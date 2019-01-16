@@ -12,16 +12,12 @@ import time
 from watchdog.observers import Observer
 from watchdog.events import PatternMatchingEventHandler
 
-EVENT_TYPE_MOVED = 'moved'
-EVENT_TYPE_DELETED = 'deleted'
-EVENT_TYPE_CREATED = 'created'
-EVENT_TYPE_MODIFIED = 'modified'
-
 FILE_REPLACEMENT_TOKEN = "__FILE__"
 
 MODE_WATCH_DIR_FOR_RENAME = "WATCH_DIR_FOR_RENAME"
 MODE_WATCH_DIR_FOR_NEW = "WATCH_DIR_FOR_NEW"
 MODE_PROCESS_DIR = "PROCESS_DIR"
+
 
 class RenameFileHandler(PatternMatchingEventHandler):
     def __init__(self, pattern, q, log):
@@ -151,7 +147,7 @@ class QueueWorker(object):
 class Processor:
     def __init__(self):
         # init the logging subsystem
-        self.logger = logging.getLogger('mwax_sub2db')
+        self.logger = logging.getLogger('mwax_mover')
 
         # init vars
         self.watch_dir = None
@@ -165,38 +161,24 @@ class Processor:
         self.running = False
 
     def initialise(self):
-        # start logging
-        self.logger.setLevel(logging.DEBUG)
-        self.logger.propagate = False
-        rot = logging.FileHandler('mwax_sub2db.log')
-        rot.setLevel(logging.DEBUG)
-        rot.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(message)s'))
-        self.logger.addHandler(rot)
-
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.DEBUG)
-        ch.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(message)s'))
-        self.logger.addHandler(ch)
-
-        self.logger.info("Starting mwax_sub2db processor...")
 
         # Get command line args
         parser = argparse.ArgumentParser()
-        parser.description = "mwax_sub2db: a command line tool which is part of the mwax correlator for the MWA.\n"
+        parser.description = "mwax_mover: a command line tool which is part of the mwax correlator for the MWA.\n"
         parser.add_argument("-w", "--watchdir", required=True, help="Directory to watch for files with watchext "
                                                                     "extension")
         parser.add_argument("-x", "--watchext", required=True, help="Extension to watch for")
         parser.add_argument("-r", "--renameext", required=True, help="Extension to rename file to")
         parser.add_argument("-e", "--executablepath", required=True,
-                            help=f"Absolute path to executable to launch. {FILE_REPLACEMENT_TOKEN} will be substituted with the abs "
-                                  "path of the filename being processed.")
+                            help=f"Absolute path to executable to launch. {FILE_REPLACEMENT_TOKEN} "
+                                 f"will be substituted with the abs path of the filename being processed.")
         parser.add_argument("-m", "--mode", required=True, default=None,
                             choices=[MODE_WATCH_DIR_FOR_NEW, MODE_WATCH_DIR_FOR_RENAME, MODE_PROCESS_DIR, ],
                             help=f"Mode to run:\n"
                             f"{MODE_WATCH_DIR_FOR_NEW}: Watch watchdir for new files forever. Launch executable. "
                                  f"Rename file.\n" 
-                            f"{MODE_WATCH_DIR_FOR_RENAME}: Watch watchdir for renamed files forever. Launch executable. "
-                                 f"Rename file.\n" 
+                            f"{MODE_WATCH_DIR_FOR_RENAME}: Watch watchdir for renamed files forever. "
+                                 f"Launch executable. Rename file.\n" 
                             f"{MODE_PROCESS_DIR}: For each file in watchdir, launch executable. Rename file. Exit.\n")
         args = vars(parser.parse_args())
 
@@ -218,6 +200,16 @@ class Processor:
         if not self.rename_ext[0] == ".":
             print(f"Error: --renameext '{self.rename_ext}' should start with a '.' e.g. '.done'")
             exit(1)
+
+        # start logging
+        self.logger.setLevel(logging.DEBUG)
+        self.logger.propagate = False
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.DEBUG)
+        ch.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(message)s'))
+        self.logger.addHandler(ch)
+
+        self.logger.info("Starting mwax_mover processor...")
 
         # Create a queue for dealing with files
         self.q = queue.Queue()
