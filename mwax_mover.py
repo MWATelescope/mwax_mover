@@ -9,78 +9,66 @@ import subprocess
 import sys
 import threading
 import time
-from watchdog.observers import Observer
-from watchdog.events import PatternMatchingEventHandler
+import inotify.constants
+import inotify.adapters
 
 FILE_REPLACEMENT_TOKEN = "__FILE__"
+FILENOEXT_REPLACEMENT_TOKEN = "__FILENOEXT__"
 
 MODE_WATCH_DIR_FOR_RENAME = "WATCH_DIR_FOR_RENAME"
 MODE_WATCH_DIR_FOR_NEW = "WATCH_DIR_FOR_NEW"
 MODE_PROCESS_DIR = "PROCESS_DIR"
 
 
-class RenameFileHandler(PatternMatchingEventHandler):
-    def __init__(self, pattern, q, log):
-        self.q = q
-        self.logger = log
-        # this takes the pattern- e.g. *.sub and returns the last string after the "."
-        self.watch_ext = "." + pattern.split(".")[-1]
-        PatternMatchingEventHandler.__init__(self, patterns=pattern)
-
-    def on_moved(self, event):
-        dest_filename = event.dest_path
-
-        if os.path.splitext(dest_filename)[1] == self.watch_ext:
-            self.q.put(dest_filename)
-            self.logger.info(f'Added {dest_filename} to queue')
-
-
-class NewFileHandler(PatternMatchingEventHandler):
-    def __init__(self, pattern, q, log):
-        self.q = q
-        self.logger = log
-        # this takes the pattern- e.g. *.sub and returns the last string after the "."
-        self.watch_ext = "." + pattern.split(".")[-1]
-        PatternMatchingEventHandler.__init__(self, patterns=pattern)
-
-    def on_created(self, event):
-        dest_filename = event.src_path
-
-        if os.path.splitext(dest_filename)[1] == self.watch_ext:
-            self.q.put(dest_filename)
-            self.logger.info(f'Added {dest_filename} to queue')
-
-
 class Watcher(object):
-    def __init__(self, path='.', recursive=True, q=None, pattern=None, log=None, mode=None):
+    def __init__(self, path='.', q=None, pattern=None, log=None, mode=None):
         self.logger = log
-        self._observer = Observer()
+        self.i = inotify.adapters.Inotify()
         self.mode = mode
+        self.path = path
+        self.watching = False
+        self.q = q
+        self.pattern = pattern
 
-        if self.mode == MODE_WATCH_DIR_FOR_RENAME:
-            self._observer.schedule(RenameFileHandler(pattern, q, self.logger), path, recursive)
-        elif self.mode == MODE_WATCH_DIR_FOR_NEW:
-            self._observer.schedule(NewFileHandler(pattern, q, self.logger), path, recursive)
+        if self.mode == MODE_WATCH_DIR_FOR_NEW:
+            self.mask = inotify.constants.IN_CLOSE_WRITE
+        elif self.mode == MODE_WATCH_DIR_FOR_RENAME:
+            self.mask = inotify.constants.IN_MOVED_TO
 
     def start(self):
         self.logger.info("Watcher starting...")
-        self._observer.start()
+        self.i.add_watch(self.path, mask=self.mask)
+        self.watching = True
+        self.do_watch_loop()
 
     def stop(self):
         self.logger.info("Watcher stopping...")
-        if self._observer.isAlive():
-            self._observer.stop()
-            self._observer.join()
+        self.i.remove_watch(self.path)
+        self.watching = False
+
+    def do_watch_loop(self):
+        ext_length = len(self.pattern)
+
+        while self.watching:
+            for event in self.i.event_gen(timeout_s=1, yield_nones=False):
+                (_, evt_type_names, evt_path, evt_filename) = event
+
+                filename_len = len(evt_filename)
+
+                # check filename
+                if evt_filename[(filename_len-ext_length):] == self.pattern:
+                    dest_filename = os.path.join(evt_path, evt_filename)
+                    self.q.put(dest_filename)
+                    self.logger.info(f'Added {dest_filename} to queue')
 
 
 class QueueWorker(object):
-    def __init__(self, q, executable_path, mode, log, rename_ext):
+    def __init__(self, q, executable_path, mode, log):
         self._q = q
         self._executable_path = executable_path
         self._running = False
         self._mode = mode
         self.logger = log
-        self.rename_ext = rename_ext
 
     def start(self):
         self.logger.info("QueueWorker starting...")
@@ -115,26 +103,20 @@ class QueueWorker(object):
         # Substitute the filename into the command
         command = command.replace(FILE_REPLACEMENT_TOKEN, filename)
 
+        filename_no_ext = os.path.splitext(filename)[0]
+        command = command.replace(FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext)
+
         # Example: "dada_diskdb -k 1234 -f 1216447872_02_256_201.sub -s"
 
-        new_filename_no_ext = os.path.splitext(filename)[0]
-        new_filename = os.path.join(os.path.dirname(filename), new_filename_no_ext + self.rename_ext)
-
         try:
+            self.logger.info(f"Executing {command}...")
             # Execute the command
             completed_process = subprocess.run(command, shell=True)
 
             return_code = completed_process.returncode
             stderror = completed_process.stderr
 
-            if return_code == 0:
-                # Success - rename the file
-                try:
-                    self.logger.info(f"Renaming {filename} to {new_filename}")
-                    os.rename(filename, new_filename)
-                except Exception as rename_exception:
-                    self.logger.error(f"Error renaming {filename} to {new_filename}: {str(rename_exception)}")
-            else:
+            if return_code != 0:
                 self.logger.error(f"Error executing {command}. Return code: {return_code} StdErr: {stderror}")
 
         except subprocess.CalledProcessError:
@@ -168,24 +150,21 @@ class Processor:
         parser.add_argument("-w", "--watchdir", required=True, help="Directory to watch for files with watchext "
                                                                     "extension")
         parser.add_argument("-x", "--watchext", required=True, help="Extension to watch for")
-        parser.add_argument("-r", "--renameext", required=True, help="Extension to rename file to")
         parser.add_argument("-e", "--executablepath", required=True,
                             help=f"Absolute path to executable to launch. {FILE_REPLACEMENT_TOKEN} "
-                                 f"will be substituted with the abs path of the filename being processed.")
+                                 f"will be substituted with the abs path of the filename being processed."
+                                 f"{FILENOEXT_REPLACEMENT_TOKEN} will be replaced with the filename but not extenson.")
         parser.add_argument("-m", "--mode", required=True, default=None,
                             choices=[MODE_WATCH_DIR_FOR_NEW, MODE_WATCH_DIR_FOR_RENAME, MODE_PROCESS_DIR, ],
                             help=f"Mode to run:\n"
-                            f"{MODE_WATCH_DIR_FOR_NEW}: Watch watchdir for new files forever. Launch executable. "
-                                 f"Rename file.\n" 
-                            f"{MODE_WATCH_DIR_FOR_RENAME}: Watch watchdir for renamed files forever. "
-                                 f"Launch executable. Rename file.\n" 
-                            f"{MODE_PROCESS_DIR}: For each file in watchdir, launch executable. Rename file. Exit.\n")
+                            f"{MODE_WATCH_DIR_FOR_NEW}: Watch watchdir for new files forever. Launch executable.\n" 
+                            f"{MODE_WATCH_DIR_FOR_RENAME}: Watch watchdir for renamed files forever. Launch executable.\n" 
+                            f"{MODE_PROCESS_DIR}: For each file in watchdir, launch executable. Exit.\n")
         args = vars(parser.parse_args())
 
         # Check args
         self.watch_dir = args["watchdir"]
         self.watch_ext = args["watchext"]
-        self.rename_ext = args["renameext"]
         self.executable = args["executablepath"]
         self.mode = args["mode"]
 
@@ -195,10 +174,6 @@ class Processor:
 
         if not self.watch_ext[0] == ".":
             print(f"Error: --watchext '{self.watch_ext}' should start with a '.' e.g. '.sub'")
-            exit(1)
-
-        if not self.rename_ext[0] == ".":
-            print(f"Error: --renameext '{self.rename_ext}' should start with a '.' e.g. '.done'")
             exit(1)
 
         # start logging
@@ -215,12 +190,12 @@ class Processor:
         self.q = queue.Queue()
 
         # Create watcher
-        self.watch = Watcher(path=self.watch_dir, recursive=False, q=self.q,
-                             pattern=f"*.{self.watch_ext}", log=self.logger, mode=self.mode)
+        self.watch = Watcher(path=self.watch_dir, q=self.q,
+                             pattern=f"{self.watch_ext}", log=self.logger, mode=self.mode)
 
         # Create queueworker
         self.queueworker = QueueWorker(q=self.q, executable_path=self.executable,
-                                       mode=self.mode, log=self.logger, rename_ext=self.rename_ext)
+                                       mode=self.mode, log=self.logger)
 
         self.running = True
         self.logger.info("Processor Initialised...")
