@@ -2,13 +2,13 @@ import argparse
 import glob
 import logging
 import logging.handlers
-import os
-import queue
 import signal
-import subprocess
 import sys
 import threading
 import time
+import os
+import queue
+import subprocess
 import inotify.constants
 import inotify.adapters
 
@@ -63,9 +63,16 @@ class Watcher(object):
 
 
 class QueueWorker(object):
-    def __init__(self, q, executable_path, mode, log):
+    # Either pass an event handler or pass an executable path to run
+    def __init__(self, q, executable_path, mode, log, event_handler):
         self._q = q
+
+        if (event_handler is None and executable_path is None) or \
+           (event_handler is not None and executable_path is not None):
+            raise Exception("QueueWorker requires event_handler OR executable_path not both and not neither!")
+
         self._executable_path = executable_path
+        self._event_handler = event_handler
         self._running = False
         self._mode = mode
         self.logger = log
@@ -78,7 +85,12 @@ class QueueWorker(object):
             try:
                 item = self._q.get(block=True, timeout=0.5)
                 self.logger.info(f"Processing {item}...")
-                self.run_command(item)
+
+                if self._executable_path:
+                    self.run_command(item)
+                else:
+                    self._event_handler(item)
+
                 self._q.task_done()
                 self.logger.info(f"Processing {item} Complete... Queue size: {self._q.qsize()}")
             except queue.Empty:
@@ -107,6 +119,7 @@ class QueueWorker(object):
         command = command.replace(FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext)
 
         # Example: "dada_diskdb -k 1234 -f 1216447872_02_256_201.sub -s"
+        stderror = ""
 
         try:
             self.logger.info(f"Executing {command}...")
@@ -149,7 +162,7 @@ class Processor:
         parser.description = "mwax_mover: a command line tool which is part of the mwax correlator for the MWA.\n"
         parser.add_argument("-w", "--watchdir", required=True, help="Directory to watch for files with watchext "
                                                                     "extension")
-        parser.add_argument("-x", "--watchext", required=True, help="Extension to watch for")
+        parser.add_argument("-x", "--watchext", required=True, help="Extension to watch for e.g. .sub")
         parser.add_argument("-e", "--executablepath", required=True,
                             help=f"Absolute path to executable to launch. {FILE_REPLACEMENT_TOKEN} "
                                  f"will be substituted with the abs path of the filename being processed."
