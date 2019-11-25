@@ -1,2 +1,3 @@
 wheel
 inotify
+crc32c

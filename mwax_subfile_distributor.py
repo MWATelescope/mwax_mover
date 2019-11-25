@@ -1,13 +1,19 @@
 import mwax_mover
 import argparse
+import crc32c
 import logging
 import logging.handlers
+import os
 import queue
 import signal
+import socket
 import subprocess
 import sys
 import threading
 import time
+from urllib.parse import urlencode
+from urllib.request import urlopen
+import urllib.error
 
 MODE_MWAX_CORRELATOR = "MWAX_CORRELATOR"
 MODE_MWAX_BEAMFORMER = "MWAX_BEAMFORMER"
@@ -21,6 +27,29 @@ PSRDADA_MAX_HEADER_LINES = 16           # number of lines of the PSRDADA header 
 
 VOLTDATA_PATH = "/voltdata"
 VISDATA_PATH = "/visdata"
+
+
+def calculate_checksum(filename):
+    crc32 = 0
+    block_size = 1048576
+
+    with open(filename, "rb") as binaryfile:
+        while True:
+            block = binaryfile.read(block_size)
+            if not block:
+                break
+            crc32 = crc32c.crc32(block, crc32)
+
+    return crc32
+
+
+def get_hostname():
+    hostname = socket.gethostname()
+
+    # ensure we remove anything after a . in case we got the fqdn
+    split_hostname = hostname.split(".")[0]
+
+    return split_hostname
 
 
 def run_command(logger, filename, command, command_timeout):
@@ -61,30 +90,41 @@ class SubfileProcessor:
         self.ext_to_watch_for = ".sub"
         self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_RENAME
         self.watch_dir = "/dev/shm"
-        self.queue = None
+        self.ext_done = ".free"
+
+        self.watcher_threads = []
+        self.worker_threads = []
+
+        self.queue = queue.Queue()
         self.watcher = None
         self.queue_worker = None
-        self.ext_done = ".free"
-        self.queue_worker_thread = None
-        self.watcher_thread = None
+
         self.ringbuffer_key = ringbuffer_key    # PSRDADA ringbuffer key for INPUT into correlator or beamformer
         self.numa_node = numa_node              # Numa node to use to do a file copy
 
     def start(self):
-        # Create a queue for dealing with sub files
-        self.queue = queue.Queue()
-
         # Create watcher
         self.watcher = mwax_mover.Watcher(path=self.watch_dir, q=self.queue,
                                           pattern=f"{self.ext_to_watch_for}", log=self.logger,
                                           mode=self.mwax_mover_mode)
 
         # Create queueworker
-        self.queue_worker = mwax_mover.QueueWorker(q=self.queue,
+        self.queue_worker = mwax_mover.QueueWorker(label="Subfile Input Queue",
+                                                   q=self.queue,
                                                    executable_path=None,
                                                    event_handler=self.handler,
                                                    mode=self.mwax_mover_mode,
                                                    log=self.logger)
+
+        # Setup thread for watching filesystem
+        watcher_thread = threading.Thread(name="watch_sub", target=self.watcher.start, daemon=True)
+        self.watcher_threads.append(watcher_thread)
+        watcher_thread.start()
+
+        # Setup thread for processing items
+        queue_worker_thread = threading.Thread(name="work_sub", target=self.queue_worker.start, daemon=True)
+        self.worker_threads.append(queue_worker_thread)
+        queue_worker_thread.start()
 
     def handler(self, item):
         self.logger.info(f"{item}- SubfileProcessor.handler is handling {item}...")
@@ -129,6 +169,17 @@ class SubfileProcessor:
         self.watcher.stop()
         self.queue_worker.stop()
 
+        # Wait for threads to finish
+        for t in self.watcher_threads:
+            if t:
+                if t.isAlive:
+                    t.join()
+
+        for t in self.worker_threads:
+            if t:
+                if t.isAlive():
+                    t.join()
+
     def _read_subfile_mode(self, filename):
         subfile_mode = None
 
@@ -164,6 +215,236 @@ class SubfileProcessor:
 
         command = f"numactl --cpunodebind={numa_node} --membind={numa_node} cp {filename} {VOLTDATA_PATH}/."
         return run_command(self.logger, filename, command, 120)
+
+
+class ArchiveProcessor:
+    def __init__(self, logger, mode, archive_host, archive_port):
+        self.logger = logger
+
+        self.archive_destination_host = archive_host
+        self.archive_destination_port = archive_port
+
+        self.mode = mode
+        self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_NEW
+
+        self.queue_db = queue.Queue()
+        self.queue_worker_db = None
+
+        self.watcher_threads = []
+        self.worker_threads = []
+
+        self.watch_dir_volt = "/voltdata"
+        self.queue_volt = queue.Queue()
+        self.watcher_volt = None
+        self.queue_worker_volt = None
+
+        self.watch_dir_vis = "/visdata"
+        self.queue_vis = queue.Queue()
+        self.watcher_vis = None
+        self.queue_worker_vis = None
+
+        self.watch_dir_fil = "/visdata"
+        self.queue_fil = queue.Queue()
+        self.watcher_fil = None
+        self.queue_worker_fil = None
+
+    def start(self):
+        # Create watcher for voltage data -> db queue
+        self.watcher_volt = mwax_mover.Watcher(path=self.watch_dir_volt, q=self.queue_db,
+                                               pattern=".sub", log=self.logger,
+                                               mode=self.mwax_mover_mode)
+
+        # Create watcher for visibility data -> db queue
+        self.watcher_vis = mwax_mover.Watcher(path=self.watch_dir_vis, q=self.queue_db,
+                                              pattern=".fits", log=self.logger,
+                                              mode=self.mwax_mover_mode)
+
+        # Create watcher for filterbank data -> db queue
+        self.watcher_fil = mwax_mover.Watcher(path=self.watch_dir_fil, q=self.queue_db,
+                                              pattern=".fil", log=self.logger,
+                                              mode=self.mwax_mover_mode)
+
+        # Create queueworker for the db queue
+        self.queue_worker_db = mwax_mover.QueueWorker(label="MWA Metadata DB",
+                                                      q=self.queue_db,
+                                                      executable_path=None,
+                                                      event_handler=self.db_handler,
+                                                      mode=self.mwax_mover_mode,
+                                                      log=self.logger)
+
+        # Create queueworker for voltage queue
+        self.queue_worker_volt = mwax_mover.QueueWorker(label="Subfile Archive",
+                                                        q=self.queue_volt,
+                                                        executable_path=None,
+                                                        event_handler=self.archive_handler,
+                                                        mode=self.mwax_mover_mode,
+                                                        log=self.logger)
+
+        # Create queueworker for visibility queue
+        self.queue_worker_vis = mwax_mover.QueueWorker(label="Visibility Archive",
+                                                       q=self.queue_vis,
+                                                       executable_path=None,
+                                                       event_handler=self.archive_handler,
+                                                       mode=self.mwax_mover_mode,
+                                                       log=self.logger)
+
+        # Create queueworker for filterbank queue
+        self.queue_worker_fil = mwax_mover.QueueWorker(label="Filterbank Archive",
+                                                       q=self.queue_fil,
+                                                       executable_path=None,
+                                                       event_handler=self.archive_handler,
+                                                       mode=self.mwax_mover_mode,
+                                                       log=self.logger)
+
+        # Setup thread for watching filesystem
+        watcher_volt_thread = threading.Thread(name="watch_volt", target=self.watcher_volt.start, daemon=True)
+        self.watcher_threads.append(watcher_volt_thread)
+        watcher_volt_thread.start()
+
+        # Setup thread for processing items
+        queue_worker_volt_thread = threading.Thread(name="work_volt", target=self.queue_worker_volt.start, daemon=True)
+        self.worker_threads.append(queue_worker_volt_thread)
+        queue_worker_volt_thread.start()
+
+        # Setup thread for watching filesystem
+        watcher_vis_thread = threading.Thread(name="watch_vis", target=self.watcher_vis.start, daemon=True)
+        self.watcher_threads.append(watcher_vis_thread)
+        watcher_vis_thread.start()
+
+        # Setup thread for processing items
+        queue_worker_vis_thread = threading.Thread(name="work_vis", target=self.queue_worker_vis.start, daemon=True)
+        self.worker_threads.append(queue_worker_vis_thread)
+        queue_worker_vis_thread.start()
+
+        # Setup thread for watching filesystem
+        watcher_fil_thread = threading.Thread(name="watch_fil", target=self.watcher_fil.start, daemon=True)
+        self.watcher_threads.append(watcher_fil_thread)
+        watcher_fil_thread.start()
+
+        # Setup thread for processing items
+        queue_worker_fil_thread = threading.Thread(name="work_fil", target=self.queue_worker_fil.start, daemon=True)
+        self.worker_threads.append(queue_worker_fil_thread)
+        queue_worker_fil_thread.start()
+
+        # Setup thread for processing items from db queue
+        queue_worker_db_thread = threading.Thread(name="work_db", target=self.queue_worker_db.start, daemon=True)
+        self.worker_threads.append(queue_worker_db_thread)
+        queue_worker_db_thread.start()
+
+    def db_handler(self, item, origin_queue):
+        self.logger.info(f"{item}- ArchiveProcessor.handler is handling {item}...")
+
+        # immediately add this file to the db so we insert a record into metadata data_files table
+        # Get info
+        filename = os.path.basename(item)
+        obsid = filename[0:10]
+        file_ext = os.path.splitext(item)[1]
+        file_size = os.stat(item).st_size
+        filetype = None
+        hostname = get_hostname()
+        remote_archived = False     # This gets set to True by NGAS at Pawsey
+        site_path = f"http://mwangas/RETRIEVE?file_id={obsid}"
+
+        if file_ext.lower() == ".sub":
+            filetype = 17
+        elif file_ext.lower() == ".fits":
+            filetype = 8
+        elif file_ext.lower() == ".fil":
+            filetype = 18
+        else:
+            # Error - unknown filetype
+            self.logger.error(f"{item}- Could not handle unknown extension {file_ext}")
+            exit(3)
+
+        # Insert record into metadata database
+        self.insert_data_file_row(obsid, filetype, file_size, filename, site_path, hostname, remote_archived)
+
+        # if something went wrong, requeue
+        #origin_queue.append(item)
+
+        # immediately add this file (and a ptr to it's queue) to the voltage or vis queue which will deal with archiving
+        if file_ext.lower() == ".sub":
+            self.queue_volt.put(item)
+        elif file_ext.lower() == ".fits":
+            self.queue_vis.put(item)
+        elif file_ext.lower() == ".fil":
+            self.queue_fil.put(item)
+
+        self.logger.info(f"{item}- ArchiveProcessor.db_handler finished handling.")
+
+    def archive_handler(self, item, origin_queue):
+        self.logger.info(f"{item}- ArchiveProcessor.archive_handler is handling {item}...")
+
+        if self.archive_file(item) != 200:
+            # Retry
+            origin_queue.put(item)
+
+        self.logger.info(f"{item}- ArchiveProcessor.archive_handler finished handling.")
+
+    def stop(self):
+        self.watcher_volt.stop()
+        self.watcher_vis.stop()
+        self.watcher_fil.stop()
+
+        self.queue_worker_db.stop()
+        self.queue_worker_volt.stop()
+        self.queue_worker_vis.stop()
+        self.queue_worker_fil.stop()
+
+        # Wait for threads to finish
+        for t in self.watcher_threads:
+            if t:
+                if t.isAlive:
+                    t.join()
+
+        for t in self.worker_threads:
+            if t:
+                if t.isAlive():
+                    t.join()
+
+    def insert_data_file_row(self, obsid, filetype, file_size, filename, site_path, hostname, remote_archived):
+        self.logger.info(f"INSERT INTO data_files (observation_num, filetype, size, filename, "
+                         f"site_path, host, remote_archived) "
+                         f"VALUES ({obsid}, {filetype}, {file_size}, {filename}, "
+                         f"{site_path}, {hostname}, {remote_archived})")
+
+    def archive_file(self, full_filename):
+        self.logger.info(f"{full_filename} attempting archive_file...")
+
+        self.logger.info(f"{full_filename} calculating checksum...")
+        checksum = calculate_checksum(full_filename)
+        self.logger.debug(f"{full_filename} checksum == {checksum}")
+
+        query_args = {'fileUri': f'ngas@{self.archive_destination_host}:{full_filename}',
+                      'bport': self.archive_destination_port,
+                      'bwinsize': '=32m',
+                      'bnum_streams': 12,
+                      'mimeType': 'application/octet-stream',
+                      'bchecksum': str(checksum)}
+
+        encoded_args = urlencode(query_args)
+
+        bbcpurl = f"http://{self.archive_destination_host}/BBCPARC?{encoded_args}"
+
+        resp = None
+        try:
+            resp = urlopen(bbcpurl, timeout=7200)
+            data = []
+            while True:
+                buff = resp.read()
+                if not buff:
+                    break
+                data.append(buff.decode('utf-8'))
+
+            return 200, '', ''.join(data)
+        except urllib.error.URLError as url_error:
+            self.logger.error(f"{full_filename} failed to archive ({url_error.errno} {url_error.reason}")
+            return url_error.errno, '', url_error.reason
+
+        finally:
+            if resp:
+                resp.close()
+            self.logger.info(f"{full_filename} archive_file completed")
 
 
 class MWAXSubfileDistributor:
@@ -214,7 +495,7 @@ class MWAXSubfileDistributor:
         self.logger.propagate = False
         ch = logging.StreamHandler()
         ch.setLevel(logging.DEBUG)
-        ch.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(message)s'))
+        ch.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
         self.logger.addHandler(ch)
 
         self.logger.info("Starting mwax_subfile_distributor processor...")
@@ -225,8 +506,10 @@ class MWAXSubfileDistributor:
             # Add this processor to list of processors we manage
             self.processors.append(processor)
 
-            # Start this processor
-            processor.start()
+            processor = ArchiveProcessor(self.logger, self.mode, "mwacache10", 7700)
+
+            # Add this processor to list of processors we manage
+            self.processors.append(processor)
 
         else:
             self.logger.error("Unknown running mode. Quitting.")
@@ -249,35 +532,17 @@ class MWAXSubfileDistributor:
         self.logger.info(f"Running in mode {self.mode}")
 
         for processor in self.processors:
-            self.logger.info(f"Scanning {processor.watch_dir} for files matching {'*' + processor.ext_to_watch_for}...")
-
-            # Setup thread for watching filesystem
-            processor.watcher_thread = threading.Thread(target=processor.watcher.start, daemon=True)
-
-            # Start watcher
-            processor.watcher_thread.start()
-
-            # Setup thread for processing items
-            processor.queue_worker_thread = threading.Thread(target=processor.queue_worker.start, daemon=True)
-
-            # Start queue worker
-            processor.queue_worker_thread.start()
+            processor.start()
 
         while self.running:
             for processor in self.processors:
-                if processor.queue_worker_thread.isAlive():
-                    time.sleep(1)
-                else:
-                    self.running = False
-                    break
-
-        for processor in self.processors:
-            # Wait for threads to finish
-            if processor.watcher_thread:
-                processor.watcher_thread.join()
-
-            if processor.queue_worker_thread.isAlive():
-                processor.queue_worker_thread.join()
+                for t in processor.worker_threads:
+                    if t:
+                        if t.isAlive():
+                            time.sleep(1)
+                        else:
+                            self.running = False
+                            break
 
         # Finished
         self.logger.info("Completed Successfully")

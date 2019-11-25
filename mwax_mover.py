@@ -35,14 +35,18 @@ class Watcher(object):
         elif self.mode == MODE_WATCH_DIR_FOR_RENAME:
             self.mask = inotify.constants.IN_MOVED_TO
 
+        # Check that the path to watch exists
+        if not os.path.exists(self.path):
+            raise FileNotFoundError(self.path)
+
     def start(self):
-        self.logger.info("Watcher starting...")
+        self.logger.info(f"Watcher starting on {self.path}/{self.pattern}...")
         self.i.add_watch(self.path, mask=self.mask)
         self.watching = True
         self.do_watch_loop()
 
     def stop(self):
-        self.logger.info("Watcher stopping...")
+        self.logger.info(f"Watcher stopping on {self.path}/{self.pattern}...")
         self.i.remove_watch(self.path)
         self.watching = False
 
@@ -64,7 +68,8 @@ class Watcher(object):
 
 class QueueWorker(object):
     # Either pass an event handler or pass an executable path to run
-    def __init__(self, q, executable_path, mode, log, event_handler):
+    def __init__(self, label, q, executable_path, mode, log, event_handler):
+        self.label = label
         self._q = q
 
         if (event_handler is None and executable_path is None) or \
@@ -78,7 +83,7 @@ class QueueWorker(object):
         self.logger = log
 
     def start(self):
-        self.logger.info("QueueWorker starting...")
+        self.logger.info(f"QueueWorker {self.label} starting...")
         self._running = True
 
         while self._running or self._q.qsize() > 0:
@@ -89,7 +94,7 @@ class QueueWorker(object):
                 if self._executable_path:
                     self.run_command(item)
                 else:
-                    self._event_handler(item)
+                    self._event_handler(item, self._q)
 
                 self._q.task_done()
                 self.logger.info(f"Processing {item} Complete... Queue size: {self._q.qsize()}")
@@ -105,9 +110,9 @@ class QueueWorker(object):
     def stop(self):
         self._running = False
         if self._q.qsize() == 0:
-            self.logger.info("QueueWorker stopping...")
+            self.logger.info(f"QueueWorker {self.label} stopping...")
         else:
-            self.logger.info("QueueWorker stopping... finishing remaining items")
+            self.logger.info(f"QueueWorker {self.label} stopping... finishing remaining items")
 
     def run_command(self, filename):
         command = f"{self._executable_path}"
@@ -207,7 +212,7 @@ class Processor:
                              pattern=f"{self.watch_ext}", log=self.logger, mode=self.mode)
 
         # Create queueworker
-        self.queueworker = QueueWorker(q=self.q, executable_path=self.executable,
+        self.queueworker = QueueWorker(label="queue", q=self.q, executable_path=self.executable,
                                        mode=self.mode, log=self.logger)
 
         self.running = True
