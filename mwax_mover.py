@@ -1,16 +1,18 @@
 import argparse
+import crc32c
 import glob
 import logging
 import logging.handlers
+import mwax_queue_worker
+import mwax_watcher
+import os
+import queue
 import signal
+import socket
+import subprocess
 import sys
 import threading
 import time
-import os
-import queue
-import subprocess
-import inotify.constants
-import inotify.adapters
 
 FILE_REPLACEMENT_TOKEN = "__FILE__"
 FILENOEXT_REPLACEMENT_TOKEN = "__FILENOEXT__"
@@ -20,128 +22,44 @@ MODE_WATCH_DIR_FOR_NEW = "WATCH_DIR_FOR_NEW"
 MODE_PROCESS_DIR = "PROCESS_DIR"
 
 
-class Watcher(object):
-    def __init__(self, path='.', q=None, pattern=None, log=None, mode=None):
-        self.logger = log
-        self.i = inotify.adapters.Inotify()
-        self.mode = mode
-        self.path = path
-        self.watching = False
-        self.q = q
-        self.pattern = pattern
+def calculate_checksum(filename):
+    crc32 = 0
+    block_size = 1048576
 
-        if self.mode == MODE_WATCH_DIR_FOR_NEW:
-            self.mask = inotify.constants.IN_CLOSE_WRITE
-        elif self.mode == MODE_WATCH_DIR_FOR_RENAME:
-            self.mask = inotify.constants.IN_MOVED_TO
+    with open(filename, "rb") as binaryfile:
+        while True:
+            block = binaryfile.read(block_size)
+            if not block:
+                break
+            crc32 = crc32c.crc32(block, crc32)
 
-        # Check that the path to watch exists
-        if not os.path.exists(self.path):
-            raise FileNotFoundError(self.path)
-
-    def start(self):
-        self.logger.info(f"Watcher starting on {self.path}/{self.pattern}...")
-        self.i.add_watch(self.path, mask=self.mask)
-        self.watching = True
-        self.do_watch_loop()
-
-    def stop(self):
-        self.logger.info(f"Watcher stopping on {self.path}/{self.pattern}...")
-        self.i.remove_watch(self.path)
-        self.watching = False
-
-    def do_watch_loop(self):
-        ext_length = len(self.pattern)
-
-        while self.watching:
-            for event in self.i.event_gen(timeout_s=1, yield_nones=False):
-                (_, evt_type_names, evt_path, evt_filename) = event
-
-                filename_len = len(evt_filename)
-
-                # check filename
-                if evt_filename[(filename_len-ext_length):] == self.pattern:
-                    dest_filename = os.path.join(evt_path, evt_filename)
-                    self.q.put(dest_filename)
-                    self.logger.info(f'Added {dest_filename} to queue')
+    return crc32
 
 
-class QueueWorker(object):
-    # Either pass an event handler or pass an executable path to run
-    def __init__(self, label, q, executable_path, mode, log, event_handler):
-        self.label = label
-        self._q = q
+def get_hostname():
+    hostname = socket.gethostname()
 
-        if (event_handler is None and executable_path is None) or \
-           (event_handler is not None and executable_path is not None):
-            raise Exception("QueueWorker requires event_handler OR executable_path not both and not neither!")
+    # ensure we remove anything after a . in case we got the fqdn
+    split_hostname = hostname.split(".")[0]
 
-        self._executable_path = executable_path
-        self._event_handler = event_handler
-        self._running = False
-        self._mode = mode
-        self.logger = log
+    return split_hostname
 
-    def start(self):
-        self.logger.info(f"QueueWorker {self.label} starting...")
-        self._running = True
 
-        while self._running or self._q.qsize() > 0:
-            try:
-                item = self._q.get(block=True, timeout=0.5)
-                self.logger.info(f"Processing {item}...")
+def run_command(filename, command, command_timeout):
 
-                if self._executable_path:
-                    self.run_command(item)
-                else:
-                    self._event_handler(item, self._q)
+    try:
+        # launch the process
+        subprocess.run(f"{command}",
+                       shell=True, check=True, timeout=command_timeout)
+        return True
 
-                self._q.task_done()
-                self.logger.info(f"Processing {item} Complete... Queue size: {self._q.qsize()}")
-            except queue.Empty:
-                if self._mode == MODE_PROCESS_DIR:
-                    # Queue is complete. Stop now
-                    self.logger.info("Finished processing queue.")
-                    self.stop()
-                    return
-                else:
-                    pass
+    except subprocess.CalledProcessError as process_error:
+        raise Exception(f"Error launching {command}. "
+                        f"Return code {process_error.returncode},"
+                        f"Output {process_error.output} {process_error.stderr}")
 
-    def stop(self):
-        self._running = False
-        if self._q.qsize() == 0:
-            self.logger.info(f"QueueWorker {self.label} stopping...")
-        else:
-            self.logger.info(f"QueueWorker {self.label} stopping... finishing remaining items")
-
-    def run_command(self, filename):
-        command = f"{self._executable_path}"
-
-        # Substitute the filename into the command
-        command = command.replace(FILE_REPLACEMENT_TOKEN, filename)
-
-        filename_no_ext = os.path.splitext(filename)[0]
-        command = command.replace(FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext)
-
-        # Example: "dada_diskdb -k 1234 -f 1216447872_02_256_201.sub -s"
-        stderror = ""
-
-        try:
-            self.logger.info(f"Executing {command}...")
-            # Execute the command
-            completed_process = subprocess.run(command, shell=True)
-
-            return_code = completed_process.returncode
-            stderror = completed_process.stderr
-
-            if return_code != 0:
-                self.logger.error(f"Error executing {command}. Return code: {return_code} StdErr: {stderror}")
-
-        except subprocess.CalledProcessError:
-            self.logger.error(f"Error executing {command} StdErr: {stderror}")
-
-        except Exception as command_exception:
-            self.logger.error(f"Error executing {command}: {str(command_exception)}")
+    except Exception as unknown_exception:
+        raise Exception(f"Unknown error launching {command}. {unknown_exception}")
 
 
 class Processor:
@@ -208,12 +126,12 @@ class Processor:
         self.q = queue.Queue()
 
         # Create watcher
-        self.watch = Watcher(path=self.watch_dir, q=self.q,
-                             pattern=f"{self.watch_ext}", log=self.logger, mode=self.mode)
+        self.watch = mwax_watcher.Watcher(path=self.watch_dir, q=self.q,
+                                          pattern=f"{self.watch_ext}", log=self.logger, mode=self.mode)
 
         # Create queueworker
-        self.queueworker = QueueWorker(label="queue", q=self.q, executable_path=self.executable,
-                                       mode=self.mode, log=self.logger)
+        self.queueworker = mwax_queue_worker.QueueWorker(label="queue", q=self.q, executable_path=self.executable,
+                                                         mode=self.mode, log=self.logger)
 
         self.running = True
         self.logger.info("Processor Initialised...")
@@ -242,17 +160,7 @@ class Processor:
             # we don't need a watcher
             watcher_thread = None
 
-            # Just loop through all files and add them to the queue
-            pattern = os.path.join(self.watch_dir, "*" + self.watch_ext)
-            self.logger.info(f"Scanning {self.watch_dir} for files matching {'*' + self.watch_ext}...")
-
-            files = glob.glob(pattern)
-
-            self.logger.info(f"Found {len(files)} files")
-
-            for file in sorted(files):
-                self.q.put(file)
-                self.logger.info(f'Added {file} to queue')
+            mwax_watcher.scan_directory(self.logger, self.watch_dir, self.watch_ext, self.q)
         else:
             # Unsupported modes
             watcher_thread = None
