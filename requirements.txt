@@ -1,3 +1,4 @@
 wheel
 inotify
 crc32c
+psycopg2-binary

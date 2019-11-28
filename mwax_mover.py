@@ -1,6 +1,5 @@
 import argparse
 import crc32c
-import glob
 import logging
 import logging.handlers
 import mwax_queue_worker
@@ -8,7 +7,6 @@ import mwax_watcher
 import os
 import queue
 import signal
-import socket
 import subprocess
 import sys
 import threading
@@ -34,15 +32,6 @@ def calculate_checksum(filename):
             crc32 = crc32c.crc32(block, crc32)
 
     return crc32
-
-
-def get_hostname():
-    hostname = socket.gethostname()
-
-    # ensure we remove anything after a . in case we got the fqdn
-    split_hostname = hostname.split(".")[0]
-
-    return split_hostname
 
 
 def run_command(filename, command, command_timeout):
@@ -131,7 +120,7 @@ class Processor:
 
         # Create queueworker
         self.queueworker = mwax_queue_worker.QueueWorker(label="queue", q=self.q, executable_path=self.executable,
-                                                         mode=self.mode, log=self.logger)
+                                                         mode=self.mode, log=self.logger, event_handler=None)
 
         self.running = True
         self.logger.info("Processor Initialised...")

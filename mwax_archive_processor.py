@@ -1,3 +1,4 @@
+import json
 import mwax_mover
 import mwax_queue_worker
 import mwax_subfile_distributor
@@ -12,14 +13,18 @@ import urllib.error
 
 
 class ArchiveProcessor:
-    def __init__(self, logger, mode, archive_host, archive_port):
+    def __init__(self, logger, hostname, mode, archive_host, archive_port, db_pool):
         self.logger = logger
 
+        self.db_pool = db_pool
+
+        self.hostname = hostname
         self.archive_destination_host = archive_host
         self.archive_destination_port = archive_port
 
         self.mode = mode
         self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_NEW
+        self.archiving_paused = False
 
         self.queue_db = queue.Queue()
         self.queue_worker_db = None
@@ -128,7 +133,7 @@ class ArchiveProcessor:
             self.worker_threads.append(queue_worker_fil_thread)
             queue_worker_fil_thread.start()
 
-    def db_handler(self, item, origin_queue):
+    def db_handler(self, item):
         self.logger.info(f"{item}- ArchiveProcessor.handler is handling {item}...")
 
         # immediately add this file to the db so we insert a record into metadata data_files table
@@ -138,8 +143,8 @@ class ArchiveProcessor:
         file_ext = os.path.splitext(item)[1]
         file_size = os.stat(item).st_size
         filetype = None
-        hostname = mwax_mover.get_hostname()
         remote_archived = False     # This gets set to True by NGAS at Pawsey
+        deleted = False
         site_path = f"http://mwangas/RETRIEVE?file_id={obsid}"
 
         if file_ext.lower() == ".sub":
@@ -152,10 +157,10 @@ class ArchiveProcessor:
             exit(3)
 
         # Insert record into metadata database
-        if not self.insert_data_file_row(obsid, filetype, file_size, filename, site_path, hostname, remote_archived):
-            # if something went wrong, requeue after 2 seconds
-            time.sleep(2)
-            origin_queue.put(item)
+        if not self.insert_data_file_row(obsid, filetype, file_size,
+                                         filename, site_path, self.hostname, remote_archived, deleted):
+            # if something went wrong, requeue
+            return False
 
         # immediately add this file (and a ptr to it's queue) to the voltage or vis queue which will deal with archiving
         if file_ext.lower() == ".sub":
@@ -164,15 +169,35 @@ class ArchiveProcessor:
             self.queue_vis.put(item)
 
         self.logger.info(f"{item}- ArchiveProcessor.db_handler finished handling.")
+        return True
 
-    def archive_handler(self, item, origin_queue):
-        self.logger.info(f"{item}- ArchiveProcessor.archive_handler is handling {item}...")
+    def archive_handler(self, item):
+        if not self.archiving_paused:
+            self.logger.info(f"{item}- ArchiveProcessor.archive_handler is handling {item}...")
 
-        if self.archive_file(item) != 200:
-            # Retry
-            origin_queue.put(item)
+            if self.archive_file(item) != 200:
+                return False
 
-        self.logger.info(f"{item}- ArchiveProcessor.archive_handler finished handling.")
+            self.logger.info(f"{item}- ArchiveProcessor.archive_handler finished handling.")
+            return True
+        else:
+            return False
+
+    def pause_archiving(self, paused):
+        if self.archiving_paused != paused:
+            if paused:
+                self.logger.info(f"Pausing archiving")
+            else:
+                self.logger.info(f"Resuming archiving")
+
+            if self.queue_worker_volt:
+                self.queue_worker_volt.pause(paused)
+            if self.queue_worker_vis:
+                self.queue_worker_vis.pause(paused)
+            if self.queue_worker_fil:
+                self.queue_worker_fil.pause(paused)
+
+            self.archiving_paused = paused
 
     def stop(self):
         if self.mode == mwax_subfile_distributor.MODE_MWAX_CORRELATOR:
@@ -203,13 +228,47 @@ class ArchiveProcessor:
                     t.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
-    def insert_data_file_row(self, obsid, filetype, file_size, filename, site_path, hostname, remote_archived):
-        self.logger.info(f"INSERT INTO data_files (observation_num, filetype, size, filename, "
-                         f"site_path, host, remote_archived) "
-                         f"VALUES ({obsid}, {filetype}, {file_size}, {filename}, "
-                         f"{site_path}, {hostname}, {remote_archived})")
+    def insert_data_file_row(self, obsid, filetype, file_size, filename, site_path, hostname, remote_archived, deleted):
+        return_value = False
+        cursor = None
+        con = None
 
-        return True
+        try:
+            con = self.db_pool.getconn()
+            cursor = con.cursor()
+            cursor.execute((f"INSERT INTO data_files "
+                            f"(observation_num, filetype, size, filename, site_path, host, remote_archived, deleted) "
+                            f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (filename) DO NOTHING"),
+                           (obsid, filetype, file_size, filename, site_path, hostname, remote_archived, deleted))
+
+        except Exception as exception_info:
+            if con:
+                con.rollback()
+                self.logger.error(f"{filename} error inserting data_files record in "
+                                  f"metadata database: {exception_info}")
+        else:
+            # getting in here means either:
+            # a) We inserted the row OK --OR--
+            # b) The filename already existed in this table, so ignore (maybe we're reprocessing this file?)
+
+            return_value = True
+            rows_affected = cursor.rowcount
+
+            if rows_affected == 1:
+                if con:
+                    con.commit()
+                self.logger.info(f"{filename} successfully inserted into data_files table in metdata database.")
+            else:
+                if con:
+                    con.rollback()
+                self.logger.info(f"{filename} already exists in data_files table in metdata database.")
+        finally:
+            if cursor:
+                cursor.close()
+            if con:
+                self.db_pool.putconn(conn=con)
+
+        return return_value
 
     def archive_file(self, full_filename):
         self.logger.info(f"{full_filename} attempting archive_file...")
@@ -248,3 +307,55 @@ class ArchiveProcessor:
             if resp:
                 resp.close()
             self.logger.info(f"{full_filename} archive_file completed")
+
+    def get_status(self):
+        watcher_list = []
+
+        if self.watcher_volt:
+            status = dict({"name": "voltdata_watcher"})
+            status.update(self.watcher_volt.get_status())
+            watcher_list.append(status)
+
+        if self.watcher_vis:
+            status = dict({"name": "visdata_watcher"})
+            status.update(self.watcher_vis.get_status())
+            watcher_list.append(status)
+
+        if self.watcher_fil:
+            status = dict({"name": "fil_watcher"})
+            status.update(self.watcher_fil.get_status())
+            watcher_list.append(status)
+
+        worker_list = []
+
+        if self.queue_worker_db:
+            status = dict({"name": "db_worker"})
+            status.update(self.queue_worker_db.get_status())
+            worker_list.append(status)
+
+        if self.queue_worker_volt:
+            status = dict({"name": "volt_archiver"})
+            status.update(self.queue_worker_volt.get_status())
+            worker_list.append(status)
+
+        if self.queue_worker_vis:
+            status = dict({"name": "vis_archiver"})
+            status.update(self.queue_worker_vis.get_status())
+            worker_list.append(status)
+
+        if self.queue_worker_fil:
+            status = dict({"name": "fil_archiver"})
+            status.update(self.queue_worker_fil.get_status())
+            worker_list.append(status)
+
+        if self.archiving_paused:
+            archiving = "paused"
+        else:
+            archiving = "running"
+
+        return_status = {"type": type(self).__name__,
+                         "archiving": archiving,
+                         "watchers": watcher_list,
+                         "workers": worker_list}
+
+        return return_status

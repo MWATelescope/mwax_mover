@@ -5,16 +5,21 @@ import mwax_mover
 import os
 
 
+def get_file_list(watch_dir, watch_ext):
+    pattern = os.path.join(watch_dir, "*" + watch_ext)
+    files = glob.glob(pattern)
+    return sorted(files)
+
+
 def scan_directory(logger, watch_dir, watch_ext, q):
     # Just loop through all files and add them to the queue
-    pattern = os.path.join(watch_dir, "*" + watch_ext)
     logger.info(f"Scanning {watch_dir} for files matching {'*' + watch_ext}...")
 
-    files = glob.glob(pattern)
+    files = get_file_list(watch_dir, watch_ext)
 
     logger.info(f"Found {len(files)} files")
 
-    for file in sorted(files):
+    for file in files:
         q.put(file)
         logger.info(f'Added {file} to queue')
 
@@ -70,3 +75,9 @@ class Watcher(object):
                 if first_run:
                     scan_directory(self.logger, self.path, self.pattern, self.q)
                     first_run = False
+
+    def get_status(self):
+        return {"watching": self.watching,
+                "mode": self.mode,
+                "watch_path": self.path,
+                "watch_pattern": self.pattern}

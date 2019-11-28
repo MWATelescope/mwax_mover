@@ -1,24 +1,22 @@
-import mwax_archive_processor
 import mwax_mover
 import mwax_queue_worker
 import mwax_watcher
-import argparse
-import logging
-import logging.handlers
+import mwax_subfile_distributor
+import glob
+import os
 import queue
-import signal
-import sys
+import shutil
 import threading
-import time
 
 
-SUBFILE_MODE_IDLE = "IDLE"
-SUBFILE_MODE_CCAPTURE = "CCAPTURE"
-SUBFILE_MODE_VCAPTURE = "VCAPTURE"
+CORRELATOR_MODE_NO_CAPTURE = "NO_CAPTURE"
+CORRELATOR_MODE_HW_LFILES = "HW_LFILES"
+CORRELATOR_MODE_VOLTAGE_START = "VOLTAGE_START"
 
 COMMAND_DADA_DISKDB = "dada_diskdb"
 PSRDADA_MAX_HEADER_LINES = 16           # number of lines of the PSRDADA header to read looking for keywords
 
+SUBFILE_PATH = "/dev/shm"
 VOLTDATA_PATH = "/voltdata"
 VISDATA_PATH = "/visdata"
 
@@ -49,13 +47,15 @@ def read_subfile_mode(filename):
 
 
 class SubfileProcessor:
-    def __init__(self, logger, mode, ringbuffer_key, numa_node):
+    def __init__(self, logger, mode, ringbuffer_key, numa_node, context):
+        self.subfile_distributor_context = context
+
         self.logger = logger
 
         self.mode = mode
         self.ext_to_watch_for = ".sub"
         self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_RENAME
-        self.watch_dir = "/dev/shm"
+        self.watch_dir = SUBFILE_PATH
         self.ext_done = ".free"
 
         self.watcher_threads = []
@@ -93,43 +93,67 @@ class SubfileProcessor:
         queue_worker_thread.start()
 
     def handler(self, item):
+        success = False
+
         self.logger.info(f"{item}- SubfileProcessor.handler is handling {item}...")
 
         try:
             subfile_mode = read_subfile_mode(item)
 
-            if self.mode == MODE_MWAX_CORRELATOR:
+            if self.mode == mwax_subfile_distributor.MODE_MWAX_CORRELATOR:
                 # 1. Read header of subfile.
-                # 2. If mode==CCAPTURE then
+                # 2. If mode==HW_LFILES then
                 #       load into PSRDADA ringbuffer for correlator input
-                #    else if mode==VCAPTURE then
+                #    else if mode==VOLTAGE_START then
                 #       Ensure archiving to Pawsey is stopped while we capture
                 #       copy subfile onto /voltdata where it will eventually get archived
                 # 3. Rename .sub file to .free so that udpgrab can reuse it
-                if subfile_mode == SUBFILE_MODE_CCAPTURE:
-                    self._load_psrdada_ringbuffer(item, self.ringbuffer_key)
+                if subfile_mode == CORRELATOR_MODE_HW_LFILES:
+                    self.subfile_distributor_context.archive_processor.pause_archiving(False)
 
-                elif subfile_mode == SUBFILE_MODE_VCAPTURE:
+                    self._load_psrdada_ringbuffer(item, self.ringbuffer_key)
+                    success = True
+
+                elif subfile_mode == CORRELATOR_MODE_VOLTAGE_START:
+                    # Pause archiving so we have the disk to ourselves
+                    self.subfile_distributor_context.archive_processor.pause_archiving(True)
+
                     self._copy_subfile_to_voltdata(item, self.numa_node)
+                    success = True
+
+                elif subfile_mode == CORRELATOR_MODE_NO_CAPTURE:
+                    self.subfile_distributor_context.archive_processor.pause_archiving(False)
+                    success = True
 
                 else:
                     self.logger.error(f"{item}- Unknown subfile mode {subfile_mode}, ignoring.")
+                    success = False
 
-            elif self.mode == MODE_MWAX_BEAMFORMER:
+            elif self.mode == mwax_subfile_distributor.MODE_MWAX_BEAMFORMER:
                 # 1. load file into PSRDADA ringbuffer for beamformer input
                 # 2. Rename .sub file to .free so that udpgrab can reuse it
                 self._load_psrdada_ringbuffer(item, self.ringbuffer_key)
+                success = True
 
             else:
                 self.logger.error(f"{item}- Unknown MWAX Mover mode, ignoring.")
+                success = False
+
+        except Exception as handler_exception:
+            self.logger.error(f"{item} {handler_exception}")
+            success = False
+
         finally:
-            # Rename subfile so that udpgrab can reuse it
-            free_filename = str(item).replace(self.ext_to_watch_for, self.ext_done)
-            if not mwax_mover.run_command(item, f"mv {item} {free_filename}", 2):
-                self.logger.error(f"{item}- Could not reame {item} back to {free_filename}")
-                exit(2)
+            if success:
+                # Rename subfile so that udpgrab can reuse it
+                free_filename = str(item).replace(self.ext_to_watch_for, self.ext_done)
+                if not mwax_mover.run_command(item, f"mv {item} {free_filename}", 2):
+                    self.logger.error(f"{item}- Could not reame {item} back to {free_filename}")
+                    exit(2)
 
             self.logger.info(f"{item}- SubfileProcessor.handler finished handling.")
+
+        return success
 
     def stop(self):
         self.watcher.stop()
@@ -164,3 +188,77 @@ class SubfileProcessor:
         command = f"numactl --cpunodebind={numa_node} --membind={numa_node} cp {filename} {VOLTDATA_PATH}/."
         return mwax_mover.run_command(filename, command, 120)
 
+    def dump_voltages(self, starttime, endtime):
+        self.logger.info(f"dump_voltages: from {starttime} to {endtime}...")
+
+        # disable archiving
+        archiving = self.subfile_distributor_context.archive_processor.archiving_paused
+        self.subfile_distributor_context.archive_processor.pause_archiving(True)
+
+        # Look for any .free files which have the first 10 characters of filename from starttime to endtime
+        free_file_list = sorted(glob.glob(f"{SUBFILE_PATH}/*.free"))
+
+        keep_file_list = []
+
+        for free_filename in free_file_list:
+            # Get just the filename, and then see if we have a gps time
+            #
+            # Filenames are:  1234567890_1234567890_xxx.free
+            #
+            filename_only = os.path.basename(free_filename)
+            file_obsid = int(filename_only[0:10])
+            file_gps_time = int(filename_only[11:21])
+
+            # See if the file_gps_time is between start and end time
+            if starttime <= file_gps_time <= endtime:
+                self.logger.info(f"dump_voltages: keeping {free_filename}")
+
+                # For any that exist, rename them immediately to .keep
+                keep_filename = free_filename.replace(".free", ".keep")
+                shutil.move(free_filename, keep_filename)
+                keep_file_list.append(keep_filename)
+
+        # Then copy all .keep to /voltdata/*.sub
+        for keep_filename in keep_file_list:
+            self.logger.info(f"dump_voltages: copying {keep_filename} to {VOLTDATA_PATH}...")
+            keep_filename_only = os.path.basename(keep_filename)
+            sub_filename_only = keep_filename_only.replace(".keep", ".sub")
+            sub_filename = os.path.join(VOLTDATA_PATH, sub_filename_only)
+
+            # Only copy if we don't already have it in /voltdata
+            if not os.path.exists(sub_filename):
+                shutil.copyfile(keep_filename, sub_filename)
+                self.logger.info(f"dump_voltages: copy of {keep_filename} to {VOLTDATA_PATH} complete")
+
+        # Then rename all .keep files to .free
+        for keep_filename in keep_file_list:
+            free_filename = keep_filename.replace(".keep", ".free")
+            self.logger.info(f"dump_voltages: renaming {keep_filename} to {free_filename}")
+            shutil.move(keep_filename, free_filename)
+
+        # reenable archiving (if we're not in voltage capture mode)
+        self.subfile_distributor_context.archive_processor.pause_archiving(archiving)
+
+        self.logger.info(f"dump_voltages: complete")
+        return True
+
+    def get_status(self):
+        watcher_list = []
+
+        if self.watcher:
+            status = dict({"name": "subfile watcher"})
+            status.update(self.watcher.get_status())
+            watcher_list.append(status)
+
+        worker_list = []
+
+        if self.queue_worker:
+            status = dict({"name": "subfile worker"})
+            status.update(self.queue_worker.get_status())
+            worker_list.append(status)
+
+        return_status = {"type": type(self).__name__,
+                         "watchers": watcher_list,
+                         "workers": worker_list}
+
+        return return_status
