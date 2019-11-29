@@ -34,7 +34,7 @@ def calculate_checksum(filename):
     return crc32
 
 
-def run_command(filename, command, command_timeout):
+def run_command(command, command_timeout):
 
     try:
         # launch the process

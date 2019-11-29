@@ -1,4 +1,5 @@
 import mwax_archive_processor
+import mwax_filterbank_processor
 import mwax_subfile_processor
 import argparse
 import base64
@@ -134,6 +135,7 @@ class MWAXSubfileDistributor:
         self.running = False
         self.processors = []
         self.archive_processor = None
+        self.filterbank_processor = None
         self.subfile_processor = None
 
         # Web server
@@ -144,6 +146,10 @@ class MWAXSubfileDistributor:
         self.cfg_ringbuffer_key = None
         self.cfg_numa_node = None
         self.cfg_webserver_port = None
+        self.cfg_subfile_path = None
+        self.cfg_voltdata_path = None
+        self.cfg_visdata_path = None
+        self.cfg_fildata_path = None
 
         # Connection info for metadata db
         self.cfg_metadatadb_host = None
@@ -155,8 +161,15 @@ class MWAXSubfileDistributor:
         # Connection pool for metadata db
         self.db_pool = None
 
+        # Archiving settings
         self.cfg_ngas_host = None
         self.cfg_ngas_port = None
+
+        # Filterbank settings
+        self.cfg_filterbank_host = None
+        self.cfg_filterbank_port = None
+        self.cfg_filterbank_destination_path = None
+        self.cfg_filterbank_bbcp_streams = None
 
     def initialise(self):
         # Get this hosts hostname
@@ -175,10 +188,10 @@ class MWAXSubfileDistributor:
         # Get command line args
         parser = argparse.ArgumentParser()
         parser.description = "mwax_subfile_distributor: a command line tool which is part of the mwax " \
-                             "suite for the MWA. It will perform different tasks based on --mode option.\n" \
+                             "suite for the MWA. It will perform different tasks based on the configuration file.\n" \
                              "In addition, it will automatically archive files in /voltdata and /visdata to the " \
-                             "mwacache servers at the Curtin Data Centre. Files in /voltdata/beams will be sent to" \
-                             "Fredda.\n"
+                             "mwacache servers at the Curtin Data Centre. In Beamformer mode, filterbank files " \
+                             "generated will be bbcp copied to a remote host running Fredda.\n"
 
         parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
 
@@ -200,26 +213,40 @@ class MWAXSubfileDistributor:
         self.cfg_ringbuffer_key = self.read_config("mwax mover", "input_ringbuffer_key")
         self.cfg_numa_node = self.read_config("mwax mover", "dada_disk_db_numa_node")
         self.cfg_webserver_port = self.read_config("mwax mover", "webserver_port")
+        self.cfg_subfile_path = self.read_config("mwax mover", "subfile_path")
+        self.cfg_voltdata_path = self.read_config("mwax mover", "voltdata_path")
 
         # read metadata database config
-        self.cfg_metadatadb_host = self.read_config("mwa metadata database", "host")
-        self.cfg_metadatadb_db = self.read_config("mwa metadata database", "db")
-        self.cfg_metadatadb_user = self.read_config("mwa metadata database", "user")
-        self.cfg_metadatadb_pass = self.read_config("mwa metadata database", "pass", True)
-        self.cfg_metadatadb_port = self.read_config("mwa metadata database", "port")
+        if self.cfg_mode == MODE_MWAX_CORRELATOR:
+            self.cfg_visdata_path = self.read_config("mwax mover", "visdata_path")
 
-        # Read config specific to this host
-        self.cfg_ngas_host = self.read_config(self.hostname, "ngas_host")
-        self.cfg_ngas_port = self.read_config(self.hostname, "ngas_port")
+            self.cfg_metadatadb_host = self.read_config("mwa metadata database", "host")
+            self.cfg_metadatadb_db = self.read_config("mwa metadata database", "db")
+            self.cfg_metadatadb_user = self.read_config("mwa metadata database", "user")
+            self.cfg_metadatadb_pass = self.read_config("mwa metadata database", "pass", True)
+            self.cfg_metadatadb_port = self.read_config("mwa metadata database", "port")
 
-        # Initiate database connection pool for metadata db
-        self.db_pool = psycopg2.pool.ThreadedConnectionPool(minconn=1,
-                                                            maxconn=8,
-                                                            host=self.cfg_metadatadb_host,
-                                                            database=self.cfg_metadatadb_db,
-                                                            user=self.cfg_metadatadb_user,
-                                                            password=self.cfg_metadatadb_pass,
-                                                            port=self.cfg_metadatadb_port)
+            # Read config specific to this host
+            self.cfg_ngas_host = self.read_config(self.hostname, "ngas_host")
+            self.cfg_ngas_port = self.read_config(self.hostname, "ngas_port")
+
+            # Initiate database connection pool for metadata db
+            self.db_pool = psycopg2.pool.ThreadedConnectionPool(minconn=1,
+                                                                maxconn=8,
+                                                                host=self.cfg_metadatadb_host,
+                                                                database=self.cfg_metadatadb_db,
+                                                                user=self.cfg_metadatadb_user,
+                                                                password=self.cfg_metadatadb_pass,
+                                                                port=self.cfg_metadatadb_port)
+
+        if self.cfg_mode == MODE_MWAX_BEAMFORMER:
+            self.cfg_fildata_path = self.read_config("mwax mover", "fildata_path")
+
+            # Read filterbank config specific to this host
+            self.cfg_filterbank_host = self.read_config(self.hostname, "filterbank_host")
+            self.cfg_filterbank_port = self.read_config(self.hostname, "filterbank_port")
+            self.cfg_filterbank_destination_path = self.read_config(self.hostname, "filterbank_destination_path")
+            self.cfg_filterbank_bbcp_streams = self.read_config(self.hostname, "filterbank_bbcp_streams")
 
         # Create and start web server
         self.logger.info(f"Starting http server on port {self.cfg_webserver_port}...")
@@ -237,11 +264,17 @@ class MWAXSubfileDistributor:
                                                                              self.cfg_mode,
                                                                              self.cfg_ringbuffer_key,
                                                                              self.cfg_numa_node,
-                                                                             self)
+                                                                             self,
+                                                                             self.cfg_subfile_path,
+                                                                             self.cfg_voltdata_path)
 
             # Add this processor to list of processors we manage
             self.processors.append(self.subfile_processor)
+        else:
+            self.logger.error("Unknown running mode. Quitting.")
+            exit(1)
 
+        if self.cfg_mode == MODE_MWAX_CORRELATOR:
             self.archive_processor = mwax_archive_processor.ArchiveProcessor(self.logger,
                                                                              self.hostname,
                                                                              self.cfg_mode,
@@ -252,9 +285,17 @@ class MWAXSubfileDistributor:
             # Add this processor to list of processors we manage
             self.processors.append(self.archive_processor)
 
-        else:
-            self.logger.error("Unknown running mode. Quitting.")
-            exit(1)
+        if self.cfg_mode == MODE_MWAX_BEAMFORMER:
+            self.filterbank_processor = mwax_filterbank_processor.FilterbankProcessor(self.logger,
+                                                                                      self.hostname,
+                                                                                      self.cfg_fildata_path,
+                                                                                      self.cfg_filterbank_host,
+                                                                                      self.cfg_filterbank_port,
+                                                                                      self.cfg_filterbank_destination_path,
+                                                                                      self.cfg_filterbank_bbcp_streams)
+
+            # Add this processor to list of processors we manage
+            self.processors.append(self.filterbank_processor)
 
     def get_status(self):
         main_status = {"host": self.hostname,

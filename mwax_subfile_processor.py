@@ -16,10 +16,6 @@ CORRELATOR_MODE_VOLTAGE_START = "VOLTAGE_START"
 COMMAND_DADA_DISKDB = "dada_diskdb"
 PSRDADA_MAX_HEADER_LINES = 16           # number of lines of the PSRDADA header to read looking for keywords
 
-SUBFILE_PATH = "/dev/shm"
-VOLTDATA_PATH = "/voltdata"
-VISDATA_PATH = "/visdata"
-
 
 def read_subfile_mode(filename):
     subfile_mode = None
@@ -47,7 +43,7 @@ def read_subfile_mode(filename):
 
 
 class SubfileProcessor:
-    def __init__(self, logger, mode, ringbuffer_key, numa_node, context):
+    def __init__(self, logger, mode, ringbuffer_key, numa_node, context, subfile_path, voltdata_path):
         self.subfile_distributor_context = context
 
         self.logger = logger
@@ -55,13 +51,16 @@ class SubfileProcessor:
         self.mode = mode
         self.ext_to_watch_for = ".sub"
         self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_RENAME
-        self.watch_dir = SUBFILE_PATH
+        self.subfile_path = subfile_path
+        self.voltdata_path = voltdata_path
+        self.watch_dir = self.subfile_path
         self.ext_done = ".free"
 
         self.watcher_threads = []
         self.worker_threads = []
 
-        self.queue = queue.Queue()
+        # Use a priority queue to ensure earliest to oldest order of subfiles by obsid and second
+        self.queue = queue.PriorityQueue()
         self.watcher = None
         self.queue_worker = None
 
@@ -147,7 +146,7 @@ class SubfileProcessor:
             if success:
                 # Rename subfile so that udpgrab can reuse it
                 free_filename = str(item).replace(self.ext_to_watch_for, self.ext_done)
-                if not mwax_mover.run_command(item, f"mv {item} {free_filename}", 2):
+                if not mwax_mover.run_command(f"mv {item} {free_filename}", 2):
                     self.logger.error(f"{item}- Could not reame {item} back to {free_filename}")
                     exit(2)
 
@@ -180,13 +179,13 @@ class SubfileProcessor:
         self.logger.info(f"{filename}- Loading file into PSRDADA ringbuffer {ringbuffer_key}")
 
         command = f"dada_diskdb -k {ringbuffer_key} -f {filename}"
-        return mwax_mover.run_command(filename, command, 32)
+        return mwax_mover.run_command(command, 32)
 
     def _copy_subfile_to_voltdata(self, filename, numa_node):
-        self.logger.info(f"{filename}- Copying file into {VOLTDATA_PATH}")
+        self.logger.info(f"{filename}- Copying file into {self.voltdata_path}")
 
-        command = f"numactl --cpunodebind={numa_node} --membind={numa_node} cp {filename} {VOLTDATA_PATH}/."
-        return mwax_mover.run_command(filename, command, 120)
+        command = f"numactl --cpunodebind={numa_node} --membind={numa_node} cp {filename} {self.voltdata_path}/."
+        return mwax_mover.run_command(command, 120)
 
     def dump_voltages(self, starttime, endtime):
         self.logger.info(f"dump_voltages: from {starttime} to {endtime}...")
@@ -196,7 +195,7 @@ class SubfileProcessor:
         self.subfile_distributor_context.archive_processor.pause_archiving(True)
 
         # Look for any .free files which have the first 10 characters of filename from starttime to endtime
-        free_file_list = sorted(glob.glob(f"{SUBFILE_PATH}/*.free"))
+        free_file_list = sorted(glob.glob(f"{self.subfile_path}/*.free"))
 
         keep_file_list = []
 
@@ -220,15 +219,15 @@ class SubfileProcessor:
 
         # Then copy all .keep to /voltdata/*.sub
         for keep_filename in keep_file_list:
-            self.logger.info(f"dump_voltages: copying {keep_filename} to {VOLTDATA_PATH}...")
+            self.logger.info(f"dump_voltages: copying {keep_filename} to {self.voltdata_path}...")
             keep_filename_only = os.path.basename(keep_filename)
             sub_filename_only = keep_filename_only.replace(".keep", ".sub")
-            sub_filename = os.path.join(VOLTDATA_PATH, sub_filename_only)
+            sub_filename = os.path.join(self.voltdata_path, sub_filename_only)
 
             # Only copy if we don't already have it in /voltdata
             if not os.path.exists(sub_filename):
                 shutil.copyfile(keep_filename, sub_filename)
-                self.logger.info(f"dump_voltages: copy of {keep_filename} to {VOLTDATA_PATH} complete")
+                self.logger.info(f"dump_voltages: copy of {keep_filename} to {self.voltdata_path} complete")
 
         # Then rename all .keep files to .free
         for keep_filename in keep_file_list:

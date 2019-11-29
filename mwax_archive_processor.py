@@ -1,19 +1,16 @@
-import json
 import mwax_mover
 import mwax_queue_worker
-import mwax_subfile_distributor
 import mwax_watcher
 import os
 import queue
 import threading
-import time
 from urllib.parse import urlencode
 from urllib.request import urlopen
 import urllib.error
 
 
 class ArchiveProcessor:
-    def __init__(self, logger, hostname, mode, archive_host, archive_port, db_pool):
+    def __init__(self, logger, hostname, mode, archive_host, archive_port, db_pool, voltdata_path, visdata_path):
         self.logger = logger
 
         self.db_pool = db_pool
@@ -32,106 +29,76 @@ class ArchiveProcessor:
         self.watcher_threads = []
         self.worker_threads = []
 
-        self.watch_dir_volt = "/voltdata"
+        self.watch_dir_volt = voltdata_path
         self.queue_volt = queue.Queue()
         self.watcher_volt = None
         self.queue_worker_volt = None
 
-        self.watch_dir_vis = "/visdata"
+        self.watch_dir_vis = visdata_path
         self.queue_vis = queue.Queue()
         self.watcher_vis = None
         self.queue_worker_vis = None
 
-        self.watch_dir_fil = "/visdata"
-        self.queue_fil = queue.Queue()
-        self.watcher_fil = None
-        self.queue_worker_fil = None
-
     def start(self):
-        if self.mode == mwax_subfile_distributor.MODE_MWAX_CORRELATOR:
-            # Create watcher for voltage data -> db queue
-            self.watcher_volt = mwax_watcher.Watcher(path=self.watch_dir_volt, q=self.queue_db,
-                                                     pattern=".sub", log=self.logger,
-                                                     mode=self.mwax_mover_mode)
+        # Create watcher for voltage data -> db queue
+        self.watcher_volt = mwax_watcher.Watcher(path=self.watch_dir_volt, q=self.queue_db,
+                                                 pattern=".sub", log=self.logger,
+                                                 mode=self.mwax_mover_mode)
 
-            # Create watcher for visibility data -> db queue
-            self.watcher_vis = mwax_watcher.Watcher(path=self.watch_dir_vis, q=self.queue_db,
-                                                    pattern=".fits", log=self.logger,
-                                                    mode=self.mwax_mover_mode)
+        # Create watcher for visibility data -> db queue
+        self.watcher_vis = mwax_watcher.Watcher(path=self.watch_dir_vis, q=self.queue_db,
+                                                pattern=".fits", log=self.logger,
+                                                mode=self.mwax_mover_mode)
 
-            # Create queueworker for the db queue
-            self.queue_worker_db = mwax_queue_worker.QueueWorker(label="MWA Metadata DB",
-                                                                 q=self.queue_db,
-                                                                 executable_path=None,
-                                                                 event_handler=self.db_handler,
-                                                                 mode=self.mwax_mover_mode,
-                                                                 log=self.logger)
+        # Create queueworker for the db queue
+        self.queue_worker_db = mwax_queue_worker.QueueWorker(label="MWA Metadata DB",
+                                                             q=self.queue_db,
+                                                             executable_path=None,
+                                                             event_handler=self.db_handler,
+                                                             mode=self.mwax_mover_mode,
+                                                             log=self.logger)
 
-            # Create queueworker for voltage queue
-            self.queue_worker_volt = mwax_queue_worker.QueueWorker(label="Subfile Archive",
-                                                                   q=self.queue_volt,
-                                                                   executable_path=None,
-                                                                   event_handler=self.archive_handler,
-                                                                   mode=self.mwax_mover_mode,
-                                                                   log=self.logger)
+        # Create queueworker for voltage queue
+        self.queue_worker_volt = mwax_queue_worker.QueueWorker(label="Subfile Archive",
+                                                               q=self.queue_volt,
+                                                               executable_path=None,
+                                                               event_handler=self.archive_handler,
+                                                               mode=self.mwax_mover_mode,
+                                                               log=self.logger)
 
-            # Create queueworker for visibility queue
-            self.queue_worker_vis = mwax_queue_worker.QueueWorker(label="Visibility Archive",
-                                                                  q=self.queue_vis,
-                                                                  executable_path=None,
-                                                                  event_handler=self.archive_handler,
-                                                                  mode=self.mwax_mover_mode,
-                                                                  log=self.logger)
+        # Create queueworker for visibility queue
+        self.queue_worker_vis = mwax_queue_worker.QueueWorker(label="Visibility Archive",
+                                                              q=self.queue_vis,
+                                                              executable_path=None,
+                                                              event_handler=self.archive_handler,
+                                                              mode=self.mwax_mover_mode,
+                                                              log=self.logger)
 
-            # Setup thread for processing items from db queue
-            queue_worker_db_thread = threading.Thread(name="work_db", target=self.queue_worker_db.start, daemon=True)
-            self.worker_threads.append(queue_worker_db_thread)
-            queue_worker_db_thread.start()
+        # Setup thread for processing items from db queue
+        queue_worker_db_thread = threading.Thread(name="work_db", target=self.queue_worker_db.start, daemon=True)
+        self.worker_threads.append(queue_worker_db_thread)
+        queue_worker_db_thread.start()
 
-            # Setup thread for watching filesystem
-            watcher_volt_thread = threading.Thread(name="watch_volt", target=self.watcher_volt.start, daemon=True)
-            self.watcher_threads.append(watcher_volt_thread)
-            watcher_volt_thread.start()
+        # Setup thread for watching filesystem
+        watcher_volt_thread = threading.Thread(name="watch_volt", target=self.watcher_volt.start, daemon=True)
+        self.watcher_threads.append(watcher_volt_thread)
+        watcher_volt_thread.start()
 
-            # Setup thread for processing items
-            queue_worker_volt_thread = threading.Thread(name="work_volt", target=self.queue_worker_volt.start,
-                                                        daemon=True)
-            self.worker_threads.append(queue_worker_volt_thread)
-            queue_worker_volt_thread.start()
+        # Setup thread for processing items
+        queue_worker_volt_thread = threading.Thread(name="work_volt", target=self.queue_worker_volt.start,
+                                                    daemon=True)
+        self.worker_threads.append(queue_worker_volt_thread)
+        queue_worker_volt_thread.start()
 
-            # Setup thread for watching filesystem
-            watcher_vis_thread = threading.Thread(name="watch_vis", target=self.watcher_vis.start, daemon=True)
-            self.watcher_threads.append(watcher_vis_thread)
-            watcher_vis_thread.start()
+        # Setup thread for watching filesystem
+        watcher_vis_thread = threading.Thread(name="watch_vis", target=self.watcher_vis.start, daemon=True)
+        self.watcher_threads.append(watcher_vis_thread)
+        watcher_vis_thread.start()
 
-            # Setup thread for processing items
-            queue_worker_vis_thread = threading.Thread(name="work_vis", target=self.queue_worker_vis.start, daemon=True)
-            self.worker_threads.append(queue_worker_vis_thread)
-            queue_worker_vis_thread.start()
-
-        elif self.mode == mwax_subfile_distributor.MODE_MWAX_BEAMFORMER:
-            # Create watcher for filterbank data -> filterbank queue
-            self.watcher_fil = mwax_watcher.Watcher(path=self.watch_dir_fil, q=self.queue_fil,
-                                                    pattern=".fil", log=self.logger,
-                                                    mode=self.mwax_mover_mode)
-
-            # Create queueworker for filterbank queue
-            self.queue_worker_fil = mwax_queue_worker.QueueWorker(label="Filterbank Archive",
-                                                                  q=self.queue_fil,
-                                                                  executable_path=None,
-                                                                  event_handler=self.archive_handler,
-                                                                  mode=self.mwax_mover_mode,
-                                                                  log=self.logger)
-
-            # Setup thread for watching filesystem
-            watcher_fil_thread = threading.Thread(name="watch_fil", target=self.watcher_fil.start, daemon=True)
-            self.watcher_threads.append(watcher_fil_thread)
-            watcher_fil_thread.start()
-
-            # Setup thread for processing items
-            queue_worker_fil_thread = threading.Thread(name="work_fil", target=self.queue_worker_fil.start, daemon=True)
-            self.worker_threads.append(queue_worker_fil_thread)
-            queue_worker_fil_thread.start()
+        # Setup thread for processing items
+        queue_worker_vis_thread = threading.Thread(name="work_vis", target=self.queue_worker_vis.start, daemon=True)
+        self.worker_threads.append(queue_worker_vis_thread)
+        queue_worker_vis_thread.start()
 
     def db_handler(self, item):
         self.logger.info(f"{item}- ArchiveProcessor.handler is handling {item}...")
@@ -194,22 +161,15 @@ class ArchiveProcessor:
                 self.queue_worker_volt.pause(paused)
             if self.queue_worker_vis:
                 self.queue_worker_vis.pause(paused)
-            if self.queue_worker_fil:
-                self.queue_worker_fil.pause(paused)
 
             self.archiving_paused = paused
 
     def stop(self):
-        if self.mode == mwax_subfile_distributor.MODE_MWAX_CORRELATOR:
-            self.watcher_volt.stop()
-            self.watcher_vis.stop()
-            self.queue_worker_db.stop()
-            self.queue_worker_volt.stop()
-            self.queue_worker_vis.stop()
-
-        elif self.mode == mwax_subfile_distributor.MODE_MWAX_BEAMFORMER:
-            self.watcher_fil.stop()
-            self.queue_worker_fil.stop()
+        self.watcher_volt.stop()
+        self.watcher_vis.stop()
+        self.queue_worker_db.stop()
+        self.queue_worker_volt.stop()
+        self.queue_worker_vis.stop()
 
         # Wait for threads to finish
         for t in self.watcher_threads:
@@ -321,11 +281,6 @@ class ArchiveProcessor:
             status.update(self.watcher_vis.get_status())
             watcher_list.append(status)
 
-        if self.watcher_fil:
-            status = dict({"name": "fil_watcher"})
-            status.update(self.watcher_fil.get_status())
-            watcher_list.append(status)
-
         worker_list = []
 
         if self.queue_worker_db:
@@ -341,11 +296,6 @@ class ArchiveProcessor:
         if self.queue_worker_vis:
             status = dict({"name": "vis_archiver"})
             status.update(self.queue_worker_vis.get_status())
-            worker_list.append(status)
-
-        if self.queue_worker_fil:
-            status = dict({"name": "fil_archiver"})
-            status.update(self.queue_worker_fil.get_status())
             worker_list.append(status)
 
         if self.archiving_paused:
