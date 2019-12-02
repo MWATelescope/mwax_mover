@@ -221,11 +221,23 @@ class MWAXSubfileDistributor:
         self.cfg_subfile_path = self.read_config("mwax mover", "subfile_path")
         self.cfg_voltdata_path = self.read_config("mwax mover", "voltdata_path")
 
+        if not os.path.exists(self.cfg_subfile_path):
+            self.logger.error(f"Subfile file location {self.cfg_subfile_path} does not exist. Quitting.")
+            exit(1)
+
+        if not os.path.exists(self.cfg_voltdata_path):
+            self.logger.error(f"Voltdata file location {self.cfg_voltdata_path} does not exist. Quitting.")
+            exit(1)
+
         # Check to see if we have a beamformer section
         if self.config.has_section("beamformer"):
             self.cfg_bf_ringbuffer_key = self.read_config("beamformer", "input_ringbuffer_key")
             self.cfg_bf_numa_node = self.read_config("beamformer", "dada_disk_db_numa_node")
             self.cfg_bf_fildata_path = self.read_config("beamformer", "fildata_path")
+
+            if not os.path.exists(self.cfg_bf_fildata_path):
+                self.logger.error(f"Fildata file location {self.cfg_bf_fildata_path} does not exist. Quitting.")
+                exit(1)
 
             # Read filterbank config specific to this host
             self.cfg_filterbank_host = self.read_config(self.hostname, "filterbank_host")
@@ -242,6 +254,10 @@ class MWAXSubfileDistributor:
             self.cfg_corr_ringbuffer_key = self.read_config("correlator", "input_ringbuffer_key")
             self.cfg_corr_numa_node = self.read_config("correlator", "dada_disk_db_numa_node")
             self.cfg_corr_visdata_path = self.read_config("correlator", "visdata_path")
+
+            if not os.path.exists(self.cfg_corr_visdata_path):
+                self.logger.error(f"Fildata file location {self.cfg_corr_visdata_path} does not exist. Quitting.")
+                exit(1)
 
             self.cfg_metadatadb_host = self.read_config("mwa metadata database", "host")
 
