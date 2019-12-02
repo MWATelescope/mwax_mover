@@ -189,44 +189,24 @@ class ArchiveProcessor:
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
     def insert_data_file_row(self, obsid, filetype, file_size, filename, site_path, hostname, remote_archived, deleted):
-        return_value = False
-        cursor = None
-        con = None
+        sql = f"INSERT INTO data_files " \
+              f"(observation_num, filetype, size, filename, site_path, host, remote_archived, deleted) " \
+              f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (filename) DO NOTHING"
 
         try:
-            con = self.db_pool.getconn()
-            cursor = con.cursor()
-            cursor.execute((f"INSERT INTO data_files "
-                            f"(observation_num, filetype, size, filename, site_path, host, remote_archived, deleted) "
-                            f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (filename) DO NOTHING"),
-                           (obsid, filetype, file_size, filename, site_path, hostname, remote_archived, deleted))
+            rows_inserted = self.db_pool.insert_one_row(sql, (obsid, filetype, file_size, filename, site_path,
+                                                              hostname, remote_archived, deleted))
 
-        except Exception as exception_info:
-            if con:
-                con.rollback()
-                self.logger.error(f"{filename} error inserting data_files record in "
-                                  f"metadata database: {exception_info}")
-        else:
-            # getting in here means either:
-            # a) We inserted the row OK --OR--
-            # b) The filename already existed in this table, so ignore (maybe we're reprocessing this file?)
-
-            return_value = True
-            rows_affected = cursor.rowcount
-
-            if rows_affected == 1:
-                if con:
-                    con.commit()
+            if rows_inserted == 1:
                 self.logger.info(f"{filename} successfully inserted into data_files table in metdata database.")
             else:
-                if con:
-                    con.rollback()
                 self.logger.info(f"{filename} already exists in data_files table in metdata database.")
-        finally:
-            if cursor:
-                cursor.close()
-            if con:
-                self.db_pool.putconn(conn=con)
+
+            return_value = True
+        except Exception as insert_exception:
+            self.logger.error(f"{filename} error inserting data_files record in "
+                              f"metadata database: {insert_exception}")
+            return_value = False
 
         return return_value
 

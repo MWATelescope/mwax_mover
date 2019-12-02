@@ -1,4 +1,5 @@
 from mwax_mover import mwax_archive_processor
+from mwax_mover import mwax_db
 from mwax_mover import mwax_filterbank_processor
 from mwax_mover import mwax_subfile_processor
 import argparse
@@ -9,17 +10,12 @@ import json
 import logging
 import logging.handlers
 import os
-import psycopg2
-import psycopg2.pool
 import signal
 import socket
 import sys
 import time
 import threading
 from urllib.parse import urlparse, parse_qs
-
-MODE_MWAX_CORRELATOR = "MWAX_CORRELATOR"
-MODE_MWAX_BEAMFORMER = "MWAX_BEAMFORMER"
 
 
 def get_hostname():
@@ -142,14 +138,26 @@ class MWAXSubfileDistributor:
         self.web_server = None
         self.web_server_thread = None
 
-        self.cfg_mode = None
-        self.cfg_ringbuffer_key = None
-        self.cfg_numa_node = None
+        #
+        # Config file vars
+        #
+
+        # Common
         self.cfg_webserver_port = None
         self.cfg_subfile_path = None
         self.cfg_voltdata_path = None
-        self.cfg_visdata_path = None
-        self.cfg_fildata_path = None
+
+        # Beamformer
+        self.cfg_bf_enabled = None
+        self.cfg_bf_ringbuffer_key = None
+        self.cfg_bf_numa_node = None
+        self.cfg_bf_fildata_path = None
+
+        # Correlator
+        self.cfg_corr_enabled = None
+        self.cfg_corr_ringbuffer_key = None
+        self.cfg_corr_numa_node = None
+        self.cfg_corr_visdata_path = None
 
         # Connection info for metadata db
         self.cfg_metadatadb_host = None
@@ -158,8 +166,8 @@ class MWAXSubfileDistributor:
         self.cfg_metadatadb_pass = None
         self.cfg_metadatadb_port = None
 
-        # Connection pool for metadata db
-        self.db_pool = None
+        # Database handler for metadata db
+        self.db_handler = None
 
         # Archiving settings
         self.cfg_ngas_host = None
@@ -209,16 +217,31 @@ class MWAXSubfileDistributor:
         self.config.read_file(open(config_filename, 'r'))
 
         # read from config file
-        self.cfg_mode = self.read_config("mwax mover", "mode")
-        self.cfg_ringbuffer_key = self.read_config("mwax mover", "input_ringbuffer_key")
-        self.cfg_numa_node = self.read_config("mwax mover", "dada_disk_db_numa_node")
         self.cfg_webserver_port = self.read_config("mwax mover", "webserver_port")
         self.cfg_subfile_path = self.read_config("mwax mover", "subfile_path")
         self.cfg_voltdata_path = self.read_config("mwax mover", "voltdata_path")
 
+        # Check to see if we have a beamformer section
+        if self.config.has_section("beamformer"):
+            self.cfg_bf_ringbuffer_key = self.read_config("beamformer", "input_ringbuffer_key")
+            self.cfg_bf_numa_node = self.read_config("beamformer", "dada_disk_db_numa_node")
+            self.cfg_bf_fildata_path = self.read_config("beamformer", "fildata_path")
+
+            # Read filterbank config specific to this host
+            self.cfg_filterbank_host = self.read_config(self.hostname, "filterbank_host")
+            self.cfg_filterbank_port = self.read_config(self.hostname, "filterbank_port")
+            self.cfg_filterbank_destination_path = self.read_config(self.hostname, "filterbank_destination_path")
+            self.cfg_filterbank_bbcp_streams = self.read_config(self.hostname, "filterbank_bbcp_streams")
+
+            self.cfg_bf_enabled = True
+        else:
+            self.cfg_bf_enabled = False
+
         # read metadata database config
-        if self.cfg_mode == MODE_MWAX_CORRELATOR:
-            self.cfg_visdata_path = self.read_config("mwax mover", "visdata_path")
+        if self.config.has_section("correlator"):
+            self.cfg_corr_ringbuffer_key = self.read_config("correlator", "input_ringbuffer_key")
+            self.cfg_corr_numa_node = self.read_config("correlator", "dada_disk_db_numa_node")
+            self.cfg_corr_visdata_path = self.read_config("correlator", "visdata_path")
 
             self.cfg_metadatadb_host = self.read_config("mwa metadata database", "host")
             self.cfg_metadatadb_db = self.read_config("mwa metadata database", "db")
@@ -231,22 +254,15 @@ class MWAXSubfileDistributor:
             self.cfg_ngas_port = self.read_config(self.hostname, "ngas_port")
 
             # Initiate database connection pool for metadata db
-            self.db_pool = psycopg2.pool.ThreadedConnectionPool(minconn=1,
-                                                                maxconn=8,
-                                                                host=self.cfg_metadatadb_host,
-                                                                database=self.cfg_metadatadb_db,
-                                                                user=self.cfg_metadatadb_user,
-                                                                password=self.cfg_metadatadb_pass,
-                                                                port=self.cfg_metadatadb_port)
+            self.db_handler = mwax_db.MWAXDBHandler(host=self.cfg_metadatadb_host,
+                                                    port=self.cfg_metadatadb_port,
+                                                    db=self.cfg_metadatadb_db,
+                                                    user=self.cfg_metadatadb_user,
+                                                    password=self.cfg_metadatadb_pass)
 
-        if self.cfg_mode == MODE_MWAX_BEAMFORMER:
-            self.cfg_fildata_path = self.read_config("mwax mover", "fildata_path")
-
-            # Read filterbank config specific to this host
-            self.cfg_filterbank_host = self.read_config(self.hostname, "filterbank_host")
-            self.cfg_filterbank_port = self.read_config(self.hostname, "filterbank_port")
-            self.cfg_filterbank_destination_path = self.read_config(self.hostname, "filterbank_destination_path")
-            self.cfg_filterbank_bbcp_streams = self.read_config(self.hostname, "filterbank_bbcp_streams")
+            self.cfg_corr_enabled = True
+        else:
+            self.cfg_corr_enabled = False
 
         # Create and start web server
         self.logger.info(f"Starting http server on port {self.cfg_webserver_port}...")
@@ -259,36 +275,35 @@ class MWAXSubfileDistributor:
         self.web_server_thread.start()
 
         # Start the processors
-        if self.cfg_mode == MODE_MWAX_CORRELATOR or self.cfg_mode == MODE_MWAX_BEAMFORMER:
+        if self.cfg_bf_enabled or self.cfg_corr_enabled:
             self.subfile_processor = mwax_subfile_processor.SubfileProcessor(self.logger,
-                                                                             self.cfg_mode,
-                                                                             self.cfg_ringbuffer_key,
-                                                                             self.cfg_numa_node,
                                                                              self,
                                                                              self.cfg_subfile_path,
-                                                                             self.cfg_voltdata_path)
+                                                                             self.cfg_voltdata_path,
+                                                                             self.cfg_bf_enabled,
+                                                                             self.cfg_bf_ringbuffer_key,
+                                                                             self.cfg_bf_numa_node,
+                                                                             self.cfg_corr_enabled,
+                                                                             self.cfg_corr_ringbuffer_key,
+                                                                             self.cfg_corr_numa_node)
 
             # Add this processor to list of processors we manage
             self.processors.append(self.subfile_processor)
-        else:
-            self.logger.error("Unknown running mode. Quitting.")
-            exit(1)
 
-        if self.cfg_mode == MODE_MWAX_CORRELATOR:
+        if self.cfg_corr_enabled:
             self.archive_processor = mwax_archive_processor.ArchiveProcessor(self.logger,
                                                                              self.hostname,
-                                                                             self.cfg_mode,
                                                                              self.cfg_ngas_host,
                                                                              self.cfg_ngas_port,
-                                                                             self.db_pool)
+                                                                             self.db_handler)
 
             # Add this processor to list of processors we manage
             self.processors.append(self.archive_processor)
 
-        if self.cfg_mode == MODE_MWAX_BEAMFORMER:
+        if self.cfg_bf_enabled:
             self.filterbank_processor = mwax_filterbank_processor.FilterbankProcessor(self.logger,
                                                                                       self.hostname,
-                                                                                      self.cfg_fildata_path,
+                                                                                      self.cfg_bf_fildata_path,
                                                                                       self.cfg_filterbank_host,
                                                                                       self.cfg_filterbank_port,
                                                                                       self.cfg_filterbank_destination_path,
@@ -299,7 +314,8 @@ class MWAXSubfileDistributor:
 
     def get_status(self):
         main_status = {"host": self.hostname,
-                       "mode": self.cfg_mode,
+                       "beamformer": self.cfg_bf_enabled,
+                       "correlator": self.cfg_corr_enabled,
                        "running": self.running}
 
         processor_status_list = []
@@ -342,7 +358,15 @@ class MWAXSubfileDistributor:
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
 
-        self.logger.info(f"Running in mode {self.cfg_mode}")
+        if self.cfg_bf_enabled:
+            self.logger.info(f"Beamformer Enabled")
+        else:
+            self.logger.info(f"Beamformer disabled")
+
+        if self.cfg_corr_enabled:
+            self.logger.info(f"Correlator Enabled")
+        else:
+            self.logger.info(f"Correlator disabled")
 
         for processor in self.processors:
             processor.start()

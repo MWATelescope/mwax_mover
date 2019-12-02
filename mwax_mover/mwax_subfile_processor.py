@@ -1,7 +1,6 @@
 from mwax_mover import mwax_mover
 from mwax_mover import mwax_queue_worker
 from mwax_mover import mwax_watcher
-from mwax_mover import mwax_subfile_distributor
 import glob
 import os
 import queue
@@ -43,12 +42,14 @@ def read_subfile_mode(filename):
 
 
 class SubfileProcessor:
-    def __init__(self, logger, mode, ringbuffer_key, numa_node, context, subfile_path, voltdata_path):
+    def __init__(self, logger, context,
+                 subfile_path, voltdata_path,
+                 bf_enabled, bf_ringbuffer_key, bf_numa_node,
+                 corr_enabled, corr_ringbuffer_key, corr_numa_node):
         self.subfile_distributor_context = context
 
         self.logger = logger
 
-        self.mode = mode
         self.ext_to_watch_for = ".sub"
         self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_RENAME
         self.subfile_path = subfile_path
@@ -64,8 +65,13 @@ class SubfileProcessor:
         self.watcher = None
         self.queue_worker = None
 
-        self.ringbuffer_key = ringbuffer_key    # PSRDADA ringbuffer key for INPUT into correlator or beamformer
-        self.numa_node = numa_node              # Numa node to use to do a file copy
+        self.bf_enabled = bf_enabled
+        self.bf_ringbuffer_key = bf_ringbuffer_key    # PSRDADA ringbuffer key for INPUT into correlator or beamformer
+        self.bf_numa_node = bf_numa_node              # Numa node to use to do a file copy
+
+        self.corr_enabled = corr_enabled
+        self.corr_ringbuffer_key = corr_ringbuffer_key  # PSRDADA ringbuffer key for INPUT into correlator or beamformer
+        self.corr_numa_node = corr_numa_node  # Numa node to use to do a file copy
 
     def start(self):
         # Create watcher
@@ -99,7 +105,7 @@ class SubfileProcessor:
         try:
             subfile_mode = read_subfile_mode(item)
 
-            if self.mode == mwax_subfile_distributor.MODE_MWAX_CORRELATOR:
+            if self.corr_enabled:
                 # 1. Read header of subfile.
                 # 2. If mode==HW_LFILES then
                 #       load into PSRDADA ringbuffer for correlator input
@@ -110,14 +116,14 @@ class SubfileProcessor:
                 if subfile_mode == CORRELATOR_MODE_HW_LFILES:
                     self.subfile_distributor_context.archive_processor.pause_archiving(False)
 
-                    self._load_psrdada_ringbuffer(item, self.ringbuffer_key)
+                    self._load_psrdada_ringbuffer(item, self.corr_ringbuffer_key)
                     success = True
 
                 elif subfile_mode == CORRELATOR_MODE_VOLTAGE_START:
                     # Pause archiving so we have the disk to ourselves
                     self.subfile_distributor_context.archive_processor.pause_archiving(True)
 
-                    self._copy_subfile_to_voltdata(item, self.numa_node)
+                    self._copy_subfile_to_voltdata(item, self.corr_numa_node)
                     success = True
 
                 elif subfile_mode == CORRELATOR_MODE_NO_CAPTURE:
@@ -128,15 +134,17 @@ class SubfileProcessor:
                     self.logger.error(f"{item}- Unknown subfile mode {subfile_mode}, ignoring.")
                     success = False
 
-            elif self.mode == mwax_subfile_distributor.MODE_MWAX_BEAMFORMER:
+            if self.bf_enabled:
+                # Don't run beamformer is we are in correlator mode too and we are doing a voltage capture!
+                # Otherwise:
                 # 1. load file into PSRDADA ringbuffer for beamformer input
                 # 2. Rename .sub file to .free so that udpgrab can reuse it
-                self._load_psrdada_ringbuffer(item, self.ringbuffer_key)
+                if self.corr_enabled and subfile_mode != CORRELATOR_MODE_VOLTAGE_START:
+                    self._load_psrdada_ringbuffer(item, self.bf_ringbuffer_key)
+                else:
+                    self.logger.warning(f"{item}- correlator mode enabled and is in {subfile_mode} mode, ignoring this"
+                                        f" beamformer job.")
                 success = True
-
-            else:
-                self.logger.error(f"{item}- Unknown MWAX Mover mode, ignoring.")
-                success = False
 
         except Exception as handler_exception:
             self.logger.error(f"{item} {handler_exception}")
@@ -146,8 +154,12 @@ class SubfileProcessor:
             if success:
                 # Rename subfile so that udpgrab can reuse it
                 free_filename = str(item).replace(self.ext_to_watch_for, self.ext_done)
-                if not mwax_mover.run_command(f"mv {item} {free_filename}", 2):
-                    self.logger.error(f"{item}- Could not reame {item} back to {free_filename}")
+
+                try:
+                    shutil.move(item, free_filename)
+                except Exception as move_exception:
+                    self.logger.error(f"{item}- Could not rename {item} back to {free_filename}. Error "
+                                      f"{move_exception}")
                     exit(2)
 
             self.logger.info(f"{item}- SubfileProcessor.handler finished handling.")
