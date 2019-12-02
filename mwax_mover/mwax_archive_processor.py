@@ -10,16 +10,15 @@ import urllib.error
 
 
 class ArchiveProcessor:
-    def __init__(self, logger, hostname, mode, archive_host, archive_port, db_pool, voltdata_path, visdata_path):
+    def __init__(self, logger, hostname, archive_host, archive_port, db_handler_object, voltdata_path, visdata_path):
         self.logger = logger
 
-        self.db_pool = db_pool
+        self.db_handler_object = db_handler_object
 
         self.hostname = hostname
         self.archive_destination_host = archive_host
         self.archive_destination_port = archive_port
 
-        self.mode = mode
         self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_NEW
         self.archiving_paused = False
 
@@ -194,13 +193,17 @@ class ArchiveProcessor:
               f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (filename) DO NOTHING"
 
         try:
-            rows_inserted = self.db_pool.insert_one_row(sql, (obsid, filetype, file_size, filename, site_path,
-                                                              hostname, remote_archived, deleted))
+            rows_inserted = self.db_handler_object.insert_one_row(sql, (obsid, filetype, file_size,
+                                                                        filename, site_path, hostname,
+                                                                        remote_archived, deleted))
 
-            if rows_inserted == 1:
-                self.logger.info(f"{filename} successfully inserted into data_files table in metdata database.")
+            if self.db_handler_object.dummy:
+                self.logger.warning(f"{filename} Using dummy database connection. No data is really being inserted.")
             else:
-                self.logger.info(f"{filename} already exists in data_files table in metdata database.")
+                if rows_inserted == 1:
+                    self.logger.info(f"{filename} successfully inserted into data_files table in metdata database.")
+                else:
+                    self.logger.info(f"{filename} already exists in data_files table in metdata database.")
 
             return_value = True
         except Exception as insert_exception:

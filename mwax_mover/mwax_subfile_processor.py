@@ -139,11 +139,12 @@ class SubfileProcessor:
                 # Otherwise:
                 # 1. load file into PSRDADA ringbuffer for beamformer input
                 # 2. Rename .sub file to .free so that udpgrab can reuse it
-                if self.corr_enabled and subfile_mode != CORRELATOR_MODE_VOLTAGE_START:
-                    self._load_psrdada_ringbuffer(item, self.bf_ringbuffer_key)
-                else:
+                if self.corr_enabled and subfile_mode == CORRELATOR_MODE_VOLTAGE_START:
                     self.logger.warning(f"{item}- correlator mode enabled and is in {subfile_mode} mode, ignoring this"
                                         f" beamformer job.")
+                else:
+                    self._load_psrdada_ringbuffer(item, self.bf_ringbuffer_key)
+
                 success = True
 
         except Exception as handler_exception:

@@ -244,10 +244,12 @@ class MWAXSubfileDistributor:
             self.cfg_corr_visdata_path = self.read_config("correlator", "visdata_path")
 
             self.cfg_metadatadb_host = self.read_config("mwa metadata database", "host")
-            self.cfg_metadatadb_db = self.read_config("mwa metadata database", "db")
-            self.cfg_metadatadb_user = self.read_config("mwa metadata database", "user")
-            self.cfg_metadatadb_pass = self.read_config("mwa metadata database", "pass", True)
-            self.cfg_metadatadb_port = self.read_config("mwa metadata database", "port")
+
+            if self.cfg_metadatadb_host != mwax_db.DUMMY_DB:
+                self.cfg_metadatadb_db = self.read_config("mwa metadata database", "db")
+                self.cfg_metadatadb_user = self.read_config("mwa metadata database", "user")
+                self.cfg_metadatadb_pass = self.read_config("mwa metadata database", "pass", True)
+                self.cfg_metadatadb_port = self.read_config("mwa metadata database", "port")
 
             # Read config specific to this host
             self.cfg_ngas_host = self.read_config(self.hostname, "ngas_host")
@@ -295,7 +297,9 @@ class MWAXSubfileDistributor:
                                                                              self.hostname,
                                                                              self.cfg_ngas_host,
                                                                              self.cfg_ngas_port,
-                                                                             self.db_handler)
+                                                                             self.db_handler,
+                                                                             self.cfg_voltdata_path,
+                                                                             self.cfg_corr_visdata_path)
 
             # Add this processor to list of processors we manage
             self.processors.append(self.archive_processor)
