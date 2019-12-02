@@ -1,7 +1,7 @@
-import mwax_mover
-import mwax_queue_worker
-import mwax_watcher
-import mwax_subfile_distributor
+from mwax_mover import mwax_mover
+from mwax_mover import mwax_queue_worker
+from mwax_mover import mwax_watcher
+from mwax_mover import mwax_subfile_distributor
 import glob
 import os
 import queue

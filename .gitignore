@@ -1,4 +1,7 @@
 .idea/
 __pycache__/
 env/
+build/
+dist/
+mwax_mover.egg-info/
 *.sub

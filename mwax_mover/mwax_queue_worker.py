@@ -1,4 +1,4 @@
-import mwax_mover
+from mwax_mover import mwax_mover
 import os
 import queue
 import subprocess

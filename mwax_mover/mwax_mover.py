@@ -1,9 +1,9 @@
+from mwax_mover import mwax_queue_worker
+from mwax_mover import mwax_watcher
 import argparse
 import crc32c
 import logging
 import logging.handlers
-import mwax_queue_worker
-import mwax_watcher
 import os
 import queue
 import signal
@@ -178,7 +178,7 @@ class Processor:
         self.logger.info("Completed Successfully")
 
 
-if __name__ == '__main__':
+def main():
     p = Processor()
 
     try:
@@ -190,3 +190,7 @@ if __name__ == '__main__':
             p.logger.exception(str(e))
         else:
             print(str(e))
+
+
+if __name__ == '__main__':
+    main()

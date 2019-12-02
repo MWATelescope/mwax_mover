@@ -1,6 +1,6 @@
-import mwax_archive_processor
-import mwax_filterbank_processor
-import mwax_subfile_processor
+from mwax_mover import mwax_archive_processor
+from mwax_mover import mwax_filterbank_processor
+from mwax_mover import mwax_subfile_processor
 import argparse
 import base64
 from configparser import ConfigParser
@@ -371,7 +371,7 @@ class MWAXSubfileDistributor:
         self.logger.info("Completed Successfully")
 
 
-if __name__ == '__main__':
+def main():
     p = MWAXSubfileDistributor()
 
     try:
@@ -383,3 +383,7 @@ if __name__ == '__main__':
             p.logger.exception(str(e))
         else:
             print(str(e))
+
+
+if __name__ == '__main__':
+    main()

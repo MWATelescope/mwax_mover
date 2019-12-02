@@ -1,7 +1,7 @@
+from mwax_mover import mwax_mover
+import glob
 import inotify.constants
 import inotify.adapters
-import glob
-import mwax_mover
 import os
 
 
