@@ -5,6 +5,7 @@ import logging
 import logging.handlers
 import os
 import queue
+from tenacity import *
 import threading
 
 
@@ -67,20 +68,37 @@ class FilterbankProcessor:
 
     def filterbank_handler(self, item):
         if not self.archiving_paused:
-            self.logger.info(f"{item}- ArchiveProcessor.archive_handler is handling {item}...")
+            self.logger.info(f"{item}- ArchiveProcessor.archive_handler is handling {item}: bbcp to {self.filterbank_host}...")
 
             # Get filename without path
             filename_only = os.path.basename(item)
             destination_filename = os.path.join(self.filterbank_destination_path, filename_only)
 
-            command = f"bbcp -w=32m -s {self.filterbank_bbcp_streams} " \
-                      f"{item} {self.filterbank_host}{destination_filename}"
-            return_value = mwax_mover.run_command(command, 32)
+            # bbcp options:
+            # -f force overwrite if destination exists
+            # -w =32m, means use a tcp window size of 32MB and do not autosize ('w')
+            # -s set the number of parallel streams
+            command = f"bbcp -f -w =32m -s {self.filterbank_bbcp_streams} " \
+                      f"{item} mwa@{self.filterbank_host}:{destination_filename}"
+            return_value = mwax_mover.run_command(command, 600)
+
+            if return_value == True:
+                self.logger.info(f"{item}- ArchiveProcessor.archive_handler attempting to delete...")
+                self.remove_file(item)
 
             self.logger.info(f"{item}- ArchiveProcessor.archive_handler finished handling.")
             return return_value
         else:
             return False
+    
+    @retry(stop=stop_after_attempt(5), wait=wait_fixed(10))
+    def remove_file(self, filename):
+        try:
+            os.remove(filename)
+            self.logger.info(f"{filename}- ArchiveProcessor.archive_handler deleted")
+        except Exception as delete_exception:
+            self.logger.info(f"{filename}- ArchiveProcessor.archive_handler Error deleting: {delete_exception}. Retrying up to 5 times.")
+            raise delete_exception
 
     def pause_archiving(self, paused):
         if self.archiving_paused != paused:
