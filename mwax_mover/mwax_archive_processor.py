@@ -156,6 +156,9 @@ class ArchiveProcessor:
             if self.archive_file(item) != 200:
                 return False
 
+            self.logger.debug(f"{item}- ArchiveProcessor.archive_handler attempting delete...")
+            mwax_mover.remove_file(self.logger, item)
+
             self.logger.info(f"{item}- ArchiveProcessor.archive_handler finished handling.")
             return True
         else:

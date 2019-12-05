@@ -9,6 +9,7 @@ import queue
 import signal
 import subprocess
 import sys
+from tenacity import *
 import threading
 import time
 
@@ -35,7 +36,6 @@ def calculate_checksum(filename):
 
 
 def run_command(command, command_timeout):
-
     try:
         # launch the process
         subprocess.run(f"{command}",
@@ -49,6 +49,18 @@ def run_command(command, command_timeout):
 
     except Exception as unknown_exception:
         raise Exception(f"Unknown error launching {command}. {unknown_exception}")
+
+
+@retry(stop=stop_after_attempt(5), wait=wait_fixed(10))
+def remove_file(logger, filename):
+    try:
+        os.remove(filename)
+        logger.info(f"{filename}- file deleted")
+        return True
+
+    except Exception as delete_exception:
+        logger.error(f"{filename}- Error deleting: {delete_exception}. Retrying up to 5 times.")
+        raise delete_exception
 
 
 class Processor:

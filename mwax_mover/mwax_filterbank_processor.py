@@ -5,7 +5,6 @@ import logging
 import logging.handlers
 import os
 import queue
-from tenacity import *
 import threading
 
 
@@ -68,7 +67,8 @@ class FilterbankProcessor:
 
     def filterbank_handler(self, item):
         if not self.archiving_paused:
-            self.logger.info(f"{item}- ArchiveProcessor.archive_handler is handling {item}: bbcp to {self.filterbank_host}...")
+            self.logger.info(f"{item}- FilterbankProcessor.filterbank_handler is handling {item}: "
+                             f"bbcp to {self.filterbank_host}...")
 
             # Get filename without path
             filename_only = os.path.basename(item)
@@ -82,23 +82,14 @@ class FilterbankProcessor:
                       f"{item} mwa@{self.filterbank_host}:{destination_filename}"
             return_value = mwax_mover.run_command(command, 600)
 
-            if return_value == True:
-                self.logger.info(f"{item}- ArchiveProcessor.archive_handler attempting to delete...")
-                self.remove_file(item)
+            if return_value:
+                self.logger.debug(f"{item}- FilterbankProcessor.filterbank_handler attempting delete...")
+                mwax_mover.remove_file(self.logger, item)
 
-            self.logger.info(f"{item}- ArchiveProcessor.archive_handler finished handling.")
+            self.logger.info(f"{item}- FilterbankProcessor.filterbank_handler finished handling.")
             return return_value
         else:
             return False
-    
-    @retry(stop=stop_after_attempt(5), wait=wait_fixed(10))
-    def remove_file(self, filename):
-        try:
-            os.remove(filename)
-            self.logger.info(f"{filename}- ArchiveProcessor.archive_handler deleted")
-        except Exception as delete_exception:
-            self.logger.info(f"{filename}- ArchiveProcessor.archive_handler Error deleting: {delete_exception}. Retrying up to 5 times.")
-            raise delete_exception
 
     def pause_archiving(self, paused):
         if self.archiving_paused != paused:
