@@ -1,15 +1,27 @@
 from mwax_mover import mwax_mover
 from mwax_mover import mwax_queue_worker
 from mwax_mover import mwax_watcher
+import logging
+import logging.handlers
 import os
 import queue
 import threading
 
 
 class FilterbankProcessor:
-    def __init__(self, logger, hostname, fildata_path, filterbank_host, filterbank_port,
+    def __init__(self, context, hostname, fildata_path, filterbank_host, filterbank_port,
                  filterbank_destination_path, filterbank_bbcp_streams):
-        self.logger = logger
+        self.subfile_distributor_context = context
+
+        # Setup logging
+        self.logger = logging.getLogger(__name__)
+        self.logger.propagate = True  # pass all logged events to the parent (subfile distributor/main log)
+        self.logger.setLevel(logging.DEBUG)
+        file_log = logging.FileHandler(filename=os.path.join(self.subfile_distributor_context.cfg_log_path,
+                                                             f"{__name__}.log"))
+        file_log.setLevel(logging.DEBUG)
+        file_log.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
+        self.logger.addHandler(file_log)
 
         self.hostname = hostname
 

@@ -2,6 +2,8 @@ from mwax_mover import mwax_mover
 from mwax_mover import mwax_queue_worker
 from mwax_mover import mwax_watcher
 import glob
+import logging
+import logging.handlers
 import os
 import queue
 import shutil
@@ -42,13 +44,21 @@ def read_subfile_mode(filename):
 
 
 class SubfileProcessor:
-    def __init__(self, logger, context,
+    def __init__(self, context,
                  subfile_path, voltdata_path,
                  bf_enabled, bf_ringbuffer_key, bf_numa_node,
                  corr_enabled, corr_ringbuffer_key, corr_numa_node):
         self.subfile_distributor_context = context
 
-        self.logger = logger
+        # Setup logging
+        self.logger = logging.getLogger(__name__)
+        self.logger.propagate = True  # pass all logged events to the parent (subfile distributor/main log)
+        self.logger.setLevel(logging.DEBUG)
+        file_log = logging.FileHandler(filename=os.path.join(self.subfile_distributor_context.cfg_log_path,
+                                                             f"{__name__}.log"))
+        file_log.setLevel(logging.DEBUG)
+        file_log.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
+        self.logger.addHandler(file_log)
 
         self.ext_to_watch_for = ".sub"
         self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_RENAME

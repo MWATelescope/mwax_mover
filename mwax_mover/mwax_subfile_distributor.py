@@ -121,7 +121,7 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
 class MWAXSubfileDistributor:
     def __init__(self):
         # init the logging subsystem
-        self.logger = logging.getLogger('mwax_subfile_distributor')
+        self.logger = logging.getLogger("mwax_mover")
 
         # Config parser
         self.config = None
@@ -143,6 +143,7 @@ class MWAXSubfileDistributor:
         #
 
         # Common
+        self.cfg_log_path = None
         self.cfg_webserver_port = None
         self.cfg_subfile_path = None
         self.cfg_voltdata_path = None
@@ -183,16 +184,6 @@ class MWAXSubfileDistributor:
         # Get this hosts hostname
         self.hostname = get_hostname()
 
-        # start logging
-        self.logger.setLevel(logging.DEBUG)
-        self.logger.propagate = False
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.DEBUG)
-        ch.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
-        self.logger.addHandler(ch)
-
-        self.logger.info("Starting mwax_subfile_distributor processor...")
-
         # Get command line args
         parser = argparse.ArgumentParser()
         parser.description = "mwax_subfile_distributor: a command line tool which is part of the mwax " \
@@ -217,6 +208,26 @@ class MWAXSubfileDistributor:
         self.config.read_file(open(config_filename, 'r'))
 
         # read from config file
+        self.cfg_log_path = self.config.get("mwax mover", "log_path")
+
+        if not os.path.exists(self.cfg_log_path):
+            self.logger.error(f"log_path {self.cfg_log_path} does not exist. Quiting.")
+            exit(1)
+
+        # It's now safe to start logging
+        # start logging
+        self.logger.setLevel(logging.DEBUG)
+        console_log = logging.StreamHandler()
+        console_log.setLevel(logging.DEBUG)
+        console_log.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
+        self.logger.addHandler(console_log)
+
+        file_log = logging.FileHandler(filename=os.path.join(self.cfg_log_path, "main.log"))
+        file_log.setLevel(logging.DEBUG)
+        file_log.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
+        self.logger.addHandler(file_log)
+
+        self.logger.info("Starting mwax_subfile_distributor processor...")
         self.cfg_webserver_port = self.read_config("mwax mover", "webserver_port")
         self.cfg_subfile_path = self.read_config("mwax mover", "subfile_path")
         self.cfg_voltdata_path = self.read_config("mwax mover", "voltdata_path")
@@ -294,8 +305,7 @@ class MWAXSubfileDistributor:
 
         # Start the processors
         if self.cfg_bf_enabled or self.cfg_corr_enabled:
-            self.subfile_processor = mwax_subfile_processor.SubfileProcessor(self.logger,
-                                                                             self,
+            self.subfile_processor = mwax_subfile_processor.SubfileProcessor(self,
                                                                              self.cfg_subfile_path,
                                                                              self.cfg_voltdata_path,
                                                                              self.cfg_bf_enabled,
@@ -309,7 +319,7 @@ class MWAXSubfileDistributor:
             self.processors.append(self.subfile_processor)
 
         if self.cfg_corr_enabled:
-            self.archive_processor = mwax_archive_processor.ArchiveProcessor(self.logger,
+            self.archive_processor = mwax_archive_processor.ArchiveProcessor(self,
                                                                              self.hostname,
                                                                              self.cfg_ngas_host,
                                                                              self.cfg_ngas_port,
@@ -321,7 +331,7 @@ class MWAXSubfileDistributor:
             self.processors.append(self.archive_processor)
 
         if self.cfg_bf_enabled:
-            self.filterbank_processor = mwax_filterbank_processor.FilterbankProcessor(self.logger,
+            self.filterbank_processor = mwax_filterbank_processor.FilterbankProcessor(self,
                                                                                       self.hostname,
                                                                                       self.cfg_bf_fildata_path,
                                                                                       self.cfg_filterbank_host,
