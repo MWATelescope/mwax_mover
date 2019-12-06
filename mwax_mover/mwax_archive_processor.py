@@ -153,7 +153,7 @@ class ArchiveProcessor:
         if not self.archiving_paused:
             self.logger.info(f"{item}- ArchiveProcessor.archive_handler is handling {item}...")
 
-            if self.archive_file(item) != 200:
+            if self.archive_file_qarchive(item) != 200:
                 return False
 
             self.logger.debug(f"{item}- ArchiveProcessor.archive_handler attempting delete...")
@@ -228,26 +228,26 @@ class ArchiveProcessor:
 
         return return_value
 
-    def archive_file(self, full_filename):
+    def archive_file_qarchive(self, full_filename):
+        pass
+
+    def archive_file_bbcp(self, full_filename):
         self.logger.info(f"{full_filename} attempting archive_file...")
 
         self.logger.info(f"{full_filename} calculating checksum...")
         checksum = mwax_mover.calculate_checksum(full_filename)
         self.logger.debug(f"{full_filename} checksum == {checksum}")
 
-        query_args = {'fileUri': f'ngas@{self.archive_destination_host}:{full_filename}',
-                      'bport': self.archive_destination_port,
-                      'bwinsize': '=32m',
+        query_args = {'filename': f'mwa@{self.cfg_hostname}:{full_filename}',
                       'bnum_streams': 12,
-                      'mimeType': 'application/octet-stream',
-                      'bchecksum': str(checksum)}
-
+                      'mime_type': 'application/x-mwa-fits'}
         encoded_args = urlencode(query_args)
 
-        bbcpurl = f"http://{self.archive_destination_host}/BBCPARC?{encoded_args}"
+        bbcpurl = f"http://{self.archive_destination_host}:{self.archive_destination_port}/BBCPARC?{encoded_args}"
 
         resp = None
         try:
+            self.logger.debug(f"{full_filename} calling {bbcpurl}...")
             resp = urlopen(bbcpurl, timeout=7200)
             data = []
             while True:
@@ -258,7 +258,7 @@ class ArchiveProcessor:
 
             return 200, '', ''.join(data)
         except urllib.error.URLError as url_error:
-            self.logger.error(f"{full_filename} failed to archive ({url_error.errno} {url_error.reason}")
+            self.logger.error(f"{full_filename} failed to archive ({url_error})")
             return url_error.errno, '', url_error.reason
 
         finally:
