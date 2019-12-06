@@ -5,10 +5,8 @@ import logging
 import logging.handlers
 import os
 import queue
+import requests
 import threading
-from urllib.parse import urlencode
-from urllib.request import urlopen
-import urllib.error
 
 
 class ArchiveProcessor:
@@ -229,37 +227,83 @@ class ArchiveProcessor:
         return return_value
 
     def archive_file_qarchive(self, full_filename):
-        pass
-
-    def archive_file_bbcp(self, full_filename):
         self.logger.info(f"{full_filename} attempting archive_file...")
 
-        self.logger.info(f"{full_filename} calculating checksum...")
-        checksum = mwax_mover.calculate_checksum(full_filename)
-        self.logger.debug(f"{full_filename} checksum == {checksum}")
-
-        query_args = {'filename': f'mwa@{self.cfg_hostname}:{full_filename}',
-                      'bnum_streams': 12,
-                      'mime_type': 'application/x-mwa-fits'}
-        encoded_args = urlencode(query_args)
-
-        bbcpurl = f"http://{self.archive_destination_host}:{self.archive_destination_port}/BBCPARC?{encoded_args}"
-
         resp = None
-        try:
-            self.logger.debug(f"{full_filename} calling {bbcpurl}...")
-            resp = urlopen(bbcpurl, timeout=7200)
-            data = []
-            while True:
-                buff = resp.read()
-                if not buff:
-                    break
-                data.append(buff.decode('utf-8'))
 
-            return 200, '', ''.join(data)
-        except urllib.error.URLError as url_error:
-            self.logger.error(f"{full_filename} failed to archive ({url_error})")
-            return url_error.errno, '', url_error.reason
+        try:
+            # Get info about the file we're about to archive
+            filename_no_path = os.path.basename(full_filename)
+            file_size = os.stat(full_filename).st_size
+            file_ext = os.path.splitext(filename_no_path)
+
+            # determine mimetype
+            mime_type = "application/x-mwa-"
+
+            if file_ext == ".sub":
+                mime_type = mime_type + "subfile"
+            elif file_ext == ".fits":
+                mime_type = mime_type + "fits"
+            else:
+                raise Exception(f"Unable to determine mimetype for file {full_filename}")
+
+            query_args = {'filename': filename_no_path}
+
+            url = f"http://{self.archive_destination_host}:{self.archive_destination_port}/QARCHIVE?{query_args}"
+
+            header = {'Content-disposition': f'attachment; filename={filename_no_path}',
+                      'Content-length': file_size,
+                      'Host': self.hostname,
+                      'Content-type': mime_type}
+
+            file_data = {'file': open(full_filename, 'rb')}
+
+            self.logger.debug(f"{full_filename} archiving to {url}...")
+            resp = requests.post(url, files=file_data, header=header)
+
+            # if we have anything except success, raise a http exception
+            resp.raise_for_status()
+
+            self.logger.info(f"{full_filename} archive_file successful")
+            return resp.status_code, resp.reason, ''
+
+        except requests.exceptions.HTTPError as http_error:
+            self.logger.error(f"{full_filename} HTTPError when trying to archive ({http_error})")
+            return resp.status_code, http_error.errno, str(http_error)
+
+        except Exception as other_error:
+            self.logger.error(f"{full_filename} error when trying to archive ({other_error})")
+            return 500, '', str(other_error)
+
+    # def archive_file_bbcp(self, full_filename):
+    #     self.logger.info(f"{full_filename} attempting archive_file...")
+    #
+    #     self.logger.info(f"{full_filename} calculating checksum...")
+    #     checksum = mwax_mover.calculate_checksum(full_filename)
+    #     self.logger.debug(f"{full_filename} checksum == {checksum}")
+    #
+    #     query_args = {'filename': f'mwa@{self.hostname}:{full_filename}',
+    #                   'bnum_streams': 12,
+    #                   'mime_type': 'application/x-mwa-fits'}
+    #     encoded_args = urlencode(query_args)
+    #
+    #     bbcpurl = f"http://{self.archive_destination_host}:{self.archive_destination_port}/BBCPARC?{encoded_args}"
+    #
+    #     resp = None
+    #     try:
+    #         self.logger.debug(f"{full_filename} calling {bbcpurl}...")
+    #         resp = urlopen(bbcpurl, timeout=7200)
+    #         data = []
+    #         while True:
+    #             buff = resp.read()
+    #             if not buff:
+    #                 break
+    #             data.append(buff.decode('utf-8'))
+    #
+    #         return 200, '', ''.join(data)
+    #     except urllib.error.URLError as url_error:
+    #         self.logger.error(f"{full_filename} failed to archive ({url_error})")
+    #         return url_error.errno, '', url_error.reason
 
         finally:
             if resp:
