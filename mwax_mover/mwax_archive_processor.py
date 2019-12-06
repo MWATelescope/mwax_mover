@@ -68,7 +68,7 @@ class ArchiveProcessor:
                                                              log=self.logger)
 
         # Create queueworker for voltage queue
-        self.queue_worker_volt = mwax_queue_worker.QueueWorker(label="Subfile Archive",
+        self.queue_worker_volt = mwax_queue_worker.QueueWorker(label="Subfile Archiver",
                                                                q=self.queue_volt,
                                                                executable_path=None,
                                                                event_handler=self.archive_handler,
@@ -76,7 +76,7 @@ class ArchiveProcessor:
                                                                log=self.logger)
 
         # Create queueworker for visibility queue
-        self.queue_worker_vis = mwax_queue_worker.QueueWorker(label="Visibility Archive",
+        self.queue_worker_vis = mwax_queue_worker.QueueWorker(label="Visibility Archiver",
                                                               q=self.queue_vis,
                                                               executable_path=None,
                                                               event_handler=self.archive_handler,
@@ -110,7 +110,7 @@ class ArchiveProcessor:
         queue_worker_vis_thread.start()
 
     def db_handler(self, item):
-        self.logger.info(f"{item}- ArchiveProcessor.handler is handling {item}...")
+        self.logger.info(f"{item}- db_handler() Started")
 
         # immediately add this file to the db so we insert a record into metadata data_files table
         # Get info
@@ -129,7 +129,7 @@ class ArchiveProcessor:
             filetype = 8
         else:
             # Error - unknown filetype
-            self.logger.error(f"{item}- Could not handle unknown extension {file_ext}")
+            self.logger.error(f"{item}- db_handler() Could not handle unknown extension {file_ext}")
             exit(3)
 
         # Insert record into metadata database
@@ -141,26 +141,25 @@ class ArchiveProcessor:
         # immediately add this file (and a ptr to it's queue) to the voltage or vis queue which will deal with archiving
         if file_ext.lower() == ".sub":
             self.queue_volt.put(item)
+            self.logger.info(f"{item}- db_handler() Added to voltage queue for archiving. Queue size: {self.queue_volt.qsize()}")
         elif file_ext.lower() == ".fits":
             self.queue_vis.put(item)
+            self.logger.info(f"{item}- db_handler() Added to visibility queue for archiving. Queue size: {self.queue_vis.qsize()}")
 
-        self.logger.info(f"{item}- ArchiveProcessor.db_handler finished handling.")
+        self.logger.info(f"{item}- db_handler() Finished")
         return True
 
     def archive_handler(self, item):
-        if not self.archiving_paused:
-            self.logger.info(f"{item}- ArchiveProcessor.archive_handler is handling {item}...")
+        self.logger.info(f"{item}- archive_handler() Started...")
 
-            if self.archive_file_qarchive(item) != 200:
-                return False
-
-            self.logger.debug(f"{item}- ArchiveProcessor.archive_handler attempting delete...")
-            mwax_mover.remove_file(self.logger, item)
-
-            self.logger.info(f"{item}- ArchiveProcessor.archive_handler finished handling.")
-            return True
-        else:
+        if self.archive_file_qarchive(item) != 200:
             return False
+
+        self.logger.debug(f"{item}- archive_handler() Deleting file")
+        mwax_mover.remove_file(self.logger, item)
+
+        self.logger.info(f"{item}- archive_handler() Finished")
+        return True
 
     def pause_archiving(self, paused):
         if self.archiving_paused != paused:
@@ -211,31 +210,29 @@ class ArchiveProcessor:
                                                                         remote_archived, deleted))
 
             if self.db_handler_object.dummy:
-                self.logger.warning(f"{filename} Using dummy database connection. No data is really being inserted.")
+                self.logger.warning(f"{filename} insert_data_file_row() Using dummy database connection. No data is really being inserted")
             else:
                 if rows_inserted == 1:
-                    self.logger.info(f"{filename} successfully inserted into data_files table in metdata database.")
+                    self.logger.info(f"{filename} insert_data_file_row() Successfully inserted into data_files table")
                 else:
-                    self.logger.info(f"{filename} already exists in data_files table in metdata database.")
+                    self.logger.info(f"{filename} insert_data_file_row() Row already exists in data_files table")
 
             return_value = True
         except Exception as insert_exception:
-            self.logger.error(f"{filename} error inserting data_files record in "
-                              f"metadata database: {insert_exception}")
+            self.logger.error(f"{filename} insert_data_file_row() inserting data_files record in "
+                              f"data_files table: {insert_exception}")
             return_value = False
 
         return return_value
 
     def archive_file_qarchive(self, full_filename):
-        self.logger.info(f"{full_filename} attempting archive_file...")
-
         resp = None
 
         try:
             # Get info about the file we're about to archive
             filename_no_path = os.path.basename(full_filename)
             file_size = os.stat(full_filename).st_size
-            file_ext = os.path.splitext(filename_no_path)
+            file_ext = os.path.splitext(filename_no_path)[1]
 
             # determine mimetype
             mime_type = "application/x-mwa-"
@@ -251,29 +248,28 @@ class ArchiveProcessor:
 
             url = f"http://{self.archive_destination_host}:{self.archive_destination_port}/QARCHIVE?{query_args}"
 
-            header = {'Content-disposition': f'attachment; filename={filename_no_path}',
-                      'Content-length': file_size,
-                      'Host': self.hostname,
-                      'Content-type': mime_type}
+            headers = {'Content-disposition': f'attachment; filename={filename_no_path}',
+                       'Content-length': str(file_size),
+                       'Host': self.hostname,
+                       'Content-type': mime_type}
 
             file_data = {'file': open(full_filename, 'rb')}
 
-            self.logger.debug(f"{full_filename} archiving to {url}...")
-            resp = requests.post(url, files=file_data, header=header)
+            self.logger.debug(f"{full_filename} archive_file_qarchive() Archiving to {url}")
+            resp = requests.post(url, files=file_data, headers=headers)
 
             # if we have anything except success, raise a http exception
             resp.raise_for_status()
 
-            self.logger.info(f"{full_filename} archive_file successful")
-            return resp.status_code, resp.reason, ''
+            return resp.status_code
 
         except requests.exceptions.HTTPError as http_error:
-            self.logger.error(f"{full_filename} HTTPError when trying to archive ({http_error})")
-            return resp.status_code, http_error.errno, str(http_error)
+            self.logger.error(f"{full_filename} archive_file_qarchive() HTTPError when trying to archive ({http_error})")
+            return resp.status_code
 
         except Exception as other_error:
-            self.logger.error(f"{full_filename} error when trying to archive ({other_error})")
-            return 500, '', str(other_error)
+            self.logger.error(f"{full_filename} archive_file_qarchive() Error when trying to archive ({other_error})")
+            return 500
 
     # def archive_file_bbcp(self, full_filename):
     #     self.logger.info(f"{full_filename} attempting archive_file...")
@@ -308,7 +304,6 @@ class ArchiveProcessor:
         finally:
             if resp:
                 resp.close()
-            self.logger.info(f"{full_filename} archive_file completed")
 
     def get_status(self):
         watcher_list = []
