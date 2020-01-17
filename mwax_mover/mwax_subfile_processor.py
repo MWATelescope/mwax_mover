@@ -24,7 +24,9 @@ def read_subfile_mode(filename):
     with open(filename, "r") as subfile:
         line_no = 1
 
-        for line in subfile:
+        subfile_text = subfile.read(4096)
+
+        for line in subfile_text:
             # Don't search the whole file, just the first 16 lines
             if line_no <= PSRDADA_MAX_HEADER_LINES:
                 split_line = line.split(" ")
