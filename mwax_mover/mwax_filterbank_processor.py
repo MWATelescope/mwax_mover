@@ -80,11 +80,19 @@ class FilterbankProcessor:
             # -s set the number of parallel streams
             command = f"bbcp -f -w =32m -s {self.filterbank_bbcp_streams} " \
                       f"{item} mwa@{self.filterbank_host}:{destination_filename}"
-            return_value = mwax_mover.run_command(command, 600)
 
-            if return_value:
-                self.logger.debug(f"{item}- FilterbankProcessor.filterbank_handler attempting delete...")
-                mwax_mover.remove_file(self.logger, item)
+            self.logger.info(f"{item}- FilterbankProcessor.filterbank_handler is executing "
+                             f"{command}...")
+
+            try:
+                return_value = mwax_mover.run_command(command, 600)
+
+                if return_value:
+                    self.logger.debug(f"{item}- FilterbankProcessor.filterbank_handler attempting delete...")
+                    mwax_mover.remove_file(self.logger, item)
+            except Exception as e:
+                self.logger.info(f"{item}- FilterbankProcessor.filterbank_handler ERROR running command: {e}")
+                return_value = False
 
             self.logger.info(f"{item}- FilterbankProcessor.filterbank_handler finished handling.")
             return return_value
