@@ -15,14 +15,14 @@ Instructions:
 git clone https://this_repository_url mwax_mover
 cd mwax_mover
 
-# Create a virtual environment (Python 3.6)
-virtualenv -p /usr/bin/python3.6 env
+# Create a virtual environment (Python 3.8.3)
+virtualenv -p /usr/bin/python3.8.3 env
 
 # Source the environment
 source env/bin/activate
 
 # Install prerequisities
-pip install -r requirements.txt
+pipenv install 
 
 # Install
 python setup.py install    

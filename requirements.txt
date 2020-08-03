@@ -1,6 +1,0 @@
-inotify
-crc32c
-psycopg2-binary
-requests
-tenacity
-wheel
