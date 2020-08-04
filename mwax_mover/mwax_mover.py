@@ -174,7 +174,7 @@ class Processor:
 
         while self.running:
             if queueworker_thread.isAlive():
-                time.sleep(1)
+                time.sleep(0.001)
             else:
                 self.running = False
                 break

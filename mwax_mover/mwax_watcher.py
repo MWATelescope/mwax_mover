@@ -59,7 +59,7 @@ class Watcher(object):
         first_run = True
 
         while self.watching:
-            for event in self.i.event_gen(timeout_s=1, yield_nones=False):
+            for event in self.i.event_gen(timeout_s=0.01, yield_nones=False):
                 (_, evt_type_names, evt_path, evt_filename) = event
 
                 filename_len = len(evt_filename)

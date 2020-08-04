@@ -30,9 +30,11 @@ class QueueWorker(object):
         while self._running:
             if not self._paused:
                 try:
-                    item = self.q.get(block=True, timeout=2)
+                    item = self.q.get(block=True, timeout=0.1)
                     self.current_item = item
                     self.logger.info(f"Processing {item}...")
+
+                    start_time = time.time()
 
                     # Check file exists (maybe someone deleted it?)
                     if os.path.exists(item):
@@ -53,7 +55,7 @@ class QueueWorker(object):
                                             f"Queue size: {self.q.qsize()}")
 
                     self.current_item = None
-                    self.logger.info(f"Processing {item} Complete... Queue size: {self.q.qsize()}")
+                    self.logger.info(f"Complete {item}. Queue size: {self.q.qsize()} Elapsed: {time.time() - start_time} sec")
 
                 except queue.Empty:
                     if self._mode == mwax_mover.MODE_PROCESS_DIR:
@@ -61,9 +63,6 @@ class QueueWorker(object):
                         self.logger.info("Finished processing queue.")
                         self.stop()
                         return
-
-            # Sleep for a couple of seconds
-            time.sleep(2)
 
     def pause(self, paused):
         self._paused = paused

@@ -304,19 +304,18 @@ class MWAXSubfileDistributor:
         self.web_server_thread.start()
 
         # Start the processors
-        if self.cfg_bf_enabled or self.cfg_corr_enabled:
-            self.subfile_processor = mwax_subfile_processor.SubfileProcessor(self,
-                                                                             self.cfg_subfile_path,
-                                                                             self.cfg_voltdata_path,
-                                                                             self.cfg_bf_enabled,
-                                                                             self.cfg_bf_ringbuffer_key,
-                                                                             self.cfg_bf_numa_node,
-                                                                             self.cfg_corr_enabled,
-                                                                             self.cfg_corr_ringbuffer_key,
-                                                                             self.cfg_corr_numa_node)
+        self.subfile_processor = mwax_subfile_processor.SubfileProcessor(self,
+                                                                         self.cfg_subfile_path,
+                                                                         self.cfg_voltdata_path,
+                                                                         self.cfg_bf_enabled,
+                                                                         self.cfg_bf_ringbuffer_key,
+                                                                         self.cfg_bf_numa_node,
+                                                                         self.cfg_corr_enabled,
+                                                                         self.cfg_corr_ringbuffer_key,
+                                                                         self.cfg_corr_numa_node)
 
-            # Add this processor to list of processors we manage
-            self.processors.append(self.subfile_processor)
+        # Add this processor to list of processors we manage
+        self.processors.append(self.subfile_processor)
 
         if self.cfg_corr_enabled:
             self.archive_processor = mwax_archive_processor.ArchiveProcessor(self,
