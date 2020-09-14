@@ -10,7 +10,7 @@ import threading
 
 class FilterbankProcessor:
     def __init__(self, context, hostname, fildata_path, filterbank_host, filterbank_port,
-                 filterbank_destination_path, filterbank_bbcp_streams):
+                 filterbank_destination_path, filterbank_streams):
         self.subfile_distributor_context = context
 
         # Setup logging
@@ -39,7 +39,7 @@ class FilterbankProcessor:
         self.filterbank_host = filterbank_host
         self.filterbank_port = filterbank_port
         self.filterbank_destination_path = filterbank_destination_path
-        self.filterbank_bbcp_streams = filterbank_bbcp_streams
+        self.filterbank_streams = filterbank_streams
 
     def start(self):
         # Create watcher for filterbank data -> filterbank queue
@@ -78,7 +78,7 @@ class FilterbankProcessor:
             # -f force overwrite if destination exists
             # -w =32m, means use a tcp window size of 32MB and do not autosize ('w')
             # -s set the number of parallel streams
-            command = f"bbcp -f -w =32m -s {self.filterbank_bbcp_streams} " \
+            command = f"bbcp -f -w =32m -s {self.filterbank_streams} " \
                       f"{item} mwa@{self.filterbank_host}:{destination_filename}"
 
             self.logger.info(f"{item}- FilterbankProcessor.filterbank_handler is executing "

@@ -1,6 +1,4 @@
-from mwax_mover import mwax_mover
-from mwax_mover import mwax_queue_worker
-from mwax_mover import mwax_watcher
+from mwax_mover import mwax_mover, mwax_queue_worker, mwax_watcher, mwax_command
 import logging
 import logging.handlers
 import os
@@ -152,7 +150,7 @@ class ArchiveProcessor:
     def archive_handler(self, item):
         self.logger.info(f"{item}- archive_handler() Started...")
 
-        if self.archive_file_qarchive(item) != 200:
+        if self.archive_file_xrootd(item) is not True:
             return False
 
         self.logger.debug(f"{item}- archive_handler() Deleting file")
@@ -226,6 +224,7 @@ class ArchiveProcessor:
         return return_value
 
     def archive_file_qarchive(self, full_filename):
+        self.logger.info(f"{full_filename} attempting archive_file_qarchive...")
         resp = None
 
         try:
@@ -271,39 +270,13 @@ class ArchiveProcessor:
             self.logger.error(f"{full_filename} archive_file_qarchive() Error when trying to archive ({other_error})")
             return 500
 
-    # def archive_file_bbcp(self, full_filename):
-    #     self.logger.info(f"{full_filename} attempting archive_file...")
-    #
-    #     self.logger.info(f"{full_filename} calculating checksum...")
-    #     checksum = mwax_mover.calculate_checksum(full_filename)
-    #     self.logger.debug(f"{full_filename} checksum == {checksum}")
-    #
-    #     query_args = {'filename': f'mwa@{self.hostname}:{full_filename}',
-    #                   'bnum_streams': 12,
-    #                   'mime_type': 'application/x-mwa-fits'}
-    #     encoded_args = urlencode(query_args)
-    #
-    #     bbcpurl = f"http://{self.archive_destination_host}:{self.archive_destination_port}/BBCPARC?{encoded_args}"
-    #
-    #     resp = None
-    #     try:
-    #         self.logger.debug(f"{full_filename} calling {bbcpurl}...")
-    #         resp = urlopen(bbcpurl, timeout=7200)
-    #         data = []
-    #         while True:
-    #             buff = resp.read()
-    #             if not buff:
-    #                 break
-    #             data.append(buff.decode('utf-8'))
-    #
-    #         return 200, '', ''.join(data)
-    #     except urllib.error.URLError as url_error:
-    #         self.logger.error(f"{full_filename} failed to archive ({url_error})")
-    #         return url_error.errno, '', url_error.reason
+    def archive_file_xrootd(self, full_filename):
+        self.logger.info(f"{full_filename} attempting archive_file_xrootd...")
 
-        finally:
-            if resp:
-                resp.close()
+        command = f"xrdcp {full_filename} xroot://{self.archive_destination_host}"
+        mwax_command.run_shell_command(self.logger, command)
+
+        return self.logger.info(f"{full_filename} archive_file_xrootd success.")
 
     def get_status(self):
         watcher_list = []

@@ -1,7 +1,6 @@
-from mwax_mover import mwax_mover
+from mwax_mover import mwax_mover, mwax_command
 import os
 import queue
-import subprocess
 import time
 
 
@@ -79,30 +78,7 @@ class QueueWorker(object):
         filename_no_ext = os.path.splitext(filename)[0]
         command = command.replace(mwax_mover.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext)
 
-        # Example: "dada_diskdb -k 1234 -f 1216447872_02_256_201.sub -s"
-        stderror = ""
-
-        try:
-            self.logger.info(f"Executing {command}...")
-            # Execute the command
-            completed_process = subprocess.run(command, shell=True)
-
-            return_code = completed_process.returncode
-            stderror = completed_process.stderr
-
-            if return_code != 0:
-                self.logger.error(f"Error executing {command}. Return code: {return_code} StdErr: {stderror}")
-                return False
-            else:
-                return True
-
-        except subprocess.CalledProcessError:
-            self.logger.error(f"Error executing {command} StdErr: {stderror}")
-            return False
-
-        except Exception as command_exception:
-            self.logger.error(f"Error executing {command}: {str(command_exception)}")
-            return False
+        return mwax_command.run_shell_command(self.logger, command)
 
     def get_status(self):
         return {"current": self.current_item,

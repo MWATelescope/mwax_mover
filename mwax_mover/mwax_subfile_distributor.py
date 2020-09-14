@@ -254,7 +254,7 @@ class MWAXSubfileDistributor:
             self.cfg_filterbank_host = self.read_config(self.hostname, "filterbank_host")
             self.cfg_filterbank_port = self.read_config(self.hostname, "filterbank_port")
             self.cfg_filterbank_destination_path = self.read_config(self.hostname, "filterbank_destination_path")
-            self.cfg_filterbank_bbcp_streams = self.read_config(self.hostname, "filterbank_bbcp_streams")
+            self.cfg_filterbank_streams = self.read_config(self.hostname, "filterbank_streams")
 
             self.cfg_bf_enabled = True
         else:
@@ -279,8 +279,8 @@ class MWAXSubfileDistributor:
                 self.cfg_metadatadb_port = self.read_config("mwa metadata database", "port")
 
             # Read config specific to this host
-            self.cfg_ngas_host = self.read_config(self.hostname, "ngas_host")
-            self.cfg_ngas_port = self.read_config(self.hostname, "ngas_port")
+            self.cfg_destination_host = self.read_config(self.hostname, "destination_host")
+            self.cfg_destination_port = self.read_config(self.hostname, "destination_port")
 
             # Initiate database connection pool for metadata db
             self.db_handler = mwax_db.MWAXDBHandler(host=self.cfg_metadatadb_host,
