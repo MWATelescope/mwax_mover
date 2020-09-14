@@ -21,15 +21,16 @@ PSRDADA_MAX_HEADER_LINES = 16           # number of lines of the PSRDADA header 
 def read_subfile_mode(filename):
     subfile_mode = None
 
-    with open(filename, "r") as subfile:
+    with open(filename, "rb") as subfile:
         line_no = 1
 
-        subfile_text = subfile.read(4096)
+        subfile_text = subfile.read(4096).decode()
+        subfile_text_lines = subfile_text.splitlines()
 
-        for line in subfile_text:
+        for line in subfile_text_lines:
             # Don't search the whole file, just the first 16 lines
             if line_no <= PSRDADA_MAX_HEADER_LINES:
-                split_line = line.split(" ")
+                split_line = line.split()
 
                 # We should have 2 items, keyword and value
                 if len(split_line) == 2:
