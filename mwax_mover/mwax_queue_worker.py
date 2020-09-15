@@ -54,7 +54,8 @@ class QueueWorker(object):
                                             f"Queue size: {self.q.qsize()}")
 
                     self.current_item = None
-                    self.logger.info(f"Complete {item}. Queue size: {self.q.qsize()} Elapsed: {time.time() - start_time} sec")
+                    elapsed = time.time() - start_time
+                    self.logger.info(f"Complete {item}. Queue size: {self.q.qsize()} Elapsed: {elapsed:.2f} sec")
 
                 except queue.Empty:
                     if self._mode == mwax_mover.MODE_PROCESS_DIR:
