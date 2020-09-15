@@ -8,11 +8,31 @@ import os
 import queue
 import shutil
 import threading
+from enum import Enum
 
 
-CORRELATOR_MODE_NO_CAPTURE = "NO_CAPTURE"
-CORRELATOR_MODE_HW_LFILES = "HW_LFILES"
-CORRELATOR_MODE_VOLTAGE_START = "VOLTAGE_START"
+class CorrelatorMode(Enum):
+    NO_CAPTURE = "NO_CAPTURE"
+    CORR_MODE_CHANGE = "CORR_MODE_CHANGE"
+    HW_LFILES = "HW_LFILES"
+    MWAX_CORRELATOR = "MWAX_CORRELATOR"
+    VOLTAGE_START = "VOLTAGE_START"
+    VOLTAGE_BUFFER = "VOLTAGE_BUFFER"
+    VOLTAGE_STOP = "VOLTAGE_STOP"
+    MWAX_VCS = "MWAX_VCS"
+
+    @staticmethod
+    def is_no_capture(mode_string: str) -> bool:
+        return mode_string in [CorrelatorMode.NO_CAPTURE, CorrelatorMode.CORR_MODE_CHANGE, CorrelatorMode.VOLTAGE_STOP]
+
+    @staticmethod
+    def is_correlator(mode_string: str) -> bool:
+        return mode_string in [CorrelatorMode.HW_LFILES, CorrelatorMode.MWAX_CORRELATOR, ]
+
+    @staticmethod
+    def is_vcs(mode_string: str) -> bool:
+        return mode_string in [CorrelatorMode.VOLTAGE_START, CorrelatorMode.VOLTAGE_BUFFER, CorrelatorMode.MWAX_VCS]
+
 
 COMMAND_DADA_DISKDB = "dada_diskdb"
 PSRDADA_MAX_HEADER_LINES = 16           # number of lines of the PSRDADA header to read looking for keywords
@@ -125,21 +145,23 @@ class SubfileProcessor:
                 #    else if mode==VOLTAGE_START then
                 #       Ensure archiving to Pawsey is stopped while we capture
                 #       copy subfile onto /voltdata where it will eventually get archived
+                #    else
+                #       Ignore the subfile
                 # 3. Rename .sub file to .free so that udpgrab can reuse it
-                if subfile_mode == CORRELATOR_MODE_HW_LFILES:
+                if CorrelatorMode.is_correlator(subfile_mode):
                     self.subfile_distributor_context.archive_processor.pause_archiving(False)
 
                     self._load_psrdada_ringbuffer(item, self.corr_ringbuffer_key)
                     success = True
 
-                elif subfile_mode == CORRELATOR_MODE_VOLTAGE_START:
+                elif CorrelatorMode.is_vcs(subfile_mode):
                     # Pause archiving so we have the disk to ourselves
                     self.subfile_distributor_context.archive_processor.pause_archiving(True)
 
                     self._copy_subfile_to_voltdata(item, self.corr_numa_node)
                     success = True
 
-                elif subfile_mode == CORRELATOR_MODE_NO_CAPTURE:
+                elif CorrelatorMode.is_no_capture(subfile_mode):
                     self.subfile_distributor_context.archive_processor.pause_archiving(False)
                     success = True
 
@@ -152,7 +174,7 @@ class SubfileProcessor:
                 # Otherwise:
                 # 1. load file into PSRDADA ringbuffer for beamformer input
                 # 2. Rename .sub file to .free so that udpgrab can reuse it
-                if self.corr_enabled and subfile_mode == CORRELATOR_MODE_VOLTAGE_START:
+                if self.corr_enabled and CorrelatorMode.is_vcs(subfile_mode):
                     self.logger.warning(f"{item}- correlator mode enabled and is in {subfile_mode} mode, ignoring this"
                                         f" beamformer job.")
                 else:
