@@ -1,14 +1,12 @@
 from mwax_mover import mwax_queue_worker
 from mwax_mover import mwax_watcher
 import argparse
-import crc32c
 import logging
 import logging.handlers
 import os
 import queue
 import signal
 import subprocess
-import sys
 from tenacity import *
 import threading
 import time
@@ -19,20 +17,6 @@ FILENOEXT_REPLACEMENT_TOKEN = "__FILENOEXT__"
 MODE_WATCH_DIR_FOR_RENAME = "WATCH_DIR_FOR_RENAME"
 MODE_WATCH_DIR_FOR_NEW = "WATCH_DIR_FOR_NEW"
 MODE_PROCESS_DIR = "PROCESS_DIR"
-
-
-def calculate_checksum(filename):
-    crc32 = 0
-    block_size = 1048576
-
-    with open(filename, "rb") as binaryfile:
-        while True:
-            block = binaryfile.read(block_size)
-            if not block:
-                break
-            crc32 = crc32c.crc32(block, crc32)
-
-    return crc32
 
 
 def run_command(command, command_timeout):

@@ -1,0 +1,4 @@
+inotify
+psycopg2-binary
+requests
+tenacity
