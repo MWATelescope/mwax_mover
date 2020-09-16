@@ -23,15 +23,15 @@ class CorrelatorMode(Enum):
 
     @staticmethod
     def is_no_capture(mode_string: str) -> bool:
-        return mode_string in [CorrelatorMode.NO_CAPTURE, CorrelatorMode.CORR_MODE_CHANGE, CorrelatorMode.VOLTAGE_STOP]
+        return mode_string in [CorrelatorMode.NO_CAPTURE.value, CorrelatorMode.CORR_MODE_CHANGE.value, CorrelatorMode.VOLTAGE_STOP.value, ]
 
     @staticmethod
     def is_correlator(mode_string: str) -> bool:
-        return mode_string in [CorrelatorMode.HW_LFILES, CorrelatorMode.MWAX_CORRELATOR, ]
+        return mode_string in [CorrelatorMode.HW_LFILES.value, CorrelatorMode.MWAX_CORRELATOR.value, ]
 
     @staticmethod
     def is_vcs(mode_string: str) -> bool:
-        return mode_string in [CorrelatorMode.VOLTAGE_START, CorrelatorMode.VOLTAGE_BUFFER, CorrelatorMode.MWAX_VCS]
+        return mode_string in [CorrelatorMode.VOLTAGE_START.value, CorrelatorMode.VOLTAGE_BUFFER.value, CorrelatorMode.MWAX_VCS.value, ]
 
 
 COMMAND_DADA_DISKDB = "dada_diskdb"
@@ -151,7 +151,7 @@ class SubfileProcessor:
                 if CorrelatorMode.is_correlator(subfile_mode):
                     self.subfile_distributor_context.archive_processor.pause_archiving(False)
 
-                    self._load_psrdada_ringbuffer(item, self.corr_ringbuffer_key)
+                    self._load_psrdada_ringbuffer(item, self.corr_ringbuffer_key, self.corr_numa_node)
                     success = True
 
                 elif CorrelatorMode.is_vcs(subfile_mode):
@@ -162,6 +162,7 @@ class SubfileProcessor:
                     success = True
 
                 elif CorrelatorMode.is_no_capture(subfile_mode):
+                    self.logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
                     self.subfile_distributor_context.archive_processor.pause_archiving(False)
                     success = True
 
@@ -223,10 +224,10 @@ class SubfileProcessor:
                     t.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
-    def _load_psrdada_ringbuffer(self, filename, ringbuffer_key):
+    def _load_psrdada_ringbuffer(self, filename, ringbuffer_key, numa_node):
         self.logger.info(f"{filename}- Loading file into PSRDADA ringbuffer {ringbuffer_key}")
 
-        command = f"dada_diskdb -k {ringbuffer_key} -f {filename}"
+        command = f"numactl --cpunodebind={numa_node} --membind={numa_node} dada_diskdb -k {ringbuffer_key} -f {filename}"
         return mwax_mover.run_command(command, 32)
 
     def _copy_subfile_to_voltdata(self, filename, numa_node):

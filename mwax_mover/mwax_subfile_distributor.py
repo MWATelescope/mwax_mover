@@ -171,8 +171,8 @@ class MWAXSubfileDistributor:
         self.db_handler = None
 
         # Archiving settings
-        self.cfg_ngas_host = None
-        self.cfg_ngas_port = None
+        self.cfg_archive_destination_host = None
+        self.cfg_archive_destination_port = None
 
         # Filterbank settings
         self.cfg_filterbank_host = None
@@ -279,8 +279,8 @@ class MWAXSubfileDistributor:
                 self.cfg_metadatadb_port = self.read_config("mwa metadata database", "port")
 
             # Read config specific to this host
-            self.cfg_destination_host = self.read_config(self.hostname, "destination_host")
-            self.cfg_destination_port = self.read_config(self.hostname, "destination_port")
+            self.cfg_archive_destination_host = self.read_config(self.hostname, "destination_host")
+            self.cfg_archive_destination_port = self.read_config(self.hostname, "destination_port")
 
             # Initiate database connection pool for metadata db
             self.db_handler = mwax_db.MWAXDBHandler(host=self.cfg_metadatadb_host,
@@ -320,8 +320,8 @@ class MWAXSubfileDistributor:
         if self.cfg_corr_enabled:
             self.archive_processor = mwax_archive_processor.ArchiveProcessor(self,
                                                                              self.hostname,
-                                                                             self.cfg_ngas_host,
-                                                                             self.cfg_ngas_port,
+                                                                             self.cfg_archive_destination_host,
+                                                                             self.cfg_archive_destination_port,
                                                                              self.db_handler,
                                                                              self.cfg_voltdata_path,
                                                                              self.cfg_corr_visdata_path)
