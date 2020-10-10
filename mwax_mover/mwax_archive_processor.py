@@ -273,11 +273,15 @@ class ArchiveProcessor:
     def archive_file_xrootd(self, full_filename):
         self.logger.info(f"{full_filename} attempting archive_file_xrootd...")
 
-        command = f"/usr/local/bin/xrdcp --silent --streams 2 --tlsnodata {full_filename} xroot://{self.archive_destination_host}"
-        mwax_command.run_shell_command(self.logger, command)
+        return_value = False
 
-        self.logger.info(f"{full_filename} archive_file_xrootd success.")
-        return True
+        command = f"/usr/local/bin/xrdcp --silent --streams 2 --tlsnodata {full_filename} xroot://{self.archive_destination_host}"
+        return_value = mwax_command.run_shell_command(self.logger, command)
+        
+        if return_value:
+            self.logger.info(f"{full_filename} archive_file_xrootd success.")
+
+        return return_value
 
     def get_status(self):
         watcher_list = []
