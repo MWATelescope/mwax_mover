@@ -68,7 +68,7 @@ class FilterbankProcessor:
     def filterbank_handler(self, item):
         if not self.archiving_paused:
             self.logger.info(f"{item}- FilterbankProcessor.filterbank_handler is handling {item}: "
-                             f"bbcp to {self.filterbank_host}...")
+                             f"copy to {self.filterbank_host}...")
 
             # Get filename without path
             filename_only = os.path.basename(item)

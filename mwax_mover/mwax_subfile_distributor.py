@@ -190,7 +190,7 @@ class MWAXSubfileDistributor:
                              "suite for the MWA. It will perform different tasks based on the configuration file.\n" \
                              "In addition, it will automatically archive files in /voltdata and /visdata to the " \
                              "mwacache servers at the Curtin Data Centre. In Beamformer mode, filterbank files " \
-                             "generated will be bbcp copied to a remote host running Fredda.\n"
+                             "generated will be copied to a remote host running Fredda.\n"
 
         parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
 
