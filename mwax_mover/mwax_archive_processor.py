@@ -274,9 +274,9 @@ class ArchiveProcessor:
     def archive_file_xrootd(self, full_filename):
         self.logger.info(f"{full_filename} attempting archive_file_xrootd...")
 
-        size = os.stat(full_filename)
+        size = os.path.getsize(full_filename)
 
-        command = f"/usr/local/bin/xrdcp --posc --cksum adler32 --silent --streams 2 --tlsnodata {full_filename} xroot://{self.archive_destination_host}"
+        command = f"/usr/local/bin/xrdcp --force --cksum adler32 --silent --streams 2 --tlsnodata {full_filename} xroot://{self.archive_destination_host}"
         start_time = time.time()
         return_value = mwax_command.run_shell_command(self.logger, command)
         elapsed = time.time() - start_time
