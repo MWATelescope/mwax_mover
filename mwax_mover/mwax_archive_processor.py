@@ -5,6 +5,7 @@ import os
 import queue
 import requests
 import threading
+import time
 
 
 class ArchiveProcessor:
@@ -273,13 +274,18 @@ class ArchiveProcessor:
     def archive_file_xrootd(self, full_filename):
         self.logger.info(f"{full_filename} attempting archive_file_xrootd...")
 
-        return_value = False
+        size = os.stat(full_filename)
 
-        command = f"/usr/local/bin/xrdcp --silent --streams 2 --tlsnodata {full_filename} xroot://{self.archive_destination_host}"
+        command = f"/usr/local/bin/xrdcp --posc --cksum adler32 --silent --streams 2 --tlsnodata {full_filename} xroot://{self.archive_destination_host}"
+        start_time = time.time()
         return_value = mwax_command.run_shell_command(self.logger, command)
-        
+        elapsed = time.time() - start_time
+
+        bits_per_sec = (size * 8) / elapsed
+        gbps_per_sec = bits_per_sec / (1000*1000*1000)
+
         if return_value:
-            self.logger.info(f"{full_filename} archive_file_xrootd success.")
+            self.logger.info(f"{full_filename} archive_file_xrootd success ({gbps_per_sec:.3f} Gbps)")
 
         return return_value
 
