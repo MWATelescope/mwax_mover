@@ -5,7 +5,7 @@ DUMMY_DB = "dummy"
 
 
 class MWAXDBHandler:
-    def __init__(self, host, port, db, user, password):
+    def __init__(self, host: str, port: int, db, user: str, password: str):
         self.host = host
         self.port = port
         self.db = db
@@ -30,13 +30,13 @@ class MWAXDBHandler:
                                                                 password=self.password,
                                                                 port=self.port)
 
-    def insert_one_row(self, sql, parm_list):
+    def insert_one_row(self, sql: str, parm_list: list) -> int:
         if self.dummy:
             return 1
         else:
             self.insert_one_row_postgres(sql, parm_list)
 
-    def insert_one_row_postgres(self, sql, parm_list):
+    def insert_one_row_postgres(self, sql: str, parm_list: list) -> int:
         cursor = None
         con = None
 

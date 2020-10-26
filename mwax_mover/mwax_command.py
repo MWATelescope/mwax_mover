@@ -1,7 +1,7 @@
 import subprocess
 
 
-def run_shell_command(logger, command):
+def run_shell_command(logger, command: str) -> bool:
     # Example: "dada_diskdb -k 1234 -f 1216447872_02_256_201.sub -s"
     stderror = ""
 

@@ -5,13 +5,13 @@ import inotify.adapters
 import os
 
 
-def get_file_list(watch_dir, watch_ext):
+def get_file_list(watch_dir: str, watch_ext: str) -> list:
     pattern = os.path.join(watch_dir, "*" + watch_ext)
     files = glob.glob(pattern)
     return sorted(files)
 
 
-def scan_directory(logger, watch_dir, watch_ext, q):
+def scan_directory(logger, watch_dir: str, watch_ext: str, q):
     # Just loop through all files and add them to the queue
     logger.info(f"Scanning {watch_dir} for files matching {'*' + watch_ext}...")
 
@@ -76,7 +76,7 @@ class Watcher(object):
                     scan_directory(self.logger, self.path, self.pattern, self.q)
                     first_run = False
 
-    def get_status(self):
+    def get_status(self) -> dict:
         return {"watching": self.watching,
                 "mode": self.mode,
                 "watch_path": self.path,

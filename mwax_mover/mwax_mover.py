@@ -19,11 +19,11 @@ MODE_WATCH_DIR_FOR_NEW = "WATCH_DIR_FOR_NEW"
 MODE_PROCESS_DIR = "PROCESS_DIR"
 
 
-def run_command(command, command_timeout):
+def run_command(command: str, command_timeout_seconds: float) -> bool:
     try:
         # launch the process
         subprocess.run(f"{command}",
-                       shell=True, check=True, timeout=command_timeout)
+                       shell=True, check=True, timeout=command_timeout_seconds)
         return True
 
     except subprocess.CalledProcessError as process_error:
@@ -36,7 +36,7 @@ def run_command(command, command_timeout):
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_fixed(10))
-def remove_file(logger, filename):
+def remove_file(logger, filename: str) -> bool:
     try:
         os.remove(filename)
         logger.info(f"{filename}- file deleted")

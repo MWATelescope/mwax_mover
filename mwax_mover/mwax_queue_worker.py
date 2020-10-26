@@ -6,7 +6,7 @@ import time
 
 class QueueWorker(object):
     # Either pass an event handler or pass an executable path to run
-    def __init__(self, label, q, executable_path, mode, log, event_handler):
+    def __init__(self, label: str, q, executable_path, mode: str, log, event_handler):
         self.label = label
         self.q = q
 
@@ -64,13 +64,13 @@ class QueueWorker(object):
                         self.stop()
                         return
 
-    def pause(self, paused):
+    def pause(self, paused: bool):
         self._paused = paused
 
     def stop(self):
         self._running = False
 
-    def run_command(self, filename):
+    def run_command(self, filename: str) -> bool:
         command = f"{self._executable_path}"
 
         # Substitute the filename into the command
@@ -81,6 +81,6 @@ class QueueWorker(object):
 
         return mwax_command.run_shell_command(self.logger, command)
 
-    def get_status(self):
+    def get_status(self) -> dict:
         return {"current": self.current_item,
                 "queue_size": self.q.qsize()}

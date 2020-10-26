@@ -3,13 +3,13 @@ import logging
 import logging.handlers
 import os
 import queue
-import requests
 import threading
 import time
 
 
 class ArchiveProcessor:
-    def __init__(self, context, hostname, archive_host, archive_port, db_handler_object, voltdata_path, visdata_path):
+    def __init__(self, context, hostname: str, archive_command_numa_node: int, archive_host: str, archive_port: str,
+                 db_handler_object, voltdata_path: str, visdata_path: str):
         self.subfile_distributor_context = context
 
         # Setup logging
@@ -27,6 +27,7 @@ class ArchiveProcessor:
         self.hostname = hostname
         self.archive_destination_host = archive_host
         self.archive_destination_port = archive_port
+        self.archive_command_numa_node = archive_command_numa_node
 
         self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_NEW
         self.archiving_paused = False
@@ -108,7 +109,7 @@ class ArchiveProcessor:
         self.worker_threads.append(queue_worker_vis_thread)
         queue_worker_vis_thread.start()
 
-    def db_handler(self, item):
+    def db_handler(self, item: str) -> bool:
         self.logger.info(f"{item}- db_handler() Started")
 
         # immediately add this file to the db so we insert a record into metadata data_files table
@@ -148,10 +149,10 @@ class ArchiveProcessor:
         self.logger.info(f"{item}- db_handler() Finished")
         return True
 
-    def archive_handler(self, item):
+    def archive_handler(self, item: str) -> bool:
         self.logger.info(f"{item}- archive_handler() Started...")
 
-        if self.archive_file_xrootd(item) is not True:
+        if self.archive_file_xrootd(item, self.archive_command_numa_node, self.archive_destination_host) is not True:
             return False
 
         self.logger.debug(f"{item}- archive_handler() Deleting file")
@@ -160,7 +161,7 @@ class ArchiveProcessor:
         self.logger.info(f"{item}- archive_handler() Finished")
         return True
 
-    def pause_archiving(self, paused):
+    def pause_archiving(self, paused: bool):
         if self.archiving_paused != paused:
             if paused:
                 self.logger.info(f"Pausing archiving")
@@ -198,13 +199,14 @@ class ArchiveProcessor:
                     t.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
-    def insert_data_file_row(self, obsid, filetype, file_size, filename, site_path, hostname, remote_archived, deleted):
+    def insert_data_file_row(self, obsid: int, filetype: int, file_size: int, filename: str, site_path: str,
+                             hostname: str, remote_archived: bool, deleted: bool) -> bool:
         sql = f"INSERT INTO data_files " \
               f"(observation_num, filetype, size, filename, site_path, host, remote_archived, deleted) " \
               f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (filename) DO NOTHING"
 
         try:
-            rows_inserted = self.db_handler_object.insert_one_row(sql, (obsid, filetype, file_size,
+            rows_inserted = self.db_handler_object.insert_one_row(sql, (str(obsid), filetype, file_size,
                                                                         filename, site_path, hostname,
                                                                         remote_archived, deleted))
 
@@ -224,72 +226,25 @@ class ArchiveProcessor:
 
         return return_value
 
-    def archive_file_qarchive(self, full_filename):
-        self.logger.info(f"{full_filename} attempting archive_file_qarchive...")
-        resp = None
-
-        try:
-            # Get info about the file we're about to archive
-            filename_no_path = os.path.basename(full_filename)
-            file_size = os.stat(full_filename).st_size
-            file_ext = os.path.splitext(filename_no_path)[1]
-
-            # determine mimetype
-            mime_type = "application/x-mwa-"
-
-            if file_ext == ".sub":
-                mime_type = mime_type + "subfile"
-            elif file_ext == ".fits":
-                mime_type = mime_type + "fits"
-            else:
-                raise Exception(f"Unable to determine mimetype for file {full_filename}")
-
-            query_args = {'filename': filename_no_path}
-
-            url = f"http://{self.archive_destination_host}:{self.archive_destination_port}/QARCHIVE?{query_args}"
-
-            headers = {'Content-disposition': f'attachment; filename={filename_no_path}',
-                       'Content-length': str(file_size),
-                       'Host': self.hostname,
-                       'Content-type': mime_type}
-
-            file_data = {'file': open(full_filename, 'rb')}
-
-            self.logger.debug(f"{full_filename} archive_file_qarchive() Archiving to {url}")
-            resp = requests.post(url, files=file_data, headers=headers)
-
-            # if we have anything except success, raise a http exception
-            resp.raise_for_status()
-
-            return resp.status_code
-
-        except requests.exceptions.HTTPError as http_error:
-            self.logger.error(f"{full_filename} archive_file_qarchive() HTTPError when trying to archive ({http_error})")
-            return resp.status_code
-
-        except Exception as other_error:
-            self.logger.error(f"{full_filename} archive_file_qarchive() Error when trying to archive ({other_error})")
-            return 500
-
-    def archive_file_xrootd(self, full_filename):
+    def archive_file_xrootd(self, full_filename: str, archive_numa_node: int, archive_destination_host: str):
         self.logger.info(f"{full_filename} attempting archive_file_xrootd...")
 
         size = os.path.getsize(full_filename)
 
-        command = f"/usr/local/bin/xrdcp --force --cksum adler32 --silent --streams 2 --tlsnodata {full_filename} xroot://{self.archive_destination_host}"
+        command = f"numactl --cpunodebind={archive_numa_node} --membind={archive_numa_node} /usr/local/bin/xrdcp --force --cksum adler32 --silent --streams 2 --tlsnodata {full_filename} xroot://{archive_destination_host}"
         start_time = time.time()
         return_value = mwax_command.run_shell_command(self.logger, command)
         elapsed = time.time() - start_time
 
-        bits_per_sec = (size * 8) / elapsed
-        gbps_per_sec = bits_per_sec / (1000*1000*1000)
+        size_gigabytes = size / (1000*1000*1000)
+        gbps_per_sec = (size_gigabytes * 8) / elapsed
 
         if return_value:
-            self.logger.info(f"{full_filename} archive_file_xrootd success ({gbps_per_sec:.3f} Gbps)")
+            self.logger.info(f"{full_filename} archive_file_xrootd success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
 
         return return_value
 
-    def get_status(self):
+    def get_status(self) -> dict:
         watcher_list = []
 
         if self.watcher_volt:

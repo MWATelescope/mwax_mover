@@ -18,7 +18,7 @@ import threading
 from urllib.parse import urlparse, parse_qs
 
 
-def get_hostname():
+def get_hostname() -> str:
     hostname = socket.gethostname()
 
     # ensure we remove anything after a . in case we got the fqdn
@@ -113,7 +113,7 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
             self.send_response(400)
             self.end_headers()
 
-    def log_message(self, format, *args):
+    def log_message(self, format: str, *args):
         self.server.context.logger.debug(f"{self.address_string()} {format % args}")
         return
 
@@ -157,7 +157,8 @@ class MWAXSubfileDistributor:
         # Correlator
         self.cfg_corr_enabled = None
         self.cfg_corr_ringbuffer_key = None
-        self.cfg_corr_numa_node = None
+        self.cfg_corr_diskdb_numa_node = None
+        self.cfg_corr_archive_command_numa_node = None
         self.cfg_corr_visdata_path = None
 
         # Connection info for metadata db
@@ -263,7 +264,8 @@ class MWAXSubfileDistributor:
         # read metadata database config
         if self.config.has_section("correlator"):
             self.cfg_corr_ringbuffer_key = self.read_config("correlator", "input_ringbuffer_key")
-            self.cfg_corr_numa_node = self.read_config("correlator", "dada_disk_db_numa_node")
+            self.cfg_corr_diskdb_numa_node = self.read_config("correlator", "dada_disk_db_numa_node")
+            self.cfg_corr_archive_command_numa_node = self.read_config("correlator", "archive_command_numa_node")
             self.cfg_corr_visdata_path = self.read_config("correlator", "visdata_path")
 
             if not os.path.exists(self.cfg_corr_visdata_path):
@@ -312,7 +314,7 @@ class MWAXSubfileDistributor:
                                                                          self.cfg_bf_numa_node,
                                                                          self.cfg_corr_enabled,
                                                                          self.cfg_corr_ringbuffer_key,
-                                                                         self.cfg_corr_numa_node)
+                                                                         self.cfg_corr_diskdb_numa_node)
 
         # Add this processor to list of processors we manage
         self.processors.append(self.subfile_processor)
@@ -320,6 +322,7 @@ class MWAXSubfileDistributor:
         if self.cfg_corr_enabled:
             self.archive_processor = mwax_archive_processor.ArchiveProcessor(self,
                                                                              self.hostname,
+                                                                             self.cfg_corr_archive_command_numa_node,
                                                                              self.cfg_archive_destination_host,
                                                                              self.cfg_archive_destination_port,
                                                                              self.db_handler,
@@ -341,7 +344,7 @@ class MWAXSubfileDistributor:
             # Add this processor to list of processors we manage
             self.processors.append(self.filterbank_processor)
 
-    def get_status(self):
+    def get_status(self) -> dict:
         main_status = {"host": self.hostname,
                        "beamformer": self.cfg_bf_enabled,
                        "correlator": self.cfg_corr_enabled,
@@ -360,7 +363,7 @@ class MWAXSubfileDistributor:
     def web_server_loop(self, webserver):
         webserver.serve_forever()
 
-    def read_config(self, section, key, b64encoded=False):
+    def read_config(self, section: str, key: str, b64encoded=False):
         if b64encoded:
             value = base64.b64decode(self.config.get(section, key)).decode('utf-8')
             value_to_log = '*' * len(value)

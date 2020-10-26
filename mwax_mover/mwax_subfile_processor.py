@@ -38,7 +38,7 @@ COMMAND_DADA_DISKDB = "dada_diskdb"
 PSRDADA_MAX_HEADER_LINES = 16           # number of lines of the PSRDADA header to read looking for keywords
 
 
-def read_subfile_mode(filename):
+def read_subfile_mode(filename: str) -> str:
     subfile_mode = None
 
     with open(filename, "rb") as subfile:
@@ -68,9 +68,9 @@ def read_subfile_mode(filename):
 
 class SubfileProcessor:
     def __init__(self, context,
-                 subfile_path, voltdata_path,
-                 bf_enabled, bf_ringbuffer_key, bf_numa_node,
-                 corr_enabled, corr_ringbuffer_key, corr_numa_node):
+                 subfile_path: str, voltdata_path: str,
+                 bf_enabled: bool, bf_ringbuffer_key: str, bf_numa_node: int,
+                 corr_enabled: bool, corr_ringbuffer_key: str, corr_diskdb_numa_node: int):
         self.subfile_distributor_context = context
 
         # Setup logging
@@ -104,7 +104,7 @@ class SubfileProcessor:
 
         self.corr_enabled = corr_enabled
         self.corr_ringbuffer_key = corr_ringbuffer_key  # PSRDADA ringbuffer key for INPUT into correlator or beamformer
-        self.corr_numa_node = corr_numa_node  # Numa node to use to do a file copy
+        self.corr_diskdb_numa_node = corr_diskdb_numa_node  # Numa node to use to do a file copy
 
     def start(self):
         # Create watcher
@@ -130,7 +130,7 @@ class SubfileProcessor:
         self.worker_threads.append(queue_worker_thread)
         queue_worker_thread.start()
 
-    def handler(self, item):
+    def handler(self, item: str) -> bool:
         success = False
 
         self.logger.info(f"{item}- SubfileProcessor.handler is handling {item}...")
@@ -151,14 +151,14 @@ class SubfileProcessor:
                 if CorrelatorMode.is_correlator(subfile_mode):
                     self.subfile_distributor_context.archive_processor.pause_archiving(False)
 
-                    self._load_psrdada_ringbuffer(item, self.corr_ringbuffer_key, self.corr_numa_node)
+                    self._load_psrdada_ringbuffer(item, self.corr_ringbuffer_key, self.corr_diskdb_numa_node)
                     success = True
 
                 elif CorrelatorMode.is_vcs(subfile_mode):
                     # Pause archiving so we have the disk to ourselves
                     self.subfile_distributor_context.archive_processor.pause_archiving(True)
 
-                    self._copy_subfile_to_voltdata(item, self.corr_numa_node)
+                    self._copy_subfile_to_voltdata(item, self.corr_diskdb_numa_node)
                     success = True
 
                 elif CorrelatorMode.is_no_capture(subfile_mode):
@@ -179,7 +179,7 @@ class SubfileProcessor:
                     self.logger.warning(f"{item}- beamformer mode enabled and is in {subfile_mode} mode, ignoring this"
                                         f" beamformer job.")
                 else:
-                    self._load_psrdada_ringbuffer(item, self.bf_ringbuffer_key)
+                    self._load_psrdada_ringbuffer(item, self.bf_ringbuffer_key, self.corr_diskdb_numa_node)
 
                 success = True
 
@@ -224,20 +224,20 @@ class SubfileProcessor:
                     t.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
-    def _load_psrdada_ringbuffer(self, filename, ringbuffer_key, numa_node):
+    def _load_psrdada_ringbuffer(self, filename: str, ringbuffer_key: str, numa_node: int) -> bool:
         self.logger.info(f"{filename}- Loading file into PSRDADA ringbuffer {ringbuffer_key}")
 
-        command = f"numactl --cpunodebind={numa_node} --membind={numa_node} dada_diskdb -k {ringbuffer_key} -f {filename}"
+        command = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} dada_diskdb -k {ringbuffer_key} -f {filename}"
         return mwax_mover.run_command(command, 32)
 
-    def _copy_subfile_to_voltdata(self, filename, numa_node):
+    def _copy_subfile_to_voltdata(self, filename: str, numa_node: int) -> bool:
         self.logger.info(f"{filename}- Copying file into {self.voltdata_path}")
 
-        command = f"numactl --cpunodebind={numa_node} --membind={numa_node} cp {filename} {self.voltdata_path}/."
+        command = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} cp {filename} {self.voltdata_path}/."
         return mwax_mover.run_command(command, 120)
 
-    def dump_voltages(self, starttime, endtime):
-        self.logger.info(f"dump_voltages: from {starttime} to {endtime}...")
+    def dump_voltages(self, start_gps_time: int, end_gps_time: int) -> bool:
+        self.logger.info(f"dump_voltages: from {str(start_gps_time)} to {str(end_gps_time)}...")
 
         # disable archiving
         archiving = self.subfile_distributor_context.archive_processor.archiving_paused
@@ -258,7 +258,7 @@ class SubfileProcessor:
             file_gps_time = int(filename_only[11:21])
 
             # See if the file_gps_time is between start and end time
-            if starttime <= file_gps_time <= endtime:
+            if start_gps_time <= file_gps_time <= end_gps_time:
                 self.logger.info(f"dump_voltages: keeping {free_filename}")
 
                 # For any that exist, rename them immediately to .keep
@@ -290,7 +290,7 @@ class SubfileProcessor:
         self.logger.info(f"dump_voltages: complete")
         return True
 
-    def get_status(self):
+    def get_status(self) -> dict:
         watcher_list = []
 
         if self.watcher:

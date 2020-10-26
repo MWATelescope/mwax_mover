@@ -9,8 +9,8 @@ import threading
 
 
 class FilterbankProcessor:
-    def __init__(self, context, hostname, fildata_path, filterbank_host, filterbank_port,
-                 filterbank_destination_path, filterbank_streams):
+    def __init__(self, context, hostname: str, fildata_path: str, filterbank_host: str, filterbank_port: int,
+                 filterbank_destination_path: str, filterbank_streams: int):
         self.subfile_distributor_context = context
 
         # Setup logging
@@ -65,7 +65,7 @@ class FilterbankProcessor:
         self.worker_threads.append(queue_worker_fil_thread)
         queue_worker_fil_thread.start()
 
-    def filterbank_handler(self, item):
+    def filterbank_handler(self, item: str) -> bool:
         if not self.archiving_paused:
             self.logger.info(f"{item}- FilterbankProcessor.filterbank_handler is handling {item}: "
                              f"copy to {self.filterbank_host}...")
@@ -99,7 +99,7 @@ class FilterbankProcessor:
         else:
             return False
 
-    def pause_archiving(self, paused):
+    def pause_archiving(self, paused: bool):
         if self.archiving_paused != paused:
             if paused:
                 self.logger.info(f"Pausing archiving")
@@ -132,7 +132,7 @@ class FilterbankProcessor:
                     t.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
-    def get_status(self):
+    def get_status(self) -> dict:
         watcher_list = []
         status = dict({"name": "fil_watcher"})
         status.update(self.watcher_fil.get_status())
