@@ -8,7 +8,7 @@ def run_shell_command(logger, command: str) -> bool:
     try:
         logger.info(f"Executing {command}...")
         # Execute the command
-        completed_process = subprocess.run(command, shell=True)
+        completed_process = subprocess.run(command, shell=True, check=True, timeout=60)
 
         return_code = completed_process.returncode
         stderror = completed_process.stderr
