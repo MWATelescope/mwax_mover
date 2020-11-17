@@ -9,6 +9,7 @@ setup(
    packages=find_packages(),
    entry_points={'console_scripts': [
         'mwax_mover = mwax_mover.mwax_mover:main',
-        'mwax_subfile_distributor = mwax_mover.mwax_subfile_distributor:main']
+        'mwax_subfile_distributor = mwax_mover.mwax_subfile_distributor:main',
+        'mwacache_archiver = mwax_mover.mwacache_archive_processor:main']
     }
 )

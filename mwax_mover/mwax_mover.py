@@ -1,5 +1,4 @@
-from mwax_mover import mwax_queue_worker
-from mwax_mover import mwax_watcher
+from mwax_mover import mwax_queue_worker, mwax_watcher, utils
 import argparse
 import logging
 import logging.handlers
@@ -11,7 +10,10 @@ from tenacity import *
 import threading
 import time
 
+# The full filename with path
 FILE_REPLACEMENT_TOKEN = "__FILE__"
+
+# Full filename/path but with no extension
 FILENOEXT_REPLACEMENT_TOKEN = "__FILENOEXT__"
 
 MODE_WATCH_DIR_FOR_RENAME = "WATCH_DIR_FOR_RENAME"
@@ -58,6 +60,7 @@ class Processor:
         self.rename_ext = None
         self.executable = None
         self.mode = None
+        self.recursive = False
         self.q = None
         self.watch = None
         self.queueworker = None
@@ -81,6 +84,9 @@ class Processor:
                             f"{MODE_WATCH_DIR_FOR_NEW}: Watch watchdir for new files forever. Launch executable.\n" 
                             f"{MODE_WATCH_DIR_FOR_RENAME}: Watch watchdir for renamed files forever. Launch executable.\n" 
                             f"{MODE_PROCESS_DIR}: For each file in watchdir, launch executable. Exit.\n")
+        parser.add_argument("-r", "--recursive", required=False, default=False,
+                            help="Recurse subdirectories of the watchdir. Omitting this option is the default and"
+                                 " only the watchdir will be monitored.")
         args = vars(parser.parse_args())
 
         # Check args
@@ -88,6 +94,9 @@ class Processor:
         self.watch_ext = args["watchext"]
         self.executable = args["executablepath"]
         self.mode = args["mode"]
+
+        if args["recursive"]:
+            self.recursive = args["recursive"]
 
         if not os.path.isdir(self.watch_dir):
             print(f"Error: --watchdir '{self.watch_dir}' does not exist or you don't have permission")
@@ -145,7 +154,7 @@ class Processor:
             # we don't need a watcher
             watcher_thread = None
 
-            mwax_watcher.scan_directory(self.logger, self.watch_dir, self.watch_ext, self.q)
+            utils.scan_for_existing_files(self.logger, self.watch_dir, self.watch_ext, self.recursive, self.q)
         else:
             # Unsupported modes
             watcher_thread = None
@@ -157,7 +166,7 @@ class Processor:
         queueworker_thread.start()
 
         while self.running:
-            if queueworker_thread.isAlive():
+            if queueworker_thread.is_alive():
                 time.sleep(0.001)
             else:
                 self.running = False
@@ -167,7 +176,7 @@ class Processor:
         if watcher_thread:
             watcher_thread.join()
 
-        if queueworker_thread.isAlive():
+        if queueworker_thread.is_alive():
             queueworker_thread.join()
 
         # Finished

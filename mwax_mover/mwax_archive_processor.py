@@ -1,15 +1,21 @@
-from mwax_mover import mwax_mover, mwax_queue_worker, mwax_watcher, mwax_command
+from mwax_mover import mwax_mover, mwax_db, mwax_queue_worker, mwax_watcher, utils
 import logging
 import logging.handlers
 import os
 import queue
 import threading
-import time
 
 
 class ArchiveProcessor:
-    def __init__(self, context, hostname: str, archive_command_numa_node: int, archive_host: str, archive_port: str,
-                 db_handler_object, voltdata_path: str, visdata_path: str):
+    def __init__(self,
+                 context,
+                 hostname: str,
+                 archive_command_numa_node: int,
+                 archive_host: str,
+                 archive_port: str,
+                 db_handler_object,
+                 voltdata_path: str,
+                 visdata_path: str):
         self.subfile_distributor_context = context
 
         # Setup logging
@@ -52,12 +58,12 @@ class ArchiveProcessor:
         # Create watcher for voltage data -> db queue
         self.watcher_volt = mwax_watcher.Watcher(path=self.watch_dir_volt, q=self.queue_db,
                                                  pattern=".sub", log=self.logger,
-                                                 mode=self.mwax_mover_mode)
+                                                 mode=self.mwax_mover_mode, recursive=False)
 
         # Create watcher for visibility data -> db queue
         self.watcher_vis = mwax_watcher.Watcher(path=self.watch_dir_vis, q=self.queue_db,
                                                 pattern=".fits", log=self.logger,
-                                                mode=self.mwax_mover_mode)
+                                                mode=self.mwax_mover_mode, recursive=False)
 
         # Create queueworker for the db queue
         self.queue_worker_db = mwax_queue_worker.QueueWorker(label="MWA Metadata DB",
@@ -114,27 +120,20 @@ class ArchiveProcessor:
 
         # immediately add this file to the db so we insert a record into metadata data_files table
         # Get info
-        filename = os.path.basename(item)
-        obsid = filename[0:10]
         file_ext = os.path.splitext(item)[1]
-        file_size = os.stat(item).st_size
         filetype = None
-        remote_archived = False     # This gets set to True by NGAS at Pawsey
-        deleted = False
-        site_path = f"http://mwangas/RETRIEVE?file_id={obsid}"
 
         if file_ext.lower() == ".sub":
             filetype = 17
         elif file_ext.lower() == ".fits":
-            filetype = 8
+            filetype = 18
         else:
             # Error - unknown filetype
             self.logger.error(f"{item}- db_handler() Could not handle unknown extension {file_ext}")
             exit(3)
 
         # Insert record into metadata database
-        if not self.insert_data_file_row(obsid, filetype, file_size,
-                                         filename, site_path, self.hostname, remote_archived, deleted):
+        if not mwax_db.insert_data_file_row(self.logger, self.db_handler_object, item, filetype, self.hostname):
             # if something went wrong, requeue
             return False
 
@@ -152,7 +151,7 @@ class ArchiveProcessor:
     def archive_handler(self, item: str) -> bool:
         self.logger.info(f"{item}- archive_handler() Started...")
 
-        if self.archive_file_xrootd(item, self.archive_command_numa_node, self.archive_destination_host) is not True:
+        if utils.archive_file_xrootd(self.logger, item, self.archive_command_numa_node, self.archive_destination_host) is not True:
             return False
 
         self.logger.debug(f"{item}- archive_handler() Deleting file")
@@ -198,51 +197,6 @@ class ArchiveProcessor:
                 if t.isAlive():
                     t.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
-
-    def insert_data_file_row(self, obsid: int, filetype: int, file_size: int, filename: str, site_path: str,
-                             hostname: str, remote_archived: bool, deleted: bool) -> bool:
-        sql = f"INSERT INTO data_files " \
-              f"(observation_num, filetype, size, filename, site_path, host, remote_archived, deleted) " \
-              f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (filename) DO NOTHING"
-
-        try:
-            rows_inserted = self.db_handler_object.insert_one_row(sql, (str(obsid), filetype, file_size,
-                                                                        filename, site_path, hostname,
-                                                                        remote_archived, deleted))
-
-            if self.db_handler_object.dummy:
-                self.logger.warning(f"{filename} insert_data_file_row() Using dummy database connection. No data is really being inserted")
-            else:
-                if rows_inserted == 1:
-                    self.logger.info(f"{filename} insert_data_file_row() Successfully inserted into data_files table")
-                else:
-                    self.logger.info(f"{filename} insert_data_file_row() Row already exists in data_files table")
-
-            return_value = True
-        except Exception as insert_exception:
-            self.logger.error(f"{filename} insert_data_file_row() inserting data_files record in "
-                              f"data_files table: {insert_exception}")
-            return_value = False
-
-        return return_value
-
-    def archive_file_xrootd(self, full_filename: str, archive_numa_node: int, archive_destination_host: str):
-        self.logger.info(f"{full_filename} attempting archive_file_xrootd...")
-
-        size = os.path.getsize(full_filename)
-
-        command = f"numactl --cpunodebind={archive_numa_node} --membind={archive_numa_node} /usr/local/bin/xrdcp --force --cksum adler32 --silent --streams 2 --tlsnodata {full_filename} xroot://{archive_destination_host}"
-        start_time = time.time()
-        return_value = mwax_command.run_shell_command(self.logger, command)
-        elapsed = time.time() - start_time
-
-        size_gigabytes = size / (1000*1000*1000)
-        gbps_per_sec = (size_gigabytes * 8) / elapsed
-
-        if return_value:
-            self.logger.info(f"{full_filename} archive_file_xrootd success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
-
-        return return_value
 
     def get_status(self) -> dict:
         watcher_list = []

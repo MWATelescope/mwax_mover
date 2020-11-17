@@ -2,8 +2,8 @@ from mwax_mover import mwax_archive_processor
 from mwax_mover import mwax_db
 from mwax_mover import mwax_filterbank_processor
 from mwax_mover import mwax_subfile_processor
+from mwax_mover import utils
 import argparse
-import base64
 from configparser import ConfigParser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
@@ -11,20 +11,10 @@ import logging
 import logging.handlers
 import os
 import signal
-import socket
 import sys
 import time
 import threading
 from urllib.parse import urlparse, parse_qs
-
-
-def get_hostname() -> str:
-    hostname = socket.gethostname()
-
-    # ensure we remove anything after a . in case we got the fqdn
-    split_hostname = hostname.split(".")[0]
-
-    return split_hostname
 
 
 class MWAXHTTPServer(HTTPServer):
@@ -183,7 +173,7 @@ class MWAXSubfileDistributor:
 
     def initialise(self):
         # Get this hosts hostname
-        self.hostname = get_hostname()
+        self.hostname = utils.get_hostname()
 
         # Get command line args
         parser = argparse.ArgumentParser()
@@ -229,9 +219,9 @@ class MWAXSubfileDistributor:
         self.logger.addHandler(file_log)
 
         self.logger.info("Starting mwax_subfile_distributor processor...")
-        self.cfg_webserver_port = self.read_config("mwax mover", "webserver_port")
-        self.cfg_subfile_path = self.read_config("mwax mover", "subfile_path")
-        self.cfg_voltdata_path = self.read_config("mwax mover", "voltdata_path")
+        self.cfg_webserver_port = utils.read_config(self.logger, self.config, "mwax mover", "webserver_port")
+        self.cfg_subfile_path = utils.read_config(self.logger, self.config,"mwax mover", "subfile_path")
+        self.cfg_voltdata_path = utils.read_config(self.logger, self.config,"mwax mover", "voltdata_path")
 
         if not os.path.exists(self.cfg_subfile_path):
             self.logger.error(f"Subfile file location {self.cfg_subfile_path} does not exist. Quitting.")
@@ -243,19 +233,19 @@ class MWAXSubfileDistributor:
 
         # Check to see if we have a beamformer section
         if self.config.has_section("beamformer"):
-            self.cfg_bf_ringbuffer_key = self.read_config("beamformer", "input_ringbuffer_key")
-            self.cfg_bf_numa_node = self.read_config("beamformer", "dada_disk_db_numa_node")
-            self.cfg_bf_fildata_path = self.read_config("beamformer", "fildata_path")
+            self.cfg_bf_ringbuffer_key = utils.read_config(self.logger, self.config,"beamformer", "input_ringbuffer_key")
+            self.cfg_bf_numa_node = utils.read_config(self.logger, self.config,"beamformer", "dada_disk_db_numa_node")
+            self.cfg_bf_fildata_path = utils.read_config(self.logger, self.config,"beamformer", "fildata_path")
 
             if not os.path.exists(self.cfg_bf_fildata_path):
                 self.logger.error(f"Fildata file location {self.cfg_bf_fildata_path} does not exist. Quitting.")
                 exit(1)
 
             # Read filterbank config specific to this host
-            self.cfg_filterbank_host = self.read_config(self.hostname, "filterbank_host")
-            self.cfg_filterbank_port = self.read_config(self.hostname, "filterbank_port")
-            self.cfg_filterbank_destination_path = self.read_config(self.hostname, "filterbank_destination_path")
-            self.cfg_filterbank_streams = self.read_config(self.hostname, "filterbank_streams")
+            self.cfg_filterbank_host = utils.read_config(self.logger, self.config,self.hostname, "filterbank_host")
+            self.cfg_filterbank_port = utils.read_config(self.logger, self.config,self.hostname, "filterbank_port")
+            self.cfg_filterbank_destination_path = utils.read_config(self.logger, self.config,self.hostname, "filterbank_destination_path")
+            self.cfg_filterbank_streams = utils.read_config(self.logger, self.config,self.hostname, "filterbank_streams")
 
             self.cfg_bf_enabled = True
         else:
@@ -263,26 +253,26 @@ class MWAXSubfileDistributor:
 
         # read metadata database config
         if self.config.has_section("correlator"):
-            self.cfg_corr_ringbuffer_key = self.read_config("correlator", "input_ringbuffer_key")
-            self.cfg_corr_diskdb_numa_node = self.read_config("correlator", "dada_disk_db_numa_node")
-            self.cfg_corr_archive_command_numa_node = self.read_config("correlator", "archive_command_numa_node")
-            self.cfg_corr_visdata_path = self.read_config("correlator", "visdata_path")
+            self.cfg_corr_ringbuffer_key = utils.read_config(self.logger, self.config,"correlator", "input_ringbuffer_key")
+            self.cfg_corr_diskdb_numa_node = utils.read_config(self.logger, self.config,"correlator", "dada_disk_db_numa_node")
+            self.cfg_corr_archive_command_numa_node = utils.read_config(self.logger, self.config,"correlator", "archive_command_numa_node")
+            self.cfg_corr_visdata_path = utils.read_config(self.logger, self.config,"correlator", "visdata_path")
 
             if not os.path.exists(self.cfg_corr_visdata_path):
                 self.logger.error(f"Fildata file location {self.cfg_corr_visdata_path} does not exist. Quitting.")
                 exit(1)
 
-            self.cfg_metadatadb_host = self.read_config("mwa metadata database", "host")
+            self.cfg_metadatadb_host = utils.read_config(self.logger, self.config,"mwa metadata database", "host")
 
             if self.cfg_metadatadb_host != mwax_db.DUMMY_DB:
-                self.cfg_metadatadb_db = self.read_config("mwa metadata database", "db")
-                self.cfg_metadatadb_user = self.read_config("mwa metadata database", "user")
-                self.cfg_metadatadb_pass = self.read_config("mwa metadata database", "pass", True)
-                self.cfg_metadatadb_port = self.read_config("mwa metadata database", "port")
+                self.cfg_metadatadb_db = utils.read_config(self.logger, self.config,"mwa metadata database", "db")
+                self.cfg_metadatadb_user = utils.read_config(self.logger, self.config,"mwa metadata database", "user")
+                self.cfg_metadatadb_pass = utils.read_config(self.logger, self.config,"mwa metadata database", "pass", True)
+                self.cfg_metadatadb_port = utils.read_config(self.logger, self.config,"mwa metadata database", "port")
 
             # Read config specific to this host
-            self.cfg_archive_destination_host = self.read_config(self.hostname, "destination_host")
-            self.cfg_archive_destination_port = self.read_config(self.hostname, "destination_port")
+            self.cfg_archive_destination_host = utils.read_config(self.logger, self.config,self.hostname, "destination_host")
+            self.cfg_archive_destination_port = utils.read_config(self.logger, self.config,self.hostname, "destination_port")
 
             # Initiate database connection pool for metadata db
             self.db_handler = mwax_db.MWAXDBHandler(host=self.cfg_metadatadb_host,
@@ -362,18 +352,6 @@ class MWAXSubfileDistributor:
 
     def web_server_loop(self, webserver):
         webserver.serve_forever()
-
-    def read_config(self, section: str, key: str, b64encoded=False):
-        if b64encoded:
-            value = base64.b64decode(self.config.get(section, key)).decode('utf-8')
-            value_to_log = '*' * len(value)
-        else:
-            value = self.config.get(section, key)
-            value_to_log = value
-
-        self.logger.info(f"Read cfg [{section}].{key} == {value_to_log}")
-
-        return value
 
     def signal_handler(self, signum, frame):
         self.logger.warning(f"Interrupted. Shutting down {len(self.processors)} processors...")

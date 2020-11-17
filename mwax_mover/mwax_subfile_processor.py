@@ -110,7 +110,7 @@ class SubfileProcessor:
         # Create watcher
         self.watcher = mwax_watcher.Watcher(path=self.watch_dir, q=self.queue,
                                             pattern=f"{self.ext_to_watch_for}", log=self.logger,
-                                            mode=self.mwax_mover_mode)
+                                            mode=self.mwax_mover_mode, recursive=False)
 
         # Create queueworker
         self.queue_worker = mwax_queue_worker.QueueWorker(label="Subfile Input Queue",
@@ -118,7 +118,8 @@ class SubfileProcessor:
                                                           executable_path=None,
                                                           event_handler=self.handler,
                                                           mode=self.mwax_mover_mode,
-                                                          log=self.logger)
+                                                          log=self.logger,
+                                                          requeue_to_eoq_on_failure=False)
 
         # Setup thread for watching filesystem
         watcher_thread = threading.Thread(name="watch_sub", target=self.watcher.start, daemon=True)

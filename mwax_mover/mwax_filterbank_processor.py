@@ -45,7 +45,7 @@ class FilterbankProcessor:
         # Create watcher for filterbank data -> filterbank queue
         self.watcher_fil = mwax_watcher.Watcher(path=self.watch_dir_fil, q=self.queue_fil,
                                                 pattern=".fil", log=self.logger,
-                                                mode=self.mwax_mover_mode)
+                                                mode=self.mwax_mover_mode, recursive=False)
 
         # Create queueworker for filterbank queue
         self.queue_worker_fil = mwax_queue_worker.QueueWorker(label="Filterbank Archive",

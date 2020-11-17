@@ -1,14 +1,14 @@
 import subprocess
 
 
-def run_shell_command(logger, command: str) -> bool:
+def run_shell_command(logger, command: str, timeout: int = 60) -> bool:
     # Example: "dada_diskdb -k 1234 -f 1216447872_02_256_201.sub -s"
     stderror = ""
 
     try:
-        logger.info(f"Executing {command}...")
+        logger.debug(f"Executing {command}...")
         # Execute the command
-        completed_process = subprocess.run(command, shell=True, check=True, timeout=60)
+        completed_process = subprocess.run(command, shell=True, check=True, timeout=timeout)
 
         return_code = completed_process.returncode
         stderror = completed_process.stderr

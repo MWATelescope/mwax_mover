@@ -6,7 +6,21 @@ import time
 
 class QueueWorker(object):
     # Either pass an event handler or pass an executable path to run
-    def __init__(self, label: str, q, executable_path, mode: str, log, event_handler):
+    #
+    # requeue_to_eoq_on_failure: if work fails, True  = requeue to back of queue, try the next item
+    #                                                   (order does not matter)
+    #                                         , False = keep retrying this item (i.e. order of items matters)
+    def __init__(self,
+                 label: str,
+                 q,
+                 executable_path,
+                 mode: str,
+                 log,
+                 event_handler,
+                 requeue_to_eoq_on_failure: bool = True,
+                 backoff_initial_seconds: int = 1,
+                 backoff_factor: int = 2,
+                 backoff_limit_seconds: int = 60):
         self.label = label
         self.q = q
 
@@ -19,43 +33,72 @@ class QueueWorker(object):
         self._running = False
         self._paused = False
         self._mode = mode
+        self.requeue_to_eoq_on_failure = requeue_to_eoq_on_failure
         self.logger = log
         self.current_item = None
+        self.consecutive_error_count = 0
+        self.backoff_initial_seconds = backoff_initial_seconds
+        self.backoff_factor = backoff_factor
+        self.backoff_limit_seconds = backoff_limit_seconds
 
     def start(self):
         self.logger.info(f"QueueWorker {self.label} starting...")
         self._running = True
+        self.current_item = None
+        self.consecutive_error_count = 0
+        backoff = 0
 
         while self._running:
             if not self._paused:
                 try:
-                    item = self.q.get(block=True, timeout=0.1)
-                    self.current_item = item
-                    self.logger.info(f"Processing {item}...")
+                    success = False
+
+                    if self.current_item is None:
+                        self.current_item = self.q.get(block=True, timeout=0.5)
+                    self.logger.info(f"Processing {self.current_item}...")
 
                     start_time = time.time()
 
                     # Check file exists (maybe someone deleted it?)
-                    if os.path.exists(item):
+                    if os.path.exists(self.current_item):
                         if self._executable_path:
-                            success = self.run_command(item)
+                            success = self.run_command(self.current_item)
                         else:
-                            success = self._event_handler(item)
+                            success = self._event_handler(self.current_item)
 
-                        # Dequeue the item, but requeue if it was not successful
-                        self.q.task_done()
-
-                        if not success:
-                            self.q.put(item)
+                        if success:
+                            # Dequeue the item, but requeue if it was not successful
+                            self.q.task_done()
+                            self.current_item = None
+                        else:
+                            # If this option is set, add item back to the end of the queue
+                            # If not set, just keep retrying the operation
+                            if self.requeue_to_eoq_on_failure:
+                                self.q.task_done()
+                                self.q.put(self.current_item)
+                                self.current_item = None
                     else:
                         # Dequeue the item
                         self.q.task_done()
-                        self.logger.warning(f"Processing {item} Complete... file was moved or deleted. "
+                        self.logger.warning(f"Processing {self.current_item } Complete... file was moved or deleted. "
                                             f"Queue size: {self.q.qsize()}")
+                        self.current_item = None
 
-                    self.current_item = None
                     elapsed = time.time() - start_time
-                    self.logger.info(f"Complete {item}. Queue size: {self.q.qsize()} Elapsed: {elapsed:.2f} sec")
+                    self.logger.info(f"Complete. Queue size: {self.q.qsize()} Elapsed: {elapsed:.2f} sec")
+
+                    if success:
+                        # reset our error count and backoffs
+                        self.consecutive_error_count = 0
+                    else:
+                        self.consecutive_error_count += 1
+                        backoff = self.backoff_initial_seconds * self.backoff_factor * self.consecutive_error_count
+                        if backoff > self.backoff_limit_seconds:
+                            backoff = self.backoff_limit_seconds
+
+                        self.logger.info(f"{self.consecutive_error_count} consecutive failures. Backing off "
+                                         f"for {backoff} seconds.")
+                        time.sleep(backoff)
 
                 except queue.Empty:
                     if self._mode == mwax_mover.MODE_PROCESS_DIR:
