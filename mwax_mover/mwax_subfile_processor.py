@@ -180,7 +180,7 @@ class SubfileProcessor:
                     self.logger.warning(f"{item}- beamformer mode enabled and is in {subfile_mode} mode, ignoring this"
                                         f" beamformer job.")
                 else:
-                    self._load_psrdada_ringbuffer(item, self.bf_ringbuffer_key, self.corr_diskdb_numa_node)
+                    self._load_psrdada_ringbuffer(item, self.bf_ringbuffer_key, self.bf_numa_node)
 
                 success = True
 
