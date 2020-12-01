@@ -119,31 +119,30 @@ class ArchiveProcessor:
         self.logger.info(f"{item}- db_handler() Started")
 
         # immediately add this file to the db so we insert a record into metadata data_files table
-        # Get info
-        file_ext = os.path.splitext(item)[1]
-        filetype = None
 
-        if file_ext.lower() == ".sub":
-            filetype = 17
-        elif file_ext.lower() == ".fits":
-            filetype = 18
+        # validate the filename
+        (valid, filetype, file_ext, validation_message) = utils.validate_filename(item)
+
+        if valid:
+            # Insert record into metadata database
+            if not mwax_db.insert_data_file_row(self.logger, self.db_handler_object, item, filetype, self.hostname):
+                # if something went wrong, requeue
+                return False
+
+            # immediately add this file (and a ptr to it's queue) to the voltage or
+            # vis queue which will deal with archiving
+            if file_ext == ".sub":
+                self.queue_volt.put(item)
+                self.logger.info(f"{item}- db_handler() Added to voltage queue for archiving. "
+                                 f"Queue size: {self.queue_volt.qsize()}")
+            elif file_ext == ".fits":
+                self.queue_vis.put(item)
+                self.logger.info(f"{item}- db_handler() Added to visibility queue for archiving. "
+                                 f"Queue size: {self.queue_vis.qsize()}")
         else:
-            # Error - unknown filetype
-            self.logger.error(f"{item}- db_handler() Could not handle unknown extension {file_ext}")
-            exit(3)
-
-        # Insert record into metadata database
-        if not mwax_db.insert_data_file_row(self.logger, self.db_handler_object, item, filetype, self.hostname):
-            # if something went wrong, requeue
+            # The filename was not valid
+            self.logger.error(f"{item}- db_handler() {validation_message}")
             return False
-
-        # immediately add this file (and a ptr to it's queue) to the voltage or vis queue which will deal with archiving
-        if file_ext.lower() == ".sub":
-            self.queue_volt.put(item)
-            self.logger.info(f"{item}- db_handler() Added to voltage queue for archiving. Queue size: {self.queue_volt.qsize()}")
-        elif file_ext.lower() == ".fits":
-            self.queue_vis.put(item)
-            self.logger.info(f"{item}- db_handler() Added to visibility queue for archiving. Queue size: {self.queue_vis.qsize()}")
 
         self.logger.info(f"{item}- db_handler() Finished")
         return True

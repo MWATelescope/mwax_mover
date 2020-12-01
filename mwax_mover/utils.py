@@ -85,3 +85,62 @@ def scan_directory(logger, watch_dir: str, pattern: str, recursive: bool) -> lis
 
     files = glob.glob(find_pattern, recursive=recursive)
     return files
+
+
+def validate_filename(filename: str) -> (bool, int, str, str):
+    # Returns valid, filetype_id, file_ext, validation_error
+    valid: bool = True
+    validation_error: str = ""
+    filetype_id: int = -1
+    file_name_part: str = ""
+    file_ext_part: str = ""
+
+    # 1. Is there an extension?
+    split_filename = os.path.splitext(filename)
+    if len(split_filename) == 2:
+        file_name_part = os.path.basename(split_filename[0])
+        file_ext_part = split_filename[1]
+    else:
+        # Error no extension
+        valid = False
+        validation_error = "Filename has no extension- ignoring"
+
+    # 2. Check extension
+    if valid:
+        if file_ext_part.lower() == ".sub":
+            filetype_id = 17
+        elif file_ext_part.lower() == ".fits":
+            filetype_id = 18
+        else:
+            # Error - unknown filetype
+            valid = False
+            validation_error = f"Unknown file extension {file_ext_part}- ignoring"
+
+    # 3. Check length of filename
+    if valid:
+        if filetype_id == 17:
+            # filename format should be obsid_subobsid_XXX.sub
+            # filename format should be obsid_subobsid_XX.sub
+            # filename format should be obsid_subobsid_X.sub
+            if len(file_name_part) < 23 or len(file_name_part) > 25:
+                valid = False
+                validation_error = f"Filename (excluding extension) is not in the correct format " \
+                                   f"(incorrect length ({len(file_name_part)}). Format should be " \
+                                   f"obsid_subobsid_XXX.sub)- ignoring"
+        elif filetype_id == 18:
+            # filename format should be obsid_yyyymmddhhnnss_chXXX_XXX.fits
+            if len(file_name_part) != 35:
+                valid = False
+                validation_error = f"Filename (excluding extension) is not in the correct format " \
+                                   f"(incorrect length ({len(file_name_part)}). Format should be " \
+                                   f"obsid_yyyymmddhhnnss_chXXX_XXX.fits)- ignoring"
+
+    # 4. check obs_id in the first 10 chars of the filename and is integer
+    if valid:
+        obs_id_check = file_name_part[0:10]
+
+        if not obs_id_check.isdigit():
+            valid = False
+            validation_error = f"Filename does not start with a 10 digit observation_id- ignoring"
+
+    return valid, filetype_id, file_ext_part, validation_error
