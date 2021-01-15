@@ -35,8 +35,8 @@ class CorrelatorMode(Enum):
 
 
 COMMAND_DADA_DISKDB = "dada_diskdb"
-PSRDADA_MAX_HEADER_LINES = 16           # number of lines of the PSRDADA header to read looking for keywords
-
+PSRDADA_MAX_HEADER_LINES = 31           # number of lines of the PSRDADA header to read looking for keywords
+PSRDADA_HEADER_BYTES = 4096
 
 def read_subfile_mode(filename: str) -> str:
     subfile_mode = None
@@ -174,12 +174,16 @@ class SubfileProcessor:
             if self.bf_enabled:
                 # Don't run beamformer is we are in correlator mode too and we are doing a voltage capture!
                 # Otherwise:
-                # 1. load file into PSRDADA ringbuffer for beamformer input
-                # 2. Rename .sub file to .free so that udpgrab can reuse it
+                # 1. Inject the relevant beamformer keywords into the header of the sub file
+                # 2. load file into PSRDADA ringbuffer for beamformer input
+                # 3. Rename .sub file to .free so that udpgrab can reuse it
                 if self.corr_enabled and CorrelatorMode.is_vcs(subfile_mode):
                     self.logger.warning(f"{item}- beamformer mode enabled and is in {subfile_mode} mode, ignoring this"
                                         f" beamformer job.")
                 else:
+                    # Get the settings we want for the beamformer
+                    beamformer_settings = "NUM_INCOHERENT_BEAMS 1\nINCOHERENT_BEAM_01_CHANNELS 1280000\nINCOHERENT_BEAM_01_TIME_INTEG 1\nNUM_COHERENT_BEAMS 0\n"
+                    self._inject_beamformer_headers(item, beamformer_settings)
                     self._load_psrdada_ringbuffer(item, self.bf_ringbuffer_key, self.bf_numa_node)
 
                 success = True
@@ -230,6 +234,34 @@ class SubfileProcessor:
 
         command = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} dada_diskdb -k {ringbuffer_key} -f {filename}"
         return mwax_mover.run_command(command, 32)
+
+    def _inject_beamformer_headers(self, filename: str, beamformer_settings: str):
+        data = []
+
+        # Read the psrdada header data in to a list (one line per item)
+        with open(filename, "rb") as subfile:
+            data = subfile.read(PSRDADA_HEADER_BYTES).decode("UTF-8").split('\n')
+
+        last_line_index = 32  # TODO: determine last row. For now hardcoding is fine as the format does not change often
+        last_row_len = len(data[last_line_index])
+
+        beamformer_settings_len = len(beamformer_settings)
+        null_trail = "\0" * (last_row_len - beamformer_settings_len)
+        data[last_line_index] = beamformer_settings + null_trail
+
+        # convert our list of lines back to a byte array
+        new_string = "\n".join(data)
+
+        new_bytes = bytes(new_string, "UTF-8")
+        if len(new_bytes) != PSRDADA_HEADER_BYTES:
+            raise Exception (f"_inject_beamformer_headers(): new_bytes length is not {PSRDADA_HEADER_BYTES} "
+                             f"as expected it is {len(new_bytes)}")
+
+        # Overwrite the first 4096 bytes with our updated header
+        with open(filename, "r+b") as subfile:
+            subfile.seek(0)
+            subfile.write(new_bytes)
+
 
     def _copy_subfile_to_voltdata(self, filename: str, numa_node: int) -> bool:
         self.logger.info(f"{filename}- Copying file into {self.voltdata_path}")
