@@ -27,7 +27,7 @@ def run_command(logger, executable: str, args: list, timeout: int = 60) -> bool:
 
 
 def run_shell_command(logger, command: str, timeout: int = 60) -> bool:
-    # Example: "dada_diskdb -k 1234 -f 1216447872_02_256_201.sub -s"    
+    # Example: "dada_diskdb -k 1234 -f 1216447872_02_256_201.sub -s"
     try:
         logger.debug(f"Executing {command}...")
         # Execute the command
