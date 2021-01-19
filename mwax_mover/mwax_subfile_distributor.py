@@ -143,6 +143,10 @@ class MWAXSubfileDistributor:
         self.cfg_bf_ringbuffer_key = None
         self.cfg_bf_numa_node = None
         self.cfg_bf_fildata_path = None
+        self.cfg_bf_archive_command_numa_node = None
+        # Archiving settings for beamformer
+        self.cfg_bf_archive_destination_host = None
+        self.cfg_bf_archive_destination_port = None
 
         # Correlator
         self.cfg_corr_enabled = None
@@ -150,6 +154,9 @@ class MWAXSubfileDistributor:
         self.cfg_corr_diskdb_numa_node = None
         self.cfg_corr_archive_command_numa_node = None
         self.cfg_corr_visdata_path = None
+        # Archiving settings for correlator
+        self.cfg_corr_archive_destination_host = None
+        self.cfg_corr_archive_destination_port = None
 
         # Connection info for metadata db
         self.cfg_metadatadb_host = None
@@ -160,16 +167,6 @@ class MWAXSubfileDistributor:
 
         # Database handler for metadata db
         self.db_handler = None
-
-        # Archiving settings
-        self.cfg_archive_destination_host = None
-        self.cfg_archive_destination_port = None
-
-        # Filterbank settings
-        self.cfg_filterbank_host = None
-        self.cfg_filterbank_port = None
-        self.cfg_filterbank_destination_path = None
-        self.cfg_filterbank_bbcp_streams = None
 
     def initialise(self):
         # Get this hosts hostname
@@ -236,16 +233,18 @@ class MWAXSubfileDistributor:
             self.cfg_bf_ringbuffer_key = utils.read_config(self.logger, self.config,"beamformer", "input_ringbuffer_key")
             self.cfg_bf_numa_node = utils.read_config(self.logger, self.config,"beamformer", "dada_disk_db_numa_node")
             self.cfg_bf_fildata_path = utils.read_config(self.logger, self.config,"beamformer", "fildata_path")
+            self.cfg_bf_archive_command_numa_node = utils.read_config(self.logger, self.config, "beamformer",
+                                                                        "archive_command_numa_node")
 
             if not os.path.exists(self.cfg_bf_fildata_path):
                 self.logger.error(f"Fildata file location {self.cfg_bf_fildata_path} does not exist. Quitting.")
                 exit(1)
 
             # Read filterbank config specific to this host
-            self.cfg_filterbank_host = utils.read_config(self.logger, self.config,self.hostname, "filterbank_host")
-            self.cfg_filterbank_port = utils.read_config(self.logger, self.config,self.hostname, "filterbank_port")
-            self.cfg_filterbank_destination_path = utils.read_config(self.logger, self.config,self.hostname, "filterbank_destination_path")
-            self.cfg_filterbank_streams = utils.read_config(self.logger, self.config,self.hostname, "filterbank_streams")
+            self.cfg_bf_archive_destination_host = utils.read_config(self.logger, self.config, self.hostname,
+                                                                       "destination_host")
+            self.cfg_bf_archive_destination_port = utils.read_config(self.logger, self.config, self.hostname,
+                                                                       "destination_port")
 
             self.cfg_bf_enabled = True
         else:
@@ -271,8 +270,8 @@ class MWAXSubfileDistributor:
                 self.cfg_metadatadb_port = utils.read_config(self.logger, self.config,"mwa metadata database", "port")
 
             # Read config specific to this host
-            self.cfg_archive_destination_host = utils.read_config(self.logger, self.config,self.hostname, "destination_host")
-            self.cfg_archive_destination_port = utils.read_config(self.logger, self.config,self.hostname, "destination_port")
+            self.cfg_corr_archive_destination_host = utils.read_config(self.logger, self.config, self.hostname, "destination_host")
+            self.cfg_corr_archive_destination_port = utils.read_config(self.logger, self.config, self.hostname, "destination_port")
 
             # Initiate database connection pool for metadata db
             self.db_handler = mwax_db.MWAXDBHandler(host=self.cfg_metadatadb_host,
@@ -313,8 +312,8 @@ class MWAXSubfileDistributor:
             self.archive_processor = mwax_archive_processor.ArchiveProcessor(self,
                                                                              self.hostname,
                                                                              self.cfg_corr_archive_command_numa_node,
-                                                                             self.cfg_archive_destination_host,
-                                                                             self.cfg_archive_destination_port,
+                                                                             self.cfg_corr_archive_destination_host,
+                                                                             self.cfg_corr_archive_destination_port,
                                                                              self.db_handler,
                                                                              self.cfg_voltdata_path,
                                                                              self.cfg_corr_visdata_path)

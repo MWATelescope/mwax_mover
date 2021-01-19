@@ -35,23 +35,42 @@ def get_hostname() -> str:
     return split_hostname
 
 
+def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, numa_node: int) -> bool:
+    logger.info(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
+
+    numa_cmd = ["numactl", f"--cpunodebind={str(numa_node)}", f"--membind={str(numa_node)}", f"dada_diskdb -k {ringbuffer_key} -f {full_filename}"]
+
+    size = os.path.getsize(full_filename)
+
+    start_time = time.time()
+    return_value = mwax_command.run_command(logger, numa_cmd)
+    elapsed = time.time() - start_time
+
+    size_gigabytes = size / (1000 * 1000 * 1000)
+    gbps_per_sec = (size_gigabytes * 8) / elapsed
+
+    if return_value:
+        logger.info(f"{full_filename} load_psrdada_ringbuffer success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
+
+    return return_value
+
+
 def archive_file_xrootd(logger, full_filename: str, archive_numa_node, archive_destination_host: str):
     logger.debug(f"{full_filename} attempting archive_file_xrootd...")
 
-    numa_cmd = ""
-
     # If provided, launch using specific numa node. Passing None ignores this part of the command line
     if archive_numa_node:
-        numa_cmd = f"numactl --cpunodebind={archive_numa_node} --membind={archive_numa_node} "
+        numa_cmd = ["numactl", f"--cpunodebind={archive_numa_node}", f"--membind={archive_numa_node}"]
+    else:
+        numa_cmd = []
 
     size = os.path.getsize(full_filename)
 
     # Build final command line
-    command = numa_cmd + \
-              f"/usr/local/bin/xrdcp --force --cksum adler32 --silent --streams 2 --tlsnodata " \
-              f"{full_filename} xroot://{archive_destination_host}"
+    numa_cmd.append(f"/usr/local/bin/xrdcp --force --cksum adler32 --silent --streams 2 --tlsnodata {full_filename} xroot://{archive_destination_host}")
+
     start_time = time.time()
-    return_value = mwax_command.run_shell_command(logger, command)
+    return_value = mwax_command.run_command(logger, numa_cmd)
     elapsed = time.time() - start_time
 
     size_gigabytes = size / (1000*1000*1000)

@@ -1,4 +1,4 @@
-from mwax_mover import mwax_mover
+from mwax_mover import mwax_mover, utils
 from mwax_mover import mwax_queue_worker
 from mwax_mover import mwax_watcher
 import logging
@@ -9,8 +9,8 @@ import threading
 
 
 class FilterbankProcessor:
-    def __init__(self, context, hostname: str, fildata_path: str, filterbank_host: str, filterbank_port: int,
-                 filterbank_destination_path: str, filterbank_streams: int):
+    def __init__(self, context, hostname: str, fildata_path: str, archive_host: str, archive_port: int,
+                 archive_command_numa_node: int):
         self.subfile_distributor_context = context
 
         # Setup logging
@@ -36,10 +36,9 @@ class FilterbankProcessor:
         self.watcher_fil = None
         self.queue_worker_fil = None
 
-        self.filterbank_host = filterbank_host
-        self.filterbank_port = filterbank_port
-        self.filterbank_destination_path = filterbank_destination_path
-        self.filterbank_streams = filterbank_streams
+        self.archive_destination_host = archive_host
+        self.archive_destination_port = archive_port
+        self.archive_command_numa_node = archive_command_numa_node
 
     def start(self):
         # Create watcher for filterbank data -> filterbank queue
@@ -68,36 +67,17 @@ class FilterbankProcessor:
     def filterbank_handler(self, item: str) -> bool:
         if not self.archiving_paused:
             self.logger.info(f"{item}- FilterbankProcessor.filterbank_handler is handling {item}: "
-                             f"copy to {self.filterbank_host}...")
+                             f"copy to {self.archive_destination_host}...")
 
-            # Get filename without path
-            filename_only = os.path.basename(item)
-            destination_filename = os.path.join(self.filterbank_destination_path, filename_only)
+            if not utils.archive_file_xrootd(self.logger, item, self.archive_command_numa_node,
+                                             self.archive_destination_host):
+                return False
 
-            # bbcp options:
-            # -f force overwrite if destination exists
-            # -w =32m, means use a tcp window size of 32MB and do not autosize ('w')
-            # -s set the number of parallel streams
-            command = f"bbcp -f -w =32m -s {self.filterbank_streams} " \
-                      f"{item} mwa@{self.filterbank_host}:{destination_filename}"
+            self.logger.debug(f"{item}- filterbank_handler() Deleting file")
+            mwax_mover.remove_file(self.logger, item)
 
-            self.logger.info(f"{item}- FilterbankProcessor.filterbank_handler is executing "
-                             f"{command}...")
-
-            try:
-                return_value = mwax_mover.run_command(command, 600)
-
-                if return_value:
-                    self.logger.debug(f"{item}- FilterbankProcessor.filterbank_handler attempting delete...")
-                    mwax_mover.remove_file(self.logger, item)
-            except Exception as e:
-                self.logger.info(f"{item}- FilterbankProcessor.filterbank_handler ERROR running command: {e}")
-                return_value = False
-
-            self.logger.info(f"{item}- FilterbankProcessor.filterbank_handler finished handling.")
-            return return_value
-        else:
-            return False
+            self.logger.info(f"{item}- filterbank_handler() Finished")
+            return True
 
     def pause_archiving(self, paused: bool):
         if self.archiving_paused != paused:

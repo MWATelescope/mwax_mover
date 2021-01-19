@@ -1,4 +1,4 @@
-from mwax_mover import mwax_mover
+from mwax_mover import mwax_mover, utils
 from mwax_mover import mwax_queue_worker
 from mwax_mover import mwax_watcher
 import glob
@@ -152,8 +152,7 @@ class SubfileProcessor:
                 if CorrelatorMode.is_correlator(subfile_mode):
                     self.subfile_distributor_context.archive_processor.pause_archiving(False)
 
-                    self._load_psrdada_ringbuffer(item, self.corr_ringbuffer_key, self.corr_diskdb_numa_node)
-                    success = True
+                    success = utils.load_psrdada_ringbuffer(self.logger, item, self.corr_ringbuffer_key, self.corr_diskdb_numa_node)
 
                 elif CorrelatorMode.is_vcs(subfile_mode):
                     # Pause archiving so we have the disk to ourselves
@@ -180,13 +179,13 @@ class SubfileProcessor:
                 if self.corr_enabled and CorrelatorMode.is_vcs(subfile_mode):
                     self.logger.warning(f"{item}- beamformer mode enabled and is in {subfile_mode} mode, ignoring this"
                                         f" beamformer job.")
+                    success = True
                 else:
                     # Get the settings we want for the beamformer
                     beamformer_settings = "NUM_INCOHERENT_BEAMS 1\nINCOHERENT_BEAM_01_CHANNELS 1280000\nINCOHERENT_BEAM_01_TIME_INTEG 1\nNUM_COHERENT_BEAMS 0\n"
                     self._inject_beamformer_headers(item, beamformer_settings)
-                    self._load_psrdada_ringbuffer(item, self.bf_ringbuffer_key, self.bf_numa_node)
 
-                success = True
+                    success = utils.load_psrdada_ringbuffer(self.logger, item, self.bf_ringbuffer_key, self.bf_numa_node)
 
         except Exception as handler_exception:
             self.logger.error(f"{item} {handler_exception}")
@@ -229,11 +228,6 @@ class SubfileProcessor:
                     t.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
-    def _load_psrdada_ringbuffer(self, filename: str, ringbuffer_key: str, numa_node: int) -> bool:
-        self.logger.info(f"{filename}- Loading file into PSRDADA ringbuffer {ringbuffer_key}")
-
-        command = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} dada_diskdb -k {ringbuffer_key} -f {filename}"
-        return mwax_mover.run_command(command, 32)
 
     def _inject_beamformer_headers(self, filename: str, beamformer_settings: str):
         data = []
