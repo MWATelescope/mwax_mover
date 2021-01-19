@@ -183,6 +183,8 @@ class SubfileProcessor:
                 else:
                     # Get the settings we want for the beamformer
                     beamformer_settings = "NUM_INCOHERENT_BEAMS 1\nINCOHERENT_BEAM_01_CHANNELS 1280000\nINCOHERENT_BEAM_01_TIME_INTEG 1\nNUM_COHERENT_BEAMS 0\n"
+
+                    self.logger.info(f"{item}- injecting beamformer header into subfile...")
                     self._inject_beamformer_headers(item, beamformer_settings)
 
                     success = utils.load_psrdada_ringbuffer(self.logger, item, self.bf_ringbuffer_key, self.bf_numa_node)
@@ -236,7 +238,7 @@ class SubfileProcessor:
         with open(filename, "rb") as subfile:
             data = subfile.read(PSRDADA_HEADER_BYTES).decode("UTF-8").split('\n')
 
-        last_line_index = len(data)
+        last_line_index = len(data)-1
         last_row_len = len(data[last_line_index])
 
         beamformer_settings_len = len(beamformer_settings)
