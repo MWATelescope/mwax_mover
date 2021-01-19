@@ -38,7 +38,12 @@ def get_hostname() -> str:
 def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, numa_node: int) -> bool:
     logger.info(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
 
-    numa_cmd = ["numactl", f"--cpunodebind={str(numa_node)}", f"--membind={str(numa_node)}", f"dada_diskdb -k {ringbuffer_key} -f {full_filename}"]
+    numa_cmd = ["numactl",
+                f"--cpunodebind={str(numa_node)}",
+                f"--membind={str(numa_node)}",
+                "dada_diskdb",
+                f"-k {ringbuffer_key}",
+                f"-f {full_filename}"]
 
     size = os.path.getsize(full_filename)
 
@@ -67,7 +72,14 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node, archive_d
     size = os.path.getsize(full_filename)
 
     # Build final command line
-    numa_cmd.append(f"/usr/local/bin/xrdcp --force --cksum adler32 --silent --streams 2 --tlsnodata {full_filename} xroot://{archive_destination_host}")
+    numa_cmd.append("/usr/local/bin/xrdcp")
+    numa_cmd.append("--force")
+    numa_cmd.append("--cksum adler32")
+    numa_cmd.append("--silent")
+    numa_cmd.append("--streams 2")
+    numa_cmd.append("--tlsnodata")
+    numa_cmd.append(f"{full_filename}")
+    numa_cmd.append(f"xroot://{archive_destination_host}")
 
     start_time = time.time()
     return_value = mwax_command.run_command(logger, numa_cmd)
