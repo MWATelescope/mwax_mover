@@ -100,7 +100,8 @@ class MWACacheArchiveProcessor:
         if utils.archive_file_xrootd(self.logger,
                                      item,
                                      None,
-                                     self.archive_destination_host) is not True:
+                                     self.archive_destination_host,
+                                     120) is not True:
             return False
 
         self.logger.debug(f"{item}- archive_handler() Deleting file")
