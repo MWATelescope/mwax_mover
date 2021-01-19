@@ -325,10 +325,9 @@ class MWAXSubfileDistributor:
             self.filterbank_processor = mwax_filterbank_processor.FilterbankProcessor(self,
                                                                                       self.hostname,
                                                                                       self.cfg_bf_fildata_path,
-                                                                                      self.cfg_filterbank_host,
-                                                                                      self.cfg_filterbank_port,
-                                                                                      self.cfg_filterbank_destination_path,
-                                                                                      self.cfg_filterbank_bbcp_streams)
+                                                                                      self.cfg_bf_archive_destination_host,
+                                                                                      self.cfg_bf_archive_destination_port,
+                                                                                      self.cfg_bf_archive_command_numa_node)
 
             # Add this processor to list of processors we manage
             self.processors.append(self.filterbank_processor)
