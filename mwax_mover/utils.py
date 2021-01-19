@@ -38,7 +38,7 @@ def get_hostname() -> str:
 def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, numa_node: int) -> bool:
     logger.info(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
 
-    numa_cmdline = f"numactl --cpunodebind ={str(numa_node)} --membind={str(numa_node)} dada_diskdb -k {ringbuffer_key} -f {full_filename}"
+    numa_cmdline = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} dada_diskdb -k {ringbuffer_key} -f {full_filename}"
 
     size = os.path.getsize(full_filename)
 
@@ -60,7 +60,7 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node, archive_d
 
     # If provided, launch using specific numa node. Passing None ignores this part of the command line
     if archive_numa_node:
-        numa_cmdline = f"numactl --cpunodebind ={str(archive_numa_node)} --membind={str(archive_numa_node)} "
+        numa_cmdline = f"numactl --cpunodebind={str(archive_numa_node)} --membind={str(archive_numa_node)} "
     else:
         numa_cmdline = ""
 
