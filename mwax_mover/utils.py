@@ -38,11 +38,11 @@ def get_hostname() -> str:
 def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, numa_node: int) -> bool:
     logger.info(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
 
-    numa_args = [f"--cpunodebind={str(numa_node)}",
-                f"--membind={str(numa_node)}",
+    numa_args = [f"--cpunodebind", str(numa_node),
+                f"--membind", str(numa_node),
                 "dada_diskdb",
-                f"-k {ringbuffer_key}",
-                f"-f {full_filename}"]
+                "-k", ringbuffer_key,
+                "-f", full_filename]
 
     size = os.path.getsize(full_filename)
 
@@ -64,7 +64,7 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node, archive_d
 
     # If provided, launch using specific numa node. Passing None ignores this part of the command line
     if archive_numa_node:
-        numa_args = [f"--cpunodebind={archive_numa_node}", f"--membind={archive_numa_node}"]
+        numa_args = ["--cpunodebind", archive_numa_node, "--membind", archive_numa_node]
     else:
         numa_args = []
 
@@ -73,9 +73,11 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node, archive_d
     # Build final command line
     numa_args.append("/usr/local/bin/xrdcp")
     numa_args.append("--force")
-    numa_args.append("--cksum adler32")
+    numa_args.append("--cksum")
+    numa_args.append("adler32")
     numa_args.append("--silent")
-    numa_args.append("--streams 2")
+    numa_args.append("--streams")
+    numa_args.append("2")
     numa_args.append("--tlsnodata")
     numa_args.append(f"{full_filename}")
     numa_args.append(f"xroot://{archive_destination_host}")

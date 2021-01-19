@@ -236,7 +236,7 @@ class SubfileProcessor:
         with open(filename, "rb") as subfile:
             data = subfile.read(PSRDADA_HEADER_BYTES).decode("UTF-8").split('\n')
 
-        last_line_index = 32  # TODO: determine last row. For now hardcoding is fine as the format does not change often
+        last_line_index = len(data)
         last_row_len = len(data[last_line_index])
 
         beamformer_settings_len = len(beamformer_settings)
@@ -249,7 +249,7 @@ class SubfileProcessor:
         new_bytes = bytes(new_string, "UTF-8")
         if len(new_bytes) != PSRDADA_HEADER_BYTES:
             raise Exception (f"_inject_beamformer_headers(): new_bytes length is not {PSRDADA_HEADER_BYTES} "
-                             f"as expected it is {len(new_bytes)}")
+                             f"as expected it is {len(new_bytes)}. Newbytes = [{new_string}]")
 
         # Overwrite the first 4096 bytes with our updated header
         with open(filename, "r+b") as subfile:
