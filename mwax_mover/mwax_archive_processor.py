@@ -150,7 +150,7 @@ class ArchiveProcessor:
     def archive_handler(self, item: str) -> bool:
         self.logger.info(f"{item}- archive_handler() Started...")
 
-        if utils.archive_file_xrootd(self.logger, item, self.archive_command_numa_node, self.archive_destination_host) is not True:
+        if utils.archive_file_xrootd(self.logger, item, self.archive_command_numa_node, self.archive_destination_host, 120) is not True:
             return False
 
         self.logger.debug(f"{item}- archive_handler() Deleting file")

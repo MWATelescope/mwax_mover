@@ -152,7 +152,7 @@ class SubfileProcessor:
                 if CorrelatorMode.is_correlator(subfile_mode):
                     self.subfile_distributor_context.archive_processor.pause_archiving(False)
 
-                    success = utils.load_psrdada_ringbuffer(self.logger, item, self.corr_ringbuffer_key, self.corr_diskdb_numa_node)
+                    success = utils.load_psrdada_ringbuffer(self.logger, item, self.corr_ringbuffer_key, self.corr_diskdb_numa_node, 16)
 
                 elif CorrelatorMode.is_vcs(subfile_mode):
                     # Pause archiving so we have the disk to ourselves
@@ -187,7 +187,7 @@ class SubfileProcessor:
                     self.logger.info(f"{item}- injecting beamformer header into subfile...")
                     self._inject_beamformer_headers(item, beamformer_settings)
 
-                    success = utils.load_psrdada_ringbuffer(self.logger, item, self.bf_ringbuffer_key, self.bf_numa_node)
+                    success = utils.load_psrdada_ringbuffer(self.logger, item, self.bf_ringbuffer_key, self.bf_numa_node, 16)
 
         except Exception as handler_exception:
             self.logger.error(f"{item} {handler_exception}")

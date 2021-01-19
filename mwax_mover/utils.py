@@ -35,7 +35,7 @@ def get_hostname() -> str:
     return split_hostname
 
 
-def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, numa_node: int) -> bool:
+def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, numa_node: int, timeout: int) -> bool:
     logger.info(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
 
     numa_cmdline = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} dada_diskdb -k {ringbuffer_key} -f {full_filename}"
@@ -43,7 +43,7 @@ def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, num
     size = os.path.getsize(full_filename)
 
     start_time = time.time()
-    return_value = mwax_command.run_command(logger, numa_cmdline)
+    return_value = mwax_command.run_command(logger, numa_cmdline, timeout)
     elapsed = time.time() - start_time
 
     size_gigabytes = size / (1000 * 1000 * 1000)
@@ -55,7 +55,7 @@ def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, num
     return return_value
 
 
-def archive_file_xrootd(logger, full_filename: str, archive_numa_node, archive_destination_host: str):
+def archive_file_xrootd(logger, full_filename: str, archive_numa_node, archive_destination_host: str, timeout: int):
     logger.debug(f"{full_filename} attempting archive_file_xrootd...")
 
     # If provided, launch using specific numa node. Passing None ignores this part of the command line
@@ -70,7 +70,7 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node, archive_d
     cmdline = f"{numa_cmdline}/usr/local/bin/xrdcp --force --cksum adler32 --silent --streams 2 --tlsnodata {full_filename} xroot://{archive_destination_host}"
 
     start_time = time.time()
-    return_value = mwax_command.run_command(logger, cmdline)
+    return_value = mwax_command.run_command(logger, cmdline, timeout)
     elapsed = time.time() - start_time
 
     size_gigabytes = size / (1000*1000*1000)

@@ -70,7 +70,7 @@ class FilterbankProcessor:
                              f"copy to {self.archive_destination_host}...")
 
             if not utils.archive_file_xrootd(self.logger, item, self.archive_command_numa_node,
-                                             self.archive_destination_host):
+                                             self.archive_destination_host, 120):
                 return False
 
             self.logger.debug(f"{item}- filterbank_handler() Deleting file")
