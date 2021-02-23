@@ -193,7 +193,6 @@ class SubfileProcessor:
                                                                 self.bf_numa_node, 16)
                     elif CorrelatorMode.is_no_capture(subfile_mode):
                         self.logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
-                        self.subfile_distributor_context.archive_processor.pause_archiving(False)
                         success = True
 
                     else:
