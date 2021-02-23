@@ -171,23 +171,34 @@ class SubfileProcessor:
                     success = False
 
             if self.bf_enabled:
-                # Don't run beamformer is we are in correlator mode too and we are doing a voltage capture!
-                # Otherwise:
-                # 1. Inject the relevant beamformer keywords into the header of the sub file
-                # 2. load file into PSRDADA ringbuffer for beamformer input
-                # 3. Rename .sub file to .free so that udpgrab can reuse it
+                # Don't run beamformer if we are in correlator mode too and we are doing a voltage capture!
                 if self.corr_enabled and CorrelatorMode.is_vcs(subfile_mode):
                     self.logger.warning(f"{item}- beamformer mode enabled and is in {subfile_mode} mode, ignoring this"
                                         f" beamformer job.")
                     success = True
                 else:
-                    # Get the settings we want for the beamformer
-                    beamformer_settings = "NUM_INCOHERENT_BEAMS 1\nINCOHERENT_BEAM_01_CHANNELS 1280000\nINCOHERENT_BEAM_01_TIME_INTEG 1\nNUM_COHERENT_BEAMS 0\n"
+                    # Otherwise:
+                    # 1. If mode is correlator or vcs, then:
+                    # 2. Inject the relevant beamformer keywords into the header of the sub file
+                    # 3. load file into PSRDADA ringbuffer for beamformer input
+                    # 4. Rename .sub file to .free so that udpgrab can reuse it
+                    if CorrelatorMode.is_correlator(subfile_mode) or CorrelatorMode.is_vcs(subfile_mode):
+                        # Get the settings we want for the beamformer
+                        beamformer_settings = "NUM_INCOHERENT_BEAMS 1\nINCOHERENT_BEAM_01_CHANNELS 1280000\nINCOHERENT_BEAM_01_TIME_INTEG 1\nNUM_COHERENT_BEAMS 0\n"
 
-                    self.logger.info(f"{item}- injecting beamformer header into subfile...")
-                    self._inject_beamformer_headers(item, beamformer_settings)
+                        self.logger.info(f"{item}- injecting beamformer header into subfile...")
+                        self._inject_beamformer_headers(item, beamformer_settings)
 
-                    success = utils.load_psrdada_ringbuffer(self.logger, item, self.bf_ringbuffer_key, self.bf_numa_node, 16)
+                        success = utils.load_psrdada_ringbuffer(self.logger, item, self.bf_ringbuffer_key,
+                                                                self.bf_numa_node, 16)
+                    elif CorrelatorMode.is_no_capture(subfile_mode):
+                        self.logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
+                        self.subfile_distributor_context.archive_processor.pause_archiving(False)
+                        success = True
+
+                    else:
+                        self.logger.error(f"{item}- Unknown subfile mode {subfile_mode}, ignoring.")
+                        success = False
 
         except Exception as handler_exception:
             self.logger.error(f"{item} {handler_exception}")
