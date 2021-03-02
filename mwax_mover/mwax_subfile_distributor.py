@@ -233,6 +233,10 @@ class MWAXSubfileDistributor:
             self.logger.error(f"Voltdata file location {self.cfg_voltdata_path} does not exist. Quitting.")
             exit(1)
 
+        if self.cfg_always_keep_subfiles:
+            self.logger.info(f"Will keep subfiles after they are used in: {self.cfg_voltdata_path}... "
+                             f"** NOTE: this should be for DEBUG only as it will be slow and may not keep up! **")
+
         # Check to see if we have a beamformer section
         if self.config.has_section("beamformer"):
             self.cfg_bf_ringbuffer_key = utils.read_config(self.logger, self.config,"beamformer", "input_ringbuffer_key")
@@ -246,6 +250,8 @@ class MWAXSubfileDistributor:
             if not os.path.exists(self.cfg_bf_settings_path):
                 self.logger.error(f"Beamformer settings file location {self.cfg_bf_settings_path} does not exist. Quitting.")
                 exit(1)
+
+            self.logger.info(f"Beam settings will be read from: {self.cfg_bf_settings_path} at runtime.")
 
             # Read filterbank config specific to this host
             self.cfg_bf_archive_destination_host = utils.read_config(self.logger, self.config, self.hostname,
