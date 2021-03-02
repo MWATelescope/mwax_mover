@@ -190,7 +190,7 @@ def initialise():
 
     # Get command line args
     parser = argparse.ArgumentParser()
-    parser.description = "archbox_archive_processor: a command line tool which is part of the MWA " \
+    parser.description = "mwacache_archive_processor: a command line tool which is part of the MWA " \
                          "correlator for the MWA. It will monitor the /data directory on each arch box " \
                          "and upon detecting a file, send it to a mwacache server via xrootd. It will then " \
                          "remove the file from the arch box NGAS instance."
@@ -256,8 +256,8 @@ def initialise():
     cfg_recursive = utils.read_config_bool(logger, config, "mwax mover", "recursive")
 
     # Read config specific to this host
-    cfg_archive_destination_host = utils.read_config(logger, config, hostname, "destination_host")
-    cfg_archive_destination_port = utils.read_config(logger, config, hostname, "destination_port")
+    cfg_archive_destination_host = utils.read_config(logger, config, hostname, "mwacache_destination_host")
+    cfg_archive_destination_port = utils.read_config(logger, config, hostname, "mwacache_destination_port")
 
     return logger, hostname, cfg_archive_destination_host, cfg_archive_destination_port, cfg_incoming_paths, cfg_recursive
 

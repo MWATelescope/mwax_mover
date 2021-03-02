@@ -6,7 +6,7 @@ import queue
 import threading
 
 
-class ArchiveProcessor:
+class MWAXArchiveProcessor:
     def __init__(self,
                  context,
                  hostname: str,

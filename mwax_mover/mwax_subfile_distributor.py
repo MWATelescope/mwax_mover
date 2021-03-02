@@ -147,6 +147,7 @@ class MWAXSubfileDistributor:
         # Archiving settings for beamformer
         self.cfg_bf_archive_destination_host = None
         self.cfg_bf_archive_destination_port = None
+        self.cfg_bf_archive_destination_enabled = None
 
         # Correlator
         self.cfg_corr_enabled = None
@@ -157,6 +158,7 @@ class MWAXSubfileDistributor:
         # Archiving settings for correlator
         self.cfg_corr_archive_destination_host = None
         self.cfg_corr_archive_destination_port = None
+        self.cfg_corr_archive_destination_enabled = None
 
         # Connection info for metadata db
         self.cfg_metadatadb_host = None
@@ -239,9 +241,11 @@ class MWAXSubfileDistributor:
 
             # Read filterbank config specific to this host
             self.cfg_bf_archive_destination_host = utils.read_config(self.logger, self.config, self.hostname,
-                                                                       "bf_destination_host")
+                                                                       "fil_destination_host")
             self.cfg_bf_archive_destination_port = utils.read_config(self.logger, self.config, self.hostname,
-                                                                       "bf_destination_port")
+                                                                       "fil_destination_port")
+            self.cfg_bf_archive_destination_enabled = utils.read_config(self.logger, self.config, self.hostname,
+                                                                     "fil_destination_enabled") == 1
             self.cfg_bf_numa_node = utils.read_config(self.logger, self.config, self.hostname, "dada_disk_db_numa_node")
             self.cfg_bf_archive_command_numa_node = utils.read_config(self.logger, self.config, self.hostname,
                                                                       "archive_command_numa_node")
@@ -269,9 +273,11 @@ class MWAXSubfileDistributor:
 
             # Read config specific to this host
             self.cfg_corr_archive_destination_host = utils.read_config(self.logger, self.config, self.hostname,
-                                                                       "destination_host")
+                                                                       "mwax_destination_host")
             self.cfg_corr_archive_destination_port = utils.read_config(self.logger, self.config, self.hostname,
-                                                                       "destination_port")
+                                                                       "mwax_destination_port")
+            self.cfg_corr_archive_destination_enabled = utils.read_config(self.logger, self.config, self.hostname,
+                                                                       "mwax_destination_enabled") == 1
             self.cfg_corr_diskdb_numa_node = utils.read_config(self.logger, self.config, self.hostname,
                                                                "dada_disk_db_numa_node")
             self.cfg_corr_archive_command_numa_node = utils.read_config(self.logger, self.config, self.hostname,
@@ -313,33 +319,43 @@ class MWAXSubfileDistributor:
         self.processors.append(self.subfile_processor)
 
         if self.cfg_corr_enabled:
-            self.archive_processor = mwax_archive_processor.ArchiveProcessor(self,
-                                                                             self.hostname,
-                                                                             self.cfg_corr_archive_command_numa_node,
-                                                                             self.cfg_corr_archive_destination_host,
-                                                                             self.cfg_corr_archive_destination_port,
-                                                                             self.db_handler,
-                                                                             self.cfg_voltdata_path,
-                                                                             self.cfg_corr_visdata_path)
+            if self.cfg_corr_archive_destination_enabled:
+                self.archive_processor = mwax_archive_processor.MWAXArchiveProcessor(self,
+                                                                                     self.hostname,
+                                                                                     self.cfg_corr_archive_command_numa_node,
+                                                                                     self.cfg_corr_archive_destination_host,
+                                                                                     self.cfg_corr_archive_destination_port,
+                                                                                     self.db_handler,
+                                                                                     self.cfg_voltdata_path,
+                                                                                     self.cfg_corr_visdata_path)
 
-            # Add this processor to list of processors we manage
-            self.processors.append(self.archive_processor)
+                # Add this processor to list of processors we manage
+                self.processors.append(self.archive_processor)
+            else:
+                self.logger.info("MWAX Archiving is disabled due to configuration setting "
+                                 "`mwax_destination_enabled`.")
 
         if self.cfg_bf_enabled:
-            self.filterbank_processor = mwax_filterbank_processor.FilterbankProcessor(self,
-                                                                                      self.hostname,
-                                                                                      self.cfg_bf_fildata_path,
-                                                                                      self.cfg_bf_archive_destination_host,
-                                                                                      self.cfg_bf_archive_destination_port,
-                                                                                      self.cfg_bf_archive_command_numa_node)
+            if self.cfg_bf_archive_destination_enabled:
+                self.filterbank_processor = mwax_filterbank_processor.FilterbankProcessor(self,
+                                                                                          self.hostname,
+                                                                                          self.cfg_bf_fildata_path,
+                                                                                          self.cfg_bf_archive_destination_host,
+                                                                                          self.cfg_bf_archive_destination_port,
+                                                                                          self.cfg_bf_archive_command_numa_node)
 
-            # Add this processor to list of processors we manage
-            self.processors.append(self.filterbank_processor)
+                # Add this processor to list of processors we manage
+                self.processors.append(self.filterbank_processor)
+            else:
+                self.logger.info("Filterbank Archiving is disabled due to configuration setting "
+                                 "`fil_destination_enabled`.")
 
     def get_status(self) -> dict:
         main_status = {"host": self.hostname,
                        "beamformer": self.cfg_bf_enabled,
+                       "beamformer archiving": self.cfg_bf_archive_destination_enabled,
                        "correlator": self.cfg_corr_enabled,
+                       "correlator archiving": self.cfg_corr_archive_destination_enabled,
                        "running": self.running}
 
         processor_status_list = []
