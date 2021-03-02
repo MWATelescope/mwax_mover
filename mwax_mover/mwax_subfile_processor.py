@@ -306,7 +306,12 @@ class SubfileProcessor:
         if numa_node:
             command = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} {command}"
 
-        return mwax_mover.run_command(command, 120)
+        retval = mwax_mover.run_command(command, 120)
+
+        if retval:
+            self.logger.info(f"{filename}- Copying file into {destination_path} was successful.")
+
+        return retval
 
     def dump_voltages(self, start_gps_time: int, end_gps_time: int) -> bool:
         self.logger.info(f"dump_voltages: from {str(start_gps_time)} to {str(end_gps_time)}...")

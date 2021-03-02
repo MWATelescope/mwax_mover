@@ -223,7 +223,7 @@ class MWAXSubfileDistributor:
         self.cfg_webserver_port = utils.read_config(self.logger, self.config, "mwax mover", "webserver_port")
         self.cfg_subfile_path = utils.read_config(self.logger, self.config,"mwax mover", "subfile_path")
         self.cfg_voltdata_path = utils.read_config(self.logger, self.config,"mwax mover", "voltdata_path")
-        self.cfg_always_keep_subfiles = utils.read_config(self.logger, self.config,"mwax mover", "always_keep_subfiles") ==0
+        self.cfg_always_keep_subfiles = utils.read_config(self.logger, self.config,"mwax mover", "always_keep_subfiles") == 1
 
         if not os.path.exists(self.cfg_subfile_path):
             self.logger.error(f"Subfile file location {self.cfg_subfile_path} does not exist. Quitting.")
