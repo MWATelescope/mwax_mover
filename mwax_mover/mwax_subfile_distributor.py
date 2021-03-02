@@ -223,7 +223,7 @@ class MWAXSubfileDistributor:
         self.cfg_webserver_port = utils.read_config(self.logger, self.config, "mwax mover", "webserver_port")
         self.cfg_subfile_path = utils.read_config(self.logger, self.config,"mwax mover", "subfile_path")
         self.cfg_voltdata_path = utils.read_config(self.logger, self.config,"mwax mover", "voltdata_path")
-        self.cfg_always_keep_subfiles = utils.read_config(self.logger, self.config,"mwax mover", "always_keep_subfiles") == 1
+        self.cfg_always_keep_subfiles = int(utils.read_config(self.logger, self.config,"mwax mover", "always_keep_subfiles")) == 1
 
         if not os.path.exists(self.cfg_subfile_path):
             self.logger.error(f"Subfile file location {self.cfg_subfile_path} does not exist. Quitting.")
@@ -258,8 +258,8 @@ class MWAXSubfileDistributor:
                                                                        "fil_destination_host")
             self.cfg_bf_archive_destination_port = utils.read_config(self.logger, self.config, self.hostname,
                                                                        "fil_destination_port")
-            self.cfg_bf_archive_destination_enabled = utils.read_config(self.logger, self.config, self.hostname,
-                                                                     "fil_destination_enabled") == 1
+            self.cfg_bf_archive_destination_enabled = int(utils.read_config(self.logger, self.config, self.hostname,
+                                                                     "fil_destination_enabled")) == 1
             self.cfg_bf_numa_node = utils.read_config(self.logger, self.config, self.hostname, "dada_disk_db_numa_node")
             self.cfg_bf_archive_command_numa_node = utils.read_config(self.logger, self.config, self.hostname,
                                                                       "archive_command_numa_node")
@@ -290,8 +290,8 @@ class MWAXSubfileDistributor:
                                                                        "mwax_destination_host")
             self.cfg_corr_archive_destination_port = utils.read_config(self.logger, self.config, self.hostname,
                                                                        "mwax_destination_port")
-            self.cfg_corr_archive_destination_enabled = utils.read_config(self.logger, self.config, self.hostname,
-                                                                       "mwax_destination_enabled") == 1
+            self.cfg_corr_archive_destination_enabled = int(utils.read_config(self.logger, self.config, self.hostname,
+                                                                       "mwax_destination_enabled")) == 1
             self.cfg_corr_diskdb_numa_node = utils.read_config(self.logger, self.config, self.hostname,
                                                                "dada_disk_db_numa_node")
             self.cfg_corr_archive_command_numa_node = utils.read_config(self.logger, self.config, self.hostname,
