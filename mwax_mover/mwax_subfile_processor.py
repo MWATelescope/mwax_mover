@@ -68,8 +68,8 @@ def read_subfile_mode(filename: str) -> str:
 
 class SubfileProcessor:
     def __init__(self, context,
-                 subfile_path: str, voltdata_path: str,
-                 bf_enabled: bool, bf_ringbuffer_key: str, bf_numa_node: int, bf_settings_path: str,
+                 subfile_path: str, voltdata_path: str, always_keep_subfiles: bool,
+                 bf_enabled: bool, bf_ringbuffer_key: str, bf_numa_node: int, bf_fildata_path: str, bf_settings_path: str,
                  corr_enabled: bool, corr_ringbuffer_key: str, corr_diskdb_numa_node: int):
         self.subfile_distributor_context = context
 
@@ -87,6 +87,7 @@ class SubfileProcessor:
         self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_RENAME
         self.subfile_path = subfile_path
         self.voltdata_path = voltdata_path
+        self.always_keep_subfiles = always_keep_subfiles
         self.watch_dir = self.subfile_path
         self.ext_done = ".free"
 
@@ -101,6 +102,7 @@ class SubfileProcessor:
         self.bf_enabled = bf_enabled
         self.bf_ringbuffer_key = bf_ringbuffer_key    # PSRDADA ringbuffer key for INPUT into correlator or beamformer
         self.bf_numa_node = bf_numa_node              # Numa node to use to do a file copy
+        self.bf_fildata_path = bf_fildata_path        # Path where filterbank files are written to (and sub files in debug mode)
         self.bf_settings_path = bf_settings_path      # Path to text file containing the PSRDADA Beamformer header info
 
         self.corr_enabled = corr_enabled
@@ -137,6 +139,15 @@ class SubfileProcessor:
 
         self.logger.info(f"{item}- SubfileProcessor.handler is handling {item}...")
 
+        # This is used after doing the main work. If we are running in debug mode,
+        # then we will always keep the voltages and not delete them.
+        # In MWAX mode we will put them into the voltdata path. But if we are in VCS mode, there is no need to do this as we already keep the sub files.
+        # In Beamformer mode we will put them into the fildata path.
+        #
+        # If not in debug mode, this value will be None and will be ignored
+        #
+        keep_subfiles_path = None
+
         try:
             subfile_mode = read_subfile_mode(item)
 
@@ -151,20 +162,26 @@ class SubfileProcessor:
                 #       Ignore the subfile
                 # 3. Rename .sub file to .free so that udpgrab can reuse it
                 if CorrelatorMode.is_correlator(subfile_mode):
-                    self.subfile_distributor_context.archive_processor.pause_archiving(False)
+                    if self.subfile_distributor_context.cfg_corr_archive_destination_enabled:
+                        self.subfile_distributor_context.archive_processor.pause_archiving(False)
 
                     success = utils.load_psrdada_ringbuffer(self.logger, item, self.corr_ringbuffer_key, self.corr_diskdb_numa_node, 16)
 
+                    if self.always_keep_subfiles:
+                        keep_subfiles_path = self.voltdata_path
+
                 elif CorrelatorMode.is_vcs(subfile_mode):
                     # Pause archiving so we have the disk to ourselves
-                    self.subfile_distributor_context.archive_processor.pause_archiving(True)
+                    if self.subfile_distributor_context.cfg_corr_archive_destination_enabled:
+                        self.subfile_distributor_context.archive_processor.pause_archiving(True)
 
-                    self._copy_subfile_to_voltdata(item, self.corr_diskdb_numa_node)
+                    self._copy_subfile_to_disk(item, self.corr_diskdb_numa_node, self.voltdata_path)
                     success = True
 
                 elif CorrelatorMode.is_no_capture(subfile_mode):
                     self.logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
-                    self.subfile_distributor_context.archive_processor.pause_archiving(False)
+                    if self.subfile_distributor_context.cfg_corr_archive_destination_enabled:
+                        self.subfile_distributor_context.archive_processor.pause_archiving(False)
                     success = True
 
                 else:
@@ -195,6 +212,10 @@ class SubfileProcessor:
 
                         success = utils.load_psrdada_ringbuffer(self.logger, item, self.bf_ringbuffer_key,
                                                                 self.bf_numa_node, 16)
+
+                        if self.always_keep_subfiles:
+                            keep_subfiles_path = self.bf_fildata_path
+
                     elif CorrelatorMode.is_no_capture(subfile_mode):
                         self.logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
                         success = True
@@ -209,6 +230,10 @@ class SubfileProcessor:
 
         finally:
             if success:
+                # Check if need to keep subfiles, if so we need to copy them off
+                if keep_subfiles_path:
+                    self._copy_subfile_to_disk(item, None, keep_subfiles_path)
+
                 # Rename subfile so that udpgrab can reuse it
                 free_filename = str(item).replace(self.ext_to_watch_for, self.ext_done)
 
@@ -273,18 +298,26 @@ class SubfileProcessor:
             subfile.write(new_bytes)
 
 
-    def _copy_subfile_to_voltdata(self, filename: str, numa_node: int) -> bool:
-        self.logger.info(f"{filename}- Copying file into {self.voltdata_path}")
+    def _copy_subfile_to_disk(self, filename: str, numa_node, destination_path: str) -> bool:
+        self.logger.info(f"{filename}- Copying file into {destination_path}")
 
-        command = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} cp {filename} {self.voltdata_path}/."
+        command = f"cp {filename} {destination_path}/."
+
+        if numa_node:
+            command = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} {command}"
+
         return mwax_mover.run_command(command, 120)
 
     def dump_voltages(self, start_gps_time: int, end_gps_time: int) -> bool:
         self.logger.info(f"dump_voltages: from {str(start_gps_time)} to {str(end_gps_time)}...")
 
         # disable archiving
-        archiving = self.subfile_distributor_context.archive_processor.archiving_paused
-        self.subfile_distributor_context.archive_processor.pause_archiving(True)
+        archiving_was_paused = False
+
+        # If we have an active archiver, check it's status
+        if self.subfile_distributor_context.cfg_corr_archive_destination_enabled:
+            archiving_was_paused = self.subfile_distributor_context.archive_processor.archiving_paused
+            self.subfile_distributor_context.archive_processor.pause_archiving(True)
 
         # Look for any .free files which have the first 10 characters of filename from starttime to endtime
         free_file_list = sorted(glob.glob(f"{self.subfile_path}/*.free"))
@@ -327,8 +360,9 @@ class SubfileProcessor:
             self.logger.info(f"dump_voltages: renaming {keep_filename} to {free_filename}")
             shutil.move(keep_filename, free_filename)
 
-        # reenable archiving (if we're not in voltage capture mode)
-        self.subfile_distributor_context.archive_processor.pause_archiving(archiving)
+        # reenable archiving (if we're not in voltage capture mode) and if an archiver is running
+        if self.subfile_distributor_context.cfg_corr_archive_destination_enabled:
+            self.subfile_distributor_context.archive_processor.pause_archiving(archiving_was_paused)
 
         self.logger.info(f"dump_voltages: complete")
         return True
