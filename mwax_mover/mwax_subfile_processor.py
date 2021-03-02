@@ -139,12 +139,12 @@ class SubfileProcessor:
 
         self.logger.info(f"{item}- SubfileProcessor.handler is handling {item}...")
 
-        # This is used after doing the main work. If we are running in debug mode,
+        # `keep_subfiles_path` is used after doing the main work. If we are running in with `always_keep_subfiles`=1,
         # then we will always keep the voltages and not delete them.
-        # In MWAX mode we will put them into the voltdata path. But if we are in VCS mode, there is no need to do this as we already keep the sub files.
-        # In Beamformer mode we will put them into the fildata path.
+        # If so, we put them into the voltdata path. But if we are in VCS mode, there is no need to do this as we
+        # already keep the sub files.
         #
-        # If not in debug mode, this value will be None and will be ignored
+        # If not in `always_keep_subfiles`=1 mode, this value will be None and will be ignored.
         #
         keep_subfiles_path = None
 
@@ -214,7 +214,7 @@ class SubfileProcessor:
                                                                 self.bf_numa_node, 16)
 
                         if self.always_keep_subfiles:
-                            keep_subfiles_path = self.bf_fildata_path
+                            keep_subfiles_path = self.voltdata_path
 
                     elif CorrelatorMode.is_no_capture(subfile_mode):
                         self.logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
