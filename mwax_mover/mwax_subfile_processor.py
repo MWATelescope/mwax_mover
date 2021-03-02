@@ -69,7 +69,7 @@ def read_subfile_mode(filename: str) -> str:
 class SubfileProcessor:
     def __init__(self, context,
                  subfile_path: str, voltdata_path: str,
-                 bf_enabled: bool, bf_ringbuffer_key: str, bf_numa_node: int,
+                 bf_enabled: bool, bf_ringbuffer_key: str, bf_numa_node: int, bf_settings_path: str,
                  corr_enabled: bool, corr_ringbuffer_key: str, corr_diskdb_numa_node: int):
         self.subfile_distributor_context = context
 
@@ -101,6 +101,7 @@ class SubfileProcessor:
         self.bf_enabled = bf_enabled
         self.bf_ringbuffer_key = bf_ringbuffer_key    # PSRDADA ringbuffer key for INPUT into correlator or beamformer
         self.bf_numa_node = bf_numa_node              # Numa node to use to do a file copy
+        self.bf_settings_path = bf_settings_path      # Path to text file containing the PSRDADA Beamformer header info
 
         self.corr_enabled = corr_enabled
         self.corr_ringbuffer_key = corr_ringbuffer_key  # PSRDADA ringbuffer key for INPUT into correlator or beamformer
@@ -183,8 +184,11 @@ class SubfileProcessor:
                     # 3. load file into PSRDADA ringbuffer for beamformer input
                     # 4. Rename .sub file to .free so that udpgrab can reuse it
                     if CorrelatorMode.is_correlator(subfile_mode) or CorrelatorMode.is_vcs(subfile_mode):
-                        # Get the settings we want for the beamformer
-                        beamformer_settings = "NUM_INCOHERENT_BEAMS 1\nINCOHERENT_BEAM_01_CHANNELS 1280000\nINCOHERENT_BEAM_01_TIME_INTEG 1\nNUM_COHERENT_BEAMS 0\n"
+                        # Get the settings we want for the beamformer from the text file
+                        # NOTE: this is read per subfile, and the idea is it can be updated at runtime
+                        # but this makes it a bit less efficient than reading it once and using it many times.
+                        with open(self.bf_settings_path, "r") as bf_settings_file:
+                            beamformer_settings = bf_settings_file.read()
 
                         self.logger.info(f"{item}- injecting beamformer header into subfile...")
                         self._inject_beamformer_headers(item, beamformer_settings)

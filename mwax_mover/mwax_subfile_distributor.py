@@ -143,6 +143,7 @@ class MWAXSubfileDistributor:
         self.cfg_bf_ringbuffer_key = None
         self.cfg_bf_numa_node = None
         self.cfg_bf_fildata_path = None
+        self.cfg_bf_settings_path = None
         self.cfg_bf_archive_command_numa_node = None
         # Archiving settings for beamformer
         self.cfg_bf_archive_destination_host = None
@@ -239,6 +240,11 @@ class MWAXSubfileDistributor:
                 self.logger.error(f"Fildata file location {self.cfg_bf_fildata_path} does not exist. Quitting.")
                 exit(1)
 
+            self.cfg_bf_settings_path = utils.read_config(self.logger, self.config,"beamformer", "beamformer_settings_path")
+            if not os.path.exists(self.cfg_bf_settings_path):
+                self.logger.error(f"Beamformer settings file location {self.cfg_bf_settings_path} does not exist. Quitting.")
+                exit(1)
+
             # Read filterbank config specific to this host
             self.cfg_bf_archive_destination_host = utils.read_config(self.logger, self.config, self.hostname,
                                                                        "fil_destination_host")
@@ -311,6 +317,7 @@ class MWAXSubfileDistributor:
                                                                          self.cfg_bf_enabled,
                                                                          self.cfg_bf_ringbuffer_key,
                                                                          self.cfg_bf_numa_node,
+                                                                         self.cfg_bf_settings_path,
                                                                          self.cfg_corr_enabled,
                                                                          self.cfg_corr_ringbuffer_key,
                                                                          self.cfg_corr_diskdb_numa_node)
