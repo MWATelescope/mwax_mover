@@ -121,7 +121,7 @@ class MWAXArchiveProcessor:
         # immediately add this file to the db so we insert a record into metadata data_files table
 
         # validate the filename
-        (valid, filetype, file_ext, validation_message) = utils.validate_filename(item)
+        (valid, obs_id, filetype, file_ext, validation_message) = utils.validate_filename(item)
 
         if valid:
             # Insert record into metadata database

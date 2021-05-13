@@ -8,6 +8,8 @@ inotify = "*"
 psycopg2-binary = "*"
 requests = "*"
 tenacity = "*"
+python-openstackclient = "*"
+boto3 = "*"
 
 [dev-packages]
 

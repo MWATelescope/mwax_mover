@@ -15,16 +15,14 @@ class MWACacheArchiveProcessor:
     def __init__(self,
                  logger,
                  hostname: str,
-                 archive_host: str,
-                 archive_port: str,
+                 ceph_endpoint: str,
                  incoming_paths: list,
                  recursive: bool):
 
         self.logger = logger
 
         self.hostname = hostname
-        self.archive_destination_host = archive_host
-        self.archive_destination_port = archive_port
+        self.ceph_endpoint = ceph_endpoint
         self.recursive = recursive
 
         self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_NEW
@@ -97,11 +95,9 @@ class MWACacheArchiveProcessor:
     def archive_handler(self, item: str) -> bool:
         self.logger.info(f"{item}- archive_handler() Started...")
 
-        if utils.archive_file_xrootd(self.logger,
-                                     item,
-                                     None,
-                                     self.archive_destination_host,
-                                     120) is not True:
+        if utils.archive_file_ceph(self.logger,
+                                   item,
+                                   self.ceph_endpoint) is not True:
             return False
 
         self.logger.debug(f"{item}- archive_handler() Deleting file")
@@ -191,9 +187,9 @@ def initialise():
     # Get command line args
     parser = argparse.ArgumentParser()
     parser.description = "mwacache_archive_processor: a command line tool which is part of the MWA " \
-                         "correlator for the MWA. It will monitor the /data directory on each arch box " \
-                         "and upon detecting a file, send it to a mwacache server via xrootd. It will then " \
-                         "remove the file from the arch box NGAS instance."
+                         "correlator for the MWA. It will monitor various directories on each mwacache " \
+                         "server and, upon detecting a file, send it to Pawsey's LTS. It will then " \
+                         "remove the file from the local disk."
 
     parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
 
@@ -254,21 +250,18 @@ def initialise():
         exit(1)
 
     cfg_recursive = utils.read_config_bool(logger, config, "mwax mover", "recursive")
+    cfg_ceph_endpoint = utils.read_config_bool(logger, config, "mwax mover", "ceph_endpoint")
 
-    # Read config specific to this host
-    cfg_archive_destination_host = utils.read_config(logger, config, hostname, "mwacache_destination_host")
-    cfg_archive_destination_port = utils.read_config(logger, config, hostname, "mwacache_destination_port")
 
-    return logger, hostname, cfg_archive_destination_host, cfg_archive_destination_port, cfg_incoming_paths, cfg_recursive
+    return logger, hostname, cfg_ceph_endpoint, cfg_incoming_paths, cfg_recursive
 
 
 def main():
-    (logger, hostname, archive_host, archive_port, incoming_paths, recursive) = initialise()
+    (logger, hostname, ceph_endpoint, incoming_paths, recursive) = initialise()
 
     p = MWACacheArchiveProcessor(logger,
                                  hostname,
-                                 archive_host,
-                                 archive_port,
+                                 ceph_endpoint,
                                  incoming_paths,
                                  recursive)
 

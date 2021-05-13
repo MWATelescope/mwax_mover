@@ -5,6 +5,8 @@ import glob
 import os
 import socket
 import time
+import ceph
+from mwax_mover.ceph import ceph_get_bucket_name_from_filename, ceph_get_s3_object
 
 
 def read_config(logger, config: ConfigParser, section: str, key: str, b64encoded=False):
@@ -64,22 +66,82 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node, archive_d
     else:
         numa_cmdline = ""
 
-    size = os.path.getsize(full_filename)
+    # get file size
+    try:
+        file_size = os.path.getsize(full_filename)
+    except Exception as e:
+        logger.error(f"Error determining file size for {full_filename}. Error {e}")
+        return False
 
     # Build final command line
-    cmdline = f"{numa_cmdline}/usr/local/bin/xrdcp --force --cksum adler32 --silent --streams 2 --tlsnodata {full_filename} xroot://{archive_destination_host}"
+    cmdline = f"{numa_cmdline}/usr/local/bin/xrdcp --force --cksum adler32 " \
+              f"--silent --streams 2 --tlsnodata {full_filename} xroot://{archive_destination_host}"
 
     start_time = time.time()
-    return_value = mwax_command.run_command(logger, cmdline, timeout)
-    elapsed = time.time() - start_time
 
-    size_gigabytes = size / (1000*1000*1000)
-    gbps_per_sec = (size_gigabytes * 8) / elapsed
+    # run xrdcp
+    if mwax_command.run_command(logger, cmdline, timeout):
+        elapsed = time.time() - start_time
 
-    if return_value:
+        size_gigabytes = file_size / (1000*1000*1000)
+        gbps_per_sec = (size_gigabytes * 8) / elapsed
+
         logger.info(f"{full_filename} archive_file_xrootd success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
 
-    return return_value
+        return True
+    else:
+        return False
+
+
+def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str, timeout: int):
+    logger.debug(f"{full_filename} attempting archive_file_ceph...")
+
+    # get file size
+    try:
+        file_size = os.path.getsize(full_filename)
+    except Exception as e:
+        logger.error(f"Error determining file size for {full_filename}. Error {e}")
+        return False
+
+    # determine bucket name
+    try:
+        bucket_name = ceph.ceph_get_bucket_name_from_filename(full_filename)
+    except Exception as e:
+        logger.error(f"Error determining bucket name for {full_filename}. Error {e}")
+        return False
+
+    # get s3 object
+    try:
+        s3_object = ceph_get_s3_object(ceph_endpoint)
+    except Exception as e:
+        logger.error(f"Error connecting to S3 endpoint {ceph_endpoint}. Error {e}")
+        return False
+
+    # create bucket if required
+    try:
+        ceph.ceph_create_bucket(s3_object, bucket_name)
+    except Exception as e:
+        logger.error(f"Error creating/checking existence of S3 bucket {bucket_name} on {ceph_endpoint}. Error {e}")
+        return False
+
+    # start timer
+    start_time = time.time()
+
+    # Do upload
+    try:
+        ceph.ceph_upload_file(s3_object, bucket_name, full_filename)
+    except Exception as e:
+        logger.error(f"Error uploading {full_filename} to S3 bucket {bucket_name} on {ceph_endpoint}. Error {e}")
+        return False
+
+    # end timer
+    elapsed = time.time() - start_time
+
+    size_gigabytes = file_size / (1000 * 1000 * 1000)
+    gbps_per_sec = (size_gigabytes * 8) / elapsed
+
+    logger.info(f"{full_filename} archive_file_ceph success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
+    return True
 
 
 def scan_for_existing_files(logger, watch_dir: str, pattern: str, recursive: bool, q):
@@ -106,9 +168,10 @@ def scan_directory(logger, watch_dir: str, pattern: str, recursive: bool) -> lis
     return files
 
 
-def validate_filename(filename: str) -> (bool, int, str, str):
-    # Returns valid, filetype_id, file_ext, validation_error
+def validate_filename(filename: str) -> (bool, int, int, str, str):
+    # Returns valid, obs_id, filetype_id, file_ext, validation_error
     valid: bool = True
+    obs_id = 0
     validation_error: str = ""
     filetype_id: int = -1
     file_name_part: str = ""
@@ -161,5 +224,7 @@ def validate_filename(filename: str) -> (bool, int, str, str):
         if not obs_id_check.isdigit():
             valid = False
             validation_error = f"Filename does not start with a 10 digit observation_id- ignoring"
+        else:
+            obs_id = int(obs_id_check)
 
-    return valid, filetype_id, file_ext_part, validation_error
+    return valid, obs_id, filetype_id, file_ext_part, validation_error
