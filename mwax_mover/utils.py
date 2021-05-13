@@ -6,7 +6,6 @@ import os
 import socket
 import time
 import ceph
-from mwax_mover.ceph import ceph_get_bucket_name_from_filename, ceph_get_s3_object
 
 
 def read_config(logger, config: ConfigParser, section: str, key: str, b64encoded=False):
@@ -93,7 +92,7 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node, archive_d
         return False
 
 
-def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str, timeout: int):
+def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str):
     logger.debug(f"{full_filename} attempting archive_file_ceph...")
 
     # get file size
@@ -112,7 +111,7 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str, timeout: i
 
     # get s3 object
     try:
-        s3_object = ceph_get_s3_object(ceph_endpoint)
+        s3_object = ceph.ceph_get_s3_object(ceph_endpoint)
     except Exception as e:
         logger.error(f"Error connecting to S3 endpoint {ceph_endpoint}. Error {e}")
         return False
