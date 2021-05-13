@@ -1,11 +1,10 @@
-from mwax_mover import mwax_command
+from mwax_mover import mwax_command,ceph
 import base64
 from configparser import ConfigParser
 import glob
 import os
 import socket
 import time
-import ceph
 
 
 def read_config(logger, config: ConfigParser, section: str, key: str, b64encoded=False):
