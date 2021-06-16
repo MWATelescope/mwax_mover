@@ -233,7 +233,7 @@ def initialise():
     cfg_incoming_paths = []
 
     # Common config options
-    cfg_ceph_endpoint = utils.read_config_bool(logger, config, "mwax mover", "ceph_endpoint")
+    cfg_ceph_endpoint = utils.read_config(logger, config, "mwax mover", "ceph_endpoint")
 
     #
     # Options specified per host
