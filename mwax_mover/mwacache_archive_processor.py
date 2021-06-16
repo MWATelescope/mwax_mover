@@ -251,7 +251,8 @@ def initialise():
     if len(cfg_incoming_paths) == 0:
         logger.error(f"No incoming data file locations were not present in config file. "
                      f"Use incoming_path1 .. incoming_pathN "
-                     f"in the mwax_mover section. Quitting.")
+                     f"in the [<hostname>] section (where <hostname> is the lowercase hostname of the machine running "
+                     f"this). This host's name is: '{hostname}'. Quitting.")
         exit(1)
 
     cfg_recursive = utils.read_config_bool(logger, config, hostname, "recursive")
