@@ -2,6 +2,16 @@ import os
 import boto3
 from boto3.s3.transfer import TransferConfig
 
+#
+# NOTE: this module relies on the fact that the machine/user running this code should already have a valid
+# cat ~/.aws/config file which provides:
+#
+# [default]
+# aws_access_key_id=XXXXXXXXXXXXXX
+# aws_secret_access_key=XXXXXXXXXXXXXXXXXXXXXXXXX
+#
+# Boto3 will use this file to authenticate and fail if it is not there or is not valid
+#
 def ceph_get_s3_object(endpoint: str):
     s3_object = boto3.resource('s3',
                                endpoint_url=endpoint)

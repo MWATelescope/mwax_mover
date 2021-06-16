@@ -227,16 +227,21 @@ def initialise():
     file_log.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
     logger.addHandler(file_log)
 
-    logger.info("Starting mwax_subfile_distributor processor...")
+    logger.info("Starting mwacache_archive_processor processor...")
 
     i = 1
     cfg_incoming_paths = []
 
+    # Common config options
+    cfg_ceph_endpoint = utils.read_config_bool(logger, config, "mwax mover", "ceph_endpoint")
+
     #
+    # Options specified per host
+    #
+
     # Look for data_path1.. data_pathN
-    #
-    while config.has_option("mwax mover", f"incoming_path{i}"):
-        new_incoming_path = utils.read_config(logger, config, "mwax mover", f"incoming_path{i}")
+    while config.has_option(hostname, f"incoming_path{i}"):
+        new_incoming_path = utils.read_config(logger, config, hostname, f"incoming_path{i}")
         if not os.path.exists(new_incoming_path):
             logger.error(f"incoming file location in incoming_path{i} - {new_incoming_path} does not exist. Quitting.")
             exit(1)
@@ -249,9 +254,7 @@ def initialise():
                      f"in the mwax_mover section. Quitting.")
         exit(1)
 
-    cfg_recursive = utils.read_config_bool(logger, config, "mwax mover", "recursive")
-    cfg_ceph_endpoint = utils.read_config_bool(logger, config, "mwax mover", "ceph_endpoint")
-
+    cfg_recursive = utils.read_config_bool(logger, config, hostname, "recursive")
 
     return logger, hostname, cfg_ceph_endpoint, cfg_incoming_paths, cfg_recursive
 
