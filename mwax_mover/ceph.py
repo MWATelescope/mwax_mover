@@ -44,7 +44,8 @@ def ceph_upload_file(s3_object, bucket_name: str, filename: str) -> bool:
     bucket = s3_object.Bucket(bucket_name)
 
     # configure the xfer to use multiparts
-    config = TransferConfig(multipart_threshold=100 * MB)
+    config = TransferConfig(multipart_threshold=100 * MB, max_concurrency=10,
+                            multipart_chunksize=1024*25, use_threads=True)
 
     # Upload the file
     bucket.upload_file(Filename=filename, Key=key, Config=config)

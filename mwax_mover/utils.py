@@ -81,7 +81,7 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node, archive_d
     if mwax_command.run_command(logger, cmdline, timeout):
         elapsed = time.time() - start_time
 
-        size_gigabytes = file_size / (1000*1000*1000)
+        size_gigabytes = float(file_size) / (1000. * 1000. * 1000.)
         gbps_per_sec = (size_gigabytes * 8) / elapsed
 
         logger.info(f"{full_filename} archive_file_xrootd success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
@@ -95,6 +95,7 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str):
     logger.debug(f"{full_filename} attempting archive_file_ceph...")
 
     # get file size
+    logger.debug(f"{full_filename} attempting to get file size...")
     try:
         file_size = os.path.getsize(full_filename)
     except Exception as e:
@@ -135,7 +136,7 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str):
     # end timer
     elapsed = time.time() - start_time
 
-    size_gigabytes = file_size / (1000 * 1000 * 1000)
+    size_gigabytes = float(file_size) / (1000. * 1000. * 1000.)
     gbps_per_sec = (size_gigabytes * 8) / elapsed
 
     logger.info(f"{full_filename} archive_file_ceph success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
