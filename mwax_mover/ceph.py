@@ -1,7 +1,6 @@
 import os
 import boto3
 from boto3.s3.transfer import TransferConfig
-import time
 
 def ceph_get_s3_object(endpoint: str):
     s3_object = boto3.resource('s3',
@@ -36,9 +35,6 @@ def ceph_upload_file(s3_object, bucket_name: str, filename: str) -> bool:
 
     # configure the xfer to use multiparts
     config = TransferConfig(multipart_threshold=100 * MB)
-
-    # beging timing
-    start_time = time.time()
 
     # Upload the file
     bucket.upload_file(Filename=filename, Key=key, Config=config)
