@@ -13,8 +13,11 @@ from boto3.s3.transfer import TransferConfig
 # Boto3 will use this file to authenticate and fail if it is not there or is not valid
 #
 def ceph_get_s3_object(endpoint: str):
+    # This ensures the default boto retries and timeouts don't leave us hanging too long
+    config = Config(connect_timeout=20, retries={'max_attempts': 2})
+
     s3_object = boto3.resource('s3',
-                               endpoint_url=endpoint)
+                               endpoint_url=endpoint, config=config)
 
     return s3_object
 

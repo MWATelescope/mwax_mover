@@ -103,6 +103,7 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str):
         return False
 
     # determine bucket name
+    logger.debug(f"{full_filename} determining destination bucket name...")
     try:
         bucket_name = ceph.ceph_get_bucket_name_from_filename(full_filename)
     except Exception as e:
@@ -110,18 +111,22 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str):
         return False
 
     # get s3 object
+    logger.debug(f"{full_filename} getting S3 bucket reference: {bucket_name}...")
     try:
         s3_object = ceph.ceph_get_s3_object(ceph_endpoint)
     except Exception as e:
-        logger.error(f"Error connecting to S3 endpoint {ceph_endpoint}. Error {e}")
+        logger.error(f"Error connecting to S3 endpoint: {ceph_endpoint}. Error {e}")
         return False
 
     # create bucket if required
+    logger.debug(f"{full_filename} creating S3 bucket {bucket_name} (if required)...")
     try:
         ceph.ceph_create_bucket(s3_object, bucket_name)
     except Exception as e:
         logger.error(f"Error creating/checking existence of S3 bucket {bucket_name} on {ceph_endpoint}. Error {e}")
         return False
+
+    logger.debug(f"{full_filename} attempting upload to S3 bucket {bucket_name}...")
 
     # start timer
     start_time = time.time()
