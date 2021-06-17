@@ -1,6 +1,7 @@
 import os
 import boto3
 from boto3.s3.transfer import TransferConfig
+from botocore.client import Config
 
 #
 # NOTE: this module relies on the fact that the machine/user running this code should already have a valid
