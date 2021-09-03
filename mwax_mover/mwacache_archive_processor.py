@@ -1,4 +1,4 @@
-from mwax_mover import mwax_mover, mwax_queue_worker, mwax_watcher, utils
+from mwax_mover import mwax_mover, mwax_db, mwax_queue_worker, mwax_watcher, utils
 import argparse
 from configparser import ConfigParser
 import logging
@@ -17,7 +17,8 @@ class MWACacheArchiveProcessor:
                  hostname: str,
                  ceph_endpoint: str,
                  incoming_paths: list,
-                 recursive: bool):
+                 recursive: bool,
+                 db_handler_object):
 
         self.logger = logger
 
@@ -28,6 +29,8 @@ class MWACacheArchiveProcessor:
         self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_NEW
         self.archiving_paused = False
         self.running = False
+
+        self.db_handler_object = db_handler_object
 
         self.watcher_threads = []
         self.worker_threads = []
@@ -95,16 +98,40 @@ class MWACacheArchiveProcessor:
     def archive_handler(self, item: str) -> bool:
         self.logger.info(f"{item}- archive_handler() Started...")
 
-        if utils.archive_file_ceph(self.logger,
-                                   item,
-                                   self.ceph_endpoint) is not True:
+        # For now archive to DMF
+        location = 1  # DMF
+
+        # validate the filename
+        (valid, obs_id, filetype, file_ext, prefix, validation_message) = utils.validate_filename(item, location)
+
+        if valid:
+            # Insert record into metadata database
+            if not mwax_db.insert_data_file_row(self.logger, self.db_handler_object, item, filetype, self.hostname,
+                                                False, None, None):
+                # if something went wrong, requeue
+                return False
+
+            if location == 1:  # DMF
+
+
+                # Now copy the file into dmf
+
+
+            elif location == 2:  # Ceph
+                if utils.archive_file_ceph(self.logger,
+                                           item,
+                                           self.ceph_endpoint) is not True:
+                    return False
+
+            self.logger.debug(f"{item}- archive_handler() Deleting file")
+            mwax_mover.remove_file(self.logger, item)
+
+            self.logger.info(f"{item}- archive_handler() Finished")
+            return True
+        else:
+            # The filename was not valid
+            self.logger.error(f"{item}- db_handler() {validation_message}")
             return False
-
-        self.logger.debug(f"{item}- archive_handler() Deleting file")
-        mwax_mover.remove_file(self.logger, item)
-
-        self.logger.info(f"{item}- archive_handler() Finished")
-        return True
 
     def pause_archiving(self, paused: bool):
         if self.archiving_paused != paused:
@@ -257,17 +284,38 @@ def initialise():
 
     cfg_recursive = utils.read_config_bool(logger, config, hostname, "recursive")
 
-    return logger, hostname, cfg_ceph_endpoint, cfg_incoming_paths, cfg_recursive
+    cfg_metadatadb_host = utils.read_config(logger, config, "mwa metadata database", "host")
+
+    if cfg_metadatadb_host != mwax_db.DUMMY_DB:
+        cfg_metadatadb_db = utils.read_config(logger, config, "mwa metadata database", "db")
+        cfg_metadatadb_user = utils.read_config(logger, config, "mwa metadata database", "user")
+        cfg_metadatadb_pass = utils.read_config(logger, config, "mwa metadata database", "pass", True)
+        cfg_metadatadb_port = utils.read_config(logger, config, "mwa metadata database", "port")
+    else:
+        cfg_metadatadb_db = None
+        cfg_metadatadb_user = None
+        cfg_metadatadb_pass = None
+        cfg_metadatadb_port = None
+
+        # Initiate database connection pool for metadata db
+    db_handler = mwax_db.MWAXDBHandler(host=cfg_metadatadb_host,
+                                       port=cfg_metadatadb_port,
+                                       db=cfg_metadatadb_db,
+                                       user=cfg_metadatadb_user,
+                                       password=cfg_metadatadb_pass)
+
+    return logger, hostname, cfg_ceph_endpoint, cfg_incoming_paths, cfg_recursive, db_handler
 
 
 def main():
-    (logger, hostname, ceph_endpoint, incoming_paths, recursive) = initialise()
+    (logger, hostname, ceph_endpoint, incoming_paths, recursive, db_handler) = initialise()
 
     p = MWACacheArchiveProcessor(logger,
                                  hostname,
                                  ceph_endpoint,
                                  incoming_paths,
-                                 recursive)
+                                 recursive,
+                                 db_handler)
 
     try:
         p.initialise()

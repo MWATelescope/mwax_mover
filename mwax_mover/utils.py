@@ -1,6 +1,7 @@
 from mwax_mover import mwax_command,ceph
 import base64
 from configparser import ConfigParser
+from datetime import datetime
 import glob
 import os
 import socket
@@ -172,14 +173,15 @@ def scan_directory(logger, watch_dir: str, pattern: str, recursive: bool) -> lis
     return files
 
 
-def validate_filename(filename: str) -> (bool, int, int, str, str):
-    # Returns valid, obs_id, filetype_id, file_ext, validation_error
+def validate_filename(filename: str, location: int) -> (bool, int, int, str, str, str):
+    # Returns valid, obs_id, filetype_id, file_ext, prefix, validation_error
     valid: bool = True
     obs_id = 0
     validation_error: str = ""
     filetype_id: int = -1
     file_name_part: str = ""
     file_ext_part: str = ""
+    prefix = ""
 
     # 1. Is there an extension?
     split_filename = os.path.splitext(filename)
@@ -231,4 +233,29 @@ def validate_filename(filename: str) -> (bool, int, int, str, str):
         else:
             obs_id = int(obs_id_check)
 
-    return valid, obs_id, filetype_id, file_ext_part, validation_error
+    if valid:
+        if location == 1:  # DMF
+            if filetype_id == 18: # Correlator
+                # We need a deterministic way of getting the dmf fs, so if we run this multiple times for the same
+                # file we get the same answer
+                filename_sum = 0
+                for c in filename:
+                    # Get the ascii code for this letter
+                    filename_sum = filename_sum + ord(c)
+
+                # Determine which filesystem to use
+                fs_number = filename_sum % 4
+
+                dmf_fs = f"mwa{fs_number}fs"
+            elif filetype_id == 17: # VCS
+                dmf_fs = "volt01fs"
+            else:
+                raise NotImplementedError
+
+            yyyy_mm_dd = datetime.now().strftime("%Y-%m-%d")
+            prefix = f"/mnt/{dmf_fs}/MWA/ngas_data_volume/mfa/{yyyy_mm_dd}/1/"
+        else:
+            # Ceph and Versity not yet implemented
+            raise NotImplementedError
+
+    return valid, obs_id, filetype_id, file_ext_part, prefix, validation_error
