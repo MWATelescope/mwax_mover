@@ -105,23 +105,21 @@ class MWACacheArchiveProcessor:
         (valid, obs_id, filetype, file_ext, prefix, validation_message) = utils.validate_filename(item, location)
 
         if valid:
-            # Insert record into metadata database
-            if not mwax_db.insert_data_file_row(self.logger, self.db_handler_object, item, filetype, self.hostname,
+            # Update record in metadata database
+            if not mwax_db.upsert_data_file_row(self.logger, self.db_handler_object, item, filetype, self.hostname,
                                                 False, None, None):
                 # if something went wrong, requeue
                 return False
 
             if location == 1:  # DMF
-
-
                 # Now copy the file into dmf
-
+                #TODO
+                pass
 
             elif location == 2:  # Ceph
-                if utils.archive_file_ceph(self.logger,
+                return utils.archive_file_ceph(self.logger,
                                            item,
-                                           self.ceph_endpoint) is not True:
-                    return False
+                                           self.ceph_endpoint)
 
             self.logger.debug(f"{item}- archive_handler() Deleting file")
             mwax_mover.remove_file(self.logger, item)

@@ -236,8 +236,8 @@ def validate_filename(filename: str, location: int) -> (bool, int, int, str, str
     if valid:
         if location == 1:  # DMF
             if filetype_id == 18: # Correlator
-                # We need a deterministic way of getting the dmf fs, so if we run this multiple times for the same
-                # file we get the same answer
+                # We need a deterministic way of getting the dmf fs number (01,02,03,04), so if we run this multiple
+                # times for the same file we get the same answer
                 filename_sum = 0
                 for c in filename:
                     # Get the ascii code for this letter

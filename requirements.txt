@@ -1,6 +1,6 @@
-inotify
-psycopg2-binary
-requests
-tenacity
-python-openstackclient
-boto3
+inotify==0.2.10
+psycopg2-binary==2.9.1
+requests==2.25.1
+tenacity==8.0.1
+python-openstackclient==5.6.0
+boto3==1.18.45

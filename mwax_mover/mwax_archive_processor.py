@@ -126,7 +126,7 @@ class MWAXArchiveProcessor:
 
         if valid:
             # Insert record into metadata database
-            if not mwax_db.insert_data_file_row(self.logger, self.db_handler_object, item, filetype, self.hostname,
+            if not mwax_db.upsert_data_file_row(self.logger, self.db_handler_object, item, filetype, self.hostname,
                                                 False, None, None):
                 # if something went wrong, requeue
                 return False
@@ -141,6 +141,9 @@ class MWAXArchiveProcessor:
                 self.queue_vis.put(item)
                 self.logger.info(f"{item}- db_handler() Added to visibility queue for archiving. "
                                  f"Queue size: {self.queue_vis.qsize()}")
+            else:
+                self.logger.error(f"{item}- db_handler() - not a valid file extension")
+                return False
         else:
             # The filename was not valid
             self.logger.error(f"{item}- db_handler() {validation_message}")
