@@ -76,8 +76,10 @@ def archive_file_rsync(logger, full_filename: str, archive_numa_node, archive_de
         return False
 
     # Build final command line
-    # rsync -r /volume1/incoming/1313386776_20210819053918_ch118_000.fits ngas@fe1.pawsey.org.au:/mnt/mwa_scratch_01fs/testdata/cache_test/20211023/
-    cmdline = f"{numa_cmdline}rsync -r {full_filename} {archive_destination_host}:{archive_destination_path}"
+    # --no-compress ensures we don't try to compress (it's going to be quite uncompressible)
+    # The -e "xxx" is there to remove as much encryption/compression of the ssh connection as possible to speed up the xfer
+    cmdline = f"{numa_cmdline}rsync --no-compress -e 'ssh -T -c aes128-gcm@openssh.com -o Compression=no -x ' " \
+              f"-r {full_filename} {archive_destination_host}:{archive_destination_path}"
 
     start_time = time.time()
 
