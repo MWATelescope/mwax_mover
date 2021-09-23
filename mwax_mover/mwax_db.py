@@ -101,7 +101,7 @@ def upsert_data_file_row(db_handler_object,
           f"remote_archived = excluded.remote_archived, location = excluded.location, prefix = excluded.prefix"
 
     try:
-        db_handler_object.insert_one_row(sql, (str(obsid), filetype, file_size,
+        db_handler_object.upsert_one_row(sql, (str(obsid), filetype, file_size,
                                               filename, hostname,
                                               remote_archived, deleted, location, prefix))
 
