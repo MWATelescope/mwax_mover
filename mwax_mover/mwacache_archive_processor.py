@@ -105,31 +105,37 @@ class MWACacheArchiveProcessor:
         (valid, obs_id, filetype, file_ext, prefix, dmf_host, validation_message) = utils.validate_filename(item, location)
 
         if valid:
-            # Update record in metadata database
-            if not mwax_db.upsert_data_file_row(self.db_handler_object, item, filetype, self.hostname,
-                                                True, location, prefix):
-                # if something went wrong, requeue
-                return False
+            archive_success = False
 
             if location == 1:  # DMF
                 # Now copy the file into dmf
-                return utils.archive_file_rsync(self.logger,
-                                                item,
-                                                None,
-                                                f"ngas@{dmf_host}",
-                                                prefix,
-                                                120)
+                archive_success = utils.archive_file_rsync(self.logger,
+                                                           item,
+                                                           None,
+                                                           f"ngas@{dmf_host}",
+                                                           prefix,
+                                                           120)
 
             elif location == 2:  # Ceph
-                return utils.archive_file_ceph(self.logger,
-                                           item,
-                                           self.ceph_endpoint)
+                archive_success = utils.archive_file_ceph(self.logger,
+                                                          item,
+                                                          self.ceph_endpoint)
 
-            self.logger.debug(f"{item}- archive_handler() Deleting file")
-            mwax_mover.remove_file(self.logger, item)
+            if archive_success:
+                # Update record in metadata database
+                if not mwax_db.upsert_data_file_row(self.db_handler_object, item, filetype, self.hostname,
+                                                    True, location, prefix):
+                    # if something went wrong, requeue
+                    return False
 
-            self.logger.info(f"{item}- archive_handler() Finished")
-            return True
+                # If all is well, we have the file safely archived and the database updated, so remove the file
+                self.logger.debug(f"{item}- archive_handler() Deleting file")
+                mwax_mover.remove_file(self.logger, item)
+
+                self.logger.info(f"{item}- archive_handler() Finished")
+                return True
+            else:
+                return False
         else:
             # The filename was not valid
             self.logger.error(f"{item}- db_handler() {validation_message}")
