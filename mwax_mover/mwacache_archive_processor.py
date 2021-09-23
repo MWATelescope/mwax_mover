@@ -107,7 +107,7 @@ class MWACacheArchiveProcessor:
         if valid:
             # Update record in metadata database
             if not mwax_db.upsert_data_file_row(self.db_handler_object, item, filetype, self.hostname,
-                                                False, None, None):
+                                                True, location, prefix):
                 # if something went wrong, requeue
                 return False
 
