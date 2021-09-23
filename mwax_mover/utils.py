@@ -78,7 +78,7 @@ def archive_file_rsync(logger, full_filename: str, archive_numa_node, archive_de
     # Build final command line
     # --no-compress ensures we don't try to compress (it's going to be quite uncompressible)
     # The -e "xxx" is there to remove as much encryption/compression of the ssh connection as possible to speed up the xfer
-    cmdline = f"{numa_cmdline}rsync --no-compress -e 'ssh -T -c aes128-gcm@openssh.com -o Compression=no -x ' " \
+    cmdline = f"{numa_cmdline}rsync --no-compress -e 'ssh -T -c aes128-cbc -o Compression=no -x ' " \
               f"-r {full_filename} {archive_destination_host}:{archive_destination_path}"
 
     start_time = time.time()
