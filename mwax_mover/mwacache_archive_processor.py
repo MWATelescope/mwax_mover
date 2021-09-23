@@ -102,19 +102,23 @@ class MWACacheArchiveProcessor:
         location = 1  # DMF
 
         # validate the filename
-        (valid, obs_id, filetype, file_ext, prefix, validation_message) = utils.validate_filename(item, location)
+        (valid, obs_id, filetype, file_ext, prefix, dmf_host, validation_message) = utils.validate_filename(item, location)
 
         if valid:
             # Update record in metadata database
-            if not mwax_db.upsert_data_file_row(self.logger, self.db_handler_object, item, filetype, self.hostname,
+            if not mwax_db.upsert_data_file_row(self.db_handler_object, item, filetype, self.hostname,
                                                 False, None, None):
                 # if something went wrong, requeue
                 return False
 
             if location == 1:  # DMF
                 # Now copy the file into dmf
-                #TODO
-                pass
+                return utils.archive_file_rsync(self.logger,
+                                                item,
+                                                None,
+                                                f"ngas@{dmf_host}",
+                                                prefix,
+                                                120)
 
             elif location == 2:  # Ceph
                 return utils.archive_file_ceph(self.logger,
@@ -296,7 +300,8 @@ def initialise():
         cfg_metadatadb_port = None
 
         # Initiate database connection pool for metadata db
-    db_handler = mwax_db.MWAXDBHandler(host=cfg_metadatadb_host,
+    db_handler = mwax_db.MWAXDBHandler(logger=logger,
+                                       host=cfg_metadatadb_host,
                                        port=cfg_metadatadb_port,
                                        db=cfg_metadatadb_db,
                                        user=cfg_metadatadb_user,

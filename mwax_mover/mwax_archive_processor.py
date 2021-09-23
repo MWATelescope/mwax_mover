@@ -122,11 +122,11 @@ class MWAXArchiveProcessor:
 
         # validate the filename
         location = 1 # DMF for now
-        (valid, obs_id, filetype, file_ext, _, validation_message) = utils.validate_filename(item, location)
+        (valid, obs_id, filetype, file_ext, _, _, validation_message) = utils.validate_filename(item, location)
 
         if valid:
             # Insert record into metadata database
-            if not mwax_db.upsert_data_file_row(self.logger, self.db_handler_object, item, filetype, self.hostname,
+            if not mwax_db.upsert_data_file_row(self.db_handler_object, item, filetype, self.hostname,
                                                 False, None, None):
                 # if something went wrong, requeue
                 return False

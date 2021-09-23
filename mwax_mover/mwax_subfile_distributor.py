@@ -298,7 +298,8 @@ class MWAXSubfileDistributor:
                                                                         "archive_command_numa_node")
 
             # Initiate database connection pool for metadata db
-            self.db_handler = mwax_db.MWAXDBHandler(host=self.cfg_metadatadb_host,
+            self.db_handler = mwax_db.MWAXDBHandler(logger=self.logger,
+                                                    host=self.cfg_metadatadb_host,
                                                     port=self.cfg_metadatadb_port,
                                                     db=self.cfg_metadatadb_db,
                                                     user=self.cfg_metadatadb_user,

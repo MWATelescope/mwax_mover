@@ -1,3 +1,5 @@
+import random
+
 from mwax_mover import mwax_command,ceph
 import base64
 from configparser import ConfigParser
@@ -54,6 +56,43 @@ def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, num
         logger.info(f"{full_filename} load_psrdada_ringbuffer success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
 
     return return_value
+
+
+def archive_file_rsync(logger, full_filename: str, archive_numa_node, archive_destination_host: str,
+                       archive_destination_path: str, timeout: int):
+    logger.debug(f"{full_filename} attempting archive_file_rsync...")
+
+    # If provided, launch using specific numa node. Passing None ignores this part of the command line
+    if archive_numa_node:
+        numa_cmdline = f"numactl --cpunodebind={str(archive_numa_node)} --membind={str(archive_numa_node)} "
+    else:
+        numa_cmdline = ""
+
+    # get file size
+    try:
+        file_size = os.path.getsize(full_filename)
+    except Exception as e:
+        logger.error(f"Error determining file size for {full_filename}. Error {e}")
+        return False
+
+    # Build final command line
+    # rsync -r /volume1/incoming/1313386776_20210819053918_ch118_000.fits ngas@fe1.pawsey.org.au:/mnt/mwa_scratch_01fs/testdata/cache_test/20211023/
+    cmdline = f"{numa_cmdline}rsync -r {full_filename} {archive_destination_host}:{archive_destination_path}"
+
+    start_time = time.time()
+
+    # run xrdcp
+    if mwax_command.run_command(logger, cmdline, timeout):
+        elapsed = time.time() - start_time
+
+        size_gigabytes = float(file_size) / (1000. * 1000. * 1000.)
+        gbps_per_sec = (size_gigabytes * 8) / elapsed
+
+        logger.info(f"{full_filename} archive_file_rsync success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
+
+        return True
+    else:
+        return False
 
 
 def archive_file_xrootd(logger, full_filename: str, archive_numa_node, archive_destination_host: str, timeout: int):
@@ -173,8 +212,8 @@ def scan_directory(logger, watch_dir: str, pattern: str, recursive: bool) -> lis
     return files
 
 
-def validate_filename(filename: str, location: int) -> (bool, int, int, str, str, str):
-    # Returns valid, obs_id, filetype_id, file_ext, prefix, validation_error
+def validate_filename(filename: str, location: int) -> (bool, int, int, str, str, str, str):
+    # Returns valid, obs_id, filetype_id, file_ext, prefix, dmf_host, validation_error
     valid: bool = True
     obs_id = 0
     validation_error: str = ""
@@ -182,6 +221,7 @@ def validate_filename(filename: str, location: int) -> (bool, int, int, str, str
     file_name_part: str = ""
     file_ext_part: str = ""
     prefix = ""
+    dmf_host = ""
 
     # 1. Is there an extension?
     split_filename = os.path.splitext(filename)
@@ -235,27 +275,31 @@ def validate_filename(filename: str, location: int) -> (bool, int, int, str, str
 
     if valid:
         if location == 1:  # DMF
+            # We need a deterministic way of getting the dmf fs number (01,02,03,04), so if we run this multiple
+            # times for the same file we get the same answer
+            filename_sum = 0
+            for c in filename:
+                # Get the ascii code for this letter
+                filename_sum = filename_sum + ord(c)
+
             if filetype_id == 18: # Correlator
-                # We need a deterministic way of getting the dmf fs number (01,02,03,04), so if we run this multiple
-                # times for the same file we get the same answer
-                filename_sum = 0
-                for c in filename:
-                    # Get the ascii code for this letter
-                    filename_sum = filename_sum + ord(c)
-
                 # Determine which filesystem to use
-                fs_number = filename_sum % 4
+                fs_number = (filename_sum % 4) + 1
+                dmf_fs = f"mwa0{fs_number}fs"
 
-                dmf_fs = f"mwa{fs_number}fs"
             elif filetype_id == 17: # VCS
                 dmf_fs = "volt01fs"
+
             else:
                 raise NotImplementedError
 
+            # use any dmf host
+            dmf_host = random.choice(["fe1.pawsey.org.au","fe2.pawsey.org.au","fe4.pawsey.org.au"])
+
             yyyy_mm_dd = datetime.now().strftime("%Y-%m-%d")
-            prefix = f"/mnt/{dmf_fs}/MWA/ngas_data_volume/mfa/{yyyy_mm_dd}/1/"
+            prefix = f"/mnt/{dmf_fs}/MWA/ngas_data_volume/mfa/{yyyy_mm_dd}/"
         else:
             # Ceph and Versity not yet implemented
             raise NotImplementedError
 
-    return valid, obs_id, filetype_id, file_ext_part, prefix, validation_error
+    return valid, obs_id, filetype_id, file_ext_part, prefix, dmf_host, validation_error
