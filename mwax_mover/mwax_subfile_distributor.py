@@ -3,6 +3,7 @@ from mwax_mover import mwax_db
 from mwax_mover import mwax_filterbank_processor
 from mwax_mover import mwax_subfile_processor
 from mwax_mover import utils
+from mwax_mover import version
 import argparse
 from configparser import ConfigParser
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -138,6 +139,8 @@ class MWAXSubfileDistributor:
         self.cfg_subfile_path = None
         self.cfg_voltdata_path = None
         self.cfg_always_keep_subfiles = None
+        self.cfg_health_multicast_ip = None
+        self.cfg_health_multicast_port = None
 
         # Beamformer
         self.cfg_bf_enabled = None
@@ -182,7 +185,8 @@ class MWAXSubfileDistributor:
                              "suite for the MWA. It will perform different tasks based on the configuration file.\n" \
                              "In addition, it will automatically archive files in /voltdata and /visdata to the " \
                              "mwacache servers at the Curtin Data Centre. In Beamformer mode, filterbank files " \
-                             "generated will be copied to a remote host running Fredda.\n"
+                             "generated will be copied to a remote host running Fredda.  " \
+                             f"(mwax_mover {version.get_mwax_mover_version_string()})\n"
 
         parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
 
@@ -219,11 +223,13 @@ class MWAXSubfileDistributor:
         file_log.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
         self.logger.addHandler(file_log)
 
-        self.logger.info("Starting mwax_subfile_distributor processor...")
+        self.logger.info(f"Starting mwax_subfile_distributor processor...{version.get_mwax_mover_version_string()}")
         self.cfg_webserver_port = utils.read_config(self.logger, self.config, "mwax mover", "webserver_port")
         self.cfg_subfile_path = utils.read_config(self.logger, self.config,"mwax mover", "subfile_path")
         self.cfg_voltdata_path = utils.read_config(self.logger, self.config,"mwax mover", "voltdata_path")
         self.cfg_always_keep_subfiles = int(utils.read_config(self.logger, self.config,"mwax mover", "always_keep_subfiles")) == 1
+        self.cfg_health_multicast_ip = utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_ip")
+        self.cfg_health_multicast_port = int(utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_port"))
 
         if not os.path.exists(self.cfg_subfile_path):
             self.logger.error(f"Subfile file location {self.cfg_subfile_path} does not exist. Quitting.")
@@ -368,13 +374,32 @@ class MWAXSubfileDistributor:
                 self.logger.info("Filterbank Archiving is disabled due to configuration setting "
                                  "`fil_destination_enabled`.")
 
+    def health_handler(self):
+        while self.running:
+            # Code to run by the health thread
+            status_dict = self.get_status()
+
+            # Convert the status to bytes
+            status_bytes = json.dumps(status_dict).encode('utf-8')
+
+            # Send the bytes
+            try:
+                utils.send_multicast(self.cfg_health_multicast_ip, self.cfg_health_multicast_port, status_bytes)
+            except Exception as e:
+                self.logger.warning(f"health_handler: Failed to send health information. {e}")
+
+            # Sleep for a second
+            time.sleep(1)
+
     def get_status(self) -> dict:
-        main_status = {"host": self.hostname,
+        main_status = {"process": type(self).__name__,
+                       "version:": version.get_mwax_mover_version_string(),
+                       "host": self.hostname,
+                       "running": self.running
                        "beamformer": self.cfg_bf_enabled,
                        "beamformer archiving": self.cfg_bf_archive_destination_enabled,
                        "correlator": self.cfg_corr_enabled,
-                       "correlator archiving": self.cfg_corr_archive_destination_enabled,
-                       "running": self.running}
+                       "correlator archiving": self.cfg_corr_archive_destination_enabled}
 
         processor_status_list = []
 
@@ -403,6 +428,11 @@ class MWAXSubfileDistributor:
         # Make sure we can Ctrl-C / kill out of this
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
+
+        # create a health thread
+        self.logger.info("Starting health_thread...")
+        health_thread = threading.Thread(name="health_thread", target=self.health_handler, daemon=True)
+        health_thread.start()
 
         if self.cfg_bf_enabled:
             self.logger.info(f"Beamformer Enabled")

@@ -1,4 +1,4 @@
-from mwax_mover import mwax_mover, mwax_db, mwax_queue_worker, mwax_watcher, utils
+from mwax_mover import mwax_mover, mwax_db, mwax_queue_worker, mwax_watcher, utils, version
 import argparse
 from configparser import ConfigParser
 import json
@@ -233,9 +233,10 @@ class MWACacheArchiveProcessor:
             archiving = "running"
 
         return_status = {
+                         "process": type(self).__name__,
+                         "version:": version.get_mwax_mover_version_string(),
                          "host": self.hostname,
                          "running": self.running,
-                         "type": type(self).__name__,
                          "archiving": archiving,
                          "watchers": watcher_list,
                          "workers": worker_list
@@ -260,7 +261,8 @@ def initialise():
     parser.description = "mwacache_archive_processor: a command line tool which is part of the MWA " \
                          "correlator for the MWA. It will monitor various directories on each mwacache " \
                          "server and, upon detecting a file, send it to Pawsey's LTS. It will then " \
-                         "remove the file from the local disk."
+                        f"remove the file from the local disk. " \
+                        f"(mwax_mover {version.get_mwax_mover_version_string()})\n"
 
     parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
 
@@ -298,7 +300,7 @@ def initialise():
     file_log.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
     logger.addHandler(file_log)
 
-    logger.info("Starting mwacache_archive_processor processor...")
+    logger.info(f"Starting mwacache_archive_processor processor...{version.get_mwax_mover_version_string()}")
 
     i = 1
     cfg_incoming_paths = []
