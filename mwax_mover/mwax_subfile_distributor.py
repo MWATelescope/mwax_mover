@@ -232,6 +232,10 @@ class MWAXSubfileDistributor:
         self.cfg_health_multicast_ip = utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_ip")
         self.cfg_health_multicast_port = int(utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_port"))
         self.cfg_health_multicast_hops = int(utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_hops"))
+        # get this hosts primary network interface ip
+        self.cfg_health_multicast_interface_ip = utils.get_primary_ip_address()
+        self.logger.info(f"IP for sending multicast: {self.cfg_health_multicast_interface_ip}")
+
 
         if not os.path.exists(self.cfg_subfile_path):
             self.logger.error(f"Subfile file location {self.cfg_subfile_path} does not exist. Quitting.")
@@ -386,7 +390,8 @@ class MWAXSubfileDistributor:
 
             # Send the bytes
             try:
-                utils.send_multicast(self.cfg_health_multicast_ip,
+                utils.send_multicast(self.cfg_health_multicast_interface_ip,
+                                     self.cfg_health_multicast_ip,
                                      self.cfg_health_multicast_port,
                                      status_bytes,
                                      self.cfg_health_multicast_hops)
