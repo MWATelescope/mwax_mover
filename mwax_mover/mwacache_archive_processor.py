@@ -320,7 +320,7 @@ def initialise():
     cfg_health_multicast_port = int(utils.read_config(logger, config, "mwax mover", "health_multicast_port"))
     cfg_health_multicast_hops = int(utils.read_config(logger, config, "mwax mover", "health_multicast_hops"))
     # get this hosts primary network interface ip
-    cfg_health_multicast_interface_ip = utils.get_primary_ip_address()
+    cfg_health_multicast_interface_ip = utils.get_ip_address("eno1")
     logger.info(f"IP for sending multicast: {cfg_health_multicast_interface_ip}")
 
     #
