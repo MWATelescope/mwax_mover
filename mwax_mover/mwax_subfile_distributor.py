@@ -141,6 +141,7 @@ class MWAXSubfileDistributor:
         self.cfg_always_keep_subfiles = None
         self.cfg_health_multicast_ip = None
         self.cfg_health_multicast_port = None
+        self.cfg_health_multicast_hops = None
 
         # Beamformer
         self.cfg_bf_enabled = None
@@ -230,6 +231,7 @@ class MWAXSubfileDistributor:
         self.cfg_always_keep_subfiles = int(utils.read_config(self.logger, self.config,"mwax mover", "always_keep_subfiles")) == 1
         self.cfg_health_multicast_ip = utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_ip")
         self.cfg_health_multicast_port = int(utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_port"))
+        self.cfg_health_multicast_hops = int(utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_hops"))
 
         if not os.path.exists(self.cfg_subfile_path):
             self.logger.error(f"Subfile file location {self.cfg_subfile_path} does not exist. Quitting.")
@@ -384,7 +386,10 @@ class MWAXSubfileDistributor:
 
             # Send the bytes
             try:
-                utils.send_multicast(self.cfg_health_multicast_ip, self.cfg_health_multicast_port, status_bytes, 1)
+                utils.send_multicast(self.cfg_health_multicast_ip,
+                                     self.cfg_health_multicast_port,
+                                     status_bytes,
+                                     self.cfg_health_multicast_hops)
             except Exception as e:
                 self.logger.warning(f"health_handler: Failed to send health information. {e}")
 

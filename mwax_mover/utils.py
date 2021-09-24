@@ -307,7 +307,7 @@ def validate_filename(filename: str, location: int) -> (bool, int, int, str, str
 
     return valid, obs_id, filetype_id, file_ext_part, prefix, dmf_host, validation_error
 
-def send_multicast(dest_multicast_ip: str, dest_multicast_port: int, message: bytes, ttl_hops:int = 1):
+def send_multicast(dest_multicast_ip: str, dest_multicast_port: int, message: bytes, ttl_hops:int):
     # Send multicast message or raise exception if couldn't
 
     multicast_group = (dest_multicast_ip, dest_multicast_port)
@@ -318,7 +318,7 @@ def send_multicast(dest_multicast_ip: str, dest_multicast_port: int, message: by
     # Set a timeout so the socket does not block indefinitely when trying to send data
     sock.settimeout(0.2)
 
-    # Set the time-to-live for messages to 1 so they do not go past the local network segment.
+    # Set the time-to-live for messages.
     ttl = struct.pack('b', ttl_hops)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
 

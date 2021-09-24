@@ -21,7 +21,8 @@ class MWACacheArchiveProcessor:
                  recursive: bool,
                  db_handler_object,
                  health_multicast_ip,
-                 health_multicast_port):
+                 health_multicast_port,
+                 health_multicast_hops):
 
         self.logger = logger
 
@@ -31,6 +32,7 @@ class MWACacheArchiveProcessor:
 
         self.health_multicast_ip = health_multicast_ip
         self.health_multicast_port = health_multicast_port
+        self.health_multicast_hops = health_multicast_hops
 
         self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_NEW
         self.archiving_paused = False
@@ -204,7 +206,7 @@ class MWACacheArchiveProcessor:
 
             # Send the bytes
             try:
-                utils.send_multicast(self.health_multicast_ip, self.health_multicast_port, status_bytes, 4)
+                utils.send_multicast(self.health_multicast_ip, self.health_multicast_port, status_bytes, self.health_multicast_hops)
             except Exception as e:
                 self.logger.warning(f"health_handler: Failed to send health information. {e}")
 
@@ -310,6 +312,7 @@ def initialise():
 
     cfg_health_multicast_ip = utils.read_config(logger, config, "mwax mover", "health_multicast_ip")
     cfg_health_multicast_port = int(utils.read_config(logger, config, "mwax mover", "health_multicast_port"))
+    cfg_health_multicast_hops = int(utils.read_config(logger, config, "mwax mover", "health_multicast_hops"))
 
     #
     # Options specified per host
@@ -355,12 +358,12 @@ def initialise():
                                        password=cfg_metadatadb_pass)
 
     return logger, hostname, cfg_ceph_endpoint, cfg_incoming_paths, cfg_recursive, db_handler, \
-           cfg_health_multicast_ip, cfg_health_multicast_port
+           cfg_health_multicast_ip, cfg_health_multicast_port, cfg_health_multicast_hops
 
 
 def main():
     (logger, hostname, ceph_endpoint, incoming_paths, recursive, db_handler,
-     health_multicast_ip, health_multicast_port) = initialise()
+     health_multicast_ip, health_multicast_port, health_multicast_hops) = initialise()
 
     p = MWACacheArchiveProcessor(logger,
                                  hostname,
@@ -369,7 +372,8 @@ def main():
                                  recursive,
                                  db_handler,
                                  health_multicast_ip,
-                                 health_multicast_port)
+                                 health_multicast_port,
+                                 health_multicast_hops)
 
     try:
         p.initialise()
