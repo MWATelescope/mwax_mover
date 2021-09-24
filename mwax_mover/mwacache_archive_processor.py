@@ -197,13 +197,14 @@ class MWACacheArchiveProcessor:
     def health_handler(self):
         while self.running:
             # Code to run by the health thread
-            status_dict = self.get_status()
+            status_dict = "self.get_status()"
 
             # Convert the status to bytes
             status_bytes = json.dumps(status_dict).encode('utf-8')
 
             # Send the bytes
             try:
+                self.logger.debug("health_handler: sending health multicast...")
                 utils.send_multicast(self.health_multicast_ip, self.health_multicast_port, status_bytes)
             except Exception as e:
                 self.logger.warning(f"health_handler: Failed to send health information. {e}")
