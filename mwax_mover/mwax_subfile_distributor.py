@@ -139,6 +139,7 @@ class MWAXSubfileDistributor:
         self.cfg_subfile_path = None
         self.cfg_voltdata_path = None
         self.cfg_always_keep_subfiles = None
+        self.cfg_health_multicast_interface_name = None
         self.cfg_health_multicast_ip = None
         self.cfg_health_multicast_port = None
         self.cfg_health_multicast_hops = None
@@ -229,11 +230,12 @@ class MWAXSubfileDistributor:
         self.cfg_subfile_path = utils.read_config(self.logger, self.config,"mwax mover", "subfile_path")
         self.cfg_voltdata_path = utils.read_config(self.logger, self.config,"mwax mover", "voltdata_path")
         self.cfg_always_keep_subfiles = int(utils.read_config(self.logger, self.config,"mwax mover", "always_keep_subfiles")) == 1
+        self.cfg_health_multicast_interface_name = utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_interface_name")
         self.cfg_health_multicast_ip = utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_ip")
         self.cfg_health_multicast_port = int(utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_port"))
         self.cfg_health_multicast_hops = int(utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_hops"))
         # get this hosts primary network interface ip
-        self.cfg_health_multicast_interface_ip = utils.get_primary_ip_address()
+        self.cfg_health_multicast_interface_ip = utils.get_ip_address(self.cfg_health_multicast_interface_name)
         self.logger.info(f"IP for sending multicast: {self.cfg_health_multicast_interface_ip}")
 
 
