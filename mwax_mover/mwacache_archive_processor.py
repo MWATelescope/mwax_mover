@@ -1,6 +1,7 @@
 from mwax_mover import mwax_mover, mwax_db, mwax_queue_worker, mwax_watcher, utils
 import argparse
 from configparser import ConfigParser
+import json
 import logging
 import logging.handlers
 import os
@@ -18,13 +19,18 @@ class MWACacheArchiveProcessor:
                  ceph_endpoint: str,
                  incoming_paths: list,
                  recursive: bool,
-                 db_handler_object):
+                 db_handler_object,
+                 health_multicast_ip,
+                 health_multicast_port):
 
         self.logger = logger
 
         self.hostname = hostname
         self.ceph_endpoint = ceph_endpoint
         self.recursive = recursive
+
+        self.health_multicast_ip = health_multicast_ip
+        self.health_multicast_port = health_multicast_port
 
         self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_NEW
         self.archiving_paused = False
@@ -47,6 +53,7 @@ class MWACacheArchiveProcessor:
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
 
+        # Start everything
         self.start()
 
         while self.running:
@@ -66,6 +73,9 @@ class MWACacheArchiveProcessor:
         self.logger.info("Completed Successfully")
 
     def start(self):
+        # create a health thread
+        health_thread = threading.Thread(name="health_thread", target=self.health_handler(), daemon=True)
+
         for watch_dir in self.watch_dirs:
             # Create watcher for each data path queue
             new_watcher = mwax_watcher.Watcher(path=watch_dir, q=self.queue,
@@ -176,6 +186,24 @@ class MWACacheArchiveProcessor:
                     t.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
+    def health_handler(self):
+        while self.running:
+            # Code to run by the health thread
+            status_dict = self.get_status()
+
+            # Convert the status to bytes
+            status_bytes = json.dumps(status_dict).encode('utf-8')
+
+            # Send the bytes
+            try:
+                utils.send_multicast(self.health_multicast_ip, self.health_multicast_port, status_bytes)
+            except Exception as e:
+                self.logger.warning(f"health_handler: Failed to send health information. {e}")
+
+            # Sleep for a second
+            time.sleep(1)
+
+
     def get_status(self) -> dict:
         watcher_list = []
 
@@ -270,6 +298,9 @@ def initialise():
     # Common config options
     cfg_ceph_endpoint = utils.read_config(logger, config, "mwax mover", "ceph_endpoint")
 
+    health_multicast_ip = config.get("mwax mover", "health_multicast_ip")
+    health_multicast_port = config.get("mwax mover", "health_multicast_port")
+
     #
     # Options specified per host
     #
@@ -313,18 +344,22 @@ def initialise():
                                        user=cfg_metadatadb_user,
                                        password=cfg_metadatadb_pass)
 
-    return logger, hostname, cfg_ceph_endpoint, cfg_incoming_paths, cfg_recursive, db_handler
+    return logger, hostname, cfg_ceph_endpoint, cfg_incoming_paths, cfg_recursive, db_handler, \
+           health_multicast_ip, health_multicast_port
 
 
 def main():
-    (logger, hostname, ceph_endpoint, incoming_paths, recursive, db_handler) = initialise()
+    (logger, hostname, ceph_endpoint, incoming_paths, recursive, db_handler,
+     health_multicast_ip, health_multicast_port) = initialise()
 
     p = MWACacheArchiveProcessor(logger,
                                  hostname,
                                  ceph_endpoint,
                                  incoming_paths,
                                  recursive,
-                                 db_handler)
+                                 db_handler,
+                                 health_multicast_ip,
+                                 health_multicast_port)
 
     try:
         p.initialise()

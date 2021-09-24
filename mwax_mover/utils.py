@@ -1,5 +1,4 @@
 import random
-
 from mwax_mover import mwax_command,ceph
 import base64
 from configparser import ConfigParser
@@ -7,6 +6,8 @@ from datetime import datetime
 import glob
 import os
 import socket
+import struct
+import sys
 import time
 
 
@@ -305,3 +306,26 @@ def validate_filename(filename: str, location: int) -> (bool, int, int, str, str
             raise NotImplementedError
 
     return valid, obs_id, filetype_id, file_ext_part, prefix, dmf_host, validation_error
+
+def send_multicast(dest_multicast_ip: str, dest_multicast_port: int, message: bytes, ttl_hops:int = 1):
+    # Send multicast message or raise exception if couldn't
+
+    multicast_group = (dest_multicast_ip, dest_multicast_port)
+
+    # Create the datagram socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    # Set a timeout so the socket does not block indefinitely when trying to send data
+    sock.settimeout(0.2)
+
+    # Set the time-to-live for messages to 1 so they do not go past the local network segment.
+    ttl = struct.pack('b', ttl_hops)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
+
+    try:
+        # Send data to the multicast group
+        sock.sendto(message, multicast_group)
+    except Exception as e:
+        raise e
+    finally:
+        sock.close()
