@@ -74,9 +74,11 @@ class MWACacheArchiveProcessor:
 
     def start(self):
         # create a health thread
+        self.logger.info("Starting health_thread...")
         health_thread = threading.Thread(name="health_thread", target=self.health_handler(), daemon=True)
         health_thread.start()
 
+        self.logger.info("Creating watchers...")
         for watch_dir in self.watch_dirs:
             # Create watcher for each data path queue
             new_watcher = mwax_watcher.Watcher(path=watch_dir, q=self.queue,
@@ -86,6 +88,7 @@ class MWACacheArchiveProcessor:
             self.watchers.append(new_watcher)
 
         # Create queueworker archive queue
+        self.logger.info("Creating workers...")
         self.queue_worker = mwax_queue_worker.QueueWorker(label="Archiver",
                                                           q=self.queue,
                                                           executable_path=None,
@@ -94,17 +97,21 @@ class MWACacheArchiveProcessor:
                                                           log=self.logger,
                                                           requeue_to_eoq_on_failure=True)
 
+        self.logger.info("Starting watchers...")
         # Setup thread for watching filesystem
         for i, watcher in enumerate(self.watchers):
             watcher_thread = threading.Thread(name=f"watch_thread{i}", target=watcher.start, daemon=True)
             self.watcher_threads.append(watcher_thread)
             watcher_thread.start()
 
+        self.logger.info("Starting workers...")
         # Setup thread for processing items
         queue_worker_thread = threading.Thread(name="worker_thread", target=self.queue_worker.start,
                                                daemon=True)
         self.worker_threads.append(queue_worker_thread)
         queue_worker_thread.start()
+
+        self.logger.info("Started...")
 
     def archive_handler(self, item: str) -> bool:
         self.logger.info(f"{item}- archive_handler() Started...")
