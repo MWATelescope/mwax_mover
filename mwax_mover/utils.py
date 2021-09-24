@@ -7,6 +7,9 @@ import glob
 import os
 import socket
 import struct
+import socket
+import fcntl
+import struct
 import sys
 import time
 
@@ -307,16 +310,25 @@ def validate_filename(filename: str, location: int) -> (bool, int, int, str, str
 
     return valid, obs_id, filetype_id, file_ext_part, prefix, dmf_host, validation_error
 
-def send_multicast(dest_multicast_ip: str, dest_multicast_port: int, message: bytes, ttl_hops:int):
+def send_multicast(multicast_interface_ip: str, dest_multicast_ip: str, dest_multicast_port: int, message: bytes, ttl_hops:int):
     # Send multicast message or raise exception if couldn't
-
     multicast_group = (dest_multicast_ip, dest_multicast_port)
 
     # Create the datagram socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     # Set a timeout so the socket does not block indefinitely when trying to send data
-    sock.settimeout(0.2)
+    sock.settimeout(1)
+
+    # Disable loopback so you do not receive your own datagrams.
+    loopback = struct.pack('b', 0)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, loopback)
+
+    # Set local interface for outbound multicast datagrams.
+    # The IP address specified must be associated with a local,
+    # multicast - capable interface.
+    local_int = socket.inet_aton(multicast_interface_ip)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, local_int)
 
     # Set the time-to-live for messages.
     ttl = struct.pack('b', ttl_hops)
@@ -329,3 +341,14 @@ def send_multicast(dest_multicast_ip: str, dest_multicast_port: int, message: by
         raise e
     finally:
         sock.close()
+
+def get_ip_address(ifname: str) -> str:
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    return socket.inet_ntoa(fcntl.ioctl(
+        s.fileno(),
+        0x8915,  # SIOCGIFADDR
+        struct.pack('256s', bytes(ifname[:15], 'utf-8'))
+    )[20:24])
+
+def get_primary_ip_address() -> str:
+    return socket.gethostbyname(socket.gethostname())
