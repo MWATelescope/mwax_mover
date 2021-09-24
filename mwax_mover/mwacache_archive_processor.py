@@ -75,6 +75,7 @@ class MWACacheArchiveProcessor:
     def start(self):
         # create a health thread
         health_thread = threading.Thread(name="health_thread", target=self.health_handler(), daemon=True)
+        health_thread.start()
 
         for watch_dir in self.watch_dirs:
             # Create watcher for each data path queue
@@ -298,8 +299,8 @@ def initialise():
     # Common config options
     cfg_ceph_endpoint = utils.read_config(logger, config, "mwax mover", "ceph_endpoint")
 
-    cfg_health_multicast_ip = config.get("mwax mover", "health_multicast_ip")
-    cfg_health_multicast_port = int(config.get("mwax mover", "health_multicast_port"))
+    cfg_health_multicast_ip = utils.read_config(logger, config, "mwax mover", "health_multicast_ip")
+    cfg_health_multicast_port = int(utils.read_config(logger, config, "mwax mover", "health_multicast_port"))
 
     #
     # Options specified per host
