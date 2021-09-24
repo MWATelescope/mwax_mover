@@ -384,7 +384,7 @@ class MWAXSubfileDistributor:
 
             # Send the bytes
             try:
-                utils.send_multicast(self.cfg_health_multicast_ip, self.cfg_health_multicast_port, status_bytes)
+                utils.send_multicast(self.cfg_health_multicast_ip, self.cfg_health_multicast_port, status_bytes, 1)
             except Exception as e:
                 self.logger.warning(f"health_handler: Failed to send health information. {e}")
 

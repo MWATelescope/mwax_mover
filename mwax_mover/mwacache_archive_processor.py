@@ -204,7 +204,7 @@ class MWACacheArchiveProcessor:
 
             # Send the bytes
             try:
-                utils.send_multicast(self.health_multicast_ip, self.health_multicast_port, status_bytes)
+                utils.send_multicast(self.health_multicast_ip, self.health_multicast_port, status_bytes, 4)
             except Exception as e:
                 self.logger.warning(f"health_handler: Failed to send health information. {e}")
 
