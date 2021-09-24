@@ -75,7 +75,7 @@ class MWACacheArchiveProcessor:
     def start(self):
         # create a health thread
         self.logger.info("Starting health_thread...")
-        health_thread = threading.Thread(name="health_thread", target=self.health_handler(), daemon=True)
+        health_thread = threading.Thread(name="health_thread", target=self.health_handler, daemon=True)
         health_thread.start()
 
         self.logger.info("Creating watchers...")
@@ -204,7 +204,6 @@ class MWACacheArchiveProcessor:
 
             # Send the bytes
             try:
-                self.logger.debug("health_handler: sending health multicast...")
                 utils.send_multicast(self.health_multicast_ip, self.health_multicast_port, status_bytes)
             except Exception as e:
                 self.logger.warning(f"health_handler: Failed to send health information. {e}")
