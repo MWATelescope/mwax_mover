@@ -351,4 +351,4 @@ def get_ip_address(ifname: str) -> str:
     )[20:24])
 
 def get_primary_ip_address() -> str:
-    return socket.gethostbyname(socket.gethostname())
+    return socket.gethostbyname(socket.getfqdn())
