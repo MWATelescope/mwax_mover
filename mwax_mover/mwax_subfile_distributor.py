@@ -186,7 +186,7 @@ class MWAXSubfileDistributor:
                              "In addition, it will automatically archive files in /voltdata and /visdata to the " \
                              "mwacache servers at the Curtin Data Centre. In Beamformer mode, filterbank files " \
                              "generated will be copied to a remote host running Fredda.  " \
-                             f"(mwax_mover {version.get_mwax_mover_version_string()})\n"
+                             f"(mwax_mover v{version.get_mwax_mover_version_string()})\n"
 
         parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
 
@@ -223,7 +223,7 @@ class MWAXSubfileDistributor:
         file_log.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
         self.logger.addHandler(file_log)
 
-        self.logger.info(f"Starting mwax_subfile_distributor processor...{version.get_mwax_mover_version_string()}")
+        self.logger.info(f"Starting mwax_subfile_distributor processor...v{version.get_mwax_mover_version_string()}")
         self.cfg_webserver_port = utils.read_config(self.logger, self.config, "mwax mover", "webserver_port")
         self.cfg_subfile_path = utils.read_config(self.logger, self.config,"mwax mover", "subfile_path")
         self.cfg_voltdata_path = utils.read_config(self.logger, self.config,"mwax mover", "voltdata_path")
@@ -393,9 +393,9 @@ class MWAXSubfileDistributor:
 
     def get_status(self) -> dict:
         main_status = {"process": type(self).__name__,
-                       "version:": version.get_mwax_mover_version_string(),
+                       "version": version.get_mwax_mover_version_string(),
                        "host": self.hostname,
-                       "running": self.running
+                       "running": self.running,
                        "beamformer": self.cfg_bf_enabled,
                        "beamformer archiving": self.cfg_bf_archive_destination_enabled,
                        "correlator": self.cfg_corr_enabled,

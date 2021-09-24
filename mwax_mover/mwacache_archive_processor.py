@@ -234,7 +234,7 @@ class MWACacheArchiveProcessor:
 
         return_status = {
                          "process": type(self).__name__,
-                         "version:": version.get_mwax_mover_version_string(),
+                         "version": version.get_mwax_mover_version_string(),
                          "host": self.hostname,
                          "running": self.running,
                          "archiving": archiving,
@@ -262,7 +262,7 @@ def initialise():
                          "correlator for the MWA. It will monitor various directories on each mwacache " \
                          "server and, upon detecting a file, send it to Pawsey's LTS. It will then " \
                         f"remove the file from the local disk. " \
-                        f"(mwax_mover {version.get_mwax_mover_version_string()})\n"
+                        f"(mwax_mover v{version.get_mwax_mover_version_string()})\n"
 
     parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
 
@@ -300,7 +300,7 @@ def initialise():
     file_log.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
     logger.addHandler(file_log)
 
-    logger.info(f"Starting mwacache_archive_processor processor...{version.get_mwax_mover_version_string()}")
+    logger.info(f"Starting mwacache_archive_processor processor...v{version.get_mwax_mover_version_string()}")
 
     i = 1
     cfg_incoming_paths = []
