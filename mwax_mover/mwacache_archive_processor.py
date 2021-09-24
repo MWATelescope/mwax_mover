@@ -298,8 +298,8 @@ def initialise():
     # Common config options
     cfg_ceph_endpoint = utils.read_config(logger, config, "mwax mover", "ceph_endpoint")
 
-    health_multicast_ip = config.get("mwax mover", "health_multicast_ip")
-    health_multicast_port = config.get("mwax mover", "health_multicast_port")
+    cfg_health_multicast_ip = config.get("mwax mover", "health_multicast_ip")
+    cfg_health_multicast_port = int(config.get("mwax mover", "health_multicast_port"))
 
     #
     # Options specified per host
@@ -345,7 +345,7 @@ def initialise():
                                        password=cfg_metadatadb_pass)
 
     return logger, hostname, cfg_ceph_endpoint, cfg_incoming_paths, cfg_recursive, db_handler, \
-           health_multicast_ip, health_multicast_port
+           cfg_health_multicast_ip, cfg_health_multicast_port
 
 
 def main():
