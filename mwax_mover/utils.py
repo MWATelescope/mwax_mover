@@ -315,9 +315,9 @@ def send_multicast(multicast_interface_ip: str, dest_multicast_ip: str, dest_mul
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 
     # Disable loopback so you do not receive your own datagrams.
-    loopback = 0
-    if sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, loopback) != 0:
-        raise Exception("Error setsockopt IP_MULTICAST_LOOP failed")
+    #loopback = 0
+    #if sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, loopback) != 0:
+    #    raise Exception("Error setsockopt IP_MULTICAST_LOOP failed")
 
     # Set the time-to-live for messages.
     hops = struct.pack('b', ttl_hops)
@@ -327,8 +327,7 @@ def send_multicast(multicast_interface_ip: str, dest_multicast_ip: str, dest_mul
     # Set local interface for outbound multicast datagrams.
     # The IP address specified must be associated with a local,
     # multicast - capable interface.
-    local_int = socket.inet_aton(multicast_interface_ip)
-    if sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, local_int) != 0:
+    if sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(multicast_interface_ip)) != 0:
         raise Exception("Error setsockopt IP_MULTICAST_IF failed")
 
     try:
