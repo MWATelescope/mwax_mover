@@ -321,14 +321,12 @@ def send_multicast(multicast_interface_ip: str, dest_multicast_ip: str, dest_mul
 
     # Set the time-to-live for messages.
     hops = struct.pack('b', ttl_hops)
-    if sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, hops) != 0:
-        raise Exception("Error setsockopt IP_MULTICAST_TTL failed")
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, hops)
 
     # Set local interface for outbound multicast datagrams.
     # The IP address specified must be associated with a local,
     # multicast - capable interface.
-    if sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(multicast_interface_ip)) != 0:
-        raise Exception("Error setsockopt IP_MULTICAST_IF failed")
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(multicast_interface_ip))
 
     try:
         # Send data to the multicast group
