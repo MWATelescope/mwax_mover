@@ -311,14 +311,13 @@ def validate_filename(filename: str, location: int) -> (bool, int, int, str, str
     return valid, obs_id, filetype_id, file_ext_part, prefix, dmf_host, validation_error
 
 def send_multicast(multicast_interface_ip: str, dest_multicast_ip: str, dest_multicast_port: int, message: bytes, ttl_hops:int):
+    dest_addrinfo = socket.getaddrinfo(dest_multicast_ip, None)[0]
+
     # Send multicast message or raise exception if couldn't
-    multicast_group = (dest_multicast_ip, dest_multicast_port)
+    multicast_group = (dest_addrinfo[4][0], dest_multicast_port)
 
     # Create the datagram socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-    # Set a timeout so the socket does not block indefinitely when trying to send data
-    sock.settimeout(1)
 
     # Disable loopback so you do not receive your own datagrams.
     loopback = struct.pack('b', 0)
@@ -331,7 +330,7 @@ def send_multicast(multicast_interface_ip: str, dest_multicast_ip: str, dest_mul
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, local_int)
 
     # Set the time-to-live for messages.
-    ttl = struct.pack('b', ttl_hops)
+    ttl = struct.pack('@i', ttl_hops)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
 
     try:
