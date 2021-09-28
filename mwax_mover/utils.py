@@ -311,31 +311,31 @@ def validate_filename(filename: str, location: int) -> (bool, int, int, str, str
     return valid, obs_id, filetype_id, file_ext_part, prefix, dmf_host, validation_error
 
 def send_multicast(multicast_interface_ip: str, dest_multicast_ip: str, dest_multicast_port: int, message: bytes, ttl_hops:int):
-    dest_addrinfo = socket.getaddrinfo(dest_multicast_ip, None)[0]
-
-    # Send multicast message or raise exception if couldn't
-    multicast_group = (dest_addrinfo[4][0], dest_multicast_port)
-
     # Create the datagram socket
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 
     # Disable loopback so you do not receive your own datagrams.
-    loopback = struct.pack('b', 0)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, loopback)
+    loopback = 0
+    if sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, loopback) != 0:
+        raise Exception("Error setsockopt IP_MULTICAST_LOOP failed")
+
+    # Set the time-to-live for messages.
+    hops = struct.pack('b', ttl_hops)
+    if sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, hops) != 0:
+        raise Exception("Error setsockopt IP_MULTICAST_TTL failed")
 
     # Set local interface for outbound multicast datagrams.
     # The IP address specified must be associated with a local,
     # multicast - capable interface.
     local_int = socket.inet_aton(multicast_interface_ip)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, local_int)
-
-    # Set the time-to-live for messages.
-    ttl = struct.pack('@i', ttl_hops)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
+    if sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, local_int) != 0:
+        raise Exception("Error setsockopt IP_MULTICAST_IF failed")
 
     try:
         # Send data to the multicast group
-        sock.sendto(message, multicast_group)
+        if sock.sendto(message, (dest_multicast_ip, dest_multicast_port)) == 0:
+            raise Exception("Error sock.sendto() sent 0 bytes")
+
     except Exception as e:
         raise e
     finally:

@@ -201,7 +201,7 @@ class MWACacheArchiveProcessor:
     def health_handler(self):
         while self.running:
             # Code to run by the health thread
-            status_dict = self.get_status()
+            status_dict = {'hello world'} #self.get_status()
 
             # Convert the status to bytes
             status_bytes = json.dumps(status_dict).encode('utf-8')
