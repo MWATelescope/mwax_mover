@@ -121,7 +121,7 @@ def validate_filename(filename: str, location: int) -> (bool, int, int, str, str
             dmf_host = random.choice(["fe1.pawsey.org.au","fe2.pawsey.org.au","fe4.pawsey.org.au"])
 
             yyyy_mm_dd = datetime.now().strftime("%Y-%m-%d")
-            prefix = f"/mnt/{dmf_fs}/MWA/ngas_data_volume/mfa/{yyyy_mm_dd}/1/"
+            prefix = f"/mnt/{dmf_fs}/MWA/ngas_data_volume/mfa/{yyyy_mm_dd}/"
         else:
             # Ceph and Versity not yet implemented
             raise NotImplementedError
