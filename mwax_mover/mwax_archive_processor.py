@@ -1,4 +1,4 @@
-from mwax_mover import mwax_mover, mwax_db, mwax_queue_worker, mwax_watcher, utils
+from mwax_mover import mwax_mover, mwax_db, mwax_queue_worker, mwax_watcher, mwa_archiver, utils
 import logging
 import logging.handlers
 import os
@@ -122,7 +122,7 @@ class MWAXArchiveProcessor:
 
         # validate the filename
         location = 1 # DMF for now
-        (valid, obs_id, filetype, file_ext, _, _, validation_message) = utils.validate_filename(item, location)
+        (valid, obs_id, filetype, file_ext, _, _, validation_message) = mwa_archiver.validate_filename(item, location)
 
         if valid:
             # Insert record into metadata database
@@ -155,7 +155,7 @@ class MWAXArchiveProcessor:
     def archive_handler(self, item: str) -> bool:
         self.logger.info(f"{item}- archive_handler() Started...")
 
-        if utils.archive_file_xrootd(self.logger, item, self.archive_command_numa_node, self.archive_destination_host, 120) is not True:
+        if mwa_archiver.archive_file_xrootd(self.logger, item, self.archive_command_numa_node, self.archive_destination_host, 120) is not True:
             return False
 
         self.logger.debug(f"{item}- archive_handler() Deleting file")

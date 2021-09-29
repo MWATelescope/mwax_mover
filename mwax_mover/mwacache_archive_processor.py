@@ -1,4 +1,4 @@
-from mwax_mover import mwax_mover, mwax_db, mwax_queue_worker, mwax_watcher, utils, version
+from mwax_mover import mwax_mover, mwax_db, mwax_queue_worker, mwax_watcher, mwa_archiver, utils, version
 import argparse
 from configparser import ConfigParser
 import json
@@ -124,24 +124,24 @@ class MWACacheArchiveProcessor:
         location = 1  # DMF
 
         # validate the filename
-        (valid, obs_id, filetype, file_ext, prefix, dmf_host, validation_message) = utils.validate_filename(item, location)
+        (valid, obs_id, filetype, file_ext, prefix, dmf_host, validation_message) = mwa_archiver.validate_filename(item, location)
 
         if valid:
             archive_success = False
 
             if location == 1:  # DMF
                 # Now copy the file into dmf
-                archive_success = utils.archive_file_rsync(self.logger,
-                                                           item,
-                                                           None,
-                                                           f"ngas@{dmf_host}",
-                                                           prefix,
-                                                           120)
+                archive_success = mwa_archiver.archive_file_rsync(self.logger,
+                                                                  item,
+                                                                  None,
+                                                                  f"ngas@{dmf_host}",
+                                                                  prefix,
+                                                                  120)
 
             elif location == 2:  # Ceph
-                archive_success = utils.archive_file_ceph(self.logger,
-                                                          item,
-                                                          self.ceph_endpoint)
+                archive_success = mwa_archiver.archive_file_ceph(self.logger,
+                                                                 item,
+                                                                 self.ceph_endpoint)
 
             if archive_success:
                 # Update record in metadata database
