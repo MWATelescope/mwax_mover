@@ -55,8 +55,6 @@ class Watcher(object):
             for event in self.i.event_gen(timeout_s=0.1, yield_nones=False):
                 (header, types, path, filename) = event
 
-                print(event)
-
                 # check event is one we care about
                 if header.mask | self.mask == self.mask:
                     # Check file extension is one we care about
@@ -66,7 +64,11 @@ class Watcher(object):
                         self.logger.info(f'{dest_filename} added to queue ({self.q.qsize()})')
 
     def get_status(self) -> dict:
+        total_bytes, used_bytes, free_bytes = utils.get_disk_space_bytes(self.path)
+
         return {"watching": self.watching,
                 "mode": self.mode,
                 "watch_path": self.path,
-                "watch_pattern": self.pattern}
+                "watch_pattern": self.pattern,
+                "watch_used_bytes": used_bytes,
+                "watch_free_bytes": free_bytes}

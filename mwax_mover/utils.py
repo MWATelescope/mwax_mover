@@ -1,10 +1,11 @@
 from mwax_mover import mwax_command
 import base64
 from configparser import ConfigParser
+import fcntl
 import glob
 import os
+import shutil
 import socket
-import fcntl
 import struct
 import time
 
@@ -118,3 +119,7 @@ def get_ip_address(ifname: str) -> str:
 
 def get_primary_ip_address() -> str:
     return socket.gethostbyname(socket.getfqdn())
+
+def get_disk_space_bytes(path: str) -> (int, int, int):
+    # Get disk space used and free
+    return shutil.disk_usage(path)

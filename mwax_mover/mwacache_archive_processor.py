@@ -219,7 +219,6 @@ class MWACacheArchiveProcessor:
             # Sleep for a second
             time.sleep(1)
 
-
     def get_status(self) -> dict:
         watcher_list = []
 
