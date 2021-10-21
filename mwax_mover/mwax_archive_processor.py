@@ -63,7 +63,7 @@ class MWAXArchiveProcessor:
         # Create watcher for visibility data -> db queue
         self.watcher_vis = mwax_watcher.Watcher(path=self.watch_dir_vis, q=self.queue_db,
                                                 pattern=".fits", log=self.logger,
-                                                mode=self.mwax_mover_mode, recursive=False)
+                                                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME, recursive=False)
 
         # Create queueworker for the db queue
         self.queue_worker_db = mwax_queue_worker.QueueWorker(label="MWA Metadata DB",

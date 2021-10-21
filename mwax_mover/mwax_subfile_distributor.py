@@ -138,14 +138,14 @@ class MWAXSubfileDistributor:
         self.cfg_webserver_port = None
         self.cfg_subfile_path = None
         self.cfg_voltdata_path = None
-        self.cfg_always_keep_subfiles = None
+        self.cfg_always_keep_subfiles = False
         self.cfg_health_multicast_interface_name = None
         self.cfg_health_multicast_ip = None
         self.cfg_health_multicast_port = None
         self.cfg_health_multicast_hops = None
 
         # Beamformer
-        self.cfg_bf_enabled = None
+        self.cfg_bf_enabled = False
         self.cfg_bf_ringbuffer_key = None
         self.cfg_bf_numa_node = None
         self.cfg_bf_fildata_path = None
@@ -154,10 +154,10 @@ class MWAXSubfileDistributor:
         # Archiving settings for beamformer
         self.cfg_bf_archive_destination_host = None
         self.cfg_bf_archive_destination_port = None
-        self.cfg_bf_archive_destination_enabled = None
+        self.cfg_bf_archive_destination_enabled = False
 
         # Correlator
-        self.cfg_corr_enabled = None
+        self.cfg_corr_enabled = False
         self.cfg_corr_ringbuffer_key = None
         self.cfg_corr_diskdb_numa_node = None
         self.cfg_corr_archive_command_numa_node = None
@@ -165,7 +165,7 @@ class MWAXSubfileDistributor:
         # Archiving settings for correlator
         self.cfg_corr_archive_destination_host = None
         self.cfg_corr_archive_destination_port = None
-        self.cfg_corr_archive_destination_enabled = None
+        self.cfg_corr_archive_destination_enabled = False
 
         # Connection info for metadata db
         self.cfg_metadatadb_host = None

@@ -121,5 +121,5 @@ def get_primary_ip_address() -> str:
     return socket.gethostbyname(socket.getfqdn())
 
 def get_disk_space_bytes(path: str) -> (int, int, int):
-    # Get disk space used and free
+    # Get disk space: total, used and free
     return shutil.disk_usage(path)
