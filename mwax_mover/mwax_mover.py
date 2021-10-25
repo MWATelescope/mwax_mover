@@ -18,6 +18,7 @@ FILENOEXT_REPLACEMENT_TOKEN = "__FILENOEXT__"
 
 MODE_WATCH_DIR_FOR_RENAME = "WATCH_DIR_FOR_RENAME"
 MODE_WATCH_DIR_FOR_NEW = "WATCH_DIR_FOR_NEW"
+MODE_WATCH_DIR_FOR_RENAME_OR_NEW = "WATCH_DIR_FOR_RENAME_OR_NEW"
 MODE_PROCESS_DIR = "PROCESS_DIR"
 
 
@@ -79,10 +80,11 @@ class Processor:
                                  f"will be substituted with the abs path of the filename being processed."
                                  f"{FILENOEXT_REPLACEMENT_TOKEN} will be replaced with the filename but not extenson.")
         parser.add_argument("-m", "--mode", required=True, default=None,
-                            choices=[MODE_WATCH_DIR_FOR_NEW, MODE_WATCH_DIR_FOR_RENAME, MODE_PROCESS_DIR, ],
+                            choices=[MODE_WATCH_DIR_FOR_NEW, MODE_WATCH_DIR_FOR_RENAME, MODE_WATCH_DIR_FOR_RENAME_OR_NEW, MODE_PROCESS_DIR, ],
                             help=f"Mode to run:\n"
                             f"{MODE_WATCH_DIR_FOR_NEW}: Watch watchdir for new files forever. Launch executable.\n" 
-                            f"{MODE_WATCH_DIR_FOR_RENAME}: Watch watchdir for renamed files forever. Launch executable.\n" 
+                            f"{MODE_WATCH_DIR_FOR_RENAME}: Watch watchdir for renamed files forever. Launch executable.\n"
+                            f"{MODE_WATCH_DIR_FOR_RENAME_OR_NEW}: Watch watchdir for new OR renamed files forever. Launch executable.\n"     
                             f"{MODE_PROCESS_DIR}: For each file in watchdir, launch executable. Exit.\n")
         parser.add_argument("-r", "--recursive", required=False, default=False,
                             help="Recurse subdirectories of the watchdir. Omitting this option is the default and"
@@ -121,7 +123,7 @@ class Processor:
 
         # Create watcher
         self.watch = mwax_watcher.Watcher(path=self.watch_dir, q=self.q,
-                                          pattern=f"{self.watch_ext}", log=self.logger, mode=self.mode)
+                                          pattern=f"{self.watch_ext}", log=self.logger, mode=self.mode, recursive=False)
 
         # Create queueworker
         self.queueworker = mwax_queue_worker.QueueWorker(label="queue", q=self.q, executable_path=self.executable,

@@ -52,7 +52,7 @@ def validate_filename(filename: str, location: int) -> (bool, int, int, str, str
             filetype_id = MWADataFileType.MWAX_VOLTAGES.value
         elif file_ext_part.lower() == ".fits":
             # Could be metafits (e.g. 1316906688_metafits_ppds.fits) or visibilitlies
-            if file_ext_part[10:] == "_metafits_ppds":
+            if file_name_part[10:] == "_metafits_ppds":
                 filetype_id = MWADataFileType.MWA_PPD_FILE.value
             else:
                 filetype_id = MWADataFileType.MWAX_VISIBILITIES.value

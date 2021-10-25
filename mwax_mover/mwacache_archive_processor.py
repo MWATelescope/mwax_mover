@@ -97,7 +97,6 @@ class MWACacheArchiveProcessor:
                                                           q=self.queue,
                                                           executable_path=None,
                                                           event_handler=self.archive_handler,
-                                                          mode=self.mwax_mover_mode,
                                                           log=self.logger,
                                                           requeue_to_eoq_on_failure=True)
 

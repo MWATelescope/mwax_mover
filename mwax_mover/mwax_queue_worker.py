@@ -14,7 +14,6 @@ class QueueWorker(object):
                  label: str,
                  q,
                  executable_path,
-                 mode: str,
                  log,
                  event_handler,
                  requeue_to_eoq_on_failure: bool = True,
@@ -32,7 +31,6 @@ class QueueWorker(object):
         self._event_handler = event_handler
         self._running = False
         self._paused = False
-        self._mode = mode
         self.requeue_to_eoq_on_failure = requeue_to_eoq_on_failure
         self.logger = log
         self.current_item = None

@@ -1,4 +1,4 @@
-from mwax_mover import mwax_mover, utils
+from mwax_mover import mwax_mover, mwa_archiver
 from mwax_mover import mwax_queue_worker
 from mwax_mover import mwax_watcher
 import logging
@@ -51,7 +51,6 @@ class FilterbankProcessor:
                                                               q=self.queue_fil,
                                                               executable_path=None,
                                                               event_handler=self.filterbank_handler,
-                                                              mode=self.mwax_mover_mode,
                                                               log=self.logger)
 
         # Setup thread for watching filesystem
@@ -69,8 +68,8 @@ class FilterbankProcessor:
             self.logger.info(f"{item}- FilterbankProcessor.filterbank_handler is handling {item}: "
                              f"copy to {self.archive_destination_host}...")
 
-            if not utils.archive_file_xrootd(self.logger, item, self.archive_command_numa_node,
-                                             self.archive_destination_host, 120):
+            if not mwa_archiver.archive_file_xrootd(self.logger, item, self.archive_command_numa_node,
+                                                    self.archive_destination_host, 120):
                 return False
 
             self.logger.debug(f"{item}- filterbank_handler() Deleting file")

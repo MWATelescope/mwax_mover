@@ -19,6 +19,8 @@ class Watcher(object):
             self.mask = inotify.constants.IN_CLOSE_WRITE
         elif self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME:
             self.mask = inotify.constants.IN_MOVED_TO
+        elif self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW:
+            self.mask = inotify.constants.IN_MOVED_TO | inotify.constants.IN_CLOSE_WRITE
 
         # Check that the path to watch exists
         if not os.path.exists(self.path):
@@ -48,7 +50,9 @@ class Watcher(object):
 
     def do_watch_loop(self):
         # If we're in NEW or RENAME mode, then scan the folder once we have enqueued any waiting items
-        if self.mode == mwax_mover.MODE_WATCH_DIR_FOR_NEW or self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME:
+        if self.mode == mwax_mover.MODE_WATCH_DIR_FOR_NEW or \
+           self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME or \
+           self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW:
             utils.scan_for_existing_files(self.logger, self.path, self.pattern, self.recursive, self.q)
 
         while self.watching:

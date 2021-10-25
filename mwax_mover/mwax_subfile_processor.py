@@ -120,7 +120,6 @@ class SubfileProcessor:
                                                           q=self.queue,
                                                           executable_path=None,
                                                           event_handler=self.handler,
-                                                          mode=self.mwax_mover_mode,
                                                           log=self.logger,
                                                           requeue_to_eoq_on_failure=False)
 

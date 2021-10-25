@@ -35,7 +35,7 @@ class MWAXArchiveProcessor:
         self.archive_destination_port = archive_port
         self.archive_command_numa_node = archive_command_numa_node
 
-        self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_NEW
+        #self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_NEW
         self.archiving_paused = False
 
         self.queue_db = queue.Queue()
@@ -58,19 +58,20 @@ class MWAXArchiveProcessor:
         # Create watcher for voltage data -> db queue
         self.watcher_volt = mwax_watcher.Watcher(path=self.watch_dir_volt, q=self.queue_db,
                                                  pattern=".sub", log=self.logger,
-                                                 mode=self.mwax_mover_mode, recursive=False)
+                                                 mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW, recursive=False)
 
         # Create watcher for visibility data -> db queue
+        # This will watch for mwax visibilities being renamed OR
+        # fits files being created (e.g. metafits ppd files being copied into /visdata).
         self.watcher_vis = mwax_watcher.Watcher(path=self.watch_dir_vis, q=self.queue_db,
                                                 pattern=".fits", log=self.logger,
-                                                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME, recursive=False)
+                                                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW, recursive=False)
 
         # Create queueworker for the db queue
         self.queue_worker_db = mwax_queue_worker.QueueWorker(label="MWA Metadata DB",
                                                              q=self.queue_db,
                                                              executable_path=None,
                                                              event_handler=self.db_handler,
-                                                             mode=self.mwax_mover_mode,
                                                              log=self.logger)
 
         # Create queueworker for voltage queue
@@ -78,7 +79,6 @@ class MWAXArchiveProcessor:
                                                                q=self.queue_volt,
                                                                executable_path=None,
                                                                event_handler=self.archive_handler,
-                                                               mode=self.mwax_mover_mode,
                                                                log=self.logger)
 
         # Create queueworker for visibility queue
@@ -86,7 +86,6 @@ class MWAXArchiveProcessor:
                                                               q=self.queue_vis,
                                                               executable_path=None,
                                                               event_handler=self.archive_handler,
-                                                              mode=self.mwax_mover_mode,
                                                               log=self.logger)
 
         # Setup thread for processing items from db queue

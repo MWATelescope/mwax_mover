@@ -1,8 +1,6 @@
-import sys
-import logging
 import os
 import psycopg2
-from psycopg2 import OperationalError, errors
+from psycopg2 import OperationalError
 from tenacity import retry,stop_after_attempt,wait_fixed
 
 DUMMY_DB = "dummy"
