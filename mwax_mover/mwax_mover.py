@@ -39,15 +39,19 @@ def run_command(command: str, command_timeout_seconds: float) -> bool:
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_fixed(10))
-def remove_file(logger, filename: str) -> bool:
+def remove_file(logger, filename: str, raise_error: bool) -> bool:
     try:
         os.remove(filename)
         logger.info(f"{filename}- file deleted")
         return True
 
     except Exception as delete_exception:
-        logger.error(f"{filename}- Error deleting: {delete_exception}. Retrying up to 5 times.")
-        raise delete_exception
+        if raise_error:
+            logger.error(f"{filename}- Error deleting: {delete_exception}. Retrying up to 5 times.")
+            raise delete_exception
+        else:
+            logger.warning(f"{filename}- Error deleting: {delete_exception}. File may have been moved or removed.")
+            return True
 
 
 class Processor:

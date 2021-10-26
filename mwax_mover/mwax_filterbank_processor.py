@@ -74,7 +74,7 @@ class FilterbankProcessor:
                 return False
 
             self.logger.debug(f"{item}- filterbank_handler() Deleting file")
-            mwax_mover.remove_file(self.logger, item)
+            mwax_mover.remove_file(self.logger, item, raise_error=False)
 
             self.logger.info(f"{item}- filterbank_handler() Finished")
             return True

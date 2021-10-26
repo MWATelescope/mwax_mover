@@ -152,7 +152,7 @@ class MWACacheArchiveProcessor:
 
                 # If all is well, we have the file safely archived and the database updated, so remove the file
                 self.logger.debug(f"{item}- archive_handler() Deleting file")
-                mwax_mover.remove_file(self.logger, item)
+                mwax_mover.remove_file(self.logger, item, raise_error=False)
 
                 self.logger.info(f"{item}- archive_handler() Finished")
                 return True
