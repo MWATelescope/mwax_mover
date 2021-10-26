@@ -51,7 +51,8 @@ class FilterbankProcessor:
                                                               q=self.queue_fil,
                                                               executable_path=None,
                                                               event_handler=self.filterbank_handler,
-                                                              log=self.logger)
+                                                              log=self.logger,
+                                                              exit_once_queue_empty=False)
 
         # Setup thread for watching filesystem
         watcher_fil_thread = threading.Thread(name="watch_fil", target=self.watcher_fil.start, daemon=True)

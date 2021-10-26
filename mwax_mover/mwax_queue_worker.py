@@ -16,6 +16,7 @@ class QueueWorker(object):
                  executable_path,
                  log,
                  event_handler,
+                 exit_once_queue_empty,
                  requeue_to_eoq_on_failure: bool = True,
                  backoff_initial_seconds: int = 1,
                  backoff_factor: int = 2,
@@ -31,6 +32,7 @@ class QueueWorker(object):
         self._event_handler = event_handler
         self._running = False
         self._paused = False
+        self.exit_once_queue_empty = exit_once_queue_empty
         self.requeue_to_eoq_on_failure = requeue_to_eoq_on_failure
         self.logger = log
         self.current_item = None
@@ -99,7 +101,7 @@ class QueueWorker(object):
                         time.sleep(backoff)
 
                 except queue.Empty:
-                    if self._mode == mwax_mover.MODE_PROCESS_DIR:
+                    if self.exit_once_queue_empty:
                         # Queue is complete. Stop now
                         self.logger.info("Finished processing queue.")
                         self.stop()

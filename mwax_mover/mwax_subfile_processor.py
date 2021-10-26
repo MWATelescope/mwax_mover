@@ -121,7 +121,8 @@ class SubfileProcessor:
                                                           executable_path=None,
                                                           event_handler=self.handler,
                                                           log=self.logger,
-                                                          requeue_to_eoq_on_failure=False)
+                                                          requeue_to_eoq_on_failure=False,
+                                                          exit_once_queue_empty=False)
 
         # Setup thread for watching filesystem
         watcher_thread = threading.Thread(name="watch_sub", target=self.watcher.start, daemon=True)

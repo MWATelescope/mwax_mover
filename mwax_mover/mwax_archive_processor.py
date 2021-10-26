@@ -1,4 +1,4 @@
-from mwax_mover import mwax_mover, mwax_db, mwax_queue_worker, mwax_watcher, mwa_archiver, utils
+from mwax_mover import mwax_mover, mwax_db, mwax_queue_worker, mwax_watcher, mwa_archiver
 import logging
 import logging.handlers
 import os
@@ -35,7 +35,6 @@ class MWAXArchiveProcessor:
         self.archive_destination_port = archive_port
         self.archive_command_numa_node = archive_command_numa_node
 
-        #self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_NEW
         self.archiving_paused = False
 
         self.queue_db = queue.Queue()
@@ -72,21 +71,24 @@ class MWAXArchiveProcessor:
                                                              q=self.queue_db,
                                                              executable_path=None,
                                                              event_handler=self.db_handler,
-                                                             log=self.logger)
+                                                             log=self.logger,
+                                                             exit_once_queue_empty=False)
 
         # Create queueworker for voltage queue
         self.queue_worker_volt = mwax_queue_worker.QueueWorker(label="Subfile Archiver",
                                                                q=self.queue_volt,
                                                                executable_path=None,
                                                                event_handler=self.archive_handler,
-                                                               log=self.logger)
+                                                               log=self.logger,
+                                                               exit_once_queue_empty=False)
 
         # Create queueworker for visibility queue
         self.queue_worker_vis = mwax_queue_worker.QueueWorker(label="Visibility Archiver",
                                                               q=self.queue_vis,
                                                               executable_path=None,
                                                               event_handler=self.archive_handler,
-                                                              log=self.logger)
+                                                              log=self.logger,
+                                                              exit_once_queue_empty=False)
 
         # Setup thread for processing items from db queue
         queue_worker_db_thread = threading.Thread(name="work_db", target=self.queue_worker_db.start, daemon=True)

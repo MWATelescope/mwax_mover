@@ -97,6 +97,11 @@ class Processor:
         self.executable = args["executablepath"]
         self.mode = args["mode"]
 
+        if self.mode == MODE_PROCESS_DIR:
+            exit_once_queue_empty = True
+        else:
+            exit_once_queue_empty = False
+
         if args["recursive"]:
             self.recursive = args["recursive"]
 
@@ -127,7 +132,8 @@ class Processor:
 
         # Create queueworker
         self.queueworker = mwax_queue_worker.QueueWorker(label="queue", q=self.q, executable_path=self.executable,
-                                                         mode=self.mode, log=self.logger, event_handler=None)
+                                                         exit_once_queue_empty=exit_once_queue_empty,
+                                                         log=self.logger, event_handler=None)
 
         self.running = True
         self.logger.info("Processor Initialised...")

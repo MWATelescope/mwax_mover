@@ -98,7 +98,8 @@ class MWACacheArchiveProcessor:
                                                           executable_path=None,
                                                           event_handler=self.archive_handler,
                                                           log=self.logger,
-                                                          requeue_to_eoq_on_failure=True)
+                                                          requeue_to_eoq_on_failure=True,
+                                                          exit_once_queue_empty=False)
 
         self.logger.info("Starting watchers...")
         # Setup thread for watching filesystem
