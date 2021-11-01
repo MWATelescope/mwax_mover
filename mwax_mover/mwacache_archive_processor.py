@@ -220,6 +220,17 @@ class MWACacheArchiveProcessor:
             time.sleep(1)
 
     def get_status(self) -> dict:
+        if self.archiving_paused:
+            archiving = "paused"
+        else:
+            archiving = "running"
+
+        main_status = {"process": type(self).__name__,
+                       "version": version.get_mwax_mover_version_string(),
+                       "host": self.hostname,
+                       "running": self.running,
+                       "archiving": archiving, }
+
         watcher_list = []
 
         for watcher in self.watchers:
@@ -234,22 +245,16 @@ class MWACacheArchiveProcessor:
             status.update(self.queue_worker.get_status())
             worker_list.append(status)
 
-        if self.archiving_paused:
-            archiving = "paused"
-        else:
-            archiving = "running"
+        processor_status_list = []
+        processor = {"type": type(self).__name__,
+                     "watchers": watcher_list,
+                     "workers": worker_list}
+        processor_status_list.append(processor)
 
-        return_status = {
-                         "process": type(self).__name__,
-                         "version": version.get_mwax_mover_version_string(),
-                         "host": self.hostname,
-                         "running": self.running,
-                         "archiving": archiving,
-                         "watchers": watcher_list,
-                         "workers": worker_list
-                        }
+        status = {"main": main_status,
+                  "processors": processor_status_list}
 
-        return return_status
+        return status
 
     def signal_handler(self, signum, frame):
         self.logger.warning(f"Interrupted. Shutting down processor...")
