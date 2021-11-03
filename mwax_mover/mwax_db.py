@@ -2,6 +2,7 @@ import os
 import psycopg2
 from psycopg2 import OperationalError
 from tenacity import retry,stop_after_attempt,wait_fixed
+from typing import Optional
 
 DUMMY_DB = "dummy"
 
@@ -84,7 +85,9 @@ def upsert_data_file_row(db_handler_object,
                          hostname: str,
                          remote_archived: bool,
                          location,
-                         prefix) -> bool:
+                         prefix,
+                         checksum_type_id: Optional[int],
+                         checksum: Optional[str]) -> bool:
     # Prepare the fields
     # immediately add this file to the db so we insert a record into metadata data_files table
     filename = os.path.basename(archive_filename)
@@ -93,15 +96,28 @@ def upsert_data_file_row(db_handler_object,
     deleted = False
 
     # We actually do an upsert- this way we can use the same code for mwax (insert) and mwacache (update)
-    sql = f"INSERT INTO data_files " \
-          f"(observation_num, filetype, size, filename, host, remote_archived, deleted, location, prefix) " \
-          f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (filename) DO UPDATE SET " \
-          f"remote_archived = excluded.remote_archived, location = excluded.location, prefix = excluded.prefix"
+    sql = ""
 
     try:
-        db_handler_object.upsert_one_row(sql, (str(obsid), filetype, file_size,
-                                              filename, hostname,
-                                              remote_archived, deleted, location, prefix))
+        if checksum_type_id is None:
+            sql = f"INSERT INTO data_files " \
+                  f"(observation_num, filetype, size, filename, host, remote_archived, deleted, location, prefix) " \
+                  f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (filename) DO UPDATE SET " \
+                  f"remote_archived = excluded.remote_archived, location = excluded.location, prefix = excluded.prefix"
+
+            db_handler_object.upsert_one_row(sql, (str(obsid), filetype, file_size,
+                                                   filename, hostname,
+                                                   remote_archived, deleted, location, prefix))
+        else:
+            sql = f"INSERT INTO data_files " \
+                  f"(observation_num, filetype, size, filename, host, remote_archived, deleted, location, prefix, checksum_type_id, checksum) " \
+                  f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (filename) DO UPDATE SET " \
+                  f"remote_archived = excluded.remote_archived, location = excluded.location, prefix = excluded.prefix"
+
+            db_handler_object.upsert_one_row(sql, (str(obsid), filetype, file_size,
+                                                  filename, hostname,
+                                                  remote_archived, deleted, location, prefix,
+                                                   checksum_type_id, checksum))
 
         if db_handler_object.dummy:
             db_handler_object.logger.warning(f"{filename} upsert_data_file_row() Using dummy database connection. "

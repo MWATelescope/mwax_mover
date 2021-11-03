@@ -124,7 +124,8 @@ class MWACacheArchiveProcessor:
         location = 1  # DMF
 
         # validate the filename
-        (valid, obs_id, filetype, file_ext, prefix, dmf_host, validation_message) = mwa_archiver.validate_filename(item, location)
+        (valid, obs_id, filetype, file_ext, prefix, dmf_host, validation_message) = \
+            mwa_archiver.validate_filename(item, location)
 
         if valid:
             archive_success = False
@@ -133,7 +134,7 @@ class MWACacheArchiveProcessor:
                 # Now copy the file into dmf
                 archive_success = mwa_archiver.archive_file_rsync(self.logger,
                                                                   item,
-                                                                  None,
+                                                                  -1, # cache boxes do not have numa architecture
                                                                   f"ngas@{dmf_host}",
                                                                   prefix,
                                                                   120)
@@ -146,7 +147,7 @@ class MWACacheArchiveProcessor:
             if archive_success:
                 # Update record in metadata database
                 if not mwax_db.upsert_data_file_row(self.db_handler_object, item, filetype, self.hostname,
-                                                    True, location, prefix):
+                                                    True, location, prefix, None, None):
                     # if something went wrong, requeue
                     return False
 
@@ -225,7 +226,8 @@ class MWACacheArchiveProcessor:
         else:
             archiving = "running"
 
-        main_status = {"process": type(self).__name__,
+        main_status = {"Unix timestamp": time.time(),
+                       "process": type(self).__name__,
                        "version": version.get_mwax_mover_version_string(),
                        "host": self.hostname,
                        "running": self.running,

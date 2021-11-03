@@ -5,7 +5,6 @@ import logging.handlers
 import os
 import queue
 import signal
-import subprocess
 from tenacity import *
 import threading
 import time
@@ -22,20 +21,20 @@ MODE_WATCH_DIR_FOR_RENAME_OR_NEW = "WATCH_DIR_FOR_RENAME_OR_NEW"
 MODE_PROCESS_DIR = "PROCESS_DIR"
 
 
-def run_command(command: str, command_timeout_seconds: float) -> bool:
-    try:
-        # launch the process
-        subprocess.run(f"{command}",
-                       shell=True, check=True, timeout=command_timeout_seconds)
-        return True
-
-    except subprocess.CalledProcessError as process_error:
-        raise Exception(f"Error launching {command}. "
-                        f"Return code {process_error.returncode},"
-                        f"Output {process_error.output} {process_error.stderr}")
-
-    except Exception as unknown_exception:
-        raise Exception(f"Unknown error launching {command}. {unknown_exception}")
+# def run_command(command: str, command_timeout_seconds: float) -> bool:
+#     try:
+#         # launch the process
+#         subprocess.run(f"{command}",
+#                        shell=True, check=True, timeout=command_timeout_seconds)
+#         return True
+#
+#     except subprocess.CalledProcessError as process_error:
+#         raise Exception(f"Error launching {command}. "
+#                         f"Return code {process_error.returncode},"
+#                         f"Output {process_error.output} {process_error.stderr}")
+#
+#     except Exception as unknown_exception:
+#         raise Exception(f"Unknown error launching {command}. {unknown_exception}")
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_fixed(10))

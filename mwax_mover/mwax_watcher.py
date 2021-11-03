@@ -2,6 +2,7 @@ from mwax_mover import mwax_mover, utils
 import inotify.constants
 import inotify.adapters
 import os
+import time
 
 
 class Watcher(object):
@@ -70,7 +71,8 @@ class Watcher(object):
     def get_status(self) -> dict:
         total_bytes, used_bytes, free_bytes = utils.get_disk_space_bytes(self.path)
 
-        return {"watching": self.watching,
+        return {"Unix timestamp": time.time(),
+                "watching": self.watching,
                 "mode": self.mode,
                 "watch_path": self.path,
                 "watch_pattern": self.pattern,

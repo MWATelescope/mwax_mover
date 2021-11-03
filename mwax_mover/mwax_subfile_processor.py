@@ -1,6 +1,4 @@
-from mwax_mover import mwax_mover, utils
-from mwax_mover import mwax_queue_worker
-from mwax_mover import mwax_watcher
+from mwax_mover import mwax_mover, utils, mwax_queue_worker, mwax_watcher, mwax_command
 import glob
 import logging
 import logging.handlers
@@ -8,6 +6,7 @@ import os
 import queue
 import shutil
 import threading
+import time
 from enum import Enum
 
 
@@ -68,8 +67,10 @@ def read_subfile_mode(filename: str) -> str:
 
 class SubfileProcessor:
     def __init__(self, context,
-                 subfile_path: str, voltdata_path: str, always_keep_subfiles: bool,
-                 bf_enabled: bool, bf_ringbuffer_key: str, bf_numa_node: int, bf_fildata_path: str, bf_settings_path: str,
+                 subfile_incoming_path: str, voltdata_incoming_path: str,
+                 always_keep_subfiles: bool,
+                 bf_enabled: bool, bf_ringbuffer_key: str, bf_numa_node: int, bf_fildata_path: str,
+                 bf_settings_path: str,
                  corr_enabled: bool, corr_ringbuffer_key: str, corr_diskdb_numa_node: int):
         self.subfile_distributor_context = context
 
@@ -85,19 +86,18 @@ class SubfileProcessor:
 
         self.ext_to_watch_for = ".sub"
         self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_RENAME
-        self.subfile_path = subfile_path
-        self.voltdata_path = voltdata_path
+        self.subfile_incoming_path = subfile_incoming_path
+        self.voltdata_incoming_path = voltdata_incoming_path
         self.always_keep_subfiles = always_keep_subfiles
-        self.watch_dir = self.subfile_path
         self.ext_done = ".free"
 
         self.watcher_threads = []
         self.worker_threads = []
 
         # Use a priority queue to ensure earliest to oldest order of subfiles by obsid and second
-        self.queue = queue.PriorityQueue()
-        self.watcher = None
-        self.queue_worker = None
+        self.subfile_queue = queue.PriorityQueue()
+        self.subfile_watcher = None
+        self.subfile_queue_worker = None
 
         self.bf_enabled = bf_enabled
         self.bf_ringbuffer_key = bf_ringbuffer_key    # PSRDADA ringbuffer key for INPUT into correlator or beamformer
@@ -110,27 +110,27 @@ class SubfileProcessor:
         self.corr_diskdb_numa_node = corr_diskdb_numa_node  # Numa node to use to do a file copy
 
     def start(self):
-        # Create watcher
-        self.watcher = mwax_watcher.Watcher(path=self.watch_dir, q=self.queue,
-                                            pattern=f"{self.ext_to_watch_for}", log=self.logger,
-                                            mode=self.mwax_mover_mode, recursive=False)
+        # Create watcher for the subfiles
+        self.subfile_watcher = mwax_watcher.Watcher(path=self.subfile_incoming_path, q=self.subfile_queue,
+                                                    pattern=f"{self.ext_to_watch_for}", log=self.logger,
+                                                    mode=self.mwax_mover_mode, recursive=False)
 
         # Create queueworker
-        self.queue_worker = mwax_queue_worker.QueueWorker(label="Subfile Input Queue",
-                                                          q=self.queue,
-                                                          executable_path=None,
-                                                          event_handler=self.handler,
-                                                          log=self.logger,
-                                                          requeue_to_eoq_on_failure=False,
-                                                          exit_once_queue_empty=False)
+        self.subfile_queue_worker = mwax_queue_worker.QueueWorker(label="Subfile Input Queue",
+                                                                  q=self.subfile_queue,
+                                                                  executable_path=None,
+                                                                  event_handler=self.handler,
+                                                                  log=self.logger,
+                                                                  requeue_to_eoq_on_failure=False,
+                                                                  exit_once_queue_empty=False)
 
         # Setup thread for watching filesystem
-        watcher_thread = threading.Thread(name="watch_sub", target=self.watcher.start, daemon=True)
+        watcher_thread = threading.Thread(name="watch_sub", target=self.subfile_watcher.start, daemon=True)
         self.watcher_threads.append(watcher_thread)
         watcher_thread.start()
 
         # Setup thread for processing items
-        queue_worker_thread = threading.Thread(name="work_sub", target=self.queue_worker.start, daemon=True)
+        queue_worker_thread = threading.Thread(name="work_sub", target=self.subfile_queue_worker.start, daemon=True)
         self.worker_threads.append(queue_worker_thread)
         queue_worker_thread.start()
 
@@ -168,14 +168,14 @@ class SubfileProcessor:
                     success = utils.load_psrdada_ringbuffer(self.logger, item, self.corr_ringbuffer_key, self.corr_diskdb_numa_node, 16)
 
                     if self.always_keep_subfiles:
-                        keep_subfiles_path = self.voltdata_path
+                        keep_subfiles_path = self.voltdata_incoming_path
 
                 elif CorrelatorMode.is_vcs(subfile_mode):
                     # Pause archiving so we have the disk to ourselves
                     if self.subfile_distributor_context.cfg_corr_archive_destination_enabled:
                         self.subfile_distributor_context.archive_processor.pause_archiving(True)
 
-                    self._copy_subfile_to_disk(item, self.corr_diskdb_numa_node, self.voltdata_path)
+                    self._copy_subfile_to_disk(item, self.corr_diskdb_numa_node, self.voltdata_incoming_path)
                     success = True
 
                 elif CorrelatorMode.is_no_capture(subfile_mode):
@@ -214,7 +214,7 @@ class SubfileProcessor:
                                                                 self.bf_numa_node, 16)
 
                         if self.always_keep_subfiles:
-                            keep_subfiles_path = self.voltdata_path
+                            keep_subfiles_path = self.voltdata_incoming_path
 
                     elif CorrelatorMode.is_no_capture(subfile_mode):
                         self.logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
@@ -232,7 +232,8 @@ class SubfileProcessor:
             if success:
                 # Check if need to keep subfiles, if so we need to copy them off
                 if keep_subfiles_path:
-                    self._copy_subfile_to_disk(item, None, keep_subfiles_path)
+                    # we use -1 for numa node for now as this is really for debug so it does not matter
+                    self._copy_subfile_to_disk(item, -1, keep_subfiles_path)
 
                 # Rename subfile so that udpgrab can reuse it
                 free_filename = str(item).replace(self.ext_to_watch_for, self.ext_done)
@@ -249,8 +250,8 @@ class SubfileProcessor:
         return success
 
     def stop(self):
-        self.watcher.stop()
-        self.queue_worker.stop()
+        self.subfile_watcher.stop()
+        self.subfile_queue_worker.stop()
 
         # Wait for threads to finish
         for t in self.watcher_threads:
@@ -298,15 +299,12 @@ class SubfileProcessor:
             subfile.write(new_bytes)
 
 
-    def _copy_subfile_to_disk(self, filename: str, numa_node, destination_path: str) -> bool:
+    def _copy_subfile_to_disk(self, filename: str, numa_node: int, destination_path: str) -> bool:
         self.logger.info(f"{filename}- Copying file into {destination_path}")
 
         command = f"cp {filename} {destination_path}/."
 
-        if numa_node:
-            command = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} {command}"
-
-        retval = mwax_mover.run_command(command, 120)
+        retval, stdout = mwax_command.run_command_ext(self.logger, command, numa_node, 120, True)
 
         if retval:
             self.logger.info(f"{filename}- Copying file into {destination_path} was successful.")
@@ -325,7 +323,7 @@ class SubfileProcessor:
             self.subfile_distributor_context.archive_processor.pause_archiving(True)
 
         # Look for any .free files which have the first 10 characters of filename from starttime to endtime
-        free_file_list = sorted(glob.glob(f"{self.subfile_path}/*.free"))
+        free_file_list = sorted(glob.glob(f"{self.subfile_incoming_path}/*.free"))
 
         keep_file_list = []
 
@@ -349,15 +347,15 @@ class SubfileProcessor:
 
         # Then copy all .keep to /voltdata/*.sub
         for keep_filename in keep_file_list:
-            self.logger.info(f"dump_voltages: copying {keep_filename} to {self.voltdata_path}...")
+            self.logger.info(f"dump_voltages: copying {keep_filename} to {self.voltdata_incoming_path}...")
             keep_filename_only = os.path.basename(keep_filename)
             sub_filename_only = keep_filename_only.replace(".keep", ".sub")
-            sub_filename = os.path.join(self.voltdata_path, sub_filename_only)
+            sub_filename = os.path.join(self.voltdata_incoming_path, sub_filename_only)
 
             # Only copy if we don't already have it in /voltdata
             if not os.path.exists(sub_filename):
                 shutil.copyfile(keep_filename, sub_filename)
-                self.logger.info(f"dump_voltages: copy of {keep_filename} to {self.voltdata_path} complete")
+                self.logger.info(f"dump_voltages: copy of {keep_filename} to {self.voltdata_incoming_path} complete")
 
         # Then rename all .keep files to .free
         for keep_filename in keep_file_list:
@@ -375,16 +373,17 @@ class SubfileProcessor:
     def get_status(self) -> dict:
         watcher_list = []
 
-        if self.watcher:
-            status = dict({"name": "subfile watcher"})
-            status.update(self.watcher.get_status())
+        if self.subfile_watcher:
+            status = dict({"Unix timestamp": time.time(),
+                           "name": "subfile watcher"})
+            status.update(self.subfile_watcher.get_status())
             watcher_list.append(status)
 
         worker_list = []
 
-        if self.queue_worker:
+        if self.subfile_queue_worker:
             status = dict({"name": "subfile worker"})
-            status.update(self.queue_worker.get_status())
+            status.update(self.subfile_queue_worker.get_status())
             worker_list.append(status)
 
         return_status = {"type": type(self).__name__,

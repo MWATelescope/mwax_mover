@@ -52,7 +52,7 @@ def validate_filename(filename: str, location: int) -> (bool, int, int, str, str
             filetype_id = MWADataFileType.MWAX_VOLTAGES.value
         elif file_ext_part.lower() == ".fits":
             # Could be metafits (e.g. 1316906688_metafits_ppds.fits) or visibilitlies
-            if file_name_part[10:] == "_metafits_ppds":
+            if file_name_part[10:] == "_metafits_ppds" or  file_name_part[10:] == "_metafits":
                 filetype_id = MWADataFileType.MWA_PPD_FILE.value
             else:
                 filetype_id = MWADataFileType.MWAX_VISIBILITIES.value
@@ -86,11 +86,11 @@ def validate_filename(filename: str, location: int) -> (bool, int, int, str, str
 
         elif filetype_id == MWADataFileType.MWA_PPD_FILE.value:
             # filename format should be obsid_metafits_ppds.fits
-            if len(file_name_part) != 24:
+            if len(file_name_part) != 24 and len(file_name_part) != 19:
                 valid = False
                 validation_error = f"Filename (excluding extension) is not in the correct format " \
                                    f"(incorrect length ({len(file_name_part)}). Format should be " \
-                                   f"obsid_metafits_ppds.fits)- ignoring"
+                                   f"obsid_metafits_ppds.fits or obsid_metafits.fits)- ignoring"
 
         elif filetype_id == MWADataFileType.MWA_FLAG_FILE.value:
             # filename format should be obsid_flags.zip
@@ -129,15 +129,9 @@ def validate_filename(filename: str, location: int) -> (bool, int, int, str, str
     return valid, obs_id, filetype_id, file_ext_part, prefix, dmf_host, validation_error
 
 
-def archive_file_rsync(logger, full_filename: str, archive_numa_node, archive_destination_host: str,
+def archive_file_rsync(logger, full_filename: str, archive_numa_node: int, archive_destination_host: str,
                        archive_destination_path: str, timeout: int):
     logger.debug(f"{full_filename} attempting archive_file_rsync...")
-
-    # If provided, launch using specific numa node. Passing None ignores this part of the command line
-    if archive_numa_node:
-        numa_cmdline = f"numactl --cpunodebind={str(archive_numa_node)} --membind={str(archive_numa_node)} "
-    else:
-        numa_cmdline = ""
 
     # get file size
     try:
@@ -149,33 +143,28 @@ def archive_file_rsync(logger, full_filename: str, archive_numa_node, archive_de
     # Build final command line
     # --no-compress ensures we don't try to compress (it's going to be quite uncompressible)
     # The -e "xxx" is there to remove as much encryption/compression of the ssh connection as possible to speed up the xfer
-    cmdline = f"{numa_cmdline}rsync --no-compress -e 'ssh -T -c aes128-cbc -o StrictHostKeyChecking=no -o Compression=no -x ' " \
+    cmdline = f"rsync --no-compress -e 'ssh -T -c aes128-cbc -o StrictHostKeyChecking=no -o Compression=no -x ' " \
               f"-r {full_filename} {archive_destination_host}:{archive_destination_path}"
 
     start_time = time.time()
 
     # run xrdcp
-    if mwax_command.run_command(logger, cmdline, timeout):
+    return_val, stdout = mwax_command.run_command_ext(logger, cmdline, archive_numa_node, timeout, False)
+
+    if return_val:
         elapsed = time.time() - start_time
 
         size_gigabytes = float(file_size) / (1000. * 1000. * 1000.)
         gbps_per_sec = (size_gigabytes * 8) / elapsed
 
         logger.info(f"{full_filename} archive_file_rsync success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
-
         return True
     else:
         return False
 
 
-def archive_file_xrootd(logger, full_filename: str, archive_numa_node, archive_destination_host: str, timeout: int):
+def archive_file_xrootd(logger, full_filename: str, archive_numa_node: int, archive_destination_host: str, timeout: int):
     logger.debug(f"{full_filename} attempting archive_file_xrootd...")
-
-    # If provided, launch using specific numa node. Passing None ignores this part of the command line
-    if archive_numa_node:
-        numa_cmdline = f"numactl --cpunodebind={str(archive_numa_node)} --membind={str(archive_numa_node)} "
-    else:
-        numa_cmdline = ""
 
     # get file size
     try:
@@ -185,13 +174,15 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node, archive_d
         return False
 
     # Build final command line
-    cmdline = f"{numa_cmdline}/usr/local/bin/xrdcp --force --cksum adler32 " \
+    cmdline = f"/usr/local/bin/xrdcp --force --cksum adler32 " \
               f"--silent --streams 2 --tlsnodata {full_filename} xroot://{archive_destination_host}"
 
     start_time = time.time()
 
     # run xrdcp
-    if mwax_command.run_command(logger, cmdline, timeout):
+    return_val, stdout = mwax_command.run_command_ext(logger, cmdline, archive_numa_node, timeout, False)
+
+    if return_val:
         elapsed = time.time() - start_time
 
         size_gigabytes = float(file_size) / (1000. * 1000. * 1000.)

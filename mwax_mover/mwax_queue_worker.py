@@ -122,8 +122,9 @@ class QueueWorker(object):
         filename_no_ext = os.path.splitext(filename)[0]
         command = command.replace(mwax_mover.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext)
 
-        return mwax_command.run_shell_command(self.logger, command)
+        return mwax_command.run_command_ext(self.logger, command, -1, 60, True)
 
     def get_status(self) -> dict:
-        return {"current": self.current_item,
+        return {"Unix timestamp": time.time(),
+                "current": self.current_item,
                 "queue_size": self.q.qsize()}

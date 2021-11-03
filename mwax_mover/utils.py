@@ -34,25 +34,43 @@ def get_hostname() -> str:
     # ensure we remove anything after a . in case we got the fqdn
     split_hostname = hostname.split(".")[0]
 
-    return split_hostname
+    return split_hostname.lower()
+
+def process_mwax_stats(logger, mwax_stats_executable: str, full_filename: str, numa_node: int, timeout: int) -> bool:
+    # This code will execute the mwax stats command
+    obs_id = str(os.path.basename(full_filename)[0:10])
+
+    cmd = f"{mwax_stats_executable} {full_filename} -m /vulcan/metafits/{obs_id}_metafits.fits"
+
+    logger.info(f"{full_filename}- attempting to run stats: {cmd}")
+
+    start_time = time.time()
+    return_value, stdout = mwax_command.run_command_ext(logger, cmd, numa_node, timeout)
+    elapsed = time.time() - start_time
+
+    if return_value:
+        logger.info(f"{full_filename} stats success in {elapsed} seconds")
+
+    return return_value
 
 
 def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, numa_node: int, timeout: int) -> bool:
     logger.info(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
 
-    numa_cmdline = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} dada_diskdb -k {ringbuffer_key} -f {full_filename}"
+    cmd = f"dada_diskdb -k {ringbuffer_key} -f {full_filename}"
 
     size = os.path.getsize(full_filename)
 
     start_time = time.time()
-    return_value = mwax_command.run_command(logger, numa_cmdline, timeout)
+    return_value, stdout = mwax_command.run_command_ext(logger, cmd, numa_node, timeout)
     elapsed = time.time() - start_time
 
     size_gigabytes = size / (1000 * 1000 * 1000)
     gbps_per_sec = (size_gigabytes * 8) / elapsed
 
     if return_value:
-        logger.info(f"{full_filename} load_psrdada_ringbuffer success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
+        logger.info(f"{full_filename} load_psrdada_ringbuffer success ({size_gigabytes:.3f}GB "
+                    f"at {gbps_per_sec:.3f} Gbps)")
 
     return return_value
 
@@ -123,3 +141,24 @@ def get_primary_ip_address() -> str:
 def get_disk_space_bytes(path: str) -> (int, int, int):
     # Get disk space: total, used and free
     return shutil.disk_usage(path)
+
+def do_checksum_md5(logger, full_filename: str, numa_node: int, timeout: int) -> str:
+    checksum = ""
+
+    logger.info(f"{full_filename}- running md5sum...")
+
+    cmdline = f"md5sum {full_filename}"
+
+    size = os.path.getsize(full_filename)
+
+    start_time = time.time()
+    return_value, checksum = mwax_command.run_command_ext(logger, cmdline, numa_node, timeout, False)
+    elapsed = time.time() - start_time
+
+    size_gigabytes = size / (1000 * 1000 * 1000)
+    gbps_per_sec = (size_gigabytes * 8) / elapsed
+
+    if return_value:
+        logger.info(f"{full_filename} md5sum success {checksum} ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
+
+    return checksum

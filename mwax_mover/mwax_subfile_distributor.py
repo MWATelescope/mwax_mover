@@ -15,13 +15,14 @@ import signal
 import sys
 import time
 import threading
+import typing
 from urllib.parse import urlparse, parse_qs
 
 
 class MWAXHTTPServer(HTTPServer):
     def __init__(self, *args, **kw):
         HTTPServer.__init__(self, *args, **kw)
-        self.context = None
+        self.context: typing.Optional[MWAXSubfileDistributor] = None
 
 
 class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
@@ -136,8 +137,9 @@ class MWAXSubfileDistributor:
         # Common
         self.cfg_log_path = None
         self.cfg_webserver_port = None
-        self.cfg_subfile_path = None
-        self.cfg_voltdata_path = None
+        self.cfg_subfile_incoming_path = None
+        self.cfg_voltdata_incoming_path = None
+        self.cfg_voltdata_outging_path = None
         self.cfg_always_keep_subfiles = False
         self.cfg_health_multicast_interface_name = None
         self.cfg_health_multicast_ip = None
@@ -161,11 +163,13 @@ class MWAXSubfileDistributor:
         self.cfg_corr_ringbuffer_key = None
         self.cfg_corr_diskdb_numa_node = None
         self.cfg_corr_archive_command_numa_node = None
-        self.cfg_corr_visdata_path = None
+        self.cfg_corr_visdata_incoming_path = None
         # Archiving settings for correlator
         self.cfg_corr_archive_destination_host = None
         self.cfg_corr_archive_destination_port = None
         self.cfg_corr_archive_destination_enabled = False
+        # processing_stats config
+        self.cfg_corr_mwax_stats_executable = None
 
         # Connection info for metadata db
         self.cfg_metadatadb_host = None
@@ -227,28 +231,40 @@ class MWAXSubfileDistributor:
 
         self.logger.info(f"Starting mwax_subfile_distributor processor...v{version.get_mwax_mover_version_string()}")
         self.cfg_webserver_port = utils.read_config(self.logger, self.config, "mwax mover", "webserver_port")
-        self.cfg_subfile_path = utils.read_config(self.logger, self.config,"mwax mover", "subfile_path")
-        self.cfg_voltdata_path = utils.read_config(self.logger, self.config,"mwax mover", "voltdata_path")
-        self.cfg_always_keep_subfiles = int(utils.read_config(self.logger, self.config,"mwax mover", "always_keep_subfiles")) == 1
-        self.cfg_health_multicast_interface_name = utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_interface_name")
+        self.cfg_subfile_incoming_path = utils.read_config(self.logger, self.config, "mwax mover",
+                                                           "subfile_incoming_path")
+        self.cfg_voltdata_incoming_path = utils.read_config(self.logger, self.config, "mwax mover",
+                                                            "voltdata_incoming_path")
+        self.cfg_voltdata_outgoing_path = utils.read_config(self.logger, self.config, "mwax mover",
+                                                            "voltdata_outgoing_path")
+        self.cfg_always_keep_subfiles = int(utils.read_config(self.logger, self.config,"mwax mover",
+                                                              "always_keep_subfiles")) == 1
+        self.cfg_health_multicast_interface_name = utils.read_config(self.logger, self.config, "mwax mover",
+                                                                     "health_multicast_interface_name")
         self.cfg_health_multicast_ip = utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_ip")
-        self.cfg_health_multicast_port = int(utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_port"))
-        self.cfg_health_multicast_hops = int(utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_hops"))
+        self.cfg_health_multicast_port = int(utils.read_config(self.logger, self.config, "mwax mover",
+                                                               "health_multicast_port"))
+        self.cfg_health_multicast_hops = int(utils.read_config(self.logger, self.config, "mwax mover",
+                                                               "health_multicast_hops"))
         # get this hosts primary network interface ip
         self.cfg_health_multicast_interface_ip = utils.get_ip_address(self.cfg_health_multicast_interface_name)
         self.logger.info(f"IP for sending multicast: {self.cfg_health_multicast_interface_ip}")
 
 
-        if not os.path.exists(self.cfg_subfile_path):
-            self.logger.error(f"Subfile file location {self.cfg_subfile_path} does not exist. Quitting.")
+        if not os.path.exists(self.cfg_subfile_incoming_path):
+            self.logger.error(f"Subfile file location {self.cfg_subfile_incoming_path} does not exist. Quitting.")
             exit(1)
 
-        if not os.path.exists(self.cfg_voltdata_path):
-            self.logger.error(f"Voltdata file location {self.cfg_voltdata_path} does not exist. Quitting.")
+        if not os.path.exists(self.cfg_voltdata_incoming_path):
+            self.logger.error(f"Voltdata file location {self.cfg_voltdata_incoming_path} does not exist. Quitting.")
+            exit(1)
+
+        if not os.path.exists(self.cfg_voltdata_outgoing_path):
+            self.logger.error(f"Voltdata file location {self.cfg_voltdata_outgoing_path} does not exist. Quitting.")
             exit(1)
 
         if self.cfg_always_keep_subfiles:
-            self.logger.info(f"Will keep subfiles after they are used in: {self.cfg_voltdata_path}... "
+            self.logger.info(f"Will keep subfiles after they are used in: {self.cfg_voltdata_incoming_path}... "
                              f"** NOTE: this should be for DEBUG only as it will be slow and may not keep up! **")
 
         # Check to see if we have a beamformer section
@@ -284,11 +300,35 @@ class MWAXSubfileDistributor:
 
         # read metadata database config
         if self.config.has_section("correlator"):
-            self.cfg_corr_ringbuffer_key = utils.read_config(self.logger, self.config,"correlator", "input_ringbuffer_key")
-            self.cfg_corr_visdata_path = utils.read_config(self.logger, self.config,"correlator", "visdata_path")
+            self.cfg_corr_ringbuffer_key = utils.read_config(self.logger, self.config,"correlator",
+                                                             "input_ringbuffer_key")
+            self.cfg_corr_visdata_incoming_path = utils.read_config(self.logger, self.config, "correlator",
+                                                           "visdata_incoming_path")
+            self.cfg_corr_visdata_processing_stats_path = utils.read_config(self.logger, self.config, "correlator",
+                                                                    "visdata_processing_stats_path")
+            self.cfg_corr_visdata_outgoing_path = utils.read_config(self.logger, self.config, "correlator",
+                                                                    "visdata_outgoing_path")
+            self.cfg_corr_mwax_stats_executable = utils.read_config(self.logger, self.config, "correlator",
+                                                                    "mwax_stats_executable")
 
-            if not os.path.exists(self.cfg_corr_visdata_path):
-                self.logger.error(f"Fildata file location {self.cfg_corr_visdata_path} does not exist. Quitting.")
+            if not os.path.exists(self.cfg_corr_visdata_incoming_path):
+                self.logger.error(f"Visdata file location {self.cfg_corr_visdata_incoming_path} does not exist. "
+                                  f"Quitting.")
+                exit(1)
+
+            if not os.path.exists(self.cfg_corr_visdata_processing_stats_path):
+                self.logger.error(f"Visdata file location {self.cfg_corr_visdata_processing_stats_path} does not exist. "
+                                  f"Quitting.")
+                exit(1)
+
+            if not os.path.exists(self.cfg_corr_visdata_outgoing_path):
+                self.logger.error(f"Visdata file location {self.cfg_corr_visdata_outgoing_path} does not exist. "
+                                  f"Quitting.")
+                exit(1)
+
+            if not os.path.exists(self.cfg_corr_mwax_stats_executable):
+                self.logger.error(f"mwax_stats executable {self.cfg_corr_mwax_stats_executable} does not exist. "
+                                  f"Quitting.")
                 exit(1)
 
             self.cfg_metadatadb_host = utils.read_config(self.logger, self.config,"mwa metadata database", "host")
@@ -335,8 +375,8 @@ class MWAXSubfileDistributor:
 
         # Start the processors
         self.subfile_processor = mwax_subfile_processor.SubfileProcessor(self,
-                                                                         self.cfg_subfile_path,
-                                                                         self.cfg_voltdata_path,
+                                                                         self.cfg_subfile_incoming_path,
+                                                                         self.cfg_voltdata_incoming_path,
                                                                          self.cfg_always_keep_subfiles,
                                                                          self.cfg_bf_enabled,
                                                                          self.cfg_bf_ringbuffer_key,
@@ -357,9 +397,13 @@ class MWAXSubfileDistributor:
                                                                                      self.cfg_corr_archive_command_numa_node,
                                                                                      self.cfg_corr_archive_destination_host,
                                                                                      self.cfg_corr_archive_destination_port,
+                                                                                     self.cfg_corr_mwax_stats_executable,
                                                                                      self.db_handler,
-                                                                                     self.cfg_voltdata_path,
-                                                                                     self.cfg_corr_visdata_path)
+                                                                                     self.cfg_voltdata_incoming_path,
+                                                                                     self.cfg_voltdata_outgoing_path,
+                                                                                     self.cfg_corr_visdata_incoming_path,
+                                                                                     self.cfg_corr_visdata_processing_stats_path,
+                                                                                     self.cfg_corr_visdata_outgoing_path)
 
                 # Add this processor to list of processors we manage
                 self.processors.append(self.archive_processor)
@@ -404,7 +448,8 @@ class MWAXSubfileDistributor:
             time.sleep(1)
 
     def get_status(self) -> dict:
-        main_status = {"process": type(self).__name__,
+        main_status = {"Unix timestamp": time.time(),
+                       "process": type(self).__name__,
                        "version": version.get_mwax_mover_version_string(),
                        "host": self.hostname,
                        "running": self.running,
@@ -441,11 +486,6 @@ class MWAXSubfileDistributor:
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
 
-        # create a health thread
-        self.logger.info("Starting health_thread...")
-        health_thread = threading.Thread(name="health_thread", target=self.health_handler, daemon=True)
-        health_thread.start()
-
         if self.cfg_bf_enabled:
             self.logger.info(f"Beamformer Enabled")
         else:
@@ -459,12 +499,19 @@ class MWAXSubfileDistributor:
         for processor in self.processors:
             processor.start()
 
+        time.sleep(1)  # give things time to start!
+
+        # create a health thread
+        self.logger.info("Starting health_thread...")
+        health_thread = threading.Thread(name="health_thread", target=self.health_handler, daemon=True)
+        health_thread.start()
+
         while self.running:
             for processor in self.processors:
                 for t in processor.worker_threads:
                     if t:
                         if t.isAlive():
-                            time.sleep(1)
+                            time.sleep(0.2)
                         else:
                             self.running = False
                             break
