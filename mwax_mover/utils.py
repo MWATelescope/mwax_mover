@@ -55,7 +55,7 @@ def process_mwax_stats(logger, mwax_stats_executable: str, full_filename: str, n
     return return_value
 
 
-def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, numa_node: int, timeout: int) -> bool:
+def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, numa_node, timeout: int) -> bool:
     logger.info(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
 
     cmd = f"dada_diskdb -k {ringbuffer_key} -f {full_filename}"

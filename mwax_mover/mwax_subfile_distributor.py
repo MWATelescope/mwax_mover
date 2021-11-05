@@ -290,9 +290,9 @@ class MWAXSubfileDistributor:
                                                                        "fil_destination_port")
             self.cfg_bf_archive_destination_enabled = int(utils.read_config(self.logger, self.config, self.hostname,
                                                                      "fil_destination_enabled")) == 1
-            self.cfg_bf_numa_node = utils.read_config(self.logger, self.config, self.hostname, "dada_disk_db_numa_node")
-            self.cfg_bf_archive_command_numa_node = utils.read_config(self.logger, self.config, self.hostname,
-                                                                      "archive_command_numa_node")
+            self.cfg_bf_numa_node = int(utils.read_config(self.logger, self.config, self.hostname, "dada_disk_db_numa_node"))
+            self.cfg_bf_archive_command_numa_node = int(utils.read_config(self.logger, self.config, self.hostname,
+                                                                      "archive_command_numa_node"))
 
             self.cfg_bf_enabled = True
         else:
@@ -349,10 +349,10 @@ class MWAXSubfileDistributor:
                                                                        "mwax_destination_port")
             self.cfg_corr_archive_destination_enabled = int(utils.read_config(self.logger, self.config, self.hostname,
                                                                        "mwax_destination_enabled")) == 1
-            self.cfg_corr_diskdb_numa_node = utils.read_config(self.logger, self.config, self.hostname,
-                                                               "dada_disk_db_numa_node")
-            self.cfg_corr_archive_command_numa_node = utils.read_config(self.logger, self.config, self.hostname,
-                                                                        "archive_command_numa_node")
+            self.cfg_corr_diskdb_numa_node = int(utils.read_config(self.logger, self.config, self.hostname,
+                                                               "dada_disk_db_numa_node"))
+            self.cfg_corr_archive_command_numa_node = int(utils.read_config(self.logger, self.config, self.hostname,
+                                                                        "archive_command_numa_node"))
 
             # Initiate database connection pool for metadata db
             self.db_handler = mwax_db.MWAXDBHandler(logger=self.logger,

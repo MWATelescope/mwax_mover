@@ -60,11 +60,15 @@ import shlex
 # use shell should be used when you are using wildcards and other shell features
 def run_command_ext(logger, command: str, numa_node: int, timeout: int = 60, use_shell: bool = False) -> (bool, str):
     # Example: ["dada_diskdb", "-k 1234", "-f 1216447872_02_256_201.sub -s"]
-    if int(numa_node) > 0:
-        cmdline = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} " \
-                  f"{command}"
-    else:
+    if numa_node is None:
         cmdline = f"{command}"
+    else:
+        # TODO Sloppy! Some places we have None- others we have -1. Need to sort this out
+        if int(numa_node) > 0:
+            cmdline = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} " \
+                      f"{command}"
+        else:
+            cmdline = f"{command}"
 
     try:
         logger.debug(f"Executing {cmdline}...")
