@@ -60,7 +60,7 @@ import shlex
 # use shell should be used when you are using wildcards and other shell features
 def run_command_ext(logger, command: str, numa_node: int, timeout: int = 60, use_shell: bool = False) -> (bool, str):
     # Example: ["dada_diskdb", "-k 1234", "-f 1216447872_02_256_201.sub -s"]
-    if numa_node > 0:
+    if int(numa_node) > 0:
         cmdline = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} " \
                   f"{command}"
     else:

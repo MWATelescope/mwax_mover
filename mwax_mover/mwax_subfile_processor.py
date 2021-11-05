@@ -101,13 +101,13 @@ class SubfileProcessor:
 
         self.bf_enabled = bf_enabled
         self.bf_ringbuffer_key = bf_ringbuffer_key    # PSRDADA ringbuffer key for INPUT into correlator or beamformer
-        self.bf_numa_node = bf_numa_node              # Numa node to use to do a file copy
+        self.bf_numa_node = int(bf_numa_node)         # Numa node to use to do a file copy
         self.bf_fildata_path = bf_fildata_path        # Path where filterbank files are written to (and sub files in debug mode)
         self.bf_settings_path = bf_settings_path      # Path to text file containing the PSRDADA Beamformer header info
 
         self.corr_enabled = corr_enabled
         self.corr_ringbuffer_key = corr_ringbuffer_key  # PSRDADA ringbuffer key for INPUT into correlator or beamformer
-        self.corr_diskdb_numa_node = corr_diskdb_numa_node  # Numa node to use to do a file copy
+        self.corr_diskdb_numa_node = int(corr_diskdb_numa_node)  # Numa node to use to do a file copy
 
     def start(self):
         # Create watcher for the subfiles
