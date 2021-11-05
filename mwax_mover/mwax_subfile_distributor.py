@@ -311,6 +311,9 @@ class MWAXSubfileDistributor:
             self.cfg_corr_mwax_stats_executable = utils.read_config(self.logger, self.config, "correlator",
                                                                     "mwax_stats_executable")
 
+            self.cfg_corr_mwax_stats_dump_dir = utils.read_config(self.logger, self.config, "correlator",
+                                                                    "mwax_stats_dump_dir")
+
             if not os.path.exists(self.cfg_corr_visdata_incoming_path):
                 self.logger.error(f"Visdata file location {self.cfg_corr_visdata_incoming_path} does not exist. "
                                   f"Quitting.")
@@ -398,6 +401,7 @@ class MWAXSubfileDistributor:
                                                                                      self.cfg_corr_archive_destination_host,
                                                                                      self.cfg_corr_archive_destination_port,
                                                                                      self.cfg_corr_mwax_stats_executable,
+                                                                                     self.cfg_corr_mwax_stats_dump_dir,
                                                                                      self.db_handler,
                                                                                      self.cfg_voltdata_incoming_path,
                                                                                      self.cfg_voltdata_outgoing_path,
