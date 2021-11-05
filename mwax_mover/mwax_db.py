@@ -86,7 +86,7 @@ def upsert_data_file_row(db_handler_object,
                          remote_archived: bool,
                          location,
                          prefix,
-                         checksum_type_id: Optional[int],
+                         checksum_type: Optional[int],
                          checksum: Optional[str]) -> bool:
     # Prepare the fields
     # immediately add this file to the db so we insert a record into metadata data_files table
@@ -95,11 +95,12 @@ def upsert_data_file_row(db_handler_object,
     file_size = os.stat(archive_filename).st_size
     deleted = False
 
-    # We actually do an upsert- this way we can use the same code for mwax (insert) and mwacache (update)
+    # We actually do an upsert- this way we can use the same code for mwax (insert) and mwacache (update),
+    # except we won't have the checksum value on mwacache (it gets passed in as None, so we ignore it).
     sql = ""
 
     try:
-        if checksum_type_id is None:
+        if checksum_type is None:
             sql = f"INSERT INTO data_files " \
                   f"(observation_num, filetype, size, filename, host, remote_archived, deleted, location, prefix) " \
                   f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (filename) DO UPDATE SET " \
@@ -110,14 +111,14 @@ def upsert_data_file_row(db_handler_object,
                                                    remote_archived, deleted, location, prefix))
         else:
             sql = f"INSERT INTO data_files " \
-                  f"(observation_num, filetype, size, filename, host, remote_archived, deleted, location, prefix, checksum_type_id, checksum) " \
+                  f"(observation_num, filetype, size, filename, host, remote_archived, deleted, location, prefix, checksum_type, checksum) " \
                   f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (filename) DO UPDATE SET " \
                   f"remote_archived = excluded.remote_archived, location = excluded.location, prefix = excluded.prefix"
 
             db_handler_object.upsert_one_row(sql, (str(obsid), filetype, file_size,
                                                   filename, hostname,
                                                   remote_archived, deleted, location, prefix,
-                                                   checksum_type_id, checksum))
+                                                  checksum_type, checksum))
 
         if db_handler_object.dummy:
             db_handler_object.logger.warning(f"{filename} upsert_data_file_row() Using dummy database connection. "
