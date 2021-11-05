@@ -144,6 +144,9 @@ def get_disk_space_bytes(path: str) -> (int, int, int):
     return shutil.disk_usage(path)
 
 def do_checksum_md5(logger, full_filename: str, numa_node: int, timeout: int) -> str:
+    # default output of md5 hash command is:
+    # "5ce49e5ebd72c41a1d70802340613757  /visdata/incoming/1320133480_20211105074422_ch055_000.fits"
+    md5output = ""
     checksum = ""
 
     logger.info(f"{full_filename}- running md5sum...")
@@ -153,13 +156,23 @@ def do_checksum_md5(logger, full_filename: str, numa_node: int, timeout: int) ->
     size = os.path.getsize(full_filename)
 
     start_time = time.time()
-    return_value, checksum = mwax_command.run_command_ext(logger, cmdline, numa_node, timeout, False)
+    return_value, md5output = mwax_command.run_command_ext(logger, cmdline, numa_node, timeout, False)
     elapsed = time.time() - start_time
 
-    size_gigabytes = size / (1000 * 1000 * 1000)
-    gbps_per_sec = (size_gigabytes * 8) / elapsed
+    size_megabytes = size / (1000 * 1000)
+    mb_per_sec = size_megabytes / elapsed
 
     if return_value:
-        logger.info(f"{full_filename} md5sum success {checksum} ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
+        # the return value will contain a few spaces and then the filename
+        # So remove the filename and then remove any whitespace
+        checksum = md5output.replace(full_filename, "").rstrip()
 
-    return checksum
+        # MD5 hash is ALWAYS 32 characters
+        if len(checksum) == 32:
+            logger.info(f"{full_filename} md5sum success {checksum} ({size_megabytes:.3f}MB at "
+                        f"{mb_per_sec:.3f} MB/s)")
+            return checksum
+        else:
+            raise Exception(f"Calculated MD5 checksum is not valid: md5 output {md5output}")
+    else:
+        raise Exception(f"md5sum returned an unexpected return code {return_value}")
