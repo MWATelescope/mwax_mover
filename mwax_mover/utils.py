@@ -36,11 +36,12 @@ def get_hostname() -> str:
 
     return split_hostname.lower()
 
-def process_mwax_stats(logger, mwax_stats_executable: str, full_filename: str, numa_node: int, timeout: int) -> bool:
+def process_mwax_stats(logger, mwax_stats_executable: str, full_filename: str, numa_node: int, timeout: int,
+                       stats_dump_dir: str) -> bool:
     # This code will execute the mwax stats command
     obs_id = str(os.path.basename(full_filename)[0:10])
 
-    cmd = f"{mwax_stats_executable} {full_filename} -m /vulcan/metafits/{obs_id}_metafits.fits"
+    cmd = f"{mwax_stats_executable} {full_filename} -m /vulcan/metafits/{obs_id}_metafits.fits -o {stats_dump_dir}"
 
     logger.info(f"{full_filename}- attempting to run stats: {cmd}")
 

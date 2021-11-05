@@ -16,6 +16,7 @@ class MWAXArchiveProcessor:
                  archive_host: str,
                  archive_port: str,
                  mwax_stats_executable: str,
+                 mwax_stats_dump_dir: str,
                  db_handler_object,
                  voltdata_incoming_path: str,
                  voltdata_outgoing_path: str,
@@ -42,6 +43,7 @@ class MWAXArchiveProcessor:
         self.archive_command_numa_node: int = archive_command_numa_node
 
         self.mwax_stats_executable = mwax_stats_executable   # Full path to executable for mwax_stats
+        self.mwax_stats_dump_dir = mwax_stats_dump_dir       # Directory where to dump the stats files
 
         self.archiving_paused = False
 
@@ -280,7 +282,8 @@ class MWAXArchiveProcessor:
         else:
             # This is a normal mwax fits file. Run stats on it
             if utils.process_mwax_stats(self.logger, self.mwax_stats_executable,
-                                        item, int(self.archive_command_numa_node), 180) is not True:
+                                        item, int(self.archive_command_numa_node), 180,
+                                        self.mwax_stats_dump_dir) is not True:
                 return False
 
         # Take the input filename - strip the path, then append the output path
