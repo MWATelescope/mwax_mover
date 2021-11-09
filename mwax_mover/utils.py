@@ -71,7 +71,7 @@ def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, num
 
     if return_value:
         logger.info(f"{full_filename} load_psrdada_ringbuffer success ({size_gigabytes:.3f}GB "
-                    f"at {gbps_per_sec:.3f} Gbps)")
+                    f"in {elapsed} sec at {gbps_per_sec:.3f} Gbps)")
 
     return return_value
 
@@ -169,7 +169,7 @@ def do_checksum_md5(logger, full_filename: str, numa_node: int, timeout: int) ->
 
         # MD5 hash is ALWAYS 32 characters
         if len(checksum) == 32:
-            logger.info(f"{full_filename} md5sum success {checksum} ({size_megabytes:.3f}MB at "
+            logger.info(f"{full_filename} md5sum success {checksum} ({size_megabytes:.3f}MB in {elapsed} secs at "
                         f"{mb_per_sec:.3f} MB/s)")
             return checksum
         else:

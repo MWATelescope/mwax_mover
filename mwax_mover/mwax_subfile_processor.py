@@ -304,10 +304,13 @@ class SubfileProcessor:
 
         command = f"cp {filename} {destination_path}/."
 
-        retval, stdout = mwax_command.run_command_ext(self.logger, command, numa_node, 120, True)
+        start_time = time.time()
+        retval, stdout = mwax_command.run_command_ext(self.logger, command, numa_node, 120, False)
+        elapsed = time.time() - start_time
 
         if retval:
-            self.logger.info(f"{filename}- Copying file into {destination_path} was successful.")
+            self.logger.info(f"{filename}- Copying file into {destination_path} was successful "
+                             f"(took {elapsed} secs.")
 
         return retval
 
