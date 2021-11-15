@@ -34,8 +34,10 @@ class CorrelatorMode(Enum):
 
 
 COMMAND_DADA_DISKDB = "dada_diskdb"
-PSRDADA_MAX_HEADER_LINES = 31           # number of lines of the PSRDADA header to read looking for keywords
+# number of lines of the PSRDADA header to read looking for keywords
+PSRDADA_MAX_HEADER_LINES = 31
 PSRDADA_HEADER_BYTES = 4096
+
 
 def read_subfile_mode(filename: str) -> str:
     subfile_mode = None
@@ -76,12 +78,14 @@ class SubfileProcessor:
 
         # Setup logging
         self.logger = logging.getLogger(__name__)
-        self.logger.propagate = True  # pass all logged events to the parent (subfile distributor/main log)
+        # pass all logged events to the parent (subfile distributor/main log)
+        self.logger.propagate = True
         self.logger.setLevel(logging.DEBUG)
         file_log = logging.FileHandler(filename=os.path.join(self.subfile_distributor_context.cfg_log_path,
                                                              f"{__name__}.log"))
         file_log.setLevel(logging.DEBUG)
-        file_log.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
+        file_log.setFormatter(logging.Formatter(
+            '%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
         self.logger.addHandler(file_log)
 
         self.ext_to_watch_for = ".sub"
@@ -100,14 +104,19 @@ class SubfileProcessor:
         self.subfile_queue_worker = None
 
         self.bf_enabled = bf_enabled
-        self.bf_ringbuffer_key = bf_ringbuffer_key    # PSRDADA ringbuffer key for INPUT into correlator or beamformer
+        # PSRDADA ringbuffer key for INPUT into correlator or beamformer
+        self.bf_ringbuffer_key = bf_ringbuffer_key
         self.bf_numa_node = bf_numa_node         # Numa node to use to do a file copy
-        self.bf_fildata_path = bf_fildata_path        # Path where filterbank files are written to (and sub files in debug mode)
-        self.bf_settings_path = bf_settings_path      # Path to text file containing the PSRDADA Beamformer header info
+        # Path where filterbank files are written to (and sub files in debug mode)
+        self.bf_fildata_path = bf_fildata_path
+        # Path to text file containing the PSRDADA Beamformer header info
+        self.bf_settings_path = bf_settings_path
 
         self.corr_enabled = corr_enabled
-        self.corr_ringbuffer_key = corr_ringbuffer_key  # PSRDADA ringbuffer key for INPUT into correlator or beamformer
-        self.corr_diskdb_numa_node = corr_diskdb_numa_node  # Numa node to use to do a file copy
+        # PSRDADA ringbuffer key for INPUT into correlator or beamformer
+        self.corr_ringbuffer_key = corr_ringbuffer_key
+        # Numa node to use to do a file copy
+        self.corr_diskdb_numa_node = corr_diskdb_numa_node
 
     def start(self):
         # Create watcher for the subfiles
@@ -125,19 +134,22 @@ class SubfileProcessor:
                                                                   exit_once_queue_empty=False)
 
         # Setup thread for watching filesystem
-        watcher_thread = threading.Thread(name="watch_sub", target=self.subfile_watcher.start, daemon=True)
+        watcher_thread = threading.Thread(
+            name="watch_sub", target=self.subfile_watcher.start, daemon=True)
         self.watcher_threads.append(watcher_thread)
         watcher_thread.start()
 
         # Setup thread for processing items
-        queue_worker_thread = threading.Thread(name="work_sub", target=self.subfile_queue_worker.start, daemon=True)
+        queue_worker_thread = threading.Thread(
+            name="work_sub", target=self.subfile_queue_worker.start, daemon=True)
         self.worker_threads.append(queue_worker_thread)
         queue_worker_thread.start()
 
     def handler(self, item: str) -> bool:
         success = False
 
-        self.logger.info(f"{item}- SubfileProcessor.handler is handling {item}...")
+        self.logger.info(
+            f"{item}- SubfileProcessor.handler is handling {item}...")
 
         # `keep_subfiles_path` is used after doing the main work. If we are running in with `always_keep_subfiles`=1,
         # then we will always keep the voltages and not delete them.
@@ -163,9 +175,11 @@ class SubfileProcessor:
                 # 3. Rename .sub file to .free so that udpgrab can reuse it
                 if CorrelatorMode.is_correlator(subfile_mode):
                     if self.subfile_distributor_context.cfg_corr_archive_destination_enabled:
-                        self.subfile_distributor_context.archive_processor.pause_archiving(False)
+                        self.subfile_distributor_context.archive_processor.pause_archiving(
+                            False)
 
-                    success = utils.load_psrdada_ringbuffer(self.logger, item, self.corr_ringbuffer_key, self.corr_diskdb_numa_node, 16)
+                    success = utils.load_psrdada_ringbuffer(
+                        self.logger, item, self.corr_ringbuffer_key, self.corr_diskdb_numa_node, 16)
 
                     if self.always_keep_subfiles:
                         keep_subfiles_path = self.voltdata_incoming_path
@@ -173,19 +187,24 @@ class SubfileProcessor:
                 elif CorrelatorMode.is_vcs(subfile_mode):
                     # Pause archiving so we have the disk to ourselves
                     if self.subfile_distributor_context.cfg_corr_archive_destination_enabled:
-                        self.subfile_distributor_context.archive_processor.pause_archiving(True)
+                        self.subfile_distributor_context.archive_processor.pause_archiving(
+                            True)
 
-                    self._copy_subfile_to_disk(item, self.corr_diskdb_numa_node, self.voltdata_incoming_path)
+                    self._copy_subfile_to_disk(
+                        item, self.corr_diskdb_numa_node, self.voltdata_incoming_path)
                     success = True
 
                 elif CorrelatorMode.is_no_capture(subfile_mode):
-                    self.logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
+                    self.logger.info(
+                        f"{item}- ignoring due to mode: {subfile_mode}")
                     if self.subfile_distributor_context.cfg_corr_archive_destination_enabled:
-                        self.subfile_distributor_context.archive_processor.pause_archiving(False)
+                        self.subfile_distributor_context.archive_processor.pause_archiving(
+                            False)
                     success = True
 
                 else:
-                    self.logger.error(f"{item}- Unknown subfile mode {subfile_mode}, ignoring.")
+                    self.logger.error(
+                        f"{item}- Unknown subfile mode {subfile_mode}, ignoring.")
                     success = False
 
             if self.bf_enabled:
@@ -207,8 +226,10 @@ class SubfileProcessor:
                         with open(self.bf_settings_path, "r") as bf_settings_file:
                             beamformer_settings = bf_settings_file.read()
 
-                        self.logger.info(f"{item}- injecting beamformer header into subfile...")
-                        self._inject_beamformer_headers(item, beamformer_settings)
+                        self.logger.info(
+                            f"{item}- injecting beamformer header into subfile...")
+                        self._inject_beamformer_headers(
+                            item, beamformer_settings)
 
                         success = utils.load_psrdada_ringbuffer(self.logger, item, self.bf_ringbuffer_key,
                                                                 self.bf_numa_node, 16)
@@ -217,11 +238,13 @@ class SubfileProcessor:
                             keep_subfiles_path = self.voltdata_incoming_path
 
                     elif CorrelatorMode.is_no_capture(subfile_mode):
-                        self.logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
+                        self.logger.info(
+                            f"{item}- ignoring due to mode: {subfile_mode}")
                         success = True
 
                     else:
-                        self.logger.error(f"{item}- Unknown subfile mode {subfile_mode}, ignoring.")
+                        self.logger.error(
+                            f"{item}- Unknown subfile mode {subfile_mode}, ignoring.")
                         success = False
 
         except Exception as handler_exception:
@@ -236,7 +259,8 @@ class SubfileProcessor:
                     self._copy_subfile_to_disk(item, -1, keep_subfiles_path)
 
                 # Rename subfile so that udpgrab can reuse it
-                free_filename = str(item).replace(self.ext_to_watch_for, self.ext_done)
+                free_filename = str(item).replace(
+                    self.ext_to_watch_for, self.ext_done)
 
                 try:
                     shutil.move(item, free_filename)
@@ -245,7 +269,8 @@ class SubfileProcessor:
                                       f"{move_exception}")
                     exit(2)
 
-            self.logger.info(f"{item}- SubfileProcessor.handler finished handling.")
+            self.logger.info(
+                f"{item}- SubfileProcessor.handler finished handling.")
 
         return success
 
@@ -270,13 +295,13 @@ class SubfileProcessor:
                     t.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
-
     def _inject_beamformer_headers(self, filename: str, beamformer_settings: str):
         data = []
 
         # Read the psrdada header data in to a list (one line per item)
         with open(filename, "rb") as subfile:
-            data = subfile.read(PSRDADA_HEADER_BYTES).decode("UTF-8").split('\n')
+            data = subfile.read(PSRDADA_HEADER_BYTES).decode(
+                "UTF-8").split('\n')
 
         last_line_index = len(data)-1
         last_row_len = len(data[last_line_index])
@@ -290,14 +315,13 @@ class SubfileProcessor:
 
         new_bytes = bytes(new_string, "UTF-8")
         if len(new_bytes) != PSRDADA_HEADER_BYTES:
-            raise Exception (f"_inject_beamformer_headers(): new_bytes length is not {PSRDADA_HEADER_BYTES} "
-                             f"as expected it is {len(new_bytes)}. Newbytes = [{new_string}]")
+            raise Exception(f"_inject_beamformer_headers(): new_bytes length is not {PSRDADA_HEADER_BYTES} "
+                            f"as expected it is {len(new_bytes)}. Newbytes = [{new_string}]")
 
         # Overwrite the first 4096 bytes with our updated header
         with open(filename, "r+b") as subfile:
             subfile.seek(0)
             subfile.write(new_bytes)
-
 
     def _copy_subfile_to_disk(self, filename: str, numa_node: int, destination_path: str) -> bool:
         self.logger.info(f"{filename}- Copying file into {destination_path}")
@@ -305,7 +329,8 @@ class SubfileProcessor:
         command = f"cp {filename} {destination_path}/."
 
         start_time = time.time()
-        retval, stdout = mwax_command.run_command_ext(self.logger, command, numa_node, 120, False)
+        retval, stdout = mwax_command.run_command_ext(
+            self.logger, command, numa_node, 120, False)
         elapsed = time.time() - start_time
 
         if retval:
@@ -315,7 +340,8 @@ class SubfileProcessor:
         return retval
 
     def dump_voltages(self, start_gps_time: int, end_gps_time: int) -> bool:
-        self.logger.info(f"dump_voltages: from {str(start_gps_time)} to {str(end_gps_time)}...")
+        self.logger.info(
+            f"dump_voltages: from {str(start_gps_time)} to {str(end_gps_time)}...")
 
         # disable archiving
         archiving_was_paused = False
@@ -323,10 +349,12 @@ class SubfileProcessor:
         # If we have an active archiver, check it's status
         if self.subfile_distributor_context.cfg_corr_archive_destination_enabled:
             archiving_was_paused = self.subfile_distributor_context.archive_processor.archiving_paused
-            self.subfile_distributor_context.archive_processor.pause_archiving(True)
+            self.subfile_distributor_context.archive_processor.pause_archiving(
+                True)
 
         # Look for any .free files which have the first 10 characters of filename from starttime to endtime
-        free_file_list = sorted(glob.glob(f"{self.subfile_incoming_path}/*.free"))
+        free_file_list = sorted(
+            glob.glob(f"{self.subfile_incoming_path}/*.free"))
 
         keep_file_list = []
 
@@ -350,25 +378,30 @@ class SubfileProcessor:
 
         # Then copy all .keep to /voltdata/*.sub
         for keep_filename in keep_file_list:
-            self.logger.info(f"dump_voltages: copying {keep_filename} to {self.voltdata_incoming_path}...")
+            self.logger.info(
+                f"dump_voltages: copying {keep_filename} to {self.voltdata_incoming_path}...")
             keep_filename_only = os.path.basename(keep_filename)
             sub_filename_only = keep_filename_only.replace(".keep", ".sub")
-            sub_filename = os.path.join(self.voltdata_incoming_path, sub_filename_only)
+            sub_filename = os.path.join(
+                self.voltdata_incoming_path, sub_filename_only)
 
             # Only copy if we don't already have it in /voltdata
             if not os.path.exists(sub_filename):
                 shutil.copyfile(keep_filename, sub_filename)
-                self.logger.info(f"dump_voltages: copy of {keep_filename} to {self.voltdata_incoming_path} complete")
+                self.logger.info(
+                    f"dump_voltages: copy of {keep_filename} to {self.voltdata_incoming_path} complete")
 
         # Then rename all .keep files to .free
         for keep_filename in keep_file_list:
             free_filename = keep_filename.replace(".keep", ".free")
-            self.logger.info(f"dump_voltages: renaming {keep_filename} to {free_filename}")
+            self.logger.info(
+                f"dump_voltages: renaming {keep_filename} to {free_filename}")
             shutil.move(keep_filename, free_filename)
 
         # reenable archiving (if we're not in voltage capture mode) and if an archiver is running
         if self.subfile_distributor_context.cfg_corr_archive_destination_enabled:
-            self.subfile_distributor_context.archive_processor.pause_archiving(archiving_was_paused)
+            self.subfile_distributor_context.archive_processor.pause_archiving(
+                archiving_was_paused)
 
         self.logger.info(f"dump_voltages: complete")
         return True

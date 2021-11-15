@@ -8,6 +8,8 @@ import shutil
 import socket
 import struct
 import time
+import typing
+
 
 def read_config(logger, config: ConfigParser, section: str, key: str, b64encoded=False):
     if b64encoded:
@@ -36,6 +38,7 @@ def get_hostname() -> str:
 
     return split_hostname.lower()
 
+
 def process_mwax_stats(logger, mwax_stats_executable: str, full_filename: str, numa_node: int, timeout: int,
                        stats_dump_dir: str) -> bool:
     # This code will execute the mwax stats command
@@ -46,7 +49,8 @@ def process_mwax_stats(logger, mwax_stats_executable: str, full_filename: str, n
     logger.info(f"{full_filename}- attempting to run stats: {cmd}")
 
     start_time = time.time()
-    return_value, stdout = mwax_command.run_command_ext(logger, cmd, numa_node, timeout)
+    return_value, stdout = mwax_command.run_command_ext(
+        logger, cmd, numa_node, timeout)
     elapsed = time.time() - start_time
 
     if return_value:
@@ -56,14 +60,16 @@ def process_mwax_stats(logger, mwax_stats_executable: str, full_filename: str, n
 
 
 def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, numa_node, timeout: int) -> bool:
-    logger.info(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
+    logger.info(
+        f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
 
     cmd = f"dada_diskdb -k {ringbuffer_key} -f {full_filename}"
 
     size = os.path.getsize(full_filename)
 
     start_time = time.time()
-    return_value, stdout = mwax_command.run_command_ext(logger, cmd, numa_node, timeout)
+    return_value, stdout = mwax_command.run_command_ext(
+        logger, cmd, numa_node, timeout)
     elapsed = time.time() - start_time
 
     size_gigabytes = size / (1000 * 1000 * 1000)
@@ -90,8 +96,10 @@ def scan_directory(logger, watch_dir: str, pattern: str, recursive: bool) -> lis
     # Watch dir must end in a slash for the iglob to work
     # Just loop through all files and add them to the queue
     if recursive:
-        find_pattern = os.path.join(os.path.abspath(watch_dir), "**/*" + pattern)
-        logger.info(f"Scanning recursively for files matching {find_pattern}...")
+        find_pattern = os.path.join(
+            os.path.abspath(watch_dir), "**/*" + pattern)
+        logger.info(
+            f"Scanning recursively for files matching {find_pattern}...")
     else:
         find_pattern = os.path.join(os.path.abspath(watch_dir), "*" + pattern)
         logger.info(f"Scanning for files matching {find_pattern}...")
@@ -100,13 +108,13 @@ def scan_directory(logger, watch_dir: str, pattern: str, recursive: bool) -> lis
     return files
 
 
-def send_multicast(multicast_interface_ip: str, dest_multicast_ip: str, dest_multicast_port: int, message: bytes, ttl_hops:int):
+def send_multicast(multicast_interface_ip: str, dest_multicast_ip: str, dest_multicast_port: int, message: bytes, ttl_hops: int):
     # Create the datagram socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 
     # Disable loopback so you do not receive your own datagrams.
     #loopback = 0
-    #if sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, loopback) != 0:
+    # if sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, loopback) != 0:
     #    raise Exception("Error setsockopt IP_MULTICAST_LOOP failed")
 
     # Set the time-to-live for messages.
@@ -116,7 +124,8 @@ def send_multicast(multicast_interface_ip: str, dest_multicast_ip: str, dest_mul
     # Set local interface for outbound multicast datagrams.
     # The IP address specified must be associated with a local,
     # multicast - capable interface.
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(multicast_interface_ip))
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
+                    socket.inet_aton(multicast_interface_ip))
 
     try:
         # Send data to the multicast group
@@ -128,6 +137,7 @@ def send_multicast(multicast_interface_ip: str, dest_multicast_ip: str, dest_mul
     finally:
         sock.close()
 
+
 def get_ip_address(ifname: str) -> str:
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     return socket.inet_ntoa(fcntl.ioctl(
@@ -136,12 +146,15 @@ def get_ip_address(ifname: str) -> str:
         struct.pack('256s', bytes(ifname[:15], 'utf-8'))
     )[20:24])
 
+
 def get_primary_ip_address() -> str:
     return socket.gethostbyname(socket.getfqdn())
 
-def get_disk_space_bytes(path: str) -> (int, int, int):
+
+def get_disk_space_bytes(path: str) -> typing.Tuple[int, int, int]:
     # Get disk space: total, used and free
     return shutil.disk_usage(path)
+
 
 def do_checksum_md5(logger, full_filename: str, numa_node: int, timeout: int) -> str:
     # default output of md5 hash command is:
@@ -156,7 +169,8 @@ def do_checksum_md5(logger, full_filename: str, numa_node: int, timeout: int) ->
     size = os.path.getsize(full_filename)
 
     start_time = time.time()
-    return_value, md5output = mwax_command.run_command_ext(logger, cmdline, numa_node, timeout, False)
+    return_value, md5output = mwax_command.run_command_ext(
+        logger, cmdline, numa_node, timeout, False)
     elapsed = time.time() - start_time
 
     size_megabytes = size / (1000 * 1000)
@@ -173,6 +187,8 @@ def do_checksum_md5(logger, full_filename: str, numa_node: int, timeout: int) ->
                         f"{mb_per_sec:.3f} MB/s)")
             return checksum
         else:
-            raise Exception(f"Calculated MD5 checksum is not valid: md5 output {md5output}")
+            raise Exception(
+                f"Calculated MD5 checksum is not valid: md5 output {md5output}")
     else:
-        raise Exception(f"md5sum returned an unexpected return code {return_value}")
+        raise Exception(
+            f"md5sum returned an unexpected return code {return_value}")

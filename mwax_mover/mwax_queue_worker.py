@@ -26,7 +26,8 @@ class QueueWorker(object):
 
         if (event_handler is None and executable_path is None) or \
            (event_handler is not None and executable_path is not None):
-            raise Exception("QueueWorker requires event_handler OR executable_path not both and not neither!")
+            raise Exception(
+                "QueueWorker requires event_handler OR executable_path not both and not neither!")
 
         self._executable_path = executable_path
         self._event_handler = event_handler
@@ -85,14 +86,16 @@ class QueueWorker(object):
                         self.current_item = None
 
                     elapsed = time.time() - start_time
-                    self.logger.info(f"Complete. Queue size: {self.q.qsize()} Elapsed: {elapsed:.2f} sec")
+                    self.logger.info(
+                        f"Complete. Queue size: {self.q.qsize()} Elapsed: {elapsed:.2f} sec")
 
                     if success:
                         # reset our error count and backoffs
                         self.consecutive_error_count = 0
                     else:
                         self.consecutive_error_count += 1
-                        backoff = self.backoff_initial_seconds * self.backoff_factor * self.consecutive_error_count
+                        backoff = self.backoff_initial_seconds * \
+                            self.backoff_factor * self.consecutive_error_count
                         if backoff > self.backoff_limit_seconds:
                             backoff = self.backoff_limit_seconds
 
@@ -120,7 +123,8 @@ class QueueWorker(object):
         command = command.replace(mwax_mover.FILE_REPLACEMENT_TOKEN, filename)
 
         filename_no_ext = os.path.splitext(filename)[0]
-        command = command.replace(mwax_mover.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext)
+        command = command.replace(
+            mwax_mover.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext)
 
         return mwax_command.run_command_ext(self.logger, command, -1, 60, True)
 

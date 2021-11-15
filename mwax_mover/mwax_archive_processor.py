@@ -27,12 +27,14 @@ class MWAXArchiveProcessor:
 
         # Setup logging
         self.logger = logging.getLogger(__name__)
-        self.logger.propagate = True  # pass all logged events to the parent (subfile distributor/main log)
+        # pass all logged events to the parent (subfile distributor/main log)
+        self.logger.propagate = True
         self.logger.setLevel(logging.DEBUG)
         file_log = logging.FileHandler(filename=os.path.join(self.subfile_distributor_context.cfg_log_path,
                                                              f"{__name__}.log"))
         file_log.setLevel(logging.DEBUG)
-        file_log.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
+        file_log.setFormatter(logging.Formatter(
+            '%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
         self.logger.addHandler(file_log)
 
         self.db_handler_object = db_handler_object
@@ -42,8 +44,10 @@ class MWAXArchiveProcessor:
         self.archive_destination_port = archive_port
         self.archive_command_numa_node: int = archive_command_numa_node
 
-        self.mwax_stats_executable = mwax_stats_executable   # Full path to executable for mwax_stats
-        self.mwax_stats_dump_dir = mwax_stats_dump_dir       # Directory where to dump the stats files
+        # Full path to executable for mwax_stats
+        self.mwax_stats_executable = mwax_stats_executable
+        # Directory where to dump the stats files
+        self.mwax_stats_dump_dir = mwax_stats_dump_dir
 
         self.archiving_paused = False
 
@@ -128,10 +132,10 @@ class MWAXArchiveProcessor:
 
         # Create watcher for archiving outgoing visibility data
         self.watcher_outgoing_vis = mwax_watcher.Watcher(path=self.watch_dir_outgoing_vis,
-                                                          q=self.queue_outgoing_vis,
-                                                          pattern=".fits", log=self.logger,
-                                                          mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
-                                                          recursive=False)
+                                                         q=self.queue_outgoing_vis,
+                                                         pattern=".fits", log=self.logger,
+                                                         mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
+                                                         recursive=False)
 
         # Create queueworker for visibility outgoing queue
         self.queue_worker_outgoing_vis = mwax_queue_worker.QueueWorker(label="outgoing vis worker",
@@ -214,13 +218,15 @@ class MWAXArchiveProcessor:
         self.logger.info(f"{item}- checksum_and_db_handler() Started")
 
         # validate the filename
-        location = 1 # DMF for now
-        (valid, obs_id, filetype, file_ext, _, _, validation_message) = mwa_archiver.validate_filename(item, location)
+        location = 1  # DMF for now
+        (valid, obs_id, filetype, file_ext, _, _,
+         validation_message) = mwa_archiver.validate_filename(item, location)
 
         if valid:
             # checksum then add this file to the db so we insert a record into metadata data_files table
             checksum_type_id: int = 1  # MD5
-            checksum: str = utils.do_checksum_md5(self.logger, item, int(self.archive_command_numa_node), 180)
+            checksum: str = utils.do_checksum_md5(
+                self.logger, item, int(self.archive_command_numa_node), 180)
 
             # Insert record into metadata database
             if not mwax_db.upsert_data_file_row(self.db_handler_object, item, filetype, self.hostname,
@@ -233,9 +239,11 @@ class MWAXArchiveProcessor:
             if filetype == MWADataFileType.MWAX_VOLTAGES.value:
                 # move to voltdata/outgoing
                 # Take the input filename - strip the path, then append the output path
-                outgoing_filename = os.path.join(self.watch_dir_outgoing_volt, os.path.basename(item))
+                outgoing_filename = os.path.join(
+                    self.watch_dir_outgoing_volt, os.path.basename(item))
 
-                self.logger.debug(f"{item}- checksum_and_db_handler() moving subfile to volt outgoing dir")
+                self.logger.debug(
+                    f"{item}- checksum_and_db_handler() moving subfile to volt outgoing dir")
                 os.rename(item, outgoing_filename)
 
                 self.logger.info(f"{item}- checksum_and_db_handler() moved subfile to volt outgoing dir "
@@ -243,9 +251,11 @@ class MWAXArchiveProcessor:
             elif filetype == MWADataFileType.MWAX_VISIBILITIES.value:
                 # move to visdata/processing_stats
                 # Take the input filename - strip the path, then append the output path
-                outgoing_filename = os.path.join(self.watch_dir_processing_stats_vis, os.path.basename(item))
+                outgoing_filename = os.path.join(
+                    self.watch_dir_processing_stats_vis, os.path.basename(item))
 
-                self.logger.debug(f"{item}- checksum_and_db_handler() moving visibility file to vis processing stats dir")
+                self.logger.debug(
+                    f"{item}- checksum_and_db_handler() moving visibility file to vis processing stats dir")
                 os.rename(item, outgoing_filename)
 
                 self.logger.info(f"{item}- checksum_and_db_handler() moved visibility file to vis processing stats dir "
@@ -254,19 +264,23 @@ class MWAXArchiveProcessor:
             elif filetype == MWADataFileType.MWA_PPD_FILE.value:
                 # move to visdata/outgoing
                 # Take the input filename - strip the path, then append the output path
-                outgoing_filename = os.path.join(self.watch_dir_outgoing_vis, os.path.basename(item))
+                outgoing_filename = os.path.join(
+                    self.watch_dir_outgoing_vis, os.path.basename(item))
 
-                self.logger.debug(f"{item}- checksum_and_db_handler() moving metafits file to vis outgoing dir")
+                self.logger.debug(
+                    f"{item}- checksum_and_db_handler() moving metafits file to vis outgoing dir")
                 os.rename(item, outgoing_filename)
 
                 self.logger.info(f"{item}- checksum_and_db_handler() moved metafits file to vis outgoing dir "
                                  f"Queue size: {self.queue_checksum_and_db.qsize()}")
             else:
-                self.logger.error(f"{item}- checksum_and_db_handler() - not a valid file extension {filetype}")
+                self.logger.error(
+                    f"{item}- checksum_and_db_handler() - not a valid file extension {filetype}")
                 return False
         else:
             # The filename was not valid
-            self.logger.error(f"{item}- checksum_and_db_handler() {validation_message}")
+            self.logger.error(
+                f"{item}- checksum_and_db_handler() {validation_message}")
             return False
 
         self.logger.info(f"{item}- checksum_and_db_handler() Finished")
@@ -278,18 +292,22 @@ class MWAXArchiveProcessor:
         # Check if this is a metafits file or regular mwax file
         if "metafits" in item:
             # We don't run stats on metafits! Just pass it onto the output dir
-            self.logger.debug(f"{item}- stats_handler() - metafits file detected. Moving file to outgoing dir")
+            self.logger.debug(
+                f"{item}- stats_handler() - metafits file detected. Moving file to outgoing dir")
         else:
             # This is a normal mwax fits file. Run stats on it
             if utils.process_mwax_stats(self.logger, self.mwax_stats_executable,
-                                        item, int(self.archive_command_numa_node), 180,
+                                        item, int(
+                                            self.archive_command_numa_node), 180,
                                         self.mwax_stats_dump_dir) is not True:
                 return False
 
         # Take the input filename - strip the path, then append the output path
-        outgoing_filename = os.path.join(self.watch_dir_outgoing_vis, os.path.basename(item))
+        outgoing_filename = os.path.join(
+            self.watch_dir_outgoing_vis, os.path.basename(item))
 
-        self.logger.debug(f"{item}- stats_handler() moving file to outgoing dir")
+        self.logger.debug(
+            f"{item}- stats_handler() moving file to outgoing dir")
         os.rename(item, outgoing_filename)
 
         self.logger.info(f"{item}- stats_handler() Finished")

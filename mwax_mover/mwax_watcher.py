@@ -29,10 +29,12 @@ class Watcher(object):
 
     def start(self):
         if self.recursive:
-            self.logger.info(f"Watcher starting on {self.path}/*{self.pattern} and all subdirectories...")
+            self.logger.info(
+                f"Watcher starting on {self.path}/*{self.pattern} and all subdirectories...")
             self.i = inotify.adapters.InotifyTree(self.path, mask=self.mask)
         else:
-            self.logger.info(f"Watcher starting on {self.path}/*{self.pattern}...")
+            self.logger.info(
+                f"Watcher starting on {self.path}/*{self.pattern}...")
             self.i = inotify.adapters.Inotify()
             self.i.add_watch(self.path, mask=self.mask)
 
@@ -54,7 +56,8 @@ class Watcher(object):
         if self.mode == mwax_mover.MODE_WATCH_DIR_FOR_NEW or \
            self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME or \
            self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW:
-            utils.scan_for_existing_files(self.logger, self.path, self.pattern, self.recursive, self.q)
+            utils.scan_for_existing_files(
+                self.logger, self.path, self.pattern, self.recursive, self.q)
 
         while self.watching:
             for event in self.i.event_gen(timeout_s=0.1, yield_nones=False):
@@ -66,10 +69,12 @@ class Watcher(object):
                     if os.path.splitext(filename)[1] == self.pattern or self.pattern == ".*":
                         dest_filename = os.path.join(path, filename)
                         self.q.put(dest_filename)
-                        self.logger.info(f'{dest_filename} added to queue ({self.q.qsize()})')
+                        self.logger.info(
+                            f'{dest_filename} added to queue ({self.q.qsize()})')
 
     def get_status(self) -> dict:
-        total_bytes, used_bytes, free_bytes = utils.get_disk_space_bytes(self.path)
+        total_bytes, used_bytes, free_bytes = utils.get_disk_space_bytes(
+            self.path)
 
         return {"Unix timestamp": time.time(),
                 "watching": self.watching,

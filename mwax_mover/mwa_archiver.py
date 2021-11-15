@@ -7,15 +7,17 @@ import random
 from datetime import datetime
 from mwax_mover import mwax_command
 import time
+import typing
+
 
 class MWADataFileType(Enum):
-    MWA_FLAG_FILE=10
-    MWA_PPD_FILE=14
-    MWAX_VOLTAGES=17
-    MWAX_VISIBILITIES=18
+    MWA_FLAG_FILE = 10
+    MWA_PPD_FILE = 14
+    MWAX_VOLTAGES = 17
+    MWAX_VISIBILITIES = 18
 
 
-def validate_filename(filename: str, location: int) -> (bool, int, int, str, str, str, str):
+def validate_filename(filename: str, location: int) -> typing.Tuple[bool, int, int, str, str, str, str]:
     # Returns valid, obs_id, filetype_id, file_ext, prefix, dmf_host, validation_error
     valid: bool = True
     obs_id = 0
@@ -52,7 +54,7 @@ def validate_filename(filename: str, location: int) -> (bool, int, int, str, str
             filetype_id = MWADataFileType.MWAX_VOLTAGES.value
         elif file_ext_part.lower() == ".fits":
             # Could be metafits (e.g. 1316906688_metafits_ppds.fits) or visibilitlies
-            if file_name_part[10:] == "_metafits_ppds" or  file_name_part[10:] == "_metafits":
+            if file_name_part[10:] == "_metafits_ppds" or file_name_part[10:] == "_metafits":
                 filetype_id = MWADataFileType.MWA_PPD_FILE.value
             else:
                 filetype_id = MWADataFileType.MWAX_VISIBILITIES.value
@@ -110,7 +112,7 @@ def validate_filename(filename: str, location: int) -> (bool, int, int, str, str
                 # Get the ascii code for this letter
                 filename_sum = filename_sum + ord(c)
 
-            if filetype_id == MWADataFileType.MWAX_VOLTAGES.value: # VCS
+            if filetype_id == MWADataFileType.MWAX_VOLTAGES.value:  # VCS
                 dmf_fs = "volt01fs"
             else:  # Correlator, Flags, PPDs
                 # Determine which filesystem to use
@@ -118,7 +120,8 @@ def validate_filename(filename: str, location: int) -> (bool, int, int, str, str
                 dmf_fs = f"mwa0{fs_number}fs"
 
             # use any dmf host
-            dmf_host = random.choice(["fe1.pawsey.org.au","fe2.pawsey.org.au","fe4.pawsey.org.au"])
+            dmf_host = random.choice(
+                ["fe1.pawsey.org.au", "fe2.pawsey.org.au", "fe4.pawsey.org.au"])
 
             yyyy_mm_dd = datetime.now().strftime("%Y-%m-%d")
             prefix = f"/mnt/{dmf_fs}/MWA/ngas_data_volume/mfa/{yyyy_mm_dd}/"
@@ -137,7 +140,8 @@ def archive_file_rsync(logger, full_filename: str, archive_numa_node: int, archi
     try:
         file_size = os.path.getsize(full_filename)
     except Exception as e:
-        logger.error(f"Error determining file size for {full_filename}. Error {e}")
+        logger.error(
+            f"Error determining file size for {full_filename}. Error {e}")
         return False
 
     # Build final command line
@@ -149,7 +153,8 @@ def archive_file_rsync(logger, full_filename: str, archive_numa_node: int, archi
     start_time = time.time()
 
     # run xrdcp
-    return_val, stdout = mwax_command.run_command_ext(logger, cmdline, archive_numa_node, timeout, False)
+    return_val, stdout = mwax_command.run_command_ext(
+        logger, cmdline, archive_numa_node, timeout, False)
 
     if return_val:
         elapsed = time.time() - start_time
@@ -157,7 +162,8 @@ def archive_file_rsync(logger, full_filename: str, archive_numa_node: int, archi
         size_gigabytes = float(file_size) / (1000. * 1000. * 1000.)
         gbps_per_sec = (size_gigabytes * 8) / elapsed
 
-        logger.info(f"{full_filename} archive_file_rsync success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
+        logger.info(
+            f"{full_filename} archive_file_rsync success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
         return True
     else:
         return False
@@ -170,7 +176,8 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node: int, arch
     try:
         file_size = os.path.getsize(full_filename)
     except Exception as e:
-        logger.error(f"Error determining file size for {full_filename}. Error {e}")
+        logger.error(
+            f"Error determining file size for {full_filename}. Error {e}")
         return False
 
     # Build final command line
@@ -180,7 +187,8 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node: int, arch
     start_time = time.time()
 
     # run xrdcp
-    return_val, stdout = mwax_command.run_command_ext(logger, cmdline, archive_numa_node, timeout, False)
+    return_val, stdout = mwax_command.run_command_ext(
+        logger, cmdline, archive_numa_node, timeout, False)
 
     if return_val:
         elapsed = time.time() - start_time
@@ -188,7 +196,8 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node: int, arch
         size_gigabytes = float(file_size) / (1000. * 1000. * 1000.)
         gbps_per_sec = (size_gigabytes * 8) / elapsed
 
-        logger.info(f"{full_filename} archive_file_xrootd success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
+        logger.info(
+            f"{full_filename} archive_file_xrootd success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
 
         return True
     else:
@@ -203,7 +212,8 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str):
     try:
         file_size = os.path.getsize(full_filename)
     except Exception as e:
-        logger.error(f"Error determining file size for {full_filename}. Error {e}")
+        logger.error(
+            f"Error determining file size for {full_filename}. Error {e}")
         return False
 
     # determine bucket name
@@ -211,26 +221,32 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str):
     try:
         bucket_name = ceph_get_bucket_name_from_filename(full_filename)
     except Exception as e:
-        logger.error(f"Error determining bucket name for {full_filename}. Error {e}")
+        logger.error(
+            f"Error determining bucket name for {full_filename}. Error {e}")
         return False
 
     # get s3 object
-    logger.debug(f"{full_filename} getting S3 bucket reference: {bucket_name}...")
+    logger.debug(
+        f"{full_filename} getting S3 bucket reference: {bucket_name}...")
     try:
         s3_object = ceph_get_s3_object(ceph_endpoint)
     except Exception as e:
-        logger.error(f"Error connecting to S3 endpoint: {ceph_endpoint}. Error {e}")
+        logger.error(
+            f"Error connecting to S3 endpoint: {ceph_endpoint}. Error {e}")
         return False
 
     # create bucket if required
-    logger.debug(f"{full_filename} creating S3 bucket {bucket_name} (if required)...")
+    logger.debug(
+        f"{full_filename} creating S3 bucket {bucket_name} (if required)...")
     try:
         ceph_create_bucket(s3_object, bucket_name)
     except Exception as e:
-        logger.error(f"Error creating/checking existence of S3 bucket {bucket_name} on {ceph_endpoint}. Error {e}")
+        logger.error(
+            f"Error creating/checking existence of S3 bucket {bucket_name} on {ceph_endpoint}. Error {e}")
         return False
 
-    logger.debug(f"{full_filename} attempting upload to S3 bucket {bucket_name}...")
+    logger.debug(
+        f"{full_filename} attempting upload to S3 bucket {bucket_name}...")
 
     # start timer
     start_time = time.time()
@@ -239,7 +255,8 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str):
     try:
         ceph_upload_file(s3_object, bucket_name, full_filename)
     except Exception as e:
-        logger.error(f"Error uploading {full_filename} to S3 bucket {bucket_name} on {ceph_endpoint}. Error {e}")
+        logger.error(
+            f"Error uploading {full_filename} to S3 bucket {bucket_name} on {ceph_endpoint}. Error {e}")
         return False
 
     # end timer
@@ -248,7 +265,8 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str):
     size_gigabytes = float(file_size) / (1000. * 1000. * 1000.)
     gbps_per_sec = (size_gigabytes * 8) / elapsed
 
-    logger.info(f"{full_filename} archive_file_ceph success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
+    logger.info(
+        f"{full_filename} archive_file_ceph success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
     return True
 
 #
@@ -261,6 +279,8 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str):
 #
 # Boto3 will use this file to authenticate and fail if it is not there or is not valid
 #
+
+
 def ceph_get_s3_object(endpoint: str):
     # This ensures the default boto retries and timeouts don't leave us hanging too long
     config = Config(connect_timeout=20, retries={'max_attempts': 2})
@@ -270,20 +290,25 @@ def ceph_get_s3_object(endpoint: str):
 
     return s3_object
 
+
 def ceph_get_bucket_name_from_filename(filename: str) -> str:
     file_part = os.path.split(filename)[1]
     return ceph_get_bucket_name_from_obs_id(int(file_part[0:10]))
 
+
 def ceph_get_bucket_name_from_obs_id(obs_id: int) -> str:
     return str(obs_id)[0:4]
+
 
 def ceph_create_bucket(s3_object, bucket_name: str):
     bucket = s3_object.Bucket(bucket_name)
     bucket.create()
 
+
 def ceph_list_bucket(s3_object, bucket_name: str) -> list:
     bucket = s3_object.Bucket(bucket_name)
     return list(bucket.objects.all())
+
 
 def ceph_upload_file(s3_object, bucket_name: str, filename: str) -> bool:
     # Set number of bytes in 1 MB

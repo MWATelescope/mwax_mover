@@ -1,7 +1,7 @@
 import os
 import psycopg2
 from psycopg2 import OperationalError
-from tenacity import retry,stop_after_attempt,wait_fixed
+from tenacity import retry, stop_after_attempt, wait_fixed
 from typing import Optional
 
 DUMMY_DB = "dummy"
@@ -34,10 +34,9 @@ class MWAXDBHandler:
 
         except OperationalError as err:
             self.logger.error(
-                    f"MWAXDBHandler.connect(): error connecting to database: "
-                    f"{self.user}@{self.host}:{self.port}/{self.db} Error: {err}")
+                f"MWAXDBHandler.connect(): error connecting to database: "
+                f"{self.user}@{self.host}:{self.port}/{self.db} Error: {err}")
             raise err
-
 
     def upsert_one_row(self, sql: str, parm_list: list) -> int:
         if self.dummy:
@@ -63,19 +62,23 @@ class MWAXDBHandler:
 
                     if rows_affected != 1:
                         # An exception in here will trigger a rollback which is good
-                        self.logger.error(f"upsert_one_row_postgres(): Error- upserted {rows_affected} rows, expected 1. SQL={sql}")
-                        raise Exception(f"upsert_one_row_postgres(): Error- upserted {rows_affected} rows, expected 1. SQL={sql}")
+                        self.logger.error(
+                            f"upsert_one_row_postgres(): Error- upserted {rows_affected} rows, expected 1. SQL={sql}")
+                        raise Exception(
+                            f"upsert_one_row_postgres(): Error- upserted {rows_affected} rows, expected 1. SQL={sql}")
 
         except OperationalError as conn_error:
             # Our connection is toast. Clear it so we attempt a reconnect
             self.con = None
-            self.logger.error(f"upsert_one_row_postgres(): Error- {conn_error}")
+            self.logger.error(
+                f"upsert_one_row_postgres(): Error- {conn_error}")
             # Reraise error
             raise conn_error
 
         except Exception as exception_info:
             # Any other error- likely to be a database error
-            self.logger.error(f"upsert_one_row_postgres(): Error- {exception_info}")
+            self.logger.error(
+                f"upsert_one_row_postgres(): Error- {exception_info}")
             raise exception_info
 
 
@@ -116,19 +119,20 @@ def upsert_data_file_row(db_handler_object,
                   f"remote_archived = excluded.remote_archived, location = excluded.location, prefix = excluded.prefix"
 
             db_handler_object.upsert_one_row(sql, (str(obsid), filetype, file_size,
-                                                  filename, hostname,
-                                                  remote_archived, deleted, location, prefix,
-                                                  checksum_type, checksum))
+                                                   filename, hostname,
+                                                   remote_archived, deleted, location, prefix,
+                                                   checksum_type, checksum))
 
         if db_handler_object.dummy:
             db_handler_object.logger.warning(f"{filename} upsert_data_file_row() Using dummy database connection. "
-                           f"No data is really being upserted")
+                                             f"No data is really being upserted")
             return True
         else:
-            db_handler_object.logger.info(f"{filename} upsert_data_file_row() Successfully wrote into data_files table")
+            db_handler_object.logger.info(
+                f"{filename} upsert_data_file_row() Successfully wrote into data_files table")
             return True
 
     except Exception as upsert_exception:
         db_handler_object.logger.error(f"{filename} insert_data_file_row() error upserting data_files record in "
-                     f"data_files table: {upsert_exception}. SQL was {sql}")
+                                       f"data_files table: {upsert_exception}. SQL was {sql}")
         return False

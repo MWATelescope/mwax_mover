@@ -79,7 +79,8 @@ class MWACacheArchiveProcessor:
     def start(self):
         # create a health thread
         self.logger.info("Starting health_thread...")
-        health_thread = threading.Thread(name="health_thread", target=self.health_handler, daemon=True)
+        health_thread = threading.Thread(
+            name="health_thread", target=self.health_handler, daemon=True)
         health_thread.start()
 
         self.logger.info("Creating watchers...")
@@ -104,7 +105,8 @@ class MWACacheArchiveProcessor:
         self.logger.info("Starting watchers...")
         # Setup thread for watching filesystem
         for i, watcher in enumerate(self.watchers):
-            watcher_thread = threading.Thread(name=f"watch_thread{i}", target=watcher.start, daemon=True)
+            watcher_thread = threading.Thread(
+                name=f"watch_thread{i}", target=watcher.start, daemon=True)
             self.watcher_threads.append(watcher_thread)
             watcher_thread.start()
 
@@ -134,7 +136,7 @@ class MWACacheArchiveProcessor:
                 # Now copy the file into dmf
                 archive_success = mwa_archiver.archive_file_rsync(self.logger,
                                                                   item,
-                                                                  -1, # cache boxes do not have numa architecture
+                                                                  -1,  # cache boxes do not have numa architecture
                                                                   f"ngas@{dmf_host}",
                                                                   prefix,
                                                                   120)
@@ -215,7 +217,8 @@ class MWACacheArchiveProcessor:
                                      status_bytes,
                                      self.health_multicast_hops)
             except Exception as e:
-                self.logger.warning(f"health_handler: Failed to send health information. {e}")
+                self.logger.warning(
+                    f"health_handler: Failed to send health information. {e}")
 
             # Sleep for a second
             time.sleep(1)
@@ -275,10 +278,11 @@ def initialise():
     parser.description = "mwacache_archive_processor: a command line tool which is part of the MWA " \
                          "correlator for the MWA. It will monitor various directories on each mwacache " \
                          "server and, upon detecting a file, send it to Pawsey's LTS. It will then " \
-                        f"remove the file from the local disk. " \
-                        f"(mwax_mover v{version.get_mwax_mover_version_string()})\n"
+        f"remove the file from the local disk. " \
+        f"(mwax_mover v{version.get_mwax_mover_version_string()})\n"
 
-    parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
+    parser.add_argument("-c", "--cfg", required=True,
+                        help="Configuration file location.\n")
 
     args = vars(parser.parse_args())
 
@@ -286,7 +290,8 @@ def initialise():
     config_filename = args["cfg"]
 
     if not os.path.exists(config_filename):
-        print(f"Configuration file location {config_filename} does not exist. Quitting.")
+        print(
+            f"Configuration file location {config_filename} does not exist. Quitting.")
         exit(1)
 
     # Parse config file
@@ -306,29 +311,40 @@ def initialise():
     logger.setLevel(logging.DEBUG)
     console_log = logging.StreamHandler()
     console_log.setLevel(logging.DEBUG)
-    console_log.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
+    console_log.setFormatter(logging.Formatter(
+        '%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
     logger.addHandler(console_log)
 
-    file_log = logging.FileHandler(filename=os.path.join(cfg_log_path, "main.log"))
+    file_log = logging.FileHandler(
+        filename=os.path.join(cfg_log_path, "main.log"))
     file_log.setLevel(logging.DEBUG)
-    file_log.setFormatter(logging.Formatter('%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
+    file_log.setFormatter(logging.Formatter(
+        '%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
     logger.addHandler(file_log)
 
-    logger.info(f"Starting mwacache_archive_processor processor...v{version.get_mwax_mover_version_string()}")
+    logger.info(
+        f"Starting mwacache_archive_processor processor...v{version.get_mwax_mover_version_string()}")
 
     i = 1
     cfg_incoming_paths = []
 
     # Common config options
-    cfg_ceph_endpoint = utils.read_config(logger, config, "mwax mover", "ceph_endpoint")
+    cfg_ceph_endpoint = utils.read_config(
+        logger, config, "mwax mover", "ceph_endpoint")
 
-    cfg_health_multicast_ip = utils.read_config(logger, config, "mwax mover", "health_multicast_ip")
-    cfg_health_multicast_port = int(utils.read_config(logger, config, "mwax mover", "health_multicast_port"))
-    cfg_health_multicast_hops = int(utils.read_config(logger, config, "mwax mover", "health_multicast_hops"))
-    cfg_health_multicast_interface_name = utils.read_config(logger, config, "mwax mover", "health_multicast_interface_name")
+    cfg_health_multicast_ip = utils.read_config(
+        logger, config, "mwax mover", "health_multicast_ip")
+    cfg_health_multicast_port = int(utils.read_config(
+        logger, config, "mwax mover", "health_multicast_port"))
+    cfg_health_multicast_hops = int(utils.read_config(
+        logger, config, "mwax mover", "health_multicast_hops"))
+    cfg_health_multicast_interface_name = utils.read_config(
+        logger, config, "mwax mover", "health_multicast_interface_name")
     # get this hosts primary network interface ip
-    cfg_health_multicast_interface_ip = utils.get_ip_address(cfg_health_multicast_interface_name)
-    logger.info(f"IP for sending multicast: {cfg_health_multicast_interface_ip}")
+    cfg_health_multicast_interface_ip = utils.get_ip_address(
+        cfg_health_multicast_interface_name)
+    logger.info(
+        f"IP for sending multicast: {cfg_health_multicast_interface_ip}")
 
     #
     # Options specified per host
@@ -336,9 +352,11 @@ def initialise():
 
     # Look for data_path1.. data_pathN
     while config.has_option(hostname, f"incoming_path{i}"):
-        new_incoming_path = utils.read_config(logger, config, hostname, f"incoming_path{i}")
+        new_incoming_path = utils.read_config(
+            logger, config, hostname, f"incoming_path{i}")
         if not os.path.exists(new_incoming_path):
-            logger.error(f"incoming file location in incoming_path{i} - {new_incoming_path} does not exist. Quitting.")
+            logger.error(
+                f"incoming file location in incoming_path{i} - {new_incoming_path} does not exist. Quitting.")
             exit(1)
         cfg_incoming_paths.append(new_incoming_path)
         i += 1
@@ -350,15 +368,21 @@ def initialise():
                      f"this). This host's name is: '{hostname}'. Quitting.")
         exit(1)
 
-    cfg_recursive = utils.read_config_bool(logger, config, hostname, "recursive")
+    cfg_recursive = utils.read_config_bool(
+        logger, config, hostname, "recursive")
 
-    cfg_metadatadb_host = utils.read_config(logger, config, "mwa metadata database", "host")
+    cfg_metadatadb_host = utils.read_config(
+        logger, config, "mwa metadata database", "host")
 
     if cfg_metadatadb_host != mwax_db.DUMMY_DB:
-        cfg_metadatadb_db = utils.read_config(logger, config, "mwa metadata database", "db")
-        cfg_metadatadb_user = utils.read_config(logger, config, "mwa metadata database", "user")
-        cfg_metadatadb_pass = utils.read_config(logger, config, "mwa metadata database", "pass", True)
-        cfg_metadatadb_port = utils.read_config(logger, config, "mwa metadata database", "port")
+        cfg_metadatadb_db = utils.read_config(
+            logger, config, "mwa metadata database", "db")
+        cfg_metadatadb_user = utils.read_config(
+            logger, config, "mwa metadata database", "user")
+        cfg_metadatadb_pass = utils.read_config(
+            logger, config, "mwa metadata database", "pass", True)
+        cfg_metadatadb_port = utils.read_config(
+            logger, config, "mwa metadata database", "port")
     else:
         cfg_metadatadb_db = None
         cfg_metadatadb_user = None
@@ -374,8 +398,8 @@ def initialise():
                                        password=cfg_metadatadb_pass)
 
     return logger, hostname, cfg_ceph_endpoint, cfg_incoming_paths, cfg_recursive, db_handler, \
-           cfg_health_multicast_interface_ip, cfg_health_multicast_ip, cfg_health_multicast_port, \
-           cfg_health_multicast_hops
+        cfg_health_multicast_interface_ip, cfg_health_multicast_ip, cfg_health_multicast_port, \
+        cfg_health_multicast_hops
 
 
 def main():
