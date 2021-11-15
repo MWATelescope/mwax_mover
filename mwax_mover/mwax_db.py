@@ -1,6 +1,6 @@
 import os
 import psycopg2
-from psycopg2 import OperationalError
+from psycopg2 import InterfaceError, OperationalError
 from tenacity import retry, stop_after_attempt, wait_fixed
 from typing import Optional
 
@@ -71,14 +71,29 @@ class MWAXDBHandler:
             # Our connection is toast. Clear it so we attempt a reconnect
             self.con = None
             self.logger.error(
-                f"upsert_one_row_postgres(): Error- {conn_error}")
+                f"upsert_one_row_postgres(): postgres OperationalError- {conn_error}")
             # Reraise error
             raise conn_error
 
-        except Exception as exception_info:
-            # Any other error- likely to be a database error
+        except InterfaceError as int_error:
+            # Our connection is toast. Clear it so we attempt a reconnect
+            self.con = None
             self.logger.error(
-                f"upsert_one_row_postgres(): Error- {exception_info}")
+                f"upsert_one_row_postgres(): postgres InterfaceError- {int_error}")
+            # Reraise error
+            raise int_error
+
+        except psycopg2.ProgrammingError as prog_error:
+            # A programming/SQL error - e.g. table does not exist. Don't reconnect connection
+            self.logger.error(
+                f"upsert_one_row_postgres(): postgres ProgrammingError- {prog_error}")
+            # Reraise error
+            raise prog_error
+
+        except Exception as exception_info:
+            # Any other error- likely to be a database error rather than connection based
+            self.logger.error(
+                f"upsert_one_row_postgres(): unknown Error- {exception_info}")
             raise exception_info
 
 

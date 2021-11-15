@@ -44,7 +44,7 @@ def process_mwax_stats(logger, mwax_stats_executable: str, full_filename: str, n
     # This code will execute the mwax stats command
     obs_id = str(os.path.basename(full_filename)[0:10])
 
-    cmd = f"{mwax_stats_executable} {full_filename} -m /vulcan/metafits/{obs_id}_metafits.fits -o {stats_dump_dir}"
+    cmd = f"{mwax_stats_executable} -t {full_filename} -m /vulcan/metafits/{obs_id}_metafits.fits -o {stats_dump_dir}"
 
     logger.info(f"{full_filename}- attempting to run stats: {cmd}")
 
