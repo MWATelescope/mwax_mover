@@ -1,4 +1,3 @@
-from mwax_mover import mwax_mover, mwax_db, mwax_queue_worker, mwax_watcher, mwa_archiver, utils, version
 import argparse
 from configparser import ConfigParser
 import json
@@ -10,12 +9,13 @@ import signal
 import sys
 import threading
 import time
-
+from mwax_mover import mwax_mover, mwax_db, mwax_queue_worker, mwax_watcher, mwa_archiver, utils, version
 
 class MWACacheArchiveProcessor:
     def __init__(self,
                  logger,
                  hostname: str,
+                 archive_to_location: int,
                  ceph_endpoint: str,
                  incoming_paths: list,
                  recursive: bool,
@@ -28,6 +28,7 @@ class MWACacheArchiveProcessor:
         self.logger = logger
 
         self.hostname = hostname
+        self.archive_to_location = archive_to_location
         self.ceph_endpoint = ceph_endpoint
         self.recursive = recursive
 
@@ -121,18 +122,15 @@ class MWACacheArchiveProcessor:
 
     def archive_handler(self, item: str) -> bool:
         self.logger.info(f"{item}- archive_handler() Started...")
-
-        # For now archive to DMF
-        location = 1  # DMF
-
+        
         # validate the filename
         (valid, obs_id, filetype, file_ext, prefix, dmf_host, validation_message) = \
-            mwa_archiver.validate_filename(item, location)
+            mwa_archiver.validate_filename(item, self.archive_to_location)
 
         if valid:
             archive_success = False
 
-            if location == 1:  # DMF
+            if self.archive_to_location == 1:  # DMF
                 # Now copy the file into dmf
                 archive_success = mwa_archiver.archive_file_rsync(self.logger,
                                                                   item,
@@ -141,15 +139,16 @@ class MWACacheArchiveProcessor:
                                                                   prefix,
                                                                   120)
 
-            elif location == 2:  # Ceph
+            elif self.archive_to_location == 2:  # Ceph
                 archive_success = mwa_archiver.archive_file_ceph(self.logger,
                                                                  item,
-                                                                 self.ceph_endpoint)
+                                                                 self.ceph_endpoint,
+                                                                 prefix)
 
             if archive_success:
                 # Update record in metadata database
                 if not mwax_db.upsert_data_file_row(self.db_handler_object, item, filetype, self.hostname,
-                                                    True, location, prefix, None, None):
+                                                    True, self.archive_to_location, prefix, None, None):
                     # if something went wrong, requeue
                     return False
 
@@ -169,9 +168,9 @@ class MWACacheArchiveProcessor:
     def pause_archiving(self, paused: bool):
         if self.archiving_paused != paused:
             if paused:
-                self.logger.info(f"Pausing archiving")
+                self.logger.info("Pausing archiving")
             else:
-                self.logger.info(f"Resuming archiving")
+                self.logger.info("Resuming archiving")
 
             if self.queue_worker:
                 self.queue_worker.pause(paused)
@@ -262,7 +261,7 @@ class MWACacheArchiveProcessor:
         return status
 
     def signal_handler(self, signum, frame):
-        self.logger.warning(f"Interrupted. Shutting down processor...")
+        self.logger.warning("Interrupted. Shutting down processor...")
         self.running = False
 
         # Stop any Processors
@@ -331,6 +330,8 @@ def initialise():
     # Common config options
     cfg_ceph_endpoint = utils.read_config(
         logger, config, "mwax mover", "ceph_endpoint")
+    cfg_archive_to_location = utils.read_config(
+        logger, config, "mwax mover", "archive_to_location")
 
     cfg_health_multicast_ip = utils.read_config(
         logger, config, "mwax mover", "health_multicast_ip")
@@ -397,18 +398,19 @@ def initialise():
                                        user=cfg_metadatadb_user,
                                        password=cfg_metadatadb_pass)
 
-    return logger, hostname, cfg_ceph_endpoint, cfg_incoming_paths, cfg_recursive, db_handler, \
+    return logger, hostname, cfg_ceph_endpoint, cfg_archive_to_location, cfg_incoming_paths, cfg_recursive, db_handler, \
         cfg_health_multicast_interface_ip, cfg_health_multicast_ip, cfg_health_multicast_port, \
         cfg_health_multicast_hops
 
 
 def main():
-    (logger, hostname, ceph_endpoint, incoming_paths, recursive, db_handler,
+    (logger, hostname, ceph_endpoint, location, incoming_paths, recursive, db_handler,
      health_multicast_interface_ip, health_multicast_ip, health_multicast_port, health_multicast_hops) = initialise()
 
     p = MWACacheArchiveProcessor(logger,
                                  hostname,
                                  ceph_endpoint,
+                                 location,
                                  incoming_paths,
                                  recursive,
                                  db_handler,

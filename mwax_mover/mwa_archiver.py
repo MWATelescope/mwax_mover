@@ -1,14 +1,17 @@
 import os
-import boto3
-from boto3.s3.transfer import TransferConfig
-from botocore.client import Config
+import hashlib
 from enum import Enum
 import random
 from datetime import datetime
-from mwax_mover import mwax_command
 import time
 import typing
+import boto3
+from boto3.s3.transfer import TransferConfig
+from botocore.client import Config
+from mwax_mover import mwax_command
 
+# Set number of bytes in 1 GB
+GB = 1024 * 1024 * 1024
 
 class MWADataFileType(Enum):
     MWA_FLAG_FILE = 10
@@ -44,7 +47,7 @@ def validate_filename(filename: str, location: int) -> typing.Tuple[bool, int, i
 
         if not obs_id_check.isdigit():
             valid = False
-            validation_error = f"Filename does not start with a 10 digit observation_id- ignoring"
+            validation_error = "Filename does not start with a 10 digit observation_id- ignoring"
         else:
             obs_id = int(obs_id_check)
 
@@ -102,7 +105,7 @@ def validate_filename(filename: str, location: int) -> typing.Tuple[bool, int, i
                                    f"(incorrect length ({len(file_name_part)}). Format should be " \
                                    f"obsid_flags.zip)- ignoring"
 
-    # Now actually archive it
+    # Now actually determine where to archive it
     if valid:
         if location == 1:  # DMF
             # We need a deterministic way of getting the dmf fs number (01,02,03,04), so if we run this multiple
@@ -125,8 +128,12 @@ def validate_filename(filename: str, location: int) -> typing.Tuple[bool, int, i
 
             yyyy_mm_dd = datetime.now().strftime("%Y-%m-%d")
             prefix = f"/mnt/{dmf_fs}/MWA/ngas_data_volume/mfa/{yyyy_mm_dd}/"
+        elif location == 2:  #ceph / acacia
+            # determine bucket name
+            prefix = ceph_get_bucket_name_from_filename(filename)
+
         else:
-            # Ceph and Versity not yet implemented
+            # Versity not yet implemented
             raise NotImplementedError
 
     return valid, obs_id, filetype_id, file_ext_part, prefix, dmf_host, validation_error
@@ -163,7 +170,7 @@ def archive_file_rsync(logger, full_filename: str, archive_numa_node: int, archi
         gbps_per_sec = (size_gigabytes * 8) / elapsed
 
         logger.info(
-            f"{full_filename} archive_file_rsync success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
+            f"{full_filename} archive_file_rsync success ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at {gbps_per_sec:.3f} Gbps)")
         return True
     else:
         return False
@@ -197,14 +204,14 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node: int, arch
         gbps_per_sec = (size_gigabytes * 8) / elapsed
 
         logger.info(
-            f"{full_filename} archive_file_xrootd success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
+            f"{full_filename} archive_file_xrootd success ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at {gbps_per_sec:.3f} Gbps)")
 
         return True
     else:
         return False
 
 
-def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str):
+def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str, bucket_name: str):
     logger.debug(f"{full_filename} attempting archive_file_ceph...")
 
     # get file size
@@ -215,15 +222,8 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str):
         logger.error(
             f"Error determining file size for {full_filename}. Error {e}")
         return False
-
-    # determine bucket name
-    logger.debug(f"{full_filename} determining destination bucket name...")
-    try:
-        bucket_name = ceph_get_bucket_name_from_filename(full_filename)
-    except Exception as e:
-        logger.error(
-            f"Error determining bucket name for {full_filename}. Error {e}")
-        return False
+    
+    chunk_size_bytes = 2 * GB
 
     # get s3 object
     logger.debug(
@@ -253,7 +253,7 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str):
 
     # Do upload
     try:
-        ceph_upload_file(s3_object, bucket_name, full_filename)
+        ceph_upload_file(s3_object, bucket_name, full_filename, chunk_size_bytes)
     except Exception as e:
         logger.error(
             f"Error uploading {full_filename} to S3 bucket {bucket_name} on {ceph_endpoint}. Error {e}")
@@ -266,7 +266,7 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str):
     gbps_per_sec = (size_gigabytes * 8) / elapsed
 
     logger.info(
-        f"{full_filename} archive_file_ceph success ({size_gigabytes:.3f}GB at {gbps_per_sec:.3f} Gbps)")
+        f"{full_filename} archive_file_ceph success. ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at {gbps_per_sec:.3f} Gbps)")
     return True
 
 #
@@ -279,6 +279,33 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str):
 #
 # Boto3 will use this file to authenticate and fail if it is not there or is not valid
 #
+
+#
+# Dervied from: https://github.com/tlastowka/calculate_multipart_etag/blob/master/calculate_multipart_etag.py
+#
+def ceph_get_s3_md5_etag(filename: str, chunk_size_bytes: int) -> str:
+    md5s = []
+
+    with open(filename, 'rb') as fp:
+        while True:
+            data = fp.read(chunk_size_bytes)
+
+            if not data:
+                break
+            md5s.append(hashlib.md5(data))
+
+    if len(md5s) > 1:
+        digests = b"".join(m.digest() for m in md5s)
+        new_md5 = hashlib.md5(digests)
+        new_etag = '"%s-%s"' % (new_md5.hexdigest(),len(md5s))
+
+    elif len(md5s) == 1: # file smaller than chunk size
+        new_etag = '"%s"' % md5s[0].hexdigest()
+
+    else: # empty file
+        new_etag = '""'    
+
+    return new_etag
 
 
 def ceph_get_s3_object(endpoint: str):
@@ -297,23 +324,18 @@ def ceph_get_bucket_name_from_filename(filename: str) -> str:
 
 
 def ceph_get_bucket_name_from_obs_id(obs_id: int) -> str:
-    return str(obs_id)[0:4]
-
+    return f"mwaservice-archive-{str(obs_id)[0:4]}"
 
 def ceph_create_bucket(s3_object, bucket_name: str):
     bucket = s3_object.Bucket(bucket_name)
     bucket.create()
-
 
 def ceph_list_bucket(s3_object, bucket_name: str) -> list:
     bucket = s3_object.Bucket(bucket_name)
     return list(bucket.objects.all())
 
 
-def ceph_upload_file(s3_object, bucket_name: str, filename: str) -> bool:
-    # Set number of bytes in 1 MB
-    MB = (1024 * 1024)
-
+def ceph_upload_file(s3_object, bucket_name: str, filename: str, chunk_size_bytes: int) -> bool:
     # get key
     key = os.path.split(filename)[1]
 
@@ -321,8 +343,8 @@ def ceph_upload_file(s3_object, bucket_name: str, filename: str) -> bool:
     bucket = s3_object.Bucket(bucket_name)
 
     # configure the xfer to use multiparts
-    config = TransferConfig(multipart_threshold=100 * MB, max_concurrency=10,
-                            multipart_chunksize=1024*25, use_threads=True)
+    # 5GB is the limit Ceph has for parts, so only split if >= 1GB
+    config = TransferConfig(multipart_threshold=1 * GB, max_concurrency=8, use_threads=True, multipart_chunksize=chunk_size_bytes)
 
     # Upload the file
     bucket.upload_file(Filename=filename, Key=key, Config=config)
