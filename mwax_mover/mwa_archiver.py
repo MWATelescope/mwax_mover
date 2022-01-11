@@ -133,7 +133,7 @@ def validate_filename(filename: str, location: int) -> typing.Tuple[bool, int, i
             prefix = ceph_get_bucket_name_from_filename(filename)
 
         else:
-            # Versity not yet implemented
+            # Versity not yet implemented            
             raise NotImplementedError
 
     return valid, obs_id, filetype_id, file_ext_part, prefix, dmf_host, validation_error

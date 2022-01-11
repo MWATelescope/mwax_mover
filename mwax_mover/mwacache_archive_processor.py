@@ -14,9 +14,9 @@ from mwax_mover import mwax_mover, mwax_db, mwax_queue_worker, mwax_watcher, mwa
 class MWACacheArchiveProcessor:
     def __init__(self,
                  logger,
-                 hostname: str,
-                 archive_to_location: int,
+                 hostname: str,                 
                  ceph_endpoint: str,
+                 archive_to_location: int,
                  incoming_paths: list,
                  recursive: bool,
                  db_handler_object,
@@ -404,13 +404,13 @@ def initialise():
 
 
 def main():
-    (logger, hostname, ceph_endpoint, location, incoming_paths, recursive, db_handler,
+    (logger, hostname, ceph_endpoint, archive_to_location, incoming_paths, recursive, db_handler,
      health_multicast_interface_ip, health_multicast_ip, health_multicast_port, health_multicast_hops) = initialise()
 
     p = MWACacheArchiveProcessor(logger,
                                  hostname,
                                  ceph_endpoint,
-                                 location,
+                                 archive_to_location,
                                  incoming_paths,
                                  recursive,
                                  db_handler,
