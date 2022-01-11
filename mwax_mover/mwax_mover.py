@@ -31,7 +31,7 @@ def remove_file(logger, filename: str, raise_error: bool) -> bool:
     except Exception as delete_exception:
         if raise_error:
             logger.error(
-                f"{filename} {bob}- Error deleting: {delete_exception}. Retrying up to 5 times.")
+                f"{filename}- Error deleting: {delete_exception}. Retrying up to 5 times.")
             raise delete_exception
         else:
             logger.warning(

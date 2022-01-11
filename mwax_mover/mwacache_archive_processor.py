@@ -330,8 +330,7 @@ def initialise():
     # Common config options
     cfg_ceph_endpoint = utils.read_config(
         logger, config, "mwax mover", "ceph_endpoint")
-    cfg_archive_to_location = utils.read_config(
-        logger, config, "mwax mover", "archive_to_location")
+    cfg_archive_to_location = int(utils.read_config(logger, config, "mwax mover", "archive_to_location"))
 
     cfg_health_multicast_ip = utils.read_config(
         logger, config, "mwax mover", "health_multicast_ip")
