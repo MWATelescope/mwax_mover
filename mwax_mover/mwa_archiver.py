@@ -62,6 +62,10 @@ def validate_filename(filename: str, location: int) -> typing.Tuple[bool, int, i
             else:
                 filetype_id = MWADataFileType.MWAX_VISIBILITIES.value
 
+        elif file_ext_part.lower() == ".metafits":
+            # Could be metafits (e.g. 1316906688.metafits)             
+            filetype_id = MWADataFileType.MWA_PPD_FILE.value
+            
         elif file_ext_part.lower() == ".zip":
             filetype_id = MWADataFileType.MWA_FLAG_FILE.value
 
@@ -90,12 +94,12 @@ def validate_filename(filename: str, location: int) -> typing.Tuple[bool, int, i
                                    f"obsid_yyyymmddhhnnss_chXXX_XXX.fits)- ignoring"
 
         elif filetype_id == MWADataFileType.MWA_PPD_FILE.value:
-            # filename format should be obsid_metafits_ppds.fits
-            if len(file_name_part) != 24 and len(file_name_part) != 19:
+            # filename format should be obsid_metafits_ppds.fits or obsid_metafits.fits or obsid.metafits
+            if len(file_name_part) != 24 and len(file_name_part) != 19 and len(file_name_part) != 10:
                 valid = False
                 validation_error = f"Filename (excluding extension) is not in the correct format " \
                                    f"(incorrect length ({len(file_name_part)}). Format should be " \
-                                   f"obsid_metafits_ppds.fits or obsid_metafits.fits)- ignoring"
+                                   f"obsid_metafits_ppds.fits, obsid_metafits.fits or obsid.metafits)- ignoring"
 
         elif filetype_id == MWADataFileType.MWA_FLAG_FILE.value:
             # filename format should be obsid_flags.zip
@@ -148,7 +152,7 @@ def archive_file_rsync(logger, full_filename: str, archive_numa_node: int, archi
         file_size = os.path.getsize(full_filename)
     except Exception as e:
         logger.error(
-            f"Error determining file size for {full_filename}. Error {e}")
+            f"{full_filename}: Error determining file size. Error {e}")
         return False
 
     # Build final command line
@@ -184,7 +188,7 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node: int, arch
         file_size = os.path.getsize(full_filename)
     except Exception as e:
         logger.error(
-            f"Error determining file size for {full_filename}. Error {e}")
+            f"{full_filename}: Error determining file size. Error {e}")
         return False
 
     # Build final command line
@@ -220,7 +224,7 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str, bucket_nam
         file_size = os.path.getsize(full_filename)
     except Exception as e:
         logger.error(
-            f"Error determining file size for {full_filename}. Error {e}")
+            f"{full_filename}: Error determining file size. Error {e}")
         return False
     
     chunk_size_bytes = 2 * GB
@@ -232,7 +236,7 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str, bucket_nam
         s3_object = ceph_get_s3_object(ceph_endpoint)
     except Exception as e:
         logger.error(
-            f"Error connecting to S3 endpoint: {ceph_endpoint}. Error {e}")
+            f"{full_filename}: Error connecting to S3 endpoint: {ceph_endpoint}. Error {e}")
         return False
 
     # create bucket if required
@@ -242,7 +246,7 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str, bucket_nam
         ceph_create_bucket(s3_object, bucket_name)
     except Exception as e:
         logger.error(
-            f"Error creating/checking existence of S3 bucket {bucket_name} on {ceph_endpoint}. Error {e}")
+            f"{full_filename}: Error creating/checking existence of S3 bucket {bucket_name} on {ceph_endpoint}. Error {e}")
         return False
 
     logger.debug(
@@ -256,7 +260,7 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str, bucket_nam
         ceph_upload_file(s3_object, bucket_name, full_filename, chunk_size_bytes)
     except Exception as e:
         logger.error(
-            f"Error uploading {full_filename} to S3 bucket {bucket_name} on {ceph_endpoint}. Error {e}")
+            f"{full_filename}: Error uploading to S3 bucket {bucket_name} on {ceph_endpoint}. Error {e}")
         return False
 
     # end timer
@@ -303,7 +307,7 @@ def ceph_get_s3_md5_etag(filename: str, chunk_size_bytes: int) -> str:
         new_etag = '"%s"' % md5s[0].hexdigest()
 
     else: # empty file
-        new_etag = '""'    
+        new_etag = '""'
 
     return new_etag
 
@@ -343,8 +347,8 @@ def ceph_upload_file(s3_object, bucket_name: str, filename: str, chunk_size_byte
     bucket = s3_object.Bucket(bucket_name)
 
     # configure the xfer to use multiparts
-    # 5GB is the limit Ceph has for parts, so only split if >= 1GB
-    config = TransferConfig(multipart_threshold=1 * GB, max_concurrency=8, use_threads=True, multipart_chunksize=chunk_size_bytes)
+    # 5GB is the limit Ceph has for parts, so only split if >= 2GB
+    config = TransferConfig(multipart_threshold=2 * GB, max_concurrency=8, use_threads=True, multipart_chunksize=chunk_size_bytes)
 
     # Upload the file
     bucket.upload_file(Filename=filename, Key=key, Config=config)

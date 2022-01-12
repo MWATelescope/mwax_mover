@@ -17,6 +17,7 @@ class MWACacheArchiveProcessor:
                  hostname: str,                 
                  ceph_endpoint: str,
                  archive_to_location: int,
+                 concurrent_archive_workers: int,
                  incoming_paths: list,
                  recursive: bool,
                  db_handler_object,
@@ -30,6 +31,7 @@ class MWACacheArchiveProcessor:
         self.hostname = hostname
         self.archive_to_location = archive_to_location
         self.ceph_endpoint = ceph_endpoint
+        self.concurrent_archive_workers = concurrent_archive_workers
         self.recursive = recursive
 
         self.health_multicast_interface_ip = health_multicast_interface_ip
@@ -49,7 +51,7 @@ class MWACacheArchiveProcessor:
         self.watch_dirs = incoming_paths
         self.queue = queue.Queue()
         self.watchers = []
-        self.queue_worker = None
+        self.queue_workers = []
 
     def initialise(self):
         self.running = True
@@ -94,14 +96,17 @@ class MWACacheArchiveProcessor:
             self.watchers.append(new_watcher)
 
         # Create queueworker archive queue
-        self.logger.info("Creating workers...")
-        self.queue_worker = mwax_queue_worker.QueueWorker(label="Archiver",
-                                                          q=self.queue,
-                                                          executable_path=None,
-                                                          event_handler=self.archive_handler,
-                                                          log=self.logger,
-                                                          requeue_to_eoq_on_failure=True,
-                                                          exit_once_queue_empty=False)
+        self.logger.info("Creating workers...")        
+
+        for n in range(0, self.concurrent_archive_workers):
+            new_worker = mwax_queue_worker.QueueWorker(label=f"Archiver{n}",
+                                                        q=self.queue,
+                                                        executable_path=None,
+                                                        event_handler=self.archive_handler,
+                                                        log=self.logger,
+                                                        requeue_to_eoq_on_failure=True,
+                                                        exit_once_queue_empty=False)
+            self.queue_workers.append(new_worker)
 
         self.logger.info("Starting watchers...")
         # Setup thread for watching filesystem
@@ -113,10 +118,10 @@ class MWACacheArchiveProcessor:
 
         self.logger.info("Starting workers...")
         # Setup thread for processing items
-        queue_worker_thread = threading.Thread(name="worker_thread", target=self.queue_worker.start,
-                                               daemon=True)
-        self.worker_threads.append(queue_worker_thread)
-        queue_worker_thread.start()
+        for i, worker in enumerate(self.queue_workers):
+            queue_worker_thread = threading.Thread(name=f"worker_thread{i}", target=worker.start, daemon=True)
+            self.worker_threads.append(queue_worker_thread)
+            queue_worker_thread.start()
 
         self.logger.info("Started...")
 
@@ -162,7 +167,7 @@ class MWACacheArchiveProcessor:
                 return False
         else:
             # The filename was not valid
-            self.logger.error(f"{item}- db_handler() {validation_message}")
+            self.logger.error(f"{item}- archive_handler() {validation_message}")
             return False
 
     def pause_archiving(self, paused: bool):
@@ -172,8 +177,9 @@ class MWACacheArchiveProcessor:
             else:
                 self.logger.info("Resuming archiving")
 
-            if self.queue_worker:
-                self.queue_worker.pause(paused)
+            if len(self.queue_workers)>0:
+                for qw in self.queue_workers:
+                    qw.pause(paused)
 
             self.archiving_paused = paused
 
@@ -181,8 +187,10 @@ class MWACacheArchiveProcessor:
         for watcher in self.watchers:
             watcher.stop()
 
-        self.queue_worker.stop()
-
+        if len(self.queue_workers)>0:
+            for qw in self.queue_workers:
+                qw.stop()
+        
         # Wait for threads to finish
         for t in self.watcher_threads:
             if t:
@@ -244,10 +252,11 @@ class MWACacheArchiveProcessor:
 
         worker_list = []
 
-        if self.queue_worker:
-            status = dict({"name": "archiver"})
-            status.update(self.queue_worker.get_status())
-            worker_list.append(status)
+        if len(self.queue_workers)>0:
+            for i, worker in enumerate(self.queue_workers):
+                status = dict({"name": f"archiver{i}"})
+                status.update(worker.get_status())
+                worker_list.append(status)
 
         processor_status_list = []
         processor = {"type": type(self).__name__,
@@ -331,7 +340,8 @@ def initialise():
     cfg_ceph_endpoint = utils.read_config(
         logger, config, "mwax mover", "ceph_endpoint")
     cfg_archive_to_location = int(utils.read_config(logger, config, "mwax mover", "archive_to_location"))
-
+    cfg_concurrent_archive_workers = int(utils.read_config(logger, config, "mwax mover", "concurrent_archive_workers"))
+    
     cfg_health_multicast_ip = utils.read_config(
         logger, config, "mwax mover", "health_multicast_ip")
     cfg_health_multicast_port = int(utils.read_config(
@@ -389,7 +399,7 @@ def initialise():
         cfg_metadatadb_pass = None
         cfg_metadatadb_port = None
 
-        # Initiate database connection pool for metadata db
+     # Initiate database connection for metadata db
     db_handler = mwax_db.MWAXDBHandler(logger=logger,
                                        host=cfg_metadatadb_host,
                                        port=cfg_metadatadb_port,
@@ -397,19 +407,20 @@ def initialise():
                                        user=cfg_metadatadb_user,
                                        password=cfg_metadatadb_pass)
 
-    return logger, hostname, cfg_ceph_endpoint, cfg_archive_to_location, cfg_incoming_paths, cfg_recursive, db_handler, \
+    return logger, hostname, cfg_ceph_endpoint, cfg_archive_to_location, cfg_concurrent_archive_workers, cfg_incoming_paths, cfg_recursive, db_handler, \
         cfg_health_multicast_interface_ip, cfg_health_multicast_ip, cfg_health_multicast_port, \
         cfg_health_multicast_hops
 
 
 def main():
-    (logger, hostname, ceph_endpoint, archive_to_location, incoming_paths, recursive, db_handler,
+    (logger, hostname, ceph_endpoint, archive_to_location, concurrent_archive_workers, incoming_paths, recursive, db_handler,
      health_multicast_interface_ip, health_multicast_ip, health_multicast_port, health_multicast_hops) = initialise()
 
     p = MWACacheArchiveProcessor(logger,
                                  hostname,
                                  ceph_endpoint,
                                  archive_to_location,
+                                 concurrent_archive_workers,
                                  incoming_paths,
                                  recursive,
                                  db_handler,

@@ -3,9 +3,10 @@ import psycopg2
 from psycopg2 import InterfaceError, OperationalError
 from tenacity import retry, stop_after_attempt, wait_fixed
 from typing import Optional
+import threading
+import time
 
 DUMMY_DB = "dummy"
-
 
 class MWAXDBHandler:
     def __init__(self, logger, host: str, port: int, db, user: str, password: str):
@@ -16,7 +17,10 @@ class MWAXDBHandler:
         self.user = user
         self.password = password
         self.dummy = self.host == DUMMY_DB
-        self.con = None
+        self.con = None        
+
+        # We use a mutex so we only run one db command at a time
+        self.db_lock = threading.Lock()
 
     def connect(self):
         try:
@@ -38,7 +42,7 @@ class MWAXDBHandler:
                 f"{self.user}@{self.host}:{self.port}/{self.db} Error: {err}")
             raise err
 
-    def upsert_one_row(self, sql: str, parm_list: list) -> int:
+    def upsert_one_row(self, sql: str, parm_list: list) -> int:        
         if self.dummy:
             return 1
         else:
@@ -46,55 +50,57 @@ class MWAXDBHandler:
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(30))
     def upsert_one_row_postgres(self, sql: str, parm_list: list):
-        # Do we have a database connection?
-        if self.con is None:
-            self.connect()
+        # We have a mutex here to ensure only 1 user of the connection at a time
+        with self.db_lock:            
+            # Do we have a database connection?
+            if self.con is None:
+                self.connect()
 
-        # Assuming we have a connection, try to do the database operation
-        try:
-            with self.con as con:
-                with self.con.cursor() as cursor:
-                    # Run the sql
-                    cursor.execute(sql, parm_list)
+            # Assuming we have a connection, try to do the database operation
+            try:
+                with self.con as con:
+                    with self.con.cursor() as cursor:
+                        # Run the sql
+                        cursor.execute(sql, parm_list)
 
-                    # Check how many rows we affected
-                    rows_affected = cursor.rowcount
+                        # Check how many rows we affected
+                        rows_affected = cursor.rowcount
 
-                    if rows_affected != 1:
-                        # An exception in here will trigger a rollback which is good
-                        self.logger.error(
-                            f"upsert_one_row_postgres(): Error- upserted {rows_affected} rows, expected 1. SQL={sql}")
-                        raise Exception(
-                            f"upsert_one_row_postgres(): Error- upserted {rows_affected} rows, expected 1. SQL={sql}")
+                        if rows_affected != 1:
+                            # An exception in here will trigger a rollback which is good
+                            self.logger.error(
+                                f"upsert_one_row_postgres(): Error- upserted {rows_affected} rows, expected 1. SQL={sql}")
+                            raise Exception(
+                                f"upsert_one_row_postgres(): Error- upserted {rows_affected} rows, expected 1. SQL={sql}")
 
-        except OperationalError as conn_error:
-            # Our connection is toast. Clear it so we attempt a reconnect
-            self.con = None
-            self.logger.error(
-                f"upsert_one_row_postgres(): postgres OperationalError- {conn_error}")
-            # Reraise error
-            raise conn_error
+            except OperationalError as conn_error:
+                # Our connection is toast. Clear it so we attempt a reconnect
+                self.con = None
+                self.logger.error(
+                    f"upsert_one_row_postgres(): postgres OperationalError- {conn_error}")
+                # Reraise error
+                raise conn_error
 
-        except InterfaceError as int_error:
-            # Our connection is toast. Clear it so we attempt a reconnect
-            self.con = None
-            self.logger.error(
-                f"upsert_one_row_postgres(): postgres InterfaceError- {int_error}")
-            # Reraise error
-            raise int_error
+            except InterfaceError as int_error:
+                # Our connection is toast. Clear it so we attempt a reconnect
+                self.con = None
+                self.logger.error(
+                    f"upsert_one_row_postgres(): postgres InterfaceError- {int_error}")
+                # Reraise error
+                raise int_error
 
-        except psycopg2.ProgrammingError as prog_error:
-            # A programming/SQL error - e.g. table does not exist. Don't reconnect connection
-            self.logger.error(
-                f"upsert_one_row_postgres(): postgres ProgrammingError- {prog_error}")
-            # Reraise error
-            raise prog_error
+            except psycopg2.ProgrammingError as prog_error:
+                # A programming/SQL error - e.g. table does not exist. Don't reconnect connection
+                self.logger.error(
+                    f"upsert_one_row_postgres(): postgres ProgrammingError- {prog_error}")
+                # Reraise error
+                raise prog_error
 
-        except Exception as exception_info:
-            # Any other error- likely to be a database error rather than connection based
-            self.logger.error(
-                f"upsert_one_row_postgres(): unknown Error- {exception_info}")
-            raise exception_info
+            except Exception as exception_info:
+                # Any other error- likely to be a database error rather than connection based
+                self.logger.error(
+                    f"upsert_one_row_postgres(): unknown Error- {exception_info}")
+                raise exception_info
 
 
 def upsert_data_file_row(db_handler_object,
@@ -139,9 +145,12 @@ def upsert_data_file_row(db_handler_object,
                                                    checksum_type, checksum))
 
         if db_handler_object.dummy:
-            db_handler_object.logger.warning(f"{filename} upsert_data_file_row() Using dummy database connection. "
-                                             f"No data is really being upserted")
-            return True
+            # We have a mutex here to ensure only 1 user of the connection at a time
+            with db_handler_object.db_lock:                
+                db_handler_object.logger.warning(f"{filename} upsert_data_file_row() Using dummy database connection. "
+                                                 f"No data is really being upserted.")
+                time.sleep(10) # simulate a slow transaction
+                return True
         else:
             db_handler_object.logger.info(
                 f"{filename} upsert_data_file_row() Successfully wrote into data_files table")
