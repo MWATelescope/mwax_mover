@@ -70,14 +70,7 @@ class QueueWorker(object):
                         if success:
                             # Dequeue the item, but requeue if it was not successful
                             self.q.task_done()
-                            self.current_item = None
-                        else:
-                            # If this option is set, add item back to the end of the queue
-                            # If not set, just keep retrying the operation
-                            if self.requeue_to_eoq_on_failure:
-                                self.q.task_done()
-                                self.q.put(self.current_item)
-                                self.current_item = None
+                            self.current_item = None                        
                     else:
                         # Dequeue the item
                         self.q.task_done()
@@ -102,6 +95,13 @@ class QueueWorker(object):
                         self.logger.info(f"{self.consecutive_error_count} consecutive failures. Backing off "
                                          f"for {backoff} seconds.")
                         time.sleep(backoff)
+
+                        # If this option is set, add item back to the end of the queue
+                        # If not set, just keep retrying the operation
+                        if self.requeue_to_eoq_on_failure:
+                            self.q.task_done()
+                            self.q.put(self.current_item)
+                            self.current_item = None
 
                 except queue.Empty:
                     if self.exit_once_queue_empty:
