@@ -14,8 +14,7 @@ from mwax_mover import mwax_mover, mwax_db, mwax_queue_worker, mwax_watcher, mwa
 class MWACacheArchiveProcessor:
     def __init__(self,
                  logger,
-                 hostname: str,                 
-                 ceph_endpoint: str,
+                 hostname: str,                                  
                  archive_to_location: int,
                  concurrent_archive_workers: int,
                  incoming_paths: list,
@@ -24,15 +23,26 @@ class MWACacheArchiveProcessor:
                  health_multicast_interface_ip,
                  health_multicast_ip,
                  health_multicast_port,
-                 health_multicast_hops):
+                 health_multicast_hops,
+                 acacia_profile: str,
+                 acacia_ceph_endpoint: str,
+                 acacia_multipart_threshold_bytes: int,
+                 acacia_chunk_size_bytes: int,
+                 acacia_max_concurrency: int):
 
         self.logger = logger
 
         self.hostname = hostname
-        self.archive_to_location = archive_to_location
-        self.ceph_endpoint = ceph_endpoint
+        self.archive_to_location = archive_to_location        
         self.concurrent_archive_workers = concurrent_archive_workers
         self.recursive = recursive
+
+        # acacia config
+        self.acacia_profile =acacia_profile
+        self.acacia_ceph_endpoint = acacia_ceph_endpoint
+        self.acacia_multipart_threshold_bytes = acacia_multipart_threshold_bytes
+        self.acacia_chunk_size_bytes = acacia_chunk_size_bytes
+        self.acacia_max_concurrency = acacia_max_concurrency
 
         self.health_multicast_interface_ip = health_multicast_interface_ip
         self.health_multicast_ip = health_multicast_ip
@@ -147,8 +157,12 @@ class MWACacheArchiveProcessor:
             elif self.archive_to_location == 2:  # Ceph
                 archive_success = mwa_archiver.archive_file_ceph(self.logger,
                                                                  item,
-                                                                 self.ceph_endpoint,
-                                                                 prefix)
+                                                                 prefix,
+                                                                 self.acacia_profile,                                                                 
+                                                                 self.acacia_ceph_endpoint,
+                                                                 self.acacia_multipart_threshold_bytes,
+                                                                 self.acacia_chunk_size_bytes,
+                                                                 self.acacia_max_concurrency)
 
             if archive_success:
                 # Update record in metadata database
@@ -336,12 +350,11 @@ def initialise():
     i = 1
     cfg_incoming_paths = []
 
-    # Common config options
-    cfg_ceph_endpoint = utils.read_config(
-        logger, config, "mwax mover", "ceph_endpoint")
+    # Common config options    
     cfg_archive_to_location = int(utils.read_config(logger, config, "mwax mover", "archive_to_location"))
     cfg_concurrent_archive_workers = int(utils.read_config(logger, config, "mwax mover", "concurrent_archive_workers"))
     
+    # health
     cfg_health_multicast_ip = utils.read_config(
         logger, config, "mwax mover", "health_multicast_ip")
     cfg_health_multicast_port = int(utils.read_config(
@@ -355,6 +368,13 @@ def initialise():
         cfg_health_multicast_interface_name)
     logger.info(
         f"IP for sending multicast: {cfg_health_multicast_interface_ip}")
+
+    # acacia options    
+    cfg_acacia_profile = utils.read_config(logger, config, "acacia", "profile")
+    cfg_acacia_ceph_endpoint = utils.read_config(logger, config, "acacia", "ceph_endpoint")
+    cfg_acacia_multipart_threshold_bytes = int(utils.read_config(logger, config, "acacia", "multipart_threshold_bytes"))
+    cfg_acacia_chunk_size_bytes = int(utils.read_config(logger, config, "acacia", "chunk_size_bytes"))
+    cfg_acacia_max_concurrency = int(utils.read_config(logger, config, "acacia", "max_concurrency"))
 
     #
     # Options specified per host
@@ -407,18 +427,18 @@ def initialise():
                                        user=cfg_metadatadb_user,
                                        password=cfg_metadatadb_pass)
 
-    return logger, hostname, cfg_ceph_endpoint, cfg_archive_to_location, cfg_concurrent_archive_workers, cfg_incoming_paths, cfg_recursive, db_handler, \
+    return logger, hostname, cfg_archive_to_location, cfg_concurrent_archive_workers, cfg_incoming_paths, cfg_recursive, db_handler, \
         cfg_health_multicast_interface_ip, cfg_health_multicast_ip, cfg_health_multicast_port, \
-        cfg_health_multicast_hops
+        cfg_health_multicast_hops, cfg_acacia_profile, cfg_acacia_ceph_endpoint, cfg_acacia_multipart_threshold_bytes, cfg_acacia_chunk_size_bytes, cfg_acacia_max_concurrency
 
 
 def main():
-    (logger, hostname, ceph_endpoint, archive_to_location, concurrent_archive_workers, incoming_paths, recursive, db_handler,
-     health_multicast_interface_ip, health_multicast_ip, health_multicast_port, health_multicast_hops) = initialise()
+    (logger, hostname, archive_to_location, concurrent_archive_workers, incoming_paths, recursive, db_handler,
+     health_multicast_interface_ip, health_multicast_ip, health_multicast_port, health_multicast_hops, acacia_profile, 
+     acacia_ceph_endpoint, acacia_multipart_threshold_bytes, acacia_chunk_size_bytes, acacia_max_concurrency) = initialise()
 
     p = MWACacheArchiveProcessor(logger,
-                                 hostname,
-                                 ceph_endpoint,
+                                 hostname,                                 
                                  archive_to_location,
                                  concurrent_archive_workers,
                                  incoming_paths,
@@ -427,7 +447,12 @@ def main():
                                  health_multicast_interface_ip,
                                  health_multicast_ip,
                                  health_multicast_port,
-                                 health_multicast_hops)
+                                 health_multicast_hops,
+                                 acacia_profile,
+                                 acacia_ceph_endpoint,
+                                 acacia_multipart_threshold_bytes,
+                                 acacia_chunk_size_bytes,
+                                 acacia_max_concurrency)
 
     try:
         p.initialise()

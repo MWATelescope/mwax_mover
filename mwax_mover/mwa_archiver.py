@@ -11,7 +11,9 @@ from botocore.client import Config
 from mwax_mover import mwax_command
 
 # Set number of bytes in 1 GB
-GB = 1024 * 1024 * 1024
+MB = 1024 * 1024
+GB = MB * 1024
+
 
 class MWADataFileType(Enum):
     MWA_FLAG_FILE = 10
@@ -215,7 +217,7 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node: int, arch
         return False
 
 
-def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str, bucket_name: str):
+def archive_file_ceph(logger, full_filename: str, bucket_name: str, profile: str, ceph_endpoint: str, multipart_threshold_bytes: int, chunk_size_bytes: int, max_concurrency: int):
     logger.debug(f"{full_filename} attempting archive_file_ceph...")
 
     # get file size
@@ -226,14 +228,12 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str, bucket_nam
         logger.error(
             f"{full_filename}: Error determining file size. Error {e}")
         return False
-    
-    chunk_size_bytes = 2 * GB
-
+            
     # get s3 object
     logger.debug(
         f"{full_filename} getting S3 bucket reference: {bucket_name}...")
     try:
-        s3_object = ceph_get_s3_object(ceph_endpoint)
+        s3_object = ceph_get_s3_object(profile, ceph_endpoint)
     except Exception as e:
         logger.error(
             f"{full_filename}: Error connecting to S3 endpoint: {ceph_endpoint}. Error {e}")
@@ -254,10 +254,10 @@ def archive_file_ceph(logger, full_filename: str, ceph_endpoint: str, bucket_nam
 
     # start timer
     start_time = time.time()
-
+    
     # Do upload
     try:
-        ceph_upload_file(s3_object, bucket_name, full_filename, chunk_size_bytes)
+        ceph_upload_file(s3_object, bucket_name, full_filename, multipart_threshold_bytes , chunk_size_bytes, max_concurrency)
     except Exception as e:
         logger.error(
             f"{full_filename}: Error uploading to S3 bucket {bucket_name} on {ceph_endpoint}. Error {e}")
@@ -312,12 +312,14 @@ def ceph_get_s3_md5_etag(filename: str, chunk_size_bytes: int) -> str:
     return new_etag
 
 
-def ceph_get_s3_object(endpoint: str):
+def ceph_get_s3_object(profile: str, endpoint: str):
+    # create a session based on the profile name
+    session = boto3.Session(profile_name=profile)
+    
     # This ensures the default boto retries and timeouts don't leave us hanging too long
     config = Config(connect_timeout=20, retries={'max_attempts': 2})
 
-    s3_object = boto3.resource('s3',
-                               endpoint_url=endpoint, config=config)
+    s3_object = session.resource('s3', endpoint_url=endpoint, config=config)
 
     return s3_object
 
@@ -339,7 +341,7 @@ def ceph_list_bucket(s3_object, bucket_name: str) -> list:
     return list(bucket.objects.all())
 
 
-def ceph_upload_file(s3_object, bucket_name: str, filename: str, chunk_size_bytes: int) -> bool:
+def ceph_upload_file(s3_object, bucket_name: str, filename: str, multipart_threshold_bytes: int, chunk_size_bytes: int, max_concurrency: int) -> bool:
     # get key
     key = os.path.split(filename)[1]
 
@@ -348,7 +350,7 @@ def ceph_upload_file(s3_object, bucket_name: str, filename: str, chunk_size_byte
 
     # configure the xfer to use multiparts
     # 5GB is the limit Ceph has for parts, so only split if >= 2GB
-    config = TransferConfig(multipart_threshold=2 * GB, max_concurrency=8, use_threads=True, multipart_chunksize=chunk_size_bytes)
+    config = TransferConfig(multipart_threshold=multipart_threshold_bytes, multipart_chunksize=chunk_size_bytes, use_threads=True, max_concurrency=max_concurrency)
 
     # Upload the file
     bucket.upload_file(Filename=filename, Key=key, Config=config)
