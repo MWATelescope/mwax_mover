@@ -17,6 +17,7 @@ class MWACacheArchiveProcessor:
                  hostname: str,                                  
                  archive_to_location: int,
                  concurrent_archive_workers: int,
+                 archive_command_timeout_sec: int,
                  incoming_paths: list,
                  recursive: bool,
                  db_handler_object,
@@ -35,6 +36,7 @@ class MWACacheArchiveProcessor:
         self.hostname = hostname
         self.archive_to_location = archive_to_location        
         self.concurrent_archive_workers = concurrent_archive_workers
+        self.archive_command_timeout_sec = archive_command_timeout_sec
         self.recursive = recursive
 
         # acacia config
@@ -145,14 +147,14 @@ class MWACacheArchiveProcessor:
         if valid:
             archive_success = False
 
-            if self.archive_to_location == 1:  # DMF
+            if self.archive_to_location == 1:  # DMF                
                 # Now copy the file into dmf
                 archive_success = mwa_archiver.archive_file_rsync(self.logger,
                                                                   item,
                                                                   -1,  # cache boxes do not have numa architecture
                                                                   f"ngas@{dmf_host}",
                                                                   prefix,
-                                                                  120)
+                                                                  self.archive_command_timeout_sec)
 
             elif self.archive_to_location == 2:  # Ceph
                 archive_success = mwa_archiver.archive_file_ceph(self.logger,
@@ -353,6 +355,7 @@ def initialise():
     # Common config options    
     cfg_archive_to_location = int(utils.read_config(logger, config, "mwax mover", "archive_to_location"))
     cfg_concurrent_archive_workers = int(utils.read_config(logger, config, "mwax mover", "concurrent_archive_workers"))
+    cfg_archive_command_timeout_sec = int(utils.read_config(logger, config, "mwax mover", "archive_command_timeout_sec"))
     
     # health
     cfg_health_multicast_ip = utils.read_config(
@@ -433,7 +436,7 @@ def initialise():
 
 
 def main():
-    (logger, hostname, archive_to_location, concurrent_archive_workers, incoming_paths, recursive, db_handler,
+    (logger, hostname, archive_to_location, concurrent_archive_workers, archive_command_timeout_sec, incoming_paths, recursive, db_handler,
      health_multicast_interface_ip, health_multicast_ip, health_multicast_port, health_multicast_hops, acacia_profile, 
      acacia_ceph_endpoint, acacia_multipart_threshold_bytes, acacia_chunk_size_bytes, acacia_max_concurrency) = initialise()
 
@@ -441,6 +444,7 @@ def main():
                                  hostname,                                 
                                  archive_to_location,
                                  concurrent_archive_workers,
+                                 archive_command_timeout_sec,
                                  incoming_paths,
                                  recursive,
                                  db_handler,

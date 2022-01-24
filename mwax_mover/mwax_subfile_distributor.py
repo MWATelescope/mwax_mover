@@ -263,6 +263,15 @@ class MWAXSubfileDistributor:
                                                                "health_multicast_port"))
         self.cfg_health_multicast_hops = int(utils.read_config(self.logger, self.config, "mwax mover",
                                                                "health_multicast_hops"))
+
+        self.cfg_psrdada_timeout_sec = int(utils.read_config(self.logger, self.config, "mwax mover",
+                                                               "psrdada_timeout_sec"))
+        self.cfg_copy_subfile_to_disk_timeout_sec = int(utils.read_config(self.logger, self.config, "mwax mover",
+                                                               "copy_subfile_to_disk_timeout_sec"))
+
+        self.cfg_archive_command_timeout_sec = int(utils.read_config(self.logger, self.config, "mwax mover",
+                                                               "archive_command_timeout_sec"))
+
         # get this hosts primary network interface ip
         self.cfg_health_multicast_interface_ip = utils.get_ip_address(
             self.cfg_health_multicast_interface_name)
@@ -338,9 +347,8 @@ class MWAXSubfileDistributor:
                                                                     "visdata_outgoing_path")
             self.cfg_corr_mwax_stats_executable = utils.read_config(self.logger, self.config, "correlator",
                                                                     "mwax_stats_executable")
-
-            self.cfg_corr_mwax_stats_dump_dir = utils.read_config(self.logger, self.config, "correlator",
-                                                                  "mwax_stats_dump_dir")
+            self.cfg_corr_mwax_stats_dump_dir = utils.read_config(self.logger, self.config, "correlator", "mwax_stats_dump_dir")
+            self.cfg_mwax_stats_timeout_sec = int(utils.read_config(self.logger, self.config, "correlator", "mwax_stats_timeout_sec"))
 
             if not os.path.exists(self.cfg_corr_visdata_incoming_path):
                 self.logger.error(f"Visdata file location {self.cfg_corr_visdata_incoming_path} does not exist. "
@@ -423,7 +431,9 @@ class MWAXSubfileDistributor:
                                                                          self.cfg_bf_settings_path,
                                                                          self.cfg_corr_enabled,
                                                                          self.cfg_corr_ringbuffer_key,
-                                                                         self.cfg_corr_diskdb_numa_node)
+                                                                         self.cfg_corr_diskdb_numa_node,
+                                                                         self.cfg_psrdada_timeout_sec,
+                                                                         self.cfg_copy_subfile_to_disk_timeout_sec)
 
         # Add this processor to list of processors we manage
         self.processors.append(self.subfile_processor)
@@ -437,6 +447,7 @@ class MWAXSubfileDistributor:
                                                                                      self.cfg_corr_archive_destination_port,
                                                                                      self.cfg_corr_mwax_stats_executable,
                                                                                      self.cfg_corr_mwax_stats_dump_dir,
+                                                                                     self.cfg_mwax_stats_timeout_sec,
                                                                                      self.db_handler,
                                                                                      self.cfg_voltdata_incoming_path,
                                                                                      self.cfg_voltdata_outgoing_path,

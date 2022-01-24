@@ -17,6 +17,7 @@ class MWAXArchiveProcessor:
                  archive_port: str,
                  mwax_stats_executable: str,
                  mwax_stats_dump_dir: str,
+                 mwax_stats_timeout_sec: int,
                  db_handler_object,
                  voltdata_incoming_path: str,
                  voltdata_outgoing_path: str,
@@ -48,6 +49,7 @@ class MWAXArchiveProcessor:
         self.mwax_stats_executable = mwax_stats_executable
         # Directory where to dump the stats files
         self.mwax_stats_dump_dir = mwax_stats_dump_dir
+        self.mwax_stats_timeout_sec = mwax_stats_timeout_sec
 
         self.archiving_paused = False
 
@@ -294,11 +296,10 @@ class MWAXArchiveProcessor:
             # We don't run stats on metafits! Just pass it onto the output dir
             self.logger.debug(
                 f"{item}- stats_handler() - metafits file detected. Moving file to outgoing dir")
-        else:
+        else:            
             # This is a normal mwax fits file. Run stats on it
             if utils.process_mwax_stats(self.logger, self.mwax_stats_executable,
-                                        item, int(
-                                            self.archive_command_numa_node), 180,
+                                        item, int(self.archive_command_numa_node), self.mwax_stats_timeout_sec,
                                         self.mwax_stats_dump_dir) is not True:
                 return False
 
@@ -316,8 +317,10 @@ class MWAXArchiveProcessor:
     def archive_handler(self, item: str) -> bool:
         self.logger.info(f"{item}- archive_handler() Started...")
 
+        archive_command_timeout_sec = 300  # 120s is sometimes not enough for a ~10GB file. Make it generous to avoid premature timeout
+
         if mwa_archiver.archive_file_xrootd(self.logger, item, int(self.archive_command_numa_node),
-                                            self.archive_destination_host, 120) is not True:
+                                            self.archive_destination_host, archive_command_timeout_sec) is not True:
             return False
 
         self.logger.debug(f"{item}- archive_handler() Deleting file")

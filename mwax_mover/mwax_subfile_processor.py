@@ -73,7 +73,8 @@ class SubfileProcessor:
                  always_keep_subfiles: bool,
                  bf_enabled: bool, bf_ringbuffer_key: str, bf_numa_node, bf_fildata_path: str,
                  bf_settings_path: str,
-                 corr_enabled: bool, corr_ringbuffer_key: str, corr_diskdb_numa_node):
+                 corr_enabled: bool, corr_ringbuffer_key: str, corr_diskdb_numa_node,
+                 psrdada_timeout_sec: int, copy_subfile_to_disk_timeout_sec: int):
         self.subfile_distributor_context = context
 
         # Setup logging
@@ -117,6 +118,9 @@ class SubfileProcessor:
         self.corr_ringbuffer_key = corr_ringbuffer_key
         # Numa node to use to do a file copy
         self.corr_diskdb_numa_node = corr_diskdb_numa_node
+
+        self.psrdada_timeout_sec = psrdada_timeout_sec
+        self.copy_subfile_to_disk_timeout_sec = copy_subfile_to_disk_timeout_sec
 
     def start(self):
         # Create watcher for the subfiles
@@ -162,7 +166,7 @@ class SubfileProcessor:
 
         try:
             subfile_mode = read_subfile_mode(item)
-
+            
             if self.corr_enabled:
                 # 1. Read header of subfile.
                 # 2. If mode==HW_LFILES then
@@ -176,10 +180,10 @@ class SubfileProcessor:
                 if CorrelatorMode.is_correlator(subfile_mode):
                     if self.subfile_distributor_context.cfg_corr_archive_destination_enabled:
                         self.subfile_distributor_context.archive_processor.pause_archiving(
-                            False)
+                            False)                    
 
                     success = utils.load_psrdada_ringbuffer(
-                        self.logger, item, self.corr_ringbuffer_key, self.corr_diskdb_numa_node, 16)
+                        self.logger, item, self.corr_ringbuffer_key, self.corr_diskdb_numa_node, self.psrdada_timeout_sec)
 
                     if self.always_keep_subfiles:
                         keep_subfiles_path = self.voltdata_incoming_path
@@ -191,7 +195,7 @@ class SubfileProcessor:
                             True)
 
                     self._copy_subfile_to_disk(
-                        item, self.corr_diskdb_numa_node, self.voltdata_incoming_path)
+                        item, self.corr_diskdb_numa_node, self.voltdata_incoming_path, self.copy_subfile_to_disk_timeout_sec)
                     success = True
 
                 elif CorrelatorMode.is_no_capture(subfile_mode):
@@ -229,10 +233,10 @@ class SubfileProcessor:
                         self.logger.info(
                             f"{item}- injecting beamformer header into subfile...")
                         self._inject_beamformer_headers(
-                            item, beamformer_settings)
+                            item, beamformer_settings)                        
 
                         success = utils.load_psrdada_ringbuffer(self.logger, item, self.bf_ringbuffer_key,
-                                                                self.bf_numa_node, 16)
+                                                                self.bf_numa_node, self.psrdada_timeout_sec)
 
                         if self.always_keep_subfiles:
                             keep_subfiles_path = self.voltdata_incoming_path
@@ -256,7 +260,7 @@ class SubfileProcessor:
                 # Check if need to keep subfiles, if so we need to copy them off
                 if keep_subfiles_path:
                     # we use -1 for numa node for now as this is really for debug so it does not matter
-                    self._copy_subfile_to_disk(item, -1, keep_subfiles_path)
+                    self._copy_subfile_to_disk(item, -1, keep_subfiles_path, self.copy_subfile_to_disk_timeout_sec)
 
                 # Rename subfile so that udpgrab can reuse it
                 free_filename = str(item).replace(
@@ -323,14 +327,14 @@ class SubfileProcessor:
             subfile.seek(0)
             subfile.write(new_bytes)
 
-    def _copy_subfile_to_disk(self, filename: str, numa_node: int, destination_path: str) -> bool:
+    def _copy_subfile_to_disk(self, filename: str, numa_node: int, destination_path: str, timeout: int) -> bool:
         self.logger.info(f"{filename}- Copying file into {destination_path}")
 
         command = f"cp {filename} {destination_path}/."
 
         start_time = time.time()
         retval, stdout = mwax_command.run_command_ext(
-            self.logger, command, numa_node, 120, False)
+            self.logger, command, numa_node, timeout, False)
         elapsed = time.time() - start_time
 
         if retval:
