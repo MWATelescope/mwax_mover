@@ -430,7 +430,7 @@ def initialise():
                                        user=cfg_metadatadb_user,
                                        password=cfg_metadatadb_pass)
 
-    return logger, hostname, cfg_archive_to_location, cfg_concurrent_archive_workers, cfg_incoming_paths, cfg_recursive, db_handler, \
+    return logger, hostname, cfg_archive_to_location, cfg_concurrent_archive_workers, cfg_archive_command_timeout_sec, cfg_incoming_paths, cfg_recursive, db_handler, \
         cfg_health_multicast_interface_ip, cfg_health_multicast_ip, cfg_health_multicast_port, \
         cfg_health_multicast_hops, cfg_acacia_profile, cfg_acacia_ceph_endpoint, cfg_acacia_multipart_threshold_bytes, cfg_acacia_chunk_size_bytes, cfg_acacia_max_concurrency
 
