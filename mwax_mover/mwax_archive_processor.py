@@ -15,6 +15,7 @@ class MWAXArchiveProcessor:
                  archive_command_numa_node: int,
                  archive_host: str,
                  archive_port: str,
+                 archive_command_timeout_sec: int,
                  mwax_stats_executable: str,
                  mwax_stats_dump_dir: str,
                  mwax_stats_timeout_sec: int,
@@ -44,6 +45,7 @@ class MWAXArchiveProcessor:
         self.archive_destination_host = archive_host
         self.archive_destination_port = archive_port
         self.archive_command_numa_node: int = archive_command_numa_node
+        self.archive_command_timeout_sec = archive_command_timeout_sec
 
         # Full path to executable for mwax_stats
         self.mwax_stats_executable = mwax_stats_executable
@@ -316,11 +318,9 @@ class MWAXArchiveProcessor:
 
     def archive_handler(self, item: str) -> bool:
         self.logger.info(f"{item}- archive_handler() Started...")
-
-        archive_command_timeout_sec = 300  # 120s is sometimes not enough for a ~10GB file. Make it generous to avoid premature timeout
-
+        
         if mwa_archiver.archive_file_xrootd(self.logger, item, int(self.archive_command_numa_node),
-                                            self.archive_destination_host, archive_command_timeout_sec) is not True:
+                                            self.archive_destination_host, self.archive_command_timeout_sec) is not True:
             return False
 
         self.logger.debug(f"{item}- archive_handler() Deleting file")

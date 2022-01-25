@@ -445,6 +445,7 @@ class MWAXSubfileDistributor:
                                                                                      self.cfg_corr_archive_command_numa_node,
                                                                                      self.cfg_corr_archive_destination_host,
                                                                                      self.cfg_corr_archive_destination_port,
+                                                                                     self.cfg_archive_command_timeout_sec,
                                                                                      self.cfg_corr_mwax_stats_executable,
                                                                                      self.cfg_corr_mwax_stats_dump_dir,
                                                                                      self.cfg_mwax_stats_timeout_sec,
