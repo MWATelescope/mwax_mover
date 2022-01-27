@@ -194,7 +194,11 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node: int, arch
         return False
 
     # Build final command line
-    cmdline = f"/usr/local/bin/xrdcp --force --cksum adler32 " \
+    #
+    # --posc         = persist on successful copy. If copy fails either remove the file or set it to 0 bytes. Setting to 0 bytes is weird, but I'll take it
+    # --rm-bad-cksum = Delete dest file if checksums do not match     
+    #
+    cmdline = f"/usr/local/bin/xrdcp --cksum adler32 --posc --rm-bad-cksum " \
               f"--silent --streams 2 --tlsnodata {full_filename} xroot://{archive_destination_host}"
 
     start_time = time.time()

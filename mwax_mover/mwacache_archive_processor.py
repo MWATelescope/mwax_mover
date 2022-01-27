@@ -144,10 +144,34 @@ class MWACacheArchiveProcessor:
         (valid, obs_id, filetype, file_ext, prefix, dmf_host, validation_message) = \
             mwa_archiver.validate_filename(item, self.archive_to_location)
 
+        # do some sanity checks!
+        if valid:
+            # Get the file size
+            actual_file_size = os.stat(item).st_size
+            
+            # TODO: Get the database file size
+            database_file_size = actual_file_size
+
+            # Check for 0 size
+            if actual_file_size == 0:
+                # File size is 0- lets just blow it away
+                self.logger.warning(f"{item}- archive_handler() File size is 0 bytes. Deleting file")
+                mwax_mover.remove_file(self.logger, item, raise_error=False)
+
+                # even though its a problem,we return true as we are finished with the item and it should not be requeued
+                return True
+            elif actual_file_size != database_file_size:
+                # File size is incorrect- lets just blow it away
+                self.logger.warning(f"{item}- archive_handler() File size {actual_file_size} does not match {database_file_size}. Deleting file")
+                mwax_mover.remove_file(self.logger, item, raise_error=False)
+
+                # even though its a problem,we return true as we are finished with the item and it should not be requeued
+                return True
+
         if valid:
             archive_success = False
 
-            if self.archive_to_location == 1:  # DMF                
+            if self.archive_to_location == 1:  # DMF
                 # Now copy the file into dmf
                 archive_success = mwa_archiver.archive_file_rsync(self.logger,
                                                                   item,
