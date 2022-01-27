@@ -72,11 +72,12 @@ class QueueWorker(object):
                             self.q.task_done()
                             self.current_item = None                        
                     else:
-                        # Dequeue the item
-                        self.q.task_done()
+                        # Dequeue the item                        
                         self.logger.warning(f"Processing {self.current_item } Complete... file was moved or deleted. "
                                             f"Queue size: {self.q.qsize()}")
                         self.current_item = None
+                        self.q.task_done()
+                        continue
 
                     elapsed = time.time() - start_time
                     self.logger.info(
