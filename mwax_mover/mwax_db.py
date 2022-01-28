@@ -42,6 +42,72 @@ class MWAXDBHandler:
                 f"{self.user}@{self.host}:{self.port}/{self.db} Error: {err}")
             raise err
 
+    def select_one_row(self, sql: str, parm_list: list) -> int:        
+        if self.dummy:
+            return 1
+        else:
+            return self.select_one_row_postgres(sql, parm_list)
+
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(30))
+    def select_one_row_postgres(self, sql: str, parm_list: list):
+        # We have a mutex here to ensure only 1 user of the connection at a time
+        with self.db_lock:            
+            # Do we have a database connection?
+            if self.con is None:
+                self.connect()
+
+            # Assuming we have a connection, try to do the database operation
+            try:
+                with self.con as con:
+                    with self.con.cursor() as cursor:
+                        # Run the sql
+                        cursor.execute(sql, parm_list)
+
+                        # Fetch results as a list of tuples
+                        rows = cursor.fetchall()
+
+                        # Check how many rows we affected
+                        rows_affected = len(rows)
+
+                        if rows_affected == 1:
+                            # Success - return the tuple
+                            return rows[0]
+                        else:
+                            # Something went wrong
+                            self.logger.error(
+                                f"select_one_row_postgres(): Error- queried {rows_affected} rows, expected 1. SQL={sql}")
+                            raise Exception(
+                                f"select_one_row_postgres(): Error- queried {rows_affected} rows, expected 1. SQL={sql}")                            
+
+            except OperationalError as conn_error:
+                # Our connection is toast. Clear it so we attempt a reconnect
+                self.con = None
+                self.logger.error(
+                    f"select_one_row_postgres(): postgres OperationalError- {conn_error}")
+                # Reraise error
+                raise conn_error
+
+            except InterfaceError as int_error:
+                # Our connection is toast. Clear it so we attempt a reconnect
+                self.con = None
+                self.logger.error(
+                    f"select_one_row_postgres(): postgres InterfaceError- {int_error}")
+                # Reraise error
+                raise int_error
+
+            except psycopg2.ProgrammingError as prog_error:
+                # A programming/SQL error - e.g. table does not exist. Don't reconnect connection
+                self.logger.error(
+                    f"select_one_row_postgres(): postgres ProgrammingError- {prog_error}")
+                # Reraise error
+                raise prog_error
+
+            except Exception as exception_info:
+                # Any other error- likely to be a database error rather than connection based
+                self.logger.error(
+                    f"select_one_row_postgres(): unknown Error- {exception_info}")
+                raise exception_info
+
     def upsert_one_row(self, sql: str, parm_list: list) -> int:        
         if self.dummy:
             return 1
@@ -102,6 +168,59 @@ class MWAXDBHandler:
                     f"upsert_one_row_postgres(): unknown Error- {exception_info}")
                 raise exception_info
 
+#
+# High level functions to do what we want specifically
+#
+class DataFileRow:
+    def __init__(self):
+        self.observation_num = ""
+        self.year = -1
+        self.month = -1
+        self.day = -1
+        self.size = -1
+
+# Return a data file row instance on success or None on Failure
+def get_data_file_row(db_handler_object,
+                      full_filename: str) -> DataFileRow:
+    # Prepare the fields
+    # immediately add this file to the db so we insert a record into metadata data_files table
+    filename = os.path.basename(full_filename)
+        
+    sql = """SELECT observation_num,
+                    date_part('year', timestamp_gps(observation_num)) as year,
+                    date_part('month', timestamp_gps(observation_num)) as month,
+                    date_part('day', timestamp_gps(observation_num)) as day,
+                    size
+            FROM data_files
+            WHERE filename = %s"""
+
+    try:                    
+        # Run query and get the data_files row info for this file
+        obsid, year, month, day, size = db_handler_object.select_one_row(sql, (filename,))
+
+        data_files_row = DataFileRow()
+        data_files_row.observation_num = int(obsid)
+        data_files_row.year = int(year)
+        data_files_row.month = int(month)
+        data_files_row.day = int(day)
+        data_files_row.size = int(size)
+
+        if db_handler_object.dummy:
+            # We have a mutex here to ensure only 1 user of the connection at a time
+            with db_handler_object.db_lock:                
+                db_handler_object.logger.warning(f"{full_filename} get_data_file_row() Using dummy database connection. "
+                                                 f"No data is really being queried.")
+                time.sleep(2) # simulate a slow transaction
+                return None
+        else:
+            db_handler_object.logger.info(
+                f"{full_filename} get_data_file_row() Successfully read from data_files table {vars(data_files_row)}")
+            return data_files_row
+
+    except Exception as upsert_exception:
+        db_handler_object.logger.error(f"{full_filename} insert_data_file_row() error upserting data_files record in "
+                                       f"data_files table: {upsert_exception}. SQL was {sql}")
+        return None
 
 def upsert_data_file_row(db_handler_object,
                          archive_filename: str,
@@ -125,19 +244,19 @@ def upsert_data_file_row(db_handler_object,
 
     try:
         if checksum_type is None:
-            sql = f"INSERT INTO data_files " \
-                  f"(observation_num, filetype, size, filename, host, remote_archived, deleted, location, prefix) " \
-                  f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (filename) DO UPDATE SET " \
-                  f"remote_archived = excluded.remote_archived, location = excluded.location, prefix = excluded.prefix"
+            sql = "INSERT INTO data_files " \
+                  "(observation_num, filetype, size, filename, host, remote_archived, deleted, location, prefix) " \
+                  "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (filename) DO UPDATE SET " \
+                  "remote_archived = excluded.remote_archived, location = excluded.location, prefix = excluded.prefix"
 
             db_handler_object.upsert_one_row(sql, (str(obsid), filetype, file_size,
                                                    filename, hostname,
                                                    remote_archived, deleted, location, prefix))
         else:
-            sql = f"INSERT INTO data_files " \
-                  f"(observation_num, filetype, size, filename, host, remote_archived, deleted, location, prefix, checksum_type, checksum) " \
-                  f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (filename) DO UPDATE SET " \
-                  f"remote_archived = excluded.remote_archived, location = excluded.location, prefix = excluded.prefix"
+            sql = "INSERT INTO data_files " \
+                  "(observation_num, filetype, size, filename, host, remote_archived, deleted, location, prefix, checksum_type, checksum) " \
+                  "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (filename) DO UPDATE SET " \
+                  "remote_archived = excluded.remote_archived, location = excluded.location, prefix = excluded.prefix"
 
             db_handler_object.upsert_one_row(sql, (str(obsid), filetype, file_size,
                                                    filename, hostname,

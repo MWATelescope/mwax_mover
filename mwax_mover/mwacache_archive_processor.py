@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 from mwax_mover import mwax_mover, mwax_db, mwax_queue_worker, mwax_watcher, mwa_archiver, utils, version
+from mwax_mover.mwax_db import DataFileRow
 
 class MWACacheArchiveProcessor:
     def __init__(self,
@@ -20,7 +21,8 @@ class MWACacheArchiveProcessor:
                  archive_command_timeout_sec: int,
                  incoming_paths: list,
                  recursive: bool,
-                 db_handler_object,
+                 mro_db_handler_object,
+                 remote_db_handler_object,
                  health_multicast_interface_ip,
                  health_multicast_ip,
                  health_multicast_port,
@@ -55,7 +57,8 @@ class MWACacheArchiveProcessor:
         self.archiving_paused = False
         self.running = False
 
-        self.db_handler_object = db_handler_object
+        self.mro_db_handler_object = mro_db_handler_object
+        self.remote_db_handler_object = remote_db_handler_object
 
         self.watcher_threads = []
         self.worker_threads = []
@@ -108,7 +111,7 @@ class MWACacheArchiveProcessor:
             self.watchers.append(new_watcher)
 
         # Create queueworker archive queue
-        self.logger.info("Creating workers...")        
+        self.logger.info("Creating workers...")
 
         for n in range(0, self.concurrent_archive_workers):
             new_worker = mwax_queue_worker.QueueWorker(label=f"Archiver{n}",
@@ -117,7 +120,10 @@ class MWACacheArchiveProcessor:
                                                         event_handler=self.archive_handler,
                                                         log=self.logger,
                                                         requeue_to_eoq_on_failure=True,
-                                                        exit_once_queue_empty=False)
+                                                        exit_once_queue_empty=False,
+                                                        backoff_initial_seconds=20,
+                                                        backoff_factor=2,
+                                                        backoff_limit_seconds=40)
             self.queue_workers.append(new_worker)
 
         self.logger.info("Starting watchers...")
@@ -141,7 +147,7 @@ class MWACacheArchiveProcessor:
         self.logger.info(f"{item}- archive_handler() Started...")
         
         # validate the filename
-        (valid, obs_id, filetype, file_ext, prefix, dmf_host, validation_message) = \
+        (valid, obs_id, filetype, file_ext, validation_message) = \
             mwa_archiver.validate_filename(item, self.archive_to_location)
 
         # do some sanity checks!
@@ -149,8 +155,8 @@ class MWACacheArchiveProcessor:
             # Get the file size
             actual_file_size = os.stat(item).st_size
             
-            # TODO: Get the database file size
-            database_file_size = actual_file_size
+            data_files_row: DataFileRow = mwax_db.get_data_file_row(self.remote_db_handler_object, item)
+            database_file_size = data_files_row.size
 
             # Check for 0 size
             if actual_file_size == 0:
@@ -166,9 +172,18 @@ class MWACacheArchiveProcessor:
                 mwax_mover.remove_file(self.logger, item, raise_error=False)
 
                 # even though its a problem,we return true as we are finished with the item and it should not be requeued
-                return True
+                return True  
 
-        if valid:
+            self.logger.debug(f"{item}- archive_handler() File size matches metadata database")
+
+            # Determine where to archive it
+            prefix, dmf_host = mwa_archiver.determine_prefix_and_dmfhost(item, filetype,
+                                                                         self.archive_to_location,
+                                                                         data_files_row.year,
+                                                                         data_files_row.month,
+                                                                         data_files_row.day)
+
+        if valid:            
             archive_success = False
 
             if self.archive_to_location == 1:  # DMF
@@ -192,7 +207,7 @@ class MWACacheArchiveProcessor:
 
             if archive_success:
                 # Update record in metadata database
-                if not mwax_db.upsert_data_file_row(self.db_handler_object, item, filetype, self.hostname,
+                if not mwax_db.upsert_data_file_row(self.mro_db_handler_object, item, filetype, self.hostname,
                                                     True, self.archive_to_location, prefix, None, None):
                     # if something went wrong, requeue
                     return False
@@ -317,7 +332,7 @@ class MWACacheArchiveProcessor:
         self.stop()
 
 
-def initialise():
+def main():
     # Get this hosts hostname
     hostname = utils.get_hostname()
 
@@ -428,67 +443,91 @@ def initialise():
     cfg_recursive = utils.read_config_bool(
         logger, config, hostname, "recursive")
 
-    cfg_metadatadb_host = utils.read_config(
-        logger, config, "mwa metadata database", "host")
+    #
+    # MRO database - this is one we will update
+    #
+    cfg_mro_metadatadb_host = utils.read_config(
+        logger, config, "mro metadata database", "host")
 
-    if cfg_metadatadb_host != mwax_db.DUMMY_DB:
-        cfg_metadatadb_db = utils.read_config(
-            logger, config, "mwa metadata database", "db")
-        cfg_metadatadb_user = utils.read_config(
-            logger, config, "mwa metadata database", "user")
-        cfg_metadatadb_pass = utils.read_config(
-            logger, config, "mwa metadata database", "pass", True)
-        cfg_metadatadb_port = utils.read_config(
-            logger, config, "mwa metadata database", "port")
+    if cfg_mro_metadatadb_host != mwax_db.DUMMY_DB:
+        cfg_mro_metadatadb_db = utils.read_config(
+            logger, config, "mro metadata database", "db")
+        cfg_mro_metadatadb_user = utils.read_config(
+            logger, config, "mro metadata database", "user")
+        cfg_mro_metadatadb_pass = utils.read_config(
+            logger, config, "mro metadata database", "pass", True)
+        cfg_mro_metadatadb_port = utils.read_config(
+            logger, config, "mro metadata database", "port")
     else:
-        cfg_metadatadb_db = None
-        cfg_metadatadb_user = None
-        cfg_metadatadb_pass = None
-        cfg_metadatadb_port = None
+        cfg_mro_metadatadb_db = None
+        cfg_mro_metadatadb_user = None
+        cfg_mro_metadatadb_pass = None
+        cfg_mro_metadatadb_port = None
 
-     # Initiate database connection for metadata db
-    db_handler = mwax_db.MWAXDBHandler(logger=logger,
-                                       host=cfg_metadatadb_host,
-                                       port=cfg_metadatadb_port,
-                                       db=cfg_metadatadb_db,
-                                       user=cfg_metadatadb_user,
-                                       password=cfg_metadatadb_pass)
+    # Initiate database connection for rmo metadata db
+    mro_db_handler = mwax_db.MWAXDBHandler(logger=logger,
+                                           host=cfg_mro_metadatadb_host,
+                                           port=cfg_mro_metadatadb_port,
+                                           db=cfg_mro_metadatadb_db,
+                                           user=cfg_mro_metadatadb_user,
+                                           password=cfg_mro_metadatadb_pass)
 
-    return logger, hostname, cfg_archive_to_location, cfg_concurrent_archive_workers, cfg_archive_command_timeout_sec, cfg_incoming_paths, cfg_recursive, db_handler, \
-        cfg_health_multicast_interface_ip, cfg_health_multicast_ip, cfg_health_multicast_port, \
-        cfg_health_multicast_hops, cfg_acacia_profile, cfg_acacia_ceph_endpoint, cfg_acacia_multipart_threshold_bytes, cfg_acacia_chunk_size_bytes, cfg_acacia_max_concurrency
+    #
+    # Remote metadata db is ready only- just used to query file size and date info
+    #
+    cfg_remote_metadatadb_host = utils.read_config(
+        logger, config, "remote metadata database", "host")
 
+    if cfg_remote_metadatadb_host != mwax_db.DUMMY_DB:
+        cfg_remote_metadatadb_db = utils.read_config(
+            logger, config, "remote metadata database", "db")
+        cfg_remote_metadatadb_user = utils.read_config(
+            logger, config, "remote metadata database", "user")
+        cfg_remote_metadatadb_pass = utils.read_config(
+            logger, config, "remote metadata database", "pass", True)
+        cfg_remote_metadatadb_port = utils.read_config(
+            logger, config, "remote metadata database", "port")
+    else:
+        cfg_remote_metadatadb_db = None
+        cfg_remote_metadatadb_user = None
+        cfg_remote_metadatadb_pass = None
+        cfg_remote_metadatadb_port = None
 
-def main():
-    (logger, hostname, archive_to_location, concurrent_archive_workers, archive_command_timeout_sec, incoming_paths, recursive, db_handler,
-     health_multicast_interface_ip, health_multicast_ip, health_multicast_port, health_multicast_hops, acacia_profile, 
-     acacia_ceph_endpoint, acacia_multipart_threshold_bytes, acacia_chunk_size_bytes, acacia_max_concurrency) = initialise()
+     # Initiate database connection for remote metadata db
+    remote_db_handler = mwax_db.MWAXDBHandler(logger=logger,
+                                              host=cfg_remote_metadatadb_host,
+                                              port=cfg_remote_metadatadb_port,
+                                              db=cfg_remote_metadatadb_db,
+                                              user=cfg_remote_metadatadb_user,
+                                              password=cfg_remote_metadatadb_pass)
 
-    p = MWACacheArchiveProcessor(logger,
-                                 hostname,                                 
-                                 archive_to_location,
-                                 concurrent_archive_workers,
-                                 archive_command_timeout_sec,
-                                 incoming_paths,
-                                 recursive,
-                                 db_handler,
-                                 health_multicast_interface_ip,
-                                 health_multicast_ip,
-                                 health_multicast_port,
-                                 health_multicast_hops,
-                                 acacia_profile,
-                                 acacia_ceph_endpoint,
-                                 acacia_multipart_threshold_bytes,
-                                 acacia_chunk_size_bytes,
-                                 acacia_max_concurrency)
+    # Create the processor
+    processor = MWACacheArchiveProcessor(logger,
+                                         hostname,                                 
+                                         cfg_archive_to_location,
+                                         cfg_concurrent_archive_workers,
+                                         cfg_archive_command_timeout_sec,
+                                         cfg_incoming_paths,
+                                         cfg_recursive,
+                                         mro_db_handler,
+                                         remote_db_handler,
+                                         cfg_health_multicast_interface_ip,
+                                         cfg_health_multicast_ip,
+                                         cfg_health_multicast_port,
+                                         cfg_health_multicast_hops,
+                                         cfg_acacia_profile,
+                                         cfg_acacia_ceph_endpoint,
+                                         cfg_acacia_multipart_threshold_bytes,
+                                         cfg_acacia_chunk_size_bytes,
+                                         cfg_acacia_max_concurrency)
 
     try:
-        p.initialise()
+        processor.initialise()
         sys.exit(0)
 
     except Exception as e:
-        if p.logger:
-            p.logger.exception(str(e))
+        if processor.logger:
+            processor.logger.exception(str(e))
         else:
             print(str(e))
 

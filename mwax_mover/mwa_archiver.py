@@ -2,7 +2,6 @@ import os
 import hashlib
 from enum import Enum
 import random
-from datetime import datetime
 import time
 import typing
 import boto3
@@ -22,7 +21,7 @@ class MWADataFileType(Enum):
     MWAX_VISIBILITIES = 18
 
 
-def validate_filename(filename: str, location: int) -> typing.Tuple[bool, int, int, str, str, str, str]:
+def validate_filename(filename: str, location: int) -> typing.Tuple[bool, int, int, str, str]:
     # Returns valid, obs_id, filetype_id, file_ext, prefix, dmf_host, validation_error
     valid: bool = True
     obs_id = 0
@@ -30,8 +29,6 @@ def validate_filename(filename: str, location: int) -> typing.Tuple[bool, int, i
     filetype_id: int = -1
     file_name_part: str = ""
     file_ext_part: str = ""
-    prefix = ""
-    dmf_host = ""
 
     # 1. Is there an extension?
     split_filename = os.path.splitext(filename)
@@ -110,39 +107,43 @@ def validate_filename(filename: str, location: int) -> typing.Tuple[bool, int, i
                 validation_error = f"Filename (excluding extension) is not in the correct format " \
                                    f"(incorrect length ({len(file_name_part)}). Format should be " \
                                    f"obsid_flags.zip)- ignoring"
+    
+    return valid, obs_id, filetype_id, file_ext_part, validation_error
 
-    # Now actually determine where to archive it
-    if valid:
-        if location == 1:  # DMF
-            # We need a deterministic way of getting the dmf fs number (01,02,03,04), so if we run this multiple
-            # times for the same file we get the same answer
-            filename_sum = 0
-            for c in filename:
-                # Get the ascii code for this letter
-                filename_sum = filename_sum + ord(c)
 
-            if filetype_id == MWADataFileType.MWAX_VOLTAGES.value:  # VCS
-                dmf_fs = "volt01fs"
-            else:  # Correlator, Flags, PPDs
-                # Determine which filesystem to use
-                fs_number = (filename_sum % 4) + 1
-                dmf_fs = f"mwa0{fs_number}fs"
+def determine_prefix_and_dmfhost(full_filename, filetype_id, location, obsid_year, obsid_month, obsid_day):    
+    filename = os.path.basename(full_filename)
+    
+    if location == 1:  # DMF
+        # We need a deterministic way of getting the dmf fs number (01,02,03,04), so if we run this multiple
+        # times for the same file we get the same answer
+        filename_sum = 0
+        for c in filename:
+            # Get the ascii code for this letter
+            filename_sum = filename_sum + ord(c)
 
-            # use any dmf host
-            dmf_host = random.choice(
-                ["fe1.pawsey.org.au", "fe2.pawsey.org.au", "fe4.pawsey.org.au"])
+        if filetype_id == MWADataFileType.MWAX_VOLTAGES.value:  # VCS
+            dmf_fs = "volt01fs"
+        else:  # Correlator, Flags, PPDs
+            # Determine which filesystem to use
+            fs_number = (filename_sum % 4) + 1
+            dmf_fs = f"mwa0{fs_number}fs"
 
-            yyyy_mm_dd = datetime.now().strftime("%Y-%m-%d")
-            prefix = f"/mnt/{dmf_fs}/MWA/ngas_data_volume/mfa/{yyyy_mm_dd}/"
-        elif location == 2:  #ceph / acacia
-            # determine bucket name
-            prefix = ceph_get_bucket_name_from_filename(filename)
+        # use any dmf host
+        dmf_host = random.choice(
+            ["fe1.pawsey.org.au", "fe2.pawsey.org.au", "fe4.pawsey.org.au"])
+        
+        prefix = f"/mnt/{dmf_fs}/MWA/ngas_data_volume/mfa/{obsid_year}-{obsid_month}-{obsid_day}/"
+        return prefix, dmf_host
 
-        else:
-            # Versity not yet implemented            
-            raise NotImplementedError
+    elif location == 2:  #ceph / acacia
+        # determine bucket name
+        prefix = ceph_get_bucket_name_from_filename(filename)
+        return prefix, ""
 
-    return valid, obs_id, filetype_id, file_ext_part, prefix, dmf_host, validation_error
+    else:
+        # Versity not yet implemented            
+        raise NotImplementedError
 
 
 def archive_file_rsync(logger, full_filename: str, archive_numa_node: int, archive_destination_host: str,
