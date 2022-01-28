@@ -210,7 +210,7 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node: int, arch
     # --rm-bad-cksum = Delete dest file if checksums do not match     
     #
     cmdline = f"/usr/local/bin/xrdcp --cksum adler32 --posc --rm-bad-cksum " \
-              f"--silent --streams 2 --tlsnodata {full_filename} xroot://{archive_destination_host}/{temp_filename} && ssh mwa@{destination_host} 'mv {full_destination_temp_filename} {full_destination_final_filename}'"
+              f"--silent --streams 2 --tlsnodata {full_filename} xroot://{archive_destination_host}/{temp_filename}"
 
     start_time = time.time()
 
@@ -225,9 +225,20 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node: int, arch
         gbps_per_sec = (size_gigabytes * 8) / elapsed
 
         logger.info(
-            f"{full_filename} archive_file_xrootd success ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at {gbps_per_sec:.3f} Gbps)")        
+            f"{full_filename} archive_file_xrootd success ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at {gbps_per_sec:.3f} Gbps)")
 
-        return True
+        cmdline = "ssh mwa@{destination_host} 'mv {full_destination_temp_filename} {full_destination_final_filename}'"
+        
+        # run the mv command to rename the temp file to the final file
+        # If this works, then mwacache will actually do its thing
+        return_val, stdout = mwax_command.run_command_ext(logger, cmdline, archive_numa_node, timeout, False)
+
+        if return_val:
+            logger.info(
+            f"{full_filename} archive_file_xrootd successfully renamed {full_destination_temp_filename} to {full_destination_final_filename} on the remote host {destination_host}")
+            return True
+        else:
+            return False
     else:
         return False
 
