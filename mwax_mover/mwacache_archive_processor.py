@@ -154,7 +154,9 @@ class MWACacheArchiveProcessor:
         if valid:
             # Get the file size
             actual_file_size = os.stat(item).st_size
+            self.logger.debug(f"{item}- archive_handler() file size on disk is {actual_file_size} bytes")
             
+            # Lookup file from db
             data_files_row: DataFileRow = mwax_db.get_data_file_row(self.remote_db_handler_object, item)
             database_file_size = data_files_row.size
 
