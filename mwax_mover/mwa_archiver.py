@@ -227,7 +227,7 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node: int, arch
         logger.info(
             f"{full_filename} archive_file_xrootd success ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at {gbps_per_sec:.3f} Gbps)")
 
-        cmdline = "ssh mwa@{destination_host} 'mv {full_destination_temp_filename} {full_destination_final_filename}'"
+        cmdline = f"ssh mwa@{destination_host} 'mv {full_destination_temp_filename} {full_destination_final_filename}'"
         
         # run the mv command to rename the temp file to the final file
         # If this works, then mwacache will actually do its thing
