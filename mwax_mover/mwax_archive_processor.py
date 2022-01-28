@@ -221,10 +221,8 @@ class MWAXArchiveProcessor:
     def checksum_and_db_handler(self, item: str) -> bool:
         self.logger.info(f"{item}- checksum_and_db_handler() Started")
 
-        # validate the filename
-        location = 1  # DMF for now
-        (valid, obs_id, filetype, file_ext, _, _,
-         validation_message) = mwa_archiver.validate_filename(item, location)
+        # validate the filename        
+        (valid, obs_id, filetype, file_ext, validation_message) = mwa_archiver.validate_filename(item)
 
         if valid:
             # checksum then add this file to the db so we insert a record into metadata data_files table

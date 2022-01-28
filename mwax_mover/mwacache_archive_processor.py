@@ -148,7 +148,7 @@ class MWACacheArchiveProcessor:
         
         # validate the filename
         (valid, obs_id, filetype, file_ext, validation_message) = \
-            mwa_archiver.validate_filename(item, self.archive_to_location)
+            mwa_archiver.validate_filename(item)
 
         # do some sanity checks!
         if valid:

@@ -21,8 +21,8 @@ class MWADataFileType(Enum):
     MWAX_VISIBILITIES = 18
 
 
-def validate_filename(filename: str, location: int) -> typing.Tuple[bool, int, int, str, str]:
-    # Returns valid, obs_id, filetype_id, file_ext, prefix, dmf_host, validation_error
+def validate_filename(filename: str) -> typing.Tuple[bool, int, int, str, str]:
+    # Returns valid, obs_id, filetype_id, file_ext, validation_error
     valid: bool = True
     obs_id = 0
     validation_error: str = ""
