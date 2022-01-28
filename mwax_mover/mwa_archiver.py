@@ -4,6 +4,7 @@ from enum import Enum
 import random
 import time
 import typing
+import uuid
 import boto3
 from boto3.s3.transfer import TransferConfig
 from botocore.client import Config
@@ -194,13 +195,22 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node: int, arch
             f"{full_filename}: Error determining file size. Error {e}")
         return False
 
+    # Gather some info for later
+    filename = os.path.basename(full_filename)
+    temp_filename = f"{filename}.part{uuid.uuid4()}"
+    # Archive destination host looks like: "192.168.120.110://volume2/incoming", so just get the bit before the ":" for the host and the bit after for the path
+    destination_host = archive_destination_host.split(":")[0]
+    destination_path = archive_destination_host.split(":")[1]
+    full_destination_temp_filename = os.path.join(destination_path, temp_filename)
+    full_destination_final_filename = os.path.join(destination_path, filename)
+
     # Build final command line
     #
     # --posc         = persist on successful copy. If copy fails either remove the file or set it to 0 bytes. Setting to 0 bytes is weird, but I'll take it
     # --rm-bad-cksum = Delete dest file if checksums do not match     
     #
     cmdline = f"/usr/local/bin/xrdcp --cksum adler32 --posc --rm-bad-cksum " \
-              f"--silent --streams 2 --tlsnodata {full_filename} xroot://{archive_destination_host}"
+              f"--silent --streams 2 --tlsnodata {full_filename} xroot://{archive_destination_host}/{temp_filename} && ssh mwa@{destination_host} 'mv {full_destination_temp_filename} {full_destination_final_filename}'"
 
     start_time = time.time()
 
@@ -215,7 +225,7 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node: int, arch
         gbps_per_sec = (size_gigabytes * 8) / elapsed
 
         logger.info(
-            f"{full_filename} archive_file_xrootd success ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at {gbps_per_sec:.3f} Gbps)")
+            f"{full_filename} archive_file_xrootd success ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at {gbps_per_sec:.3f} Gbps)")        
 
         return True
     else:

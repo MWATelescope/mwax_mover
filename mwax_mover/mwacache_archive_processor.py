@@ -53,7 +53,8 @@ class MWACacheArchiveProcessor:
         self.health_multicast_port = health_multicast_port
         self.health_multicast_hops = health_multicast_hops
 
-        self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_NEW
+        # MWAX servers will copy in a temp file, then rename once it is good
+        self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_RENAME
         self.archiving_paused = False
         self.running = False
 
