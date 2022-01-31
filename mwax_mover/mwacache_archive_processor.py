@@ -1,5 +1,6 @@
 import argparse
 from configparser import ConfigParser
+from glob import glob
 import json
 import logging
 import logging.handlers
@@ -104,6 +105,23 @@ class MWACacheArchiveProcessor:
 
         self.logger.info("Creating watchers...")
         for watch_dir in self.watch_dirs:
+            #
+            # Remove any partial files first if they are old
+            #
+            partial_files = glob(os.path.join(watch_dir,"*.part*"))
+            for partial_file in partial_files:
+                # Ensure now minus the last mod time of the partial file is > 60 mins, it is definitely safe to delete
+                # In theory we could be starting up as mwax is sending us a new file and we don't want to delete an real
+                # in progress file.
+                MIN_PARTIAL_PURGE_AGE_SECS = 3600
+
+                if time.time() - os.path.getmtime(partial_file) > MIN_PARTIAL_PURGE_AGE_SECS:
+                    self.logger.warning(f"Partial file {partial_file} is older than {MIN_PARTIAL_PURGE_AGE_SECS} seconds and will be removed...")
+                    os.remove(partial_file)
+                    self.logger.warning(f"Partial file {partial_file} deleted")
+                else:
+                    self.logger.warning(f"Partial file {partial_file} is newer than {MIN_PARTIAL_PURGE_AGE_SECS} seconds so will NOT be removed this time")
+            
             # Create watcher for each data path queue
             new_watcher = mwax_watcher.Watcher(path=watch_dir, q=self.queue,
                                                pattern=".*", log=self.logger,
