@@ -82,8 +82,8 @@ def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, num
     return return_value
 
 
-def scan_for_existing_files(logger, watch_dir: str, pattern: str, recursive: bool, q):
-    files = scan_directory(logger, watch_dir, pattern, recursive)
+def scan_for_existing_files(logger, watch_dir: str, pattern: str, recursive: bool, q, exclude_pattern=None):
+    files = scan_directory(logger, watch_dir, pattern, recursive, exclude_pattern)
     files = sorted(files)
     logger.info(f"Found {len(files)} files")
 
@@ -92,7 +92,7 @@ def scan_for_existing_files(logger, watch_dir: str, pattern: str, recursive: boo
         logger.info(f'{file} added to queue')
 
 
-def scan_directory(logger, watch_dir: str, pattern: str, recursive: bool) -> list:
+def scan_directory(logger, watch_dir: str, pattern: str, recursive: bool, exclude_pattern) -> list:
     # Watch dir must end in a slash for the iglob to work
     # Just loop through all files and add them to the queue
     if recursive:
@@ -105,7 +105,14 @@ def scan_directory(logger, watch_dir: str, pattern: str, recursive: bool) -> lis
         logger.info(f"Scanning for files matching {find_pattern}...")
 
     files = glob.glob(find_pattern, recursive=recursive)
-    return files
+
+    # Now exclude files if they match the exclude pattern
+    if exclude_pattern:
+        exclude_glob = os.path.join(os.path.abspath(watch_dir), "*" + exclude_pattern)
+        logger.info(f"Excluding files {exclude_glob}...")
+        return [fn for fn in files if fn not in glob.glob(exclude_glob)]
+    else:
+        return files    
 
 
 def send_multicast(multicast_interface_ip: str, dest_multicast_ip: str, dest_multicast_port: int, message: bytes, ttl_hops: int):

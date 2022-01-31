@@ -126,7 +126,7 @@ class MWACacheArchiveProcessor:
             new_watcher = mwax_watcher.Watcher(path=watch_dir, q=self.queue,
                                                pattern=".*", log=self.logger,
                                                mode=self.mwax_mover_mode,
-                                               recursive=self.recursive)
+                                               recursive=self.recursive, exclude_pattern=".part*")
             self.watchers.append(new_watcher)
 
         # Create queueworker archive queue

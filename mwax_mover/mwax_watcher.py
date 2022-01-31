@@ -6,7 +6,7 @@ import time
 
 
 class Watcher(object):
-    def __init__(self, path: str, q, pattern: str, log, mode, recursive):
+    def __init__(self, path: str, q, pattern: str, log, mode, recursive, exclude_pattern=None):
         self.logger = log
         self.i = None
         self.recursive = recursive
@@ -14,7 +14,8 @@ class Watcher(object):
         self.path = path
         self.watching = False
         self.q = q
-        self.pattern = pattern
+        self.pattern = pattern                  # must be ".ext" or ".*"
+        self.exclude_pattern = exclude_pattern  # Can be None or ".ext"
 
         if self.mode == mwax_mover.MODE_WATCH_DIR_FOR_NEW:
             self.mask = inotify.constants.IN_CLOSE_WRITE
@@ -38,6 +39,10 @@ class Watcher(object):
             self.i = inotify.adapters.Inotify()
             self.i.add_watch(self.path, mask=self.mask)
 
+        if self.exclude_pattern:
+            self.logger.info(
+                f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}")
+
         self.watching = True
         self.do_watch_loop()
 
@@ -57,7 +62,7 @@ class Watcher(object):
            self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME or \
            self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW:
             utils.scan_for_existing_files(
-                self.logger, self.path, self.pattern, self.recursive, self.q)
+                self.logger, self.path, self.pattern, self.recursive, self.q, self.exclude_pattern)
 
         while self.watching:
             for event in self.i.event_gen(timeout_s=0.1, yield_nones=False):
@@ -66,7 +71,7 @@ class Watcher(object):
                 # check event is one we care about
                 if header.mask | self.mask == self.mask:
                     # Check file extension is one we care about
-                    if os.path.splitext(filename)[1] == self.pattern or self.pattern == ".*":
+                    if (os.path.splitext(filename)[1] == self.pattern or self.pattern == ".*") and os.path.splitext(filename)[1] != self.exclude_pattern:                        
                         dest_filename = os.path.join(path, filename)
                         self.q.put(dest_filename)
                         self.logger.info(
