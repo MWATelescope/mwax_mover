@@ -2,6 +2,7 @@ from mwax_mover import mwax_mover, mwax_command
 import os
 import queue
 import time
+import threading
 
 
 class QueueWorker(object):
@@ -41,6 +42,8 @@ class QueueWorker(object):
         self.backoff_initial_seconds = backoff_initial_seconds
         self.backoff_factor = backoff_factor
         self.backoff_limit_seconds = backoff_limit_seconds
+        # Use threading event instead of time.sleep to backoff
+        self.event = threading.Event()
 
     def start(self):
         self.logger.info(f"QueueWorker {self.label} starting...")
@@ -95,7 +98,7 @@ class QueueWorker(object):
 
                         self.logger.info(f"{self.consecutive_error_count} consecutive failures. Backing off "
                                          f"for {backoff} seconds.")
-                        time.sleep(backoff)
+                        self.event.wait(backoff)
 
                         # If this option is set, add item back to the end of the queue
                         # If not set, just keep retrying the operation
@@ -116,6 +119,8 @@ class QueueWorker(object):
 
     def stop(self):
         self._running = False
+        # cancel a wait if we are in one
+        self.event.set()
 
     def run_command(self, filename: str) -> bool:
         command = f"{self._executable_path}"
