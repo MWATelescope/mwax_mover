@@ -243,7 +243,9 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node: int, arch
         return False
 
 
-def archive_file_ceph(logger, full_filename: str, bucket_name: str, profile: str, ceph_endpoint: str, multipart_threshold_bytes: int, chunk_size_bytes: int, max_concurrency: int):
+def archive_file_ceph(logger, full_filename: str, bucket_name: str, profile: str, ceph_endpoint: str, 
+                      multipart_threshold_bytes: int, chunk_size_bytes: int, max_concurrency: int,
+                      checksum: str):
     logger.debug(f"{full_filename} attempting archive_file_ceph...")
 
     # get file size

@@ -178,6 +178,7 @@ class DataFileRow:
         self.month = -1
         self.day = -1
         self.size = -1
+        self.checksum = ""
 
 # Return a data file row instance on success or None on Failure
 def get_data_file_row(db_handler_object,
@@ -190,13 +191,14 @@ def get_data_file_row(db_handler_object,
                     date_part('year', timestamp_gps(observation_num)) as year,
                     date_part('month', timestamp_gps(observation_num)) as month,
                     date_part('day', timestamp_gps(observation_num)) as day,
-                    size
+                    size,
+                    checksum
             FROM data_files
             WHERE filename = %s"""
 
     try:                    
         # Run query and get the data_files row info for this file
-        obsid, year, month, day, size = db_handler_object.select_one_row(sql, (filename,))
+        obsid, year, month, day, size, checksum = db_handler_object.select_one_row(sql, (filename,))
 
         data_files_row = DataFileRow()
         data_files_row.observation_num = int(obsid)
@@ -204,6 +206,7 @@ def get_data_file_row(db_handler_object,
         data_files_row.month = int(month)
         data_files_row.day = int(day)
         data_files_row.size = int(size)
+        data_files_row.checksum = checksum
 
         if db_handler_object.dummy:
             # We have a mutex here to ensure only 1 user of the connection at a time
