@@ -134,7 +134,7 @@ def determine_prefix_and_dmfhost(full_filename, filetype_id, location, obsid_yea
         dmf_host = random.choice(
             ["fe1.pawsey.org.au", "fe2.pawsey.org.au", "fe4.pawsey.org.au"])
         
-        prefix = f"/mnt/{dmf_fs}/MWA/ngas_data_volume/mfa/{obsid_year}-{obsid_month}-{obsid_day}/"
+        prefix = f"/mnt/{dmf_fs}/MWA/ngas_data_volume/mfa/{obsid_year}-{obsid_month:02d}-{obsid_day:02d}/"
         return prefix, dmf_host
 
     elif location == 2:  #ceph / acacia
