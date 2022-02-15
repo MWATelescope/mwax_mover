@@ -220,12 +220,12 @@ class MWACacheArchiveProcessor:
                 archive_success = mwa_archiver.archive_file_ceph(self.logger,
                                                                  item,
                                                                  prefix,
+                                                                 data_files_row.checksum,
                                                                  self.acacia_profile,
                                                                  self.acacia_ceph_endpoint,
                                                                  self.acacia_multipart_threshold_bytes,
                                                                  self.acacia_chunk_size_bytes,
-                                                                 self.acacia_max_concurrency,
-                                                                 data_files_row.checksum)
+                                                                 self.acacia_max_concurrency)
 
             if archive_success:
                 # Update record in metadata database

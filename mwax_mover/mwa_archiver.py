@@ -243,9 +243,8 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node: int, arch
         return False
 
 
-def archive_file_ceph(logger, full_filename: str, bucket_name: str, profile: str, ceph_endpoint: str, 
-                      multipart_threshold_bytes: int, chunk_size_bytes: int, max_concurrency: int,
-                      checksum: str):
+def archive_file_ceph(logger, full_filename: str, bucket_name: str, md5hash: str, profile: str, ceph_endpoint: str, 
+                      multipart_threshold_bytes: int, chunk_size_bytes: int, max_concurrency: int):
     logger.debug(f"{full_filename} attempting archive_file_ceph...")
 
     # get file size
@@ -285,7 +284,7 @@ def archive_file_ceph(logger, full_filename: str, bucket_name: str, profile: str
     
     # Do upload
     try:
-        ceph_upload_file(s3_object, bucket_name, full_filename, multipart_threshold_bytes , chunk_size_bytes, max_concurrency)
+        ceph_upload_file(s3_object, bucket_name, full_filename, md5hash, multipart_threshold_bytes , chunk_size_bytes, max_concurrency)
     except Exception as e:
         logger.error(
             f"{full_filename}: Error uploading to S3 bucket {bucket_name} on {ceph_endpoint}. Error {e}")
@@ -358,7 +357,10 @@ def ceph_get_bucket_name_from_filename(filename: str) -> str:
 
 
 def ceph_get_bucket_name_from_obs_id(obs_id: int) -> str:
-    return f"mwaservice-archive-{str(obs_id)[0:4]}"
+    # return the first 5 digits of the obsid
+    # This means there will be a new bucket every ~27 hours
+    # This is to reduce the chances of vcs jobs filling a bucket to more than 100K of files
+    return f"mwaingest-{str(obs_id)[0:5]}"
 
 def ceph_create_bucket(s3_object, bucket_name: str):
     bucket = s3_object.Bucket(bucket_name)
@@ -368,8 +370,7 @@ def ceph_list_bucket(s3_object, bucket_name: str) -> list:
     bucket = s3_object.Bucket(bucket_name)
     return list(bucket.objects.all())
 
-
-def ceph_upload_file(s3_object, bucket_name: str, filename: str, multipart_threshold_bytes: int, chunk_size_bytes: int, max_concurrency: int) -> bool:
+def ceph_upload_file(s3_object, bucket_name: str, filename: str, md5hash: str, multipart_threshold_bytes: int, chunk_size_bytes: int, max_concurrency: int) -> bool:
     # get key
     key = os.path.split(filename)[1]
 
@@ -380,6 +381,6 @@ def ceph_upload_file(s3_object, bucket_name: str, filename: str, multipart_thres
     # 5GB is the limit Ceph has for parts, so only split if >= 2GB
     config = TransferConfig(multipart_threshold=multipart_threshold_bytes, multipart_chunksize=chunk_size_bytes, use_threads=True, max_concurrency=max_concurrency)
 
-    # Upload the file
-    bucket.upload_file(Filename=filename, Key=key, Config=config)
+    # Upload the file and include the md5sum as metadata
+    bucket.upload_file(Filename=filename, Key=key, Config=config, ExtraArgs={"Metadata": {"md5":md5hash}})
     return True
