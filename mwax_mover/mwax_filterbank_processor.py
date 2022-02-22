@@ -9,8 +9,15 @@ import threading
 
 
 class FilterbankProcessor:
-    def __init__(self, context, hostname: str, fildata_path: str, archive_host: str, archive_port: int,
-                 archive_command_numa_node: int):
+    def __init__(
+        self,
+        context,
+        hostname: str,
+        fildata_path: str,
+        archive_host: str,
+        archive_port: int,
+        archive_command_numa_node: int,
+    ):
         self.subfile_distributor_context = context
 
         # Setup logging
@@ -18,11 +25,15 @@ class FilterbankProcessor:
         # pass all logged events to the parent (subfile distributor/main log)
         self.logger.propagate = True
         self.logger.setLevel(logging.DEBUG)
-        file_log = logging.FileHandler(filename=os.path.join(self.subfile_distributor_context.cfg_log_path,
-                                                             f"{__name__}.log"))
+        file_log = logging.FileHandler(
+            filename=os.path.join(
+                self.subfile_distributor_context.cfg_log_path, f"{__name__}.log"
+            )
+        )
         file_log.setLevel(logging.DEBUG)
-        file_log.setFormatter(logging.Formatter(
-            '%(asctime)s, %(levelname)s, %(threadName)s, %(message)s'))
+        file_log.setFormatter(
+            logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s")
+        )
         self.logger.addHandler(file_log)
 
         self.hostname = hostname
@@ -44,37 +55,53 @@ class FilterbankProcessor:
 
     def start(self):
         # Create watcher for filterbank data -> filterbank queue
-        self.watcher_fil = mwax_watcher.Watcher(path=self.watch_dir_fil, q=self.queue_fil,
-                                                pattern=".fil", log=self.logger,
-                                                mode=self.mwax_mover_mode, recursive=False)
+        self.watcher_fil = mwax_watcher.Watcher(
+            path=self.watch_dir_fil,
+            q=self.queue_fil,
+            pattern=".fil",
+            log=self.logger,
+            mode=self.mwax_mover_mode,
+            recursive=False,
+        )
 
         # Create queueworker for filterbank queue
-        self.queue_worker_fil = mwax_queue_worker.QueueWorker(label="Filterbank Archive",
-                                                              q=self.queue_fil,
-                                                              executable_path=None,
-                                                              event_handler=self.filterbank_handler,
-                                                              log=self.logger,
-                                                              exit_once_queue_empty=False)
+        self.queue_worker_fil = mwax_queue_worker.QueueWorker(
+            label="Filterbank Archive",
+            q=self.queue_fil,
+            executable_path=None,
+            event_handler=self.filterbank_handler,
+            log=self.logger,
+            exit_once_queue_empty=False,
+        )
 
         # Setup thread for watching filesystem
         watcher_fil_thread = threading.Thread(
-            name="watch_fil", target=self.watcher_fil.start, daemon=True)
+            name="watch_fil", target=self.watcher_fil.start, daemon=True
+        )
         self.watcher_threads.append(watcher_fil_thread)
         watcher_fil_thread.start()
 
         # Setup thread for processing items
         queue_worker_fil_thread = threading.Thread(
-            name="work_fil", target=self.queue_worker_fil.start, daemon=True)
+            name="work_fil", target=self.queue_worker_fil.start, daemon=True
+        )
         self.worker_threads.append(queue_worker_fil_thread)
         queue_worker_fil_thread.start()
 
     def filterbank_handler(self, item: str) -> bool:
         if not self.archiving_paused:
-            self.logger.info(f"{item}- FilterbankProcessor.filterbank_handler is handling {item}: "
-                             f"copy to {self.archive_destination_host}...")
+            self.logger.info(
+                f"{item}- FilterbankProcessor.filterbank_handler is handling {item}: "
+                f"copy to {self.archive_destination_host}..."
+            )
 
-            if not mwa_archiver.archive_file_xrootd(self.logger, item, self.archive_command_numa_node,
-                                                    self.archive_destination_host, 120):
+            if not mwa_archiver.archive_file_xrootd(
+                self.logger,
+                item,
+                self.archive_command_numa_node,
+                self.archive_destination_host,
+                120,
+            ):
                 return False
 
             self.logger.debug(f"{item}- filterbank_handler() Deleting file")
@@ -132,9 +159,11 @@ class FilterbankProcessor:
         else:
             archiving = "running"
 
-        return_status = {"type": type(self).__name__,
-                         "archiving": archiving,
-                         "watchers": watcher_list,
-                         "workers": worker_list}
+        return_status = {
+            "type": type(self).__name__,
+            "archiving": archiving,
+            "watchers": watcher_list,
+            "workers": worker_list,
+        }
 
         return return_status

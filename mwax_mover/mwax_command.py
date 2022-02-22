@@ -5,15 +5,19 @@ import typing
 
 # This will return true/false plus the output from stdout
 # use shell should be used when you are using wildcards and other shell features
-def run_command_ext(logger, command: str, numa_node: int, timeout: int = 60, use_shell: bool = False) -> typing.Tuple[bool, str]:
+def run_command_ext(
+    logger, command: str, numa_node: int, timeout: int = 60, use_shell: bool = False
+) -> typing.Tuple[bool, str]:
     # Example: ["dada_diskdb", "-k 1234", "-f 1216447872_02_256_201.sub -s"]
     if numa_node is None:
         cmdline = f"{command}"
     else:
         # TODO Sloppy! Some places we have None- others we have -1. Need to sort this out
         if int(numa_node) > 0:
-            cmdline = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} " \
-                      f"{command}"
+            cmdline = (
+                f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} "
+                f"{command}"
+            )
         else:
             cmdline = f"{command}"
 
@@ -24,8 +28,14 @@ def run_command_ext(logger, command: str, numa_node: int, timeout: int = 60, use
         args = shlex.split(cmdline)
 
         # Execute the command
-        completed_process = subprocess.run(args, shell=use_shell, check=True,
-                                           timeout=timeout, capture_output=True, text=True, )
+        completed_process = subprocess.run(
+            args,
+            shell=use_shell,
+            check=True,
+            timeout=timeout,
+            capture_output=True,
+            text=True,
+        )
 
         return_code = completed_process.returncode
         stdout = completed_process.stdout
@@ -33,17 +43,16 @@ def run_command_ext(logger, command: str, numa_node: int, timeout: int = 60, use
 
         if return_code != 0:
             logger.error(
-                f"Error executing {cmdline}. Return code: {return_code} StdErr: {stderror} StdOut: {stdout}")
+                f"Error executing {cmdline}. Return code: {return_code} StdErr: {stderror} StdOut: {stdout}"
+            )
             return False, ""
         else:
             return True, stdout
 
     except subprocess.CalledProcessError as cpe:
-        logger.error(
-            f"CalledProcessError executing {cmdline}: {str(cpe)} {cpe.stderr}")
+        logger.error(f"CalledProcessError executing {cmdline}: {str(cpe)} {cpe.stderr}")
         return False, ""
 
     except Exception as command_exception:
-        logger.error(
-            f"Exception executing {cmdline}: {str(command_exception)}")
+        logger.error(f"Exception executing {cmdline}: {str(command_exception)}")
         return False, ""

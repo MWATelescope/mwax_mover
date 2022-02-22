@@ -6,7 +6,9 @@ import time
 
 
 class Watcher(object):
-    def __init__(self, path: str, q, pattern: str, log, mode, recursive, exclude_pattern=None):
+    def __init__(
+        self, path: str, q, pattern: str, log, mode, recursive, exclude_pattern=None
+    ):
         self.logger = log
         self.i = None
         self.recursive = recursive
@@ -14,7 +16,7 @@ class Watcher(object):
         self.path = path
         self.watching = False
         self.q = q
-        self.pattern = pattern                  # must be ".ext" or ".*"
+        self.pattern = pattern  # must be ".ext" or ".*"
         self.exclude_pattern = exclude_pattern  # Can be None or ".ext"
 
         if self.mode == mwax_mover.MODE_WATCH_DIR_FOR_NEW:
@@ -31,17 +33,18 @@ class Watcher(object):
     def start(self):
         if self.recursive:
             self.logger.info(
-                f"Watcher starting on {self.path}/*{self.pattern} and all subdirectories...")
+                f"Watcher starting on {self.path}/*{self.pattern} and all subdirectories..."
+            )
             self.i = inotify.adapters.InotifyTree(self.path, mask=self.mask)
         else:
-            self.logger.info(
-                f"Watcher starting on {self.path}/*{self.pattern}...")
+            self.logger.info(f"Watcher starting on {self.path}/*{self.pattern}...")
             self.i = inotify.adapters.Inotify()
             self.i.add_watch(self.path, mask=self.mask)
 
         if self.exclude_pattern:
             self.logger.info(
-                f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}")
+                f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}"
+            )
 
         self.watching = True
         self.do_watch_loop()
@@ -58,11 +61,19 @@ class Watcher(object):
 
     def do_watch_loop(self):
         # If we're in NEW or RENAME mode, then scan the folder once we have enqueued any waiting items
-        if self.mode == mwax_mover.MODE_WATCH_DIR_FOR_NEW or \
-           self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME or \
-           self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW:
+        if (
+            self.mode == mwax_mover.MODE_WATCH_DIR_FOR_NEW
+            or self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME
+            or self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW
+        ):
             utils.scan_for_existing_files(
-                self.logger, self.path, self.pattern, self.recursive, self.q, self.exclude_pattern)
+                self.logger,
+                self.path,
+                self.pattern,
+                self.recursive,
+                self.q,
+                self.exclude_pattern,
+            )
 
         while self.watching:
             for event in self.i.event_gen(timeout_s=0.1, yield_nones=False):
@@ -71,20 +82,25 @@ class Watcher(object):
                 # check event is one we care about
                 if header.mask | self.mask == self.mask:
                     # Check file extension is one we care about
-                    if (os.path.splitext(filename)[1] == self.pattern or self.pattern == ".*") and os.path.splitext(filename)[1] != self.exclude_pattern:                        
+                    if (
+                        os.path.splitext(filename)[1] == self.pattern
+                        or self.pattern == ".*"
+                    ) and os.path.splitext(filename)[1] != self.exclude_pattern:
                         dest_filename = os.path.join(path, filename)
                         self.q.put(dest_filename)
                         self.logger.info(
-                            f'{dest_filename} added to queue ({self.q.qsize()})')
+                            f"{dest_filename} added to queue ({self.q.qsize()})"
+                        )
 
     def get_status(self) -> dict:
-        total_bytes, used_bytes, free_bytes = utils.get_disk_space_bytes(
-            self.path)
+        total_bytes, used_bytes, free_bytes = utils.get_disk_space_bytes(self.path)
 
-        return {"Unix timestamp": time.time(),
-                "watching": self.watching,
-                "mode": self.mode,
-                "watch_path": self.path,
-                "watch_pattern": self.pattern,
-                "watch_used_bytes": used_bytes,
-                "watch_free_bytes": free_bytes}
+        return {
+            "Unix timestamp": time.time(),
+            "watching": self.watching,
+            "mode": self.mode,
+            "watch_path": self.path,
+            "watch_pattern": self.pattern,
+            "watch_used_bytes": used_bytes,
+            "watch_free_bytes": free_bytes,
+        }

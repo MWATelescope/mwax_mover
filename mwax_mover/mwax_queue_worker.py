@@ -11,24 +11,28 @@ class QueueWorker(object):
     # requeue_to_eoq_on_failure: if work fails, True  = requeue to back of queue, try the next item
     #                                                   (order does not matter)
     #                                         , False = keep retrying this item (i.e. order of items matters)
-    def __init__(self,
-                 label: str,
-                 q,
-                 executable_path,
-                 log,
-                 event_handler,
-                 exit_once_queue_empty,
-                 requeue_to_eoq_on_failure: bool = True,
-                 backoff_initial_seconds: int = 1,
-                 backoff_factor: int = 2,
-                 backoff_limit_seconds: int = 60):
+    def __init__(
+        self,
+        label: str,
+        q,
+        executable_path,
+        log,
+        event_handler,
+        exit_once_queue_empty,
+        requeue_to_eoq_on_failure: bool = True,
+        backoff_initial_seconds: int = 1,
+        backoff_factor: int = 2,
+        backoff_limit_seconds: int = 60,
+    ):
         self.label = label
         self.q = q
 
-        if (event_handler is None and executable_path is None) or \
-           (event_handler is not None and executable_path is not None):
+        if (event_handler is None and executable_path is None) or (
+            event_handler is not None and executable_path is not None
+        ):
             raise Exception(
-                "QueueWorker requires event_handler OR executable_path not both and not neither!")
+                "QueueWorker requires event_handler OR executable_path not both and not neither!"
+            )
 
         self._executable_path = executable_path
         self._event_handler = event_handler
@@ -73,31 +77,39 @@ class QueueWorker(object):
                         if success:
                             # Dequeue the item, but requeue if it was not successful
                             self.q.task_done()
-                            self.current_item = None                        
+                            self.current_item = None
                     else:
-                        # Dequeue the item                        
-                        self.logger.warning(f"Processing {self.current_item } Complete... file was moved or deleted. "
-                                            f"Queue size: {self.q.qsize()}")
+                        # Dequeue the item
+                        self.logger.warning(
+                            f"Processing {self.current_item } Complete... file was moved or deleted. "
+                            f"Queue size: {self.q.qsize()}"
+                        )
                         self.current_item = None
                         self.q.task_done()
                         continue
 
                     elapsed = time.time() - start_time
                     self.logger.info(
-                        f"Complete. Queue size: {self.q.qsize()} Elapsed: {elapsed:.2f} sec")
+                        f"Complete. Queue size: {self.q.qsize()} Elapsed: {elapsed:.2f} sec"
+                    )
 
                     if success:
                         # reset our error count and backoffs
                         self.consecutive_error_count = 0
                     else:
                         self.consecutive_error_count += 1
-                        backoff = self.backoff_initial_seconds * \
-                            self.backoff_factor * self.consecutive_error_count
+                        backoff = (
+                            self.backoff_initial_seconds
+                            * self.backoff_factor
+                            * self.consecutive_error_count
+                        )
                         if backoff > self.backoff_limit_seconds:
                             backoff = self.backoff_limit_seconds
 
-                        self.logger.info(f"{self.consecutive_error_count} consecutive failures. Backing off "
-                                         f"for {backoff} seconds.")
+                        self.logger.info(
+                            f"{self.consecutive_error_count} consecutive failures. Backing off "
+                            f"for {backoff} seconds."
+                        )
                         self.event.wait(backoff)
 
                         # If this option is set, add item back to the end of the queue
@@ -130,11 +142,14 @@ class QueueWorker(object):
 
         filename_no_ext = os.path.splitext(filename)[0]
         command = command.replace(
-            mwax_mover.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext)
+            mwax_mover.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext
+        )
 
         return mwax_command.run_command_ext(self.logger, command, -1, 60, True)
 
     def get_status(self) -> dict:
-        return {"Unix timestamp": time.time(),
-                "current": self.current_item,
-                "queue_size": self.q.qsize()}
+        return {
+            "Unix timestamp": time.time(),
+            "current": self.current_item,
+            "queue_size": self.q.qsize(),
+        }
