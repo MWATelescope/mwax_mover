@@ -198,39 +198,32 @@ class MWACacheArchiveProcessor:
             self.logger.debug(f"{item}- archive_handler() File size matches metadata database")
 
             # Determine where to archive it
-            prefix, dmf_host = mwa_archiver.determine_prefix_and_dmfhost(item, filetype,
-                                                                         self.archive_to_location,
-                                                                         data_files_row.year,
-                                                                         data_files_row.month,
-                                                                         data_files_row.day)
+            bucket, folder = mwa_archiver.determine_bucket_and_folder(item, filetype,
+                                                                        self.archive_to_location,
+                                                                        data_files_row.year,
+                                                                        data_files_row.month,
+                                                                        data_files_row.day)
 
         if valid:            
             archive_success = False
 
-            if self.archive_to_location == 1:  # DMF
-                # Now copy the file into dmf
-                archive_success = mwa_archiver.archive_file_rsync(self.logger,
-                                                                  item,
-                                                                  -1,  # cache boxes do not have numa architecture
-                                                                  f"ngas@{dmf_host}",
-                                                                  prefix,
-                                                                  self.archive_command_timeout_sec)
-
-            elif self.archive_to_location == 2:  # Ceph
+            if self.archive_to_location == 2:  # Ceph
                 archive_success = mwa_archiver.archive_file_ceph(self.logger,
                                                                  item,
-                                                                 prefix,
+                                                                 bucket,
                                                                  data_files_row.checksum,
                                                                  self.acacia_profile,
                                                                  self.acacia_ceph_endpoint,
                                                                  self.acacia_multipart_threshold_bytes,
                                                                  self.acacia_chunk_size_bytes,
                                                                  self.acacia_max_concurrency)
+            else:
+                raise NotImplementedError(f"Location {self.archive_to_location} not implemented")
 
             if archive_success:
                 # Update record in metadata database
                 if not mwax_db.upsert_data_file_row(self.mro_db_handler_object, item, filetype, self.hostname,
-                                                    True, self.archive_to_location, prefix, None, None):
+                                                    True, self.archive_to_location, bucket, location, None, None):
                     # if something went wrong, requeue
                     return False
 
@@ -254,7 +247,7 @@ class MWACacheArchiveProcessor:
             else:
                 self.logger.info("Resuming archiving")
 
-            if len(self.queue_workers)>0:
+            if len(self.queue_workers) > 0:
                 for qw in self.queue_workers:
                     qw.pause(paused)
 
@@ -264,7 +257,7 @@ class MWACacheArchiveProcessor:
         for watcher in self.watchers:
             watcher.stop()
 
-        if len(self.queue_workers)>0:
+        if len(self.queue_workers) > 0:
             for qw in self.queue_workers:
                 qw.stop()
         

@@ -1,7 +1,6 @@
 import os
 import hashlib
 from enum import Enum
-import random
 import time
 import typing
 import uuid
@@ -112,39 +111,20 @@ def validate_filename(filename: str) -> typing.Tuple[bool, int, int, str, str]:
     return valid, obs_id, filetype_id, file_ext_part, validation_error
 
 
-def determine_prefix_and_dmfhost(full_filename, filetype_id, location, obsid_year, obsid_month, obsid_day):    
+def determine_bucket_and_folder(full_filename, filetype_id, location, obsid_year, obsid_month, obsid_day):
+    """Return the bucket and folder of the file to be archived, based on location."""
     filename = os.path.basename(full_filename)
     
-    if location == 1:  # DMF
-        # We need a deterministic way of getting the dmf fs number (01,02,03,04), so if we run this multiple
-        # times for the same file we get the same answer
-        filename_sum = 0
-        for c in filename:
-            # Get the ascii code for this letter
-            filename_sum = filename_sum + ord(c)
-
-        if filetype_id == MWADataFileType.MWAX_VOLTAGES.value:  # VCS
-            dmf_fs = "volt01fs"
-        else:  # Correlator, Flags, PPDs
-            # Determine which filesystem to use
-            fs_number = (filename_sum % 4) + 1
-            dmf_fs = f"mwa0{fs_number}fs"
-
-        # use any dmf host
-        dmf_host = random.choice(
-            ["fe1.pawsey.org.au", "fe2.pawsey.org.au", "fe4.pawsey.org.au"])
-        
-        prefix = f"/mnt/{dmf_fs}/MWA/ngas_data_volume/mfa/{obsid_year}-{obsid_month:02d}-{obsid_day:02d}/"
-        return prefix, dmf_host
-
-    elif location == 2:  #ceph / acacia
+    # ceph / acacia
+    if location == 2:
         # determine bucket name
-        prefix = ceph_get_bucket_name_from_filename(filename)
-        return prefix, ""
+        bucket = ceph_get_bucket_name_from_filename(filename)
+        folder = None
+        return bucket, folder
 
     else:
-        # Versity not yet implemented            
-        raise NotImplementedError
+        # DMF and Versity not yet implemented
+        raise NotImplementedError(f"Location {location} is not supported.")
 
 
 def archive_file_rsync(logger, full_filename: str, archive_numa_node: int, archive_destination_host: str,
@@ -243,8 +223,10 @@ def archive_file_xrootd(logger, full_filename: str, archive_numa_node: int, arch
         return False
 
 
-def archive_file_ceph(logger, full_filename: str, bucket_name: str, md5hash: str, profile: str, ceph_endpoint: str, 
-                      multipart_threshold_bytes: int, chunk_size_bytes: int, max_concurrency: int):
+def archive_file_ceph(logger, full_filename: str, bucket_name: str,
+                      md5hash: str, profile: str, ceph_endpoint: str,
+                      multipart_threshold_bytes: int, chunk_size_bytes: int,
+                      max_concurrency: int):
     logger.debug(f"{full_filename} attempting archive_file_ceph...")
 
     # get file size
@@ -284,7 +266,7 @@ def archive_file_ceph(logger, full_filename: str, bucket_name: str, md5hash: str
     
     # Do upload
     try:
-        ceph_upload_file(s3_object, bucket_name, full_filename, md5hash, multipart_threshold_bytes , chunk_size_bytes, max_concurrency)
+        ceph_upload_file(s3_object, bucket_name, full_filename, md5hash, multipart_threshold_bytes, chunk_size_bytes, max_concurrency)
     except Exception as e:
         logger.error(
             f"{full_filename}: Error uploading to S3 bucket {bucket_name} on {ceph_endpoint}. Error {e}")

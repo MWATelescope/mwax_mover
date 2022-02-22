@@ -230,8 +230,9 @@ def upsert_data_file_row(db_handler_object,
                          filetype: int,
                          hostname: str,
                          remote_archived: bool,
-                         location,
-                         prefix,
+                         location: int,
+                         bucket: Optional[str],
+                         folder: Optional[str],
                          checksum_type: Optional[int],
                          checksum: Optional[str]) -> bool:
     # Prepare the fields
@@ -247,31 +248,62 @@ def upsert_data_file_row(db_handler_object,
 
     try:
         if checksum_type is None:
-            sql = "INSERT INTO data_files " \
-                  "(observation_num, filetype, size, filename, host, remote_archived, deleted, location, prefix) " \
-                  "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (filename) DO UPDATE SET " \
-                  "remote_archived = excluded.remote_archived, location = excluded.location, prefix = excluded.prefix"
+            sql = """INSERT INTO data_files
+                  (observation_num,
+                   filetype,
+                   size,
+                   filename,
+                   host,
+                   remote_archived,
+                   deleted,
+                   location,
+                   bucket,
+                   folder)
+                  VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                  ON CONFLICT (filename) DO UPDATE SET
+                  remote_archived = excluded.remote_archived,
+                  location = excluded.location,
+                  bucket = excluded.bucket,
+                  folder = excluded.folder"""
 
-            db_handler_object.upsert_one_row(sql, (str(obsid), filetype, file_size,
-                                                   filename, hostname,
-                                                   remote_archived, deleted, location, prefix))
+            db_handler_object.upsert_one_row(sql, (str(obsid), filetype,
+                                             file_size, filename, hostname,
+                                             remote_archived, deleted,
+                                             location, bucket, folder))
         else:
-            sql = "INSERT INTO data_files " \
-                  "(observation_num, filetype, size, filename, host, remote_archived, deleted, location, prefix, checksum_type, checksum) " \
-                  "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (filename) DO UPDATE SET " \
-                  "remote_archived = excluded.remote_archived, location = excluded.location, prefix = excluded.prefix"
+            sql = """INSERT INTO data_files
+                  (observation_num,
+                  filetype,
+                  size,
+                  filename,
+                  host,
+                  remote_archived,
+                  deleted,
+                  location,
+                  bucket,
+                  folder,
+                  checksum_type,
+                  checksum)
+                  VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                  ON CONFLICT (filename) DO UPDATE SET
+                  remote_archived = excluded.remote_archived,
+                  location = excluded.location,
+                  bucket = excluded.bucket,
+                  folder = excluded.folder"""
 
-            db_handler_object.upsert_one_row(sql, (str(obsid), filetype, file_size,
-                                                   filename, hostname,
-                                                   remote_archived, deleted, location, prefix,
-                                                   checksum_type, checksum))
+            db_handler_object.upsert_one_row(sql, (str(obsid), filetype,
+                                             file_size, filename, hostname,
+                                             remote_archived, deleted,
+                                             location, bucket, folder,
+                                             checksum_type, checksum))
 
         if db_handler_object.dummy:
-            # We have a mutex here to ensure only 1 user of the connection at a time
-            with db_handler_object.db_lock:                
+            # We have a mutex here to ensure only 1 user of 
+            # the connection at a time
+            with db_handler_object.db_lock:
                 db_handler_object.logger.warning(f"{filename} upsert_data_file_row() Using dummy database connection. "
                                                  f"No data is really being upserted.")
-                time.sleep(10) # simulate a slow transaction
+                time.sleep(10)  # simulate a slow transaction
                 return True
         else:
             db_handler_object.logger.info(
