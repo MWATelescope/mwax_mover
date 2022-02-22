@@ -128,9 +128,7 @@ def validate_filename(filename: str) -> typing.Tuple[bool, int, int, str, str]:
     return valid, obs_id, filetype_id, file_ext_part, validation_error
 
 
-def determine_bucket_and_folder(
-    full_filename, filetype_id, location, obsid_year, obsid_month, obsid_day
-):
+def determine_bucket_and_folder(full_filename, location):
     """Return the bucket and folder of the file to be archived, based on location."""
     filename = os.path.basename(full_filename)
 

@@ -1,3 +1,9 @@
+import logging
+import logging.handlers
+import os
+import queue
+import threading
+import time
 from mwax_mover import (
     mwax_mover,
     mwax_db,
@@ -7,12 +13,6 @@ from mwax_mover import (
     utils,
 )
 from mwax_mover.mwa_archiver import MWADataFileType
-import logging
-import logging.handlers
-import os
-import queue
-import threading
-import time
 
 
 class MWAXArchiveProcessor:
@@ -295,14 +295,12 @@ class MWAXArchiveProcessor:
             )
 
             # Insert record into metadata database
-            if not mwax_db.upsert_data_file_row(
+            if not mwax_db.insert_data_file_row(
                 self.db_handler_object,
+                obs_id,
                 item,
                 filetype,
                 self.hostname,
-                False,
-                None,
-                None,
                 checksum_type_id,
                 checksum,
             ):

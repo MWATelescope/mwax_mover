@@ -244,11 +244,7 @@ class MWACacheArchiveProcessor:
             # Determine where to archive it
             bucket, folder = mwa_archiver.determine_bucket_and_folder(
                 item,
-                filetype,
                 self.archive_to_location,
-                data_files_row.year,
-                data_files_row.month,
-                data_files_row.day,
             )
 
         if valid:
@@ -273,16 +269,12 @@ class MWACacheArchiveProcessor:
 
             if archive_success:
                 # Update record in metadata database
-                if not mwax_db.upsert_data_file_row(
+                if not mwax_db.update_data_file_row_as_archived(
                     self.mro_db_handler_object,
+                    obs_id,
                     item,
-                    filetype,
-                    self.hostname,
-                    True,
                     self.archive_to_location,
                     bucket,
-                    location,
-                    None,
                     None,
                 ):
                     # if something went wrong, requeue
