@@ -228,7 +228,7 @@ def get_data_file_row(db_handler_object, full_filename: str) -> DataFileRow:
 
     except Exception as upsert_exception:
         db_handler_object.logger.error(
-            f"{full_filename} insert_data_file_row() error upserting data_files record in "
+            f"{full_filename} get_data_file_row() error upserting data_files record in "
             f"data_files table: {upsert_exception}. SQL was {sql}"
         )
         return None
@@ -266,7 +266,7 @@ def insert_data_file_row(
                 checksum)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"""
 
-        db_handler_object.insert_one_row(
+        db_handler_object.execute_single_dml_row(
             sql,
             (
                 str(obsid),
@@ -330,7 +330,7 @@ def update_data_file_row_as_archived(
                     observation_num = %s
                     AND filename = %s"""
 
-        db_handler_object.update_one_row(
+        db_handler_object.execute_single_dml_row(
             sql,
             (
                 bucket,
