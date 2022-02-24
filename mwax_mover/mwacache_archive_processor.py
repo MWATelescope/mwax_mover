@@ -13,7 +13,7 @@ import time
 from mwax_mover import (
     mwax_mover,
     mwax_db,
-    mwax_queue_worker,
+    mwax_ceph_queue_worker,
     mwax_watcher,
     mwa_archiver,
     utils,
@@ -157,7 +157,7 @@ class MWACacheArchiveProcessor:
         self.logger.info("Creating workers...")
 
         for n in range(0, self.concurrent_archive_workers):
-            new_worker = mwax_queue_worker.QueueWorker(
+            new_worker = mwax_ceph_queue_worker.CephQueueWorker(
                 label=f"Archiver{n}",
                 q=self.queue,
                 executable_path=None,
@@ -168,6 +168,8 @@ class MWACacheArchiveProcessor:
                 backoff_initial_seconds=20,
                 backoff_factor=2,
                 backoff_limit_seconds=40,
+                ceph_endpoint=self.acacia_ceph_endpoint,
+                ceph_profile=self.acacia_profile,
             )
             self.queue_workers.append(new_worker)
 
@@ -191,7 +193,7 @@ class MWACacheArchiveProcessor:
 
         self.logger.info("Started...")
 
-    def archive_handler(self, item: str) -> bool:
+    def archive_handler(self, item: str, ceph_session) -> bool:
         self.logger.info(f"{item}- archive_handler() Started...")
 
         # validate the filename
@@ -253,6 +255,7 @@ class MWACacheArchiveProcessor:
             if self.archive_to_location == 2:  # Ceph
                 archive_success = mwa_archiver.archive_file_ceph(
                     self.logger,
+                    ceph_session,
                     item,
                     bucket,
                     data_files_row.checksum,

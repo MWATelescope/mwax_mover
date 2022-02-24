@@ -263,6 +263,7 @@ def archive_file_xrootd(
 
 def archive_file_ceph(
     logger,
+    ceph_session,
     full_filename: str,
     bucket_name: str,
     md5hash: str,
@@ -282,20 +283,10 @@ def archive_file_ceph(
         logger.error(f"{full_filename}: Error determining file size. Error {e}")
         return False
 
-    # get s3 object
-    logger.debug(f"{full_filename} getting S3 bucket reference: {bucket_name}...")
-    try:
-        s3_object = ceph_get_s3_object(profile, ceph_endpoint)
-    except Exception as e:
-        logger.error(
-            f"{full_filename}: Error connecting to S3 endpoint: {ceph_endpoint}. Error {e}"
-        )
-        return False
-
     # create bucket if required
     logger.debug(f"{full_filename} creating S3 bucket {bucket_name} (if required)...")
     try:
-        ceph_create_bucket(s3_object, bucket_name)
+        ceph_create_bucket(ceph_session, bucket_name)
     except Exception as e:
         logger.error(
             f"{full_filename}: Error creating/checking existence of S3 bucket {bucket_name} on {ceph_endpoint}. Error {e}"
@@ -310,7 +301,7 @@ def archive_file_ceph(
     # Do upload
     try:
         ceph_upload_file(
-            s3_object,
+            ceph_session,
             bucket_name,
             full_filename,
             md5hash,

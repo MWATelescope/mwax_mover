@@ -1,16 +1,13 @@
 import os
 import queue
 import time
-import threading
-from mwax_mover import mwax_mover, mwax_command
+from mwax_mover.mwax_queue_worker import QueueWorker
+from mwax_mover.mwa_archiver import ceph_get_s3_object
 
 
-class QueueWorker(object):
-    # Either pass an event handler or pass an executable path to run
-    #
-    # requeue_to_eoq_on_failure: if work fails, True  = requeue to back of queue, try the next item
-    #                                                   (order does not matter)
-    #                                         , False = keep retrying this item (i.e. order of items matters)
+class CephQueueWorker(QueueWorker):
+    """Subclass of a queue worker which houses a Boto3 session object so we can take advantage of Session connection pooling"""
+
     def __init__(
         self,
         label: str,
@@ -23,34 +20,45 @@ class QueueWorker(object):
         backoff_initial_seconds: int = 1,
         backoff_factor: int = 2,
         backoff_limit_seconds: int = 60,
+        ceph_profile: str = "",
+        ceph_endpoint: str = "",
     ):
-        self.label = label
-        self.q = q
+        # Call Default QueueWorker contstructor
+        super().__init__(
+            label,
+            q,
+            executable_path,
+            log,
+            event_handler,
+            exit_once_queue_empty,
+            requeue_to_eoq_on_failure,
+            backoff_initial_seconds,
+            backoff_factor,
+            backoff_limit_seconds,
+        )
 
-        if (event_handler is None and executable_path is None) or (
-            event_handler is not None and executable_path is not None
-        ):
-            raise Exception(
-                "QueueWorker requires event_handler OR executable_path not both and not neither!"
-            )
-
-        self._executable_path = executable_path
-        self._event_handler = event_handler
-        self._running = False
-        self._paused = False
-        self.exit_once_queue_empty = exit_once_queue_empty
-        self.requeue_to_eoq_on_failure = requeue_to_eoq_on_failure
-        self.logger = log
-        self.current_item = None
-        self.consecutive_error_count = 0
-        self.backoff_initial_seconds = backoff_initial_seconds
-        self.backoff_factor = backoff_factor
-        self.backoff_limit_seconds = backoff_limit_seconds
-        # Use threading event instead of time.sleep to backoff
-        self.event = threading.Event()
+        self.ceph_profile = ceph_profile
+        self.ceph_endpoint = ceph_endpoint
+        self.ceph_session = None
 
     def start(self):
-        self.logger.info(f"QueueWorker {self.label} starting...")
+        """Overrride this method from QueueWorker so we can initiate a boto3 session"""
+
+        self.logger.info(f"CephQueueWorker {self.label} starting...")
+        #
+        # Init the Boto3 session
+        #
+        # get s3 object
+        try:
+            self.ceph_session = ceph_get_s3_object(
+                self.ceph_profile, self.ceph_endpoint
+            )
+        except Exception as e:
+            self.logger.error(
+                f"Error creating Ceph Session: Profile: {self.ceph_profile} Endpoint: {self.ceph_endpoint}. Error {e}"
+            )
+            return
+
         self._running = True
         self.current_item = None
         self.consecutive_error_count = 0
@@ -72,7 +80,9 @@ class QueueWorker(object):
                         if self._executable_path:
                             success = self.run_command(self.current_item)
                         else:
-                            success = self._event_handler(self.current_item)
+                            success = self._event_handler(
+                                self.current_item, self.ceph_session
+                            )
 
                         if success:
                             # Dequeue the item, but requeue if it was not successful
@@ -125,31 +135,3 @@ class QueueWorker(object):
                         self.logger.info("Finished processing queue.")
                         self.stop()
                         return
-
-    def pause(self, paused: bool):
-        self._paused = paused
-
-    def stop(self):
-        self._running = False
-        # cancel a wait if we are in one
-        self.event.set()
-
-    def run_command(self, filename: str) -> bool:
-        command = f"{self._executable_path}"
-
-        # Substitute the filename into the command
-        command = command.replace(mwax_mover.FILE_REPLACEMENT_TOKEN, filename)
-
-        filename_no_ext = os.path.splitext(filename)[0]
-        command = command.replace(
-            mwax_mover.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext
-        )
-
-        return mwax_command.run_command_ext(self.logger, command, -1, 60, True)
-
-    def get_status(self) -> dict:
-        return {
-            "Unix timestamp": time.time(),
-            "current": self.current_item,
-            "queue_size": self.q.qsize(),
-        }
