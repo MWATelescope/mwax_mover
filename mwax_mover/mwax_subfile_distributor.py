@@ -150,6 +150,10 @@ class MWAXSubfileDistributor:
         self.cfg_voltdata_incoming_path = None
         self.cfg_voltdata_outging_path = None
         self.cfg_always_keep_subfiles = False
+        self.cfg_archive_command_timeout_sec = None
+        self.cfg_psrdada_timeout_sec = None
+        self.cfg_copy_subfile_to_disk_timeout_sec = None
+        self.cfg_archiving_enabled = None
         self.cfg_health_multicast_interface_name = None
         self.cfg_health_multicast_ip = None
         self.cfg_health_multicast_port = None
@@ -517,6 +521,28 @@ class MWAXSubfileDistributor:
             self.cfg_corr_enabled = True
         else:
             self.cfg_corr_enabled = False
+
+        # Read master archiving enabled option
+        self.cfg_archiving_enabled = (
+            int(
+                utils.read_config(
+                    self.logger,
+                    self.config,
+                    "mwax mover",
+                    "archiving_enabled",
+                )
+            )
+            == 1
+        )
+
+        # If master archiving is disabled, the disable the corr and bf archiving settings
+        # otherwise just use those settings as necessary
+        if not self.cfg_archiving_enabled:
+            self.logger.warn(
+                f"Master archiving is set to DISABLED. Nothing will be archived."
+            )
+            self.cfg_bf_archive_destination_enabled = False
+            self.cfg_corr_archive_destination_enabled = False
 
         # Create and start web server
         self.logger.info(f"Starting http server on port {self.cfg_webserver_port}...")
