@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="mwax_mover",
-    version="0.8.4",
+    version="0.8.5",
     description="A module to manage input and archiving for the MWAX correlator",
     author="Greg Sleap",
     author_email="",

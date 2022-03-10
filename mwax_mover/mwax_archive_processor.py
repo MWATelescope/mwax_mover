@@ -20,6 +20,7 @@ class MWAXArchiveProcessor:
         self,
         context,
         hostname: str,
+        archive_destination_enabled: int,
         archive_command_numa_node: int,
         archive_host: str,
         archive_port: str,
@@ -33,6 +34,7 @@ class MWAXArchiveProcessor:
         visdata_incoming_path: str,
         visdata_processing_stats_path: str,
         visdata_outgoing_path: str,
+        dont_archive_path: str,
     ):
         self.subfile_distributor_context = context
 
@@ -55,6 +57,7 @@ class MWAXArchiveProcessor:
         self.db_handler_object = db_handler_object
 
         self.hostname = hostname
+        self.archive_destination_enabled = archive_destination_enabled
         self.archive_destination_host = archive_host
         self.archive_destination_port = archive_port
         self.archive_command_numa_node: int = archive_command_numa_node
@@ -70,6 +73,10 @@ class MWAXArchiveProcessor:
 
         self.watcher_threads = []
         self.worker_threads = []
+
+        self.dont_archive_path = dont_archive_path
+        self.queue_dont_archive = queue.Queue()
+        self.queue_worker_dont_archive = None
 
         self.queue_checksum_and_db = queue.Queue()
         self.queue_worker_checksum_and_db = None
@@ -96,184 +103,289 @@ class MWAXArchiveProcessor:
         self.queue_worker_outgoing_vis = None
 
     def start(self):
-        # Create watcher for voltage data -> checksum+db queue
-        self.watcher_incoming_volt = mwax_watcher.Watcher(
-            path=self.watch_dir_incoming_volt,
-            q=self.queue_checksum_and_db,
-            pattern=".sub",
-            log=self.logger,
-            mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
-            recursive=False,
+        if self.archive_destination_enabled:
+            # Create watcher for voltage data -> checksum+db queue
+            self.watcher_incoming_volt = mwax_watcher.Watcher(
+                path=self.watch_dir_incoming_volt,
+                q=self.queue_checksum_and_db,
+                pattern=".sub",
+                log=self.logger,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
+                recursive=False,
+            )
+
+            # Create watcher for visibility data -> checksum+db queue
+            # This will watch for mwax visibilities being renamed OR
+            # fits files being created (e.g. metafits ppd files being copied into /visdata).
+            self.watcher_incoming_vis = mwax_watcher.Watcher(
+                path=self.watch_dir_incoming_vis,
+                q=self.queue_checksum_and_db,
+                pattern=".fits",
+                log=self.logger,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+                recursive=False,
+            )
+
+            # Create queueworker for the cehcksum and db queue
+            self.queue_worker_checksum_and_db = mwax_queue_worker.QueueWorker(
+                label="checksum and database worker",
+                q=self.queue_checksum_and_db,
+                executable_path=None,
+                event_handler=self.checksum_and_db_handler,
+                log=self.logger,
+                exit_once_queue_empty=False,
+            )
+
+            # Create watcher for visibility processing stats
+            self.watcher_processing_stats_vis = mwax_watcher.Watcher(
+                path=self.watch_dir_processing_stats_vis,
+                q=self.queue_processing_stats_vis,
+                pattern=".fits",
+                log=self.logger,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
+                recursive=False,
+            )
+
+            # worker for visibility processing stats
+            self.queue_worker_processing_stats_vis = mwax_queue_worker.QueueWorker(
+                label="processing stats vis worker",
+                q=self.queue_processing_stats_vis,
+                executable_path=None,
+                event_handler=self.stats_handler,
+                log=self.logger,
+                exit_once_queue_empty=False,
+            )
+
+            # Create watcher for archiving outgoing voltage data
+            self.watcher_outgoing_volt = mwax_watcher.Watcher(
+                path=self.watch_dir_outgoing_volt,
+                q=self.queue_outgoing_volt,
+                pattern=".sub",
+                log=self.logger,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
+                recursive=False,
+            )
+
+            # Create queueworker for voltage outgoing queue
+            self.queue_worker_outgoing_volt = mwax_queue_worker.QueueWorker(
+                label="outgoing volt worker",
+                q=self.queue_outgoing_volt,
+                executable_path=None,
+                event_handler=self.archive_handler,
+                log=self.logger,
+                exit_once_queue_empty=False,
+            )
+
+            # Create watcher for archiving outgoing visibility data
+            self.watcher_outgoing_vis = mwax_watcher.Watcher(
+                path=self.watch_dir_outgoing_vis,
+                q=self.queue_outgoing_vis,
+                pattern=".fits",
+                log=self.logger,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
+                recursive=False,
+            )
+
+            # Create queueworker for visibility outgoing queue
+            self.queue_worker_outgoing_vis = mwax_queue_worker.QueueWorker(
+                label="outgoing vis worker",
+                q=self.queue_outgoing_vis,
+                executable_path=None,
+                event_handler=self.archive_handler,
+                log=self.logger,
+                exit_once_queue_empty=False,
+            )
+            #
+            # Start watcher threads
+            #
+
+            # Setup thread for watching incoming filesystem (volt)
+            watcher_volt_incoming_thread = threading.Thread(
+                name="watch_volt_incoming",
+                target=self.watcher_incoming_volt.start,
+                daemon=True,
+            )
+            self.watcher_threads.append(watcher_volt_incoming_thread)
+            watcher_volt_incoming_thread.start()
+
+            # Setup thread for watching incoming filesystem (vis)
+            watcher_vis_incoming_thread = threading.Thread(
+                name="watch_vis_incoming",
+                target=self.watcher_incoming_vis.start,
+                daemon=True,
+            )
+            self.watcher_threads.append(watcher_vis_incoming_thread)
+            watcher_vis_incoming_thread.start()
+
+            # Setup thread for watching processing_stats filesystem (vis)
+            watcher_vis_processing_stats_thread = threading.Thread(
+                name="watch_vis_processing_stats",
+                target=self.watcher_processing_stats_vis.start,
+                daemon=True,
+            )
+            self.watcher_threads.append(watcher_vis_processing_stats_thread)
+            watcher_vis_processing_stats_thread.start()
+
+            # Setup thread for watching outgoing filesystem (volt)
+            watcher_volt_outgoing_thread = threading.Thread(
+                name="watch_volt_outgoing",
+                target=self.watcher_outgoing_volt.start,
+                daemon=True,
+            )
+            self.watcher_threads.append(watcher_volt_outgoing_thread)
+            watcher_volt_outgoing_thread.start()
+
+            # Setup thread for watching outgoing filesystem (vis)
+            watcher_vis_outgoing_thread = threading.Thread(
+                name="watch_vis_outgoing",
+                target=self.watcher_outgoing_vis.start,
+                daemon=True,
+            )
+            self.watcher_threads.append(watcher_vis_outgoing_thread)
+            watcher_vis_outgoing_thread.start()
+
+            #
+            # Start queue worker threads
+            #
+            # Setup thread for processing items on the checksum and db queue
+            queue_worker_checksum_and_db_thread = threading.Thread(
+                name="work_checksum_and_db",
+                target=self.queue_worker_checksum_and_db.start,
+                daemon=True,
+            )
+            self.worker_threads.append(queue_worker_checksum_and_db_thread)
+            queue_worker_checksum_and_db_thread.start()
+
+            # Setup thread for processing items on the processing stats vis queue
+            queue_worker_vis_processing_stats_thread = threading.Thread(
+                name="work_vis_processing_stats",
+                target=self.queue_worker_processing_stats_vis.start,
+                daemon=True,
+            )
+            self.worker_threads.append(queue_worker_vis_processing_stats_thread)
+            queue_worker_vis_processing_stats_thread.start()
+
+            # Setup thread for processing items on the outgoing_volt queue
+            queue_worker_volt_outgoing_thread = threading.Thread(
+                name="work_volt_outgoing",
+                target=self.queue_worker_outgoing_volt.start,
+                daemon=True,
+            )
+            self.worker_threads.append(queue_worker_volt_outgoing_thread)
+            queue_worker_volt_outgoing_thread.start()
+
+            # Setup thread for processing items on the outgoing vis queue
+            queue_worker_vis_outgoing_thread = threading.Thread(
+                name="work_vis_outgoing",
+                target=self.queue_worker_outgoing_vis.start,
+                daemon=True,
+            )
+            self.worker_threads.append(queue_worker_vis_outgoing_thread)
+            queue_worker_vis_outgoing_thread.start()
+        else:
+            # We have disabled archiving, so use a different handler for incoming data
+            # which just moves the files elsewhere
+
+            # First check to ensure there are no existing unarchived files on our watching dirs
+            if (
+                len(next(os.walk(self.watch_dir_incoming_volt))[2]) > 0
+                or len(next(os.walk(self.watch_dir_incoming_vis))[2]) > 0
+                or len(next(os.walk(self.watch_dir_outgoing_volt))[2]) > 0
+                or len(next(os.walk(self.watch_dir_outgoing_vis))[2]) > 0
+                or len(next(os.walk(self.watch_dir_processing_stats_vis))[2]) > 0
+            ):
+                self.logger.error(
+                    "Error- voltage incoming/outgoing and/or visibility "
+                    "incoming/processing/outgoing dirs are not empty! "
+                    "Watched paths must be empty before starting with  "
+                    "archiving disabled to prevent inadvertent data loss. "
+                    "Exiting."
+                )
+                exit(-2)
+
+            # Create watcher for voltage data -> dont_archive queue
+            self.watcher_incoming_volt = mwax_watcher.Watcher(
+                path=self.watch_dir_incoming_volt,
+                q=self.queue_dont_archive,
+                pattern=".sub",
+                log=self.logger,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
+                recursive=False,
+            )
+
+            # Create watcher for visibility data -> dont_archive queue
+            # This will watch for mwax visibilities being renamed OR
+            # fits files being created (e.g. metafits ppd files being copied into /visdata).
+            self.watcher_incoming_vis = mwax_watcher.Watcher(
+                path=self.watch_dir_incoming_vis,
+                q=self.queue_dont_archive,
+                pattern=".fits",
+                log=self.logger,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+                recursive=False,
+            )
+
+            # Create queueworker for the don't archive queue
+            self.queue_worker_dont_archive = mwax_queue_worker.QueueWorker(
+                label="dont archive worker",
+                q=self.queue_dont_archive,
+                executable_path=None,
+                event_handler=self.dont_archive_handler,
+                log=self.logger,
+                exit_once_queue_empty=False,
+            )
+
+            #
+            # Start watcher threads
+            #
+
+            # Setup thread for watching incoming filesystem (volt)
+            watcher_volt_incoming_thread = threading.Thread(
+                name="watch_volt_incoming",
+                target=self.watcher_incoming_volt.start,
+                daemon=True,
+            )
+            self.watcher_threads.append(watcher_volt_incoming_thread)
+            watcher_volt_incoming_thread.start()
+
+            # Setup thread for watching incoming filesystem (vis)
+            watcher_vis_incoming_thread = threading.Thread(
+                name="watch_vis_incoming",
+                target=self.watcher_incoming_vis.start,
+                daemon=True,
+            )
+            self.watcher_threads.append(watcher_vis_incoming_thread)
+            watcher_vis_incoming_thread.start()
+
+            #
+            # Start queue worker threads
+            #
+            # Setup thread for processing items on the dont archive queue
+            queue_worker_dont_archive_thread = threading.Thread(
+                name="work_dont_archive",
+                target=self.queue_worker_dont_archive.start,
+                daemon=True,
+            )
+            self.worker_threads.append(queue_worker_dont_archive_thread)
+            queue_worker_dont_archive_thread.start()
+
+    def dont_archive_handler(self, item: str) -> bool:
+        self.logger.info(f"{item}- dont_archive_handler() Started")
+
+        outgoing_filename = os.path.join(self.dont_archive_path, os.path.basename(item))
+
+        self.logger.debug(
+            f"{item}- dont_archive_handler() moving file to {self.dont_archive_path}"
+        )
+        os.rename(item, outgoing_filename)
+
+        self.logger.info(
+            f"{item}- dont_archive_handler() moved file to {self.dont_archive_path} dir "
+            f"Queue size: {self.queue_dont_archive.qsize()}"
         )
 
-        # Create watcher for visibility data -> checksum+db queue
-        # This will watch for mwax visibilities being renamed OR
-        # fits files being created (e.g. metafits ppd files being copied into /visdata).
-        self.watcher_incoming_vis = mwax_watcher.Watcher(
-            path=self.watch_dir_incoming_vis,
-            q=self.queue_checksum_and_db,
-            pattern=".fits",
-            log=self.logger,
-            mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
-            recursive=False,
-        )
-
-        # Create queueworker for the cehcksum and db queue
-        self.queue_worker_checksum_and_db = mwax_queue_worker.QueueWorker(
-            label="checksum and database worker",
-            q=self.queue_checksum_and_db,
-            executable_path=None,
-            event_handler=self.checksum_and_db_handler,
-            log=self.logger,
-            exit_once_queue_empty=False,
-        )
-
-        # Create watcher for visibility processing stats
-        self.watcher_processing_stats_vis = mwax_watcher.Watcher(
-            path=self.watch_dir_processing_stats_vis,
-            q=self.queue_processing_stats_vis,
-            pattern=".fits",
-            log=self.logger,
-            mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
-            recursive=False,
-        )
-
-        # worker for visibility processing stats
-        self.queue_worker_processing_stats_vis = mwax_queue_worker.QueueWorker(
-            label="processing stats vis worker",
-            q=self.queue_processing_stats_vis,
-            executable_path=None,
-            event_handler=self.stats_handler,
-            log=self.logger,
-            exit_once_queue_empty=False,
-        )
-
-        # Create watcher for archiving outgoing voltage data
-        self.watcher_outgoing_volt = mwax_watcher.Watcher(
-            path=self.watch_dir_outgoing_volt,
-            q=self.queue_outgoing_volt,
-            pattern=".sub",
-            log=self.logger,
-            mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
-            recursive=False,
-        )
-
-        # Create queueworker for voltage outgoing queue
-        self.queue_worker_outgoing_volt = mwax_queue_worker.QueueWorker(
-            label="outgoing volt worker",
-            q=self.queue_outgoing_volt,
-            executable_path=None,
-            event_handler=self.archive_handler,
-            log=self.logger,
-            exit_once_queue_empty=False,
-        )
-
-        # Create watcher for archiving outgoing visibility data
-        self.watcher_outgoing_vis = mwax_watcher.Watcher(
-            path=self.watch_dir_outgoing_vis,
-            q=self.queue_outgoing_vis,
-            pattern=".fits",
-            log=self.logger,
-            mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
-            recursive=False,
-        )
-
-        # Create queueworker for visibility outgoing queue
-        self.queue_worker_outgoing_vis = mwax_queue_worker.QueueWorker(
-            label="outgoing vis worker",
-            q=self.queue_outgoing_vis,
-            executable_path=None,
-            event_handler=self.archive_handler,
-            log=self.logger,
-            exit_once_queue_empty=False,
-        )
-        #
-        # Start watcher threads
-        #
-
-        # Setup thread for watching incoming filesystem (volt)
-        watcher_volt_incoming_thread = threading.Thread(
-            name="watch_volt_incoming",
-            target=self.watcher_incoming_volt.start,
-            daemon=True,
-        )
-        self.watcher_threads.append(watcher_volt_incoming_thread)
-        watcher_volt_incoming_thread.start()
-
-        # Setup thread for watching incoming filesystem (vis)
-        watcher_vis_incoming_thread = threading.Thread(
-            name="watch_vis_incoming",
-            target=self.watcher_incoming_vis.start,
-            daemon=True,
-        )
-        self.watcher_threads.append(watcher_vis_incoming_thread)
-        watcher_vis_incoming_thread.start()
-
-        # Setup thread for watching processing_stats filesystem (vis)
-        watcher_vis_processing_stats_thread = threading.Thread(
-            name="watch_vis_processing_stats",
-            target=self.watcher_processing_stats_vis.start,
-            daemon=True,
-        )
-        self.watcher_threads.append(watcher_vis_processing_stats_thread)
-        watcher_vis_processing_stats_thread.start()
-
-        # Setup thread for watching outgoing filesystem (volt)
-        watcher_volt_outgoing_thread = threading.Thread(
-            name="watch_volt_outgoing",
-            target=self.watcher_outgoing_volt.start,
-            daemon=True,
-        )
-        self.watcher_threads.append(watcher_volt_outgoing_thread)
-        watcher_volt_outgoing_thread.start()
-
-        # Setup thread for watching outgoing filesystem (vis)
-        watcher_vis_outgoing_thread = threading.Thread(
-            name="watch_vis_outgoing",
-            target=self.watcher_outgoing_vis.start,
-            daemon=True,
-        )
-        self.watcher_threads.append(watcher_vis_outgoing_thread)
-        watcher_vis_outgoing_thread.start()
-
-        #
-        # Start queue worker threads
-        #
-        # Setup thread for processing items on the checksum and db queue
-        queue_worker_checksum_and_db_thread = threading.Thread(
-            name="work_checksum_and_db",
-            target=self.queue_worker_checksum_and_db.start,
-            daemon=True,
-        )
-        self.worker_threads.append(queue_worker_checksum_and_db_thread)
-        queue_worker_checksum_and_db_thread.start()
-
-        # Setup thread for processing items on the processing stats vis queue
-        queue_worker_vis_processing_stats_thread = threading.Thread(
-            name="work_vis_processing_stats",
-            target=self.queue_worker_processing_stats_vis.start,
-            daemon=True,
-        )
-        self.worker_threads.append(queue_worker_vis_processing_stats_thread)
-        queue_worker_vis_processing_stats_thread.start()
-
-        # Setup thread for processing items on the outgoing_volt queue
-        queue_worker_volt_outgoing_thread = threading.Thread(
-            name="work_volt_outgoing",
-            target=self.queue_worker_outgoing_volt.start,
-            daemon=True,
-        )
-        self.worker_threads.append(queue_worker_volt_outgoing_thread)
-        queue_worker_volt_outgoing_thread.start()
-
-        # Setup thread for processing items on the outgoing vis queue
-        queue_worker_vis_outgoing_thread = threading.Thread(
-            name="work_vis_outgoing",
-            target=self.queue_worker_outgoing_vis.start,
-            daemon=True,
-        )
-        self.worker_threads.append(queue_worker_vis_outgoing_thread)
-        queue_worker_vis_outgoing_thread.start()
+        self.logger.info(f"{item}- dont_archive_handler() Finished")
+        return True
 
     def checksum_and_db_handler(self, item: str) -> bool:
         self.logger.info(f"{item}- checksum_and_db_handler() Started")
@@ -430,9 +542,9 @@ class MWAXArchiveProcessor:
     def pause_archiving(self, paused: bool):
         if self.archiving_paused != paused:
             if paused:
-                self.logger.info(f"Pausing archiving")
+                self.logger.info("Pausing archiving")
             else:
-                self.logger.info(f"Resuming archiving")
+                self.logger.info("Resuming archiving")
 
             if self.queue_worker_checksum_and_db:
                 self.queue_worker_checksum_and_db.pause(paused)

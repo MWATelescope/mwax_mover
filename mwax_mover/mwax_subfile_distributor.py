@@ -146,6 +146,7 @@ class MWAXSubfileDistributor:
         # Common
         self.cfg_log_path = None
         self.cfg_webserver_port = None
+        self.cfg_dont_archive_path = None
         self.cfg_subfile_incoming_path = None
         self.cfg_voltdata_incoming_path = None
         self.cfg_voltdata_outging_path = None
@@ -260,6 +261,9 @@ class MWAXSubfileDistributor:
         self.cfg_webserver_port = utils.read_config(
             self.logger, self.config, "mwax mover", "webserver_port"
         )
+        self.cfg_dont_archive_path = utils.read_config(
+            self.logger, self.config, "mwax mover", "dont_archive_path"
+        )
         self.cfg_subfile_incoming_path = utils.read_config(
             self.logger, self.config, "mwax mover", "subfile_incoming_path"
         )
@@ -321,6 +325,12 @@ class MWAXSubfileDistributor:
         self.logger.info(
             f"IP for sending multicast: {self.cfg_health_multicast_interface_ip}"
         )
+
+        if not os.path.exists(self.cfg_dont_archive_path):
+            self.logger.error(
+                f"'Dont Archive' location {self.cfg_dont_archive_path} does not exist. Quitting."
+            )
+            exit(1)
 
         if not os.path.exists(self.cfg_subfile_incoming_path):
             self.logger.error(
@@ -539,7 +549,7 @@ class MWAXSubfileDistributor:
         # otherwise just use those settings as necessary
         if not self.cfg_archiving_enabled:
             self.logger.warn(
-                f"Master archiving is set to DISABLED. Nothing will be archived."
+                "Master archiving is set to DISABLED. Nothing will be archived."
             )
             self.cfg_bf_archive_destination_enabled = False
             self.cfg_corr_archive_destination_enabled = False
@@ -578,32 +588,28 @@ class MWAXSubfileDistributor:
         self.processors.append(self.subfile_processor)
 
         if self.cfg_corr_enabled:
-            if self.cfg_corr_archive_destination_enabled:
-                self.archive_processor = mwax_archive_processor.MWAXArchiveProcessor(
-                    self,
-                    self.hostname,
-                    self.cfg_corr_archive_command_numa_node,
-                    self.cfg_corr_archive_destination_host,
-                    self.cfg_corr_archive_destination_port,
-                    self.cfg_archive_command_timeout_sec,
-                    self.cfg_corr_mwax_stats_executable,
-                    self.cfg_corr_mwax_stats_dump_dir,
-                    self.cfg_mwax_stats_timeout_sec,
-                    self.db_handler,
-                    self.cfg_voltdata_incoming_path,
-                    self.cfg_voltdata_outgoing_path,
-                    self.cfg_corr_visdata_incoming_path,
-                    self.cfg_corr_visdata_processing_stats_path,
-                    self.cfg_corr_visdata_outgoing_path,
-                )
+            self.archive_processor = mwax_archive_processor.MWAXArchiveProcessor(
+                self,
+                self.hostname,
+                self.cfg_corr_archive_destination_enabled,
+                self.cfg_corr_archive_command_numa_node,
+                self.cfg_corr_archive_destination_host,
+                self.cfg_corr_archive_destination_port,
+                self.cfg_archive_command_timeout_sec,
+                self.cfg_corr_mwax_stats_executable,
+                self.cfg_corr_mwax_stats_dump_dir,
+                self.cfg_mwax_stats_timeout_sec,
+                self.db_handler,
+                self.cfg_voltdata_incoming_path,
+                self.cfg_voltdata_outgoing_path,
+                self.cfg_corr_visdata_incoming_path,
+                self.cfg_corr_visdata_processing_stats_path,
+                self.cfg_corr_visdata_outgoing_path,
+                self.cfg_dont_archive_path,
+            )
 
-                # Add this processor to list of processors we manage
-                self.processors.append(self.archive_processor)
-            else:
-                self.logger.info(
-                    "MWAX Archiving is disabled due to configuration setting "
-                    "`mwax_destination_enabled`."
-                )
+            # Add this processor to list of processors we manage
+            self.processors.append(self.archive_processor)
 
         if self.cfg_bf_enabled:
             if self.cfg_bf_archive_destination_enabled:
@@ -694,14 +700,14 @@ class MWAXSubfileDistributor:
         signal.signal(signal.SIGTERM, self.signal_handler)
 
         if self.cfg_bf_enabled:
-            self.logger.info(f"Beamformer Enabled")
+            self.logger.info("Beamformer Enabled")
         else:
-            self.logger.info(f"Beamformer disabled")
+            self.logger.info("Beamformer disabled")
 
         if self.cfg_corr_enabled:
-            self.logger.info(f"Correlator Enabled")
+            self.logger.info("Correlator Enabled")
         else:
-            self.logger.info(f"Correlator disabled")
+            self.logger.info("Correlator disabled")
 
         for processor in self.processors:
             processor.start()
