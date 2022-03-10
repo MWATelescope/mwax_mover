@@ -561,16 +561,35 @@ class MWAXArchiveProcessor:
             self.archiving_paused = paused
 
     def stop(self):
-        self.watcher_incoming_volt.stop()
-        self.watcher_incoming_vis.stop()
-        self.watcher_processing_stats_vis.stop()
-        self.watcher_outgoing_volt.stop()
-        self.watcher_outgoing_vis.stop()
+        if self.watcher_incoming_volt:
+            self.watcher_incoming_volt.stop()
 
-        self.queue_worker_checksum_and_db.stop()
-        self.queue_worker_processing_stats_vis.stop()
-        self.queue_worker_outgoing_volt.stop()
-        self.queue_worker_outgoing_vis.stop()
+        if self.watcher_incoming_vis:
+            self.watcher_incoming_vis.stop()
+
+        if self.watcher_processing_stats_vis:
+            self.watcher_processing_stats_vis.stop()
+
+        if self.watcher_outgoing_volt:
+            self.watcher_outgoing_volt.stop()
+
+        if self.watcher_outgoing_vis:
+            self.watcher_outgoing_vis.stop()
+
+        if self.queue_worker_dont_archive:
+            self.queue_worker_dont_archive.stop()
+
+        if self.queue_worker_checksum_and_db:
+            self.queue_worker_checksum_and_db.stop()
+
+        if self.queue_worker_processing_stats_vis:
+            self.queue_worker_processing_stats_vis.stop()
+
+        if self.queue_worker_outgoing_volt:
+            self.queue_worker_outgoing_volt.stop()
+
+        if self.queue_worker_outgoing_vis:
+            self.queue_worker_outgoing_vis.stop()
 
         # Wait for threads to finish
         for t in self.watcher_threads:
