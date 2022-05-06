@@ -6,7 +6,8 @@ from mwax_mover.mwa_archiver import ceph_get_s3_object
 
 
 class CephQueueWorker(QueueWorker):
-    """Subclass of a queue worker which houses a Boto3 session object so we can take advantage of Session connection pooling"""
+    """Subclass of a queue worker which houses a Boto3 session object so we
+    can take advantage of Session connection pooling"""
 
     def __init__(
         self,
@@ -42,7 +43,8 @@ class CephQueueWorker(QueueWorker):
         self.ceph_session = None
 
     def start(self):
-        """Overrride this method from QueueWorker so we can initiate a boto3 session"""
+        """Overrride this method from QueueWorker so we can initiate a boto3
+        session"""
 
         self.logger.info(f"CephQueueWorker {self.label} starting...")
         #
@@ -55,7 +57,9 @@ class CephQueueWorker(QueueWorker):
             )
         except Exception as e:
             self.logger.error(
-                f"Error creating Ceph Session: Profile: {self.ceph_profile} Endpoint: {self.ceph_endpoint}. Error {e}"
+                "Error creating Ceph Session: Profile:"
+                f" {self.ceph_profile} Endpoint: {self.ceph_endpoint}."
+                f" Error {e}"
             )
             return
 
@@ -85,14 +89,16 @@ class CephQueueWorker(QueueWorker):
                             )
 
                         if success:
-                            # Dequeue the item, but requeue if it was not successful
+                            # Dequeue the item, but requeue if it was not
+                            # successful
                             self.q.task_done()
                             self.current_item = None
                     else:
                         # Dequeue the item
                         self.logger.warning(
-                            f"Processing {self.current_item } Complete... file was moved or deleted. "
-                            f"Queue size: {self.q.qsize()}"
+                            f"Processing {self.current_item } Complete... file"
+                            " was moved or deleted. Queue size:"
+                            f" {self.q.qsize()}"
                         )
                         self.current_item = None
                         self.q.task_done()
@@ -100,7 +106,8 @@ class CephQueueWorker(QueueWorker):
 
                     elapsed = time.time() - start_time
                     self.logger.info(
-                        f"Complete. Queue size: {self.q.qsize()} Elapsed: {elapsed:.2f} sec"
+                        f"Complete. Queue size: {self.q.qsize()} Elapsed:"
+                        f" {elapsed:.2f} sec"
                     )
 
                     if success:
@@ -117,13 +124,14 @@ class CephQueueWorker(QueueWorker):
                             backoff = self.backoff_limit_seconds
 
                         self.logger.info(
-                            f"{self.consecutive_error_count} consecutive failures. Backing off "
-                            f"for {backoff} seconds."
+                            f"{self.consecutive_error_count} consecutive"
+                            f" failures. Backing off for {backoff} seconds."
                         )
                         self.event.wait(backoff)
 
-                        # If this option is set, add item back to the end of the queue
-                        # If not set, just keep retrying the operation
+                        # If this option is set, add item back to the end of
+                        # the queue. If not set, just keep retrying the
+                        # operation
                         if self.requeue_to_eoq_on_failure:
                             self.q.task_done()
                             self.q.put(self.current_item)

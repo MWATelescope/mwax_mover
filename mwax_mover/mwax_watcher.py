@@ -7,7 +7,14 @@ import time
 
 class Watcher(object):
     def __init__(
-        self, path: str, q, pattern: str, log, mode, recursive, exclude_pattern=None
+        self,
+        path: str,
+        q,
+        pattern: str,
+        log,
+        mode,
+        recursive,
+        exclude_pattern=None,
     ):
         self.logger = log
         self.i = None
@@ -24,7 +31,10 @@ class Watcher(object):
         elif self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME:
             self.mask = inotify.constants.IN_MOVED_TO
         elif self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW:
-            self.mask = inotify.constants.IN_MOVED_TO | inotify.constants.IN_CLOSE_WRITE
+            self.mask = (
+                inotify.constants.IN_MOVED_TO
+                | inotify.constants.IN_CLOSE_WRITE
+            )
 
         # Check that the path to watch exists
         if not os.path.exists(self.path):
@@ -33,17 +43,21 @@ class Watcher(object):
     def start(self):
         if self.recursive:
             self.logger.info(
-                f"Watcher starting on {self.path}/*{self.pattern} and all subdirectories..."
+                f"Watcher starting on {self.path}/*{self.pattern} and all"
+                " subdirectories..."
             )
             self.i = inotify.adapters.InotifyTree(self.path, mask=self.mask)
         else:
-            self.logger.info(f"Watcher starting on {self.path}/*{self.pattern}...")
+            self.logger.info(
+                f"Watcher starting on {self.path}/*{self.pattern}..."
+            )
             self.i = inotify.adapters.Inotify()
             self.i.add_watch(self.path, mask=self.mask)
 
         if self.exclude_pattern:
             self.logger.info(
-                f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}"
+                f"Watcher on {self.path}/*{self.pattern} is excluding"
+                f" *{self.exclude_pattern}"
             )
 
         self.watching = True
@@ -60,7 +74,8 @@ class Watcher(object):
             self.i.remove_watch(self.path)
 
     def do_watch_loop(self):
-        # If we're in NEW or RENAME mode, then scan the folder once we have enqueued any waiting items
+        # If we're in NEW or RENAME mode, then scan the folder once we have
+        # enqueued any waiting items
         if (
             self.mode == mwax_mover.MODE_WATCH_DIR_FOR_NEW
             or self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME
@@ -85,15 +100,20 @@ class Watcher(object):
                     if (
                         os.path.splitext(filename)[1] == self.pattern
                         or self.pattern == ".*"
-                    ) and os.path.splitext(filename)[1] != self.exclude_pattern:
+                    ) and os.path.splitext(filename)[
+                        1
+                    ] != self.exclude_pattern:
                         dest_filename = os.path.join(path, filename)
                         self.q.put(dest_filename)
                         self.logger.info(
-                            f"{dest_filename} added to queue ({self.q.qsize()})"
+                            f"{dest_filename} added to queue"
+                            f" ({self.q.qsize()})"
                         )
 
     def get_status(self) -> dict:
-        total_bytes, used_bytes, free_bytes = utils.get_disk_space_bytes(self.path)
+        total_bytes, used_bytes, free_bytes = utils.get_disk_space_bytes(
+            self.path
+        )
 
         return {
             "Unix timestamp": time.time(),

@@ -27,12 +27,15 @@ class FilterbankProcessor:
         self.logger.setLevel(logging.DEBUG)
         file_log = logging.FileHandler(
             filename=os.path.join(
-                self.subfile_distributor_context.cfg_log_path, f"{__name__}.log"
+                self.subfile_distributor_context.cfg_log_path,
+                f"{__name__}.log",
             )
         )
         file_log.setLevel(logging.DEBUG)
         file_log.setFormatter(
-            logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s")
+            logging.Formatter(
+                "%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"
+            )
         )
         self.logger.addHandler(file_log)
 
@@ -91,8 +94,8 @@ class FilterbankProcessor:
     def filterbank_handler(self, item: str) -> bool:
         if not self.archiving_paused:
             self.logger.info(
-                f"{item}- FilterbankProcessor.filterbank_handler is handling {item}: "
-                f"copy to {self.archive_destination_host}..."
+                f"{item}- FilterbankProcessor.filterbank_handler is handling"
+                f" {item}: copy to {self.archive_destination_host}..."
             )
 
             if not mwa_archiver.archive_file_xrootd(
@@ -113,9 +116,9 @@ class FilterbankProcessor:
     def pause_archiving(self, paused: bool):
         if self.archiving_paused != paused:
             if paused:
-                self.logger.info(f"Pausing archiving")
+                self.logger.info("Pausing archiving")
             else:
-                self.logger.info(f"Resuming archiving")
+                self.logger.info("Resuming archiving")
 
             if self.queue_worker_fil:
                 self.queue_worker_fil.pause(paused)

@@ -47,7 +47,8 @@ def validate_filename(filename: str) -> typing.Tuple[bool, int, int, str, str]:
         if not obs_id_check.isdigit():
             valid = False
             validation_error = (
-                "Filename does not start with a 10 digit observation_id- ignoring"
+                "Filename does not start with a 10 digit observation_id-"
+                " ignoring"
             )
         else:
             obs_id = int(obs_id_check)
@@ -57,7 +58,8 @@ def validate_filename(filename: str) -> typing.Tuple[bool, int, int, str, str]:
         if file_ext_part.lower() == ".sub":
             filetype_id = MWADataFileType.MWAX_VOLTAGES.value
         elif file_ext_part.lower() == ".fits":
-            # Could be metafits (e.g. 1316906688_metafits_ppds.fits) or visibilitlies
+            # Could be metafits (e.g. 1316906688_metafits_ppds.fits) or
+            # visibilitlies
             if (
                 file_name_part[10:] == "_metafits_ppds"
                 or file_name_part[10:] == "_metafits"
@@ -76,7 +78,9 @@ def validate_filename(filename: str) -> typing.Tuple[bool, int, int, str, str]:
         else:
             # Error - unknown filetype
             valid = False
-            validation_error = f"Unknown file extension {file_ext_part}- ignoring"
+            validation_error = (
+                f"Unknown file extension {file_ext_part}- ignoring"
+            )
 
     # 4. Check length of filename
     if valid:
@@ -87,22 +91,24 @@ def validate_filename(filename: str) -> typing.Tuple[bool, int, int, str, str]:
             if len(file_name_part) < 23 or len(file_name_part) > 25:
                 valid = False
                 validation_error = (
-                    f"Filename (excluding extension) is not in the correct format "
-                    f"(incorrect length ({len(file_name_part)}). Format should be "
-                    f"obsid_subobsid_XXX.sub)- ignoring"
+                    "Filename (excluding extension) is not in the correct"
+                    f" format (incorrect length ({len(file_name_part)})."
+                    " Format should be obsid_subobsid_XXX.sub)- ignoring"
                 )
         elif filetype_id == MWADataFileType.MWAX_VISIBILITIES.value:
             # filename format should be obsid_yyyymmddhhnnss_chXXX_XXX.fits
             if len(file_name_part) != 35:
                 valid = False
                 validation_error = (
-                    f"Filename (excluding extension) is not in the correct format "
-                    f"(incorrect length ({len(file_name_part)}). Format should be "
-                    f"obsid_yyyymmddhhnnss_chXXX_XXX.fits)- ignoring"
+                    "Filename (excluding extension) is not in the correct"
+                    f" format (incorrect length ({len(file_name_part)})."
+                    " Format should be obsid_yyyymmddhhnnss_chXXX_XXX.fits)-"
+                    " ignoring"
                 )
 
         elif filetype_id == MWADataFileType.MWA_PPD_FILE.value:
-            # filename format should be obsid_metafits_ppds.fits or obsid_metafits.fits or obsid.metafits
+            # filename format should be obsid_metafits_ppds.fits or
+            # obsid_metafits.fits or obsid.metafits
             if (
                 len(file_name_part) != 24
                 and len(file_name_part) != 19
@@ -110,9 +116,10 @@ def validate_filename(filename: str) -> typing.Tuple[bool, int, int, str, str]:
             ):
                 valid = False
                 validation_error = (
-                    f"Filename (excluding extension) is not in the correct format "
-                    f"(incorrect length ({len(file_name_part)}). Format should be "
-                    f"obsid_metafits_ppds.fits, obsid_metafits.fits or obsid.metafits)- ignoring"
+                    "Filename (excluding extension) is not in the correct"
+                    f" format (incorrect length ({len(file_name_part)})."
+                    " Format should be obsid_metafits_ppds.fits,"
+                    " obsid_metafits.fits or obsid.metafits)- ignoring"
                 )
 
         elif filetype_id == MWADataFileType.MWA_FLAG_FILE.value:
@@ -120,16 +127,17 @@ def validate_filename(filename: str) -> typing.Tuple[bool, int, int, str, str]:
             if len(file_name_part) != 16:
                 valid = False
                 validation_error = (
-                    f"Filename (excluding extension) is not in the correct format "
-                    f"(incorrect length ({len(file_name_part)}). Format should be "
-                    f"obsid_flags.zip)- ignoring"
+                    "Filename (excluding extension) is not in the correct"
+                    f" format (incorrect length ({len(file_name_part)})."
+                    " Format should be obsid_flags.zip)- ignoring"
                 )
 
     return valid, obs_id, filetype_id, file_ext_part, validation_error
 
 
 def determine_bucket_and_folder(full_filename, location):
-    """Return the bucket and folder of the file to be archived, based on location."""
+    """Return the bucket and folder of the file to be archived,
+    based on location."""
     filename = os.path.basename(full_filename)
 
     # ceph / acacia
@@ -158,15 +166,21 @@ def archive_file_rsync(
     try:
         file_size = os.path.getsize(full_filename)
     except Exception as e:
-        logger.error(f"{full_filename}: Error determining file size. Error {e}")
+        logger.error(
+            f"{full_filename}: Error determining file size. Error {e}"
+        )
         return False
 
     # Build final command line
-    # --no-compress ensures we don't try to compress (it's going to be quite uncompressible)
-    # The -e "xxx" is there to remove as much encryption/compression of the ssh connection as possible to speed up the xfer
+    # --no-compress ensures we don't try to compress (it's going to be quite
+    # uncompressible)
+    # The -e "xxx" is there to remove as much encryption/compression of the
+    # ssh connection as possible to speed up the xfer
     cmdline = (
-        f"rsync --no-compress -e 'ssh -T -c aes128-cbc -o StrictHostKeyChecking=no -o Compression=no -x ' "
-        f"-r {full_filename} {archive_destination_host}:{archive_destination_path}"
+        "rsync --no-compress -e 'ssh -T -c aes128-cbc -o"
+        " StrictHostKeyChecking=no -o Compression=no -x ' "
+        f"-r {full_filename} {archive_destination_host}:"
+        f"{archive_destination_path}"
     )
 
     start_time = time.time()
@@ -183,7 +197,9 @@ def archive_file_rsync(
         gbps_per_sec = (size_gigabytes * 8) / elapsed
 
         logger.info(
-            f"{full_filename} archive_file_rsync success ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at {gbps_per_sec:.3f} Gbps)"
+            f"{full_filename} archive_file_rsync success"
+            f" ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at"
+            f" {gbps_per_sec:.3f} Gbps)"
         )
         return True
     else:
@@ -203,26 +219,35 @@ def archive_file_xrootd(
     try:
         file_size = os.path.getsize(full_filename)
     except Exception as e:
-        logger.error(f"{full_filename}: Error determining file size. Error {e}")
+        logger.error(
+            f"{full_filename}: Error determining file size. Error {e}"
+        )
         return False
 
     # Gather some info for later
     filename = os.path.basename(full_filename)
     temp_filename = f"{filename}.part{uuid.uuid4()}"
-    # Archive destination host looks like: "192.168.120.110://volume2/incoming", so just get the bit before the ":" for the host and the bit after for the path
+    # Archive destination host looks like: "192.168.120.110://volume2/incoming"
+    # so just get the bit before the ":" for the host and the bit after for
+    # the path
     destination_host = archive_destination_host.split(":")[0]
     destination_path = archive_destination_host.split(":")[1]
-    full_destination_temp_filename = os.path.join(destination_path, temp_filename)
+    full_destination_temp_filename = os.path.join(
+        destination_path, temp_filename
+    )
     full_destination_final_filename = os.path.join(destination_path, filename)
 
     # Build final command line
     #
-    # --posc         = persist on successful copy. If copy fails either remove the file or set it to 0 bytes. Setting to 0 bytes is weird, but I'll take it
+    # --posc         = persist on successful copy. If copy fails either remove
+    #                  the file or set it to 0 bytes. Setting to 0 bytes is
+    #                  weird, but I'll take it
     # --rm-bad-cksum = Delete dest file if checksums do not match
     #
     cmdline = (
-        f"/usr/local/bin/xrdcp --cksum adler32 --posc --rm-bad-cksum "
-        f"--silent --streams 2 --tlsnodata {full_filename} xroot://{archive_destination_host}/{temp_filename}"
+        "/usr/local/bin/xrdcp --cksum adler32 --posc --rm-bad-cksum --silent"
+        " --streams 2 --tlsnodata"
+        f" {full_filename} xroot://{archive_destination_host}/{temp_filename}"
     )
 
     start_time = time.time()
@@ -239,10 +264,16 @@ def archive_file_xrootd(
         gbps_per_sec = (size_gigabytes * 8) / elapsed
 
         logger.info(
-            f"{full_filename} archive_file_xrootd success ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at {gbps_per_sec:.3f} Gbps)"
+            f"{full_filename} archive_file_xrootd success"
+            f" ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at"
+            f" {gbps_per_sec:.3f} Gbps)"
         )
 
-        cmdline = f"ssh mwa@{destination_host} 'mv {full_destination_temp_filename} {full_destination_final_filename}'"
+        cmdline = (
+            f"ssh mwa@{destination_host} 'mv"
+            f" {full_destination_temp_filename}"
+            f" {full_destination_final_filename}'"
+        )
 
         # run the mv command to rename the temp file to the final file
         # If this works, then mwacache will actually do its thing
@@ -252,7 +283,10 @@ def archive_file_xrootd(
 
         if return_val:
             logger.info(
-                f"{full_filename} archive_file_xrootd successfully renamed {full_destination_temp_filename} to {full_destination_final_filename} on the remote host {destination_host}"
+                f"{full_filename} archive_file_xrootd successfully renamed"
+                f" {full_destination_temp_filename} to"
+                f" {full_destination_final_filename} on the remote host"
+                f" {destination_host}"
             )
             return True
         else:
@@ -280,20 +314,27 @@ def archive_file_ceph(
     try:
         file_size = os.path.getsize(full_filename)
     except Exception as e:
-        logger.error(f"{full_filename}: Error determining file size. Error {e}")
+        logger.error(
+            f"{full_filename}: Error determining file size. Error {e}"
+        )
         return False
 
     # create bucket if required
-    logger.debug(f"{full_filename} creating S3 bucket {bucket_name} (if required)...")
+    logger.debug(
+        f"{full_filename} creating S3 bucket {bucket_name} (if required)..."
+    )
     try:
         ceph_create_bucket(ceph_session, bucket_name)
     except Exception as e:
         logger.error(
-            f"{full_filename}: Error creating/checking existence of S3 bucket {bucket_name} on {ceph_endpoint}. Error {e}"
+            f"{full_filename}: Error creating/checking existence of S3 bucket"
+            f" {bucket_name} on {ceph_endpoint}. Error {e}"
         )
         return False
 
-    logger.debug(f"{full_filename} attempting upload to S3 bucket {bucket_name}...")
+    logger.debug(
+        f"{full_filename} attempting upload to S3 bucket {bucket_name}..."
+    )
 
     # start timer
     start_time = time.time()
@@ -311,7 +352,8 @@ def archive_file_ceph(
         )
     except Exception as e:
         logger.error(
-            f"{full_filename}: Error uploading to S3 bucket {bucket_name} on {ceph_endpoint}. Error {e}"
+            f"{full_filename}: Error uploading to S3 bucket {bucket_name} on"
+            f" {ceph_endpoint}. Error {e}"
         )
         return False
 
@@ -322,24 +364,28 @@ def archive_file_ceph(
     gbps_per_sec = (size_gigabytes * 8) / elapsed
 
     logger.info(
-        f"{full_filename} archive_file_ceph success. ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at {gbps_per_sec:.3f} Gbps)"
+        f"{full_filename} archive_file_ceph success. ({size_gigabytes:.3f}GB"
+        f" in {elapsed:.3f} seconds at {gbps_per_sec:.3f} Gbps)"
     )
     return True
 
 
 #
-# NOTE: this code relies on the fact that the machine/user running this code should already have a valid
+# NOTE: this code relies on the fact that the machine/user running this code
+# should already have a valid
 # cat ~/.aws/config file which provides:
 #
 # [default]
 # aws_access_key_id=XXXXXXXXXXXXXX
 # aws_secret_access_key=XXXXXXXXXXXXXXXXXXXXXXXXX
 #
-# Boto3 will use this file to authenticate and fail if it is not there or is not valid
+# Boto3 will use this file to authenticate and fail if it is not there or is
+# not valid
 #
 
 #
-# Dervied from: https://github.com/tlastowka/calculate_multipart_etag/blob/master/calculate_multipart_etag.py
+# Dervied from: https://github.com/tlastowka/calculate_multipart_etag/blob
+# /master/calculate_multipart_etag.py
 #
 def ceph_get_s3_md5_etag(filename: str, chunk_size_bytes: int) -> str:
     md5s = []
@@ -370,7 +416,8 @@ def ceph_get_s3_object(profile: str, endpoint: str):
     # create a session based on the profile name
     session = boto3.Session(profile_name=profile)
 
-    # This ensures the default boto retries and timeouts don't leave us hanging too long
+    # This ensures the default boto retries and timeouts don't leave us
+    # hanging too long
     config = Config(connect_timeout=20, retries={"max_attempts": 2})
 
     s3_object = session.resource("s3", endpoint_url=endpoint, config=config)
@@ -386,7 +433,8 @@ def ceph_get_bucket_name_from_filename(filename: str) -> str:
 def ceph_get_bucket_name_from_obs_id(obs_id: int) -> str:
     # return the first 5 digits of the obsid
     # This means there will be a new bucket every ~27 hours
-    # This is to reduce the chances of vcs jobs filling a bucket to more than 100K of files
+    # This is to reduce the chances of vcs jobs filling a bucket to more than
+    # 100K of files
     return f"mwaingest-{str(obs_id)[0:5]}"
 
 

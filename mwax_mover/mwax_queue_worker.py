@@ -8,9 +8,13 @@ from mwax_mover import mwax_mover, mwax_command
 class QueueWorker(object):
     # Either pass an event handler or pass an executable path to run
     #
-    # requeue_to_eoq_on_failure: if work fails, True  = requeue to back of queue, try the next item
-    #                                                   (order does not matter)
-    #                                         , False = keep retrying this item (i.e. order of items matters)
+    # requeue_to_eoq_on_failure: if work fails, True  = requeue to back of
+    #                                                   queue, try the next
+    #                                                   item (order does not
+    #                                                   matter)
+    #                                         , False = keep retrying this
+    #                                                   item (i.e. order
+    #                                                   of items matters)
     def __init__(
         self,
         label: str,
@@ -31,7 +35,8 @@ class QueueWorker(object):
             event_handler is not None and executable_path is not None
         ):
             raise Exception(
-                "QueueWorker requires event_handler OR executable_path not both and not neither!"
+                "QueueWorker requires event_handler OR executable_path not"
+                " both and not neither!"
             )
 
         self._executable_path = executable_path
@@ -75,14 +80,16 @@ class QueueWorker(object):
                             success = self._event_handler(self.current_item)
 
                         if success:
-                            # Dequeue the item, but requeue if it was not successful
+                            # Dequeue the item, but requeue if it was not
+                            # successful
                             self.q.task_done()
                             self.current_item = None
                     else:
                         # Dequeue the item
                         self.logger.warning(
-                            f"Processing {self.current_item } Complete... file was moved or deleted. "
-                            f"Queue size: {self.q.qsize()}"
+                            f"Processing {self.current_item } Complete... file"
+                            " was moved or deleted. Queue size:"
+                            f" {self.q.qsize()}"
                         )
                         self.current_item = None
                         self.q.task_done()
@@ -90,7 +97,8 @@ class QueueWorker(object):
 
                     elapsed = time.time() - start_time
                     self.logger.info(
-                        f"Complete. Queue size: {self.q.qsize()} Elapsed: {elapsed:.2f} sec"
+                        f"Complete. Queue size: {self.q.qsize()} Elapsed:"
+                        f" {elapsed:.2f} sec"
                     )
 
                     if success:
@@ -107,12 +115,13 @@ class QueueWorker(object):
                             backoff = self.backoff_limit_seconds
 
                         self.logger.info(
-                            f"{self.consecutive_error_count} consecutive failures. Backing off "
-                            f"for {backoff} seconds."
+                            f"{self.consecutive_error_count} consecutive"
+                            f" failures. Backing off for {backoff} seconds."
                         )
                         self.event.wait(backoff)
 
-                        # If this option is set, add item back to the end of the queue
+                        # If this option is set, add item back to the end of
+                        # the queue
                         # If not set, just keep retrying the operation
                         if self.requeue_to_eoq_on_failure:
                             self.q.task_done()

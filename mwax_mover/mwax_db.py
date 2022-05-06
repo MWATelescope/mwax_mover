@@ -10,7 +10,9 @@ DUMMY_DB = "dummy"
 
 
 class MWAXDBHandler:
-    def __init__(self, logger, host: str, port: int, db, user: str, password: str):
+    def __init__(
+        self, logger, host: str, port: int, db, user: str, password: str
+    ):
         self.logger = logger
         self.host = host
         self.port = port
@@ -26,21 +28,25 @@ class MWAXDBHandler:
     def connect(self):
         try:
             self.logger.info(
-                f"MWAXDBHandler.connect(): Attempting to connect to database: "
+                "MWAXDBHandler.connect(): Attempting to connect to database: "
                 f"{self.user}@{self.host}:{self.port}/{self.db}"
             )
 
             self.con = psycopg2.connect(
-                host=self.host, database=self.db, user=self.user, password=self.password
+                host=self.host,
+                database=self.db,
+                user=self.user,
+                password=self.password,
             )
 
             self.logger.info(
-                f"MWAXDBHandler.connect(): Connected to database: {self.user}@{self.host}:{self.port}/{self.db}"
+                "MWAXDBHandler.connect(): Connected to database:"
+                f" {self.user}@{self.host}:{self.port}/{self.db}"
             )
 
         except OperationalError as err:
             self.logger.error(
-                f"MWAXDBHandler.connect(): error connecting to database: "
+                "MWAXDBHandler.connect(): error connecting to database: "
                 f"{self.user}@{self.host}:{self.port}/{self.db} Error: {err}"
             )
             raise err
@@ -53,7 +59,8 @@ class MWAXDBHandler:
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(30))
     def select_one_row_postgres(self, sql: str, parm_list: list):
-        # We have a mutex here to ensure only 1 user of the connection at a time
+        # We have a mutex here to ensure only 1 user of the connection at a
+        # time
         with self.db_lock:
             # Do we have a database connection?
             if self.con is None:
@@ -78,17 +85,20 @@ class MWAXDBHandler:
                         else:
                             # Something went wrong
                             self.logger.error(
-                                f"select_one_row_postgres(): Error- queried {rows_affected} rows, expected 1. SQL={sql}"
+                                "select_one_row_postgres(): Error- queried"
+                                f" {rows_affected} rows, expected 1. SQL={sql}"
                             )
                             raise Exception(
-                                f"select_one_row_postgres(): Error- queried {rows_affected} rows, expected 1. SQL={sql}"
+                                "select_one_row_postgres(): Error- queried"
+                                f" {rows_affected} rows, expected 1. SQL={sql}"
                             )
 
             except OperationalError as conn_error:
                 # Our connection is toast. Clear it so we attempt a reconnect
                 self.con = None
                 self.logger.error(
-                    f"select_one_row_postgres(): postgres OperationalError- {conn_error}"
+                    "select_one_row_postgres(): postgres OperationalError-"
+                    f" {conn_error}"
                 )
                 # Reraise error
                 raise conn_error
@@ -97,31 +107,38 @@ class MWAXDBHandler:
                 # Our connection is toast. Clear it so we attempt a reconnect
                 self.con = None
                 self.logger.error(
-                    f"select_one_row_postgres(): postgres InterfaceError- {int_error}"
+                    "select_one_row_postgres(): postgres InterfaceError-"
+                    f" {int_error}"
                 )
                 # Reraise error
                 raise int_error
 
             except psycopg2.ProgrammingError as prog_error:
-                # A programming/SQL error - e.g. table does not exist. Don't reconnect connection
+                # A programming/SQL error - e.g. table does not exist. Don't
+                # reconnect connection
                 self.logger.error(
-                    f"select_one_row_postgres(): postgres ProgrammingError- {prog_error}"
+                    "select_one_row_postgres(): postgres ProgrammingError-"
+                    f" {prog_error}"
                 )
                 # Reraise error
                 raise prog_error
 
             except Exception as exception_info:
-                # Any other error- likely to be a database error rather than connection based
+                # Any other error- likely to be a database error rather than
+                # connection based
                 self.logger.error(
-                    f"select_one_row_postgres(): unknown Error- {exception_info}"
+                    "select_one_row_postgres(): unknown Error-"
+                    f" {exception_info}"
                 )
                 raise exception_info
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(30))
     def execute_single_dml_row(self, sql: str, parm_list: list):
-        """This executes an INSERT, UPDATE or DELETE that should only affect one row"""
+        """This executes an INSERT, UPDATE or DELETE that should only affect
+        one row"""
 
-        # We have a mutex here to ensure only 1 user of the connection at a time
+        # We have a mutex here to ensure only 1 user of the connection at a
+        # time
         with self.db_lock:
             # Do we have a database connection?
             if self.con is None:
@@ -138,19 +155,25 @@ class MWAXDBHandler:
                         rows_affected = cursor.rowcount
 
                         if rows_affected != 1:
-                            # An exception in here will trigger a rollback which is good
+                            # An exception in here will trigger a rollback
+                            # which is good
                             self.logger.error(
-                                f"execute_single_dml_row(): Error- query affected {rows_affected} rows, expected 1. SQL={sql}"
+                                "execute_single_dml_row(): Error- query"
+                                f" affected {rows_affected} rows, expected 1."
+                                f" SQL={sql}"
                             )
                             raise Exception(
-                                f"execute_single_dml_row(): Error- query affected {rows_affected} rows, expected 1. SQL={sql}"
+                                "execute_single_dml_row(): Error- query"
+                                f" affected {rows_affected} rows, expected 1."
+                                f" SQL={sql}"
                             )
 
             except OperationalError as conn_error:
                 # Our connection is toast. Clear it so we attempt a reconnect
                 self.con = None
                 self.logger.error(
-                    f"execute_single_dml_row(): postgres OperationalError- {conn_error}"
+                    "execute_single_dml_row(): postgres OperationalError-"
+                    f" {conn_error}"
                 )
                 # Reraise error
                 raise conn_error
@@ -159,23 +182,28 @@ class MWAXDBHandler:
                 # Our connection is toast. Clear it so we attempt a reconnect
                 self.con = None
                 self.logger.error(
-                    f"execute_single_dml_row(): postgres InterfaceError- {int_error}"
+                    "execute_single_dml_row(): postgres InterfaceError-"
+                    f" {int_error}"
                 )
                 # Reraise error
                 raise int_error
 
             except psycopg2.ProgrammingError as prog_error:
-                # A programming/SQL error - e.g. table does not exist. Don't reconnect connection
+                # A programming/SQL error - e.g. table does not exist. Don't
+                # reconnect connection
                 self.logger.error(
-                    f"execute_single_dml_row(): postgres ProgrammingError- {prog_error}"
+                    "execute_single_dml_row(): postgres ProgrammingError-"
+                    f" {prog_error}"
                 )
                 # Reraise error
                 raise prog_error
 
             except Exception as exception_info:
-                # Any other error- likely to be a database error rather than connection based
+                # Any other error- likely to be a database error rather than
+                # connection based
                 self.logger.error(
-                    f"execute_single_dml_row(): unknown Error- {exception_info}"
+                    "execute_single_dml_row(): unknown Error-"
+                    f" {exception_info}"
                 )
                 raise exception_info
 
@@ -193,10 +221,11 @@ class DataFileRow:
 # Return a data file row instance on success or None on Failure
 def get_data_file_row(db_handler_object, full_filename: str) -> DataFileRow:
     # Prepare the fields
-    # immediately add this file to the db so we insert a record into metadata data_files table
+    # immediately add this file to the db so we insert a record into metadata
+    # data_files table
     filename = os.path.basename(full_filename)
 
-    sql = """SELECT observation_num,                    
+    sql = """SELECT observation_num,
                     size,
                     checksum
             FROM data_files
@@ -204,7 +233,9 @@ def get_data_file_row(db_handler_object, full_filename: str) -> DataFileRow:
 
     try:
         # Run query and get the data_files row info for this file
-        obsid, size, checksum = db_handler_object.select_one_row(sql, (filename,))
+        obsid, size, checksum = db_handler_object.select_one_row(
+            sql, (filename,)
+        )
 
         data_files_row = DataFileRow()
         data_files_row.observation_num = int(obsid)
@@ -212,24 +243,26 @@ def get_data_file_row(db_handler_object, full_filename: str) -> DataFileRow:
         data_files_row.checksum = checksum
 
         if db_handler_object.dummy:
-            # We have a mutex here to ensure only 1 user of the connection at a time
+            # We have a mutex here to ensure only 1 user of the connection at
+            # a time
             with db_handler_object.db_lock:
                 db_handler_object.logger.warning(
-                    f"{full_filename} get_data_file_row() Using dummy database connection. "
-                    f"No data is really being queried."
+                    f"{full_filename} get_data_file_row() Using dummy database"
+                    " connection. No data is really being queried."
                 )
                 time.sleep(2)  # simulate a slow transaction
                 return None
         else:
             db_handler_object.logger.info(
-                f"{full_filename} get_data_file_row() Successfully read from data_files table {vars(data_files_row)}"
+                f"{full_filename} get_data_file_row() Successfully read from"
+                f" data_files table {vars(data_files_row)}"
             )
             return data_files_row
 
     except Exception as upsert_exception:
         db_handler_object.logger.error(
-            f"{full_filename} get_data_file_row() error upserting data_files record in "
-            f"data_files table: {upsert_exception}. SQL was {sql}"
+            f"{full_filename} get_data_file_row() error upserting data_files"
+            f" record in data_files table: {upsert_exception}. SQL was {sql}"
         )
         return None
 
@@ -244,7 +277,8 @@ def insert_data_file_row(
     checksum: str,
 ) -> bool:
     # Prepare the fields
-    # immediately add this file to the db so we insert a record into metadata data_files table
+    # immediately add this file to the db so we insert a record into metadata
+    # data_files table
     filename = os.path.basename(archive_filename)
     file_size = os.stat(archive_filename).st_size
     deleted = False
@@ -261,7 +295,7 @@ def insert_data_file_row(
                 filename,
                 host,
                 remote_archived,
-                deleted,                                
+                deleted,
                 checksum_type,
                 checksum)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"""
@@ -286,21 +320,22 @@ def insert_data_file_row(
             # the connection at a time
             with db_handler_object.db_lock:
                 db_handler_object.logger.warning(
-                    f"{filename} insert_data_file_row() Using dummy database connection. "
-                    f"No data is really being inserted."
+                    f"{filename} insert_data_file_row() Using dummy database"
+                    " connection. No data is really being inserted."
                 )
                 time.sleep(10)  # simulate a slow transaction
                 return True
         else:
             db_handler_object.logger.info(
-                f"{filename} insert_data_file_row() Successfully wrote into data_files table"
+                f"{filename} insert_data_file_row() Successfully wrote into"
+                " data_files table"
             )
             return True
 
     except Exception as upsert_exception:
         db_handler_object.logger.error(
-            f"{filename} insert_data_file_row() error inserting data_files record in "
-            f"data_files table: {upsert_exception}. SQL was {sql}"
+            f"{filename} insert_data_file_row() error inserting data_files"
+            f" record in data_files table: {upsert_exception}. SQL was {sql}"
         )
         return False
 
@@ -320,9 +355,9 @@ def update_data_file_row_as_archived(
     sql = ""
 
     try:
-        sql = """UPDATE data_files                            
+        sql = """UPDATE data_files
                 SET
-                    remote_archived = True,                
+                    remote_archived = True,
                     bucket = %s,
                     folder = %s,
                     location = %s
@@ -346,20 +381,23 @@ def update_data_file_row_as_archived(
             # the connection at a time
             with db_handler_object.db_lock:
                 db_handler_object.logger.warning(
-                    f"{filename} update_data_file_row_as_archived() Using dummy database connection. "
-                    f"No data is really being updated."
+                    f"{filename} update_data_file_row_as_archived() Using"
+                    " dummy database connection. No data is really being"
+                    " updated."
                 )
                 time.sleep(10)  # simulate a slow transaction
                 return True
         else:
             db_handler_object.logger.info(
-                f"{filename} update_data_file_row_as_archived() Successfully updated data_files table"
+                f"{filename} update_data_file_row_as_archived() Successfully"
+                " updated data_files table"
             )
             return True
 
     except Exception as upsert_exception:
         db_handler_object.logger.error(
-            f"{filename} update_data_file_row_as_archived() error updating data_files record in "
-            f"data_files table: {upsert_exception}. SQL was {sql}"
+            f"{filename} update_data_file_row_as_archived() error updating"
+            f" data_files record in data_files table: {upsert_exception}. SQL"
+            f" was {sql}"
         )
         return False

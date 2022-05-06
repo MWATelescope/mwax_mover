@@ -1,4 +1,5 @@
 from mwax_mover import mwax_command
+import astropy.io.fits as fits
 import base64
 from configparser import ConfigParser
 import fcntl
@@ -11,7 +12,21 @@ import time
 import typing
 
 
-def read_config(logger, config: ConfigParser, section: str, key: str, b64encoded=False):
+def is_observation_calibrator(metafits_filename: str) -> bool:
+    with fits.open(metafits_filename) as hdul:
+        # Read key from primary HDU
+        # Returns T or F
+        is_calibrator: str = hdul[0].header["CALIBRAT"]
+
+        if is_calibrator == "T":
+            return True
+        else:
+            return False
+
+
+def read_config(
+    logger, config: ConfigParser, section: str, key: str, b64encoded=False
+):
     if b64encoded:
         value = base64.b64decode(config.get(section, key)).decode("utf-8")
         value_to_log = "*" * len(value)
@@ -50,12 +65,17 @@ def process_mwax_stats(
     # This code will execute the mwax stats command
     obs_id = str(os.path.basename(full_filename)[0:10])
 
-    cmd = f"{mwax_stats_executable} -t {full_filename} -m /vulcan/metafits/{obs_id}_metafits.fits -o {stats_dump_dir}"
+    cmd = (
+        f"{mwax_stats_executable} -t {full_filename} -m"
+        f" /vulcan/metafits/{obs_id}_metafits.fits -o {stats_dump_dir}"
+    )
 
     logger.info(f"{full_filename}- attempting to run stats: {cmd}")
 
     start_time = time.time()
-    return_value, stdout = mwax_command.run_command_ext(logger, cmd, numa_node, timeout)
+    return_value, stdout = mwax_command.run_command_ext(
+        logger, cmd, numa_node, timeout
+    )
     elapsed = time.time() - start_time
 
     if return_value:
@@ -67,14 +87,18 @@ def process_mwax_stats(
 def load_psrdada_ringbuffer(
     logger, full_filename: str, ringbuffer_key: str, numa_node, timeout: int
 ) -> bool:
-    logger.info(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
+    logger.info(
+        f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}"
+    )
 
     cmd = f"dada_diskdb -k {ringbuffer_key} -f {full_filename}"
 
     size = os.path.getsize(full_filename)
 
     start_time = time.time()
-    return_value, stdout = mwax_command.run_command_ext(logger, cmd, numa_node, timeout)
+    return_value, stdout = mwax_command.run_command_ext(
+        logger, cmd, numa_node, timeout
+    )
     elapsed = time.time() - start_time
 
     size_gigabytes = size / (1000 * 1000 * 1000)
@@ -82,17 +106,25 @@ def load_psrdada_ringbuffer(
 
     if return_value:
         logger.info(
-            f"{full_filename} load_psrdada_ringbuffer success ({size_gigabytes:.3f}GB "
-            f"in {elapsed} sec at {gbps_per_sec:.3f} Gbps)"
+            f"{full_filename} load_psrdada_ringbuffer success"
+            f" ({size_gigabytes:.3f}GB in {elapsed} sec at"
+            f" {gbps_per_sec:.3f} Gbps)"
         )
 
     return return_value
 
 
 def scan_for_existing_files(
-    logger, watch_dir: str, pattern: str, recursive: bool, q, exclude_pattern=None
+    logger,
+    watch_dir: str,
+    pattern: str,
+    recursive: bool,
+    q,
+    exclude_pattern=None,
 ):
-    files = scan_directory(logger, watch_dir, pattern, recursive, exclude_pattern)
+    files = scan_directory(
+        logger, watch_dir, pattern, recursive, exclude_pattern
+    )
     files = sorted(files)
     logger.info(f"Found {len(files)} files")
 
@@ -107,8 +139,12 @@ def scan_directory(
     # Watch dir must end in a slash for the iglob to work
     # Just loop through all files and add them to the queue
     if recursive:
-        find_pattern = os.path.join(os.path.abspath(watch_dir), "**/*" + pattern)
-        logger.info(f"Scanning recursively for files matching {find_pattern}...")
+        find_pattern = os.path.join(
+            os.path.abspath(watch_dir), "**/*" + pattern
+        )
+        logger.info(
+            f"Scanning recursively for files matching {find_pattern}..."
+        )
     else:
         find_pattern = os.path.join(os.path.abspath(watch_dir), "*" + pattern)
         logger.info(f"Scanning for files matching {find_pattern}...")
@@ -117,7 +153,9 @@ def scan_directory(
 
     # Now exclude files if they match the exclude pattern
     if exclude_pattern:
-        exclude_glob = os.path.join(os.path.abspath(watch_dir), "*" + exclude_pattern)
+        exclude_glob = os.path.join(
+            os.path.abspath(watch_dir), "*" + exclude_pattern
+        )
         logger.info(f"Excluding files {exclude_glob}...")
         return [fn for fn in files if fn not in glob.glob(exclude_glob)]
     else:
@@ -136,7 +174,8 @@ def send_multicast(
 
     # Disable loopback so you do not receive your own datagrams.
     # loopback = 0
-    # if sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, loopback) != 0:
+    # if sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP,
+    #                    loopback) != 0:
     #    raise Exception("Error setsockopt IP_MULTICAST_LOOP failed")
 
     # Set the time-to-live for messages.
@@ -183,9 +222,12 @@ def get_disk_space_bytes(path: str) -> typing.Tuple[int, int, int]:
     return shutil.disk_usage(path)
 
 
-def do_checksum_md5(logger, full_filename: str, numa_node: int, timeout: int) -> str:
+def do_checksum_md5(
+    logger, full_filename: str, numa_node: int, timeout: int
+) -> str:
     # default output of md5 hash command is:
-    # "5ce49e5ebd72c41a1d70802340613757  /visdata/incoming/1320133480_20211105074422_ch055_000.fits"
+    # "5ce49e5ebd72c41a1d70802340613757
+    # /visdata/incoming/1320133480_20211105074422_ch055_000.fits"
     md5output = ""
     checksum = ""
 
@@ -212,8 +254,9 @@ def do_checksum_md5(logger, full_filename: str, numa_node: int, timeout: int) ->
         # MD5 hash is ALWAYS 32 characters
         if len(checksum) == 32:
             logger.info(
-                f"{full_filename} md5sum success {checksum} ({size_megabytes:.3f}MB in {elapsed} secs at "
-                f"{mb_per_sec:.3f} MB/s)"
+                f"{full_filename} md5sum success"
+                f" {checksum} ({size_megabytes:.3f}MB in {elapsed} secs at"
+                f" {mb_per_sec:.3f} MB/s)"
             )
             return checksum
         else:
@@ -221,4 +264,6 @@ def do_checksum_md5(logger, full_filename: str, numa_node: int, timeout: int) ->
                 f"Calculated MD5 checksum is not valid: md5 output {md5output}"
             )
     else:
-        raise Exception(f"md5sum returned an unexpected return code {return_value}")
+        raise Exception(
+            f"md5sum returned an unexpected return code {return_value}"
+        )

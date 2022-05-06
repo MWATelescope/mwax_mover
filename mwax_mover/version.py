@@ -27,5 +27,6 @@ def get_pmwax_mover_version_number() -> typing.Tuple[int, int, int]:
         )
     except Exception as e:
         raise Exception(
-            f"Unabled to determine pymwalib version: Got {version} which could not be parsed. Error: {e}"
+            f"Unabled to determine pymwalib version: Got {version} which could"
+            f" not be parsed. Error: {e}"
         )

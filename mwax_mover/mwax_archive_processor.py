@@ -34,6 +34,8 @@ class MWAXArchiveProcessor:
         visdata_incoming_path: str,
         visdata_processing_stats_path: str,
         visdata_outgoing_path: str,
+        visdata_cal_outgoing_path: str,
+        metafits_path: str,
         dont_archive_path: str,
     ):
         self.subfile_distributor_context = context
@@ -45,12 +47,15 @@ class MWAXArchiveProcessor:
         self.logger.setLevel(logging.DEBUG)
         file_log = logging.FileHandler(
             filename=os.path.join(
-                self.subfile_distributor_context.cfg_log_path, f"{__name__}.log"
+                self.subfile_distributor_context.cfg_log_path,
+                f"{__name__}.log",
             )
         )
         file_log.setLevel(logging.DEBUG)
         file_log.setFormatter(
-            logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s")
+            logging.Formatter(
+                "%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"
+            )
         )
         self.logger.addHandler(file_log)
 
@@ -102,6 +107,13 @@ class MWAXArchiveProcessor:
         self.watcher_outgoing_vis = None
         self.queue_worker_outgoing_vis = None
 
+        self.watch_dir_outgoing_cal = visdata_cal_outgoing_path
+        self.queue_outgoing_cal = queue.Queue()
+        self.watcher_outgoing_cal = None
+        self.queue_worker_outgoing_cal = None
+
+        self.metafits_path = metafits_path
+
     def start(self):
         if self.archive_destination_enabled:
             # Create watcher for voltage data -> checksum+db queue
@@ -116,7 +128,8 @@ class MWAXArchiveProcessor:
 
             # Create watcher for visibility data -> checksum+db queue
             # This will watch for mwax visibilities being renamed OR
-            # fits files being created (e.g. metafits ppd files being copied into /visdata).
+            # fits files being created
+            # (e.g. metafits ppd files being copied into /visdata).
             self.watcher_incoming_vis = mwax_watcher.Watcher(
                 path=self.watch_dir_incoming_vis,
                 q=self.queue_checksum_and_db,
@@ -147,13 +160,15 @@ class MWAXArchiveProcessor:
             )
 
             # worker for visibility processing stats
-            self.queue_worker_processing_stats_vis = mwax_queue_worker.QueueWorker(
-                label="processing stats vis worker",
-                q=self.queue_processing_stats_vis,
-                executable_path=None,
-                event_handler=self.stats_handler,
-                log=self.logger,
-                exit_once_queue_empty=False,
+            self.queue_worker_processing_stats_vis = (
+                mwax_queue_worker.QueueWorker(
+                    label="processing stats vis worker",
+                    q=self.queue_processing_stats_vis,
+                    executable_path=None,
+                    event_handler=self.stats_handler,
+                    log=self.logger,
+                    exit_once_queue_empty=False,
+                )
             )
 
             # Create watcher for archiving outgoing voltage data
@@ -195,6 +210,29 @@ class MWAXArchiveProcessor:
                 log=self.logger,
                 exit_once_queue_empty=False,
             )
+
+            # Create watcher for sending calibration visibility data
+            # for processing
+            self.watcher_outgoing_cal = mwax_watcher.Watcher(
+                path=self.watch_dir_outgoing_cal,
+                q=self.queue_outgoing_cal,
+                pattern=".fits",
+                log=self.logger,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
+                recursive=False,
+            )
+
+            # Create queueworker for sending calibration visibility data
+            # for processing
+            self.queue_worker_outgoing_cal = mwax_queue_worker.QueueWorker(
+                label="outgoing cal vis worker",
+                q=self.queue_outgoing_cal,
+                executable_path=None,
+                event_handler=self.cal_handler,
+                log=self.logger,
+                exit_once_queue_empty=False,
+            )
+
             #
             # Start watcher threads
             #
@@ -244,6 +282,15 @@ class MWAXArchiveProcessor:
             self.watcher_threads.append(watcher_vis_outgoing_thread)
             watcher_vis_outgoing_thread.start()
 
+            # Setup thread for watching outgoing filesystem (cal)
+            watcher_cal_outgoing_thread = threading.Thread(
+                name="watch_cal_outgoing",
+                target=self.watcher_outgoing_cal.start,
+                daemon=True,
+            )
+            self.watcher_threads.append(watcher_cal_outgoing_thread)
+            watcher_cal_outgoing_thread.start()
+
             #
             # Start queue worker threads
             #
@@ -256,13 +303,16 @@ class MWAXArchiveProcessor:
             self.worker_threads.append(queue_worker_checksum_and_db_thread)
             queue_worker_checksum_and_db_thread.start()
 
-            # Setup thread for processing items on the processing stats vis queue
+            # Setup thread for processing items on the
+            # processing stats vis queue
             queue_worker_vis_processing_stats_thread = threading.Thread(
                 name="work_vis_processing_stats",
                 target=self.queue_worker_processing_stats_vis.start,
                 daemon=True,
             )
-            self.worker_threads.append(queue_worker_vis_processing_stats_thread)
+            self.worker_threads.append(
+                queue_worker_vis_processing_stats_thread
+            )
             queue_worker_vis_processing_stats_thread.start()
 
             # Setup thread for processing items on the outgoing_volt queue
@@ -282,21 +332,34 @@ class MWAXArchiveProcessor:
             )
             self.worker_threads.append(queue_worker_vis_outgoing_thread)
             queue_worker_vis_outgoing_thread.start()
+
+            # Setup thread for processing items on the outgoing vis queue
+            queue_worker_cal_outgoing_thread = threading.Thread(
+                name="work_cal_outgoing",
+                target=self.queue_worker_outgoing_cal.start,
+                daemon=True,
+            )
+            self.worker_threads.append(queue_worker_cal_outgoing_thread)
+            queue_worker_cal_outgoing_thread.start()
         else:
-            # We have disabled archiving, so use a different handler for incoming data
+            # We have disabled archiving, so use a different
+            # handler for incoming data
             # which just moves the files elsewhere
 
-            # First check to ensure there are no existing unarchived files on our watching dirs
+            # First check to ensure there are no existing unarchived files on
+            # our watching dirs
             if (
                 len(next(os.walk(self.watch_dir_incoming_volt))[2]) > 0
                 or len(next(os.walk(self.watch_dir_incoming_vis))[2]) > 0
                 or len(next(os.walk(self.watch_dir_outgoing_volt))[2]) > 0
                 or len(next(os.walk(self.watch_dir_outgoing_vis))[2]) > 0
-                or len(next(os.walk(self.watch_dir_processing_stats_vis))[2]) > 0
+                or len(next(os.walk(self.watch_dir_outgoing_cal))[2]) > 0
+                or len(next(os.walk(self.watch_dir_processing_stats_vis))[2])
+                > 0
             ):
                 self.logger.error(
                     "Error- voltage incoming/outgoing and/or visibility "
-                    "incoming/processing/outgoing dirs are not empty! "
+                    "incoming/processing/outgoing/cal dirs are not empty! "
                     "Watched paths must be empty before starting with  "
                     "archiving disabled to prevent inadvertent data loss. "
                     "Exiting."
@@ -315,7 +378,8 @@ class MWAXArchiveProcessor:
 
             # Create watcher for visibility data -> dont_archive queue
             # This will watch for mwax visibilities being renamed OR
-            # fits files being created (e.g. metafits ppd files being copied into /visdata).
+            # fits files being created (e.g. metafits ppd files being copied
+            # into /visdata).
             self.watcher_incoming_vis = mwax_watcher.Watcher(
                 path=self.watch_dir_incoming_vis,
                 q=self.queue_dont_archive,
@@ -372,16 +436,20 @@ class MWAXArchiveProcessor:
     def dont_archive_handler(self, item: str) -> bool:
         self.logger.info(f"{item}- dont_archive_handler() Started")
 
-        outgoing_filename = os.path.join(self.dont_archive_path, os.path.basename(item))
+        outgoing_filename = os.path.join(
+            self.dont_archive_path, os.path.basename(item)
+        )
 
         self.logger.debug(
-            f"{item}- dont_archive_handler() moving file to {self.dont_archive_path}"
+            f"{item}- dont_archive_handler() moving file to"
+            f" {self.dont_archive_path}"
         )
         os.rename(item, outgoing_filename)
 
         self.logger.info(
-            f"{item}- dont_archive_handler() moved file to {self.dont_archive_path} dir "
-            f"Queue size: {self.queue_dont_archive.qsize()}"
+            f"{item}- dont_archive_handler() moved file to"
+            f" {self.dont_archive_path} dir Queue size:"
+            f" {self.queue_dont_archive.qsize()}"
         )
 
         self.logger.info(f"{item}- dont_archive_handler() Finished")
@@ -400,7 +468,8 @@ class MWAXArchiveProcessor:
         ) = mwa_archiver.validate_filename(item)
 
         if valid:
-            # checksum then add this file to the db so we insert a record into metadata data_files table
+            # checksum then add this file to the db so we insert a record into
+            # metadata data_files table
             checksum_type_id: int = 1  # MD5
             checksum: str = utils.do_checksum_md5(
                 self.logger, item, int(self.archive_command_numa_node), 180
@@ -419,65 +488,77 @@ class MWAXArchiveProcessor:
                 # if something went wrong, requeue
                 return False
 
-            # immediately add this file (and a ptr to it's queue) to the voltage or
-            # vis queue which will deal with archiving
+            # immediately add this file (and a ptr to it's queue) to the
+            # voltage or vis queue which will deal with archiving
             if filetype == MWADataFileType.MWAX_VOLTAGES.value:
                 # move to voltdata/outgoing
-                # Take the input filename - strip the path, then append the output path
+                # Take the input filename - strip the path, then append the
+                # output path
                 outgoing_filename = os.path.join(
                     self.watch_dir_outgoing_volt, os.path.basename(item)
                 )
 
                 self.logger.debug(
-                    f"{item}- checksum_and_db_handler() moving subfile to volt outgoing dir"
+                    f"{item}- checksum_and_db_handler() moving subfile to volt"
+                    " outgoing dir"
                 )
                 os.rename(item, outgoing_filename)
 
                 self.logger.info(
-                    f"{item}- checksum_and_db_handler() moved subfile to volt outgoing dir "
-                    f"Queue size: {self.queue_checksum_and_db.qsize()}"
+                    f"{item}- checksum_and_db_handler() moved subfile to volt"
+                    " outgoing dir Queue size:"
+                    f" {self.queue_checksum_and_db.qsize()}"
                 )
             elif filetype == MWADataFileType.MWAX_VISIBILITIES.value:
                 # move to visdata/processing_stats
-                # Take the input filename - strip the path, then append the output path
+                # Take the input filename - strip the path, then append the
+                # output path
                 outgoing_filename = os.path.join(
                     self.watch_dir_processing_stats_vis, os.path.basename(item)
                 )
 
                 self.logger.debug(
-                    f"{item}- checksum_and_db_handler() moving visibility file to vis processing stats dir"
+                    f"{item}- checksum_and_db_handler() moving visibility file"
+                    " to vis processing stats dir"
                 )
                 os.rename(item, outgoing_filename)
 
                 self.logger.info(
-                    f"{item}- checksum_and_db_handler() moved visibility file to vis processing stats dir "
-                    f"Queue size: {self.queue_checksum_and_db.qsize()}"
+                    f"{item}- checksum_and_db_handler() moved visibility file"
+                    " to vis processing stats dir Queue size:"
+                    f" {self.queue_checksum_and_db.qsize()}"
                 )
 
             elif filetype == MWADataFileType.MWA_PPD_FILE.value:
                 # move to visdata/outgoing
-                # Take the input filename - strip the path, then append the output path
+                # Take the input filename - strip the path, then append the
+                # output path
                 outgoing_filename = os.path.join(
                     self.watch_dir_outgoing_vis, os.path.basename(item)
                 )
 
                 self.logger.debug(
-                    f"{item}- checksum_and_db_handler() moving metafits file to vis outgoing dir"
+                    f"{item}- checksum_and_db_handler() moving metafits file"
+                    " to vis outgoing dir"
                 )
                 os.rename(item, outgoing_filename)
 
                 self.logger.info(
-                    f"{item}- checksum_and_db_handler() moved metafits file to vis outgoing dir "
-                    f"Queue size: {self.queue_checksum_and_db.qsize()}"
+                    f"{item}- checksum_and_db_handler() moved metafits file to"
+                    " vis outgoing dir Queue size:"
+                    f" {self.queue_checksum_and_db.qsize()}"
                 )
             else:
                 self.logger.error(
-                    f"{item}- checksum_and_db_handler() - not a valid file extension {filetype}"
+                    f"{item}- checksum_and_db_handler() - not a valid file"
+                    f" extension {filetype}"
                 )
                 return False
         else:
             # The filename was not valid
-            self.logger.error(f"{item}- checksum_and_db_handler() {validation_message}")
+            self.logger.error(
+                f"{item}- checksum_and_db_handler() {validation_message}"
+            )
             return False
 
         self.logger.info(f"{item}- checksum_and_db_handler() Finished")
@@ -490,7 +571,8 @@ class MWAXArchiveProcessor:
         if "metafits" in item:
             # We don't run stats on metafits! Just pass it onto the output dir
             self.logger.debug(
-                f"{item}- stats_handler() - metafits file detected. Moving file to outgoing dir"
+                f"{item}- stats_handler() - metafits file detected. Moving"
+                " file to outgoing dir"
             )
         else:
             # This is a normal mwax fits file. Run stats on it
@@ -509,16 +591,21 @@ class MWAXArchiveProcessor:
 
         # Take the input filename - strip the path, then append the output path
         outgoing_filename = os.path.join(
-            self.watch_dir_outgoing_vis, os.path.basename(item)
+            self.watch_dir_outgoing_cal, os.path.basename(item)
         )
 
-        self.logger.debug(f"{item}- stats_handler() moving file to outgoing dir")
+        self.logger.debug(
+            f"{item}- stats_handler() moving file to outgoing cal dir"
+        )
         os.rename(item, outgoing_filename)
 
         self.logger.info(f"{item}- stats_handler() Finished")
         return True
 
     def archive_handler(self, item: str) -> bool:
+        """This is called whenever a file is moved into the
+        outgoing_vis directory. For each file attempt to send to
+        the archive then remove the file"""
         self.logger.info(f"{item}- archive_handler() Started...")
 
         if (
@@ -537,6 +624,48 @@ class MWAXArchiveProcessor:
         mwax_mover.remove_file(self.logger, item, raise_error=False)
 
         self.logger.info(f"{item}- archive_handler() Finished")
+        return True
+
+    def cal_handler(self, item: str) -> bool:
+        """This is called when a file is detected in the cal watch directory.
+        If the observation is a calibrator, then copy this file to the
+        designated calibrator destination for processing. Regardless,
+        Move the file into the vis_outgoing directory for archiving"""
+        self.logger.info(f"{item}- cal_handler() Started...")
+
+        metafits_filename = os.path.join(
+            self.metafits_path, f"{item[0:10]}_metafits.fits"
+        )
+
+        self.logger.debug(
+            f"{item}- cal_handler() checking if observation is a "
+            f"calibrator by reading {metafits_filename}"
+        )
+
+        if utils.is_observation_calibrator(metafits_filename):
+            if (
+                mwa_archiver.archive_file_xrootd(
+                    self.logger,
+                    item,
+                    int(self.archive_command_numa_node),
+                    self.cal_destination_host,
+                    self.archive_command_timeout_sec,
+                )
+                is not True
+            ):
+                return False
+
+        # Take the input filename - strip the path, then append the output path
+        outgoing_filename = os.path.join(
+            self.watch_dir_outgoing_vis, os.path.basename(item)
+        )
+
+        self.logger.debug(
+            f"{item}- cal_handler() moving file to vis outgoing dir"
+        )
+        os.rename(item, outgoing_filename)
+
+        self.logger.info(f"{item}- cal_handler() Finished")
         return True
 
     def pause_archiving(self, paused: bool):

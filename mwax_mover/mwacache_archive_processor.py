@@ -56,7 +56,9 @@ class MWACacheArchiveProcessor:
         # acacia config
         self.acacia_profile = acacia_profile
         self.acacia_ceph_endpoint = acacia_ceph_endpoint
-        self.acacia_multipart_threshold_bytes = acacia_multipart_threshold_bytes
+        self.acacia_multipart_threshold_bytes = (
+            acacia_multipart_threshold_bytes
+        )
         self.acacia_chunk_size_bytes = acacia_chunk_size_bytes
         self.acacia_max_concurrency = acacia_max_concurrency
 
@@ -122,8 +124,10 @@ class MWACacheArchiveProcessor:
             #
             partial_files = glob(os.path.join(watch_dir, "*.part*"))
             for partial_file in partial_files:
-                # Ensure now minus the last mod time of the partial file is > 60 mins, it is definitely safe to delete
-                # In theory we could be starting up as mwax is sending us a new file and we don't want to delete an real
+                # Ensure now minus the last mod time of the partial file
+                # is > 60 mins, it is definitely safe to delete
+                # In theory we could be starting up as mwax is sending
+                # us a new file and we don't want to delete an real
                 # in progress file.
                 MIN_PARTIAL_PURGE_AGE_SECS = 3600
 
@@ -132,13 +136,17 @@ class MWACacheArchiveProcessor:
                     > MIN_PARTIAL_PURGE_AGE_SECS
                 ):
                     self.logger.warning(
-                        f"Partial file {partial_file} is older than {MIN_PARTIAL_PURGE_AGE_SECS} seconds and will be removed..."
+                        f"Partial file {partial_file} is older than"
+                        f" {MIN_PARTIAL_PURGE_AGE_SECS} seconds and will be"
+                        " removed..."
                     )
                     os.remove(partial_file)
                     self.logger.warning(f"Partial file {partial_file} deleted")
                 else:
                     self.logger.warning(
-                        f"Partial file {partial_file} is newer than {MIN_PARTIAL_PURGE_AGE_SECS} seconds so will NOT be removed this time"
+                        f"Partial file {partial_file} is newer than"
+                        f" {MIN_PARTIAL_PURGE_AGE_SECS} seconds so will NOT be"
+                        " removed this time"
                     )
 
             # Create watcher for each data path queue
@@ -210,7 +218,8 @@ class MWACacheArchiveProcessor:
             # Get the file size
             actual_file_size = os.stat(item).st_size
             self.logger.debug(
-                f"{item}- archive_handler() file size on disk is {actual_file_size} bytes"
+                f"{item}- archive_handler() file size on disk is"
+                f" {actual_file_size} bytes"
             )
 
             # Lookup file from db
@@ -223,24 +232,30 @@ class MWACacheArchiveProcessor:
             if actual_file_size == 0:
                 # File size is 0- lets just blow it away
                 self.logger.warning(
-                    f"{item}- archive_handler() File size is 0 bytes. Deleting file"
+                    f"{item}- archive_handler() File size is 0 bytes. Deleting"
+                    " file"
                 )
                 mwax_mover.remove_file(self.logger, item, raise_error=False)
 
-                # even though its a problem,we return true as we are finished with the item and it should not be requeued
+                # even though its a problem,we return true as we are finished
+                # with the item and it should not be requeued
                 return True
             elif actual_file_size != database_file_size:
                 # File size is incorrect- lets just blow it away
                 self.logger.warning(
-                    f"{item}- archive_handler() File size {actual_file_size} does not match {database_file_size}. Deleting file"
+                    f"{item}- archive_handler() File size"
+                    f" {actual_file_size} does not match {database_file_size}."
+                    " Deleting file"
                 )
                 mwax_mover.remove_file(self.logger, item, raise_error=False)
 
-                # even though its a problem,we return true as we are finished with the item and it should not be requeued
+                # even though its a problem,we return true as we are finished
+                # with the item and it should not be requeued
                 return True
 
             self.logger.debug(
-                f"{item}- archive_handler() File size matches metadata database"
+                f"{item}- archive_handler() File size matches metadata"
+                " database"
             )
 
             # Determine where to archive it
@@ -283,7 +298,8 @@ class MWACacheArchiveProcessor:
                     # if something went wrong, requeue
                     return False
 
-                # If all is well, we have the file safely archived and the database updated, so remove the file
+                # If all is well, we have the file safely archived and the
+                # database updated, so remove the file
                 self.logger.debug(f"{item}- archive_handler() Deleting file")
                 mwax_mover.remove_file(self.logger, item, raise_error=False)
 
@@ -293,7 +309,9 @@ class MWACacheArchiveProcessor:
                 return False
         else:
             # The filename was not valid
-            self.logger.error(f"{item}- archive_handler() {validation_message}")
+            self.logger.error(
+                f"{item}- archive_handler() {validation_message}"
+            )
             return False
 
     def pause_archiving(self, paused: bool):
@@ -416,11 +434,11 @@ def main():
     # Get command line args
     parser = argparse.ArgumentParser()
     parser.description = (
-        "mwacache_archive_processor: a command line tool which is part of the MWA "
-        "correlator for the MWA. It will monitor various directories on each mwacache "
-        "server and, upon detecting a file, send it to Pawsey's LTS. It will then "
-        f"remove the file from the local disk. "
-        f"(mwax_mover v{version.get_mwax_mover_version_string()})\n"
+        "mwacache_archive_processor: a command line tool which is part of the"
+        " MWA correlator for the MWA. It will monitor various directories on"
+        " each mwacache server and, upon detecting a file, send it to"
+        " Pawsey's LTS. It will then remove the file from the local disk."
+        f" (mwax_mover v{version.get_mwax_mover_version_string()})\n"
     )
 
     parser.add_argument(
@@ -434,7 +452,8 @@ def main():
 
     if not os.path.exists(config_filename):
         print(
-            f"Configuration file location {config_filename} does not exist. Quitting."
+            f"Configuration file location {config_filename} does not exist."
+            " Quitting."
         )
         exit(1)
 
@@ -456,19 +475,26 @@ def main():
     console_log = logging.StreamHandler()
     console_log.setLevel(logging.DEBUG)
     console_log.setFormatter(
-        logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s")
+        logging.Formatter(
+            "%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"
+        )
     )
     logger.addHandler(console_log)
 
-    file_log = logging.FileHandler(filename=os.path.join(cfg_log_path, "main.log"))
+    file_log = logging.FileHandler(
+        filename=os.path.join(cfg_log_path, "main.log")
+    )
     file_log.setLevel(logging.DEBUG)
     file_log.setFormatter(
-        logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s")
+        logging.Formatter(
+            "%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"
+        )
     )
     logger.addHandler(file_log)
 
     logger.info(
-        f"Starting mwacache_archive_processor processor...v{version.get_mwax_mover_version_string()}"
+        "Starting mwacache_archive_processor"
+        f" processor...v{version.get_mwax_mover_version_string()}"
     )
 
     i = 1
@@ -479,10 +505,14 @@ def main():
         utils.read_config(logger, config, "mwax mover", "archive_to_location")
     )
     cfg_concurrent_archive_workers = int(
-        utils.read_config(logger, config, "mwax mover", "concurrent_archive_workers")
+        utils.read_config(
+            logger, config, "mwax mover", "concurrent_archive_workers"
+        )
     )
     cfg_archive_command_timeout_sec = int(
-        utils.read_config(logger, config, "mwax mover", "archive_command_timeout_sec")
+        utils.read_config(
+            logger, config, "mwax mover", "archive_command_timeout_sec"
+        )
     )
 
     # health
@@ -490,10 +520,14 @@ def main():
         logger, config, "mwax mover", "health_multicast_ip"
     )
     cfg_health_multicast_port = int(
-        utils.read_config(logger, config, "mwax mover", "health_multicast_port")
+        utils.read_config(
+            logger, config, "mwax mover", "health_multicast_port"
+        )
     )
     cfg_health_multicast_hops = int(
-        utils.read_config(logger, config, "mwax mover", "health_multicast_hops")
+        utils.read_config(
+            logger, config, "mwax mover", "health_multicast_hops"
+        )
     )
     cfg_health_multicast_interface_name = utils.read_config(
         logger, config, "mwax mover", "health_multicast_interface_name"
@@ -502,7 +536,9 @@ def main():
     cfg_health_multicast_interface_ip = utils.get_ip_address(
         cfg_health_multicast_interface_name
     )
-    logger.info(f"IP for sending multicast: {cfg_health_multicast_interface_ip}")
+    logger.info(
+        f"IP for sending multicast: {cfg_health_multicast_interface_ip}"
+    )
 
     # acacia options
     cfg_acacia_profile = utils.read_config(logger, config, "acacia", "profile")
@@ -510,7 +546,9 @@ def main():
         logger, config, "acacia", "ceph_endpoint"
     )
     cfg_acacia_multipart_threshold_bytes = int(
-        utils.read_config(logger, config, "acacia", "multipart_threshold_bytes")
+        utils.read_config(
+            logger, config, "acacia", "multipart_threshold_bytes"
+        )
     )
     cfg_acacia_chunk_size_bytes = int(
         utils.read_config(logger, config, "acacia", "chunk_size_bytes")
@@ -530,7 +568,8 @@ def main():
         )
         if not os.path.exists(new_incoming_path):
             logger.error(
-                f"incoming file location in incoming_path{i} - {new_incoming_path} does not exist. Quitting."
+                f"incoming file location in incoming_path{i} -"
+                f" {new_incoming_path} does not exist. Quitting."
             )
             exit(1)
         cfg_incoming_paths.append(new_incoming_path)
@@ -538,14 +577,17 @@ def main():
 
     if len(cfg_incoming_paths) == 0:
         logger.error(
-            f"No incoming data file locations were not present in config file. "
-            f"Use incoming_path1 .. incoming_pathN "
-            f"in the [<hostname>] section (where <hostname> is the lowercase hostname of the machine running "
-            f"this). This host's name is: '{hostname}'. Quitting."
+            "No incoming data file locations were not present in config file."
+            " Use incoming_path1 .. incoming_pathN in the [<hostname>]"
+            " section (where <hostname> is the lowercase hostname of the"
+            f" machine running this). This host's name is: '{hostname}'."
+            " Quitting."
         )
         exit(1)
 
-    cfg_recursive = utils.read_config_bool(logger, config, hostname, "recursive")
+    cfg_recursive = utils.read_config_bool(
+        logger, config, hostname, "recursive"
+    )
 
     #
     # MRO database - this is one we will update
@@ -584,7 +626,8 @@ def main():
     )
 
     #
-    # Remote metadata db is ready only- just used to query file size and date info
+    # Remote metadata db is ready only- just used to query file size and date
+    # info
     #
     cfg_remote_metadatadb_host = utils.read_config(
         logger, config, "remote metadata database", "host"
