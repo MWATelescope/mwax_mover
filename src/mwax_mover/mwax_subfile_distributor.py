@@ -522,12 +522,15 @@ class MWAXSubfileDistributor:
                 "correlator",
                 "calibrator_destination_port",
             )
-            self.cfg_corr_calibrator_destination_enabled = utils.read_config(
-                self.logger,
-                self.config,
-                "correlator",
-                "calibrator_destination_enabled",
+            self.cfg_corr_calibrator_destination_enabled = int(
+                utils.read_config(
+                    self.logger,
+                    self.config,
+                    "correlator",
+                    "calibrator_destination_enabled",
+                )
             )
+
             self.cfg_corr_metafits_path = utils.read_config(
                 self.logger, self.config, "correlator", "metafits_path"
             )

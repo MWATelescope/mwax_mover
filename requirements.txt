@@ -1,7 +1,7 @@
-inotify==0.2.10
-psycopg2-binary==2.9.1
-requests==2.25.1
-tenacity==8.0.1
-python-openstackclient==5.6.0
-boto3==1.18.45
-astropy==5.0.4
+inotify==0.2.*
+psycopg2-binary==2.9.*
+requests==2.25.*
+tenacity==8.0.*
+python-openstackclient==5.6.*
+boto3==1.18.*
+astropy==5.0.*

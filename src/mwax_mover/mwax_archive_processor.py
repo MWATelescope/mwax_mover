@@ -35,6 +35,9 @@ class MWAXArchiveProcessor:
         visdata_processing_stats_path: str,
         visdata_outgoing_path: str,
         visdata_cal_outgoing_path: str,
+        calibrator_destination_host: str,
+        calibrator_destination_port: int,
+        calibrator_destination_enabled: int,
         metafits_path: str,
         dont_archive_path: str,
     ):
@@ -111,6 +114,10 @@ class MWAXArchiveProcessor:
         self.queue_outgoing_cal = queue.Queue()
         self.watcher_outgoing_cal = None
         self.queue_worker_outgoing_cal = None
+
+        self.calibrator_destination_enabled = calibrator_destination_enabled
+        self.calibrator_destination_host = calibrator_destination_host
+        self.calibrator_destination_port = calibrator_destination_port
 
         self.metafits_path = metafits_path
 
@@ -642,13 +649,16 @@ class MWAXArchiveProcessor:
             f"calibrator by reading {metafits_filename}"
         )
 
-        if utils.is_observation_calibrator(metafits_filename):
+        if (
+            utils.is_observation_calibrator(metafits_filename)
+            and self.calibrator_destination_enabled == 1
+        ):
             if (
                 mwa_archiver.archive_file_xrootd(
                     self.logger,
                     item,
                     int(self.archive_command_numa_node),
-                    self.cal_destination_host,
+                    self.calibrator_destination_host,
                     self.archive_command_timeout_sec,
                 )
                 is not True

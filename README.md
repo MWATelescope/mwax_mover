@@ -25,7 +25,7 @@ source env/bin/activate
 pipenv install 
 
 # Install
-python setup.py install    
+pip install .
 ```
 
 ## mwax_mover
