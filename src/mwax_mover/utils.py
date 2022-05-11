@@ -14,14 +14,8 @@ import typing
 
 def is_observation_calibrator(metafits_filename: str) -> bool:
     with fits.open(metafits_filename) as hdul:
-        # Read key from primary HDU
-        # Returns T or F
-        is_calibrator: str = hdul[0].header["CALIBRAT"]
-
-        if is_calibrator == "T":
-            return True
-        else:
-            return False
+        # Read key from primary HDU- it is bool
+        return hdul[0].header["CALIBRAT"]
 
 
 def read_config(

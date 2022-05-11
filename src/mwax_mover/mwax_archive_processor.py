@@ -632,17 +632,17 @@ class MWAXArchiveProcessor:
         Move the file into the vis_outgoing directory for archiving"""
         self.logger.info(f"{item}- cal_handler() Started...")
 
-        # Determine properties of the file we are dealing with
-        (
-            valid,
-            obs_id,
-            filetype,
-            file_ext,
-            validation_message,
-        ) = mwa_archiver.validate_filename(item)
+        # Do we even need to check for a calibrator?
+        if self.calibrator_destination_enabled == 1:
+            # Determine properties of the file we are dealing with
+            (
+                valid,
+                obs_id,
+                filetype,
+                file_ext,
+                validation_message,
+            ) = mwa_archiver.validate_filename(item)
 
-        # Check the filetype is MWAX visibility
-        if filetype == MWADataFileType.MWAX_VISIBILITIES.value:
             # Now check that the observation is a calibrator by
             # looking at the associated metafits file
             metafits_filename = os.path.join(
@@ -654,10 +654,7 @@ class MWAXArchiveProcessor:
                 f"calibrator by reading {metafits_filename}"
             )
 
-            if (
-                utils.is_observation_calibrator(metafits_filename)
-                and self.calibrator_destination_enabled == 1
-            ):
+            if utils.is_observation_calibrator(metafits_filename):
                 # It is an MWAX visibility AND the obs is a calibrator
                 # so send it to the calibrator destination
                 self.logger.debug(
@@ -677,6 +674,16 @@ class MWAXArchiveProcessor:
                     is not True
                 ):
                     return False
+            else:
+                self.logger.debug(
+                    f"{item}- cal_handler() observation IS NOT calibrator."
+                    " Skipping."
+                )
+        else:
+            self.logger.info(
+                f"{item}- cal_handler() calibrator_destination is disbaled."
+                " Skipping."
+            )
 
         # Take the input filename - strip the path, then append the output path
         outgoing_filename = os.path.join(
