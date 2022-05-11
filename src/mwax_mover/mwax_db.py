@@ -233,16 +233,6 @@ def get_data_file_row(db_handler_object, full_filename: str) -> DataFileRow:
             WHERE filename = %s"""
 
     try:
-        # Run query and get the data_files row info for this file
-        obsid, size, checksum = db_handler_object.select_one_row(
-            sql, (filename,)
-        )
-
-        data_files_row = DataFileRow()
-        data_files_row.observation_num = int(obsid)
-        data_files_row.size = int(size)
-        data_files_row.checksum = checksum
-
         if db_handler_object.dummy:
             # We have a mutex here to ensure only 1 user of the connection at
             # a time
@@ -254,6 +244,16 @@ def get_data_file_row(db_handler_object, full_filename: str) -> DataFileRow:
                 time.sleep(2)  # simulate a slow transaction
                 return None
         else:
+            # Run query and get the data_files row info for this file
+            obsid, size, checksum = db_handler_object.select_one_row(
+                sql, (filename,)
+            )
+
+            data_files_row = DataFileRow()
+            data_files_row.observation_num = int(obsid)
+            data_files_row.size = int(size)
+            data_files_row.checksum = checksum
+
             db_handler_object.logger.info(
                 f"{full_filename} get_data_file_row() Successfully read from"
                 f" data_files table {vars(data_files_row)}"
@@ -289,33 +289,6 @@ def insert_data_file_row(
     sql = ""
 
     try:
-        sql = """INSERT INTO data_files
-                (observation_num,
-                filetype,
-                size,
-                filename,
-                host,
-                remote_archived,
-                deleted,
-                checksum_type,
-                checksum)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"""
-
-        db_handler_object.execute_single_dml_row(
-            sql,
-            (
-                str(obsid),
-                filetype,
-                file_size,
-                filename,
-                hostname,
-                remote_archived,
-                deleted,
-                checksum_type,
-                checksum,
-            ),
-        )
-
         if db_handler_object.dummy:
             # We have a mutex here to ensure only 1 user of
             # the connection at a time
@@ -327,6 +300,33 @@ def insert_data_file_row(
                 time.sleep(10)  # simulate a slow transaction
                 return True
         else:
+            sql = """INSERT INTO data_files
+                (observation_num,
+                filetype,
+                size,
+                filename,
+                host,
+                remote_archived,
+                deleted,
+                checksum_type,
+                checksum)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+
+            db_handler_object.execute_single_dml_row(
+                sql,
+                (
+                    str(obsid),
+                    filetype,
+                    file_size,
+                    filename,
+                    hostname,
+                    remote_archived,
+                    deleted,
+                    checksum_type,
+                    checksum,
+                ),
+            )
+
             db_handler_object.logger.info(
                 f"{filename} insert_data_file_row() Successfully wrote into"
                 " data_files table"
