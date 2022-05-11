@@ -146,7 +146,7 @@ class MWAXArchiveProcessor:
                 recursive=False,
             )
 
-            # Create queueworker for the cehcksum and db queue
+            # Create queueworker for the checksum and db queue
             self.queue_worker_checksum_and_db = mwax_queue_worker.QueueWorker(
                 label="checksum and database worker",
                 q=self.queue_checksum_and_db,
@@ -574,27 +574,19 @@ class MWAXArchiveProcessor:
     def stats_handler(self, item: str) -> bool:
         self.logger.info(f"{item}- stats_handler() Started...")
 
-        # Check if this is a metafits file or regular mwax file
-        if "metafits" in item:
-            # We don't run stats on metafits! Just pass it onto the output dir
-            self.logger.debug(
-                f"{item}- stats_handler() - metafits file detected. Moving"
-                " file to outgoing dir"
+        # This is a normal mwax fits file. Run stats on it
+        if (
+            utils.process_mwax_stats(
+                self.logger,
+                self.mwax_stats_executable,
+                item,
+                int(self.archive_command_numa_node),
+                self.mwax_stats_timeout_sec,
+                self.mwax_stats_dump_dir,
             )
-        else:
-            # This is a normal mwax fits file. Run stats on it
-            if (
-                utils.process_mwax_stats(
-                    self.logger,
-                    self.mwax_stats_executable,
-                    item,
-                    int(self.archive_command_numa_node),
-                    self.mwax_stats_timeout_sec,
-                    self.mwax_stats_dump_dir,
-                )
-                is not True
-            ):
-                return False
+            is not True
+        ):
+            return False
 
         # Take the input filename - strip the path, then append the output path
         outgoing_filename = os.path.join(
@@ -640,30 +632,51 @@ class MWAXArchiveProcessor:
         Move the file into the vis_outgoing directory for archiving"""
         self.logger.info(f"{item}- cal_handler() Started...")
 
-        metafits_filename = os.path.join(
-            self.metafits_path, f"{item[0:10]}_metafits.fits"
-        )
+        # Determine properties of the file we are dealing with
+        (
+            valid,
+            obs_id,
+            filetype,
+            file_ext,
+            validation_message,
+        ) = mwa_archiver.validate_filename(item)
 
-        self.logger.debug(
-            f"{item}- cal_handler() checking if observation is a "
-            f"calibrator by reading {metafits_filename}"
-        )
+        # Check the filetype is MWAX visibility
+        if filetype == MWADataFileType.MWAX_VISIBILITIES.value:
+            # Now check that the observation is a calibrator by
+            # looking at the associated metafits file
+            metafits_filename = os.path.join(
+                self.metafits_path, f"{obs_id}_metafits.fits"
+            )
 
-        if (
-            utils.is_observation_calibrator(metafits_filename)
-            and self.calibrator_destination_enabled == 1
-        ):
+            self.logger.debug(
+                f"{item}- cal_handler() checking if observation is a "
+                f"calibrator by reading {metafits_filename}"
+            )
+
             if (
-                mwa_archiver.archive_file_xrootd(
-                    self.logger,
-                    item,
-                    int(self.archive_command_numa_node),
-                    self.calibrator_destination_host,
-                    self.archive_command_timeout_sec,
-                )
-                is not True
+                utils.is_observation_calibrator(metafits_filename)
+                and self.calibrator_destination_enabled == 1
             ):
-                return False
+                # It is an MWAX visibility AND the obs is a calibrator
+                # so send it to the calibrator destination
+                self.logger.debug(
+                    f"{item}- cal_handler() observation IS a calibrator,"
+                    " sending to calibration server"
+                    f" {self.calibrator_destination_host}"
+                )
+
+                if (
+                    mwa_archiver.archive_file_xrootd(
+                        self.logger,
+                        item,
+                        int(self.archive_command_numa_node),
+                        self.calibrator_destination_host,
+                        self.archive_command_timeout_sec,
+                    )
+                    is not True
+                ):
+                    return False
 
         # Take the input filename - strip the path, then append the output path
         outgoing_filename = os.path.join(
@@ -697,6 +710,9 @@ class MWAXArchiveProcessor:
             if self.queue_worker_outgoing_vis:
                 self.queue_worker_outgoing_vis.pause(paused)
 
+            if self.queue_worker_outgoing_cal:
+                self.queue_worker_outgoing_cal.pause(paused)
+
             self.archiving_paused = paused
 
     def stop(self):
@@ -729,6 +745,9 @@ class MWAXArchiveProcessor:
 
         if self.queue_worker_outgoing_vis:
             self.queue_worker_outgoing_vis.stop()
+
+        if self.queue_worker_outgoing_cal:
+            self.queue_worker_outgoing_cal.stop()
 
         # Wait for threads to finish
         for t in self.watcher_threads:
@@ -775,6 +794,11 @@ class MWAXArchiveProcessor:
             status.update(self.watcher_outgoing_vis.get_status())
             watcher_list.append(status)
 
+        if self.watcher_outgoing_cal:
+            status = dict({"name": "visdata_outgoing_cal_watcher"})
+            status.update(self.watcher_outgoing_cal.get_status())
+            watcher_list.append(status)
+
         worker_list = []
 
         if self.queue_worker_checksum_and_db:
@@ -795,6 +819,11 @@ class MWAXArchiveProcessor:
         if self.queue_worker_outgoing_vis:
             status = dict({"name": "visdata_outgoing_worker"})
             status.update(self.queue_worker_outgoing_vis.get_status())
+            worker_list.append(status)
+
+        if self.queue_worker_outgoing_cal:
+            status = dict({"name": "visdata_outgoing_cal_worker"})
+            status.update(self.queue_worker_outgoing_cal.get_status())
             worker_list.append(status)
 
         if self.archiving_paused:

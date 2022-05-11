@@ -138,7 +138,7 @@ class MWAXSubfileDistributor:
         self.config = None
 
         # init vars
-        self.hostname = None
+        self.hostname = utils.get_hostname()
         self.running = False
         self.processors = []
         self.archive_processor = None
@@ -184,7 +184,7 @@ class MWAXSubfileDistributor:
 
         # Correlator
         self.cfg_corr_enabled = False
-        self.cfg_corr_ringbuffer_key = None
+        self.cfg_corr_input_ringbuffer_key = None
         self.cfg_corr_diskdb_numa_node = None
         self.cfg_corr_archive_command_numa_node = None
         self.cfg_corr_visdata_incoming_path = None
@@ -211,10 +211,7 @@ class MWAXSubfileDistributor:
         # Database handler for metadata db
         self.db_handler = None
 
-    def initialise(self):
-        # Get this hosts hostname
-        self.hostname = utils.get_hostname()
-
+    def initialise_from_command_line(self):
         # Get command line args
         parser = argparse.ArgumentParser()
         parser.description = (
@@ -237,6 +234,9 @@ class MWAXSubfileDistributor:
         # Check that config file exists
         config_filename = args["cfg"]
 
+        self.initialise(config_filename)
+
+    def initialise(self, config_filename):
         if not os.path.exists(config_filename):
             self.logger.error(
                 f"Configuration file location {config_filename} does not"
@@ -473,7 +473,7 @@ class MWAXSubfileDistributor:
 
         # read correlator config
         if self.config.has_section("correlator"):
-            self.cfg_corr_ringbuffer_key = utils.read_config(
+            self.cfg_corr_input_ringbuffer_key = utils.read_config(
                 self.logger, self.config, "correlator", "input_ringbuffer_key"
             )
             self.cfg_corr_visdata_incoming_path = utils.read_config(
@@ -494,7 +494,7 @@ class MWAXSubfileDistributor:
             self.cfg_corr_mwax_stats_dump_dir = utils.read_config(
                 self.logger, self.config, "correlator", "mwax_stats_dump_dir"
             )
-            self.cfg_mwax_stats_timeout_sec = int(
+            self.cfg_corr_mwax_stats_timeout_sec = int(
                 utils.read_config(
                     self.logger,
                     self.config,
@@ -677,10 +677,11 @@ class MWAXSubfileDistributor:
         if not self.cfg_archiving_enabled:
             self.logger.warn(
                 "Master archiving is set to DISABLED. Nothing will be"
-                " archived."
+                " archived and nothing will be sent for calibration."
             )
             self.cfg_bf_archive_destination_enabled = False
             self.cfg_corr_archive_destination_enabled = False
+            self.cfg_corr_calibrator_destination_enabled = False
 
         # Create and start web server
         self.logger.info(
@@ -710,7 +711,7 @@ class MWAXSubfileDistributor:
             self.cfg_bf_fildata_path,
             self.cfg_bf_settings_path,
             self.cfg_corr_enabled,
-            self.cfg_corr_ringbuffer_key,
+            self.cfg_corr_input_ringbuffer_key,
             self.cfg_corr_diskdb_numa_node,
             self.cfg_psrdada_timeout_sec,
             self.cfg_copy_subfile_to_disk_timeout_sec,
@@ -731,7 +732,7 @@ class MWAXSubfileDistributor:
                     self.cfg_archive_command_timeout_sec,
                     self.cfg_corr_mwax_stats_executable,
                     self.cfg_corr_mwax_stats_dump_dir,
-                    self.cfg_mwax_stats_timeout_sec,
+                    self.cfg_corr_mwax_stats_timeout_sec,
                     self.db_handler,
                     self.cfg_voltdata_incoming_path,
                     self.cfg_voltdata_outgoing_path,
@@ -807,6 +808,7 @@ class MWAXSubfileDistributor:
             "beamformer archiving": self.cfg_bf_archive_destination_enabled,
             "correlator": self.cfg_corr_enabled,
             "correlator archiving": self.cfg_corr_archive_destination_enabled,
+            "cal sending:": self.cfg_corr_calibrator_destination_enabled,
         }
 
         processor_status_list = []
@@ -888,7 +890,7 @@ def main():
     p = MWAXSubfileDistributor()
 
     try:
-        p.initialise()
+        p.initialise_from_command_line()
         p.start()
         sys.exit(0)
     except Exception as e:
