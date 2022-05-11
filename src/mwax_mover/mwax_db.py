@@ -32,12 +32,13 @@ class MWAXDBHandler:
                 f"{self.user}@{self.host}:{self.port}/{self.db}"
             )
 
-            self.con = psycopg2.connect(
-                host=self.host,
-                database=self.db,
-                user=self.user,
-                password=self.password,
-            )
+            if not self.dummy:
+                self.con = psycopg2.connect(
+                    host=self.host,
+                    database=self.db,
+                    user=self.user,
+                    password=self.password,
+                )
 
             self.logger.info(
                 "MWAXDBHandler.connect(): Connected to database:"

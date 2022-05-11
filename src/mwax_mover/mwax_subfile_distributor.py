@@ -862,6 +862,8 @@ class MWAXSubfileDistributor:
         )
         health_thread.start()
 
+        self.logger.info("MWAX Subfile Distributor started successfully.")
+
         while self.running:
             for processor in self.processors:
                 for t in processor.worker_threads:

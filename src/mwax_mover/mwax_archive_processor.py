@@ -731,6 +731,9 @@ class MWAXArchiveProcessor:
         if self.watcher_outgoing_vis:
             self.watcher_outgoing_vis.stop()
 
+        if self.watcher_outgoing_cal:
+            self.watcher_outgoing_cal.stop()
+
         if self.queue_worker_dont_archive:
             self.queue_worker_dont_archive.stop()
 
