@@ -270,7 +270,7 @@ def archive_file_xrootd(
         )
 
         cmdline = (
-            f"ssh mwa@{destination_host} 'mv"
+            f"ssh -o StrictHostKeyChecking=no mwa@{destination_host} 'mv"
             f" {full_destination_temp_filename}"
             f" {full_destination_final_filename}'"
         )
