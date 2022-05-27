@@ -406,7 +406,7 @@ class MWAXArchiveProcessor:
                 label="dont archive worker (vis)",
                 q=self.queue_dont_archive_vis,
                 executable_path=None,
-                event_handler=self.dont_archive_handler,
+                event_handler=self.dont_archive_handler_vis,
                 log=self.logger,
                 exit_once_queue_empty=False,
             )
@@ -417,7 +417,7 @@ class MWAXArchiveProcessor:
                     label="dont archive worker (volt)",
                     q=self.queue_dont_archive_volt,
                     executable_path=None,
-                    event_handler=self.dont_archive_handler,
+                    event_handler=self.dont_archive_handler_volt,
                     log=self.logger,
                     exit_once_queue_empty=False,
                 )
@@ -466,26 +466,48 @@ class MWAXArchiveProcessor:
             self.worker_threads.append(queue_worker_dont_archive_thread_volt)
             queue_worker_dont_archive_thread_volt.start()
 
-    def dont_archive_handler(self, item: str) -> bool:
-        self.logger.info(f"{item}- dont_archive_handler() Started")
+    def dont_archive_handler_vis(self, item: str) -> bool:
+        self.logger.info(f"{item}- dont_archive_handler_vis() Started")
 
         outgoing_filename = os.path.join(
-            self.dont_archive_path, os.path.basename(item)
+            self.dont_archive_path_vis, os.path.basename(item)
         )
 
         self.logger.debug(
-            f"{item}- dont_archive_handler() moving file to"
-            f" {self.dont_archive_path}"
+            f"{item}- dont_archive_handler_vis() moving file to"
+            f" {self.dont_archive_path_vis}"
         )
         os.rename(item, outgoing_filename)
 
         self.logger.info(
-            f"{item}- dont_archive_handler() moved file to"
-            f" {self.dont_archive_path} dir Queue size:"
-            f" {self.queue_dont_archive.qsize()}"
+            f"{item}- dont_archive_handler_vis() moved file to"
+            f" {self.dont_archive_path_vis} dir Queue size:"
+            f" {self.queue_dont_archive_vis.qsize()}"
         )
 
-        self.logger.info(f"{item}- dont_archive_handler() Finished")
+        self.logger.info(f"{item}- dont_archive_handler_vis() Finished")
+        return True
+
+    def dont_archive_handler_volt(self, item: str) -> bool:
+        self.logger.info(f"{item}- dont_archive_handler_volt() Started")
+
+        outgoing_filename = os.path.join(
+            self.dont_archive_path_volt, os.path.basename(item)
+        )
+
+        self.logger.debug(
+            f"{item}- dont_archive_handler_volt() moving file to"
+            f" {self.dont_archive_path_volt}"
+        )
+        os.rename(item, outgoing_filename)
+
+        self.logger.info(
+            f"{item}- dont_archive_handler_volt() moved file to"
+            f" {self.dont_archive_path_volt} dir Queue size:"
+            f" {self.queue_dont_archive_volt.qsize()}"
+        )
+
+        self.logger.info(f"{item}- dont_archive_handler_volt() Finished")
         return True
 
     def checksum_and_db_handler(self, item: str) -> bool:
