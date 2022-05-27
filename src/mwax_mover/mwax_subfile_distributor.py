@@ -156,7 +156,8 @@ class MWAXSubfileDistributor:
         # Common
         self.cfg_log_path = None
         self.cfg_webserver_port = None
-        self.cfg_dont_archive_path = None
+        self.cfg_visdata_dont_archive_path = None
+        self.cfg_voltdata_dont_archive_path = None
         self.cfg_subfile_incoming_path = None
         self.cfg_voltdata_incoming_path = None
         self.cfg_voltdata_outging_path = None
@@ -287,8 +288,14 @@ class MWAXSubfileDistributor:
         self.cfg_webserver_port = utils.read_config(
             self.logger, self.config, "mwax mover", "webserver_port"
         )
-        self.cfg_dont_archive_path = utils.read_config(
-            self.logger, self.config, "mwax mover", "dont_archive_path"
+        self.cfg_visdata_dont_archive_path = utils.read_config(
+            self.logger, self.config, "mwax mover", "visdata_dont_archive_path"
+        )
+        self.cfg_voltdata_dont_archive_path = utils.read_config(
+            self.logger,
+            self.config,
+            "mwax mover",
+            "voltdata_dont_archive_path",
         )
         self.cfg_subfile_incoming_path = utils.read_config(
             self.logger, self.config, "mwax mover", "subfile_incoming_path"
@@ -362,10 +369,19 @@ class MWAXSubfileDistributor:
             f" {self.cfg_health_multicast_interface_ip}"
         )
 
-        if not os.path.exists(self.cfg_dont_archive_path):
+        if not os.path.exists(self.cfg_voltdata_dont_archive_path):
             self.logger.error(
-                f"'Dont Archive' location {self.cfg_dont_archive_path} does"
-                " not exist. Quitting."
+                "'Voltdata Dont Archive' location"
+                f" {self.cfg_voltdata_dont_archive_path} does not exist."
+                " Quitting."
+            )
+            exit(1)
+
+        if not os.path.exists(self.cfg_visdata_dont_archive_path):
+            self.logger.error(
+                "'Visdata Dont Archive' location"
+                f" {self.cfg_visdata_dont_archive_path} does not exist."
+                " Quitting."
             )
             exit(1)
 
@@ -744,7 +760,8 @@ class MWAXSubfileDistributor:
                     self.cfg_corr_calibrator_destination_port,
                     self.cfg_corr_calibrator_destination_enabled,
                     self.cfg_corr_metafits_path,
-                    self.cfg_dont_archive_path,
+                    self.cfg_visdata_dont_archive_path,
+                    self.cfg_voltdata_dont_archive_path,
                 )
             )
 

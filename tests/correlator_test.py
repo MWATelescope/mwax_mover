@@ -39,9 +39,15 @@ def setup_correaltor_test():
     voltdata_outgoing_path = os.path.join(base_dir, "voltdata_outgoing")
     check_and_make_dir(voltdata_outgoing_path)
 
-    # dont_archive_path
-    dont_archive_path = os.path.join(base_dir, "dont_archive")
-    check_and_make_dir(dont_archive_path)
+    # visdata_dont_archive_path
+    visdata_dont_archive_path = os.path.join(base_dir, "visdata_dont_archive")
+    check_and_make_dir(visdata_dont_archive_path)
+
+    # visdata_dont_archive_path
+    voltdata_dont_archive_path = os.path.join(
+        base_dir, "voltdata_dont_archive"
+    )
+    check_and_make_dir(voltdata_dont_archive_path)
 
     # visdata_incoming_path
     visdata_incoming_path = os.path.join(base_dir, "visdata_incoming")
@@ -108,7 +114,8 @@ def test_correlator_config_file():
     assert msd.cfg_subfile_incoming_path == "./dev_shm"
     assert msd.cfg_voltdata_incoming_path == "./voltdata_incoming"
     assert msd.cfg_voltdata_outgoing_path == "./voltdata_outgoing"
-    assert msd.cfg_dont_archive_path == "./dont_archive"
+    assert msd.cfg_visdata_dont_archive_path == "./dont_archive"
+    assert msd.cfg_voltdata_dont_archive_path == "./dont_archive"
     assert msd.cfg_always_keep_subfiles == 0
     assert msd.cfg_archive_command_timeout_sec == 300
     assert msd.cfg_psrdada_timeout_sec == 32

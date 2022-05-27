@@ -39,7 +39,8 @@ class MWAXArchiveProcessor:
         calibrator_destination_port: int,
         calibrator_destination_enabled: int,
         metafits_path: str,
-        dont_archive_path: str,
+        visdata_dont_archive_path: str,
+        voltdata_dont_archive_path: str,
     ):
         self.subfile_distributor_context = context
 
@@ -82,9 +83,13 @@ class MWAXArchiveProcessor:
         self.watcher_threads = []
         self.worker_threads = []
 
-        self.dont_archive_path = dont_archive_path
-        self.queue_dont_archive = queue.Queue()
-        self.queue_worker_dont_archive = None
+        self.dont_archive_path_vis = visdata_dont_archive_path
+        self.queue_dont_archive_vis = queue.Queue()
+        self.queue_worker_dont_archive_vis = None
+
+        self.dont_archive_path_volt = voltdata_dont_archive_path
+        self.queue_dont_archive_volt = queue.Queue()
+        self.queue_worker_dont_archive_volt = None
 
         self.queue_checksum_and_db = queue.Queue()
         self.queue_worker_checksum_and_db = None
@@ -376,7 +381,7 @@ class MWAXArchiveProcessor:
             # Create watcher for voltage data -> dont_archive queue
             self.watcher_incoming_volt = mwax_watcher.Watcher(
                 path=self.watch_dir_incoming_volt,
-                q=self.queue_dont_archive,
+                q=self.queue_dont_archive_volt,
                 pattern=".sub",
                 log=self.logger,
                 mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
@@ -389,21 +394,33 @@ class MWAXArchiveProcessor:
             # into /visdata).
             self.watcher_incoming_vis = mwax_watcher.Watcher(
                 path=self.watch_dir_incoming_vis,
-                q=self.queue_dont_archive,
+                q=self.queue_dont_archive_vis,
                 pattern=".fits",
                 log=self.logger,
                 mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
                 recursive=False,
             )
 
-            # Create queueworker for the don't archive queue
-            self.queue_worker_dont_archive = mwax_queue_worker.QueueWorker(
-                label="dont archive worker",
-                q=self.queue_dont_archive,
+            # Create queueworker for the vis don't archive queue
+            self.queue_worker_dont_archive_vis = mwax_queue_worker.QueueWorker(
+                label="dont archive worker (vis)",
+                q=self.queue_dont_archive_vis,
                 executable_path=None,
                 event_handler=self.dont_archive_handler,
                 log=self.logger,
                 exit_once_queue_empty=False,
+            )
+
+            # Create queueworker for the volt don't archive queue
+            self.queue_worker_dont_archive_volt = (
+                mwax_queue_worker.QueueWorker(
+                    label="dont archive worker (volt)",
+                    q=self.queue_dont_archive_volt,
+                    executable_path=None,
+                    event_handler=self.dont_archive_handler,
+                    log=self.logger,
+                    exit_once_queue_empty=False,
+                )
             )
 
             #
@@ -432,13 +449,22 @@ class MWAXArchiveProcessor:
             # Start queue worker threads
             #
             # Setup thread for processing items on the dont archive queue
-            queue_worker_dont_archive_thread = threading.Thread(
-                name="work_dont_archive",
-                target=self.queue_worker_dont_archive.start,
+            queue_worker_dont_archive_thread_vis = threading.Thread(
+                name="work_dont_archive_vis",
+                target=self.queue_worker_dont_archive_vis.start,
                 daemon=True,
             )
-            self.worker_threads.append(queue_worker_dont_archive_thread)
-            queue_worker_dont_archive_thread.start()
+            self.worker_threads.append(queue_worker_dont_archive_thread_vis)
+            queue_worker_dont_archive_thread_vis.start()
+
+            # Setup thread for processing items on the dont archive queue
+            queue_worker_dont_archive_thread_volt = threading.Thread(
+                name="work_dont_archive_volt",
+                target=self.queue_worker_dont_archive_volt.start,
+                daemon=True,
+            )
+            self.worker_threads.append(queue_worker_dont_archive_thread_volt)
+            queue_worker_dont_archive_thread_volt.start()
 
     def dont_archive_handler(self, item: str) -> bool:
         self.logger.info(f"{item}- dont_archive_handler() Started")
@@ -741,8 +767,11 @@ class MWAXArchiveProcessor:
         if self.watcher_outgoing_cal:
             self.watcher_outgoing_cal.stop()
 
-        if self.queue_worker_dont_archive:
-            self.queue_worker_dont_archive.stop()
+        if self.queue_worker_dont_archive_vis:
+            self.queue_worker_dont_archive_vis.stop()
+
+        if self.queue_worker_dont_archive_volt:
+            self.queue_worker_dont_archive_volt.stop()
 
         if self.queue_worker_checksum_and_db:
             self.queue_worker_checksum_and_db.stop()
