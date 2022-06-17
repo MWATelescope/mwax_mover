@@ -394,7 +394,7 @@ class SubfileProcessor:
             if t:
                 thread_name = t.name
                 self.logger.debug(f"Watcher {thread_name} Stopping...")
-                if t.isAlive:
+                if t.is_alive():
                     t.join()
                 self.logger.debug(f"Watcher {thread_name} Stopped")
 
@@ -402,7 +402,7 @@ class SubfileProcessor:
             if t:
                 thread_name = t.name
                 self.logger.debug(f"QueueWorker {thread_name} Stopping...")
-                if t.isAlive():
+                if t.is_alive():
                     t.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 

@@ -5,10 +5,12 @@
 import os
 from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
 
+EXISTING_WORKING_DIR = ""
+
 
 def get_base_path() -> str:
     TEST_BASE_PATH = "tests/mock_mwax"
-    return os.path.join(os.path.curdir, TEST_BASE_PATH)
+    return os.path.join(os.getcwd(), TEST_BASE_PATH)
 
 
 def check_and_make_dir(path):
@@ -77,6 +79,10 @@ def setup_correaltor_test():
 
 
 def test_correlator_config_file():
+    # Keep the current working dir so we can switch back
+    # to it after we run our test
+    EXISTING_WORKING_DIR = os.getcwd()
+
     # Setup all the paths
     setup_correaltor_test()
 
@@ -161,3 +167,6 @@ def test_correlator_config_file():
     assert msd.cfg_corr_archive_destination_enabled is True
     assert msd.cfg_corr_diskdb_numa_node == -1
     assert msd.cfg_corr_archive_command_numa_node == -1
+
+    # Change back to the saved current working dir
+    os.chdir(EXISTING_WORKING_DIR)

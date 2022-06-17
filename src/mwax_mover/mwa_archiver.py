@@ -140,8 +140,8 @@ def determine_bucket_and_folder(full_filename, location):
     based on location."""
     filename = os.path.basename(full_filename)
 
-    # ceph / acacia
-    if location == 2:
+    # acacia and banksia
+    if location == 2 or location == 3:
         # determine bucket name
         bucket = ceph_get_bucket_name_from_filename(filename)
         folder = None

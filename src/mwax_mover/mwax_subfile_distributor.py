@@ -885,7 +885,7 @@ class MWAXSubfileDistributor:
             for processor in self.processors:
                 for t in processor.worker_threads:
                     if t:
-                        if t.isAlive():
+                        if t.is_alive():
                             time.sleep(0.2)
                         else:
                             self.running = False
