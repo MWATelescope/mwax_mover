@@ -32,7 +32,15 @@ def run_command_ext(
         logger.debug(f"Executing {cmdline}...")
 
         # Parse the command into executable and args
-        args = shlex.split(cmdline)
+
+        if use_shell:
+            #
+            # NOTE: using shell=true in subprocess.run requires a string.
+            # Passing a list won't work!
+            #
+            args = cmdline
+        else:
+            args = shlex.split(cmdline)
 
         # Execute the command
         completed_process = subprocess.run(
