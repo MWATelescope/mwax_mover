@@ -5,9 +5,10 @@
 import os
 from mwax_mover.mwacache_archive_processor import MWACacheArchiveProcessor
 
+TEST_BASE_PATH = "tests/mock_mwacache_archiver"
+
 
 def get_base_path() -> str:
-    TEST_BASE_PATH = "tests/mock_mwacache_archiver"
     print(f"CURDIR={os.getcwd()}")
     return os.path.join(os.getcwd(), TEST_BASE_PATH)
 
@@ -43,11 +44,7 @@ def test_mwacache_archiver_config_file():
 
     # This will test mwax_subfile_distributor based
     # on mwacache_test.cfg
-    base_dir = get_base_path()
-
-    # Change working dir to our mock dir
-    print(f"Changing dir to {base_dir}")
-    os.chdir(base_dir)
+    base_dir = TEST_BASE_PATH
 
     # Start mwax_subfile_distributor using our test config
     mcap = MWACacheArchiveProcessor()
@@ -56,7 +53,7 @@ def test_mwacache_archiver_config_file():
     mcap.hostname = "test_server"
 
     # Determine config file location
-    config_filename = "../mwacache_test.cfg"
+    config_filename = "tests/mwacache_test.cfg"
 
     # Call to read config <-- this is what we're testing!
     mcap.initialise(config_filename)
@@ -66,7 +63,7 @@ def test_mwacache_archiver_config_file():
     #
 
     # mwax_mover section
-    assert mcap.log_path == "./logs"
+    assert mcap.log_path == os.path.join(base_dir, "logs")
 
     assert mcap.archive_to_location == 2
 
