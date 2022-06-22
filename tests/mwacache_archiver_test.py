@@ -9,7 +9,6 @@ TEST_BASE_PATH = "tests/mock_mwacache_archiver"
 
 
 def get_base_path() -> str:
-    print(f"CURDIR={os.getcwd()}")
     return os.path.join(os.getcwd(), TEST_BASE_PATH)
 
 
@@ -35,10 +34,6 @@ def setup_mwacache_archiver_test():
 
 
 def test_mwacache_archiver_config_file():
-    # Keep the current working dir so we can switch back
-    # to it after we run our test
-    EXISTING_WORKING_DIR = os.getcwd()
-
     # Setup all the paths
     setup_mwacache_archiver_test()
 
@@ -95,6 +90,3 @@ def test_mwacache_archiver_config_file():
 
     assert len(mcap.watch_dirs) == 1
     assert mcap.watch_dirs[0] == "/data/mwacache_test"
-
-    # Change back to the saved current working dir
-    os.chdir(EXISTING_WORKING_DIR)
