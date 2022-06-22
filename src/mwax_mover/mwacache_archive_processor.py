@@ -35,7 +35,7 @@ class MWACacheArchiveProcessor:
 
         # s3 config
         self.s3_profile = None
-        self.s3_endpoint = None
+        self.s3_ceph_endpoint = None
         self.s3_multipart_threshold_bytes = None
         self.s3_chunk_size_bytes = None
         self.s3_max_concurrency = None
@@ -128,7 +128,7 @@ class MWACacheArchiveProcessor:
                 backoff_initial_seconds=20,
                 backoff_factor=2,
                 backoff_limit_seconds=40,
-                ceph_endpoint=self.s3_endpoint,
+                ceph_endpoint=self.s3_ceph_endpoint,
                 ceph_profile=self.s3_profile,
             )
             self.queue_workers.append(new_worker)
@@ -229,7 +229,7 @@ class MWACacheArchiveProcessor:
                     bucket,
                     data_files_row.checksum,
                     self.s3_profile,
-                    self.s3_endpoint,
+                    self.s3_ceph_endpoint,
                     self.s3_multipart_threshold_bytes,
                     self.s3_chunk_size_bytes,
                     self.s3_max_concurrency,
