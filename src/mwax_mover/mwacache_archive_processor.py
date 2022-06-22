@@ -601,7 +601,7 @@ class MWACacheArchiveProcessor:
             self.mro_metadatadb_port = None
 
         # Initiate database connection for rmo metadata db
-        self.mro_db_handler = mwax_db.MWAXDBHandler(
+        self.mro_db_handler_object = mwax_db.MWAXDBHandler(
             logger=self.logger,
             host=self.mro_metadatadb_host,
             port=self.mro_metadatadb_port,
@@ -638,7 +638,7 @@ class MWACacheArchiveProcessor:
             self.remote_metadatadb_port = None
 
         # Initiate database connection for remote metadata db
-        self.remote_db_handler = mwax_db.MWAXDBHandler(
+        self.remote_db_handler_object = mwax_db.MWAXDBHandler(
             logger=self.logger,
             host=self.remote_metadatadb_host,
             port=self.remote_metadatadb_port,
