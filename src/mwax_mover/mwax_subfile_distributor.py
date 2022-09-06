@@ -306,17 +306,6 @@ class MWAXSubfileDistributor:
         self.cfg_voltdata_outgoing_path = utils.read_config(
             self.logger, self.config, "mwax mover", "voltdata_outgoing_path"
         )
-        self.cfg_always_keep_subfiles = (
-            int(
-                utils.read_config(
-                    self.logger,
-                    self.config,
-                    "mwax mover",
-                    "always_keep_subfiles",
-                )
-            )
-            == 1
-        )
         self.cfg_health_multicast_interface_name = utils.read_config(
             self.logger,
             self.config,
@@ -405,6 +394,18 @@ class MWAXSubfileDistributor:
                 f" {self.cfg_voltdata_outgoing_path} does not exist. Quitting."
             )
             exit(1)
+
+        self.cfg_always_keep_subfiles = (
+            int(
+                utils.read_config(
+                    self.logger,
+                    self.config,
+                    self.hostname,
+                    "always_keep_subfiles",
+                )
+            )
+            == 1
+        )
 
         if self.cfg_always_keep_subfiles:
             self.logger.info(

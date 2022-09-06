@@ -121,7 +121,7 @@ def test_correlator_config_file():
     assert msd.cfg_voltdata_dont_archive_path == os.path.join(
         base_dir, "dont_archive"
     )
-    assert msd.cfg_always_keep_subfiles == 0
+    assert msd.cfg_always_keep_subfiles == 1
     assert msd.cfg_archive_command_timeout_sec == 300
     assert msd.cfg_psrdada_timeout_sec == 32
     assert msd.cfg_copy_subfile_to_disk_timeout_sec == 120
