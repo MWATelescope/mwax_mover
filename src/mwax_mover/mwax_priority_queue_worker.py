@@ -6,8 +6,16 @@ import threading
 from mwax_mover import mwax_mover, mwax_command
 
 
-class QueueWorker(object):
-    """This class represents a worker process, processing items off a queue"""
+class PriorityQueueWorker(object):
+    """
+    This class represents a worker process, processing items off a priority
+    queue. A priority queue takes a tuple:
+        priority (integer - lowest items are taken off queue first)
+        item (T - the payload you are queueing)
+
+    Thus for each item, item[0] is the priorty number and item[1] is the
+    payload.
+    """
 
     # Either pass an event handler or pass an executable path to run
     #
@@ -21,7 +29,7 @@ class QueueWorker(object):
     def __init__(
         self,
         label: str,
-        q: queue.Queue,
+        q: queue.PriorityQueue,
         executable_path,
         log,
         event_handler,
@@ -32,7 +40,7 @@ class QueueWorker(object):
         backoff_limit_seconds: int = 60,
     ):
         self.label = label
-        self.q = q
+        self.q: queue.PriorityQueue = q
 
         if (event_handler is None and executable_path is None) or (
             event_handler is not None and executable_path is not None
@@ -59,7 +67,7 @@ class QueueWorker(object):
 
     def start(self):
         """Start working on the queue"""
-        self.logger.info(f"QueueWorker {self.label} starting...")
+        self.logger.info(f"PriorityQueueWorker {self.label} starting...")
         self._running = True
         self.current_item = None
         self.consecutive_error_count = 0
@@ -76,12 +84,15 @@ class QueueWorker(object):
 
                     start_time = time.time()
 
+                    filename_priority = self.current_item[0]
+                    filename = self.current_item[1]
+
                     # Check file exists (maybe someone deleted it?)
-                    if os.path.exists(self.current_item):
+                    if os.path.exists(filename):
                         if self._executable_path:
-                            success = self.run_command(self.current_item)
+                            success = self.run_command(filename)
                         else:
-                            success = self._event_handler(self.current_item)
+                            success = self._event_handler(filename)
 
                         if success:
                             # Dequeue the item, but requeue if it was not
@@ -125,11 +136,17 @@ class QueueWorker(object):
                         self.event.wait(backoff)
 
                         # If this option is set, add item back to the end of
-                        # the queue
+                        # the queue by making the priority larger
                         # If not set, just keep retrying the operation
                         if self.requeue_to_eoq_on_failure:
+                            filename_priority += 1
+
+                            # max it out at 10
+                            if filename_priority > 10:
+                                filename_priority = 10
+
                             self.q.task_done()
-                            self.q.put(self.current_item)
+                            self.q.put((filename_priority, filename))
                             self.current_item = None
 
                 except queue.Empty:
@@ -167,6 +184,6 @@ class QueueWorker(object):
         """Return the status as a dictionary"""
         return {
             "Unix timestamp": time.time(),
-            "current": self.current_item,
-            "queue_size": self.q.qsize(),
+            "current item": self.current_item[1],
+            "priority_queue_size": self.q.qsize(),
         }

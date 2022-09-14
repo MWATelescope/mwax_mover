@@ -81,7 +81,7 @@ class Watcher(object):
             or self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME
             or self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW
         ):
-            utils.scan_for_existing_files(
+            utils.scan_for_existing_files_and_add_to_queue(
                 self.logger,
                 self.path,
                 self.pattern,

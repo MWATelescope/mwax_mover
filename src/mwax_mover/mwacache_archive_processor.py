@@ -1,3 +1,4 @@
+"""Module file for MWACacheArchiveProcessor"""
 import argparse
 from configparser import ConfigParser
 from glob import glob
@@ -23,15 +24,35 @@ from mwax_mover.mwax_db import DataFileRow
 
 
 class MWACacheArchiveProcessor:
+    """
+    A class representing an instance which sends
+    MWAX data products from the mwacache servers
+    to the Pawsey LTS.
+    """
+
     def __init__(self):
 
         self.logger = None
 
         self.hostname = None
+        self.log_path = None
         self.archive_to_location = None
         self.concurrent_archive_workers = None
         self.archive_command_timeout_sec = None
         self.recursive = None
+
+        # database config
+        self.remote_metadatadb_db = None
+        self.remote_metadatadb_host = None
+        self.remote_metadatadb_user = None
+        self.remote_metadatadb_pass = None
+        self.remote_metadatadb_port = None
+
+        self.mro_metadatadb_db = None
+        self.mro_metadatadb_host = None
+        self.mro_metadatadb_user = None
+        self.mro_metadatadb_pass = None
+        self.mro_metadatadb_port = None
 
         # s3 config
         self.s3_profile = None
@@ -44,6 +65,7 @@ class MWACacheArchiveProcessor:
         self.health_multicast_ip = None
         self.health_multicast_port = None
         self.health_multicast_hops = None
+        self.health_multicast_interface_name = None
 
         # MWAX servers will copy in a temp file, then rename once it is good
         self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_RENAME
@@ -62,6 +84,7 @@ class MWACacheArchiveProcessor:
         self.queue_workers = []
 
     def start(self):
+        """This method is used to start the processor"""
         # create a health thread
         self.logger.info("Starting health_thread...")
         health_thread = threading.Thread(
@@ -116,9 +139,9 @@ class MWACacheArchiveProcessor:
         # Create queueworker archive queue
         self.logger.info("Creating workers...")
 
-        for n in range(0, self.concurrent_archive_workers):
+        for archive_worker in range(0, self.concurrent_archive_workers):
             new_worker = mwax_ceph_queue_worker.CephQueueWorker(
-                label=f"Archiver{n}",
+                label=f"Archiver{archive_worker}",
                 q=self.queue,
                 executable_path=None,
                 event_handler=self.archive_handler,
@@ -154,6 +177,7 @@ class MWACacheArchiveProcessor:
         self.logger.info("Started...")
 
     def archive_handler(self, item: str, ceph_session) -> bool:
+        """Handles sending files to Pawsey"""
         self.logger.info(f"{item}- archive_handler() Started...")
 
         # validate the filename
@@ -269,6 +293,7 @@ class MWACacheArchiveProcessor:
             return False
 
     def pause_archiving(self, paused: bool):
+        """Pauses all processes"""
         if self.archiving_paused != paused:
             if paused:
                 self.logger.info("Pausing archiving")
@@ -276,37 +301,39 @@ class MWACacheArchiveProcessor:
                 self.logger.info("Resuming archiving")
 
             if len(self.queue_workers) > 0:
-                for qw in self.queue_workers:
-                    qw.pause(paused)
+                for queue_worker in self.queue_workers:
+                    queue_worker.pause(paused)
 
             self.archiving_paused = paused
 
     def stop(self):
+        """Stops all processes"""
         for watcher in self.watchers:
             watcher.stop()
 
         if len(self.queue_workers) > 0:
-            for qw in self.queue_workers:
-                qw.stop()
+            for queue_worker in self.queue_workers:
+                queue_worker.stop()
 
         # Wait for threads to finish
-        for t in self.watcher_threads:
-            if t:
-                thread_name = t.name
+        for watcher_thread in self.watcher_threads:
+            if watcher_thread:
+                thread_name = watcher_thread.name
                 self.logger.debug(f"Watcher {thread_name} Stopping...")
-                if t.is_alive():
-                    t.join()
+                if watcher_thread.is_alive():
+                    watcher_thread.join()
                 self.logger.debug(f"Watcher {thread_name} Stopped")
 
-        for t in self.worker_threads:
-            if t:
-                thread_name = t.name
+        for worker_thread in self.worker_threads:
+            if worker_thread:
+                thread_name = worker_thread.name
                 self.logger.debug(f"QueueWorker {thread_name} Stopping...")
-                if t.is_alive():
-                    t.join()
+                if worker_thread.is_alive():
+                    worker_thread.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
     def health_handler(self):
+        """Send multicast health data"""
         while self.running:
             # Code to run by the health thread
             status_dict = self.get_status()
@@ -332,6 +359,7 @@ class MWACacheArchiveProcessor:
             time.sleep(1)
 
     def get_status(self) -> dict:
+        """Returns status of all process as a dictionary"""
         if self.archiving_paused:
             archiving = "paused"
         else:
@@ -374,6 +402,7 @@ class MWACacheArchiveProcessor:
         return status
 
     def signal_handler(self, signum, frame):
+        """Catches SIG INT and SIG TERM then stops the processor"""
         self.logger.warning("Interrupted. Shutting down processor...")
         self.running = False
 
@@ -381,30 +410,7 @@ class MWACacheArchiveProcessor:
         self.stop()
 
     def initialise(self, config_filename):
-        # self.logger = logger
-
-        # self.hostname = hostname
-        # self.archive_to_location = archive_to_location
-        # self.concurrent_archive_workers = concurrent_archive_workers
-        # self.archive_command_timeout_sec = archive_command_timeout_sec
-        # self.recursive = recursive
-
-        # # s3 config
-        # self.s3_profile = s3_profile
-        # self.s3_endpoint = s3_endpoint
-        # self.s3_multipart_threshold_bytes = s3_multipart_threshold_bytes
-        # self.s3_chunk_size_bytes = s3_chunk_size_bytes
-        # self.s3_max_concurrency = s3_max_concurrency
-
-        # self.health_multicast_interface_ip = health_multicast_interface_ip
-        # self.health_multicast_ip = health_multicast_ip
-        # self.health_multicast_port = health_multicast_port
-        # self.health_multicast_hops = health_multicast_hops
-
-        # # MWAX servers will copy in a temp file, then rename once it is good
-        # self.mro_db_handler_object = mro_db_handler_object
-        # self.remote_db_handler_object = remote_db_handler_object
-        # self.watch_dirs = incoming_paths
+        """Do initial setup"""
 
         # Get this hosts hostname
         self.hostname = utils.get_hostname()
@@ -418,7 +424,7 @@ class MWACacheArchiveProcessor:
 
         # Parse config file
         config = ConfigParser()
-        config.read_file(open(config_filename, "r"))
+        config.read_file(open(config_filename, "r", encoding="utf-8"))
 
         # read from config file
         self.log_path = config.get("mwax mover", "log_path")
@@ -556,7 +562,7 @@ class MWACacheArchiveProcessor:
                     f"incoming file location in incoming_path{i} -"
                     f" {new_incoming_path} does not exist. Quitting."
                 )
-                exit(1)
+                sys.exit(1)
             self.watch_dirs.append(new_incoming_path)
             i += 1
 
@@ -568,7 +574,7 @@ class MWACacheArchiveProcessor:
                 " hostname of the machine running this). This host's name is:"
                 f" '{self.hostname}'. Quitting."
             )
-            exit(1)
+            sys.exit(1)
 
         self.recursive = utils.read_config_bool(
             self.logger, config, self.hostname, "recursive"
@@ -657,9 +663,9 @@ class MWACacheArchiveProcessor:
         self.start()
 
         while self.running:
-            for t in self.worker_threads:
-                if t:
-                    if t.is_alive():
+            for worker_thread in self.worker_threads:
+                if worker_thread:
+                    if worker_thread.is_alive():
                         time.sleep(1)
                     else:
                         self.running = False
@@ -673,6 +679,8 @@ class MWACacheArchiveProcessor:
         self.logger.info("Completed Successfully")
 
     def initialise_from_command_line(self):
+        """Initialise if initiated from command line"""
+
         # Get command line args
         parser = argparse.ArgumentParser()
         parser.description = (
@@ -697,15 +705,16 @@ class MWACacheArchiveProcessor:
 
 
 def main():
-    p = MWACacheArchiveProcessor()
+    """Mainline function"""
+    processor = MWACacheArchiveProcessor()
 
     try:
-        p.initialise_from_command_line()
-        p.start()
+        processor.initialise_from_command_line()
+        processor.start()
         sys.exit(0)
     except Exception as e:
-        if p.logger:
-            p.logger.exception(str(e))
+        if processor.logger:
+            processor.logger.exception(str(e))
         else:
             print(str(e))
 

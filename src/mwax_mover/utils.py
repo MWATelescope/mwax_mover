@@ -1,26 +1,36 @@
-from mwax_mover import mwax_command
-import astropy.io.fits as fits
+"""Various utility functions used throughout the package"""
 import base64
 from configparser import ConfigParser
 import fcntl
 import glob
 import os
+import queue
 import shutil
 import socket
 import struct
 import time
 import typing
+import astropy.io.fits as fits
+from mwax_mover import mwax_command, mwa_archiver
+from mwax_mover.mwa_archiver import ValidationData
 
 
-def is_observation_calibrator(metafits_filename: str) -> bool:
+def get_metafits_values(metafits_filename: str) -> (bool, str):
+    """
+    Returns a tuple of is_calibrator (bool) and
+    the project_id (string) from a metafits file.
+    """
     with fits.open(metafits_filename) as hdul:
         # Read key from primary HDU- it is bool
-        return hdul[0].header["CALIBRAT"]
+        is_calibrator = hdul[0].header["CALIBRAT"]  # pylint: disable=no-member
+        project_id = hdul[0].header["PROJECT"]  # pylint: disable=no-member
+        return is_calibrator, project_id
 
 
 def read_config(
     logger, config: ConfigParser, section: str, key: str, b64encoded=False
 ):
+    """Reads a value from a config file"""
     if b64encoded:
         value = base64.b64decode(config.get(section, key)).decode("utf-8")
         value_to_log = "*" * len(value)
@@ -33,6 +43,7 @@ def read_config(
 
 
 def read_config_bool(logger, config: ConfigParser, section: str, key: str):
+    """Read a bool from a config file"""
     value = config.getboolean(section, key)
 
     logger.info(f"Read cfg [{section}].{key} == {value}")
@@ -40,6 +51,7 @@ def read_config_bool(logger, config: ConfigParser, section: str, key: str):
 
 
 def get_hostname() -> str:
+    """Return the hostname of the running machine"""
     hostname = socket.gethostname()
 
     # ensure we remove anything after a . in case we got the fqdn
@@ -55,13 +67,17 @@ def process_mwax_stats(
     numa_node: int,
     timeout: int,
     stats_dump_dir: str,
+    metafits_path: str,
 ) -> bool:
+    """Runs mwax_stats"""
     # This code will execute the mwax stats command
     obs_id = str(os.path.basename(full_filename)[0:10])
 
+    metafits_filename = os.path.join(metafits_path, f"{obs_id}_metafits.fits")
+
     cmd = (
         f"{mwax_stats_executable} -t {full_filename} -m"
-        f" /vulcan/metafits/{obs_id}_metafits.fits -o {stats_dump_dir}"
+        f" {metafits_filename} -o {stats_dump_dir}"
     )
 
     logger.info(f"{full_filename}- attempting to run stats: {cmd}")
@@ -81,6 +97,7 @@ def process_mwax_stats(
 def load_psrdada_ringbuffer(
     logger, full_filename: str, ringbuffer_key: str, numa_node, timeout: int
 ) -> bool:
+    """Loads a subfile into a PSRDADA ringbuffer"""
     logger.info(
         f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}"
     )
@@ -108,28 +125,58 @@ def load_psrdada_ringbuffer(
     return return_value
 
 
-def scan_for_existing_files(
+def scan_for_existing_files_and_add_to_queue(
     logger,
     watch_dir: str,
     pattern: str,
     recursive: bool,
-    q,
+    queue_target: queue.Queue,
     exclude_pattern=None,
 ):
+    """
+    Scans a directory for a file pattern and then enqueues all items into
+    a regular queue
+    """
     files = scan_directory(
         logger, watch_dir, pattern, recursive, exclude_pattern
     )
     files = sorted(files)
     logger.info(f"Found {len(files)} files")
 
-    for file in files:
-        q.put(file)
-        logger.info(f"{file} added to queue")
+    for filename in files:
+        queue_target.put(filename)
+        logger.info(f"{filename} added to queue")
+
+
+def scan_for_existing_files_and_add_to_priority_queue(
+    logger,
+    metafits_path: str,
+    watch_dir: str,
+    pattern: str,
+    recursive: bool,
+    queue_target: queue.PriorityQueue,
+    exclude_pattern=None,
+):
+    """
+    Scans a directory for a file pattern and then enqueues all items into
+    a priority queue
+    """
+    files = scan_directory(
+        logger, watch_dir, pattern, recursive, exclude_pattern
+    )
+    files = sorted(files)
+    logger.info(f"Found {len(files)} files")
+
+    for filename in files:
+        priority = get_priority(filename, metafits_path)
+        queue_target.put((priority, filename))
+        logger.info(f"{filename} added to queue with priority {priority}")
 
 
 def scan_directory(
     logger, watch_dir: str, pattern: str, recursive: bool, exclude_pattern
 ) -> list:
+    """Scan a directory based on a pattern and adds the files into a list"""
     # Watch dir must end in a slash for the iglob to work
     # Just loop through all files and add them to the queue
     if recursive:
@@ -163,6 +210,8 @@ def send_multicast(
     message: bytes,
     ttl_hops: int,
 ):
+    """Send data to an IP and port via multicast"""
+
     # Create the datagram socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 
@@ -197,6 +246,7 @@ def send_multicast(
 
 
 def get_ip_address(ifname: str) -> str:
+    """Gets an IP address from an interface name"""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     return socket.inet_ntoa(
         fcntl.ioctl(
@@ -208,10 +258,12 @@ def get_ip_address(ifname: str) -> str:
 
 
 def get_primary_ip_address() -> str:
+    """Get primary IP of this host"""
     return socket.gethostbyname(socket.getfqdn())
 
 
 def get_disk_space_bytes(path: str) -> typing.Tuple[int, int, int]:
+    """Gets the total, used and free bytes from a path"""
     # Get disk space: total, used and free
     return shutil.disk_usage(path)
 
@@ -219,6 +271,8 @@ def get_disk_space_bytes(path: str) -> typing.Tuple[int, int, int]:
 def do_checksum_md5(
     logger, full_filename: str, numa_node: int, timeout: int
 ) -> str:
+    """Return an md5 checksum of a file"""
+
     # default output of md5 hash command is:
     # "5ce49e5ebd72c41a1d70802340613757
     # /visdata/incoming/1320133480_20211105074422_ch055_000.fits"
@@ -261,3 +315,65 @@ def do_checksum_md5(
         raise Exception(
             f"md5sum returned an unexpected return code {return_value}"
         )
+
+
+def get_priority(filename: str, metafits_path: str) -> int:
+    """
+    metafits_path is the directory where all the current
+    metafits files exist.
+
+    Determines the priority to assign this file.
+    The returned integer has is used by a PriorityQueue
+    to determine priority. The lowest priority number
+    in the queue gets returned first when q.get() is
+    called.
+
+    Priority order is:
+    1 Calibrator correlator observations
+    2 reserved for correlator high prioriry projects
+    10 metafits PPD files
+    20 reserved for vcs high prioriry projects
+    30 normal correlator observations
+    99 vcs observations
+    100 ???
+    """
+    return_priority = 100  # default if we don't do anything else
+
+    list_of_correlator_high_priority_projects = [
+        "D0006",
+    ]
+
+    list_of_vcs_high_priority_projects = [
+        "D0006",
+    ]
+
+    # get info about this file
+    val: ValidationData = mwa_archiver.validate_filename(
+        filename, metafits_path
+    )
+
+    if val.valid:
+        if (
+            val.filetype_id
+            == mwa_archiver.MWADataFileType.MWAX_VISIBILITIES.value
+        ):
+            if val.calibrator:
+                return_priority = 1
+            else:
+                if val.project_id in list_of_correlator_high_priority_projects:
+                    return_priority = 2
+                else:
+                    return_priority = 30
+        elif (
+            val.filetype_id == mwa_archiver.MWADataFileType.MWA_PPD_FILE.value
+        ):
+            return_priority = 10
+        elif (
+            val.filetype_id == mwa_archiver.MWADataFileType.MWAX_VOLTAGES.value
+        ):
+            if val.project_id in list_of_vcs_high_priority_projects:
+                return_priority = 20
+            else:
+                return_priority = 99
+
+    return return_priority

@@ -1,13 +1,13 @@
+"""Contains various methods dealing with archiving"""
 import os
 import hashlib
 from enum import Enum
 import time
-import typing
 import uuid
 import boto3
 from boto3.s3.transfer import TransferConfig
 from botocore.client import Config
-from mwax_mover import mwax_command
+from mwax_mover import mwax_command, utils
 
 # Set number of bytes in 1 GB
 MB = 1024 * 1024
@@ -15,16 +15,66 @@ GB = MB * 1024
 
 
 class MWADataFileType(Enum):
+    """Enum for the possible MWA data file types"""
+
     MWA_FLAG_FILE = 10
     MWA_PPD_FILE = 14
     MWAX_VOLTAGES = 17
     MWAX_VISIBILITIES = 18
 
 
-def validate_filename(filename: str) -> typing.Tuple[bool, int, int, str, str]:
-    # Returns valid, obs_id, filetype_id, file_ext, validation_error
+class ValidationData:
+    """A struct for the return value of validate_filename"""
+
+    valid: bool
+    obs_id: int
+    project_id: str
+    filetype_id: int
+    file_ext: str
+    calibrator: bool
+    validation_message: str
+
+    def __init__(
+        self,
+        valid: bool,
+        obs_id: int,
+        project_id: str,
+        filetype_id: int,
+        file_ext: str,
+        calibrator: bool,
+        validation_message: str,
+    ):
+        self.valid = valid
+        self.obs_id = obs_id
+        self.project_id = project_id
+        self.filetype_id = filetype_id
+        self.file_ext = file_ext
+        self.calibrator = calibrator
+        self.validation_message = validation_message
+
+
+def validate_filename(
+    filename: str,
+    metafits_path: str,
+) -> ValidationData:
+    """
+    Takes a filename and determines various
+    things about it.
+    Returns:
+        (valid (bool) did validation succeed
+        ,obs_id (int) obs_id of file
+        ,project_id (int) project id of observation
+        ,filetype_id (int) file type id
+        ,file_ext (string) file extension
+        ,calibrator (bool) True if it's a calibrator
+        ,validation_error (string) validation error
+        )
+    """
+
     valid: bool = True
     obs_id = 0
+    project_id = ""
+    calibrator = False
     validation_error: str = ""
     filetype_id: int = -1
     file_name_part: str = ""
@@ -132,7 +182,25 @@ def validate_filename(filename: str) -> typing.Tuple[bool, int, int, str, str]:
                     " Format should be obsid_flags.zip)- ignoring"
                 )
 
-    return valid, obs_id, filetype_id, file_ext_part, validation_error
+    # 5. Get project id and calibtator info
+    if valid:
+        # Now check that the observation is a calibrator by
+        # looking at the associated metafits file
+        metafits_filename = os.path.join(
+            metafits_path, f"{obs_id}_metafits.fits"
+        )
+
+        (calibrator, project_id) = utils.get_metafits_values(metafits_filename)
+
+    return ValidationData(
+        valid,
+        obs_id,
+        project_id,
+        filetype_id,
+        file_ext_part,
+        calibrator,
+        validation_error,
+    )
 
 
 def determine_bucket_and_folder(full_filename, location):
@@ -160,6 +228,7 @@ def archive_file_rsync(
     archive_destination_path: str,
     timeout: int,
 ):
+    """Archives a file via rsync"""
     logger.debug(f"{full_filename} attempting archive_file_rsync...")
 
     # get file size
@@ -213,6 +282,7 @@ def archive_file_xrootd(
     archive_destination_host: str,
     timeout: int,
 ):
+    """Archive a file via xrootd"""
     logger.debug(f"{full_filename} attempting archive_file_xrootd...")
 
     # get file size
@@ -307,6 +377,7 @@ def archive_file_ceph(
     chunk_size_bytes: int,
     max_concurrency: int,
 ):
+    """Archive file via ceph"""
     logger.debug(f"{full_filename} attempting archive_file_ceph...")
 
     # get file size
@@ -388,6 +459,10 @@ def archive_file_ceph(
 # /master/calculate_multipart_etag.py
 #
 def ceph_get_s3_md5_etag(filename: str, chunk_size_bytes: int) -> str:
+    """
+    Determine what a Ceph etag should be
+    given filename and chunk size
+    """
     md5s = []
 
     with open(filename, "rb") as fp:
@@ -413,6 +488,7 @@ def ceph_get_s3_md5_etag(filename: str, chunk_size_bytes: int) -> str:
 
 
 def ceph_get_s3_object(profile: str, endpoint: str):
+    """Returns an S3 resource object"""
     # create a session based on the profile name
     session = boto3.Session(profile_name=profile)
 
@@ -426,11 +502,13 @@ def ceph_get_s3_object(profile: str, endpoint: str):
 
 
 def ceph_get_bucket_name_from_filename(filename: str) -> str:
+    """Generates a bucket name for a filename"""
     file_part = os.path.split(filename)[1]
     return ceph_get_bucket_name_from_obs_id(int(file_part[0:10]))
 
 
 def ceph_get_bucket_name_from_obs_id(obs_id: int) -> str:
+    """Generate bucket name given an obs_id"""
     # return the first 5 digits of the obsid
     # This means there will be a new bucket every ~27 hours
     # This is to reduce the chances of vcs jobs filling a bucket to more than
@@ -439,11 +517,13 @@ def ceph_get_bucket_name_from_obs_id(obs_id: int) -> str:
 
 
 def ceph_create_bucket(s3_object, bucket_name: str):
+    """Create a bucket via S3"""
     bucket = s3_object.Bucket(bucket_name)
     bucket.create()
 
 
 def ceph_list_bucket(s3_object, bucket_name: str) -> list:
+    """List contents of a bucket"""
     bucket = s3_object.Bucket(bucket_name)
     return list(bucket.objects.all())
 
@@ -457,6 +537,7 @@ def ceph_upload_file(
     chunk_size_bytes: int,
     max_concurrency: int,
 ) -> bool:
+    """upload a file via ceph/s3"""
     # get key
     key = os.path.split(filename)[1]
 
