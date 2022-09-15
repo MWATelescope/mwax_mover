@@ -29,7 +29,7 @@ class PriorityQueueWorker(object):
     def __init__(
         self,
         label: str,
-        q: queue.PriorityQueue,
+        dest_queue: queue.PriorityQueue,
         executable_path,
         log,
         event_handler,
@@ -40,7 +40,7 @@ class PriorityQueueWorker(object):
         backoff_limit_seconds: int = 60,
     ):
         self.label = label
-        self.q: queue.PriorityQueue = q
+        self.dest_queue: queue.PriorityQueue = dest_queue
 
         if (event_handler is None and executable_path is None) or (
             event_handler is not None and executable_path is not None
@@ -79,7 +79,9 @@ class PriorityQueueWorker(object):
                     success = False
 
                     if self.current_item is None:
-                        self.current_item = self.q.get(block=True, timeout=0.5)
+                        self.current_item = self.dest_queue.get(
+                            block=True, timeout=0.5
+                        )
                     self.logger.info(f"Processing {self.current_item}...")
 
                     start_time = time.time()
@@ -97,22 +99,23 @@ class PriorityQueueWorker(object):
                         if success:
                             # Dequeue the item, but requeue if it was not
                             # successful
-                            self.q.task_done()
+                            self.dest_queue.task_done()
                             self.current_item = None
                     else:
                         # Dequeue the item
                         self.logger.warning(
                             f"Processing {self.current_item } Complete... file"
                             " was moved or deleted. Queue size:"
-                            f" {self.q.qsize()}"
+                            f" {self.dest_queue.qsize()}"
                         )
                         self.current_item = None
-                        self.q.task_done()
+                        self.dest_queue.task_done()
                         continue
 
                     elapsed = time.time() - start_time
                     self.logger.info(
-                        f"Complete. Queue size: {self.q.qsize()} Elapsed:"
+                        "Complete. Queue size:"
+                        f" {self.dest_queue.qsize()} Elapsed:"
                         f" {elapsed:.2f} sec"
                     )
 
@@ -145,8 +148,8 @@ class PriorityQueueWorker(object):
                             if filename_priority > 10:
                                 filename_priority = 10
 
-                            self.q.task_done()
-                            self.q.put((filename_priority, filename))
+                            self.dest_queue.task_done()
+                            self.dest_queue.put((filename_priority, filename))
                             self.current_item = None
 
                 except queue.Empty:
@@ -185,5 +188,5 @@ class PriorityQueueWorker(object):
         return {
             "Unix timestamp": time.time(),
             "current item": self.current_item[1],
-            "priority_queue_size": self.q.qsize(),
+            "priority_queue_size": self.dest_queue.qsize(),
         }

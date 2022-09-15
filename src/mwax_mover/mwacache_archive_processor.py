@@ -20,6 +20,7 @@ from mwax_mover import (
     utils,
     version,
 )
+from mwax_mover.mwa_archiver import ValidationData
 from mwax_mover.mwax_db import DataFileRow
 
 
@@ -36,6 +37,7 @@ class MWACacheArchiveProcessor:
 
         self.hostname = None
         self.log_path = None
+        self.metafits_path = None
         self.archive_to_location = None
         self.concurrent_archive_workers = None
         self.archive_command_timeout_sec = None
@@ -127,7 +129,7 @@ class MWACacheArchiveProcessor:
             # Create watcher for each data path queue
             new_watcher = mwax_watcher.Watcher(
                 path=watch_dir,
-                q=self.queue,
+                dest_queue=self.queue,
                 pattern=".*",
                 log=self.logger,
                 mode=self.mwax_mover_mode,
@@ -181,16 +183,12 @@ class MWACacheArchiveProcessor:
         self.logger.info(f"{item}- archive_handler() Started...")
 
         # validate the filename
-        (
-            valid,
-            obs_id,
-            filetype,
-            file_ext,
-            validation_message,
-        ) = mwa_archiver.validate_filename(item)
+        val: ValidationData = mwa_archiver.validate_filename(
+            item, self.metafits_path
+        )
 
         # do some sanity checks!
-        if valid:
+        if val.valid:
             # Get the file size
             actual_file_size = os.stat(item).st_size
             self.logger.debug(
@@ -240,7 +238,7 @@ class MWACacheArchiveProcessor:
                 self.archive_to_location,
             )
 
-        if valid:
+        if val.valid:
             archive_success = False
 
             if (
@@ -267,7 +265,7 @@ class MWACacheArchiveProcessor:
                 # Update record in metadata database
                 if not mwax_db.update_data_file_row_as_archived(
                     self.mro_db_handler_object,
-                    obs_id,
+                    val.obs_id,
                     item,
                     self.archive_to_location,
                     bucket,
@@ -288,7 +286,7 @@ class MWACacheArchiveProcessor:
         else:
             # The filename was not valid
             self.logger.error(
-                f"{item}- archive_handler() {validation_message}"
+                f"{item}- archive_handler() {val.validation_message}"
             )
             return False
 
@@ -466,6 +464,17 @@ class MWACacheArchiveProcessor:
         self.watch_dirs = []
 
         # Common config options
+        self.metafits_path = utils.read_config(
+            self.logger, config, "mwax mover", "metafits_path"
+        )
+
+        if not os.path.exists(self.metafits_path):
+            self.logger.error(
+                "Metafits file location "
+                f" {self.metafits_path} does not exist. Quitting."
+            )
+            sys.exit(1)
+
         self.archive_to_location = int(
             utils.read_config(
                 self.logger, config, "mwax mover", "archive_to_location"

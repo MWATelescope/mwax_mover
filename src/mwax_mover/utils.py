@@ -247,10 +247,10 @@ def send_multicast(
 
 def get_ip_address(ifname: str) -> str:
     """Gets an IP address from an interface name"""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     return socket.inet_ntoa(
         fcntl.ioctl(
-            s.fileno(),
+            sock.fileno(),
             0x8915,  # SIOCGIFADDR
             struct.pack("256s", bytes(ifname[:15], "utf-8")),
         )[20:24]

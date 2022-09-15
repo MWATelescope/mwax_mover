@@ -1,3 +1,4 @@
+"""Module to execute arbitrary commands"""
 import subprocess
 import shlex
 import typing
@@ -13,6 +14,7 @@ def run_command_ext(
     timeout: int = 60,
     use_shell: bool = False,
 ) -> typing.Tuple[bool, str]:
+    """Runs a command and returns success or failure and stdout"""
     # Example: ["dada_diskdb", "-k 1234", "-f 1216447872_02_256_201.sub -s"]
     if numa_node is None:
         cmdline = f"{command}"

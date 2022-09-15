@@ -1,28 +1,27 @@
+"""
+Module hosting the MWAXCalvinProcessor for near-realtime
+calibration
+"""
 import argparse
 from configparser import ConfigParser
-from glob import glob
-import json
 import logging
 import logging.handlers
 import os
 import queue
 import signal
 import sys
-import threading
 import time
 from mwax_mover import (
     mwax_mover,
     mwax_db,
-    mwax_ceph_queue_worker,
-    mwax_watcher,
-    mwa_archiver,
     utils,
     version,
 )
-from mwax_mover.mwax_db import DataFileRow
 
 
 class MWAXCalvinProcessor:
+    """The main class processing calibration solutions"""
+
     def __init__(
         self,
         logger,
@@ -84,6 +83,7 @@ class MWAXCalvinProcessor:
         self.queue_workers = []
 
     def initialise(self):
+        """Function to setup processor"""
         self.running = True
 
         # Make sure we can Ctrl-C / kill out of this
@@ -110,316 +110,23 @@ class MWAXCalvinProcessor:
         self.logger.info("Completed Successfully")
 
     def start(self):
-        # create a health thread
-        self.logger.info("Starting health_thread...")
-        health_thread = threading.Thread(
-            name="health_thread", target=self.health_handler, daemon=True
-        )
-        health_thread.start()
-
-        self.logger.info("Creating watchers...")
-        for watch_dir in self.watch_dirs:
-            #
-            # Remove any partial files first if they are old
-            #
-            partial_files = glob(os.path.join(watch_dir, "*.part*"))
-            for partial_file in partial_files:
-                # Ensure now minus the last mod time of the partial file
-                # is > 60 mins, it is definitely safe to delete
-                # In theory we could be starting up as mwax is sending
-                # us a new file and we don't want to delete an real
-                # in progress file.
-                MIN_PARTIAL_PURGE_AGE_SECS = 3600
-
-                if (
-                    time.time() - os.path.getmtime(partial_file)
-                    > MIN_PARTIAL_PURGE_AGE_SECS
-                ):
-                    self.logger.warning(
-                        f"Partial file {partial_file} is older than"
-                        f" {MIN_PARTIAL_PURGE_AGE_SECS} seconds and will be"
-                        " removed..."
-                    )
-                    os.remove(partial_file)
-                    self.logger.warning(f"Partial file {partial_file} deleted")
-                else:
-                    self.logger.warning(
-                        f"Partial file {partial_file} is newer than"
-                        f" {MIN_PARTIAL_PURGE_AGE_SECS} seconds so will NOT be"
-                        " removed this time"
-                    )
-
-            # Create watcher for each data path queue
-            new_watcher = mwax_watcher.Watcher(
-                path=watch_dir,
-                q=self.queue,
-                pattern=".*",
-                log=self.logger,
-                mode=self.mwax_mover_mode,
-                recursive=self.recursive,
-                exclude_pattern=".part*",
-            )
-            self.watchers.append(new_watcher)
-
-        # Create queueworker archive queue
-        self.logger.info("Creating workers...")
-
-        for n in range(0, self.concurrent_archive_workers):
-            new_worker = mwax_ceph_queue_worker.CephQueueWorker(
-                label=f"Archiver{n}",
-                q=self.queue,
-                executable_path=None,
-                event_handler=self.archive_handler,
-                log=self.logger,
-                requeue_to_eoq_on_failure=True,
-                exit_once_queue_empty=False,
-                backoff_initial_seconds=20,
-                backoff_factor=2,
-                backoff_limit_seconds=40,
-                ceph_endpoint=self.acacia_ceph_endpoint,
-                ceph_profile=self.acacia_profile,
-            )
-            self.queue_workers.append(new_worker)
-
-        self.logger.info("Starting watchers...")
-        # Setup thread for watching filesystem
-        for i, watcher in enumerate(self.watchers):
-            watcher_thread = threading.Thread(
-                name=f"watch_thread{i}", target=watcher.start, daemon=True
-            )
-            self.watcher_threads.append(watcher_thread)
-            watcher_thread.start()
-
-        self.logger.info("Starting workers...")
-        # Setup thread for processing items
-        for i, worker in enumerate(self.queue_workers):
-            queue_worker_thread = threading.Thread(
-                name=f"worker_thread{i}", target=worker.start, daemon=True
-            )
-            self.worker_threads.append(queue_worker_thread)
-            queue_worker_thread.start()
-
-        self.logger.info("Started...")
-
-    def archive_handler(self, item: str, ceph_session) -> bool:
-        self.logger.info(f"{item}- archive_handler() Started...")
-
-        # validate the filename
-        (
-            valid,
-            obs_id,
-            filetype,
-            file_ext,
-            validation_message,
-        ) = mwa_archiver.validate_filename(item)
-
-        # do some sanity checks!
-        if valid:
-            # Get the file size
-            actual_file_size = os.stat(item).st_size
-            self.logger.debug(
-                f"{item}- archive_handler() file size on disk is"
-                f" {actual_file_size} bytes"
-            )
-
-            # Lookup file from db
-            data_files_row: DataFileRow = mwax_db.get_data_file_row(
-                self.remote_db_handler_object, item
-            )
-            database_file_size = data_files_row.size
-
-            # Check for 0 size
-            if actual_file_size == 0:
-                # File size is 0- lets just blow it away
-                self.logger.warning(
-                    f"{item}- archive_handler() File size is 0 bytes. Deleting"
-                    " file"
-                )
-                mwax_mover.remove_file(self.logger, item, raise_error=False)
-
-                # even though its a problem,we return true as we are finished
-                # with the item and it should not be requeued
-                return True
-            elif actual_file_size != database_file_size:
-                # File size is incorrect- lets just blow it away
-                self.logger.warning(
-                    f"{item}- archive_handler() File size"
-                    f" {actual_file_size} does not match {database_file_size}."
-                    " Deleting file"
-                )
-                mwax_mover.remove_file(self.logger, item, raise_error=False)
-
-                # even though its a problem,we return true as we are finished
-                # with the item and it should not be requeued
-                return True
-
-            self.logger.debug(
-                f"{item}- archive_handler() File size matches metadata"
-                " database"
-            )
-
-            # Determine where to archive it
-            bucket, folder = mwa_archiver.determine_bucket_and_folder(
-                item,
-                self.archive_to_location,
-            )
-
-        if valid:
-            archive_success = False
-
-            if self.archive_to_location == 2:  # Ceph
-                archive_success = mwa_archiver.archive_file_ceph(
-                    self.logger,
-                    ceph_session,
-                    item,
-                    bucket,
-                    data_files_row.checksum,
-                    self.acacia_profile,
-                    self.acacia_ceph_endpoint,
-                    self.acacia_multipart_threshold_bytes,
-                    self.acacia_chunk_size_bytes,
-                    self.acacia_max_concurrency,
-                )
-            else:
-                raise NotImplementedError(
-                    f"Location {self.archive_to_location} not implemented"
-                )
-
-            if archive_success:
-                # Update record in metadata database
-                if not mwax_db.update_data_file_row_as_archived(
-                    self.mro_db_handler_object,
-                    obs_id,
-                    item,
-                    self.archive_to_location,
-                    bucket,
-                    None,
-                ):
-                    # if something went wrong, requeue
-                    return False
-
-                # If all is well, we have the file safely archived and the
-                # database updated, so remove the file
-                self.logger.debug(f"{item}- archive_handler() Deleting file")
-                mwax_mover.remove_file(self.logger, item, raise_error=False)
-
-                self.logger.info(f"{item}- archive_handler() Finished")
-                return True
-            else:
-                return False
-        else:
-            # The filename was not valid
-            self.logger.error(
-                f"{item}- archive_handler() {validation_message}"
-            )
-            return False
-
-    def pause_archiving(self, paused: bool):
-        if self.archiving_paused != paused:
-            if paused:
-                self.logger.info("Pausing archiving")
-            else:
-                self.logger.info("Resuming archiving")
-
-            if len(self.queue_workers) > 0:
-                for qw in self.queue_workers:
-                    qw.pause(paused)
-
-            self.archiving_paused = paused
+        """Start the processor"""
+        pass
 
     def stop(self):
-        for watcher in self.watchers:
-            watcher.stop()
-
-        if len(self.queue_workers) > 0:
-            for qw in self.queue_workers:
-                qw.stop()
-
-        # Wait for threads to finish
-        for t in self.watcher_threads:
-            if t:
-                thread_name = t.name
-                self.logger.debug(f"Watcher {thread_name} Stopping...")
-                if t.isAlive:
-                    t.join()
-                self.logger.debug(f"Watcher {thread_name} Stopped")
-
-        for t in self.worker_threads:
-            if t:
-                thread_name = t.name
-                self.logger.debug(f"QueueWorker {thread_name} Stopping...")
-                if t.isAlive():
-                    t.join()
-                self.logger.debug(f"QueueWorker {thread_name} Stopped")
+        """Stop the processor"""
+        pass
 
     def health_handler(self):
-        while self.running:
-            # Code to run by the health thread
-            status_dict = self.get_status()
-
-            # Convert the status to bytes
-            status_bytes = json.dumps(status_dict).encode("utf-8")
-
-            # Send the bytes
-            try:
-                utils.send_multicast(
-                    self.health_multicast_interface_ip,
-                    self.health_multicast_ip,
-                    self.health_multicast_port,
-                    status_bytes,
-                    self.health_multicast_hops,
-                )
-            except Exception as e:
-                self.logger.warning(
-                    f"health_handler: Failed to send health information. {e}"
-                )
-
-            # Sleep for a second
-            time.sleep(1)
+        """Send health information via UDP multicast"""
+        pass
 
     def get_status(self) -> dict:
-        if self.archiving_paused:
-            archiving = "paused"
-        else:
-            archiving = "running"
-
-        main_status = {
-            "Unix timestamp": time.time(),
-            "process": type(self).__name__,
-            "version": version.get_mwax_mover_version_string(),
-            "host": self.hostname,
-            "running": self.running,
-            "archiving": archiving,
-        }
-
-        watcher_list = []
-
-        for watcher in self.watchers:
-            status = dict({"name": "data_watcher"})
-            status.update(watcher.get_status())
-            watcher_list.append(status)
-
-        worker_list = []
-
-        if len(self.queue_workers) > 0:
-            for i, worker in enumerate(self.queue_workers):
-                status = dict({"name": f"archiver{i}"})
-                status.update(worker.get_status())
-                worker_list.append(status)
-
-        processor_status_list = []
-        processor = {
-            "type": type(self).__name__,
-            "watchers": watcher_list,
-            "workers": worker_list,
-        }
-        processor_status_list.append(processor)
-
-        status = {"main": main_status, "processors": processor_status_list}
-
-        return status
+        """Return the status as a dictionary"""
+        pass
 
     def signal_handler(self, signum, frame):
+        """Handles SIGINT and SIGTERM"""
         self.logger.warning("Interrupted. Shutting down processor...")
         self.running = False
 
@@ -428,16 +135,17 @@ class MWAXCalvinProcessor:
 
 
 def main():
+    """Main routine for the processor"""
     # Get this hosts hostname
     hostname = utils.get_hostname()
 
     # Get command line args
     parser = argparse.ArgumentParser()
     parser.description = (
-        "mwacache_archive_processor: a command line tool which is part of the"
-        " MWA correlator for the MWA. It will monitor various directories on"
-        " each mwacache server and, upon detecting a file, send it to"
-        " Pawsey's LTS. It will then remove the file from the local disk."
+        "mwax_calvin_processor: a command line tool which is part of the"
+        " MWA correlator for the MWA. It will monitor directories on"
+        " each mwax server and, upon detecting a calibrator observation,"
+        " will execute hyperdrive to generate calibration solutions."
         f" (mwax_mover v{version.get_mwax_mover_version_string()})\n"
     )
 

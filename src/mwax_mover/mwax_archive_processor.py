@@ -10,6 +10,7 @@ from mwax_mover import (
     mwax_db,
     mwax_queue_worker,
     mwax_priority_queue_worker,
+    mwax_priority_watcher,
     mwax_watcher,
     mwa_archiver,
     utils,
@@ -98,8 +99,8 @@ class MWAXArchiveProcessor:
         self.queue_dont_archive_volt = queue.Queue()
         self.queue_worker_dont_archive_volt = None
 
-        self.priority_queue_checksum_and_db = queue.PriorityQueue()
-        self.priority_queue_worker_checksum_and_db = None
+        self.queue_checksum_and_db = queue.PriorityQueue()
+        self.queue_worker_checksum_and_db = None
 
         self.watch_dir_incoming_volt = voltdata_incoming_path
         self.watcher_incoming_volt = None
@@ -118,7 +119,7 @@ class MWAXArchiveProcessor:
         self.watch_dir_outgoing_vis = visdata_outgoing_path
         self.watcher_outgoing_vis = None
 
-        self.queue_outgoing = queue.Queue()
+        self.queue_outgoing = queue.PriorityQueue()
         self.queue_worker_outgoing = None
 
         self.watch_dir_outgoing_cal = visdata_cal_outgoing_path
@@ -138,7 +139,7 @@ class MWAXArchiveProcessor:
             # Create watcher for voltage data -> checksum+db queue
             self.watcher_incoming_volt = mwax_watcher.Watcher(
                 path=self.watch_dir_incoming_volt,
-                q=self.priority_queue_checksum_and_db,
+                dest_queue=self.queue_checksum_and_db,
                 pattern=".sub",
                 log=self.logger,
                 mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
@@ -151,7 +152,7 @@ class MWAXArchiveProcessor:
             # (e.g. metafits ppd files being copied into /visdata).
             self.watcher_incoming_vis = mwax_watcher.Watcher(
                 path=self.watch_dir_incoming_vis,
-                q=self.priority_queue_checksum_and_db,
+                dest_queue=self.queue_checksum_and_db,
                 pattern=".fits",
                 log=self.logger,
                 mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
@@ -159,21 +160,19 @@ class MWAXArchiveProcessor:
             )
 
             # Create queueworker for the checksum and db queue
-            self.priority_queue_worker_checksum_and_db = (
-                mwax_priority_queue_worker.PriorityQueueWorker(
-                    label="checksum and database worker",
-                    q=self.priority_queue_checksum_and_db,
-                    executable_path=None,
-                    event_handler=self.checksum_and_db_handler,
-                    log=self.logger,
-                    exit_once_queue_empty=False,
-                )
+            self.queue_worker_checksum_and_db = mwax_queue_worker.QueueWorker(
+                label="checksum and database worker",
+                source_queue=self.queue_checksum_and_db,
+                executable_path=None,
+                event_handler=self.checksum_and_db_handler,
+                log=self.logger,
+                exit_once_queue_empty=False,
             )
 
             # Create watcher for visibility processing stats
             self.watcher_processing_stats_vis = mwax_watcher.Watcher(
                 path=self.watch_dir_processing_stats_vis,
-                q=self.queue_processing_stats_vis,
+                dest_queue=self.queue_processing_stats_vis,
                 pattern=".fits",
                 log=self.logger,
                 mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
@@ -184,7 +183,7 @@ class MWAXArchiveProcessor:
             self.queue_worker_processing_stats_vis = (
                 mwax_queue_worker.QueueWorker(
                     label="processing stats vis worker",
-                    q=self.queue_processing_stats_vis,
+                    source_queue=self.queue_processing_stats_vis,
                     executable_path=None,
                     event_handler=self.stats_handler,
                     log=self.logger,
@@ -193,40 +192,44 @@ class MWAXArchiveProcessor:
             )
 
             # Create watcher for archiving outgoing voltage data
-            self.watcher_outgoing_volt = mwax_watcher.Watcher(
+            self.watcher_outgoing_volt = mwax_priority_watcher.PriorityWatcher(
                 path=self.watch_dir_outgoing_volt,
-                q=self.queue_outgoing,
+                dest_queue=self.queue_outgoing,
                 pattern=".sub",
                 log=self.logger,
                 mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
+                metafits_path=self.metafits_path,
                 recursive=False,
             )
 
             # Create watcher for archiving outgoing visibility data
-            self.watcher_outgoing_vis = mwax_watcher.Watcher(
+            self.watcher_outgoing_vis = mwax_priority_watcher.PriorityWatcher(
                 path=self.watch_dir_outgoing_vis,
-                q=self.queue_outgoing,
+                dest_queue=self.queue_outgoing,
                 pattern=".fits",
                 log=self.logger,
                 mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
+                metafits_path=self.metafits_path,
                 recursive=False,
             )
 
             # Create queueworker for outgoing queue
-            self.queue_worker_outgoing = mwax_queue_worker.QueueWorker(
-                label="outgoing worker",
-                q=self.queue_outgoing,
-                executable_path=None,
-                event_handler=self.archive_handler,
-                log=self.logger,
-                exit_once_queue_empty=False,
+            self.queue_worker_outgoing = (
+                mwax_priority_queue_worker.PriorityQueueWorker(
+                    label="outgoing worker",
+                    dest_queue=self.queue_outgoing,
+                    executable_path=None,
+                    event_handler=self.archive_handler,
+                    log=self.logger,
+                    exit_once_queue_empty=False,
+                )
             )
 
             # Create watcher for sending calibration visibility data
             # for processing
             self.watcher_outgoing_cal = mwax_watcher.Watcher(
                 path=self.watch_dir_outgoing_cal,
-                q=self.queue_outgoing_cal,
+                dest_queue=self.queue_outgoing_cal,
                 pattern=".fits",
                 log=self.logger,
                 mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
@@ -237,7 +240,7 @@ class MWAXArchiveProcessor:
             # for processing
             self.queue_worker_outgoing_cal = mwax_queue_worker.QueueWorker(
                 label="outgoing cal vis worker",
-                q=self.queue_outgoing_cal,
+                source_queue=self.queue_outgoing_cal,
                 executable_path=None,
                 event_handler=self.cal_handler,
                 log=self.logger,
@@ -308,7 +311,7 @@ class MWAXArchiveProcessor:
             # Setup thread for processing items on the checksum and db queue
             queue_worker_checksum_and_db_thread = threading.Thread(
                 name="work_checksum_and_db",
-                target=self.priority_queue_worker_checksum_and_db.start,
+                target=self.queue_worker_checksum_and_db.start,
                 daemon=True,
             )
             self.worker_threads.append(queue_worker_checksum_and_db_thread)
@@ -371,7 +374,7 @@ class MWAXArchiveProcessor:
             # Create watcher for voltage data -> dont_archive queue
             self.watcher_incoming_volt = mwax_watcher.Watcher(
                 path=self.watch_dir_incoming_volt,
-                q=self.queue_dont_archive_volt,
+                dest_queue=self.queue_dont_archive_volt,
                 pattern=".sub",
                 log=self.logger,
                 mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
@@ -384,7 +387,7 @@ class MWAXArchiveProcessor:
             # into /visdata).
             self.watcher_incoming_vis = mwax_watcher.Watcher(
                 path=self.watch_dir_incoming_vis,
-                q=self.queue_dont_archive_vis,
+                dest_queue=self.queue_dont_archive_vis,
                 pattern=".fits",
                 log=self.logger,
                 mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
@@ -394,7 +397,7 @@ class MWAXArchiveProcessor:
             # Create queueworker for the vis don't archive queue
             self.queue_worker_dont_archive_vis = mwax_queue_worker.QueueWorker(
                 label="dont archive worker (vis)",
-                q=self.queue_dont_archive_vis,
+                source_queue=self.queue_dont_archive_vis,
                 executable_path=None,
                 event_handler=self.dont_archive_handler_vis,
                 log=self.logger,
@@ -405,7 +408,7 @@ class MWAXArchiveProcessor:
             self.queue_worker_dont_archive_volt = (
                 mwax_queue_worker.QueueWorker(
                     label="dont archive worker (volt)",
-                    q=self.queue_dont_archive_volt,
+                    source_queue=self.queue_dont_archive_volt,
                     executable_path=None,
                     event_handler=self.dont_archive_handler_volt,
                     log=self.logger,
@@ -551,7 +554,7 @@ class MWAXArchiveProcessor:
                 self.logger.info(
                     f"{item}- checksum_and_db_handler() moved subfile to volt"
                     " outgoing dir Queue size:"
-                    f" {self.priority_queue_checksum_and_db.qsize()}"
+                    f" {self.queue_checksum_and_db.qsize()}"
                 )
             elif val.filetype_id == MWADataFileType.MWAX_VISIBILITIES.value:
                 # move to visdata/processing_stats
@@ -570,7 +573,7 @@ class MWAXArchiveProcessor:
                 self.logger.info(
                     f"{item}- checksum_and_db_handler() moved visibility file"
                     " to vis processing stats dir Queue size:"
-                    f" {self.priority_queue_checksum_and_db.qsize()}"
+                    f" {self.queue_checksum_and_db.qsize()}"
                 )
 
             elif val.filetype_id == MWADataFileType.MWA_PPD_FILE.value:
@@ -590,7 +593,7 @@ class MWAXArchiveProcessor:
                 self.logger.info(
                     f"{item}- checksum_and_db_handler() moved metafits file to"
                     " vis outgoing dir Queue size:"
-                    f" {self.priority_queue_checksum_and_db.qsize()}"
+                    f" {self.queue_checksum_and_db.qsize()}"
                 )
             else:
                 self.logger.error(
@@ -735,8 +738,8 @@ class MWAXArchiveProcessor:
             else:
                 self.logger.info("Resuming archiving")
 
-            if self.priority_queue_worker_checksum_and_db:
-                self.priority_queue_worker_checksum_and_db.pause(paused)
+            if self.queue_worker_checksum_and_db:
+                self.queue_worker_checksum_and_db.pause(paused)
 
             if self.queue_worker_processing_stats_vis:
                 self.queue_worker_processing_stats_vis.pause(paused)
@@ -775,8 +778,8 @@ class MWAXArchiveProcessor:
         if self.queue_worker_dont_archive_volt:
             self.queue_worker_dont_archive_volt.stop()
 
-        if self.priority_queue_worker_checksum_and_db:
-            self.priority_queue_worker_checksum_and_db.stop()
+        if self.queue_worker_checksum_and_db:
+            self.queue_worker_checksum_and_db.stop()
 
         if self.queue_worker_processing_stats_vis:
             self.queue_worker_processing_stats_vis.stop()
@@ -840,11 +843,9 @@ class MWAXArchiveProcessor:
 
         worker_list = []
 
-        if self.priority_queue_worker_checksum_and_db:
+        if self.queue_worker_checksum_and_db:
             status = dict({"name": "checksum_and_db_worker"})
-            status.update(
-                self.priority_queue_worker_checksum_and_db.get_status()
-            )
+            status.update(self.queue_worker_checksum_and_db.get_status())
             worker_list.append(status)
 
         if self.queue_worker_processing_stats_vis:

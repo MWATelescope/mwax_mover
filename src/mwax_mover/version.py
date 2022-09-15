@@ -4,20 +4,17 @@
 #
 import typing
 
-"""Returns the major, minor and patch version of mwax_mover as a string"""
-
 
 def get_mwax_mover_version_string() -> str:
+    """Returns the major, minor and patch version of mwax_mover as a string"""
     import pkg_resources  # part of setuptools
 
     package_version = pkg_resources.require("mwax_mover")[0].version
     return package_version
 
 
-"""Returns a the major, minor and patch version of mwax_mover"""
-
-
 def get_pmwax_mover_version_number() -> typing.Tuple[int, int, int]:
+    """Returns a the major, minor and patch version of mwax_mover"""
     version = get_mwax_mover_version_string()
     try:
         return (
@@ -27,6 +24,6 @@ def get_pmwax_mover_version_number() -> typing.Tuple[int, int, int]:
         )
     except Exception as e:
         raise Exception(
-            f"Unabled to determine pymwalib version: Got {version} which could"
-            f" not be parsed. Error: {e}"
+            f"Unabled to determine mwax_mover version: Got {version} which"
+            f" could not be parsed. Error: {e}"
         )

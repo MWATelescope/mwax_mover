@@ -1,3 +1,4 @@
+"""Module for the CephQueueWorker"""
 import os
 import queue
 import time
@@ -12,7 +13,7 @@ class CephQueueWorker(QueueWorker):
     def __init__(
         self,
         label: str,
-        q,
+        source_queue,
         executable_path,
         log,
         event_handler,
@@ -27,7 +28,7 @@ class CephQueueWorker(QueueWorker):
         # Call Default QueueWorker contstructor
         super().__init__(
             label,
-            q,
+            source_queue,
             executable_path,
             log,
             event_handler,
@@ -74,7 +75,9 @@ class CephQueueWorker(QueueWorker):
                     success = False
 
                     if self.current_item is None:
-                        self.current_item = self.q.get(block=True, timeout=0.5)
+                        self.current_item = self.source_queue.get(
+                            block=True, timeout=0.5
+                        )
                     self.logger.info(f"Processing {self.current_item}...")
 
                     start_time = time.time()
@@ -91,22 +94,23 @@ class CephQueueWorker(QueueWorker):
                         if success:
                             # Dequeue the item, but requeue if it was not
                             # successful
-                            self.q.task_done()
+                            self.source_queue.task_done()
                             self.current_item = None
                     else:
                         # Dequeue the item
                         self.logger.warning(
                             f"Processing {self.current_item } Complete... file"
                             " was moved or deleted. Queue size:"
-                            f" {self.q.qsize()}"
+                            f" {self.source_queue.qsize()}"
                         )
                         self.current_item = None
-                        self.q.task_done()
+                        self.source_queue.task_done()
                         continue
 
                     elapsed = time.time() - start_time
                     self.logger.info(
-                        f"Complete. Queue size: {self.q.qsize()} Elapsed:"
+                        "Complete. Queue size:"
+                        f" {self.source_queue.qsize()} Elapsed:"
                         f" {elapsed:.2f} sec"
                     )
 
@@ -133,8 +137,8 @@ class CephQueueWorker(QueueWorker):
                         # the queue. If not set, just keep retrying the
                         # operation
                         if self.requeue_to_eoq_on_failure:
-                            self.q.task_done()
-                            self.q.put(self.current_item)
+                            self.source_queue.task_done()
+                            self.source_queue.put(self.current_item)
                             self.current_item = None
 
                 except queue.Empty:

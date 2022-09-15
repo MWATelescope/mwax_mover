@@ -1,15 +1,19 @@
+"""Module for database operations"""
 import os
 import psycopg2
-from psycopg2 import InterfaceError, OperationalError
-from tenacity import retry, stop_after_attempt, wait_fixed
-from typing import Optional
 import threading
 import time
+from typing import Optional
+from psycopg2 import InterfaceError, OperationalError
+from tenacity import retry, stop_after_attempt, wait_fixed
+
 
 DUMMY_DB = "dummy"
 
 
 class MWAXDBHandler:
+    """Class which takes care of the primitive database functions"""
+
     def __init__(
         self, logger, host: str, port: int, db, user: str, password: str
     ):
@@ -26,6 +30,7 @@ class MWAXDBHandler:
         self.db_lock = threading.Lock()
 
     def connect(self):
+        """Attempts to connect to the database"""
         try:
             self.logger.info(
                 "MWAXDBHandler.connect(): Attempting to connect to database: "
@@ -53,6 +58,10 @@ class MWAXDBHandler:
             raise err
 
     def select_one_row(self, sql: str, parm_list: list) -> int:
+        """
+        Returns a single row from SQL and params, handling
+        both the real and dummy database case.
+        """
         if self.dummy:
             return 1
         else:
@@ -60,6 +69,7 @@ class MWAXDBHandler:
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(30))
     def select_one_row_postgres(self, sql: str, parm_list: list):
+        """Returns a single row from postgres given SQL and params"""
         # We have a mutex here to ensure only 1 user of the connection at a
         # time
         with self.db_lock:
@@ -213,14 +223,16 @@ class MWAXDBHandler:
 # High level functions to do what we want specifically
 #
 class DataFileRow:
+    """A class that abstracts the key fields of a MWA data_files row"""
+
     def __init__(self):
         self.observation_num = ""
         self.size = -1
         self.checksum = ""
 
 
-# Return a data file row instance on success or None on Failure
 def get_data_file_row(db_handler_object, full_filename: str) -> DataFileRow:
+    """Return a data file row instance on success or None on Failure"""
     # Prepare the fields
     # immediately add this file to the db so we insert a record into metadata
     # data_files table
@@ -277,6 +289,7 @@ def insert_data_file_row(
     checksum_type: int,
     checksum: str,
 ) -> bool:
+    """Insert a data_files row"""
     # Prepare the fields
     # immediately add this file to the db so we insert a record into metadata
     # data_files table
@@ -349,6 +362,7 @@ def update_data_file_row_as_archived(
     bucket: str,
     folder: Optional[str],
 ) -> bool:
+    """Updates a data_files row as archived (at Pawsey)"""
     # Prepare the fields
     filename = os.path.basename(archive_filename)
 

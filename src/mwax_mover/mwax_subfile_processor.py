@@ -164,7 +164,7 @@ class SubfileProcessor:
         # Create watcher for the subfiles
         self.subfile_watcher = mwax_watcher.Watcher(
             path=self.subfile_incoming_path,
-            q=self.subfile_queue,
+            dest_queue=self.subfile_queue,
             pattern=f"{self.ext_to_watch_for}",
             log=self.logger,
             mode=self.mwax_mover_mode,
@@ -174,7 +174,7 @@ class SubfileProcessor:
         # Create queueworker
         self.subfile_queue_worker = mwax_queue_worker.QueueWorker(
             label="Subfile Input Queue",
-            q=self.subfile_queue,
+            source_queue=self.subfile_queue,
             executable_path=None,
             event_handler=self.handler,
             log=self.logger,
