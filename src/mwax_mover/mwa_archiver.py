@@ -234,9 +234,10 @@ def archive_file_rsync(
     # get file size
     try:
         file_size = os.path.getsize(full_filename)
-    except Exception as e:
+    except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
         logger.error(
-            f"{full_filename}: Error determining file size. Error {e}"
+            f"{full_filename}: Error determining file size. Error"
+            f" {catch_all_exceptiion}"
         )
         return False
 
@@ -272,6 +273,9 @@ def archive_file_rsync(
         )
         return True
     else:
+        logger.error(
+            f"{full_filename} archive_file_rsync failed. Error {stdout}"
+        )
         return False
 
 
@@ -288,9 +292,10 @@ def archive_file_xrootd(
     # get file size
     try:
         file_size = os.path.getsize(full_filename)
-    except Exception as e:
+    except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
         logger.error(
-            f"{full_filename}: Error determining file size. Error {e}"
+            f"{full_filename}: Error determining file size. Error"
+            f" {catch_all_exceptiion}"
         )
         return False
 
@@ -360,8 +365,15 @@ def archive_file_xrootd(
             )
             return True
         else:
+            logger.error(
+                f"{full_filename} archive_file_xrootd rename failed. Error"
+                f" {stdout}"
+            )
             return False
     else:
+        logger.error(
+            f"{full_filename} archive_file_xrootd failed. Error {stdout}"
+        )
         return False
 
 
@@ -371,7 +383,6 @@ def archive_file_ceph(
     full_filename: str,
     bucket_name: str,
     md5hash: str,
-    profile: str,
     ceph_endpoint: str,
     multipart_threshold_bytes: int,
     chunk_size_bytes: int,
@@ -384,9 +395,10 @@ def archive_file_ceph(
     logger.debug(f"{full_filename} attempting to get file size...")
     try:
         file_size = os.path.getsize(full_filename)
-    except Exception as e:
+    except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
         logger.error(
-            f"{full_filename}: Error determining file size. Error {e}"
+            f"{full_filename}: Error determining file size. Error"
+            f" {catch_all_exceptiion}"
         )
         return False
 
@@ -396,10 +408,10 @@ def archive_file_ceph(
     )
     try:
         ceph_create_bucket(ceph_session, bucket_name)
-    except Exception as e:
+    except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
         logger.error(
             f"{full_filename}: Error creating/checking existence of S3 bucket"
-            f" {bucket_name} on {ceph_endpoint}. Error {e}"
+            f" {bucket_name} on {ceph_endpoint}. Error {catch_all_exceptiion}"
         )
         return False
 
@@ -421,10 +433,10 @@ def archive_file_ceph(
             chunk_size_bytes,
             max_concurrency,
         )
-    except Exception as e:
+    except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
         logger.error(
             f"{full_filename}: Error uploading to S3 bucket {bucket_name} on"
-            f" {ceph_endpoint}. Error {e}"
+            f" {ceph_endpoint}. Error {catch_all_exceptiion}"
         )
         return False
 
@@ -465,9 +477,9 @@ def ceph_get_s3_md5_etag(filename: str, chunk_size_bytes: int) -> str:
     """
     md5s = []
 
-    with open(filename, "rb") as fp:
+    with open(filename, "rb") as file_handle:
         while True:
-            data = fp.read(chunk_size_bytes)
+            data = file_handle.read(chunk_size_bytes)
 
             if not data:
                 break
@@ -476,10 +488,10 @@ def ceph_get_s3_md5_etag(filename: str, chunk_size_bytes: int) -> str:
     if len(md5s) > 1:
         digests = b"".join(m.digest() for m in md5s)
         new_md5 = hashlib.md5(digests)
-        new_etag = '"%s-%s"' % (new_md5.hexdigest(), len(md5s))
+        new_etag = f'"{new_md5.hexdigest()}-{len(md5s)}"'
 
     elif len(md5s) == 1:  # file smaller than chunk size
-        new_etag = '"%s"' % md5s[0].hexdigest()
+        new_etag = f'"{md5s[0].hexdigest()}"'
 
     else:  # empty file
         new_etag = '""'

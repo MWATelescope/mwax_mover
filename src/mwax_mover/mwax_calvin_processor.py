@@ -94,9 +94,9 @@ class MWAXCalvinProcessor:
         self.start()
 
         while self.running:
-            for t in self.worker_threads:
-                if t:
-                    if t.isAlive():
+            for worker_thread in self.worker_threads:
+                if worker_thread:
+                    if worker_thread.isAlive():
                         time.sleep(1)
                     else:
                         self.running = False
@@ -111,21 +111,17 @@ class MWAXCalvinProcessor:
 
     def start(self):
         """Start the processor"""
-        pass
 
     def stop(self):
         """Stop the processor"""
-        pass
 
     def health_handler(self):
         """Send health information via UDP multicast"""
-        pass
 
     def get_status(self) -> dict:
         """Return the status as a dictionary"""
-        pass
 
-    def signal_handler(self, signum, frame):
+    def signal_handler(self, _signum, _frame):
         """Handles SIGINT and SIGTERM"""
         self.logger.warning("Interrupted. Shutting down processor...")
         self.running = False
@@ -167,7 +163,7 @@ def main():
 
     # Parse config file
     config = ConfigParser()
-    config.read_file(open(config_filename, "r"))
+    config.read_file(open(config_filename, "r", encoding="utf-8"))
 
     # read from config file
     cfg_log_path = config.get("mwax mover", "log_path")
@@ -328,7 +324,7 @@ def main():
         logger=logger,
         host=cfg_mro_metadatadb_host,
         port=cfg_mro_metadatadb_port,
-        db=cfg_mro_metadatadb_db,
+        db_name=cfg_mro_metadatadb_db,
         user=cfg_mro_metadatadb_user,
         password=cfg_mro_metadatadb_pass,
     )
@@ -365,7 +361,7 @@ def main():
         logger=logger,
         host=cfg_remote_metadatadb_host,
         port=cfg_remote_metadatadb_port,
-        db=cfg_remote_metadatadb_db,
+        db_name=cfg_remote_metadatadb_db,
         user=cfg_remote_metadatadb_user,
         password=cfg_remote_metadatadb_pass,
     )
@@ -396,11 +392,11 @@ def main():
         processor.initialise()
         sys.exit(0)
 
-    except Exception as e:
+    except Exception as catch_all_exception:  # pylint: disable=broad-except
         if processor.logger:
-            processor.logger.exception(str(e))
+            processor.logger.exception(str(catch_all_exception))
         else:
-            print(str(e))
+            print(str(catch_all_exception))
 
 
 if __name__ == "__main__":

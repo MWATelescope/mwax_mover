@@ -106,15 +106,15 @@ class MWACacheArchiveProcessor:
                 # In theory we could be starting up as mwax is sending
                 # us a new file and we don't want to delete an real
                 # in progress file.
-                MIN_PARTIAL_PURGE_AGE_SECS = 3600
+                min_partial_purge_age_secs = 3600
 
                 if (
                     time.time() - os.path.getmtime(partial_file)
-                    > MIN_PARTIAL_PURGE_AGE_SECS
+                    > min_partial_purge_age_secs
                 ):
                     self.logger.warning(
                         f"Partial file {partial_file} is older than"
-                        f" {MIN_PARTIAL_PURGE_AGE_SECS} seconds and will be"
+                        f" {min_partial_purge_age_secs} seconds and will be"
                         " removed..."
                     )
                     os.remove(partial_file)
@@ -122,7 +122,7 @@ class MWACacheArchiveProcessor:
                 else:
                     self.logger.warning(
                         f"Partial file {partial_file} is newer than"
-                        f" {MIN_PARTIAL_PURGE_AGE_SECS} seconds so will NOT be"
+                        f" {min_partial_purge_age_secs} seconds so will NOT be"
                         " removed this time"
                     )
 
@@ -144,7 +144,7 @@ class MWACacheArchiveProcessor:
         for archive_worker in range(0, self.concurrent_archive_workers):
             new_worker = mwax_ceph_queue_worker.CephQueueWorker(
                 label=f"Archiver{archive_worker}",
-                q=self.queue,
+                source_queue=self.queue,
                 executable_path=None,
                 event_handler=self.archive_handler,
                 log=self.logger,
@@ -233,7 +233,7 @@ class MWACacheArchiveProcessor:
             )
 
             # Determine where to archive it
-            bucket, folder = mwa_archiver.determine_bucket_and_folder(
+            bucket, _ = mwa_archiver.determine_bucket_and_folder(
                 item,
                 self.archive_to_location,
             )
@@ -250,7 +250,6 @@ class MWACacheArchiveProcessor:
                     item,
                     bucket,
                     data_files_row.checksum,
-                    self.s3_profile,
                     self.s3_ceph_endpoint,
                     self.s3_multipart_threshold_bytes,
                     self.s3_chunk_size_bytes,
@@ -348,9 +347,10 @@ class MWACacheArchiveProcessor:
                     status_bytes,
                     self.health_multicast_hops,
                 )
-            except Exception as e:
+            except Exception as catch_all_exception:  # pylint: disable=broad-except
                 self.logger.warning(
-                    f"health_handler: Failed to send health information. {e}"
+                    "health_handler: Failed to send health information."
+                    f" {catch_all_exception}"
                 )
 
             # Sleep for a second
@@ -399,7 +399,7 @@ class MWACacheArchiveProcessor:
 
         return status
 
-    def signal_handler(self, signum, frame):
+    def signal_handler(self, _signum, _frame):
         """Catches SIG INT and SIG TERM then stops the processor"""
         self.logger.warning("Interrupted. Shutting down processor...")
         self.running = False
@@ -620,7 +620,7 @@ class MWACacheArchiveProcessor:
             logger=self.logger,
             host=self.mro_metadatadb_host,
             port=self.mro_metadatadb_port,
-            db=self.mro_metadatadb_db,
+            db_name=self.mro_metadatadb_db,
             user=self.mro_metadatadb_user,
             password=self.mro_metadatadb_pass,
         )
@@ -657,7 +657,7 @@ class MWACacheArchiveProcessor:
             logger=self.logger,
             host=self.remote_metadatadb_host,
             port=self.remote_metadatadb_port,
-            db=self.remote_metadatadb_db,
+            db_name=self.remote_metadatadb_db,
             user=self.remote_metadatadb_user,
             password=self.remote_metadatadb_pass,
         )
@@ -721,11 +721,11 @@ def main():
         processor.initialise_from_command_line()
         processor.start()
         sys.exit(0)
-    except Exception as e:
+    except Exception as catch_all_exception:  # pylint: disable=broad-except
         if processor.logger:
-            processor.logger.exception(str(e))
+            processor.logger.exception(str(catch_all_exception))
         else:
-            print(str(e))
+            print(str(catch_all_exception))
 
 
 if __name__ == "__main__":

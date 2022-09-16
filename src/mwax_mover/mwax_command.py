@@ -19,8 +19,6 @@ def run_command_ext(
     if numa_node is None:
         cmdline = f"{command}"
     else:
-        # TODO Sloppy! Some places we have None- others we have -1. Need to
-        # sort this out
         if int(numa_node) > 0:
             cmdline = (
                 "numactl"
@@ -73,7 +71,7 @@ def run_command_ext(
         )
         return False, ""
 
-    except Exception as command_exception:
+    except Exception as command_exception:  # pylint: disable=broad-except
         logger.error(
             f"Exception executing {cmdline}: {str(command_exception)}"
         )

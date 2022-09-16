@@ -90,6 +90,8 @@ def process_mwax_stats(
 
     if return_value:
         logger.info(f"{full_filename} stats success in {elapsed} seconds")
+    else:
+        logger.error(f"{full_filename} stats failed with error {stdout}")
 
     return return_value
 
@@ -120,6 +122,11 @@ def load_psrdada_ringbuffer(
             f"{full_filename} load_psrdada_ringbuffer success"
             f" ({size_gigabytes:.3f}GB in {elapsed} sec at"
             f" {gbps_per_sec:.3f} Gbps)"
+        )
+    else:
+        logger.error(
+            f"{full_filename} load_psrdada_ringbuffer failed with error"
+            f" {stdout}"
         )
 
     return return_value
@@ -239,8 +246,8 @@ def send_multicast(
         if sock.sendto(message, (dest_multicast_ip, dest_multicast_port)) == 0:
             raise Exception("Error sock.sendto() sent 0 bytes")
 
-    except Exception as e:
-        raise e
+    except Exception as catch_all_exception:
+        raise catch_all_exception
     finally:
         sock.close()
 

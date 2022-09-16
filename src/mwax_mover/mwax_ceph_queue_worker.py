@@ -56,11 +56,11 @@ class CephQueueWorker(QueueWorker):
             self.ceph_session = ceph_get_s3_object(
                 self.ceph_profile, self.ceph_endpoint
             )
-        except Exception as e:
+        except Exception as catch_all_exception:  # pylint: disable=broad-except
             self.logger.error(
                 "Error creating Ceph Session: Profile:"
                 f" {self.ceph_profile} Endpoint: {self.ceph_endpoint}."
-                f" Error {e}"
+                f" Error {catch_all_exception}"
             )
             return
 

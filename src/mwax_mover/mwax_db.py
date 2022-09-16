@@ -1,9 +1,9 @@
 """Module for database operations"""
 import os
-import psycopg2
 import threading
 import time
 from typing import Optional
+import psycopg2
 from psycopg2 import InterfaceError, OperationalError
 from tenacity import retry, stop_after_attempt, wait_fixed
 
@@ -15,12 +15,18 @@ class MWAXDBHandler:
     """Class which takes care of the primitive database functions"""
 
     def __init__(
-        self, logger, host: str, port: int, db, user: str, password: str
+        self,
+        logger,
+        host: str,
+        port: int,
+        db_name,
+        user: str,
+        password: str,
     ):
         self.logger = logger
         self.host = host
         self.port = port
-        self.db = db
+        self.db_name = db_name
         self.user = user
         self.password = password
         self.dummy = self.host == DUMMY_DB
@@ -34,26 +40,27 @@ class MWAXDBHandler:
         try:
             self.logger.info(
                 "MWAXDBHandler.connect(): Attempting to connect to database: "
-                f"{self.user}@{self.host}:{self.port}/{self.db}"
+                f"{self.user}@{self.host}:{self.port}/{self.db_name}"
             )
 
             if not self.dummy:
                 self.con = psycopg2.connect(
                     host=self.host,
-                    database=self.db,
+                    database=self.db_name,
                     user=self.user,
                     password=self.password,
                 )
 
             self.logger.info(
                 "MWAXDBHandler.connect(): Connected to database:"
-                f" {self.user}@{self.host}:{self.port}/{self.db}"
+                f" {self.user}@{self.host}:{self.port}/{self.db_name}"
             )
 
         except OperationalError as err:
             self.logger.error(
-                "MWAXDBHandler.connect(): error connecting to database: "
-                f"{self.user}@{self.host}:{self.port}/{self.db} Error: {err}"
+                "MWAXDBHandler.connect(): error connecting to database:"
+                f" {self.user}@{self.host}:{self.port}/{self.db_name} Error:"
+                f" {err}"
             )
             raise err
 
@@ -272,7 +279,7 @@ def get_data_file_row(db_handler_object, full_filename: str) -> DataFileRow:
             )
             return data_files_row
 
-    except Exception as upsert_exception:
+    except Exception as upsert_exception:  # pylint: disable=broad-except
         db_handler_object.logger.error(
             f"{full_filename} get_data_file_row() error upserting data_files"
             f" record in data_files table: {upsert_exception}. SQL was {sql}"
@@ -346,7 +353,7 @@ def insert_data_file_row(
             )
             return True
 
-    except Exception as upsert_exception:
+    except Exception as upsert_exception:  # pylint: disable=broad-except
         db_handler_object.logger.error(
             f"{filename} insert_data_file_row() error inserting data_files"
             f" record in data_files table: {upsert_exception}. SQL was {sql}"
@@ -409,7 +416,7 @@ def update_data_file_row_as_archived(
             )
             return True
 
-    except Exception as upsert_exception:
+    except Exception as upsert_exception:  # pylint: disable=broad-except
         db_handler_object.logger.error(
             f"{filename} update_data_file_row_as_archived() error updating"
             f" data_files record in data_files table: {upsert_exception}. SQL"

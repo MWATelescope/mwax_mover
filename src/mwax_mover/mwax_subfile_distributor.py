@@ -1,9 +1,4 @@
-from mwax_mover import mwax_archive_processor
-from mwax_mover import mwax_db
-from mwax_mover import mwax_filterbank_processor
-from mwax_mover import mwax_subfile_processor
-from mwax_mover import utils
-from mwax_mover import version
+"""Module for mwax_subfile_distributor"""
 import argparse
 from configparser import ConfigParser
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -17,16 +12,27 @@ import time
 import threading
 import typing
 from urllib.parse import urlparse, parse_qs
+from mwax_mover import mwax_archive_processor
+from mwax_mover import mwax_db
+from mwax_mover import mwax_filterbank_processor
+from mwax_mover import mwax_subfile_processor
+from mwax_mover import utils
+from mwax_mover import version
 
 
 class MWAXHTTPServer(HTTPServer):
+    """Class representing a web server for web service control"""
+
     def __init__(self, *args, **kw):
         HTTPServer.__init__(self, *args, **kw)
         self.context: typing.Optional[MWAXSubfileDistributor] = None
 
 
 class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
+    """Class for handling GET requests"""
+
+    def do_get(self):
+        """Process a web service GET"""
         # This is the path (e.g. /status) but with no parameters
         parsed_path = urlparse(self.path.lower()).path
 
@@ -94,7 +100,7 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
                             self.end_headers()
                             self.wfile.write(b"Failed")
 
-                    except Exception as dump_exception_end:
+                    except Exception as dump_exception_end:  # pylint: disable=broad-except
                         self.send_response(400)
                         self.end_headers()
                         self.wfile.write(
@@ -102,7 +108,7 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
                             f" {dump_exception_end}".encode("utf-8")
                         )
 
-                except Exception as dump_exception_start:
+                except Exception as dump_exception_start:  # pylint: disable=broad-except
                     self.send_response(200)
                     self.end_headers()
                     self.wfile.write(
@@ -117,12 +123,15 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
                     f"Unknown command {parsed_path}".encode("utf-8")
                 )
 
-        except Exception as e:
-            self.server.context.logger.error(f"GET: Error {str(e)}")
+        except Exception as catch_all_exception:  # pylint: disable=broad-except
+            self.server.context.logger.error(
+                f"GET: Error {str(catch_all_exception)}"
+            )
             self.send_response(400)
             self.end_headers()
 
     def log_message(self, format: str, *args):
+        """Logs a message"""
         self.server.context.logger.debug(
             f"{self.address_string()} {format % args}"
         )
@@ -130,6 +139,8 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
 
 
 class MWAXSubfileDistributor:
+    """Class for MWAXSubfileDistributor- the main engine of MWAX"""
+
     def __init__(self):
         # init the logging subsystem
         self.logger = logging.getLogger("mwax_mover")
@@ -160,12 +171,13 @@ class MWAXSubfileDistributor:
         self.cfg_voltdata_dont_archive_path = None
         self.cfg_subfile_incoming_path = None
         self.cfg_voltdata_incoming_path = None
-        self.cfg_voltdata_outging_path = None
+        self.cfg_voltdata_outgoing_path = None
         self.cfg_always_keep_subfiles = False
         self.cfg_archive_command_timeout_sec = None
         self.cfg_psrdada_timeout_sec = None
         self.cfg_copy_subfile_to_disk_timeout_sec = None
         self.cfg_archiving_enabled = None
+        self.cfg_health_multicast_interface_ip = None
         self.cfg_health_multicast_interface_name = None
         self.cfg_health_multicast_ip = None
         self.cfg_health_multicast_port = None
@@ -189,12 +201,16 @@ class MWAXSubfileDistributor:
         self.cfg_corr_diskdb_numa_node = None
         self.cfg_corr_archive_command_numa_node = None
         self.cfg_corr_visdata_incoming_path = None
+        self.cfg_corr_visdata_outgoing_path = None
         # Archiving settings for correlator
         self.cfg_corr_archive_destination_host = None
         self.cfg_corr_archive_destination_port = None
         self.cfg_corr_archive_destination_enabled = False
         # processing_stats config
+        self.cfg_corr_mwax_stats_timeout_sec = None
+        self.cfg_corr_mwax_stats_dump_dir = None
         self.cfg_corr_mwax_stats_executable = None
+        self.cfg_corr_visdata_processing_stats_path = None
         # calibration config
         self.cfg_corr_calibrator_outgoing_path = None
         self.cfg_corr_calibrator_destination_host = None
@@ -213,6 +229,8 @@ class MWAXSubfileDistributor:
         self.db_handler = None
 
     def initialise_from_command_line(self):
+        """Called if run from command line"""
+
         # Get command line args
         parser = argparse.ArgumentParser()
         parser.description = (
@@ -238,6 +256,7 @@ class MWAXSubfileDistributor:
         self.initialise(config_filename)
 
     def initialise(self, config_filename):
+        """Initialise common code"""
         if not os.path.exists(config_filename):
             self.logger.error(
                 f"Configuration file location {config_filename} does not"
@@ -247,7 +266,7 @@ class MWAXSubfileDistributor:
 
         # Parse config file
         self.config = ConfigParser()
-        self.config.read_file(open(config_filename, "r"))
+        self.config.read_file(open(config_filename, "r", encoding="utf-8"))
 
         # read from config file
         self.cfg_log_path = self.config.get("mwax mover", "log_path")
@@ -667,7 +686,7 @@ class MWAXSubfileDistributor:
                 logger=self.logger,
                 host=self.cfg_metadatadb_host,
                 port=self.cfg_metadatadb_port,
-                db=self.cfg_metadatadb_db,
+                db_name=self.cfg_metadatadb_db,
                 user=self.cfg_metadatadb_user,
                 password=self.cfg_metadatadb_pass,
             )
@@ -692,7 +711,7 @@ class MWAXSubfileDistributor:
         # If master archiving is disabled, then disable the corr and bf
         # archiving settings otherwise just use those settings as necessary
         if not self.cfg_archiving_enabled:
-            self.logger.warn(
+            self.logger.warning(
                 "Master archiving is set to DISABLED. Nothing will be"
                 " archived and nothing will be sent for calibration."
             )
@@ -791,6 +810,7 @@ class MWAXSubfileDistributor:
                 )
 
     def health_handler(self):
+        """Sends health data via UDP multicast"""
         while self.running:
             # Code to run by the health thread
             status_dict = self.get_status()
@@ -807,15 +827,17 @@ class MWAXSubfileDistributor:
                     status_bytes,
                     self.cfg_health_multicast_hops,
                 )
-            except Exception as e:
+            except Exception as catch_all_exception:  # pylint: disable=broad-except
                 self.logger.warning(
-                    f"health_handler: Failed to send health information. {e}"
+                    "health_handler: Failed to send health information."
+                    f" {catch_all_exception}"
                 )
 
             # Sleep for a second
             time.sleep(1)
 
     def get_status(self) -> dict:
+        """Returns processor status as a dictionary"""
         main_status = {
             "Unix timestamp": time.time(),
             "process": type(self).__name__,
@@ -839,9 +861,11 @@ class MWAXSubfileDistributor:
         return status
 
     def web_server_loop(self, webserver):
+        """Method to start the webserver serving"""
         webserver.serve_forever()
 
-    def signal_handler(self, signum, frame):
+    def signal_handler(self, _signum, _frame):
+        """Handle SIGINT, SIGTERM"""
         self.logger.warning(
             f"Interrupted. Shutting down {len(self.processors)} processors..."
         )
@@ -852,6 +876,7 @@ class MWAXSubfileDistributor:
             processor.stop()
 
     def start(self):
+        """Start the processor"""
         self.running = True
 
         # Make sure we can Ctrl-C / kill out of this
@@ -884,9 +909,9 @@ class MWAXSubfileDistributor:
 
         while self.running:
             for processor in self.processors:
-                for t in processor.worker_threads:
-                    if t:
-                        if t.is_alive():
+                for worker_threads in processor.worker_threads:
+                    if worker_threads:
+                        if worker_threads.is_alive():
                             time.sleep(0.2)
                         else:
                             self.running = False
@@ -907,17 +932,18 @@ class MWAXSubfileDistributor:
 
 
 def main():
-    p = MWAXSubfileDistributor()
+    """Main function"""
+    processor = MWAXSubfileDistributor()
 
     try:
-        p.initialise_from_command_line()
-        p.start()
+        processor.initialise_from_command_line()
+        processor.start()
         sys.exit(0)
-    except Exception as e:
-        if p.logger:
-            p.logger.exception(str(e))
+    except Exception as catch_all_exception:  # pylint: disable=broad-except
+        if processor.logger:
+            processor.logger.exception(str(catch_all_exception))
         else:
-            print(str(e))
+            print(str(catch_all_exception))
 
 
 if __name__ == "__main__":

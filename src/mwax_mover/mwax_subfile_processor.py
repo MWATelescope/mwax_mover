@@ -1,10 +1,4 @@
-from mwax_mover import (
-    mwax_mover,
-    utils,
-    mwax_queue_worker,
-    mwax_watcher,
-    mwax_command,
-)
+"""Module for subfile processor"""
 import glob
 import logging
 import logging.handlers
@@ -14,9 +8,23 @@ import shutil
 import threading
 import time
 from enum import Enum
+from mwax_mover import (
+    mwax_mover,
+    utils,
+    mwax_queue_worker,
+    mwax_watcher,
+    mwax_command,
+)
+
+COMMAND_DADA_DISKDB = "dada_diskdb"
+# number of lines of the PSRDADA header to read looking for keywords
+PSRDADA_MAX_HEADER_LINES = 31
+PSRDADA_HEADER_BYTES = 4096
 
 
 class CorrelatorMode(Enum):
+    """Class representing correlator mode"""
+
     NO_CAPTURE = "NO_CAPTURE"
     CORR_MODE_CHANGE = "CORR_MODE_CHANGE"
     HW_LFILES = "HW_LFILES"
@@ -28,6 +36,7 @@ class CorrelatorMode(Enum):
 
     @staticmethod
     def is_no_capture(mode_string: str) -> bool:
+        """Returns true if mode is a no capture"""
         return mode_string in [
             CorrelatorMode.NO_CAPTURE.value,
             CorrelatorMode.CORR_MODE_CHANGE.value,
@@ -36,6 +45,7 @@ class CorrelatorMode(Enum):
 
     @staticmethod
     def is_correlator(mode_string: str) -> bool:
+        """Returns true if mode is a correlator obs"""
         return mode_string in [
             CorrelatorMode.HW_LFILES.value,
             CorrelatorMode.MWAX_CORRELATOR.value,
@@ -43,6 +53,7 @@ class CorrelatorMode(Enum):
 
     @staticmethod
     def is_vcs(mode_string: str) -> bool:
+        """Returns true if mode is a vcs obs"""
         return mode_string in [
             CorrelatorMode.VOLTAGE_START.value,
             CorrelatorMode.VOLTAGE_BUFFER.value,
@@ -50,13 +61,8 @@ class CorrelatorMode(Enum):
         ]
 
 
-COMMAND_DADA_DISKDB = "dada_diskdb"
-# number of lines of the PSRDADA header to read looking for keywords
-PSRDADA_MAX_HEADER_LINES = 31
-PSRDADA_HEADER_BYTES = 4096
-
-
 def read_subfile_mode(filename: str) -> str:
+    """Returns MODE as a string from a subfile"""
     subfile_mode = None
 
     with open(filename, "rb") as subfile:
@@ -85,6 +91,8 @@ def read_subfile_mode(filename: str) -> str:
 
 
 class SubfileProcessor:
+    """Class representing the SubfileProcessor"""
+
     def __init__(
         self,
         context,
@@ -161,6 +169,7 @@ class SubfileProcessor:
         )
 
     def start(self):
+        """Start the processor"""
         # Create watcher for the subfiles
         self.subfile_watcher = mwax_watcher.Watcher(
             path=self.subfile_incoming_path,
@@ -199,6 +208,7 @@ class SubfileProcessor:
         queue_worker_thread.start()
 
     def handler(self, item: str) -> bool:
+        """When subfile detected this handles it"""
         success = False
 
         self.logger.info(
@@ -233,9 +243,9 @@ class SubfileProcessor:
                 # 3. Rename .sub file to .free so that udpgrab can reuse it
                 if CorrelatorMode.is_correlator(subfile_mode):
                     if (
-                        self.subfile_distributor_context.cfg_corr_archive_destination_enabled  # noqa: E501
+                        self.subfile_distributor_context.cfg_corr_archive_destination_enabled  # pylint: disable=line-too-long
                     ):
-                        self.subfile_distributor_context.archive_processor.pause_archiving(  # noqa: E501
+                        self.subfile_distributor_context.archive_processor.pause_archiving(  # pylint: disable=line-too-long
                             False
                         )
 
@@ -253,9 +263,9 @@ class SubfileProcessor:
                 elif CorrelatorMode.is_vcs(subfile_mode):
                     # Pause archiving so we have the disk to ourselves
                     if (
-                        self.subfile_distributor_context.cfg_corr_archive_destination_enabled  # noqa: E501
+                        self.subfile_distributor_context.cfg_corr_archive_destination_enabled  # pylint: disable=line-too-long
                     ):
-                        self.subfile_distributor_context.archive_processor.pause_archiving(  # noqa: E501
+                        self.subfile_distributor_context.archive_processor.pause_archiving(  # pylint: disable=line-too-long
                             True
                         )
 
@@ -272,9 +282,9 @@ class SubfileProcessor:
                         f"{item}- ignoring due to mode: {subfile_mode}"
                     )
                     if (
-                        self.subfile_distributor_context.cfg_corr_archive_destination_enabled  # noqa: E501
+                        self.subfile_distributor_context.cfg_corr_archive_destination_enabled  # pylint: disable=line-too-long
                     ):
-                        self.subfile_distributor_context.archive_processor.pause_archiving(  # noqa: E501
+                        self.subfile_distributor_context.archive_processor.pause_archiving(  # pylint: disable=line-too-long
                             False
                         )
                     success = True
@@ -311,7 +321,7 @@ class SubfileProcessor:
                         # it a bit less efficient than reading it once and
                         # using it many times.
                         with open(
-                            self.bf_settings_path, "r"
+                            self.bf_settings_path, "r", encoding="utf-8"
                         ) as bf_settings_file:
                             beamformer_settings = bf_settings_file.read()
 
@@ -347,7 +357,7 @@ class SubfileProcessor:
                         )
                         success = False
 
-        except Exception as handler_exception:
+        except Exception as handler_exception:  # pylint: disable=broad-except
             self.logger.error(f"{item} {handler_exception}")
             success = False
 
@@ -372,7 +382,7 @@ class SubfileProcessor:
 
                 try:
                     shutil.move(item, free_filename)
-                except Exception as move_exception:
+                except Exception as move_exception:  # pylint: disable=broad-except
                     self.logger.error(
                         f"{item}- Could not rename {item} back to"
                         f" {free_filename}. Error {move_exception}"
@@ -386,24 +396,25 @@ class SubfileProcessor:
         return success
 
     def stop(self):
+        """Stop the processor"""
         self.subfile_watcher.stop()
         self.subfile_queue_worker.stop()
 
         # Wait for threads to finish
-        for t in self.watcher_threads:
-            if t:
-                thread_name = t.name
+        for watcher_thread in self.watcher_threads:
+            if watcher_thread:
+                thread_name = watcher_thread.name
                 self.logger.debug(f"Watcher {thread_name} Stopping...")
-                if t.is_alive():
-                    t.join()
+                if watcher_thread.is_alive():
+                    watcher_thread.join()
                 self.logger.debug(f"Watcher {thread_name} Stopped")
 
-        for t in self.worker_threads:
-            if t:
-                thread_name = t.name
+        for worker_thread in self.worker_threads:
+            if worker_thread:
+                thread_name = worker_thread.name
                 self.logger.debug(f"QueueWorker {thread_name} Stopping...")
-                if t.is_alive():
-                    t.join()
+                if worker_thread.is_alive():
+                    worker_thread.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
     def _inject_beamformer_headers(
@@ -462,10 +473,16 @@ class SubfileProcessor:
                 f"{filename}- Copying file into {destination_path} was"
                 f" successful (took {elapsed} secs."
             )
+        else:
+            self.logger.error(
+                f"{filename}- Copying file into {destination_path} failed with"
+                f" error {stdout}"
+            )
 
         return retval
 
     def dump_voltages(self, start_gps_time: int, end_gps_time: int) -> bool:
+        """Dump whatever subfiles we have from /dev/shm to disk"""
         self.logger.info(
             f"dump_voltages: from {str(start_gps_time)} to"
             f" {str(end_gps_time)}..."
@@ -552,6 +569,7 @@ class SubfileProcessor:
         return True
 
     def get_status(self) -> dict:
+        """Return status as a dictionary"""
         watcher_list = []
 
         if self.subfile_watcher:

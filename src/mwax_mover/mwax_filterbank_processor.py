@@ -1,14 +1,17 @@
-from mwax_mover import mwax_mover, mwa_archiver
-from mwax_mover import mwax_queue_worker
-from mwax_mover import mwax_watcher
+"""Module for handling FilterBank file creation from a ringbuffer"""
 import logging
 import logging.handlers
 import os
 import queue
 import threading
+from mwax_mover import mwax_mover, mwa_archiver
+from mwax_mover import mwax_queue_worker
+from mwax_mover import mwax_watcher
 
 
 class FilterbankProcessor:
+    """Class for handling FilterBank file creation from a ringbuffer"""
+
     def __init__(
         self,
         context,
@@ -57,10 +60,11 @@ class FilterbankProcessor:
         self.archive_command_numa_node = archive_command_numa_node
 
     def start(self):
+        """Start the processor"""
         # Create watcher for filterbank data -> filterbank queue
         self.watcher_fil = mwax_watcher.Watcher(
             path=self.watch_dir_fil,
-            q=self.queue_fil,
+            dest_queue=self.queue_fil,
             pattern=".fil",
             log=self.logger,
             mode=self.mwax_mover_mode,
@@ -70,7 +74,7 @@ class FilterbankProcessor:
         # Create queueworker for filterbank queue
         self.queue_worker_fil = mwax_queue_worker.QueueWorker(
             label="Filterbank Archive",
-            q=self.queue_fil,
+            source_queue=self.queue_fil,
             executable_path=None,
             event_handler=self.filterbank_handler,
             log=self.logger,
@@ -92,6 +96,7 @@ class FilterbankProcessor:
         queue_worker_fil_thread.start()
 
     def filterbank_handler(self, item: str) -> bool:
+        """Handler for after a fil file is created"""
         if not self.archiving_paused:
             self.logger.info(
                 f"{item}- FilterbankProcessor.filterbank_handler is handling"
@@ -114,6 +119,7 @@ class FilterbankProcessor:
             return True
 
     def pause_archiving(self, paused: bool):
+        """Pauses archiving"""
         if self.archiving_paused != paused:
             if paused:
                 self.logger.info("Pausing archiving")
@@ -126,27 +132,29 @@ class FilterbankProcessor:
             self.archiving_paused = paused
 
     def stop(self):
+        """Stop processor"""
         self.watcher_fil.stop()
         self.queue_worker_fil.stop()
 
         # Wait for threads to finish
-        for t in self.watcher_threads:
-            if t:
-                thread_name = t.name
+        for watcher_thread in self.watcher_threads:
+            if watcher_thread:
+                thread_name = watcher_thread.name
                 self.logger.debug(f"Watcher {thread_name} Stopping...")
-                if t.is_alive():
-                    t.join()
+                if watcher_thread.is_alive():
+                    watcher_thread.join()
                 self.logger.debug(f"Watcher {thread_name} Stopped")
 
-        for t in self.worker_threads:
-            if t:
-                thread_name = t.name
+        for worker_thread in self.worker_threads:
+            if worker_thread:
+                thread_name = worker_thread.name
                 self.logger.debug(f"QueueWorker {thread_name} Stopping...")
-                if t.is_alive():
-                    t.join()
+                if worker_thread.is_alive():
+                    worker_thread.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
     def get_status(self) -> dict:
+        """Returns processor status as a dictionary"""
         watcher_list = []
         status = dict({"name": "fil_watcher"})
         status.update(self.watcher_fil.get_status())

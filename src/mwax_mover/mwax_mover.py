@@ -1,4 +1,4 @@
-from mwax_mover import mwax_queue_worker, mwax_watcher, utils
+"""Standalong mwax_mover module"""
 import argparse
 import logging
 import logging.handlers
@@ -6,9 +6,10 @@ import os
 import queue
 import signal
 import sys
-from tenacity import retry, stop_after_attempt, wait_fixed
 import threading
 import time
+from tenacity import retry, stop_after_attempt, wait_fixed
+from mwax_mover import mwax_queue_worker, mwax_watcher, utils
 
 # The full filename with path
 FILE_REPLACEMENT_TOKEN = "__FILE__"
@@ -24,12 +25,13 @@ MODE_PROCESS_DIR = "PROCESS_DIR"
 
 @retry(stop=stop_after_attempt(5), wait=wait_fixed(10))
 def remove_file(logger, filename: str, raise_error: bool) -> bool:
+    """Deletes a file from the filesystem"""
     try:
         os.remove(filename)
         logger.info(f"{filename}- file deleted")
         return True
 
-    except Exception as delete_exception:
+    except Exception as delete_exception:  # pylint: disable=broad-except
         if raise_error:
             logger.error(
                 f"{filename}- Error deleting: {delete_exception}. Retrying up"
@@ -45,6 +47,8 @@ def remove_file(logger, filename: str, raise_error: bool) -> bool:
 
 
 class Processor:
+    """Class to process items"""
+
     def __init__(self):
         # init the logging subsystem
         self.logger = logging.getLogger("mwax_mover")
@@ -56,13 +60,13 @@ class Processor:
         self.executable = None
         self.mode = None
         self.recursive = False
-        self.q = None
+        self.queue = None
         self.watch = None
         self.queueworker = None
         self.running = False
 
     def initialise(self):
-
+        """Initialisation/setup"""
         # Get command line args
         parser = argparse.ArgumentParser()
         parser.description = (
@@ -158,22 +162,23 @@ class Processor:
         # start logging
         self.logger.setLevel(logging.DEBUG)
         self.logger.propagate = False
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.DEBUG)
-        ch.setFormatter(
+
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(
             logging.Formatter("%(asctime)s, %(levelname)s, %(message)s")
         )
-        self.logger.addHandler(ch)
+        self.logger.addHandler(handler)
 
         self.logger.info("Starting mwax_mover processor...")
 
         # Create a queue for dealing with files
-        self.q = queue.Queue()
+        self.queue = queue.Queue()
 
         # Create watcher
         self.watch = mwax_watcher.Watcher(
             path=self.watch_dir,
-            q=self.q,
+            dest_queue=self.queue,
             pattern=f"{self.watch_ext}",
             log=self.logger,
             mode=self.mode,
@@ -183,7 +188,7 @@ class Processor:
         # Create queueworker
         self.queueworker = mwax_queue_worker.QueueWorker(
             label="queue",
-            q=self.q,
+            source_queue=self.queue,
             executable_path=self.executable,
             exit_once_queue_empty=exit_once_queue_empty,
             log=self.logger,
@@ -193,13 +198,15 @@ class Processor:
         self.running = True
         self.logger.info("Processor Initialised...")
 
-    def signal_handler(self, signum, frame):
+    def signal_handler(self, _signum, _frame):
+        """Handles SIGINT and SIGTERM"""
         self.logger.warning("Interrupted. Shutting down...")
         self.running = False
         self.watch.stop()
         self.queueworker.stop()
 
     def start(self):
+        """Start processing"""
         # Make sure we can Ctrl-C / kill out of this
         signal.signal(signal.SIGINT, self.signal_handler)
 
@@ -225,12 +232,12 @@ class Processor:
             # we don't need a watcher
             watcher_thread = None
 
-            utils.scan_for_existing_files(
+            utils.scan_for_existing_files_and_add_to_queue(
                 self.logger,
                 self.watch_dir,
                 self.watch_ext,
                 self.recursive,
-                self.q,
+                self.queue,
             )
         else:
             # Unsupported modes
@@ -263,17 +270,18 @@ class Processor:
 
 
 def main():
-    p = Processor()
+    """Main function"""
+    processor = Processor()
 
     try:
-        p.initialise()
-        p.start()
+        processor.initialise()
+        processor.start()
         sys.exit(0)
-    except Exception as e:
-        if p.logger:
-            p.logger.exception(str(e))
+    except Exception as catch_all_exception:  # pylint: disable=broad-except
+        if processor.logger:
+            processor.logger.exception(str(catch_all_exception))
         else:
-            print(str(e))
+            print(str(catch_all_exception))
 
 
 if __name__ == "__main__":
