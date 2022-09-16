@@ -712,8 +712,9 @@ class MWAXSubfileDistributor:
         # archiving settings otherwise just use those settings as necessary
         if not self.cfg_archiving_enabled:
             self.logger.warning(
-                "Master archiving is set to DISABLED. Nothing will be"
-                " archived and nothing will be sent for calibration."
+                "Master archving ('archiving_enabled') is set to FALSE."
+                " Nothing will be archived and nothing will be sent for"
+                " calibration."
             )
             self.cfg_bf_archive_destination_enabled = False
             self.cfg_corr_archive_destination_enabled = False
@@ -757,6 +758,12 @@ class MWAXSubfileDistributor:
         self.processors.append(self.subfile_processor)
 
         if self.cfg_corr_enabled:
+            if self.cfg_corr_archive_destination_enabled is False:
+                self.logger.warning(
+                    "'mwax_destination_enabled' is FALSE. Nothing will be"
+                    " archived and nothing will be sent for calibration."
+                )
+
             self.archive_processor = (
                 mwax_archive_processor.MWAXArchiveProcessor(
                     self,
