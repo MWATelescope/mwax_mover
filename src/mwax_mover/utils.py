@@ -1,6 +1,7 @@
 """Various utility functions used throughout the package"""
 import base64
 from configparser import ConfigParser
+from enum import Enum
 import fcntl
 import glob
 import os
@@ -11,8 +12,232 @@ import struct
 import time
 import typing
 import astropy.io.fits as fits
-from mwax_mover import mwax_command, mwa_archiver
-from mwax_mover.mwa_archiver import ValidationData
+from mwax_mover import mwax_command
+
+
+class MWADataFileType(Enum):
+    """Enum for the possible MWA data file types"""
+
+    MWA_FLAG_FILE = 10
+    MWA_PPD_FILE = 14
+    MWAX_VOLTAGES = 17
+    MWAX_VISIBILITIES = 18
+
+
+class ValidationData:
+    """A struct for the return value of validate_filename"""
+
+    valid: bool
+    obs_id: int
+    project_id: str
+    filetype_id: int
+    file_ext: str
+    calibrator: bool
+    validation_message: str
+
+    def __init__(
+        self,
+        valid: bool,
+        obs_id: int,
+        project_id: str,
+        filetype_id: int,
+        file_ext: str,
+        calibrator: bool,
+        validation_message: str,
+    ):
+        self.valid = valid
+        self.obs_id = obs_id
+        self.project_id = project_id
+        self.filetype_id = filetype_id
+        self.file_ext = file_ext
+        self.calibrator = calibrator
+        self.validation_message = validation_message
+
+
+def validate_filename(
+    filename: str,
+    metafits_path: str,
+) -> ValidationData:
+    """
+    Takes a filename and determines various
+    things about it.
+    Returns:
+        (valid (bool) did validation succeed
+        ,obs_id (int) obs_id of file
+        ,project_id (int) project id of observation
+        ,filetype_id (int) file type id
+        ,file_ext (string) file extension
+        ,calibrator (bool) True if it's a calibrator
+        ,validation_error (string) validation error
+        )
+    """
+
+    valid: bool = True
+    obs_id = 0
+    project_id = ""
+    calibrator = False
+    validation_error: str = ""
+    filetype_id: int = -1
+    file_name_part: str = ""
+    file_ext_part: str = ""
+
+    # 1. Is there an extension?
+    split_filename = os.path.splitext(filename)
+    if len(split_filename) == 2:
+        file_name_part = os.path.basename(split_filename[0])
+        file_ext_part = split_filename[1]
+    else:
+        # Error no extension
+        valid = False
+        validation_error = "Filename has no extension- ignoring"
+
+    # 2. check obs_id in the first 10 chars of the filename and is integer
+    if valid:
+        obs_id_check = file_name_part[0:10]
+
+        if not obs_id_check.isdigit():
+            valid = False
+            validation_error = (
+                "Filename does not start with a 10 digit observation_id-"
+                " ignoring"
+            )
+        else:
+            obs_id = int(obs_id_check)
+
+    # 3. Check extension
+    if valid:
+        if file_ext_part.lower() == ".sub":
+            filetype_id = MWADataFileType.MWAX_VOLTAGES.value
+        elif file_ext_part.lower() == ".fits":
+            # Could be metafits (e.g. 1316906688_metafits_ppds.fits) or
+            # visibilitlies
+            if (
+                file_name_part[10:] == "_metafits_ppds"
+                or file_name_part[10:] == "_metafits"
+            ):
+                filetype_id = MWADataFileType.MWA_PPD_FILE.value
+            else:
+                filetype_id = MWADataFileType.MWAX_VISIBILITIES.value
+
+        elif file_ext_part.lower() == ".metafits":
+            # Could be metafits (e.g. 1316906688.metafits)
+            filetype_id = MWADataFileType.MWA_PPD_FILE.value
+
+        elif file_ext_part.lower() == ".zip":
+            filetype_id = MWADataFileType.MWA_FLAG_FILE.value
+
+        else:
+            # Error - unknown filetype
+            valid = False
+            validation_error = (
+                f"Unknown file extension {file_ext_part}- ignoring"
+            )
+
+    # 4. Check length of filename
+    if valid:
+        if filetype_id == MWADataFileType.MWAX_VOLTAGES.value:
+            # filename format should be obsid_subobsid_XXX.sub
+            # filename format should be obsid_subobsid_XX.sub
+            # filename format should be obsid_subobsid_X.sub
+            if len(file_name_part) < 23 or len(file_name_part) > 25:
+                valid = False
+                validation_error = (
+                    "Filename (excluding extension) is not in the correct"
+                    f" format (incorrect length ({len(file_name_part)})."
+                    " Format should be obsid_subobsid_XXX.sub)- ignoring"
+                )
+        elif filetype_id == MWADataFileType.MWAX_VISIBILITIES.value:
+            # filename format should be obsid_yyyymmddhhnnss_chXXX_XXX.fits
+            if len(file_name_part) != 35:
+                valid = False
+                validation_error = (
+                    "Filename (excluding extension) is not in the correct"
+                    f" format (incorrect length ({len(file_name_part)})."
+                    " Format should be obsid_yyyymmddhhnnss_chXXX_XXX.fits)-"
+                    " ignoring"
+                )
+
+        elif filetype_id == MWADataFileType.MWA_PPD_FILE.value:
+            # filename format should be obsid_metafits_ppds.fits or
+            # obsid_metafits.fits or obsid.metafits
+            if (
+                len(file_name_part) != 24
+                and len(file_name_part) != 19
+                and len(file_name_part) != 10
+            ):
+                valid = False
+                validation_error = (
+                    "Filename (excluding extension) is not in the correct"
+                    f" format (incorrect length ({len(file_name_part)})."
+                    " Format should be obsid_metafits_ppds.fits,"
+                    " obsid_metafits.fits or obsid.metafits)- ignoring"
+                )
+
+        elif filetype_id == MWADataFileType.MWA_FLAG_FILE.value:
+            # filename format should be obsid_flags.zip
+            if len(file_name_part) != 16:
+                valid = False
+                validation_error = (
+                    "Filename (excluding extension) is not in the correct"
+                    f" format (incorrect length ({len(file_name_part)})."
+                    " Format should be obsid_flags.zip)- ignoring"
+                )
+
+    # 5. Get project id and calibtator info
+    if valid and filetype_id != MWADataFileType.MWA_PPD_FILE.value:
+        # Now check that the observation is a calibrator by
+        # looking at the associated metafits file
+        metafits_filename = os.path.join(
+            metafits_path, f"{obs_id}_metafits.fits"
+        )
+
+    elif valid and filetype_id == MWADataFileType.MWA_PPD_FILE.value:
+        # this file IS a metafits! So check it
+        metafits_filename = filename
+
+    (calibrator, project_id) = get_metafits_values(metafits_filename)
+
+    return ValidationData(
+        valid,
+        obs_id,
+        project_id,
+        filetype_id,
+        file_ext_part,
+        calibrator,
+        validation_error,
+    )
+
+
+def determine_bucket_and_folder(full_filename, location):
+    """Return the bucket and folder of the file to be archived,
+    based on location."""
+    filename = os.path.basename(full_filename)
+
+    # acacia and banksia
+    if location == 2 or location == 3:
+        # determine bucket name
+        bucket = get_bucket_name_from_filename(filename)
+        folder = None
+        return bucket, folder
+
+    else:
+        # DMF and Versity not yet implemented
+        raise NotImplementedError(f"Location {location} is not supported.")
+
+
+def get_bucket_name_from_filename(filename: str) -> str:
+    """Generates a bucket name for a filename"""
+    file_part = os.path.split(filename)[1]
+    return get_bucket_name_from_obs_id(int(file_part[0:10]))
+
+
+def get_bucket_name_from_obs_id(obs_id: int) -> str:
+    """Generate bucket name given an obs_id"""
+    # return the first 5 digits of the obsid
+    # This means there will be a new bucket every ~27 hours
+    # This is to reduce the chances of vcs jobs filling a bucket to more than
+    # 100K of files
+    return f"mwaingest-{str(obs_id)[0:5]}"
 
 
 def get_metafits_values(metafits_filename: str) -> (bool, str):
@@ -338,32 +563,26 @@ def get_priority(filename: str, metafits_path: str) -> int:
     Priority order is:
     1 Calibrator correlator observations
     2 reserved for correlator high prioriry projects
-    10 metafits PPD files
     20 reserved for vcs high prioriry projects
     30 normal correlator observations
-    99 vcs observations
-    100 ???
+    90 vcs observations
+    100 metafits_ppds
     """
     return_priority = 100  # default if we don't do anything else
 
     list_of_correlator_high_priority_projects = [
-        "D0006",
+        "D0006",  # added as we use this for morning and evening calibrators
     ]
 
     list_of_vcs_high_priority_projects = [
-        "D0006",
+        "C001",  # added as we use this for engineering testing
     ]
 
     # get info about this file
-    val: ValidationData = mwa_archiver.validate_filename(
-        filename, metafits_path
-    )
+    val: ValidationData = validate_filename(filename, metafits_path)
 
     if val.valid:
-        if (
-            val.filetype_id
-            == mwa_archiver.MWADataFileType.MWAX_VISIBILITIES.value
-        ):
+        if val.filetype_id == MWADataFileType.MWAX_VISIBILITIES.value:
             if val.calibrator:
                 return_priority = 1
             else:
@@ -371,16 +590,14 @@ def get_priority(filename: str, metafits_path: str) -> int:
                     return_priority = 2
                 else:
                     return_priority = 30
-        elif (
-            val.filetype_id == mwa_archiver.MWADataFileType.MWA_PPD_FILE.value
-        ):
-            return_priority = 10
-        elif (
-            val.filetype_id == mwa_archiver.MWADataFileType.MWAX_VOLTAGES.value
-        ):
+        elif val.filetype_id == MWADataFileType.MWAX_VOLTAGES.value:
             if val.project_id in list_of_vcs_high_priority_projects:
                 return_priority = 20
             else:
-                return_priority = 99
+                return_priority = 90
+    else:
+        raise Exception(
+            f"File {filename} is not valid! Reason: {val.validation_message}"
+        )
 
     return return_priority

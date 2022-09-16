@@ -1,7 +1,7 @@
-#
-# This is to test if MWACacheArchiveProcessor correctly reads the tonnes of
-# config correctly from a "mwacache_archiver" config file.
-#
+"""
+This is to test if MWACacheArchiveProcessor correctly reads the tonnes of
+config correctly from a "mwacache_archiver" config file.
+"""
 import os
 from mwax_mover.mwacache_archive_processor import MWACacheArchiveProcessor
 
@@ -9,16 +9,19 @@ TEST_BASE_PATH = "tests/mock_mwacache_archiver"
 
 
 def get_base_path() -> str:
+    """Utility function to get the base path for these tests"""
     return os.path.join(os.getcwd(), TEST_BASE_PATH)
 
 
 def check_and_make_dir(path):
+    """If dir does not exist, make it"""
     if not os.path.exists(path):
         print(f"{path} not found. Creating {path}")
         os.mkdir(path)
 
 
 def setup_mwacache_archiver_test():
+    """Gets the mwacache_archiver tests ready"""
     # Setup dirs first!
     # Make the base dir
     base_dir = get_base_path()
@@ -34,6 +37,7 @@ def setup_mwacache_archiver_test():
 
 
 def test_mwacache_archiver_config_file():
+    """Tests that MWACacheArchiver reads a config file ok"""
     # Setup all the paths
     setup_mwacache_archiver_test()
 

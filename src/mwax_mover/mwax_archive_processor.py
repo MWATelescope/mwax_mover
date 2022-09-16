@@ -15,7 +15,7 @@ from mwax_mover import (
     mwa_archiver,
     utils,
 )
-from mwax_mover.mwa_archiver import MWADataFileType, ValidationData
+from mwax_mover.utils import MWADataFileType, ValidationData
 
 
 class MWAXArchiveProcessor:
@@ -510,9 +510,7 @@ class MWAXArchiveProcessor:
         self.logger.info(f"{item}- checksum_and_db_handler() Started")
 
         # validate the filename
-        val: ValidationData = mwa_archiver.validate_filename(
-            item, self.metafits_path
-        )
+        val: ValidationData = utils.validate_filename(item, self.metafits_path)
 
         if val.valid:
             # checksum then add this file to the db so we insert a record into
@@ -682,7 +680,7 @@ class MWAXArchiveProcessor:
             )
 
             # Determine properties of the file we are dealing with
-            val: ValidationData = mwa_archiver.validate_filename(
+            val: ValidationData = utils.validate_filename(
                 item, self.metafits_path
             )
 

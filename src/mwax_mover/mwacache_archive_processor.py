@@ -20,7 +20,7 @@ from mwax_mover import (
     utils,
     version,
 )
-from mwax_mover.mwa_archiver import ValidationData
+from mwax_mover.utils import ValidationData
 from mwax_mover.mwax_db import DataFileRow
 
 
@@ -183,9 +183,7 @@ class MWACacheArchiveProcessor:
         self.logger.info(f"{item}- archive_handler() Started...")
 
         # validate the filename
-        val: ValidationData = mwa_archiver.validate_filename(
-            item, self.metafits_path
-        )
+        val: ValidationData = utils.validate_filename(item, self.metafits_path)
 
         # do some sanity checks!
         if val.valid:
@@ -233,7 +231,7 @@ class MWACacheArchiveProcessor:
             )
 
             # Determine where to archive it
-            bucket, _ = mwa_archiver.determine_bucket_and_folder(
+            bucket, _ = utils.determine_bucket_and_folder(
                 item,
                 self.archive_to_location,
             )
