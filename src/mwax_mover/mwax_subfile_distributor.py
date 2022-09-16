@@ -176,7 +176,7 @@ class MWAXSubfileDistributor:
         self.cfg_archive_command_timeout_sec = None
         self.cfg_psrdada_timeout_sec = None
         self.cfg_copy_subfile_to_disk_timeout_sec = None
-        self.cfg_archiving_enabled = None
+        self.cfg_archiving_enabled: bool = False
         self.cfg_health_multicast_interface_ip = None
         self.cfg_health_multicast_interface_name = None
         self.cfg_health_multicast_ip = None
