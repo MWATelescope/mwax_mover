@@ -49,6 +49,8 @@ class MWAXArchiveProcessor:
         metafits_path: str,
         visdata_dont_archive_path: str,
         voltdata_dont_archive_path: str,
+        high_priority_correlator_projectids: list,
+        high_priority_vcs_projectids: list,
     ):
         self.subfile_distributor_context = context
 
@@ -132,6 +134,12 @@ class MWAXArchiveProcessor:
         self.calibrator_destination_port = calibrator_destination_port
 
         self.metafits_path = metafits_path
+        self.list_of_correlator_high_priority_projects = (
+            high_priority_correlator_projectids,
+        )
+        self.list_of_vcs_high_priority_projects = (
+            high_priority_vcs_projectids,
+        )
 
     def start(self):
         """This method is used to start the processor"""
@@ -199,6 +207,8 @@ class MWAXArchiveProcessor:
                 log=self.logger,
                 mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
                 metafits_path=self.metafits_path,
+                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
+                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
                 recursive=False,
             )
 
@@ -210,6 +220,8 @@ class MWAXArchiveProcessor:
                 log=self.logger,
                 mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
                 metafits_path=self.metafits_path,
+                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
+                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
                 recursive=False,
             )
 

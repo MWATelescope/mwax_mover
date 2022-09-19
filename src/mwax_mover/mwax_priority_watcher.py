@@ -22,6 +22,8 @@ class PriorityWatcher(object):
         mode,
         recursive,
         metafits_path,
+        list_of_correlator_high_priority_projects: list,
+        list_of_vcs_high_priority_projects: list,
         exclude_pattern=None,
     ):
         self.logger = log
@@ -34,6 +36,12 @@ class PriorityWatcher(object):
         self.pattern = pattern  # must be ".ext" or ".*"
         self.exclude_pattern = exclude_pattern  # Can be None or ".ext"
         self.metafits_path = metafits_path
+        self.list_of_correlator_high_priority_projects: list = (
+            list_of_correlator_high_priority_projects
+        )
+        self.list_of_vcs_high_priority_projects: list = (
+            list_of_vcs_high_priority_projects
+        )
 
         if self.mode == mwax_mover.MODE_WATCH_DIR_FOR_NEW:
             self.mask = inotify.constants.IN_CLOSE_WRITE
@@ -104,6 +112,8 @@ class PriorityWatcher(object):
                 self.pattern,
                 self.recursive,
                 self.dest_queue,
+                self.list_of_correlator_high_priority_projects,
+                self.list_of_vcs_high_priority_projects,
                 self.exclude_pattern,
             )
 
@@ -126,7 +136,10 @@ class PriorityWatcher(object):
 
                         # We need to determine the priority
                         priority = utils.get_priority(
-                            dest_filename, self.metafits_path
+                            dest_filename,
+                            self.metafits_path,
+                            self.list_of_correlator_high_priority_projects,
+                            self.list_of_vcs_high_priority_projects,
                         )
 
                         new_queue_item = (priority, dest_filename)

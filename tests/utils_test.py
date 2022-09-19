@@ -5,6 +5,7 @@ NOTE: some tests (e.g. validate_filename and get_priority) use filenames
 which do not exist in the git repo. This is fine as the main thing being
 tested is the filename and metafits file (which is included).
 """
+from configparser import ConfigParser
 import logging
 import os
 import queue
@@ -241,7 +242,14 @@ def test_scan_for_existing_files_and_add_to_priority_queue():
     # Run test
     #
     utils.scan_for_existing_files_and_add_to_priority_queue(
-        logger, metafits_path, watch_dir, pattern, recursive, queue_target
+        logger,
+        metafits_path,
+        watch_dir,
+        pattern,
+        recursive,
+        queue_target,
+        ["D0006"],
+        ["C001"],
     )
 
     assert queue_target.qsize() == 2
@@ -296,6 +304,8 @@ def test_get_priority_correlator_calibrator():
     priority = utils.get_priority(
         "tests/data/correlator_calibrator/1347318488_20190619100110_ch101_000.fits",
         "tests/data/correlator_calibrator/",
+        ["D0006"],
+        ["C001"],
     )
     assert priority == 1
 
@@ -311,6 +321,8 @@ def test_get_priority_correlator_high_priority_list():
     priority = utils.get_priority(
         "tests/data/correlator_D0006_not_cal/1122979144_20190619100110_ch101_000.fits",
         "tests/data/correlator_D0006_not_cal/",
+        ["D0006"],
+        ["C001"],
     )
     assert priority == 2
 
@@ -323,6 +335,8 @@ def test_get_priority_vcs_c001():
     priority = utils.get_priority(
         "tests/data/vcs_C001/1347063304_1347063304_114.sub",
         "tests/data/vcs_C001/",
+        ["D0006"],
+        ["C001"],
     )
     assert priority == 20
 
@@ -335,6 +349,8 @@ def test_get_priority_correlator_c001():
     priority = utils.get_priority(
         "tests/data/correlator_C001/1244973688_20190619100110_ch114_000.fits",
         "tests/data/correlator_C001/",
+        ["D0006"],
+        ["C001"],
     )
     assert priority == 30
 
@@ -347,6 +363,8 @@ def test_get_priority_vcs_g0024():
     priority = utils.get_priority(
         "tests/data/vcs_G0024/1220738720_1220738720_123.sub",
         "tests/data/vcs_G0024/",
+        ["D0006"],
+        ["C001"],
     )
     assert priority == 90
 
@@ -359,6 +377,8 @@ def test_get_priority_metafits_ppd():
     priority = utils.get_priority(
         "tests/data/metafits_ppd/1328239120_metafits_ppds.fits",
         "tests/data/metafits_ppd/",
+        ["D0006"],
+        ["C001"],
     )
     assert priority == 100
 
@@ -438,3 +458,43 @@ def test_get_bucket_name_from_obs_id():
     bucket = utils.get_bucket_name_from_obs_id(obs_id)
 
     assert bucket == "mwaingest-12345"
+
+
+def test_config_get_list_valid():
+    """Read a string from a config file, then
+    split (by comma) into a list
+    e.g. abc,def,ghi would result in ["abc", "def", "ghi"]
+    An empty string would result in and empty list []
+    """
+    logger = logging.getLogger("test")
+    config_filename = os.path.join(
+        os.getcwd(), "tests/mwax_subfile_distributor_test.cfg"
+    )
+    config = ConfigParser()
+    config.read_file(open(config_filename, "r", encoding="utf-8"))
+
+    return_list = utils.read_config_list(
+        logger, config, "mwax mover", "high_priority_vcs_projectids"
+    )
+
+    assert return_list == ["D0006", "G0058"]
+
+
+def test_config_get_list_empty():
+    """Read a string from a config file, then
+    split (by comma) into a list
+    e.g. abc,def,ghi would result in ["abc", "def", "ghi"]
+    An empty string would result in and empty list []
+    """
+    logger = logging.getLogger("test")
+    config_filename = os.path.join(
+        os.getcwd(), "tests/mwax_subfile_distributor_test.cfg"
+    )
+    config = ConfigParser()
+    config.read_file(open(config_filename, "r", encoding="utf-8"))
+
+    return_list = utils.read_config_list(
+        logger, config, "mwax mover", "high_priority_correlator_projectids"
+    )
+
+    assert return_list == []

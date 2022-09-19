@@ -94,3 +94,7 @@ def test_mwacache_archiver_config_file():
 
     assert len(mcap.watch_dirs) == 1
     assert mcap.watch_dirs[0] == "/data/mwacache_test"
+
+    # test list of projects
+    assert mcap.high_priority_correlator_projectids == ["D0006"]
+    assert not mcap.high_priority_vcs_projectids

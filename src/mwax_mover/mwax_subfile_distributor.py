@@ -182,6 +182,8 @@ class MWAXSubfileDistributor:
         self.cfg_health_multicast_ip = None
         self.cfg_health_multicast_port = None
         self.cfg_health_multicast_hops = None
+        self.cfg_high_priority_correlator_projectids = None
+        self.cfg_high_priority_vcs_projectids = None
 
         # Beamformer
         self.cfg_bf_enabled = False
@@ -375,6 +377,21 @@ class MWAXSubfileDistributor:
         self.logger.info(
             "IP for sending multicast:"
             f" {self.cfg_health_multicast_interface_ip}"
+        )
+
+        # Get list of projectids which are to be given
+        # high priority when archiving
+        self.cfg_high_priority_correlator_projectids = utils.read_config_list(
+            self.logger,
+            self.config,
+            "mwax mover",
+            "high_priority_correlator_projectids",
+        )
+        self.cfg_high_priority_vcs_projectids = utils.read_config_list(
+            self.logger,
+            self.config,
+            "mwax mover",
+            "high_priority_vcs_projectids",
         )
 
         if not os.path.exists(self.cfg_voltdata_dont_archive_path):
@@ -789,6 +806,8 @@ class MWAXSubfileDistributor:
                     self.cfg_corr_metafits_path,
                     self.cfg_visdata_dont_archive_path,
                     self.cfg_voltdata_dont_archive_path,
+                    self.cfg_high_priority_correlator_projectids,
+                    self.cfg_high_priority_vcs_projectids,
                 )
             )
 

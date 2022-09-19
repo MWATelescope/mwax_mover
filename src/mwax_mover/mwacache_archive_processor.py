@@ -69,6 +69,9 @@ class MWACacheArchiveProcessor:
         self.health_multicast_hops = None
         self.health_multicast_interface_name = None
 
+        self.high_priority_correlator_projectids = None
+        self.high_priority_vcs_projectids = None
+
         # MWAX servers will copy in a temp file, then rename once it is good
         self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_RENAME
         self.archiving_paused = False
@@ -490,6 +493,21 @@ class MWACacheArchiveProcessor:
                 "mwax mover",
                 "archive_command_timeout_sec",
             )
+        )
+
+        # Get list of projectids which are to be given
+        # high priority when archiving
+        self.high_priority_correlator_projectids = utils.read_config_list(
+            self.logger,
+            config,
+            "mwax mover",
+            "high_priority_correlator_projectids",
+        )
+        self.high_priority_vcs_projectids = utils.read_config_list(
+            self.logger,
+            config,
+            "mwax mover",
+            "high_priority_vcs_projectids",
         )
 
         # health

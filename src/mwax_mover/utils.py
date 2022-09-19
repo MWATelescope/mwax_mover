@@ -267,6 +267,25 @@ def read_config(
     return value
 
 
+def read_config_list(logger, config: ConfigParser, section: str, key: str):
+    """Reads a string from a config file, returning a list"""
+    string_value = read_config(logger, config, section, key, False)
+
+    # Ensure we trim string_value
+    string_value = string_value.rstrip().lstrip()
+
+    if len(string_value) > 0:
+        return_list = string_value.split(",")
+    else:
+        return_list = []
+
+    logger.info(
+        f"'{string_value}' converted to list of {len(return_list)} items:"
+        f" {return_list}"
+    )
+    return return_list
+
+
 def read_config_bool(logger, config: ConfigParser, section: str, key: str):
     """Read a bool from a config file"""
     value = config.getboolean(section, key)
@@ -387,6 +406,8 @@ def scan_for_existing_files_and_add_to_priority_queue(
     pattern: str,
     recursive: bool,
     queue_target: queue.PriorityQueue,
+    list_of_correlator_high_priority_projects: list,
+    list_of_vcs_high_priority_projects: list,
     exclude_pattern=None,
 ):
     """
@@ -400,7 +421,12 @@ def scan_for_existing_files_and_add_to_priority_queue(
     logger.info(f"Found {len(files)} files")
 
     for filename in files:
-        priority = get_priority(filename, metafits_path)
+        priority = get_priority(
+            filename,
+            metafits_path,
+            list_of_correlator_high_priority_projects,
+            list_of_vcs_high_priority_projects,
+        )
         queue_target.put((priority, filename))
         logger.info(f"{filename} added to queue with priority {priority}")
 
@@ -549,7 +575,12 @@ def do_checksum_md5(
         )
 
 
-def get_priority(filename: str, metafits_path: str) -> int:
+def get_priority(
+    filename: str,
+    metafits_path: str,
+    list_of_correlator_high_priority_projects: list,
+    list_of_vcs_high_priority_projects: list,
+) -> int:
     """
     metafits_path is the directory where all the current
     metafits files exist.
@@ -569,14 +600,6 @@ def get_priority(filename: str, metafits_path: str) -> int:
     100 metafits_ppds
     """
     return_priority = 100  # default if we don't do anything else
-
-    list_of_correlator_high_priority_projects = [
-        "D0006",  # added as we use this for morning and evening calibrators
-    ]
-
-    list_of_vcs_high_priority_projects = [
-        "C001",  # added as we use this for engineering testing
-    ]
 
     # get info about this file
     val: ValidationData = validate_filename(filename, metafits_path)
