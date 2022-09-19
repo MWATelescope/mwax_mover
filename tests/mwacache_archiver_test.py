@@ -31,10 +31,6 @@ def setup_mwacache_archiver_test():
     log_path = os.path.join(base_dir, "logs")
     check_and_make_dir(log_path)
 
-    # metafits_path
-    metafits_path = os.path.join(base_dir, "vulcan_metafits")
-    check_and_make_dir(metafits_path)
-
 
 def test_mwacache_archiver_config_file():
     """Tests that MWACacheArchiver reads a config file ok"""
@@ -93,7 +89,7 @@ def test_mwacache_archiver_config_file():
     assert mcap.mro_metadatadb_pass is None
 
     assert len(mcap.watch_dirs) == 1
-    assert mcap.watch_dirs[0] == "/data/mwacache_test"
+    assert mcap.watch_dirs[0] == "tests/data/mwacache_test01"
 
     # test list of projects
     assert mcap.high_priority_correlator_projectids == ["D0006"]
