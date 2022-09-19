@@ -2,18 +2,18 @@
 import os
 import queue
 import time
-from mwax_mover.mwax_queue_worker import QueueWorker
+from mwax_mover.mwax_priority_queue_worker import PriorityQueueWorker
 from mwax_mover.mwa_archiver import ceph_get_s3_object
 
 
-class CephQueueWorker(QueueWorker):
+class CephPriorityQueueWorker(PriorityQueueWorker):
     """Subclass of a queue worker which houses a Boto3 session object so we
     can take advantage of Session connection pooling"""
 
     def __init__(
         self,
         label: str,
-        source_queue,
+        source_queue: queue.Queue,
         executable_path,
         log,
         event_handler,
@@ -47,7 +47,7 @@ class CephQueueWorker(QueueWorker):
         """Overrride this method from QueueWorker so we can initiate a boto3
         session"""
 
-        self.logger.info(f"CephQueueWorker {self.label} starting...")
+        self.logger.info(f"CephPriorityQueueWorker {self.label} starting...")
         #
         # Init the Boto3 session
         #
@@ -82,13 +82,16 @@ class CephQueueWorker(QueueWorker):
 
                     start_time = time.time()
 
+                    filename_priority = self.current_item[0]
+                    filename = self.current_item[1]
+
                     # Check file exists (maybe someone deleted it?)
-                    if os.path.exists(self.current_item):
+                    if os.path.exists(filename):
                         if self._executable_path:
-                            success = self.run_command(self.current_item)
+                            success = self.run_command(filename)
                         else:
                             success = self._event_handler(
-                                self.current_item, self.ceph_session
+                                filename, self.ceph_session
                             )
 
                         if success:
@@ -134,11 +137,18 @@ class CephQueueWorker(QueueWorker):
                         self.event.wait(backoff)
 
                         # If this option is set, add item back to the end of
-                        # the queue. If not set, just keep retrying the
-                        # operation
+                        # the queue by making the priority larger
+                        # If not set, just keep retrying the operation
                         if self.requeue_to_eoq_on_failure:
+                            # increment the priority- otherwise it
+                            # will go back and be in the same position
+                            # in the queue
+                            filename_priority += 1
+
                             self.source_queue.task_done()
-                            self.source_queue.put(self.current_item)
+                            self.source_queue.put(
+                                (filename_priority, filename)
+                            )
                             self.current_item = None
 
                 except queue.Empty:

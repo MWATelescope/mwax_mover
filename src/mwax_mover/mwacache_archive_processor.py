@@ -14,8 +14,8 @@ import time
 from mwax_mover import (
     mwax_mover,
     mwax_db,
-    mwax_ceph_queue_worker,
-    mwax_watcher,
+    mwax_ceph_priority_queue_worker,
+    mwax_priority_watcher,
     mwa_archiver,
     utils,
     version,
@@ -84,7 +84,7 @@ class MWACacheArchiveProcessor:
         self.worker_threads = []
 
         self.watch_dirs = None
-        self.queue = queue.Queue()
+        self.queue = queue.PriorityQueue()
         self.watchers = []
         self.queue_workers = []
 
@@ -130,13 +130,16 @@ class MWACacheArchiveProcessor:
                     )
 
             # Create watcher for each data path queue
-            new_watcher = mwax_watcher.Watcher(
+            new_watcher = mwax_priority_watcher.PriorityWatcher(
                 path=watch_dir,
                 dest_queue=self.queue,
                 pattern=".*",
                 log=self.logger,
                 mode=self.mwax_mover_mode,
                 recursive=self.recursive,
+                metafits_path=self.metafits_path,
+                list_of_correlator_high_priority_projects=self.high_priority_correlator_projectids,
+                list_of_vcs_high_priority_projects=self.high_priority_vcs_projectids,
                 exclude_pattern=".part*",
             )
             self.watchers.append(new_watcher)
@@ -145,19 +148,21 @@ class MWACacheArchiveProcessor:
         self.logger.info("Creating workers...")
 
         for archive_worker in range(0, self.concurrent_archive_workers):
-            new_worker = mwax_ceph_queue_worker.CephQueueWorker(
-                label=f"Archiver{archive_worker}",
-                source_queue=self.queue,
-                executable_path=None,
-                event_handler=self.archive_handler,
-                log=self.logger,
-                requeue_to_eoq_on_failure=True,
-                exit_once_queue_empty=False,
-                backoff_initial_seconds=20,
-                backoff_factor=2,
-                backoff_limit_seconds=40,
-                ceph_endpoint=self.s3_ceph_endpoint,
-                ceph_profile=self.s3_profile,
+            new_worker = (
+                mwax_ceph_priority_queue_worker.CephPriorityQueueWorker(
+                    label=f"Archiver{archive_worker}",
+                    source_queue=self.queue,
+                    executable_path=None,
+                    event_handler=self.archive_handler,
+                    log=self.logger,
+                    requeue_to_eoq_on_failure=True,
+                    exit_once_queue_empty=False,
+                    backoff_initial_seconds=20,
+                    backoff_factor=2,
+                    backoff_limit_seconds=40,
+                    ceph_endpoint=self.s3_ceph_endpoint,
+                    ceph_profile=self.s3_profile,
+                )
             )
             self.queue_workers.append(new_worker)
 
