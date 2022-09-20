@@ -319,6 +319,8 @@ def ceph_get_s3_resource(
             s3_resource = session.resource(
                 "s3", endpoint_url=endpoint, config=config
             )
+            logger.debug(f"Using endpoint {endpoint}")
+
         except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
             # Attempt failed! Probably due to end point being down.
             logger.warning(
