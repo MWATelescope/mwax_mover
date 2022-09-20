@@ -1,6 +1,7 @@
 """Contains various methods dealing with archiving"""
 import os
 import hashlib
+import random
 import time
 import uuid
 import boto3
@@ -168,11 +169,11 @@ def archive_file_xrootd(
 
 def archive_file_ceph(
     logger,
-    ceph_session,
+    ceph_session: boto3.Session,
+    ceph_endpoints: list,
     full_filename: str,
     bucket_name: str,
     md5hash: str,
-    ceph_endpoint: str,
     multipart_threshold_bytes: int,
     chunk_size_bytes: int,
     max_concurrency: int,
@@ -191,16 +192,21 @@ def archive_file_ceph(
         )
         return False
 
+    # Get a valid s3 resource
+    ceph_resource: boto3.resource = ceph_get_s3_resource(
+        logger, ceph_session, ceph_endpoints
+    )
+
     # create bucket if required
     logger.debug(
         f"{full_filename} creating S3 bucket {bucket_name} (if required)..."
     )
     try:
-        ceph_create_bucket(ceph_session, bucket_name)
+        ceph_create_bucket(ceph_resource, bucket_name)
     except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
         logger.error(
             f"{full_filename}: Error creating/checking existence of S3 bucket"
-            f" {bucket_name} on {ceph_endpoint}. Error {catch_all_exceptiion}"
+            f" {bucket_name}. Error {catch_all_exceptiion}"
         )
         return False
 
@@ -214,7 +220,7 @@ def archive_file_ceph(
     # Do upload
     try:
         ceph_upload_file(
-            ceph_session,
+            ceph_resource,
             bucket_name,
             full_filename,
             md5hash,
@@ -224,8 +230,8 @@ def archive_file_ceph(
         )
     except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
         logger.error(
-            f"{full_filename}: Error uploading to S3 bucket {bucket_name} on"
-            f" {ceph_endpoint}. Error {catch_all_exceptiion}"
+            f"{full_filename}: Error uploading to S3 bucket {bucket_name}."
+            f"Error {catch_all_exceptiion}"
         )
         return False
 
@@ -288,34 +294,59 @@ def ceph_get_s3_md5_etag(filename: str, chunk_size_bytes: int) -> str:
     return new_etag
 
 
-def ceph_get_s3_object(profile: str, endpoint: str):
-    """Returns an S3 resource object"""
-    # create a session based on the profile name
+def ceph_get_s3_session(profile: str) -> boto3.Session:
+    """Returns a boto3 session given the profile name"""
     session = boto3.Session(profile_name=profile)
+    return session
 
+
+def ceph_get_s3_resource(
+    logger, session: boto3.Session, endpoints: list
+) -> boto3.resource:
+    """Returns an S3 resource object"""
     # This ensures the default boto retries and timeouts don't leave us
     # hanging too long
     config = Config(connect_timeout=20, retries={"max_attempts": 2})
 
-    s3_object = session.resource("s3", endpoint_url=endpoint, config=config)
+    endpoint_count = len(endpoints)
 
-    return s3_object
+    # Try all of the available endpoints
+    for attempt in range(endpoint_count):
+        try:
+            # Get an enpoint at random from what is left on the list
+            endpoint = random.choice(endpoints)
+
+            s3_resource = session.resource(
+                "s3", endpoint_url=endpoint, config=config
+            )
+        except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
+            # Attempt failed! Probably due to end point being down.
+            logger.warning(
+                f"Could not connect to Ceph endpoint (attempt {attempt + 1} of"
+                f" {endpoint_count}) {endpoint}: {catch_all_exceptiion}"
+            )
+            # Remove this endpoint from our list
+            endpoints.remove(endpoint)
+        else:
+            return s3_resource
+
+    raise Exception(f"Could not connect to any Ceph endpoints ({endpoints})")
 
 
-def ceph_create_bucket(s3_object, bucket_name: str):
+def ceph_create_bucket(s3_resource: boto3.resource, bucket_name: str):
     """Create a bucket via S3"""
-    bucket = s3_object.Bucket(bucket_name)
+    bucket = s3_resource.Bucket(bucket_name)
     bucket.create()
 
 
-def ceph_list_bucket(s3_object, bucket_name: str) -> list:
+def ceph_list_bucket(s3_resource: boto3.resource, bucket_name: str) -> list:
     """List contents of a bucket"""
-    bucket = s3_object.Bucket(bucket_name)
+    bucket = s3_resource.Bucket(bucket_name)
     return list(bucket.objects.all())
 
 
 def ceph_upload_file(
-    s3_object,
+    ceph_resource: boto3.resource,
     bucket_name: str,
     filename: str,
     md5hash: str,
@@ -328,7 +359,7 @@ def ceph_upload_file(
     key = os.path.split(filename)[1]
 
     # get reference to bucket
-    bucket = s3_object.Bucket(bucket_name)
+    bucket = ceph_resource.Bucket(bucket_name)
 
     # configure the xfer to use multiparts
     # 5GB is the limit Ceph has for parts, so only split if >= 2GB

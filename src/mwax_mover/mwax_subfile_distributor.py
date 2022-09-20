@@ -835,6 +835,13 @@ class MWAXSubfileDistributor:
                     " setting `fil_destination_enabled`."
                 )
 
+        # Make sure we can Ctrl-C / kill out of this
+        self.logger.info("Initialising signal handlers")
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
+
+        self.logger.info("Ready to start...")
+
     def health_handler(self):
         """Sends health data via UDP multicast"""
         while self.running:
@@ -904,10 +911,6 @@ class MWAXSubfileDistributor:
     def start(self):
         """Start the processor"""
         self.running = True
-
-        # Make sure we can Ctrl-C / kill out of this
-        signal.signal(signal.SIGINT, self.signal_handler)
-        signal.signal(signal.SIGTERM, self.signal_handler)
 
         if self.cfg_bf_enabled:
             self.logger.info("Beamformer Enabled")

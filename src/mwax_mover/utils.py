@@ -280,8 +280,8 @@ def read_config_list(logger, config: ConfigParser, section: str, key: str):
         return_list = []
 
     logger.info(
-        f"'{string_value}' converted to list of {len(return_list)} items:"
-        f" {return_list}"
+        f"Read cfg [{section}].{key}: '{string_value}' converted to list of"
+        f" {len(return_list)} items: {return_list}"
     )
     return return_list
 

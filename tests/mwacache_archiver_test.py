@@ -70,8 +70,8 @@ def test_mwacache_archiver_config_file():
     assert mcap.concurrent_archive_workers == 4
     assert mcap.archive_command_timeout_sec == 1800
 
-    assert mcap.s3_profile == "acacia"
-    assert mcap.s3_ceph_endpoint == "https://acacia-testing.pawsey.org.au:8080"
+    assert mcap.s3_profile == "gsleap"
+    assert mcap.s3_ceph_endpoints == ["https://acacia.pawsey.org.au"]
     assert mcap.s3_multipart_threshold_bytes == 1073741824
     assert mcap.s3_chunk_size_bytes == 268435456
     assert mcap.s3_max_concurrency == 2

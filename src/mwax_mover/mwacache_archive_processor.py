@@ -11,6 +11,7 @@ import signal
 import sys
 import threading
 import time
+from boto3 import Session
 from mwax_mover import (
     mwax_mover,
     mwax_db,
@@ -58,7 +59,7 @@ class MWACacheArchiveProcessor:
 
         # s3 config
         self.s3_profile = None
-        self.s3_ceph_endpoint = None
+        self.s3_ceph_endpoints = None
         self.s3_multipart_threshold_bytes = None
         self.s3_chunk_size_bytes = None
         self.s3_max_concurrency = None
@@ -90,6 +91,8 @@ class MWACacheArchiveProcessor:
 
     def start(self):
         """This method is used to start the processor"""
+        self.running = True
+
         # create a health thread
         self.logger.info("Starting health_thread...")
         health_thread = threading.Thread(
@@ -156,12 +159,11 @@ class MWACacheArchiveProcessor:
                     event_handler=self.archive_handler,
                     log=self.logger,
                     requeue_to_eoq_on_failure=True,
+                    ceph_profile=self.s3_profile,
                     exit_once_queue_empty=False,
                     backoff_initial_seconds=20,
                     backoff_factor=2,
                     backoff_limit_seconds=40,
-                    ceph_endpoint=self.s3_ceph_endpoint,
-                    ceph_profile=self.s3_profile,
                 )
             )
             self.queue_workers.append(new_worker)
@@ -186,7 +188,23 @@ class MWACacheArchiveProcessor:
 
         self.logger.info("Started...")
 
-    def archive_handler(self, item: str, ceph_session) -> bool:
+        while self.running:
+            for worker_thread in self.worker_threads:
+                if worker_thread:
+                    if worker_thread.is_alive():
+                        time.sleep(1)
+                    else:
+                        self.running = False
+                        break
+
+        #
+        # Finished- do some clean up
+        #
+
+        # Final log message
+        self.logger.info("Completed Successfully")
+
+    def archive_handler(self, item: str, ceph_session: Session) -> bool:
         """Handles sending files to Pawsey"""
         self.logger.info(f"{item}- archive_handler() Started...")
 
@@ -206,6 +224,7 @@ class MWACacheArchiveProcessor:
             data_files_row: DataFileRow = mwax_db.get_data_file_row(
                 self.remote_db_handler_object, item
             )
+
             database_file_size = data_files_row.size
 
             # Check for 0 size
@@ -253,10 +272,10 @@ class MWACacheArchiveProcessor:
                 archive_success = mwa_archiver.archive_file_ceph(
                     self.logger,
                     ceph_session,
+                    self.s3_ceph_endpoints,
                     item,
                     bucket,
                     data_files_row.checksum,
-                    self.s3_ceph_endpoint,
                     self.s3_multipart_threshold_bytes,
                     self.s3_chunk_size_bytes,
                     self.s3_max_concurrency,
@@ -559,9 +578,14 @@ class MWACacheArchiveProcessor:
         self.s3_profile = utils.read_config(
             self.logger, config, s3_section, "profile"
         )
-        self.s3_ceph_endpoint = utils.read_config(
-            self.logger, config, s3_section, "ceph_endpoint"
+
+        self.s3_ceph_endpoints = utils.read_config_list(
+            self.logger,
+            config,
+            s3_section,
+            "ceph_endpoints",
         )
+
         self.s3_multipart_threshold_bytes = int(
             utils.read_config(
                 self.logger, config, s3_section, "multipart_threshold_bytes"
@@ -683,30 +707,11 @@ class MWACacheArchiveProcessor:
             password=self.remote_metadatadb_pass,
         )
 
-        self.running = True
-
         # Make sure we can Ctrl-C / kill out of this
+        self.logger.info("Initialising signal handlers")
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
-
-        # Start everything
-        self.start()
-
-        while self.running:
-            for worker_thread in self.worker_threads:
-                if worker_thread:
-                    if worker_thread.is_alive():
-                        time.sleep(1)
-                    else:
-                        self.running = False
-                        break
-
-        #
-        # Finished- do some clean up
-        #
-
-        # Final log message
-        self.logger.info("Completed Successfully")
+        self.logger.info("Ready to start...")
 
     def initialise_from_command_line(self):
         """Initialise if initiated from command line"""

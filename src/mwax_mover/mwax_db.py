@@ -250,7 +250,6 @@ def get_data_file_row(db_handler_object, full_filename: str) -> DataFileRow:
                     checksum
             FROM data_files
             WHERE filename = %s"""
-
     try:
         if db_handler_object.dummy:
             # We have a mutex here to ensure only 1 user of the connection at
@@ -279,12 +278,12 @@ def get_data_file_row(db_handler_object, full_filename: str) -> DataFileRow:
             )
             return data_files_row
 
-    except Exception as upsert_exception:  # pylint: disable=broad-except
+    except Exception as select_exception:  # pylint: disable=broad-except
         db_handler_object.logger.error(
-            f"{full_filename} get_data_file_row() error upserting data_files"
-            f" record in data_files table: {upsert_exception}. SQL was {sql}"
+            f"{full_filename} get_data_file_row() error selecting data_files"
+            f" record in data_files table: {select_exception}. SQL was {sql}"
         )
-        return None
+        raise Exception from select_exception
 
 
 def insert_data_file_row(

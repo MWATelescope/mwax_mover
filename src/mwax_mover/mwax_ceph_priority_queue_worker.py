@@ -2,8 +2,9 @@
 import os
 import queue
 import time
+from boto3 import Session
 from mwax_mover.mwax_priority_queue_worker import PriorityQueueWorker
-from mwax_mover.mwa_archiver import ceph_get_s3_object
+from mwax_mover.mwa_archiver import ceph_get_s3_session
 
 
 class CephPriorityQueueWorker(PriorityQueueWorker):
@@ -18,12 +19,11 @@ class CephPriorityQueueWorker(PriorityQueueWorker):
         log,
         event_handler,
         exit_once_queue_empty,
+        ceph_profile: str,
         requeue_to_eoq_on_failure: bool = True,
         backoff_initial_seconds: int = 1,
         backoff_factor: int = 2,
         backoff_limit_seconds: int = 60,
-        ceph_profile: str = "",
-        ceph_endpoint: str = "",
     ):
         # Call Default QueueWorker contstructor
         super().__init__(
@@ -40,8 +40,7 @@ class CephPriorityQueueWorker(PriorityQueueWorker):
         )
 
         self.ceph_profile = ceph_profile
-        self.ceph_endpoint = ceph_endpoint
-        self.ceph_session = None
+        self.ceph_session: Session = None
 
     def start(self):
         """Overrride this method from QueueWorker so we can initiate a boto3
@@ -53,14 +52,10 @@ class CephPriorityQueueWorker(PriorityQueueWorker):
         #
         # get s3 object
         try:
-            self.ceph_session = ceph_get_s3_object(
-                self.ceph_profile, self.ceph_endpoint
-            )
+            self.ceph_session = ceph_get_s3_session(self.ceph_profile)
         except Exception as catch_all_exception:  # pylint: disable=broad-except
             self.logger.error(
-                "Error creating Ceph Session: Profile:"
-                f" {self.ceph_profile} Endpoint: {self.ceph_endpoint}."
-                f" Error {catch_all_exception}"
+                f"Error getting Ceph Session: {catch_all_exception}"
             )
             return
 
