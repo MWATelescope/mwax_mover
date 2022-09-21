@@ -229,7 +229,7 @@ class MWAXArchiveProcessor:
             self.queue_worker_outgoing = (
                 mwax_priority_queue_worker.PriorityQueueWorker(
                     label="outgoing worker",
-                    dest_queue=self.queue_outgoing,
+                    source_queue=self.queue_outgoing,
                     executable_path=None,
                     event_handler=self.archive_handler,
                     log=self.logger,
