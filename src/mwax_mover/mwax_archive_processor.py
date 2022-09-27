@@ -639,7 +639,9 @@ class MWAXArchiveProcessor:
             )
             is not True
         ):
-            return False
+            self.logger.warning(
+                f"{item}- stats_handler() mwax_stats failed. Skipping."
+            )
 
         # Take the input filename - strip the path, then append the output path
         outgoing_filename = os.path.join(
