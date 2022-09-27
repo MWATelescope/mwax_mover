@@ -4,6 +4,7 @@ import queue
 import time
 from boto3 import Session
 from mwax_mover.mwax_priority_queue_worker import PriorityQueueWorker
+from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
 from mwax_mover.mwa_archiver import ceph_get_s3_session
 
 
@@ -78,7 +79,7 @@ class CephPriorityQueueWorker(PriorityQueueWorker):
                     start_time = time.time()
 
                     filename_priority = self.current_item[0]
-                    filename = self.current_item[1]
+                    filename = str(self.current_item[1])
 
                     # Check file exists (maybe someone deleted it?)
                     if os.path.exists(filename):
@@ -142,7 +143,10 @@ class CephPriorityQueueWorker(PriorityQueueWorker):
 
                             self.source_queue.task_done()
                             self.source_queue.put(
-                                (filename_priority, filename)
+                                (
+                                    filename_priority,
+                                    MWAXPriorityQueueData(filename),
+                                )
                             )
                             self.current_item = None
 

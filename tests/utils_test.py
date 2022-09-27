@@ -257,7 +257,7 @@ def test_scan_for_existing_files_and_add_to_priority_queue():
     # Get first item
     item1 = queue_target.get()
 
-    assert item1[1] == os.path.join(
+    assert str(item1[1]) == os.path.join(
         os.getcwd(),
         os.path.join(watch_dir, "1244973688_20190619100110_ch114_000.fits"),
     )
@@ -266,7 +266,7 @@ def test_scan_for_existing_files_and_add_to_priority_queue():
     # get second item
     item2 = queue_target.get()
 
-    assert item2[1] == os.path.join(
+    assert str(item2[1]) == os.path.join(
         os.getcwd(), os.path.join(watch_dir, "1244973688_metafits.fits")
     )
     assert item2[0] == 100  # metafits ppd file

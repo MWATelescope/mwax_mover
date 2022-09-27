@@ -159,7 +159,7 @@ def main():
             f"Configuration file location {config_filename} does not exist."
             " Quitting."
         )
-        exit(1)
+        sys.exit(1)
 
     # Parse config file
     config = ConfigParser()
@@ -170,7 +170,7 @@ def main():
 
     if not os.path.exists(cfg_log_path):
         print(f"log_path {cfg_log_path} does not exist. Quiting.")
-        exit(1)
+        sys.exit(1)
 
     # It's now safe to start logging
     # start logging
@@ -275,7 +275,7 @@ def main():
                 f"incoming file location in incoming_path{i} -"
                 f" {new_incoming_path} does not exist. Quitting."
             )
-            exit(1)
+            sys.exit(1)
         cfg_incoming_paths.append(new_incoming_path)
         i += 1
 
@@ -287,7 +287,7 @@ def main():
             f" machine running this). This host's name is: '{hostname}'."
             " Quitting."
         )
-        exit(1)
+        sys.exit(1)
 
     cfg_recursive = utils.read_config_bool(
         logger, config, hostname, "recursive"

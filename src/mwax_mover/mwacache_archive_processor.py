@@ -443,7 +443,7 @@ class MWACacheArchiveProcessor:
                 f"Configuration file location {config_filename} does not"
                 " exist. Quitting."
             )
-            exit(1)
+            sys.exit(1)
 
         # Parse config file
         config = ConfigParser()
@@ -454,7 +454,7 @@ class MWACacheArchiveProcessor:
 
         if not os.path.exists(self.log_path):
             print(f"log_path {self.log_path} does not exist. Quiting.")
-            exit(1)
+            sys.exit(1)
 
         # It's now safe to start logging
         # start logging

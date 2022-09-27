@@ -150,14 +150,14 @@ class Processor:
                 f"Error: --watchdir '{self.watch_dir}' does not exist or you"
                 " don't have permission"
             )
-            exit(1)
+            sys.exit(1)
 
         if not self.watch_ext[0] == ".":
             print(
                 f"Error: --watchext '{self.watch_ext}' should start with a '.'"
                 " e.g. '.sub'"
             )
-            exit(1)
+            sys.exit(1)
 
         # start logging
         self.logger.setLevel(logging.DEBUG)

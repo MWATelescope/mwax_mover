@@ -117,6 +117,8 @@ class FilterbankProcessor:
 
             self.logger.info(f"{item}- filterbank_handler() Finished")
             return True
+        else:
+            return False
 
     def pause_archiving(self, paused: bool):
         """Pauses archiving"""

@@ -5,6 +5,7 @@ import logging.handlers
 import os
 import queue
 import shutil
+import sys
 import threading
 import time
 from enum import Enum
@@ -387,7 +388,7 @@ class SubfileProcessor:
                         f"{item}- Could not rename {item} back to"
                         f" {free_filename}. Error {move_exception}"
                     )
-                    exit(2)
+                    sys.exit(2)
 
             self.logger.info(
                 f"{item}- SubfileProcessor.handler finished handling."

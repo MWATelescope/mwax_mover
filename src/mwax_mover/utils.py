@@ -13,6 +13,7 @@ import time
 import typing
 import astropy.io.fits as fits
 from mwax_mover import mwax_command
+from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
 
 
 class MWADataFileType(Enum):
@@ -427,7 +428,7 @@ def scan_for_existing_files_and_add_to_priority_queue(
             list_of_correlator_high_priority_projects,
             list_of_vcs_high_priority_projects,
         )
-        queue_target.put((priority, filename))
+        queue_target.put((priority, MWAXPriorityQueueData(filename)))
         logger.info(f"{filename} added to queue with priority {priority}")
 
 

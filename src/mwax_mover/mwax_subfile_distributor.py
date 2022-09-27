@@ -264,7 +264,7 @@ class MWAXSubfileDistributor:
                 f"Configuration file location {config_filename} does not"
                 " exist. Quitting."
             )
-            exit(1)
+            sys.exit(1)
 
         # Parse config file
         self.config = ConfigParser()
@@ -277,7 +277,7 @@ class MWAXSubfileDistributor:
             self.logger.error(
                 f"log_path {self.cfg_log_path} does not exist. Quiting."
             )
-            exit(1)
+            sys.exit(1)
 
         # It's now safe to start logging
         # start logging
@@ -400,7 +400,7 @@ class MWAXSubfileDistributor:
                 f" {self.cfg_voltdata_dont_archive_path} does not exist."
                 " Quitting."
             )
-            exit(1)
+            sys.exit(1)
 
         if not os.path.exists(self.cfg_visdata_dont_archive_path):
             self.logger.error(
@@ -408,28 +408,28 @@ class MWAXSubfileDistributor:
                 f" {self.cfg_visdata_dont_archive_path} does not exist."
                 " Quitting."
             )
-            exit(1)
+            sys.exit(1)
 
         if not os.path.exists(self.cfg_subfile_incoming_path):
             self.logger.error(
                 f"Subfile file location {self.cfg_subfile_incoming_path} does"
                 " not exist. Quitting."
             )
-            exit(1)
+            sys.exit(1)
 
         if not os.path.exists(self.cfg_voltdata_incoming_path):
             self.logger.error(
                 "Voltdata file location"
                 f" {self.cfg_voltdata_incoming_path} does not exist. Quitting."
             )
-            exit(1)
+            sys.exit(1)
 
         if not os.path.exists(self.cfg_voltdata_outgoing_path):
             self.logger.error(
                 "Voltdata file location"
                 f" {self.cfg_voltdata_outgoing_path} does not exist. Quitting."
             )
-            exit(1)
+            sys.exit(1)
 
         self.cfg_always_keep_subfiles = (
             int(
@@ -465,7 +465,7 @@ class MWAXSubfileDistributor:
                     f"Fildata file location {self.cfg_bf_fildata_path} does"
                     " not exist. Quitting."
                 )
-                exit(1)
+                sys.exit(1)
 
             self.cfg_bf_settings_path = utils.read_config(
                 self.logger,
@@ -478,7 +478,7 @@ class MWAXSubfileDistributor:
                     "Beamformer settings file location"
                     f" {self.cfg_bf_settings_path} does not exist. Quitting."
                 )
-                exit(1)
+                sys.exit(1)
 
             self.logger.info(
                 "Beam settings will be read from:"
@@ -594,7 +594,7 @@ class MWAXSubfileDistributor:
                     f" {self.cfg_corr_visdata_incoming_path} does not exist."
                     " Quitting."
                 )
-                exit(1)
+                sys.exit(1)
 
             if not os.path.exists(self.cfg_corr_visdata_processing_stats_path):
                 self.logger.error(
@@ -602,7 +602,7 @@ class MWAXSubfileDistributor:
                     f" {self.cfg_corr_visdata_processing_stats_path} does not"
                     " exist. Quitting."
                 )
-                exit(1)
+                sys.exit(1)
 
             if not os.path.exists(self.cfg_corr_visdata_outgoing_path):
                 self.logger.error(
@@ -610,7 +610,7 @@ class MWAXSubfileDistributor:
                     f" {self.cfg_corr_visdata_outgoing_path} does not exist."
                     " Quitting."
                 )
-                exit(1)
+                sys.exit(1)
 
             if not os.path.exists(self.cfg_corr_mwax_stats_executable):
                 self.logger.error(
@@ -618,7 +618,7 @@ class MWAXSubfileDistributor:
                     f" {self.cfg_corr_mwax_stats_executable} does not exist."
                     " Quitting."
                 )
-                exit(1)
+                sys.exit(1)
 
             if not os.path.exists(self.cfg_corr_calibrator_outgoing_path):
                 self.logger.error(
@@ -626,14 +626,14 @@ class MWAXSubfileDistributor:
                     f" {self.cfg_corr_calibrator_outgoing_path} does not"
                     " exist. Quitting."
                 )
-                exit(1)
+                sys.exit(1)
 
             if not os.path.exists(self.cfg_corr_metafits_path):
                 self.logger.error(
                     f"metafits location {self.cfg_corr_metafits_path} does not"
                     " exist. Quitting."
                 )
-                exit(1)
+                sys.exit(1)
 
             self.cfg_metadatadb_host = utils.read_config(
                 self.logger, self.config, "mwa metadata database", "host"

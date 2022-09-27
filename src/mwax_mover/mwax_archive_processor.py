@@ -3,6 +3,7 @@ import logging
 import logging.handlers
 import os
 import queue
+import sys
 import threading
 import time
 from mwax_mover import (
@@ -381,7 +382,7 @@ class MWAXArchiveProcessor:
                     "archiving disabled to prevent inadvertent data loss. "
                     "Exiting."
                 )
-                exit(-2)
+                sys.exit(-2)
 
             # Create watcher for voltage data -> dont_archive queue
             self.watcher_incoming_volt = mwax_watcher.Watcher(

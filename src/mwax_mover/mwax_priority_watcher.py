@@ -8,6 +8,7 @@ import time
 import inotify.constants
 import inotify.adapters
 from mwax_mover import mwax_mover, utils
+from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
 
 
 class PriorityWatcher(object):
@@ -142,7 +143,10 @@ class PriorityWatcher(object):
                             self.list_of_vcs_high_priority_projects,
                         )
 
-                        new_queue_item = (priority, dest_filename)
+                        new_queue_item = (
+                            priority,
+                            MWAXPriorityQueueData(dest_filename),
+                        )
 
                         self.dest_queue.put(new_queue_item)
                         self.logger.info(
