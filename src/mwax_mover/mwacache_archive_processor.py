@@ -148,10 +148,6 @@ class MWACacheArchiveProcessor:
             self.watchers.append(new_watcher)
 
         # Create queueworker archive queue
-        self.logger.info("Waiting for watchers to start up...")
-        time.sleep(5)
-
-        # Create queueworker archive queue
         self.logger.info("Creating workers...")
 
         for archive_worker in range(0, self.concurrent_archive_workers):
@@ -180,6 +176,9 @@ class MWACacheArchiveProcessor:
             )
             self.watcher_threads.append(watcher_thread)
             watcher_thread.start()
+
+        self.logger.info("Waiting for watchers to start up...")
+        time.sleep(5)
 
         self.logger.info("Starting workers...")
         # Setup thread for processing items
