@@ -192,6 +192,8 @@ class PriorityQueueWorker(object):
         """Return the status as a dictionary"""
         return {
             "Unix timestamp": time.time(),
-            "current item": str(self.current_item[1]),
+            "current item": ""
+            if self.current_item is None
+            else str(self.current_item[1]),
             "priority_queue_size": self.source_queue.qsize(),
         }
