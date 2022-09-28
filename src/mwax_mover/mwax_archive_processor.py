@@ -318,6 +318,9 @@ class MWAXArchiveProcessor:
             self.watcher_threads.append(watcher_cal_outgoing_thread)
             watcher_cal_outgoing_thread.start()
 
+            self.logger.info("Waiting for watchers to start up...")
+            time.sleep(5)
+
             #
             # Start queue worker threads
             #
@@ -450,6 +453,9 @@ class MWAXArchiveProcessor:
             )
             self.watcher_threads.append(watcher_vis_incoming_thread)
             watcher_vis_incoming_thread.start()
+
+            self.logger.info("Waiting for watchers to start up...")
+            time.sleep(5)
 
             #
             # Start queue worker threads
