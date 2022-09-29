@@ -161,9 +161,6 @@ class MWACacheArchiveProcessor:
                     requeue_to_eoq_on_failure=True,
                     ceph_profile=self.s3_profile,
                     exit_once_queue_empty=False,
-                    backoff_initial_seconds=20,
-                    backoff_factor=2,
-                    backoff_limit_seconds=40,
                 )
             )
             self.queue_workers.append(new_worker)

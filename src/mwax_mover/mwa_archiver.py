@@ -306,7 +306,7 @@ def ceph_get_s3_resource(
     """Returns an S3 resource object"""
     # This ensures the default boto retries and timeouts don't leave us
     # hanging too long
-    config = Config(connect_timeout=20, retries={"max_attempts": 2})
+    config = Config(connect_timeout=5, retries={"mode": "standard"})
 
     endpoint_count = len(endpoints)
 

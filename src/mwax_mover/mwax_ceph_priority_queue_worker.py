@@ -22,11 +22,12 @@ class CephPriorityQueueWorker(PriorityQueueWorker):
         exit_once_queue_empty,
         ceph_profile: str,
         requeue_to_eoq_on_failure: bool = True,
-        backoff_initial_seconds: int = 1,
-        backoff_factor: int = 2,
-        backoff_limit_seconds: int = 60,
     ):
-        # Call Default QueueWorker contstructor
+        # Call Default PriorityQueueWorker contstructor
+        # but we don't use the backoff params at all
+        # They are used in PriorityQueueWorker.start() but
+        # we fully override it anway. Ceph itself
+        # handles some forms of retry and backoff.
         super().__init__(
             label,
             source_queue,
@@ -35,9 +36,9 @@ class CephPriorityQueueWorker(PriorityQueueWorker):
             event_handler,
             exit_once_queue_empty,
             requeue_to_eoq_on_failure,
-            backoff_initial_seconds,
-            backoff_factor,
-            backoff_limit_seconds,
+            backoff_initial_seconds=0,
+            backoff_factor=0,
+            backoff_limit_seconds=0,
         )
 
         self.ceph_profile = ceph_profile
@@ -63,7 +64,6 @@ class CephPriorityQueueWorker(PriorityQueueWorker):
         self._running = True
         self.current_item = None
         self.consecutive_error_count = 0
-        backoff = 0
 
         while self._running:
             if not self._paused:
@@ -113,25 +113,7 @@ class CephPriorityQueueWorker(PriorityQueueWorker):
                         f" {elapsed:.2f} sec"
                     )
 
-                    if success:
-                        # reset our error count and backoffs
-                        self.consecutive_error_count = 0
-                    else:
-                        self.consecutive_error_count += 1
-                        backoff = (
-                            self.backoff_initial_seconds
-                            * self.backoff_factor
-                            * self.consecutive_error_count
-                        )
-                        if backoff > self.backoff_limit_seconds:
-                            backoff = self.backoff_limit_seconds
-
-                        self.logger.info(
-                            f"{self.consecutive_error_count} consecutive"
-                            f" failures. Backing off for {backoff} seconds."
-                        )
-                        self.event.wait(backoff)
-
+                    if not success:
                         # If this option is set, add item back to the end of
                         # the queue by making the priority larger
                         # If not set, just keep retrying the operation
