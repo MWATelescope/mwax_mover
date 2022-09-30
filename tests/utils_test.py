@@ -498,3 +498,18 @@ def test_config_get_list_empty():
     )
 
     assert return_list == []
+
+
+def test_download_metafits_file():
+    """Test that we can download a metafits file by obsid
+    from the web service"""
+    obs_id = 1244973688
+    metafits_path = "tests/data/"
+    metafits_filename = os.path.join(metafits_path, f"{obs_id}_metafits.fits")
+
+    utils.download_metafits_file(obs_id, metafits_path)
+
+    assert os.path.exists(metafits_filename)
+
+    # remove the metafits file
+    os.remove(metafits_filename)

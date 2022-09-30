@@ -287,11 +287,19 @@ def get_metafits_values(metafits_filename: str) -> (bool, str):
     Returns a tuple of is_calibrator (bool) and
     the project_id (string) from a metafits file.
     """
-    with fits.open(metafits_filename) as hdul:
-        # Read key from primary HDU- it is bool
-        is_calibrator = hdul[0].header["CALIBRAT"]  # pylint: disable=no-member
-        project_id = hdul[0].header["PROJECT"]  # pylint: disable=no-member
-        return is_calibrator, project_id
+    try:
+        with fits.open(metafits_filename) as hdul:
+            # Read key from primary HDU- it is bool
+            is_calibrator = hdul[0].header[  # pylint: disable=no-member
+                "CALIBRAT"
+            ]
+            project_id = hdul[0].header["PROJECT"]  # pylint: disable=no-member
+            return is_calibrator, project_id
+    except Exception as catch_all_exception:
+        raise Exception(
+            f"Error reading metafits file: {metafits_filename}:"
+            f" {catch_all_exception}"
+        ) from catch_all_exception
 
 
 def read_config(
