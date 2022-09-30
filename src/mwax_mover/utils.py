@@ -12,6 +12,7 @@ import struct
 import time
 import typing
 import astropy.io.fits as fits
+import requests
 from mwax_mover import mwax_command
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
 
@@ -53,6 +54,34 @@ class ValidationData:
         self.file_ext = file_ext
         self.calibrator = calibrator
         self.validation_message = validation_message
+
+
+def download_metafits_file(obs_id: int, metafits_path: str):
+    """
+    For a given obs_id, get the metafits file from webservices
+    """
+    metafits_file_path = os.path.join(metafits_path, f"{obs_id}_metafits.fits")
+
+    url = f"http://ws.mwatelescope.org/metadata/fits?obs_id={obs_id}"
+
+    try:
+        response = requests.get(url)
+    except Exception as catch_all_exception:
+        raise Exception(
+            f"Unable to get metafits file. {catch_all_exception}"
+        ) from catch_all_exception
+
+    if response.status_code == 200:
+        metafits = response.content
+        with open(metafits_file_path, "wb") as handler:
+            handler.write(metafits)
+    else:
+        raise Exception(
+            "Unable to get metafits file. Response code"
+            f" {response.status_code}"
+        )
+
+    return
 
 
 def validate_filename(
@@ -195,6 +224,18 @@ def validate_filename(
     elif valid and filetype_id == MWADataFileType.MWA_PPD_FILE.value:
         # this file IS a metafits! So check it
         metafits_filename = filename
+
+    # Does the metafits file exist??
+    if not os.path.exists(metafits_filename):
+        try:
+            download_metafits_file(obs_id, metafits_path)
+        except Exception as catch_all_exception:  # pylint: disable=broad-except
+            valid = False
+            validation_error = (
+                f"Metafits file {metafits_filename} did not exist and could"
+                " not download one from web service."
+                f" {catch_all_exception}"
+            )
 
     (calibrator, project_id) = get_metafits_values(metafits_filename)
 

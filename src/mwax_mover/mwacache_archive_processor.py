@@ -174,8 +174,8 @@ class MWACacheArchiveProcessor:
             self.watcher_threads.append(watcher_thread)
             watcher_thread.start()
 
-        self.logger.info("Waiting for watchers to start up...")
-        time.sleep(5)
+        self.logger.info("Waiting 30s for watchers to start up...")
+        time.sleep(30)
 
         self.logger.info("Starting workers...")
         # Setup thread for processing items
