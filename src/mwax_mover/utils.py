@@ -9,12 +9,17 @@ import queue
 import shutil
 import socket
 import struct
+import threading
 import time
 import typing
 import astropy.io.fits as fits
 import requests
 from mwax_mover import mwax_command
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
+
+# This is global mutex so we don't try to create the same metafits
+# file with multiple threads
+metafits_file_lock = threading.Lock()
 
 
 class MWADataFileType(Enum):
@@ -226,18 +231,21 @@ def validate_filename(
         metafits_filename = filename
 
     # Does the metafits file exist??
-    if not os.path.exists(metafits_filename):
-        try:
-            download_metafits_file(obs_id, metafits_path)
-        except Exception as catch_all_exception:  # pylint: disable=broad-except
-            valid = False
-            validation_error = (
-                f"Metafits file {metafits_filename} did not exist and could"
-                " not download one from web service."
-                f" {catch_all_exception}"
-            )
 
-    (calibrator, project_id) = get_metafits_values(metafits_filename)
+    # Obtain a lock so we can only do this inside one thread
+    with metafits_file_lock:
+        if not os.path.exists(metafits_filename):
+            try:
+                download_metafits_file(obs_id, metafits_path)
+            except Exception as catch_all_exception:  # pylint: disable=broad-except
+                valid = False
+                validation_error = (
+                    f"Metafits file {metafits_filename} did not exist and"
+                    " could not download one from web service."
+                    f" {catch_all_exception}"
+                )
+
+        (calibrator, project_id) = get_metafits_values(metafits_filename)
 
     return ValidationData(
         valid,
