@@ -43,6 +43,13 @@ class PriorityWatcher(object):
         self.list_of_vcs_high_priority_projects: list = (
             list_of_vcs_high_priority_projects
         )
+        # This is a flag used so callers can know when,
+        # on startup that the scan for existing files
+        # has completed. This is useful for the workers
+        # who will want to wait until the scan is done
+        # before starting to process the queue (so that
+        # all the priorities are taken into account)
+        self.scan_completed = False
 
         if self.mode == mwax_mover.MODE_WATCH_DIR_FOR_NEW:
             self.mask = inotify.constants.IN_CLOSE_WRITE
@@ -117,6 +124,7 @@ class PriorityWatcher(object):
                 self.list_of_vcs_high_priority_projects,
                 self.exclude_pattern,
             )
+        self.scan_completed = True
 
         while self.watching:
             for event in self.inotify_tree.event_gen(

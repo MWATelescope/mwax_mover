@@ -174,6 +174,17 @@ class MWACacheArchiveProcessor:
             self.watcher_threads.append(watcher_thread)
             watcher_thread.start()
 
+        self.logger.info("Waiting for all watchers to finish scanning....")
+
+        count_of_watchers_still_scanning = len(self.watchers)
+        while count_of_watchers_still_scanning > 0:
+            count_of_watchers_still_scanning = 0
+            for watcher in self.watchers:
+                if not watcher.scan_completed:
+                    count_of_watchers_still_scanning += 1
+            time.sleep(1)  # hold off for another second
+        self.logger.info("Watchers are finished scanning.")
+
         self.logger.info("Starting workers...")
         # Setup thread for processing items
         for i, worker in enumerate(self.queue_workers):
