@@ -90,6 +90,7 @@ def download_metafits_file(obs_id: int, metafits_path: str):
 
 
 def validate_filename(
+    logger,
     filename: str,
     metafits_path: str,
 ) -> ValidationData:
@@ -235,6 +236,10 @@ def validate_filename(
     if valid:
         with metafits_file_lock:
             if not os.path.exists(metafits_filename):
+                logger.info(
+                    f"Metafits file {metafits_filename} not found. Atempting"
+                    " to download it"
+                )
                 try:
                     download_metafits_file(obs_id, metafits_path)
                 except Exception as catch_all_exception:  # pylint: disable=broad-except
@@ -245,7 +250,10 @@ def validate_filename(
                         f" {catch_all_exception}"
                     )
 
-            (calibrator, project_id) = get_metafits_values(metafits_filename)
+            if valid:
+                (calibrator, project_id) = get_metafits_values(
+                    metafits_filename
+                )
 
     return ValidationData(
         valid,
@@ -480,6 +488,7 @@ def scan_for_existing_files_and_add_to_priority_queue(
 
     for filename in files:
         priority = get_priority(
+            logger,
             filename,
             metafits_path,
             list_of_correlator_high_priority_projects,
@@ -634,6 +643,7 @@ def do_checksum_md5(
 
 
 def get_priority(
+    logger,
     filename: str,
     metafits_path: str,
     list_of_correlator_high_priority_projects: list,
@@ -660,7 +670,7 @@ def get_priority(
     return_priority = 100  # default if we don't do anything else
 
     # get info about this file
-    val: ValidationData = validate_filename(filename, metafits_path)
+    val: ValidationData = validate_filename(logger, filename, metafits_path)
 
     if val.valid:
         if val.filetype_id == MWADataFileType.MWAX_VISIBILITIES.value:

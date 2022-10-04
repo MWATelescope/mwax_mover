@@ -217,7 +217,9 @@ class MWACacheArchiveProcessor:
         self.logger.info(f"{item}- archive_handler() Started...")
 
         # validate the filename
-        val: ValidationData = utils.validate_filename(item, self.metafits_path)
+        val: ValidationData = utils.validate_filename(
+            self.logger, item, self.metafits_path
+        )
 
         # do some sanity checks!
         if val.valid:

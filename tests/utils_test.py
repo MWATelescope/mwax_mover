@@ -15,6 +15,7 @@ from mwax_mover import utils
 def test_validate_filename_valid1():
     """Test that validate_filename() correctly identifies attributes based on filename"""
     metafits_path = os.path.join(os.getcwd(), "tests/data/correlator_C001")
+    logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -26,7 +27,7 @@ def test_validate_filename_valid1():
     # Run test
     #
     val: utils.ValidationData = utils.validate_filename(
-        filename, metafits_path
+        logger, filename, metafits_path
     )
 
     assert val.valid is True
@@ -42,6 +43,7 @@ def test_validate_filename_valid2():
     metafits_path = os.path.join(
         os.getcwd(), "tests/data/correlator_calibrator"
     )
+    logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -53,7 +55,7 @@ def test_validate_filename_valid2():
     # Run test
     #
     val: utils.ValidationData = utils.validate_filename(
-        filename, metafits_path
+        logger, filename, metafits_path
     )
 
     assert val.valid is True
@@ -67,6 +69,7 @@ def test_validate_filename_valid2():
 def test_validate_filename_valid3():
     """Test that validate_filename() correctly identifies attributes based on filename"""
     metafits_path = os.path.join(os.getcwd(), "tests/data/vcs_G0024")
+    logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -78,7 +81,7 @@ def test_validate_filename_valid3():
     # Run test
     #
     val: utils.ValidationData = utils.validate_filename(
-        filename, metafits_path
+        logger, filename, metafits_path
     )
 
     assert val.valid is True
@@ -92,6 +95,7 @@ def test_validate_filename_valid3():
 def test_validate_filename_valid4():
     """Test that validate_filename() correctly identifies attributes based on filename"""
     metafits_path = os.path.join(os.getcwd(), "tests/data/vcs_G0024")
+    logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -103,7 +107,7 @@ def test_validate_filename_valid4():
     # Run test
     #
     val: utils.ValidationData = utils.validate_filename(
-        filename, metafits_path
+        logger, filename, metafits_path
     )
 
     assert val.valid is True
@@ -117,6 +121,7 @@ def test_validate_filename_valid4():
 def test_validate_filename_valid5():
     """Test that validate_filename() correctly identifies attributes based on filename"""
     metafits_path = os.path.join(os.getcwd(), "tests/data/vcs_G0024")
+    logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -128,7 +133,7 @@ def test_validate_filename_valid5():
     # Run test
     #
     val: utils.ValidationData = utils.validate_filename(
-        filename, metafits_path
+        logger, filename, metafits_path
     )
 
     assert val.valid is True
@@ -142,6 +147,7 @@ def test_validate_filename_valid5():
 def test_validate_filename_valid6():
     """Test that validate_filename() correctly identifies attributes based on filename"""
     metafits_path = os.path.join(os.getcwd(), "tests/data/metafits_ppd")
+    logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -153,7 +159,7 @@ def test_validate_filename_valid6():
     # Run test
     #
     val: utils.ValidationData = utils.validate_filename(
-        filename, metafits_path
+        logger, filename, metafits_path
     )
 
     assert val.valid is True
@@ -167,6 +173,7 @@ def test_validate_filename_valid6():
 def test_validate_filename_valid7():
     """Test that validate_filename() correctly identifies attributes based on filename"""
     metafits_path = os.path.join(os.getcwd(), "tests/data/metafits_ppd")
+    logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -178,7 +185,7 @@ def test_validate_filename_valid7():
     # Run test
     #
     val: utils.ValidationData = utils.validate_filename(
-        filename, metafits_path
+        logger, filename, metafits_path
     )
 
     assert val.valid is True
@@ -301,7 +308,10 @@ def test_get_priority_correlator_calibrator():
     #
     # Run test
     #
+    logger = logging.getLogger("test")
+
     priority = utils.get_priority(
+        logger,
         "tests/data/correlator_calibrator/1347318488_20190619100110_ch101_000.fits",
         "tests/data/correlator_calibrator/",
         ["D0006"],
@@ -318,7 +328,10 @@ def test_get_priority_correlator_high_priority_list():
     #
     # Run test
     #
+    logger = logging.getLogger("test")
+
     priority = utils.get_priority(
+        logger,
         "tests/data/correlator_D0006_not_cal/1122979144_20190619100110_ch101_000.fits",
         "tests/data/correlator_D0006_not_cal/",
         ["D0006"],
@@ -332,7 +345,10 @@ def test_get_priority_vcs_c001():
     #
     # Run test
     #
+    logger = logging.getLogger("test")
+
     priority = utils.get_priority(
+        logger,
         "tests/data/vcs_C001/1347063304_1347063304_114.sub",
         "tests/data/vcs_C001/",
         ["D0006"],
@@ -346,7 +362,10 @@ def test_get_priority_correlator_c001():
     #
     # Run test
     #
+    logger = logging.getLogger("test")
+
     priority = utils.get_priority(
+        logger,
         "tests/data/correlator_C001/1244973688_20190619100110_ch114_000.fits",
         "tests/data/correlator_C001/",
         ["D0006"],
@@ -360,7 +379,10 @@ def test_get_priority_vcs_g0024():
     #
     # Run test
     #
+    logger = logging.getLogger("test")
+
     priority = utils.get_priority(
+        logger,
         "tests/data/vcs_G0024/1220738720_1220738720_123.sub",
         "tests/data/vcs_G0024/",
         ["D0006"],
@@ -374,7 +396,10 @@ def test_get_priority_metafits_ppd():
     #
     # Run test
     #
+    logger = logging.getLogger("test")
+
     priority = utils.get_priority(
+        logger,
         "tests/data/metafits_ppd/1328239120_metafits_ppds.fits",
         "tests/data/metafits_ppd/",
         ["D0006"],

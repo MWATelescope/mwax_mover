@@ -145,6 +145,7 @@ class PriorityWatcher(object):
 
                         # We need to determine the priority
                         priority = utils.get_priority(
+                            self.logger,
                             dest_filename,
                             self.metafits_path,
                             self.list_of_correlator_high_priority_projects,
