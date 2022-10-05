@@ -184,7 +184,7 @@ class SubfileProcessor:
 
         # Create queueworker
         self.subfile_queue_worker = mwax_queue_worker.QueueWorker(
-            label="Subfile Input Queue",
+            name="Subfile Input Queue",
             source_queue=self.subfile_queue,
             executable_path=None,
             event_handler=self.handler,

@@ -74,7 +74,7 @@ class FilterbankProcessor:
 
         # Create queueworker for filterbank queue
         self.queue_worker_fil = mwax_queue_worker.QueueWorker(
-            label="Filterbank Archive",
+            name="Filterbank Archive",
             source_queue=self.queue_fil,
             executable_path=None,
             event_handler=self.filterbank_handler,

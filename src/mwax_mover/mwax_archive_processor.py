@@ -273,7 +273,7 @@ class MWAXArchiveProcessor:
 
             # Create queueworker for the checksum and db queue
             queue_worker_checksum_and_db = mwax_queue_worker.QueueWorker(
-                label="checksum and database worker",
+                name="checksum and database worker",
                 source_queue=self.queue_checksum_and_db,
                 executable_path=None,
                 event_handler=self.checksum_and_db_handler,
@@ -284,7 +284,7 @@ class MWAXArchiveProcessor:
 
             # worker for visibility processing stats
             queue_worker_processing_stats_vis = mwax_queue_worker.QueueWorker(
-                label="processing stats vis worker",
+                name="processing stats vis worker",
                 source_queue=self.queue_processing_stats_vis,
                 executable_path=None,
                 event_handler=self.stats_handler,
@@ -296,7 +296,7 @@ class MWAXArchiveProcessor:
             # Create queueworker for outgoing queue
             queue_worker_outgoing = (
                 mwax_priority_queue_worker.PriorityQueueWorker(
-                    label="outgoing worker",
+                    name="outgoing worker",
                     source_queue=self.queue_outgoing,
                     executable_path=None,
                     event_handler=self.archive_handler,
@@ -309,7 +309,7 @@ class MWAXArchiveProcessor:
             # Create queueworker for sending calibration visibility data
             # for processing
             queue_worker_outgoing_cal = mwax_queue_worker.QueueWorker(
-                label="outgoing cal vis worker",
+                name="outgoing cal vis worker",
                 source_queue=self.queue_outgoing_cal,
                 executable_path=None,
                 event_handler=self.cal_handler,
@@ -410,7 +410,7 @@ class MWAXArchiveProcessor:
 
             # Create queueworker for the vis don't archive queue
             queue_worker_dont_archive_vis = mwax_queue_worker.QueueWorker(
-                label="dont archive worker (vis)",
+                name="dont archive worker (vis)",
                 source_queue=self.queue_dont_archive_vis,
                 executable_path=None,
                 event_handler=self.dont_archive_handler_vis,
@@ -421,7 +421,7 @@ class MWAXArchiveProcessor:
 
             # Create queueworker for the volt don't archive queue
             queue_worker_dont_archive_volt = mwax_queue_worker.QueueWorker(
-                label="dont archive worker (volt)",
+                name="dont archive worker (volt)",
                 source_queue=self.queue_dont_archive_volt,
                 executable_path=None,
                 event_handler=self.dont_archive_handler_volt,

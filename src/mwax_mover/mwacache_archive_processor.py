@@ -154,7 +154,7 @@ class MWACacheArchiveProcessor:
         for archive_worker in range(0, self.concurrent_archive_workers):
             new_worker = (
                 mwax_ceph_priority_queue_worker.CephPriorityQueueWorker(
-                    label=f"Archiver{archive_worker}",
+                    name=f"Archiver{archive_worker}",
                     source_queue=self.queue,
                     executable_path=None,
                     event_handler=self.archive_handler,

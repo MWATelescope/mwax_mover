@@ -177,6 +177,7 @@ class Processor:
 
         # Create watcher
         self.watch = mwax_watcher.Watcher(
+            name="watcher",
             path=self.watch_dir,
             dest_queue=self.queue,
             pattern=f"{self.watch_ext}",
@@ -187,7 +188,7 @@ class Processor:
 
         # Create queueworker
         self.queueworker = mwax_queue_worker.QueueWorker(
-            label="queue",
+            name="queue",
             source_queue=self.queue,
             executable_path=self.executable,
             exit_once_queue_empty=exit_once_queue_empty,
