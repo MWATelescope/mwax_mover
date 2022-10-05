@@ -806,15 +806,21 @@ class MWAXArchiveProcessor:
 
     def get_status(self) -> dict:
         """Returns a dictionary of status info from all processors"""
+        watcher_list = []
+
         for watcher in self.watchers:
             if watcher:
                 status = dict({"name": watcher.name})
                 status.update(watcher.get_status())
+                watcher_list.append(status)
+
+        worker_list = []
 
         for worker in self.workers:
             if worker:
                 status = dict({"name": worker.name})
                 status.update(worker.get_status())
+                worker_list.append(status)
 
         if self.archiving_paused:
             archiving = "paused"
@@ -825,8 +831,8 @@ class MWAXArchiveProcessor:
             "Unix timestamp": time.time(),
             "type": type(self).__name__,
             "archiving": archiving,
-            "watchers": self.watchers,
-            "workers": self.workers,
+            "watchers": watcher_list,
+            "workers": worker_list,
         }
 
         return return_status
