@@ -29,6 +29,7 @@ class Watcher(object):
         self.dest_queue = dest_queue
         self.pattern = pattern  # must be ".ext" or ".*"
         self.exclude_pattern = exclude_pattern  # Can be None or ".ext"
+        self.scan_completed = False
 
         if self.mode == mwax_mover.MODE_WATCH_DIR_FOR_NEW:
             self.mask = inotify.constants.IN_CLOSE_WRITE
@@ -98,6 +99,7 @@ class Watcher(object):
                 self.dest_queue,
                 self.exclude_pattern,
             )
+        self.scan_completed = True
 
         while self.watching:
             for event in self.inotify_tree.event_gen(
