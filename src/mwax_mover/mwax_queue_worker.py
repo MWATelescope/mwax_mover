@@ -20,7 +20,7 @@ class QueueWorker(object):
     #                                                   of items matters)
     def __init__(
         self,
-        label: str,
+        name: str,
         source_queue: queue.Queue,
         executable_path,
         log,
@@ -31,7 +31,7 @@ class QueueWorker(object):
         backoff_factor: int = 2,
         backoff_limit_seconds: int = 60,
     ):
-        self.label = label
+        self.name = name
         self.source_queue = source_queue
 
         if (event_handler is None and executable_path is None) or (
@@ -59,7 +59,7 @@ class QueueWorker(object):
 
     def start(self):
         """Start working on the queue"""
-        self.logger.info(f"QueueWorker {self.label} starting...")
+        self.logger.info(f"QueueWorker {self.name} starting...")
         self._running = True
         self.current_item = None
         self.consecutive_error_count = 0

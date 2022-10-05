@@ -135,6 +135,7 @@ class MWAXArchiveProcessor:
         if self.archive_destination_enabled:
             # Create watcher for voltage data -> checksum+db queue
             watcher_incoming_volt = mwax_watcher.Watcher(
+                name="watcher_incoming_volt",
                 path=self.watch_dir_incoming_volt,
                 dest_queue=self.queue_checksum_and_db,
                 pattern=".sub",
@@ -149,6 +150,7 @@ class MWAXArchiveProcessor:
             # fits files being created
             # (e.g. metafits ppd files being copied into /visdata).
             watcher_incoming_vis = mwax_watcher.Watcher(
+                name="watcher_incoming_vis",
                 path=self.watch_dir_incoming_vis,
                 dest_queue=self.queue_checksum_and_db,
                 pattern=".fits",
@@ -160,6 +162,7 @@ class MWAXArchiveProcessor:
 
             # Create watcher for visibility processing stats
             watcher_processing_stats_vis = mwax_watcher.Watcher(
+                name="watcher_processing_stats_vis",
                 path=self.watch_dir_processing_stats_vis,
                 dest_queue=self.queue_processing_stats_vis,
                 pattern=".fits",
@@ -171,6 +174,7 @@ class MWAXArchiveProcessor:
 
             # Create watcher for archiving outgoing voltage data
             watcher_outgoing_volt = mwax_priority_watcher.PriorityWatcher(
+                name="watcher_outgoing_volt",
                 path=self.watch_dir_outgoing_volt,
                 dest_queue=self.queue_outgoing,
                 pattern=".sub",
@@ -185,6 +189,7 @@ class MWAXArchiveProcessor:
 
             # Create watcher for archiving outgoing visibility data
             watcher_outgoing_vis = mwax_priority_watcher.PriorityWatcher(
+                name="watcher_outgoing_vis",
                 path=self.watch_dir_outgoing_vis,
                 dest_queue=self.queue_outgoing,
                 pattern=".fits",
@@ -200,6 +205,7 @@ class MWAXArchiveProcessor:
             # Create watcher for sending calibration visibility data
             # for processing
             watcher_outgoing_cal = mwax_watcher.Watcher(
+                name="watcher_outgoing_cal",
                 path=self.watch_dir_outgoing_cal,
                 dest_queue=self.queue_outgoing_cal,
                 pattern=".fits",
@@ -377,6 +383,7 @@ class MWAXArchiveProcessor:
 
             # Create watcher for voltage data -> dont_archive queue
             watcher_incoming_volt = mwax_watcher.Watcher(
+                name="watcher_incoming_volt",
                 path=self.watch_dir_incoming_volt,
                 dest_queue=self.queue_dont_archive_volt,
                 pattern=".sub",
@@ -391,6 +398,7 @@ class MWAXArchiveProcessor:
             # fits files being created (e.g. metafits ppd files being copied
             # into /visdata).
             watcher_incoming_vis = mwax_watcher.Watcher(
+                name="watcher_incoming_vis",
                 path=self.watch_dir_incoming_vis,
                 dest_queue=self.queue_dont_archive_vis,
                 pattern=".fits",

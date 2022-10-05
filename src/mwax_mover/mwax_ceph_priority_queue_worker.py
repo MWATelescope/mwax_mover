@@ -14,7 +14,7 @@ class CephPriorityQueueWorker(PriorityQueueWorker):
 
     def __init__(
         self,
-        label: str,
+        name: str,
         source_queue: queue.Queue,
         executable_path,
         log,
@@ -29,7 +29,7 @@ class CephPriorityQueueWorker(PriorityQueueWorker):
         # we fully override it anway. Ceph itself
         # handles some forms of retry and backoff.
         super().__init__(
-            label,
+            name,
             source_queue,
             executable_path,
             log,
@@ -48,7 +48,7 @@ class CephPriorityQueueWorker(PriorityQueueWorker):
         """Overrride this method from QueueWorker so we can initiate a boto3
         session"""
 
-        self.logger.info(f"CephPriorityQueueWorker {self.label} starting...")
+        self.logger.info(f"CephPriorityQueueWorker {self.name} starting...")
         #
         # Init the Boto3 session
         #

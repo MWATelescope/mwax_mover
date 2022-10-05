@@ -101,7 +101,7 @@ class MWACacheArchiveProcessor:
         health_thread.start()
 
         self.logger.info("Creating watchers...")
-        for watch_dir in self.watch_dirs:
+        for watcher_no, watch_dir in enumerate(self.watch_dirs):
             #
             # Remove any partial files first if they are old
             #
@@ -134,6 +134,7 @@ class MWACacheArchiveProcessor:
 
             # Create watcher for each data path queue
             new_watcher = mwax_priority_watcher.PriorityWatcher(
+                name=f"incoming_watcher{watcher_no}",
                 path=watch_dir,
                 dest_queue=self.queue,
                 pattern=".*",

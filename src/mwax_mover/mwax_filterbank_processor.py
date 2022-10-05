@@ -63,6 +63,7 @@ class FilterbankProcessor:
         """Start the processor"""
         # Create watcher for filterbank data -> filterbank queue
         self.watcher_fil = mwax_watcher.Watcher(
+            name="watcher_fil",
             path=self.watch_dir_fil,
             dest_queue=self.queue_fil,
             pattern=".fil",

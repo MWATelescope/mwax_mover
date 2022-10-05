@@ -12,6 +12,7 @@ class Watcher(object):
 
     def __init__(
         self,
+        name: str,
         path: str,
         dest_queue: queue.Queue,
         pattern: str,
@@ -21,6 +22,7 @@ class Watcher(object):
         exclude_pattern=None,
     ):
         self.logger = log
+        self.name = name
         self.inotify_tree = None
         self.recursive = recursive
         self.mode = mode

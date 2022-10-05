@@ -16,6 +16,7 @@ class PriorityWatcher(object):
 
     def __init__(
         self,
+        name: str,
         path: str,
         dest_queue: queue.PriorityQueue,
         pattern: str,
@@ -28,6 +29,7 @@ class PriorityWatcher(object):
         exclude_pattern=None,
     ):
         self.logger = log
+        self.name = name
         self.inotify_tree = None
         self.recursive = recursive
         self.mode = mode

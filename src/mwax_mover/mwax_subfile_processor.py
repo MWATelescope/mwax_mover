@@ -173,6 +173,7 @@ class SubfileProcessor:
         """Start the processor"""
         # Create watcher for the subfiles
         self.subfile_watcher = mwax_watcher.Watcher(
+            name="subfile_watcher",
             path=self.subfile_incoming_path,
             dest_queue=self.subfile_queue,
             pattern=f"{self.ext_to_watch_for}",
