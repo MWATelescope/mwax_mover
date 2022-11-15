@@ -493,7 +493,7 @@ def test_config_get_list_valid():
     """
     logger = logging.getLogger("test")
     config_filename = os.path.join(
-        os.getcwd(), "tests/mwax_subfile_distributor_test.cfg"
+        os.getcwd(), "tests/mwax_subfile_distributor_correlator_test.cfg"
     )
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
@@ -513,7 +513,7 @@ def test_config_get_list_empty():
     """
     logger = logging.getLogger("test")
     config_filename = os.path.join(
-        os.getcwd(), "tests/mwax_subfile_distributor_test.cfg"
+        os.getcwd(), "tests/mwax_subfile_distributor_correlator_test.cfg"
     )
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))

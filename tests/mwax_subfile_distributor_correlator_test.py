@@ -6,6 +6,7 @@ import os
 from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
 
 TEST_BASE_PATH = "tests/mock_mwax"
+TEST_CONFIG_FILE = "tests/mwax_subfile_distributor_correlator_test.cfg"
 
 
 def get_base_path() -> str:
@@ -95,11 +96,8 @@ def test_correlator_config_file():
     # Override the hostname
     msd.hostname = "test_server"
 
-    # Determine config file location
-    config_filename = "tests/mwax_subfile_distributor_test.cfg"
-
     # Call to read config <-- this is what we're testing!
-    msd.initialise(config_filename)
+    msd.initialise(TEST_CONFIG_FILE)
 
     #
     # Now confirm the params all match the config file

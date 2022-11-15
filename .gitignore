@@ -5,3 +5,7 @@ build/
 dist/
 mwax_mover.egg-info/
 *.sub
+tests/mock_mwacache_archiver
+tests/mock_mwax
+tests/mock_mwax_bf
+logs
