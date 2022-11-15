@@ -107,8 +107,6 @@ def test_beamformer_config_file():
     assert msd.cfg_psrdada_timeout_sec == 32
     assert msd.cfg_copy_subfile_to_disk_timeout_sec == 120
     assert msd.cfg_archiving_enabled == 0
-    assert not msd.cfg_high_priority_correlator_projectids
-    assert msd.cfg_high_priority_vcs_projectids == ["D0006", "G0058"]
 
     # beamformer section
     assert msd.cfg_bf_ringbuffer_key == "0x1234"

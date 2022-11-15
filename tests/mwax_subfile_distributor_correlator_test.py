@@ -160,6 +160,8 @@ def test_correlator_config_file():
     assert msd.cfg_corr_metafits_path == os.path.join(
         base_dir, "vulcan_metafits"
     )
+    assert not msd.cfg_corr_high_priority_correlator_projectids
+    assert msd.cfg_corr_high_priority_vcs_projectids == ["D0006", "G0058"]
 
     # metadata db section
     assert msd.cfg_metadatadb_host == "dummy"
@@ -177,7 +179,3 @@ def test_correlator_config_file():
     assert msd.cfg_corr_archive_destination_enabled is True
     assert msd.cfg_corr_diskdb_numa_node == -1
     assert msd.cfg_corr_archive_command_numa_node == -1
-
-    # test list of projects
-    assert not msd.cfg_high_priority_correlator_projectids
-    assert msd.cfg_high_priority_vcs_projectids == ["D0006", "G0058"]

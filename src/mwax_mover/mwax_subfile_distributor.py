@@ -182,8 +182,6 @@ class MWAXSubfileDistributor:
         self.cfg_health_multicast_ip = None
         self.cfg_health_multicast_port = None
         self.cfg_health_multicast_hops = None
-        self.cfg_high_priority_correlator_projectids = None
-        self.cfg_high_priority_vcs_projectids = None
 
         # Beamformer
         self.cfg_bf_enabled = False
@@ -204,6 +202,8 @@ class MWAXSubfileDistributor:
         self.cfg_corr_archive_command_numa_node = None
         self.cfg_corr_visdata_incoming_path = None
         self.cfg_corr_visdata_outgoing_path = None
+        self.cfg_corr_high_priority_correlator_projectids = None
+        self.cfg_corr_high_priority_vcs_projectids = None
         # Archiving settings for correlator
         self.cfg_corr_archive_destination_host = None
         self.cfg_corr_archive_destination_port = None
@@ -377,21 +377,6 @@ class MWAXSubfileDistributor:
         self.logger.info(
             "IP for sending multicast:"
             f" {self.cfg_health_multicast_interface_ip}"
-        )
-
-        # Get list of projectids which are to be given
-        # high priority when archiving
-        self.cfg_high_priority_correlator_projectids = utils.read_config_list(
-            self.logger,
-            self.config,
-            "mwax mover",
-            "high_priority_correlator_projectids",
-        )
-        self.cfg_high_priority_vcs_projectids = utils.read_config_list(
-            self.logger,
-            self.config,
-            "mwax mover",
-            "high_priority_vcs_projectids",
         )
 
         if not os.path.exists(self.cfg_voltdata_dont_archive_path):
@@ -586,6 +571,25 @@ class MWAXSubfileDistributor:
 
             self.cfg_corr_metafits_path = utils.read_config(
                 self.logger, self.config, "correlator", "metafits_path"
+            )
+
+            # Get list of projectids which are to be given
+            # high priority when archiving
+            self.cfg_corr_high_priority_correlator_projectids = (
+                utils.read_config_list(
+                    self.logger,
+                    self.config,
+                    "correlator",
+                    "high_priority_correlator_projectids",
+                )
+            )
+            self.cfg_corr_high_priority_vcs_projectids = (
+                utils.read_config_list(
+                    self.logger,
+                    self.config,
+                    "correlator",
+                    "high_priority_vcs_projectids",
+                )
             )
 
             if not os.path.exists(self.cfg_corr_visdata_incoming_path):
@@ -806,8 +810,8 @@ class MWAXSubfileDistributor:
                     self.cfg_corr_metafits_path,
                     self.cfg_visdata_dont_archive_path,
                     self.cfg_voltdata_dont_archive_path,
-                    self.cfg_high_priority_correlator_projectids,
-                    self.cfg_high_priority_vcs_projectids,
+                    self.cfg_corr_high_priority_correlator_projectids,
+                    self.cfg_corr_high_priority_vcs_projectids,
                 )
             )
 

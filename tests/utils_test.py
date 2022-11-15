@@ -499,7 +499,7 @@ def test_config_get_list_valid():
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
     return_list = utils.read_config_list(
-        logger, config, "mwax mover", "high_priority_vcs_projectids"
+        logger, config, "correlator", "high_priority_vcs_projectids"
     )
 
     assert return_list == ["D0006", "G0058"]
@@ -519,7 +519,7 @@ def test_config_get_list_empty():
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
     return_list = utils.read_config_list(
-        logger, config, "mwax mover", "high_priority_correlator_projectids"
+        logger, config, "correlator", "high_priority_correlator_projectids"
     )
 
     assert return_list == []
