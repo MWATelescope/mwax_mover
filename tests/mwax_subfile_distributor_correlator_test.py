@@ -117,9 +117,6 @@ def test_correlator_config_file():
     assert msd.cfg_voltdata_outgoing_path == os.path.join(
         base_dir, "voltdata_outgoing"
     )
-    assert msd.cfg_visdata_dont_archive_path == os.path.join(
-        base_dir, "dont_archive"
-    )
     assert msd.cfg_voltdata_dont_archive_path == os.path.join(
         base_dir, "dont_archive"
     )
@@ -133,6 +130,9 @@ def test_correlator_config_file():
     assert msd.cfg_corr_input_ringbuffer_key == "0x1234"
     assert msd.cfg_corr_visdata_incoming_path == os.path.join(
         base_dir, "visdata_incoming"
+    )
+    assert msd.cfg_corr_visdata_dont_archive_path == os.path.join(
+        base_dir, "dont_archive"
     )
     assert msd.cfg_corr_visdata_processing_stats_path == os.path.join(
         base_dir, "visdata_processing_stats"

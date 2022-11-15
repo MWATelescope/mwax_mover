@@ -45,11 +45,7 @@ def setup_beamformer_test():
     voltdata_outgoing_path = os.path.join(base_dir, "voltdata_outgoing")
     check_and_make_dir(voltdata_outgoing_path)
 
-    # visdata_dont_archive_path
-    visdata_dont_archive_path = os.path.join(base_dir, "visdata_dont_archive")
-    check_and_make_dir(visdata_dont_archive_path)
-
-    # visdata_dont_archive_path
+    # voltdata_dont_archive_path
     voltdata_dont_archive_path = os.path.join(
         base_dir, "voltdata_dont_archive"
     )
@@ -95,9 +91,6 @@ def test_beamformer_config_file():
     )
     assert msd.cfg_voltdata_outgoing_path == os.path.join(
         base_dir, "voltdata_outgoing"
-    )
-    assert msd.cfg_visdata_dont_archive_path == os.path.join(
-        base_dir, "visdata_dont_archive"
     )
     assert msd.cfg_voltdata_dont_archive_path == os.path.join(
         base_dir, "voltdata_dont_archive"

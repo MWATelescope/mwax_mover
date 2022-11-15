@@ -167,7 +167,6 @@ class MWAXSubfileDistributor:
         # Common
         self.cfg_log_path = None
         self.cfg_webserver_port = None
-        self.cfg_visdata_dont_archive_path = None
         self.cfg_voltdata_dont_archive_path = None
         self.cfg_subfile_incoming_path = None
         self.cfg_voltdata_incoming_path = None
@@ -200,6 +199,7 @@ class MWAXSubfileDistributor:
         self.cfg_corr_input_ringbuffer_key = None
         self.cfg_corr_diskdb_numa_node = None
         self.cfg_corr_archive_command_numa_node = None
+        self.cfg_corr_visdata_dont_archive_path = None
         self.cfg_corr_visdata_incoming_path = None
         self.cfg_corr_visdata_outgoing_path = None
         self.cfg_corr_high_priority_correlator_projectids = None
@@ -309,9 +309,6 @@ class MWAXSubfileDistributor:
         self.cfg_webserver_port = utils.read_config(
             self.logger, self.config, "mwax mover", "webserver_port"
         )
-        self.cfg_visdata_dont_archive_path = utils.read_config(
-            self.logger, self.config, "mwax mover", "visdata_dont_archive_path"
-        )
         self.cfg_voltdata_dont_archive_path = utils.read_config(
             self.logger,
             self.config,
@@ -383,14 +380,6 @@ class MWAXSubfileDistributor:
             self.logger.error(
                 "'Voltdata Dont Archive' location"
                 f" {self.cfg_voltdata_dont_archive_path} does not exist."
-                " Quitting."
-            )
-            sys.exit(1)
-
-        if not os.path.exists(self.cfg_visdata_dont_archive_path):
-            self.logger.error(
-                "'Visdata Dont Archive' location"
-                f" {self.cfg_visdata_dont_archive_path} does not exist."
                 " Quitting."
             )
             sys.exit(1)
@@ -517,6 +506,12 @@ class MWAXSubfileDistributor:
             self.cfg_corr_visdata_incoming_path = utils.read_config(
                 self.logger, self.config, "correlator", "visdata_incoming_path"
             )
+            self.cfg_corr_visdata_dont_archive_path = utils.read_config(
+                self.logger,
+                self.config,
+                "correlator",
+                "visdata_dont_archive_path",
+            )
             self.cfg_corr_visdata_processing_stats_path = utils.read_config(
                 self.logger,
                 self.config,
@@ -597,6 +592,14 @@ class MWAXSubfileDistributor:
                     "Visdata file location"
                     f" {self.cfg_corr_visdata_incoming_path} does not exist."
                     " Quitting."
+                )
+                sys.exit(1)
+
+            if not os.path.exists(self.cfg_corr_visdata_dont_archive_path):
+                self.logger.error(
+                    "'Visdata Dont Archive' location"
+                    f" {self.cfg_corr_visdata_dont_archive_path} does not"
+                    " exist. Quitting."
                 )
                 sys.exit(1)
 
@@ -808,7 +811,7 @@ class MWAXSubfileDistributor:
                     self.cfg_corr_calibrator_destination_port,
                     self.cfg_corr_calibrator_destination_enabled,
                     self.cfg_corr_metafits_path,
-                    self.cfg_visdata_dont_archive_path,
+                    self.cfg_corr_visdata_dont_archive_path,
                     self.cfg_voltdata_dont_archive_path,
                     self.cfg_corr_high_priority_correlator_projectids,
                     self.cfg_corr_high_priority_vcs_projectids,
