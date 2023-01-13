@@ -538,3 +538,98 @@ def test_download_metafits_file():
 
     # remove the metafits file
     os.remove(metafits_filename)
+
+
+def test_inject_beamformer_headers():
+    """Test that, given a sub file which has a 4096 byte header
+    that we can find the end of header and 'paste' in the beamformer
+    header to the end (and still maintain a 4096 byte header!)"""
+
+    # Generate test beamformer settings
+    beamformer_settings_string = (
+        "NUM_INCOHERENT_BEAMS 2\n"
+        "INCOHERENT_BEAM_01_CHANNELS 1280000\n"
+        "INCOHERENT_BEAM_01_TIME_INTEG 1\n"
+        "INCOHERENT_BEAM_02_CHANNELS 128\n"
+        "INCOHERENT_BEAM_02_TIME_INTEG 100\n"
+        "NUM_COHERENT_BEAMS 0\n"
+    )
+
+    # Generate a test header
+    test_header = (
+        "HDR_SIZE 4096\n"
+        "POPULATED 1\n"
+        "OBS_ID 1357616008\n"
+        "SUBOBS_ID 1357623888\n"
+        "MODE NO_CAPTURE\n"
+        "UTC_START 2023-01-13-03:33:10\n"
+        "OBS_OFFSET 7880\n"
+        "NBIT 8\n"
+        "NPOL 2\n"
+        "NTIMESAMPLES 64000\n"
+        "NINPUTS 256\n"
+        "NINPUTS_XGPU 256\n"
+        "APPLY_PATH_WEIGHTS 0\n"
+        "APPLY_PATH_DELAYS 1\n"
+        "APPLY_PATH_PHASE_OFFSETS 1\n"
+        "INT_TIME_MSEC 500\n"
+        "FSCRUNCH_FACTOR 200\n"
+        "APPLY_VIS_WEIGHTS 0\n"
+        "TRANSFER_SIZE 5275648000\n"
+        "PROJ_ID G0060\n"
+        "EXPOSURE_SECS 200\n"
+        "COARSE_CHANNEL 169\n"
+        "CORR_COARSE_CHANNEL 12\n"
+        "SECS_PER_SUBOBS 8\n"
+        "UNIXTIME 1673580790\n"
+        "UNIXTIME_MSEC 0\n"
+        "FINE_CHAN_WIDTH_HZ 40000\n"
+        "NFINE_CHAN 32\n"
+        "BANDWIDTH_HZ 1280000\n"
+        "SAMPLE_RATE 1280000\n"
+        "MC_IP 0.0.0.0\n"
+        "MC_PORT 0\n"
+        "MC_SRC_IP 0.0.0.0\n"
+        "MWAX_U2S_VER 2.09-87\n"
+        "IDX_PACKET_MAP 0+200860892\n"
+        "IDX_METAFITS 32+1\n"
+        "IDX_DELAY_TABLE 16383744+0\n"
+        "IDX_MARGIN_DATA 256+0\n"
+        "MWAX_SUB_VER 2\n"
+    )
+
+    assert len(test_header) == 720
+
+    # Append the remainder of the 4096 bytes
+    remainder_len = 4096 - len(test_header)
+    padding = [0x0 for _ in range(remainder_len)]
+    assert len(padding) == remainder_len
+    # add 255 bytes of data to this subfile
+    data_padding = [x for x in range(256)]
+    assert len(data_padding) == 256
+
+    # Convert to bytes
+    test_header_bytes = bytes(test_header, "UTF-8")
+
+    # Generate a test sub file
+    subfile_name = "tests/data/beamformer/test_subfile.sub"
+    with open(subfile_name, "wb") as write_file:
+        write_file.write(test_header_bytes)
+        write_file.write(bytearray(padding))
+        write_file.write(bytearray(data_padding))
+
+    utils.inject_beamformer_headers(subfile_name, beamformer_settings_string)
+
+    # Check file size
+    assert os.path.getsize(subfile_name) == 4096 + len(bytearray(data_padding))
+
+    # Now re-read the file
+    valid = False
+    with open(
+        subfile_name, "r", encoding="UTF-8", errors="ignore"
+    ) as read_file:
+        for line in read_file:
+            if "NUM_COHERENT_BEAMS 0" in line:
+                valid = True
+
+    assert valid is True

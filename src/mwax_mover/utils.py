@@ -17,6 +17,9 @@ import requests
 from mwax_mover import mwax_command
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
 
+# number of lines of the PSRDADA header to read looking for keywords
+PSRDADA_HEADER_BYTES = 4096
+
 # This is global mutex so we don't try to create the same metafits
 # file with multiple threads
 metafits_file_lock = threading.Lock()
@@ -692,3 +695,35 @@ def get_priority(
         )
 
     return return_priority
+
+
+def inject_beamformer_headers(subfile_filename: str, beamformer_settings: str):
+    """Appends the beamformer settings to the existing subfile header"""
+    data = []
+
+    # Read the psrdada header data in to a list (one line per item)
+    with open(subfile_filename, "rb") as subfile:
+        data = subfile.read(PSRDADA_HEADER_BYTES).decode("UTF-8").split("\n")
+
+    last_line_index = len(data) - 1
+    last_row_len = len(data[last_line_index])
+
+    beamformer_settings_len = len(beamformer_settings)
+    null_trail = "\0" * (last_row_len - beamformer_settings_len)
+    data[last_line_index] = beamformer_settings + null_trail
+
+    # convert our list of lines back to a byte array
+    new_string = "\n".join(data)
+
+    new_bytes = bytes(new_string, "UTF-8")
+    if len(new_bytes) != PSRDADA_HEADER_BYTES:
+        raise Exception(
+            "_inject_beamformer_headers(): new_bytes length is not"
+            f" {PSRDADA_HEADER_BYTES} as expected it is {len(new_bytes)}."
+            f" Newbytes = [{new_string}]"
+        )
+
+    # Overwrite the first 4096 bytes with our updated header
+    with open(subfile_filename, "r+b") as subfile:
+        subfile.seek(0)
+        subfile.write(new_bytes)

@@ -18,9 +18,7 @@ from mwax_mover import (
 )
 
 COMMAND_DADA_DISKDB = "dada_diskdb"
-# number of lines of the PSRDADA header to read looking for keywords
 PSRDADA_MAX_HEADER_LINES = 31
-PSRDADA_HEADER_BYTES = 4096
 
 
 class CorrelatorMode(Enum):
@@ -331,7 +329,7 @@ class SubfileProcessor:
                             f"{item}- injecting beamformer header into"
                             " subfile..."
                         )
-                        self._inject_beamformer_headers(
+                        utils.inject_beamformer_headers(
                             item, beamformer_settings
                         )
 
@@ -418,40 +416,6 @@ class SubfileProcessor:
                 if worker_thread.is_alive():
                     worker_thread.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
-
-    def _inject_beamformer_headers(
-        self, filename: str, beamformer_settings: str
-    ):
-        data = []
-
-        # Read the psrdada header data in to a list (one line per item)
-        with open(filename, "rb") as subfile:
-            data = (
-                subfile.read(PSRDADA_HEADER_BYTES).decode("UTF-8").split("\n")
-            )
-
-        last_line_index = len(data) - 1
-        last_row_len = len(data[last_line_index])
-
-        beamformer_settings_len = len(beamformer_settings)
-        null_trail = "\0" * (last_row_len - beamformer_settings_len)
-        data[last_line_index] = beamformer_settings + null_trail
-
-        # convert our list of lines back to a byte array
-        new_string = "\n".join(data)
-
-        new_bytes = bytes(new_string, "UTF-8")
-        if len(new_bytes) != PSRDADA_HEADER_BYTES:
-            raise Exception(
-                "_inject_beamformer_headers(): new_bytes length is not"
-                f" {PSRDADA_HEADER_BYTES} as expected it is {len(new_bytes)}."
-                f" Newbytes = [{new_string}]"
-            )
-
-        # Overwrite the first 4096 bytes with our updated header
-        with open(filename, "r+b") as subfile:
-            subfile.seek(0)
-            subfile.write(new_bytes)
 
     def _copy_subfile_to_disk(
         self,
