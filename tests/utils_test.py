@@ -623,13 +623,8 @@ def test_inject_beamformer_headers():
     # Check file size
     assert os.path.getsize(subfile_name) == 4096 + len(bytearray(data_padding))
 
-    # Now re-read the file
-    valid = False
-    with open(
-        subfile_name, "r", encoding="UTF-8", errors="ignore"
-    ) as read_file:
-        for line in read_file:
-            if "NUM_COHERENT_BEAMS 0" in line:
-                valid = True
-
-    assert valid is True
+    # we can also test utils.read_subfile_value(item, key)
+    assert utils.read_subfile_value(subfile_name, "MODE") == "NO_CAPTURE"
+    assert (
+        utils.read_subfile_value(subfile_name, "NUM_INCOHERENT_BEAMS") == "2"
+    )

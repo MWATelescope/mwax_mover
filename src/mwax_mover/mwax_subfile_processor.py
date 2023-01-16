@@ -18,7 +18,6 @@ from mwax_mover import (
 )
 
 COMMAND_DADA_DISKDB = "dada_diskdb"
-PSRDADA_MAX_HEADER_LINES = 31
 
 
 class CorrelatorMode(Enum):
@@ -58,35 +57,6 @@ class CorrelatorMode(Enum):
             CorrelatorMode.VOLTAGE_BUFFER.value,
             CorrelatorMode.MWAX_VCS.value,
         ]
-
-
-def read_subfile_mode(filename: str) -> str:
-    """Returns MODE as a string from a subfile"""
-    subfile_mode = None
-
-    with open(filename, "rb") as subfile:
-        line_no = 1
-
-        subfile_text = subfile.read(4096).decode()
-        subfile_text_lines = subfile_text.splitlines()
-
-        for line in subfile_text_lines:
-            # Don't search the whole file, just the first 16 lines
-            if line_no <= PSRDADA_MAX_HEADER_LINES:
-                split_line = line.split()
-
-                # We should have 2 items, keyword and value
-                if len(split_line) == 2:
-                    keyword = split_line[0].strip()
-                    value = split_line[1].strip()
-
-                    if keyword == "MODE":
-                        subfile_mode = value
-                        break
-
-            line_no = line_no + 1
-
-    return subfile_mode
 
 
 class SubfileProcessor:
@@ -228,7 +198,7 @@ class SubfileProcessor:
         keep_subfiles_path = None
 
         try:
-            subfile_mode = read_subfile_mode(item)
+            subfile_mode = utils.read_subfile_value(item, "MODE")
 
             if self.corr_enabled:
                 # 1. Read header of subfile.
@@ -325,13 +295,26 @@ class SubfileProcessor:
                         ) as bf_settings_file:
                             beamformer_settings = bf_settings_file.read()
 
-                        self.logger.info(
-                            f"{item}- injecting beamformer header into"
-                            " subfile..."
-                        )
-                        utils.inject_beamformer_headers(
-                            item, beamformer_settings
-                        )
+                        # It is possible the beamformer settings are already
+                        # added into the sub file (e.g. a failed load into ringbuffer)
+                        # So check first, before appending them again!
+                        if (
+                            utils.read_subfile_value(
+                                item, "NUM_INCOHERENT_BEAMS"
+                            )
+                            is None
+                        ):
+                            self.logger.info(
+                                f"{item}- injecting beamformer header into"
+                                " subfile..."
+                            )
+                            utils.inject_beamformer_headers(
+                                item, beamformer_settings
+                            )
+                        else:
+                            self.logger.info(
+                                f"{item}- beamformer header exists in subfile."
+                            )
 
                         success = utils.load_psrdada_ringbuffer(
                             self.logger,

@@ -727,3 +727,26 @@ def inject_beamformer_headers(subfile_filename: str, beamformer_settings: str):
     with open(subfile_filename, "r+b") as subfile:
         subfile.seek(0)
         subfile.write(new_bytes)
+
+
+def read_subfile_value(filename: str, key: str) -> str:
+    """Returns key as a string from a subfile header"""
+    subfile_value = None
+
+    with open(filename, "rb") as subfile:
+        subfile_text = subfile.read(PSRDADA_HEADER_BYTES).decode()
+        subfile_text_lines = subfile_text.splitlines()
+
+        for line in subfile_text_lines:
+            split_line = line.split()
+
+            # We should have 2 items, keyword and value
+            if len(split_line) == 2:
+                keyword = split_line[0].strip()
+                value = split_line[1].strip()
+
+                if keyword == key:
+                    subfile_value = value
+                    break
+
+    return subfile_value
