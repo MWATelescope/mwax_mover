@@ -608,16 +608,11 @@ def test_inject_beamformer_headers():
     data_padding = [x for x in range(256)]
     assert len(data_padding) == 256
 
-    # Convert to bytes
-    test_header_bytes = bytes(test_header, "UTF-8")
-
-    # Generate a test sub file
+    # Write the subfile
     subfile_name = "tests/data/beamformer/test_subfile.sub"
-    with open(subfile_name, "wb") as write_file:
-        write_file.write(test_header_bytes)
-        write_file.write(bytearray(padding))
-        write_file.write(bytearray(data_padding))
+    utils.write_mock_subfile_from_header(subfile_name, test_header)
 
+    # inject the beamformer settings
     utils.inject_beamformer_headers(subfile_name, beamformer_settings_string)
 
     # Check file size

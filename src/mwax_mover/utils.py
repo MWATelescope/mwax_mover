@@ -750,3 +750,76 @@ def read_subfile_value(filename: str, key: str) -> str:
                     break
 
     return subfile_value
+
+
+def write_mock_subfile_from_header(output_filename, header):
+    """This is a utility so that tests
+    can write subfiles! It will append some dummy data after the header and
+    ensure the header is 4096 bytes padded by nuls"""
+
+    # Append the remainder of the 4096 bytes
+    remainder_len = 4096 - len(header)
+    padding = [0x0 for _ in range(remainder_len)]
+    assert len(padding) == remainder_len
+    # add 255 bytes of data to this subfile
+    data_padding = [x for x in range(256)]
+    assert len(data_padding) == 256
+
+    # Convert to bytes
+    test_header_bytes = bytes(header, "UTF-8")
+
+    # Generate a test sub file
+    with open(output_filename, "wb") as write_file:
+        write_file.write(test_header_bytes)
+        write_file.write(bytearray(padding))
+        write_file.write(bytearray(data_padding))
+
+
+def write_mock_subfile(output_filename, obs_id, subobs_id, mode, obs_offset):
+    """This is a utility so that tests
+    can write subfiles! It will append some dummy data after the header and
+    ensure the header is 4096 bytes padded by nuls"""
+    # Create ascii header
+    header = (
+        "HDR_SIZE 4096\n"
+        "POPULATED 1\n"
+        f"OBS_ID {obs_id}\n"
+        f"SUBOBS_ID {subobs_id}\n"
+        f"MODE {mode}\n"
+        "UTC_START 2023-01-13-03:33:10\n"
+        f"OBS_OFFSET {obs_offset}\n"
+        "NBIT 8\n"
+        "NPOL 2\n"
+        "NTIMESAMPLES 64000\n"
+        "NINPUTS 256\n"
+        "NINPUTS_XGPU 256\n"
+        "APPLY_PATH_WEIGHTS 0\n"
+        "APPLY_PATH_DELAYS 1\n"
+        "APPLY_PATH_PHASE_OFFSETS 1\n"
+        "INT_TIME_MSEC 500\n"
+        "FSCRUNCH_FACTOR 200\n"
+        "APPLY_VIS_WEIGHTS 0\n"
+        "TRANSFER_SIZE 5275648000\n"
+        "PROJ_ID G0060\n"
+        "EXPOSURE_SECS 200\n"
+        "COARSE_CHANNEL 169\n"
+        "CORR_COARSE_CHANNEL 12\n"
+        "SECS_PER_SUBOBS 8\n"
+        "UNIXTIME 1673580790\n"
+        "UNIXTIME_MSEC 0\n"
+        "FINE_CHAN_WIDTH_HZ 40000\n"
+        "NFINE_CHAN 32\n"
+        "BANDWIDTH_HZ 1280000\n"
+        "SAMPLE_RATE 1280000\n"
+        "MC_IP 0.0.0.0\n"
+        "MC_PORT 0\n"
+        "MC_SRC_IP 0.0.0.0\n"
+        "MWAX_U2S_VER 2.09-87\n"
+        "IDX_PACKET_MAP 0+200860892\n"
+        "IDX_METAFITS 32+1\n"
+        "IDX_DELAY_TABLE 16383744+0\n"
+        "IDX_MARGIN_DATA 256+0\n"
+        "MWAX_SUB_VER 2\n"
+    )
+
+    write_mock_subfile_from_header(output_filename, header)

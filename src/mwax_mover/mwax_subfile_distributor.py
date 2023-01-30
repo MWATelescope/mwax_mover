@@ -72,9 +72,10 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
                 try:
                     starttime = int(parameter_list["start"][0])
 
-                    if len(str(starttime)) != 10:
+                    if len(str(starttime)) != 10 and starttime != 0:
                         raise ValueError(
-                            "start must be gps seconds and length 10"
+                            "start must be gps seconds and length 10 (or 0 for"
+                            " as early as possible)"
                         )
 
                     try:
@@ -929,6 +930,8 @@ class MWAXSubfileDistributor:
         else:
             self.logger.info("Correlator disabled")
 
+        self.logger.info("MWAX Subfile Distributor started successfully.")
+
         for processor in self.processors:
             processor.start()
 
@@ -940,8 +943,6 @@ class MWAXSubfileDistributor:
             name="health_thread", target=self.health_handler, daemon=True
         )
         health_thread.start()
-
-        self.logger.info("MWAX Subfile Distributor started successfully.")
 
         while self.running:
             for processor in self.processors:
