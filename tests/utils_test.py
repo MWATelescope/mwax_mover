@@ -540,6 +540,75 @@ def test_download_metafits_file():
     os.remove(metafits_filename)
 
 
+def test_write_mock_subfile():
+    """Test that our mock subfile is correct"""
+    output_filename = "/tmp/mock_subfile.sub"
+
+    # Write out the mock subfile
+    utils.write_mock_subfile(
+        output_filename,
+        obs_id=1234567890,
+        subobs_id=1234567898,
+        mode="MWAX_VCS",
+        obs_offset=8,
+        rec_channel=123,
+        corr_channel=5,
+    )
+
+    # This is what it should look like
+    expected_header = (
+        "HDR_SIZE 4096\n"
+        "POPULATED 1\n"
+        "OBS_ID 1234567890\n"
+        "SUBOBS_ID 1234567898\n"
+        "MODE MWAX_VCS\n"
+        "UTC_START 2023-01-13-03:33:10\n"
+        "OBS_OFFSET 8\n"
+        "NBIT 8\n"
+        "NPOL 2\n"
+        "NTIMESAMPLES 64000\n"
+        "NINPUTS 256\n"
+        "NINPUTS_XGPU 256\n"
+        "APPLY_PATH_WEIGHTS 0\n"
+        "APPLY_PATH_DELAYS 1\n"
+        "APPLY_PATH_PHASE_OFFSETS 1\n"
+        "INT_TIME_MSEC 500\n"
+        "FSCRUNCH_FACTOR 200\n"
+        "APPLY_VIS_WEIGHTS 0\n"
+        "TRANSFER_SIZE 5275648000\n"
+        "PROJ_ID G0060\n"
+        "EXPOSURE_SECS 200\n"
+        "COARSE_CHANNEL 123\n"
+        "CORR_COARSE_CHANNEL 5\n"
+        "SECS_PER_SUBOBS 8\n"
+        "UNIXTIME 1673580790\n"
+        "UNIXTIME_MSEC 0\n"
+        "FINE_CHAN_WIDTH_HZ 40000\n"
+        "NFINE_CHAN 32\n"
+        "BANDWIDTH_HZ 1280000\n"
+        "SAMPLE_RATE 1280000\n"
+        "MC_IP 0.0.0.0\n"
+        "MC_PORT 0\n"
+        "MC_SRC_IP 0.0.0.0\n"
+        "MWAX_U2S_VER 2.09-87\n"
+        "IDX_PACKET_MAP 0+200860892\n"
+        "IDX_METAFITS 32+1\n"
+        "IDX_DELAY_TABLE 16383744+0\n"
+        "IDX_MARGIN_DATA 256+0\n"
+        "MWAX_SUB_VER 2\n"
+    )
+
+    # Read in the first 4096 bytes as text/ascii
+    with open(output_filename, "rb") as subfile:
+        # Read header
+        header_bytes = subfile.read(len(expected_header))
+
+    # convert bytes to ascii
+    header_text = header_bytes.decode()
+
+    assert header_text == expected_header
+
+
 def test_inject_beamformer_headers():
     """Test that, given a sub file which has a 4096 byte header
     that we can find the end of header and 'paste' in the beamformer

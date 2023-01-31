@@ -107,6 +107,12 @@ class SubfileProcessor:
         self.always_keep_subfiles = always_keep_subfiles
         self.ext_done = ".free"
 
+        # Voltage buffer dump vars
+        self.dump_start_gps = None
+        self.dump_end_gps = None
+        self.dump_keep_file_queue = queue.Queue()
+
+        # Watchers and workers
         self.watcher_threads = []
         self.worker_threads = []
 
@@ -150,12 +156,12 @@ class SubfileProcessor:
             recursive=False,
         )
 
-        # Create queueworker
+        # Create subfile queueworker
         self.subfile_queue_worker = mwax_queue_worker.QueueWorker(
             name="Subfile Input Queue",
             source_queue=self.subfile_queue,
             executable_path=None,
-            event_handler=self.handler,
+            event_handler=self.subfile_handler,
             log=self.logger,
             requeue_to_eoq_on_failure=False,
             exit_once_queue_empty=False,
@@ -168,7 +174,7 @@ class SubfileProcessor:
         self.watcher_threads.append(watcher_thread)
         watcher_thread.start()
 
-        # Setup thread for processing items
+        # Setup thread for processing subfile items
         queue_worker_thread = threading.Thread(
             name="work_sub",
             target=self.subfile_queue_worker.start,
@@ -177,12 +183,57 @@ class SubfileProcessor:
         self.worker_threads.append(queue_worker_thread)
         queue_worker_thread.start()
 
-    def handler(self, item: str) -> bool:
+    def handle_next_keep_file(self) -> bool:
+        """When we need to offload a keep file, this handles it"""
+        success = True
+
+        # Get next keep file off the queue (if any)
+        if self.dump_keep_file_queue.qsize() > 0:
+            keep_filename = self.dump_keep_file_queue.get()
+
+            self.logger.info(
+                "SubfileProcessor.handle_next_keep_file is handling"
+                f" {keep_filename}..."
+            )
+
+            # Copy the .keep file to the voltdata incoming dir
+            copy_success = self.copy_subfile_to_disk(
+                keep_filename,
+                self.corr_diskdb_numa_node,
+                self.voltdata_incoming_path,
+                self.copy_subfile_to_disk_timeout_sec,
+            )
+
+            if copy_success:
+                # Rename kept subfile so that mwax_u2s can reuse it
+                free_filename = keep_filename.replace(".keep", self.ext_done)
+
+                try:
+                    shutil.move(keep_filename, free_filename)
+                except Exception as move_exception:  # pylint: disable=broad-except
+                    self.logger.error(
+                        f"Could not rename {keep_filename} back to"
+                        f" {free_filename}. Error {move_exception}"
+                    )
+                    sys.exit(2)
+            else:
+                # Reqeuue file to try again later
+                self.dump_keep_file_queue.put(keep_filename)
+
+            self.logger.info(
+                "SubfileProcessor.handle_next_keep_file finished handling"
+                f" {keep_filename}. Remaining .keep files:"
+                f" {self.dump_keep_file_queue.qsize()}."
+            )
+
+        return success
+
+    def subfile_handler(self, item: str) -> bool:
         """When subfile detected this handles it"""
         success = False
 
         self.logger.info(
-            f"{item}- SubfileProcessor.handler is handling {item}..."
+            f"{item}- SubfileProcessor.subfile_handler is handling {item}..."
         )
 
         # `keep_subfiles_path` is used after doing the main work. If we are
@@ -239,7 +290,7 @@ class SubfileProcessor:
                             True
                         )
 
-                    self._copy_subfile_to_disk(
+                    self.copy_subfile_to_disk(
                         item,
                         self.corr_diskdb_numa_node,
                         self.voltdata_incoming_path,
@@ -251,12 +302,23 @@ class SubfileProcessor:
                     self.logger.info(
                         f"{item}- ignoring due to mode: {subfile_mode}"
                     )
+
+                    #
+                    # This is our opportunity to write any "keep" files to disk
+                    # which were held
+                    #
+
                     if (
                         self.subfile_distributor_context.cfg_corr_archive_destination_enabled  # pylint: disable=line-too-long
                     ):
                         self.subfile_distributor_context.archive_processor.pause_archiving(  # pylint: disable=line-too-long
                             False
                         )
+
+                    # Since we're not doing anything with this subfile we can
+                    # try and handle any remaining keep files
+                    self.handle_next_keep_file()
+
                     success = True
 
                 else:
@@ -351,7 +413,7 @@ class SubfileProcessor:
                 if keep_subfiles_path:
                     # we use -1 for numa node for now as this is really for
                     # debug so it does not matter
-                    self._copy_subfile_to_disk(
+                    self.copy_subfile_to_disk(
                         item,
                         -1,
                         keep_subfiles_path,
@@ -373,7 +435,7 @@ class SubfileProcessor:
                     sys.exit(2)
 
             self.logger.info(
-                f"{item}- SubfileProcessor.handler finished handling."
+                f"{item}- SubfileProcessor.subfile_handler finished handling."
             )
 
         return success
@@ -400,13 +462,14 @@ class SubfileProcessor:
                     worker_thread.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
-    def _copy_subfile_to_disk(
+    def copy_subfile_to_disk(
         self,
         filename: str,
         numa_node: int,
         destination_path: str,
         timeout: int,
     ) -> bool:
+        """Copies the given filename to the destination path"""
         self.logger.info(f"{filename}- Copying file into {destination_path}")
 
         command = f"cp {filename} {destination_path}/."
@@ -420,7 +483,7 @@ class SubfileProcessor:
         if retval:
             self.logger.info(
                 f"{filename}- Copying file into {destination_path} was"
-                f" successful (took {elapsed} secs."
+                f" successful (took {elapsed:.3f} secs."
             )
         else:
             self.logger.error(
@@ -432,6 +495,10 @@ class SubfileProcessor:
 
     def dump_voltages(self, start_gps_time: int, end_gps_time: int) -> bool:
         """Dump whatever subfiles we have from /dev/shm to disk"""
+        # Set module level variables
+        self.dump_start_gps = start_gps_time
+        self.dump_end_gps = end_gps_time
+
         self.logger.info(
             f"dump_voltages: from {str(start_gps_time)} to"
             f" {str(end_gps_time)}..."

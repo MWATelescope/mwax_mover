@@ -775,7 +775,15 @@ def write_mock_subfile_from_header(output_filename, header):
         write_file.write(bytearray(data_padding))
 
 
-def write_mock_subfile(output_filename, obs_id, subobs_id, mode, obs_offset):
+def write_mock_subfile(
+    output_filename,
+    obs_id,
+    subobs_id,
+    mode,
+    obs_offset,
+    rec_channel,
+    corr_channel,
+):
     """This is a utility so that tests
     can write subfiles! It will append some dummy data after the header and
     ensure the header is 4096 bytes padded by nuls"""
@@ -802,8 +810,8 @@ def write_mock_subfile(output_filename, obs_id, subobs_id, mode, obs_offset):
         "TRANSFER_SIZE 5275648000\n"
         "PROJ_ID G0060\n"
         "EXPOSURE_SECS 200\n"
-        "COARSE_CHANNEL 169\n"
-        "CORR_COARSE_CHANNEL 12\n"
+        f"COARSE_CHANNEL {rec_channel}\n"
+        f"CORR_COARSE_CHANNEL {corr_channel}\n"
         "SECS_PER_SUBOBS 8\n"
         "UNIXTIME 1673580790\n"
         "UNIXTIME_MSEC 0\n"

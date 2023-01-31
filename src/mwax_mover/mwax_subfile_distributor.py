@@ -31,7 +31,7 @@ class MWAXHTTPServer(HTTPServer):
 class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
     """Class for handling GET requests"""
 
-    def do_get(self):
+    def do_GET(self):  # pylint: disable=invalid-name
         """Process a web service GET"""
         # This is the path (e.g. /status) but with no parameters
         parsed_path = urlparse(self.path.lower()).path
@@ -44,7 +44,13 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
         parameter_list = parse_qs(urlparse(self.path.lower()).query)
 
         try:
-            if parsed_path == "/status":
+            if parsed_path == "/shutdown":
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"OK")
+                self.server.context.signal_handler(signal.SIGINT, None)
+
+            elif parsed_path == "/status":
                 data = json.dumps(self.server.context.get_status())
 
                 self.send_response(200)
@@ -71,15 +77,19 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
                 # Check for correct params
                 try:
                     starttime = int(parameter_list["start"][0])
+                    endtime = int(parameter_list["end"][0])
 
-                    if len(str(starttime)) != 10 and starttime != 0:
-                        raise ValueError(
-                            "start must be gps seconds and length 10 (or 0 for"
-                            " as early as possible)"
-                        )
-
-                    try:
-                        endtime = int(parameter_list["end"][0])
+                    # Special test mode- if start and end == 0 just return 200
+                    if starttime == endtime == 0:
+                        self.send_response(200)
+                        self.end_headers()
+                        self.wfile.write(b"OK")
+                    else:
+                        if len(str(starttime)) != 10 and starttime != 0:
+                            raise ValueError(
+                                "start must be gps seconds and length 10 (or 0"
+                                " for as early as possible)"
+                            )
 
                         if len(str(endtime)) != 10:
                             raise ValueError(
@@ -89,32 +99,46 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
                         if endtime - starttime <= 0:
                             raise ValueError("end must be after start")
 
-                        # Now call the method to dump the voltages
-                        if self.server.context.subfile_processor.dump_voltages(
-                            starttime, endtime
+                        # Check to see if we aren't already doing a dump
+                        if (
+                            self.server.context.subfile_processor.dump_start_gps
+                            is None
+                            and self.server.context.subfile_processor.dump_end_gps
+                            is None
                         ):
-                            self.send_response(200)
-                            self.end_headers()
-                            self.wfile.write(b"OK")
+                            # Now call the method to dump the voltages
+                            if self.server.context.subfile_processor.dump_voltages(
+                                starttime, endtime
+                            ):
+                                self.send_response(200)
+                                self.end_headers()
+                                self.wfile.write(b"OK")
+                            else:
+                                self.send_response(400)
+                                self.end_headers()
+                                self.wfile.write(b"Failed")
                         else:
+                            # Reject this request
                             self.send_response(400)
                             self.end_headers()
-                            self.wfile.write(b"Failed")
+                            self.wfile.write(
+                                b"Voltage Buffer Dump already in progress."
+                                b" Request canceled."
+                            )
 
-                    except Exception as dump_exception_end:  # pylint: disable=broad-except
-                        self.send_response(400)
-                        self.end_headers()
-                        self.wfile.write(
-                            "Missing or invalid 'end' parameter"
-                            f" {dump_exception_end}".encode("utf-8")
-                        )
-
-                except Exception as dump_exception_start:  # pylint: disable=broad-except
-                    self.send_response(200)
+                except ValueError as parameters_exception:  # pylint: disable=broad-except
+                    self.send_response(400)
                     self.end_headers()
                     self.wfile.write(
-                        "Missing or invalid 'start' parameter"
-                        f" {dump_exception_start}".encode("utf-8")
+                        f"Value Error: {parameters_exception}".encode("utf-8")
+                    )
+
+                except Exception as dump_voltages_exception:  # pylint: disable=broad-except
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(
+                        "Unhandled exception running dump_voltages"
+                        f" {dump_voltages_exception}".encode("utf-8")
                     )
 
             else:
