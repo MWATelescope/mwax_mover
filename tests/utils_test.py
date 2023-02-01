@@ -670,7 +670,7 @@ def test_inject_beamformer_headers():
     assert len(test_header) == 720
 
     # Append the remainder of the 4096 bytes
-    remainder_len = 4096 - len(test_header)
+    remainder_len = utils.PSRDADA_HEADER_BYTES - len(test_header)
     padding = [0x0 for _ in range(remainder_len)]
     assert len(padding) == remainder_len
     # add 255 bytes of data to this subfile
@@ -685,10 +685,15 @@ def test_inject_beamformer_headers():
     utils.inject_beamformer_headers(subfile_name, beamformer_settings_string)
 
     # Check file size
-    assert os.path.getsize(subfile_name) == 4096 + len(bytearray(data_padding))
+    assert os.path.getsize(subfile_name) == utils.PSRDADA_HEADER_BYTES + len(
+        bytearray(data_padding)
+    )
 
     # we can also test utils.read_subfile_value(item, key)
-    assert utils.read_subfile_value(subfile_name, "MODE") == "NO_CAPTURE"
+    assert (
+        utils.read_subfile_value(subfile_name, utils.PSRDADA_MODE)
+        == "NO_CAPTURE"
+    )
     assert (
         utils.read_subfile_value(subfile_name, "NUM_INCOHERENT_BEAMS") == "2"
     )

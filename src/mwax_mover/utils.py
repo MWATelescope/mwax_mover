@@ -20,6 +20,10 @@ from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
 # number of lines of the PSRDADA header to read looking for keywords
 PSRDADA_HEADER_BYTES = 4096
 
+# PSRDADA keywords
+PSRDADA_MODE = "MODE"
+PSRDADA_SUBOBS_ID = "SUBOBS_ID"
+
 # This is global mutex so we don't try to create the same metafits
 # file with multiple threads
 metafits_file_lock = threading.Lock()
