@@ -540,6 +540,75 @@ def test_download_metafits_file():
     os.remove(metafits_filename)
 
 
+def test_write_mock_subfile():
+    """Test that our mock subfile is correct"""
+    output_filename = "/tmp/mock_subfile.sub"
+
+    # Write out the mock subfile
+    utils.write_mock_subfile(
+        output_filename,
+        obs_id=1234567890,
+        subobs_id=1234567898,
+        mode="MWAX_VCS",
+        obs_offset=8,
+        rec_channel=123,
+        corr_channel=5,
+    )
+
+    # This is what it should look like
+    expected_header = (
+        "HDR_SIZE 4096\n"
+        "POPULATED 1\n"
+        "OBS_ID 1234567890\n"
+        "SUBOBS_ID 1234567898\n"
+        "MODE MWAX_VCS\n"
+        "UTC_START 2023-01-13-03:33:10\n"
+        "OBS_OFFSET 8\n"
+        "NBIT 8\n"
+        "NPOL 2\n"
+        "NTIMESAMPLES 64000\n"
+        "NINPUTS 256\n"
+        "NINPUTS_XGPU 256\n"
+        "APPLY_PATH_WEIGHTS 0\n"
+        "APPLY_PATH_DELAYS 1\n"
+        "APPLY_PATH_PHASE_OFFSETS 1\n"
+        "INT_TIME_MSEC 500\n"
+        "FSCRUNCH_FACTOR 200\n"
+        "APPLY_VIS_WEIGHTS 0\n"
+        "TRANSFER_SIZE 5275648000\n"
+        "PROJ_ID G0060\n"
+        "EXPOSURE_SECS 200\n"
+        "COARSE_CHANNEL 123\n"
+        "CORR_COARSE_CHANNEL 5\n"
+        "SECS_PER_SUBOBS 8\n"
+        "UNIXTIME 1673580790\n"
+        "UNIXTIME_MSEC 0\n"
+        "FINE_CHAN_WIDTH_HZ 40000\n"
+        "NFINE_CHAN 32\n"
+        "BANDWIDTH_HZ 1280000\n"
+        "SAMPLE_RATE 1280000\n"
+        "MC_IP 0.0.0.0\n"
+        "MC_PORT 0\n"
+        "MC_SRC_IP 0.0.0.0\n"
+        "MWAX_U2S_VER 2.09-87\n"
+        "IDX_PACKET_MAP 0+200860892\n"
+        "IDX_METAFITS 32+1\n"
+        "IDX_DELAY_TABLE 16383744+0\n"
+        "IDX_MARGIN_DATA 256+0\n"
+        "MWAX_SUB_VER 2\n"
+    )
+
+    # Read in the first 4096 bytes as text/ascii
+    with open(output_filename, "rb") as subfile:
+        # Read header
+        header_bytes = subfile.read(len(expected_header))
+
+    # convert bytes to ascii
+    header_text = header_bytes.decode()
+
+    assert header_text == expected_header
+
+
 def test_inject_beamformer_headers():
     """Test that, given a sub file which has a 4096 byte header
     that we can find the end of header and 'paste' in the beamformer
@@ -601,30 +670,30 @@ def test_inject_beamformer_headers():
     assert len(test_header) == 720
 
     # Append the remainder of the 4096 bytes
-    remainder_len = 4096 - len(test_header)
+    remainder_len = utils.PSRDADA_HEADER_BYTES - len(test_header)
     padding = [0x0 for _ in range(remainder_len)]
     assert len(padding) == remainder_len
     # add 255 bytes of data to this subfile
     data_padding = [x for x in range(256)]
     assert len(data_padding) == 256
 
-    # Convert to bytes
-    test_header_bytes = bytes(test_header, "UTF-8")
-
-    # Generate a test sub file
+    # Write the subfile
     subfile_name = "tests/data/beamformer/test_subfile.sub"
-    with open(subfile_name, "wb") as write_file:
-        write_file.write(test_header_bytes)
-        write_file.write(bytearray(padding))
-        write_file.write(bytearray(data_padding))
+    utils.write_mock_subfile_from_header(subfile_name, test_header)
 
+    # inject the beamformer settings
     utils.inject_beamformer_headers(subfile_name, beamformer_settings_string)
 
     # Check file size
-    assert os.path.getsize(subfile_name) == 4096 + len(bytearray(data_padding))
+    assert os.path.getsize(subfile_name) == utils.PSRDADA_HEADER_BYTES + len(
+        bytearray(data_padding)
+    )
 
     # we can also test utils.read_subfile_value(item, key)
-    assert utils.read_subfile_value(subfile_name, "MODE") == "NO_CAPTURE"
+    assert (
+        utils.read_subfile_value(subfile_name, utils.PSRDADA_MODE)
+        == "NO_CAPTURE"
+    )
     assert (
         utils.read_subfile_value(subfile_name, "NUM_INCOHERENT_BEAMS") == "2"
     )

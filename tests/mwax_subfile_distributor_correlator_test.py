@@ -21,8 +21,8 @@ def check_and_make_dir(path):
         os.mkdir(path)
 
 
-def setup_correaltor_test():
-    """Gets the correlator tests ready"""
+def setup_test_dirs():
+    """Gets the test dirs ready"""
     # Setup dirs first!
     # Make the base dir
     base_dir = get_base_path()
@@ -84,7 +84,7 @@ def setup_correaltor_test():
 def test_correlator_config_file():
     """Tests that SubfileDistributor reads a correlator config file ok"""
     # Setup all the paths
-    setup_correaltor_test()
+    setup_test_dirs()
 
     # This will test mwax_subfile_distributor based
     # on correlator_test.cfg

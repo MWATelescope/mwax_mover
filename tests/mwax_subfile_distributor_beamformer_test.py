@@ -22,8 +22,8 @@ def check_and_make_dir(path):
         os.mkdir(path)
 
 
-def setup_beamformer_test():
-    """Gets the correlator tests ready"""
+def setup_test_dirs():
+    """Gets the test dirs ready"""
     # Setup dirs first!
     # Make the base dir
     base_dir = get_base_path()
@@ -59,7 +59,7 @@ def setup_beamformer_test():
 def test_beamformer_config_file():
     """Tests that SubfileDistributor reads a beamformer config file ok"""
     # Setup all the paths
-    setup_beamformer_test()
+    setup_test_dirs()
 
     # This will test mwax_subfile_distributor based
     # on correlator_test.cfg
