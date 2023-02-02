@@ -4,16 +4,16 @@ calibration
 """
 import argparse
 from configparser import ConfigParser
+import json
 import logging
 import logging.handlers
 import os
 import queue
 import signal
 import sys
+import threading
 import time
 from mwax_mover import (
-    mwax_mover,
-    mwax_db,
     utils,
     version,
 )
@@ -24,79 +24,75 @@ class MWAXCalvinProcessor:
 
     def __init__(
         self,
-        logger,
-        hostname: str,
-        archive_to_location: int,
-        concurrent_archive_workers: int,
-        archive_command_timeout_sec: int,
-        incoming_paths: list,
-        recursive: bool,
-        mro_db_handler_object,
-        remote_db_handler_object,
-        health_multicast_interface_ip,
-        health_multicast_ip,
-        health_multicast_port,
-        health_multicast_hops,
-        acacia_profile: str,
-        acacia_ceph_endpoint: str,
-        acacia_multipart_threshold_bytes: int,
-        acacia_chunk_size_bytes: int,
-        acacia_max_concurrency: int,
     ):
+        # General
+        self.logger = None
+        self.log_path = None
+        self.hostname = None
 
-        self.logger = logger
+        # health
+        self.health_multicast_interface_ip = None
+        self.health_multicast_interface_name = None
+        self.health_multicast_ip = None
+        self.health_multicast_port = None
+        self.health_multicast_hops = None
 
-        self.hostname = hostname
-        self.archive_to_location = archive_to_location
-        self.concurrent_archive_workers = concurrent_archive_workers
-        self.archive_command_timeout_sec = archive_command_timeout_sec
-        self.recursive = recursive
-
-        # acacia config
-        self.acacia_profile = acacia_profile
-        self.acacia_ceph_endpoint = acacia_ceph_endpoint
-        self.acacia_multipart_threshold_bytes = (
-            acacia_multipart_threshold_bytes
-        )
-        self.acacia_chunk_size_bytes = acacia_chunk_size_bytes
-        self.acacia_max_concurrency = acacia_max_concurrency
-
-        self.health_multicast_interface_ip = health_multicast_interface_ip
-        self.health_multicast_ip = health_multicast_ip
-        self.health_multicast_port = health_multicast_port
-        self.health_multicast_hops = health_multicast_hops
-
-        # MWAX servers will copy in a temp file, then rename once it is good
-        self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_RENAME
-        self.archiving_paused = False
         self.running = False
-
-        self.mro_db_handler_object = mro_db_handler_object
-        self.remote_db_handler_object = remote_db_handler_object
-
+        self.watch_path = None
+        self.work_path = None
         self.watcher_threads = []
         self.worker_threads = []
 
-        self.watch_dirs = incoming_paths
         self.queue = queue.Queue()
         self.watchers = []
         self.queue_workers = []
 
-    def initialise(self):
-        """Function to setup processor"""
+    def start(self):
+        """Start the processor"""
         self.running = True
+
+        # create a health thread
+        self.logger.info("Starting health_thread...")
+        health_thread = threading.Thread(
+            name="health_thread", target=self.health_handler, daemon=True
+        )
+        health_thread.start()
 
         # Make sure we can Ctrl-C / kill out of this
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
 
-        # Start everything
-        self.start()
+        # Create watchers
+        self.logger.info("Creating watchers...")
+
+        # Create queueworker archive queue
+        self.logger.info("Creating workers...")
+
+        self.logger.info("Waiting for all watchers to finish scanning....")
+        count_of_watchers_still_scanning = len(self.watchers)
+        while count_of_watchers_still_scanning > 0:
+            count_of_watchers_still_scanning = 0
+            for watcher in self.watchers:
+                if not watcher.scan_completed:
+                    count_of_watchers_still_scanning += 1
+            time.sleep(1)  # hold off for another second
+        self.logger.info("Watchers are finished scanning.")
+
+        self.logger.info("Starting workers...")
+        # Setup thread for processing items
+        for i, worker in enumerate(self.queue_workers):
+            queue_worker_thread = threading.Thread(
+                name=f"worker_thread{i}", target=worker.start, daemon=True
+            )
+            self.worker_threads.append(queue_worker_thread)
+            queue_worker_thread.start()
+
+        self.logger.info("Started...")
 
         while self.running:
             for worker_thread in self.worker_threads:
                 if worker_thread:
-                    if worker_thread.isAlive():
+                    if worker_thread.is_alive():
                         time.sleep(1)
                     else:
                         self.running = False
@@ -109,17 +105,95 @@ class MWAXCalvinProcessor:
         # Final log message
         self.logger.info("Completed Successfully")
 
-    def start(self):
-        """Start the processor"""
-
     def stop(self):
-        """Stop the processor"""
+        """Stops all processes"""
+        for watcher in self.watchers:
+            watcher.stop()
+
+        if len(self.queue_workers) > 0:
+            for queue_worker in self.queue_workers:
+                queue_worker.stop()
+
+        # Wait for threads to finish
+        for watcher_thread in self.watcher_threads:
+            if watcher_thread:
+                thread_name = watcher_thread.name
+                self.logger.debug(f"Watcher {thread_name} Stopping...")
+                if watcher_thread.is_alive():
+                    watcher_thread.join()
+                self.logger.debug(f"Watcher {thread_name} Stopped")
+
+        for worker_thread in self.worker_threads:
+            if worker_thread:
+                thread_name = worker_thread.name
+                self.logger.debug(f"QueueWorker {thread_name} Stopping...")
+                if worker_thread.is_alive():
+                    worker_thread.join()
+                self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
     def health_handler(self):
         """Send health information via UDP multicast"""
+        while self.running:
+            # Code to run by the health thread
+            status_dict = self.get_status()
+
+            # Convert the status to bytes
+            status_bytes = json.dumps(status_dict).encode("utf-8")
+
+            # Send the bytes
+            try:
+                utils.send_multicast(
+                    self.health_multicast_interface_ip,
+                    self.health_multicast_ip,
+                    self.health_multicast_port,
+                    status_bytes,
+                    self.health_multicast_hops,
+                )
+            except Exception as catch_all_exception:  # pylint: disable=broad-except
+                self.logger.warning(
+                    "health_handler: Failed to send health information."
+                    f" {catch_all_exception}"
+                )
+
+            # Sleep for a second
+            time.sleep(1)
 
     def get_status(self) -> dict:
-        """Return the status as a dictionary"""
+        """Returns status of all process as a dictionary"""
+        main_status = {
+            "Unix timestamp": time.time(),
+            "process": type(self).__name__,
+            "version": version.get_mwax_mover_version_string(),
+            "host": self.hostname,
+            "running": self.running,
+        }
+
+        watcher_list = []
+
+        for watcher in self.watchers:
+            status = dict({"name": "data_watcher"})
+            status.update(watcher.get_status())
+            watcher_list.append(status)
+
+        worker_list = []
+
+        if len(self.queue_workers) > 0:
+            for i, worker in enumerate(self.queue_workers):
+                status = dict({"name": f"archiver{i}"})
+                status.update(worker.get_status())
+                worker_list.append(status)
+
+        processor_status_list = []
+        processor = {
+            "type": type(self).__name__,
+            "watchers": watcher_list,
+            "workers": worker_list,
+        }
+        processor_status_list.append(processor)
+
+        status = {"main": main_status, "processors": processor_status_list}
+
+        return status
 
     def signal_handler(self, _signum, _frame):
         """Handles SIGINT and SIGTERM"""
@@ -129,269 +203,150 @@ class MWAXCalvinProcessor:
         # Stop any Processors
         self.stop()
 
+    def initialise(self, config_filename):
+        """Initialise the processor from the command line"""
+        # Get this hosts hostname
+        self.hostname = utils.get_hostname()
 
-def main():
-    """Main routine for the processor"""
-    # Get this hosts hostname
-    hostname = utils.get_hostname()
-
-    # Get command line args
-    parser = argparse.ArgumentParser()
-    parser.description = (
-        "mwax_calvin_processor: a command line tool which is part of the"
-        " MWA correlator for the MWA. It will monitor directories on"
-        " each mwax server and, upon detecting a calibrator observation,"
-        " will execute hyperdrive to generate calibration solutions."
-        f" (mwax_mover v{version.get_mwax_mover_version_string()})\n"
-    )
-
-    parser.add_argument(
-        "-c", "--cfg", required=True, help="Configuration file location.\n"
-    )
-
-    args = vars(parser.parse_args())
-
-    # Check that config file exists
-    config_filename = args["cfg"]
-
-    if not os.path.exists(config_filename):
-        print(
-            f"Configuration file location {config_filename} does not exist."
-            " Quitting."
-        )
-        sys.exit(1)
-
-    # Parse config file
-    config = ConfigParser()
-    config.read_file(open(config_filename, "r", encoding="utf-8"))
-
-    # read from config file
-    cfg_log_path = config.get("mwax mover", "log_path")
-
-    if not os.path.exists(cfg_log_path):
-        print(f"log_path {cfg_log_path} does not exist. Quiting.")
-        sys.exit(1)
-
-    # It's now safe to start logging
-    # start logging
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
-    console_log = logging.StreamHandler()
-    console_log.setLevel(logging.DEBUG)
-    console_log.setFormatter(
-        logging.Formatter(
-            "%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"
-        )
-    )
-    logger.addHandler(console_log)
-
-    file_log = logging.FileHandler(
-        filename=os.path.join(cfg_log_path, "main.log")
-    )
-    file_log.setLevel(logging.DEBUG)
-    file_log.setFormatter(
-        logging.Formatter(
-            "%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"
-        )
-    )
-    logger.addHandler(file_log)
-
-    logger.info(
-        "Starting mwax_calvin_processor"
-        f" processor...v{version.get_mwax_mover_version_string()}"
-    )
-
-    i = 1
-    cfg_incoming_paths = []
-
-    # Common config options
-    cfg_archive_to_location = int(
-        utils.read_config(logger, config, "mwax mover", "archive_to_location")
-    )
-    cfg_concurrent_archive_workers = int(
-        utils.read_config(
-            logger, config, "mwax mover", "concurrent_archive_workers"
-        )
-    )
-    cfg_archive_command_timeout_sec = int(
-        utils.read_config(
-            logger, config, "mwax mover", "archive_command_timeout_sec"
-        )
-    )
-
-    # health
-    cfg_health_multicast_ip = utils.read_config(
-        logger, config, "mwax mover", "health_multicast_ip"
-    )
-    cfg_health_multicast_port = int(
-        utils.read_config(
-            logger, config, "mwax mover", "health_multicast_port"
-        )
-    )
-    cfg_health_multicast_hops = int(
-        utils.read_config(
-            logger, config, "mwax mover", "health_multicast_hops"
-        )
-    )
-    cfg_health_multicast_interface_name = utils.read_config(
-        logger, config, "mwax mover", "health_multicast_interface_name"
-    )
-    # get this hosts primary network interface ip
-    cfg_health_multicast_interface_ip = utils.get_ip_address(
-        cfg_health_multicast_interface_name
-    )
-    logger.info(
-        f"IP for sending multicast: {cfg_health_multicast_interface_ip}"
-    )
-
-    # acacia options
-    cfg_acacia_profile = utils.read_config(logger, config, "acacia", "profile")
-    cfg_acacia_ceph_endpoint = utils.read_config(
-        logger, config, "acacia", "ceph_endpoint"
-    )
-    cfg_acacia_multipart_threshold_bytes = int(
-        utils.read_config(
-            logger, config, "acacia", "multipart_threshold_bytes"
-        )
-    )
-    cfg_acacia_chunk_size_bytes = int(
-        utils.read_config(logger, config, "acacia", "chunk_size_bytes")
-    )
-    cfg_acacia_max_concurrency = int(
-        utils.read_config(logger, config, "acacia", "max_concurrency")
-    )
-
-    #
-    # Options specified per host
-    #
-
-    # Look for data_path1.. data_pathN
-    while config.has_option(hostname, f"incoming_path{i}"):
-        new_incoming_path = utils.read_config(
-            logger, config, hostname, f"incoming_path{i}"
-        )
-        if not os.path.exists(new_incoming_path):
-            logger.error(
-                f"incoming file location in incoming_path{i} -"
-                f" {new_incoming_path} does not exist. Quitting."
+        if not os.path.exists(config_filename):
+            print(
+                f"Configuration file location {config_filename} does not"
+                " exist. Quitting."
             )
             sys.exit(1)
-        cfg_incoming_paths.append(new_incoming_path)
-        i += 1
 
-    if len(cfg_incoming_paths) == 0:
-        logger.error(
-            "No incoming data file locations were not present in config file."
-            " Use incoming_path1 .. incoming_pathN in the [<hostname>]"
-            " section (where <hostname> is the lowercase hostname of the"
-            f" machine running this). This host's name is: '{hostname}'."
-            " Quitting."
-        )
-        sys.exit(1)
+        # Parse config file
+        config = ConfigParser()
+        config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    cfg_recursive = utils.read_config_bool(
-        logger, config, hostname, "recursive"
-    )
+        # read from config file
+        self.log_path = config.get("mwax mover", "log_path")
 
-    #
-    # MRO database - this is one we will update
-    #
-    cfg_mro_metadatadb_host = utils.read_config(
-        logger, config, "mro metadata database", "host"
-    )
+        if not os.path.exists(self.log_path):
+            print(f"log_path {self.log_path} does not exist. Quiting.")
+            sys.exit(1)
 
-    if cfg_mro_metadatadb_host != mwax_db.DUMMY_DB:
-        cfg_mro_metadatadb_db = utils.read_config(
-            logger, config, "mro metadata database", "db"
+        # It's now safe to start logging
+        # start logging
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.DEBUG)
+        console_log = logging.StreamHandler()
+        console_log.setLevel(logging.DEBUG)
+        console_log.setFormatter(
+            logging.Formatter(
+                "%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"
+            )
         )
-        cfg_mro_metadatadb_user = utils.read_config(
-            logger, config, "mro metadata database", "user"
-        )
-        cfg_mro_metadatadb_pass = utils.read_config(
-            logger, config, "mro metadata database", "pass", True
-        )
-        cfg_mro_metadatadb_port = utils.read_config(
-            logger, config, "mro metadata database", "port"
-        )
-    else:
-        cfg_mro_metadatadb_db = None
-        cfg_mro_metadatadb_user = None
-        cfg_mro_metadatadb_pass = None
-        cfg_mro_metadatadb_port = None
+        self.logger.addHandler(console_log)
 
-    # Initiate database connection for rmo metadata db
-    mro_db_handler = mwax_db.MWAXDBHandler(
-        logger=logger,
-        host=cfg_mro_metadatadb_host,
-        port=cfg_mro_metadatadb_port,
-        db_name=cfg_mro_metadatadb_db,
-        user=cfg_mro_metadatadb_user,
-        password=cfg_mro_metadatadb_pass,
-    )
-
-    #
-    # Remote metadata db is ready only- just used to query file size and date
-    # info
-    #
-    cfg_remote_metadatadb_host = utils.read_config(
-        logger, config, "remote metadata database", "host"
-    )
-
-    if cfg_remote_metadatadb_host != mwax_db.DUMMY_DB:
-        cfg_remote_metadatadb_db = utils.read_config(
-            logger, config, "remote metadata database", "db"
+        file_log = logging.FileHandler(
+            filename=os.path.join(self.log_path, "main.log")
         )
-        cfg_remote_metadatadb_user = utils.read_config(
-            logger, config, "remote metadata database", "user"
+        file_log.setLevel(logging.DEBUG)
+        file_log.setFormatter(
+            logging.Formatter(
+                "%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"
+            )
         )
-        cfg_remote_metadatadb_pass = utils.read_config(
-            logger, config, "remote metadata database", "pass", True
-        )
-        cfg_remote_metadatadb_port = utils.read_config(
-            logger, config, "remote metadata database", "port"
-        )
-    else:
-        cfg_remote_metadatadb_db = None
-        cfg_remote_metadatadb_user = None
-        cfg_remote_metadatadb_pass = None
-        cfg_remote_metadatadb_port = None
+        self.logger.addHandler(file_log)
 
-    # Initiate database connection for remote metadata db
-    remote_db_handler = mwax_db.MWAXDBHandler(
-        logger=logger,
-        host=cfg_remote_metadatadb_host,
-        port=cfg_remote_metadatadb_port,
-        db_name=cfg_remote_metadatadb_db,
-        user=cfg_remote_metadatadb_user,
-        password=cfg_remote_metadatadb_pass,
-    )
+        self.logger.info(
+            "Starting mwax_calvin_processor"
+            f" processor...v{version.get_mwax_mover_version_string()}"
+        )
 
-    # Create the processor
-    processor = MWAXCalvinProcessor(
-        logger,
-        hostname,
-        cfg_archive_to_location,
-        cfg_concurrent_archive_workers,
-        cfg_archive_command_timeout_sec,
-        cfg_incoming_paths,
-        cfg_recursive,
-        mro_db_handler,
-        remote_db_handler,
-        cfg_health_multicast_interface_ip,
-        cfg_health_multicast_ip,
-        cfg_health_multicast_port,
-        cfg_health_multicast_hops,
-        cfg_acacia_profile,
-        cfg_acacia_ceph_endpoint,
-        cfg_acacia_multipart_threshold_bytes,
-        cfg_acacia_chunk_size_bytes,
-        cfg_acacia_max_concurrency,
-    )
+        # health
+        self.health_multicast_ip = utils.read_config(
+            self.logger, config, "mwax mover", "health_multicast_ip"
+        )
+        self.health_multicast_port = int(
+            utils.read_config(
+                self.logger, config, "mwax mover", "health_multicast_port"
+            )
+        )
+        self.health_multicast_hops = int(
+            utils.read_config(
+                self.logger, config, "mwax mover", "health_multicast_hops"
+            )
+        )
+        self.health_multicast_interface_name = utils.read_config(
+            self.logger,
+            config,
+            "mwax mover",
+            "health_multicast_interface_name",
+        )
+
+        # get this hosts primary network interface ip
+        self.health_multicast_interface_ip = utils.get_ip_address(
+            self.health_multicast_interface_name
+        )
+        self.logger.info(
+            f"IP for sending multicast: {self.health_multicast_interface_ip}"
+        )
+
+        # Get the watch dir
+        self.watch_path = utils.read_config(
+            self.logger,
+            config,
+            "mwax mover",
+            "watch_path",
+        )
+
+        if not os.path.exists(self.watch_path):
+            self.logger.error(
+                "watch_path location "
+                f" {self.watch_path} does not exist. Quitting."
+            )
+            sys.exit(1)
+
+        # Get the work dir
+        self.work_path = utils.read_config(
+            self.logger,
+            config,
+            "mwax mover",
+            "work_path",
+        )
+
+        if not os.path.exists(self.work_path):
+            self.logger.error(
+                "work_path location "
+                f" {self.work_path} does not exist. Quitting."
+            )
+            sys.exit(1)
+
+    def initialise_from_command_line(self):
+        """Initialise if initiated from command line"""
+
+        # Get command line args
+        parser = argparse.ArgumentParser()
+        parser.description = (
+            "mwax_calvin_processor: a command line tool which is part of the"
+            " MWA correlator for the MWA. It will monitor directories on"
+            " each mwax server and, upon detecting a calibrator observation,"
+            " will execute hyperdrive to generate calibration solutions."
+            f" (mwax_mover v{version.get_mwax_mover_version_string()})\n"
+        )
+
+        parser.add_argument(
+            "-c", "--cfg", required=True, help="Configuration file location.\n"
+        )
+
+        args = vars(parser.parse_args())
+
+        # Check that config file exists
+        config_filename = args["cfg"]
+
+        self.initialise(config_filename)
+
+
+def main():
+    """Mainline function"""
+    processor = MWAXCalvinProcessor()
 
     try:
-        processor.initialise()
+        processor.initialise_from_command_line()
+        processor.start()
         sys.exit(0)
-
     except Exception as catch_all_exception:  # pylint: disable=broad-except
         if processor.logger:
             processor.logger.exception(str(catch_all_exception))
