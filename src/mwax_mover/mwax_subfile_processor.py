@@ -39,6 +39,7 @@ class CorrelatorMode(Enum):
             CorrelatorMode.NO_CAPTURE.value,
             CorrelatorMode.CORR_MODE_CHANGE.value,
             CorrelatorMode.VOLTAGE_STOP.value,
+            CorrelatorMode.VOLTAGE_BUFFER.value,
         ]
 
     @staticmethod
@@ -54,7 +55,6 @@ class CorrelatorMode(Enum):
         """Returns true if mode is a vcs obs"""
         return mode_string in [
             CorrelatorMode.VOLTAGE_START.value,
-            CorrelatorMode.VOLTAGE_BUFFER.value,
             CorrelatorMode.MWAX_VCS.value,
         ]
 
