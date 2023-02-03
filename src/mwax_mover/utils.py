@@ -406,7 +406,7 @@ def process_mwax_stats(
     elapsed = time.time() - start_time
 
     if return_value:
-        logger.info(f"{full_filename} stats success in {elapsed} seconds")
+        logger.info(f"{full_filename} stats success in {elapsed:.3f} seconds")
     else:
         logger.error(f"{full_filename} stats failed with error {stdout}")
 
@@ -635,7 +635,7 @@ def do_checksum_md5(
         if len(checksum) == 32:
             logger.info(
                 f"{full_filename} md5sum success"
-                f" {checksum} ({size_megabytes:.3f}MB in {elapsed} secs at"
+                f" {checksum} ({size_megabytes:.3f}MB in {elapsed:.3f} secs at"
                 f" {mb_per_sec:.3f} MB/s)"
             )
             return checksum
