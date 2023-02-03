@@ -4,6 +4,7 @@ from configparser import ConfigParser
 from enum import Enum
 import fcntl
 import glob
+import json
 import os
 import queue
 import shutil
@@ -835,3 +836,13 @@ def write_mock_subfile(
     )
 
     write_mock_subfile_from_header(output_filename, header)
+
+
+def get_data_files_for_obsid_from_webservice(obsid: int):
+    """Calls an MWA webservice, passing in an obsid and returning a json metadata structure"""
+    result = requests.get(
+        "http://ws.mwatelescope.org/metadata/data_files",
+        data={"obs_id": obsid, "terse": False},
+    )
+    metadict = json.loads(result.text)
+    return metadict

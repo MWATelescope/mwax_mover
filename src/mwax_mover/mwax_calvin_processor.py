@@ -4,6 +4,7 @@ calibration
 """
 import argparse
 from configparser import ConfigParser
+import glob
 import json
 import logging
 import logging.handlers
@@ -13,10 +14,8 @@ import signal
 import sys
 import threading
 import time
-from mwax_mover import (
-    utils,
-    version,
-)
+from mwax_mover import utils, version, mwax_watcher, mwax_queue_worker
+from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_NEW
 
 
 class MWAXCalvinProcessor:
@@ -42,10 +41,14 @@ class MWAXCalvinProcessor:
         self.work_path = None
         self.watcher_threads = []
         self.worker_threads = []
+        self.mwax_mover_mode = MODE_WATCH_DIR_FOR_NEW
 
         self.queue = queue.Queue()
         self.watchers = []
         self.queue_workers = []
+
+        self.obsid_check_thread = None
+        self.obsid_check_seconds = None
 
     def start(self):
         """Start the processor"""
@@ -54,7 +57,7 @@ class MWAXCalvinProcessor:
         # create a health thread
         self.logger.info("Starting health_thread...")
         health_thread = threading.Thread(
-            name="health_thread", target=self.health_handler, daemon=True
+            name="health_thread", target=self.health_loop, daemon=True
         )
         health_thread.start()
 
@@ -64,9 +67,40 @@ class MWAXCalvinProcessor:
 
         # Create watchers
         self.logger.info("Creating watchers...")
+        # Create watcher for each data path queue
+        new_watcher = mwax_watcher.Watcher(
+            name="incoming_watcher",
+            path=self.watch_path,
+            dest_queue=self.queue,
+            pattern=".fits",
+            log=self.logger,
+            mode=self.mwax_mover_mode,
+            recursive=False,
+            exclude_pattern=None,
+        )
+        self.watchers.append(new_watcher)
 
         # Create queueworker archive queue
         self.logger.info("Creating workers...")
+        incoming_worker = mwax_queue_worker.QueueWorker(
+            name="incoming_worker",
+            source_queue=self.queue,
+            executable_path=None,
+            event_handler=self.incoming_handler,
+            log=self.logger,
+            requeue_to_eoq_on_failure=True,
+            exit_once_queue_empty=False,
+        )
+        self.queue_workers.append(incoming_worker)
+
+        self.logger.info("Starting watchers...")
+        # Setup thread for watching filesystem
+        for i, watcher in enumerate(self.watchers):
+            watcher_thread = threading.Thread(
+                name=f"watch_thread{i}", target=watcher.start, daemon=True
+            )
+            self.watcher_threads.append(watcher_thread)
+            watcher_thread.start()
 
         self.logger.info("Waiting for all watchers to finish scanning....")
         count_of_watchers_still_scanning = len(self.watchers)
@@ -87,6 +121,15 @@ class MWAXCalvinProcessor:
             self.worker_threads.append(queue_worker_thread)
             queue_worker_thread.start()
 
+        self.logger.info("Starting obsid_check_thread...")
+        obsid_check_thread = threading.Thread(
+            name="obsid_check_thread",
+            target=self.obsid_check_loop,
+            daemon=True,
+        )
+        self.obsid_check_thread = obsid_check_thread
+        obsid_check_thread.start()
+
         self.logger.info("Started...")
 
         while self.running:
@@ -104,6 +147,90 @@ class MWAXCalvinProcessor:
 
         # Final log message
         self.logger.info("Completed Successfully")
+
+    def incoming_handler(self, item) -> bool:
+        """This is triggered each time a new fits file
+        appears in the incoming_path"""
+        self.logger.info(f"Handling... incoming FITS file {item}...")
+        filename = os.path.basename(item)
+        obs_id: int = int(filename[0:10])
+
+        obsid_work_dir = os.path.join(self.work_path, str(obs_id))
+        if not os.path.exists(obsid_work_dir):
+            self.logger.info(
+                f"{item} creating obs_id's work dir {obsid_work_dir}..."
+            )
+            # This is the first file of this obs_id to be seen
+            os.mkdir(obsid_work_dir)
+
+        # Relocate this file to the obs_id_work_dir
+        new_filename = os.path.join(obsid_work_dir, filename)
+        self.logger.info(
+            f"{item} moving file into obs_id's work dir {new_filename}..."
+        )
+        os.rename(item, new_filename)
+        return True
+
+    def check_obs_is_ready_to_process(self, obs_id, obsid_work_dir) -> bool:
+        """This routine checks to see if an observation is ready to be processed
+        by hyperdrive"""
+        # perform web service call to get list of data files from obsid
+        json_metadata = utils.get_data_files_for_obsid_from_webservice(obs_id)
+
+        # we need a list of files from the web service
+        # this should just be the filenames
+        web_service_filenames = [filename for filename in json_metadata]
+        web_service_filenames.sort()
+
+        # we need a list of files from the work dir
+        # this first list has the full path
+        work_dir_full_path_files = glob.glob(
+            os.path.join(obsid_work_dir, "*.fits")
+        )
+        work_dir_filenames = [
+            os.path.basename(i) for i in work_dir_full_path_files
+        ]
+        work_dir_filenames.sort()
+
+        return_value = web_service_filenames == work_dir_filenames
+
+        self.logger.debug(
+            f"check_obs_is_ready_to_process({obs_id}) == {return_value} (WS:"
+            f" {len(web_service_filenames)}, work_dir:"
+            f" {len(work_dir_filenames)})"
+        )
+        return return_value
+
+    def obsid_check_loop(self):
+        """This thread sleeps most of the time, but wakes up
+        to check if there are any complete sets of gpubox
+        files which we should process"""
+        while self.running:
+            time.sleep(self.obsid_check_seconds)
+
+            self.logger.debug(
+                "Waking up and checking un-processed observations..."
+            )
+
+            obs_id_list = []
+
+            # make a list of all obs_ids in the work path
+            for filename in os.listdir(self.work_path):
+                full_filename = os.path.join(self.work_path, filename)
+                if os.path.isdir(full_filename):
+                    obs_id_list.append(filename)
+
+            # sort it
+            obs_id_list.sort()
+
+            # Check each one
+            for obs_id in obs_id_list:
+                if self.check_obs_is_ready_to_process(
+                    obs_id, os.path.join(self.work_path, obs_id)
+                ):
+                    # do processing
+                    self.logger.info(f"{obs_id} is ready for processing...")
+        return True
 
     def stop(self):
         """Stops all processes"""
@@ -131,7 +258,7 @@ class MWAXCalvinProcessor:
                     worker_thread.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
-    def health_handler(self):
+    def health_loop(self):
         """Send health information via UDP multicast"""
         while self.running:
             # Code to run by the health thread
@@ -313,6 +440,14 @@ class MWAXCalvinProcessor:
                 f" {self.work_path} does not exist. Quitting."
             )
             sys.exit(1)
+
+        # Set obsid_check_seconds
+        # How many secs between waiting for all gpubox files to arrive?
+        self.obsid_check_seconds = int(
+            utils.read_config(
+                self.logger, config, "mwax mover", "obsid_check_seconds"
+            )
+        )
 
     def initialise_from_command_line(self):
         """Initialise if initiated from command line"""
