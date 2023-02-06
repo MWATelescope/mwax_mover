@@ -174,9 +174,9 @@ def archive_file_ceph(
     full_filename: str,
     bucket_name: str,
     md5hash: str,
-    multipart_threshold_bytes: int,
-    chunk_size_bytes: int,
-    max_concurrency: int,
+    multipart_threshold_bytes: int = None,
+    chunk_size_bytes: int = None,
+    max_concurrency: int = None,
 ):
     """Archive file via ceph"""
     logger.debug(f"{full_filename} attempting archive_file_ceph...")
@@ -352,9 +352,9 @@ def ceph_upload_file(
     bucket_name: str,
     filename: str,
     md5hash: str,
-    multipart_threshold_bytes: int,
-    chunk_size_bytes: int,
-    max_concurrency: int,
+    multipart_threshold_bytes: int = None,
+    chunk_size_bytes: int = None,
+    max_concurrency: int = None,
 ) -> bool:
     """upload a file via ceph/s3"""
     # get key
@@ -363,20 +363,32 @@ def ceph_upload_file(
     # get reference to bucket
     bucket = ceph_resource.Bucket(bucket_name)
 
-    # configure the xfer to use multiparts
-    # 5GB is the limit Ceph has for parts, so only split if >= 2GB
-    config = TransferConfig(
-        multipart_threshold=multipart_threshold_bytes,
-        multipart_chunksize=chunk_size_bytes,
-        use_threads=True,
-        max_concurrency=max_concurrency,
-    )
+    # configure the xfer to use multiparts if specified
+    if (
+        multipart_threshold_bytes is not None
+        and chunk_size_bytes is not None
+        and max_concurrency is not None
+    ):
+        # 5GB is the limit Ceph has for parts, so only split if >= 2GB
+        config = TransferConfig(
+            multipart_threshold=multipart_threshold_bytes,
+            multipart_chunksize=chunk_size_bytes,
+            use_threads=True,
+            max_concurrency=max_concurrency,
+        )
 
-    # Upload the file and include the md5sum as metadata
-    bucket.upload_file(
-        Filename=filename,
-        Key=key,
-        Config=config,
-        ExtraArgs={"Metadata": {"md5": md5hash}},
-    )
+        # Upload the file and include the md5sum as metadata
+        bucket.upload_file(
+            Filename=filename,
+            Key=key,
+            Config=config,
+            ExtraArgs={"Metadata": {"md5": md5hash}},
+        )
+    else:
+        # Upload the file without a transferconfig
+        bucket.upload_file(
+            Filename=filename,
+            Key=key,
+            ExtraArgs={"Metadata": {"md5": md5hash}},
+        )
     return True
