@@ -67,7 +67,7 @@ def create_observation_subfiles(
         os.rename(tmp_subfile_filename, subfile_filename)
 
         # simulate gap between subobs
-        time.sleep(4)
+        time.sleep(2)
 
         # Increment subobsid and offset
         sub_obs_id += 8
@@ -229,7 +229,7 @@ def test_voltage_dump():
     msd.logger.debug(response.text)
 
     # Wait for processing
-    time.sleep(5)
+    time.sleep(3)
 
     # Now send through a MWAX_VCS and then some NO_CAPTURES
     # To test that:
