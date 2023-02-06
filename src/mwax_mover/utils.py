@@ -329,12 +329,37 @@ def read_config(
     logger, config: ConfigParser, section: str, key: str, b64encoded=False
 ):
     """Reads a value from a config file"""
+    raw_value = config.get(section, key)
+
     if b64encoded:
-        value = base64.b64decode(config.get(section, key)).decode("utf-8")
+        value = base64.b64decode(raw_value).decode("utf-8")
         value_to_log = "*" * len(value)
     else:
-        value = config.get(section, key)
+        value = raw_value
         value_to_log = value
+
+    logger.info(f"Read cfg [{section}].{key} == {value_to_log}")
+    return value
+
+
+def read_optional_config(
+    logger, config: ConfigParser, section: str, key: str, b64encoded=False
+):
+    """Reads an optional value from a config file"""
+    raw_value = config.get(section, key)
+    value = None
+    value_to_log = ""
+
+    if raw_value == "":
+        value = None
+        value_to_log = "None"
+    else:
+        if b64encoded:
+            value = base64.b64decode(raw_value).decode("utf-8")
+            value_to_log = "*" * len(value)
+        else:
+            value = raw_value
+            value_to_log = value
 
     logger.info(f"Read cfg [{section}].{key} == {value_to_log}")
     return value

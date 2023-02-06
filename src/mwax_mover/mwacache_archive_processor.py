@@ -11,6 +11,8 @@ import signal
 import sys
 import threading
 import time
+import astropy
+import boto3
 from boto3 import Session
 from mwax_mover import (
     mwax_mover,
@@ -496,6 +498,13 @@ class MWACacheArchiveProcessor:
             f" processor...v{version.get_mwax_mover_version_string()}"
         )
 
+        # Dump some diagnostic info
+        py_version = sys.version  # contains a \n, so get rid of it
+        py_version = py_version.replace("\n", " ")
+        self.logger.info(f"Python v{py_version}")
+        self.logger.info(f"astropy v{astropy.__version__}")
+        self.logger.info(f"boto3 v{boto3.__version__}")
+
         i = 1
         self.watch_dirs = []
 
@@ -597,21 +606,25 @@ class MWACacheArchiveProcessor:
             "ceph_endpoints",
         )
 
-        self.s3_multipart_threshold_bytes = int(
-            utils.read_config(
-                self.logger, config, s3_section, "multipart_threshold_bytes"
-            )
+        self.s3_multipart_threshold_bytes = utils.read_optional_config(
+            self.logger, config, s3_section, "multipart_threshold_bytes"
         )
-        self.s3_chunk_size_bytes = int(
-            utils.read_config(
-                self.logger, config, s3_section, "chunk_size_bytes"
+        if self.s3_multipart_threshold_bytes is not None:
+            self.s3_multipart_threshold_bytes = int(
+                self.s3_multipart_threshold_bytes
             )
+
+        self.s3_chunk_size_bytes = utils.read_optional_config(
+            self.logger, config, s3_section, "chunk_size_bytes"
         )
-        self.s3_max_concurrency = int(
-            utils.read_config(
-                self.logger, config, s3_section, "max_concurrency"
-            )
+        if self.s3_chunk_size_bytes is not None:
+            self.s3_chunk_size_bytes = int(self.s3_chunk_size_bytes)
+
+        self.s3_max_concurrency = utils.read_optional_config(
+            self.logger, config, s3_section, "max_concurrency"
         )
+        if self.s3_max_concurrency is not None:
+            self.s3_max_concurrency = int(self.s3_max_concurrency)
 
         #
         # Options specified per host

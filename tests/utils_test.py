@@ -525,6 +525,26 @@ def test_config_get_list_empty():
     assert return_list == []
 
 
+def test_config_get_optional_value():
+    """Read an empty string from a config file and ensure it gets
+    treated as None. Also test an non empty gets read right too"""
+    logger = logging.getLogger("test")
+    config_filename = os.path.join(os.getcwd(), "tests/mwacache_test.cfg")
+    config = ConfigParser()
+    config.read_file(open(config_filename, "r", encoding="utf-8"))
+
+    empty_return_val = utils.read_optional_config(
+        logger, config, "banksia", "max_concurrency"
+    )
+
+    non_empty_return_val = utils.read_optional_config(
+        logger, config, "acacia", "max_concurrency"
+    )
+
+    assert empty_return_val is None
+    assert non_empty_return_val is not None
+
+
 def test_download_metafits_file():
     """Test that we can download a metafits file by obsid
     from the web service"""
