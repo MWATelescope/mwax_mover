@@ -306,6 +306,22 @@ def get_bucket_name_from_obs_id(obs_id: int) -> str:
     return f"mwaingest-{str(obs_id)[0:5]}"
 
 
+def get_metafits_value(metafits_filename: str, key: str):
+    """
+    Returns a metafits value based on key in primary HDU
+    """
+    try:
+        with fits.open(metafits_filename) as hdul:
+            # Read key from primary HDU
+            return hdul[0].header[key]  # pylint: disable=no-member
+
+    except Exception as catch_all_exception:
+        raise Exception(
+            f"Error reading metafits file: {metafits_filename}:"
+            f" {catch_all_exception}"
+        ) from catch_all_exception
+
+
 def get_metafits_values(metafits_filename: str) -> (bool, str):
     """
     Returns a tuple of is_calibrator (bool) and

@@ -4,6 +4,7 @@ calibration
 """
 import argparse
 from configparser import ConfigParser
+import datetime
 import glob
 import json
 import logging
@@ -14,6 +15,7 @@ import signal
 import sys
 import threading
 import time
+from astropy import time as astrotime
 from mwax_mover import utils, version, mwax_watcher, mwax_queue_worker
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_NEW
 
@@ -38,7 +40,8 @@ class MWAXCalvinProcessor:
 
         self.running = False
         self.watch_path = None
-        self.work_path = None
+        self.assemble_path = None
+        self.processing_path = None
         self.watcher_threads = []
         self.worker_threads = []
         self.mwax_mover_mode = MODE_WATCH_DIR_FOR_NEW
@@ -47,8 +50,8 @@ class MWAXCalvinProcessor:
         self.watchers = []
         self.queue_workers = []
 
-        self.obsid_check_thread = None
-        self.obsid_check_seconds = None
+        self.obsid_assemble_thread = None
+        self.assemble_check_seconds = None
 
     def start(self):
         """Start the processor"""
@@ -121,14 +124,14 @@ class MWAXCalvinProcessor:
             self.worker_threads.append(queue_worker_thread)
             queue_worker_thread.start()
 
-        self.logger.info("Starting obsid_check_thread...")
-        obsid_check_thread = threading.Thread(
-            name="obsid_check_thread",
+        # Start obs_id_check_thread
+        self.obsid_assemble_thread = threading.Thread(
+            name="obsid_assemble_thread",
             target=self.obsid_check_loop,
             daemon=True,
         )
-        self.obsid_check_thread = obsid_check_thread
-        obsid_check_thread.start()
+        self.obsid_assemble_thread.start()
+        self.worker_threads.append(self.obsid_assemble_thread)
 
         self.logger.info("Started...")
 
@@ -155,85 +158,156 @@ class MWAXCalvinProcessor:
         filename = os.path.basename(item)
         obs_id: int = int(filename[0:10])
 
-        obsid_work_dir = os.path.join(self.work_path, str(obs_id))
-        if not os.path.exists(obsid_work_dir):
+        obsid_assembly_dir = os.path.join(self.assemble_path, str(obs_id))
+        if not os.path.exists(obsid_assembly_dir):
             self.logger.info(
-                f"{item} creating obs_id's work dir {obsid_work_dir}..."
+                f"{item} creating obs_id's assembly dir"
+                f" {obsid_assembly_dir}..."
             )
             # This is the first file of this obs_id to be seen
-            os.mkdir(obsid_work_dir)
+            os.mkdir(obsid_assembly_dir)
 
         # Relocate this file to the obs_id_work_dir
-        new_filename = os.path.join(obsid_work_dir, filename)
+        new_filename = os.path.join(obsid_assembly_dir, filename)
         self.logger.info(
-            f"{item} moving file into obs_id's work dir {new_filename}..."
+            f"{item} moving file into obs_id's assembly dir {new_filename}..."
         )
         os.rename(item, new_filename)
         return True
 
-    def check_obs_is_ready_to_process(self, obs_id, obsid_work_dir) -> bool:
+    def check_obs_is_ready_to_process(
+        self, obs_id, obsid_assembly_dir
+    ) -> bool:
         """This routine checks to see if an observation is ready to be processed
         by hyperdrive"""
-        # perform web service call to get list of data files from obsid
-        json_metadata = utils.get_data_files_for_obsid_from_webservice(obs_id)
-
-        # we need a list of files from the web service
-        # this should just be the filenames
-        web_service_filenames = [filename for filename in json_metadata]
-        web_service_filenames.sort()
-
-        # we need a list of files from the work dir
-        # this first list has the full path
-        work_dir_full_path_files = glob.glob(
-            os.path.join(obsid_work_dir, "*.fits")
+        #
+        # Check we have a metafits
+        #
+        metafits_filename = f"{obs_id}_metafits.fits"
+        metafits_assembly_filename = os.path.join(
+            obsid_assembly_dir, metafits_filename
         )
-        work_dir_filenames = [
-            os.path.basename(i) for i in work_dir_full_path_files
-        ]
-        work_dir_filenames.sort()
 
-        return_value = web_service_filenames == work_dir_filenames
+        if not os.path.exists(metafits_assembly_filename):
+            # download the metafits file to the assembly dir for the obs
+            try:
+                self.logger.info(f"{obs_id} Downloading metafits file...")
+                utils.download_metafits_file(obs_id, obsid_assembly_dir)
+                self.logger.info(f"{obs_id} metafits downloaded successfully")
+            except Exception as catch_all_exception:
+                self.logger.error(
+                    f"Metafits file {metafits_assembly_filename} did not exist"
+                    " and could not download one from web"
+                    f" service. {catch_all_exception}"
+                )
+                return False
 
-        self.logger.debug(
-            f"check_obs_is_ready_to_process({obs_id}) == {return_value} (WS:"
-            f" {len(web_service_filenames)}, work_dir:"
-            f" {len(work_dir_filenames)})"
+        # Get the duration of the obs from the metafits and only proceed
+        # if the current gps time is > the obs_id + duration + a constant
+        exp_time = int(
+            utils.get_metafits_value(metafits_assembly_filename, "EXPOSURE")
         )
-        return return_value
+        current_gpstime = astrotime.Time(
+            datetime.datetime.utcnow(), scale="utc"
+        ).gps
+        if current_gpstime > (int(obs_id) + exp_time):
+            #
+            # perform web service call to get list of data files from obsid
+            #
+            json_metadata = utils.get_data_files_for_obsid_from_webservice(
+                obs_id
+            )
+
+            #
+            # we need a list of files from the web service
+            # this should just be the filenames
+            #
+            web_service_filenames = [filename for filename in json_metadata]
+            web_service_filenames.sort()
+
+            # we need a list of files from the work dir
+            # this first list has the full path
+            # put a basic UNIX pattern so we don't pick up the metafits
+
+            # Check for gpubox files (mwax OR legacy)
+            glob_spec = "*.fits"
+            assembly_dir_full_path_files = glob.glob(
+                os.path.join(obsid_assembly_dir, glob_spec)
+            )
+            assembly_dir_filenames = [
+                os.path.basename(i) for i in assembly_dir_full_path_files
+            ]
+            assembly_dir_filenames.sort()
+            # Remove the metafits file
+            assembly_dir_filenames.remove(metafits_filename)
+
+            # How does what we need compare to what we have?
+            return_value = web_service_filenames == assembly_dir_filenames
+
+            self.logger.debug(
+                f"{obs_id} check_obs_is_ready_to_process() =="
+                f" {return_value} (WS: {len(web_service_filenames)},"
+                f" assembly_dir: {len(assembly_dir_filenames)})"
+            )
+            return return_value
+        else:
+            self.logger(
+                f"{obs_id} Observation is still in progress:"
+                f" {current_gpstime} < ({obs_id} - {int(obs_id)+exp_time})"
+            )
+            return False
 
     def obsid_check_loop(self):
         """This thread sleeps most of the time, but wakes up
-        to check if there are any complete sets of gpubox
-        files which we should process"""
+        to check if there are any completely assembled sets of
+        gpubox files which we should process"""
         while self.running:
-            time.sleep(self.obsid_check_seconds)
-
             self.logger.debug(
-                "Waking up and checking un-processed observations..."
+                f"sleeping for {self.assemble_check_seconds} secs"
             )
+            time.sleep(self.assemble_check_seconds)
 
-            obs_id_list = []
+            if self.running:
+                self.logger.debug(
+                    "Waking up and checking un-assembled observations..."
+                )
 
-            # make a list of all obs_ids in the work path
-            for filename in os.listdir(self.work_path):
-                full_filename = os.path.join(self.work_path, filename)
-                if os.path.isdir(full_filename):
-                    obs_id_list.append(filename)
+                obs_id_list = []
 
-            # sort it
-            obs_id_list.sort()
+                # make a list of all obs_ids in the work path
+                for filename in os.listdir(self.assemble_path):
+                    full_filename = os.path.join(self.assemble_path, filename)
+                    if os.path.isdir(full_filename):
+                        obs_id_list.append(filename)
 
-            # Check each one
-            for obs_id in obs_id_list:
-                if self.check_obs_is_ready_to_process(
-                    obs_id, os.path.join(self.work_path, obs_id)
-                ):
-                    # do processing
-                    self.logger.info(f"{obs_id} is ready for processing...")
+                # sort it
+                obs_id_list.sort()
+
+                # Check each one
+                for obs_id in obs_id_list:
+                    obs_assemble_path = os.path.join(
+                        self.assemble_path, obs_id
+                    )
+                    if self.check_obs_is_ready_to_process(
+                        obs_id, obs_assemble_path
+                    ):
+                        # do processing
+                        obs_processing_path = os.path.join(
+                            self.processing_path, obs_id
+                        )
+
+                        self.logger.info(
+                            f"{obs_id} is ready for processing. Moving"
+                            f" {obs_assemble_path} to {obs_processing_path}"
+                        )
+
+                        # Move the directory to the processing path
+                        os.rename(obs_assemble_path, obs_processing_path)
+
         return True
 
     def stop(self):
-        """Stops all processes"""
+        """Shutsdown all processes"""
         for watcher in self.watchers:
             watcher.stop()
 
@@ -426,26 +500,41 @@ class MWAXCalvinProcessor:
             )
             sys.exit(1)
 
-        # Get the work dir
-        self.work_path = utils.read_config(
+        # Get the assemble dir
+        self.assemble_path = utils.read_config(
             self.logger,
             config,
             "mwax mover",
-            "work_path",
+            "assemble_path",
         )
 
-        if not os.path.exists(self.work_path):
+        if not os.path.exists(self.assemble_path):
             self.logger.error(
-                "work_path location "
-                f" {self.work_path} does not exist. Quitting."
+                "assemble_path location "
+                f" {self.assemble_path} does not exist. Quitting."
             )
             sys.exit(1)
 
-        # Set obsid_check_seconds
+        # Get the processing dir
+        self.processing_path = utils.read_config(
+            self.logger,
+            config,
+            "mwax mover",
+            "processing_path",
+        )
+
+        if not os.path.exists(self.processing_path):
+            self.logger.error(
+                "processing_path location "
+                f" {self.processing_path} does not exist. Quitting."
+            )
+            sys.exit(1)
+
+        # Set assemble_check_seconds
         # How many secs between waiting for all gpubox files to arrive?
-        self.obsid_check_seconds = int(
+        self.assemble_check_seconds = int(
             utils.read_config(
-                self.logger, config, "mwax mover", "obsid_check_seconds"
+                self.logger, config, "mwax mover", "assemble_check_seconds"
             )
         )
 
