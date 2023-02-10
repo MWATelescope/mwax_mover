@@ -39,19 +39,22 @@ class MWAXCalvinProcessor:
         self.health_multicast_hops = None
 
         self.running = False
+
+        # assembly
         self.watch_path = None
         self.assemble_path = None
-        self.processing_path = None
+        self.assemble_check_seconds = None
+        self.queue = queue.Queue()
+        self.watchers = []
+        self.queue_workers = []
+        self.obsid_assemble_thread = None
         self.watcher_threads = []
         self.worker_threads = []
         self.mwax_mover_mode = MODE_WATCH_DIR_FOR_NEW
 
-        self.queue = queue.Queue()
-        self.watchers = []
-        self.queue_workers = []
-
-        self.obsid_assemble_thread = None
-        self.assemble_check_seconds = None
+        # processing
+        self.processing_path = None
+        self.hyperdrive_binary_path = None
 
     def start(self):
         """Start the processor"""
@@ -63,10 +66,6 @@ class MWAXCalvinProcessor:
             name="health_thread", target=self.health_loop, daemon=True
         )
         health_thread.start()
-
-        # Make sure we can Ctrl-C / kill out of this
-        signal.signal(signal.SIGINT, self.signal_handler)
-        signal.signal(signal.SIGTERM, self.signal_handler)
 
         # Create watchers
         self.logger.info("Creating watchers...")
@@ -416,6 +415,10 @@ class MWAXCalvinProcessor:
             )
             sys.exit(1)
 
+        # Make sure we can Ctrl-C / kill out of this
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
+
         # Parse config file
         config = ConfigParser()
         config.read_file(open(config_filename, "r", encoding="utf-8"))
@@ -485,11 +488,15 @@ class MWAXCalvinProcessor:
             f"IP for sending multicast: {self.health_multicast_interface_ip}"
         )
 
+        #
+        # Assembly config
+        #
+
         # Get the watch dir
         self.watch_path = utils.read_config(
             self.logger,
             config,
-            "mwax mover",
+            "assembly",
             "watch_path",
         )
 
@@ -504,7 +511,7 @@ class MWAXCalvinProcessor:
         self.assemble_path = utils.read_config(
             self.logger,
             config,
-            "mwax mover",
+            "assembly",
             "assemble_path",
         )
 
@@ -515,11 +522,23 @@ class MWAXCalvinProcessor:
             )
             sys.exit(1)
 
+        # Set assemble_check_seconds
+        # How many secs between waiting for all gpubox files to arrive?
+        self.assemble_check_seconds = int(
+            utils.read_config(
+                self.logger, config, "assembly", "assemble_check_seconds"
+            )
+        )
+
+        #
+        # processing config
+        #
+
         # Get the processing dir
         self.processing_path = utils.read_config(
             self.logger,
             config,
-            "mwax mover",
+            "processing",
             "processing_path",
         )
 
@@ -530,13 +549,20 @@ class MWAXCalvinProcessor:
             )
             sys.exit(1)
 
-        # Set assemble_check_seconds
-        # How many secs between waiting for all gpubox files to arrive?
-        self.assemble_check_seconds = int(
-            utils.read_config(
-                self.logger, config, "mwax mover", "assemble_check_seconds"
-            )
+        # Get the hyperdrive binary
+        self.hyperdrive_binary_path = utils.read_config(
+            self.logger,
+            config,
+            "processing",
+            "hyperdrive_binary_path",
         )
+
+        if not os.path.exists(self.hyperdrive_binary_path):
+            self.logger.error(
+                "hyperdrive_binary_payj location "
+                f" {self.hyperdrive_binary_path} does not exist. Quitting."
+            )
+            sys.exit(1)
 
     def initialise_from_command_line(self):
         """Initialise if initiated from command line"""

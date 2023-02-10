@@ -386,8 +386,8 @@ class SubfileProcessor:
                         success = False
 
                     # There is a semi-rare case where in between the top of this code and now
-                    # a voltage trigger has been received. If so THIS subfile may not have been added to
-                    # the keep list, so deal with it now
+                    # a voltage trigger has been received. If so THIS subfile may not have
+                    # been added to the keep list, so deal with it now
                     if (
                         (
                             self.dump_start_gps is not None
