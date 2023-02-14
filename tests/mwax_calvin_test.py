@@ -121,7 +121,7 @@ def test_mwax_calvin_config_file():
     assert mcal.health_multicast_port == 8009
     assert mcal.health_multicast_hops == 1
 
-    assert mcal.watch_path == os.path.join(base_dir, "watch")
+    assert mcal.incoming_watch_path == os.path.join(base_dir, "watch")
     assert mcal.assemble_path == os.path.join(base_dir, "assemble")
     assert mcal.assemble_check_seconds == 10
 
@@ -130,6 +130,12 @@ def test_mwax_calvin_config_file():
         mcal.hyperdrive_binary_path
         == "../mwa_hyperdrive/target/release/hyperdrive"
     )
+    assert (
+        mcal.source_list_filename
+        == "../srclists/srclist_pumav3_EoR0aegean_fixedEoR1pietro+ForA_phase1+2.txt"
+    )
+    assert mcal.source_list_type == "rts"
+    assert mcal.hyperdrive_timeout == 7200
 
 
 def test_mwax_calvin_normal_pipeline_run():
@@ -167,7 +173,7 @@ def test_mwax_calvin_normal_pipeline_run():
 
     for filename in incoming_files:
         dest_filename = os.path.join(
-            mcal.watch_path, os.path.basename(filename)
+            mcal.incoming_watch_path, os.path.basename(filename)
         )
 
         shutil.copyfile(filename, dest_filename)

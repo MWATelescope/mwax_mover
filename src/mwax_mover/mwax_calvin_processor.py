@@ -17,7 +17,10 @@ import threading
 import time
 from astropy import time as astrotime
 from mwax_mover import utils, version, mwax_watcher, mwax_queue_worker
-from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_NEW
+from mwax_mover.mwax_mover import (
+    MODE_WATCH_DIR_FOR_NEW,
+)
+from mwax_mover.mwax_hyperdrive_utils import run_hyperdrive
 
 
 class MWAXCalvinProcessor:
@@ -40,20 +43,25 @@ class MWAXCalvinProcessor:
 
         self.running = False
 
-        # assembly
-        self.watch_path = None
-        self.assemble_path = None
-        self.assemble_check_seconds = None
-        self.queue = queue.Queue()
         self.watchers = []
         self.queue_workers = []
-        self.obsid_assemble_thread = None
         self.watcher_threads = []
         self.worker_threads = []
-        self.mwax_mover_mode = MODE_WATCH_DIR_FOR_NEW
+
+        # assembly
+        self.incoming_watch_path = None
+        self.assembly_watch_queue = queue.Queue()
+        self.assemble_path = None
+        self.assemble_check_seconds = None
+        self.obsid_check_assembled_thread = None
 
         # processing
         self.processing_path = None
+        self.processing_queue = queue.Queue()
+        self.source_list_filename = None
+        self.source_list_type = None
+        self.hyperdrive_timeout = None
+
         self.hyperdrive_binary_path = None
 
     def start(self):
@@ -67,36 +75,65 @@ class MWAXCalvinProcessor:
         )
         health_thread.start()
 
+        #
+        # Do initial scan for directories to add to the processing
+        # queue (in the processing_path)
+        #
+        scanned_dirs = utils.scan_directory(
+            self.logger, self.processing_path, "", False, None
+        )
+        for item in scanned_dirs:
+            if os.path.isdir(item):
+                self.add_to_processing_queue(item)
+
+        #
         # Create watchers
+        #
         self.logger.info("Creating watchers...")
-        # Create watcher for each data path queue
+        # Create watcher for the incoming watch path queue
         new_watcher = mwax_watcher.Watcher(
             name="incoming_watcher",
-            path=self.watch_path,
-            dest_queue=self.queue,
+            path=self.incoming_watch_path,
+            dest_queue=self.assembly_watch_queue,
             pattern=".fits",
             log=self.logger,
-            mode=self.mwax_mover_mode,
+            mode=MODE_WATCH_DIR_FOR_NEW,
             recursive=False,
             exclude_pattern=None,
         )
         self.watchers.append(new_watcher)
 
-        # Create queueworker archive queue
+        #
+        # Create queue workers
+        #
+
+        # Create queueworker for assembly queue
         self.logger.info("Creating workers...")
-        incoming_worker = mwax_queue_worker.QueueWorker(
+        new_worker = mwax_queue_worker.QueueWorker(
             name="incoming_worker",
-            source_queue=self.queue,
+            source_queue=self.assembly_watch_queue,
             executable_path=None,
             event_handler=self.incoming_handler,
             log=self.logger,
             requeue_to_eoq_on_failure=True,
             exit_once_queue_empty=False,
         )
-        self.queue_workers.append(incoming_worker)
+        self.queue_workers.append(new_worker)
+
+        # Create queueworker for assembly queue
+        new_worker = mwax_queue_worker.QueueWorker(
+            name="processing_worker",
+            source_queue=self.processing_queue,
+            executable_path=None,
+            event_handler=self.processing_handler,
+            log=self.logger,
+            requeue_to_eoq_on_failure=True,
+            exit_once_queue_empty=False,
+        )
+        self.queue_workers.append(new_worker)
 
         self.logger.info("Starting watchers...")
-        # Setup thread for watching filesystem
+        # Setup threads for watching filesystem
         for i, watcher in enumerate(self.watchers):
             watcher_thread = threading.Thread(
                 name=f"watch_thread{i}", target=watcher.start, daemon=True
@@ -115,7 +152,7 @@ class MWAXCalvinProcessor:
         self.logger.info("Watchers are finished scanning.")
 
         self.logger.info("Starting workers...")
-        # Setup thread for processing items
+        # Setup threads for processing items
         for i, worker in enumerate(self.queue_workers):
             queue_worker_thread = threading.Thread(
                 name=f"worker_thread{i}", target=worker.start, daemon=True
@@ -124,13 +161,13 @@ class MWAXCalvinProcessor:
             queue_worker_thread.start()
 
         # Start obs_id_check_thread
-        self.obsid_assemble_thread = threading.Thread(
+        self.obsid_check_assembled_thread = threading.Thread(
             name="obsid_assemble_thread",
-            target=self.obsid_check_loop,
+            target=self.obsid_check_assembled_handler,
             daemon=True,
         )
-        self.obsid_assemble_thread.start()
-        self.worker_threads.append(self.obsid_assemble_thread)
+        self.obsid_check_assembled_thread.start()
+        self.worker_threads.append(self.obsid_check_assembled_thread)
 
         self.logger.info("Started...")
 
@@ -209,6 +246,7 @@ class MWAXCalvinProcessor:
         current_gpstime = astrotime.Time(
             datetime.datetime.utcnow(), scale="utc"
         ).gps
+
         if current_gpstime > (int(obs_id) + exp_time):
             #
             # perform web service call to get list of data files from obsid
@@ -250,13 +288,13 @@ class MWAXCalvinProcessor:
             )
             return return_value
         else:
-            self.logger(
+            self.logger.info(
                 f"{obs_id} Observation is still in progress:"
                 f" {current_gpstime} < ({obs_id} - {int(obs_id)+exp_time})"
             )
             return False
 
-    def obsid_check_loop(self):
+    def obsid_check_assembled_handler(self):
         """This thread sleeps most of the time, but wakes up
         to check if there are any completely assembled sets of
         gpubox files which we should process"""
@@ -302,8 +340,38 @@ class MWAXCalvinProcessor:
 
                         # Move the directory to the processing path
                         os.rename(obs_assemble_path, obs_processing_path)
-
+                        self.add_to_processing_queue(obs_processing_path)
         return True
+
+    def add_to_processing_queue(self, item):
+        """Adds a dir containing all the files for an obsid
+        to the processing queue"""
+        self.processing_queue.put(item)
+        self.logger.info(
+            f"{item} added to processing_queue."
+            f" ({self.processing_queue.qsize()}) in queue."
+        )
+
+    def processing_handler(self, item) -> bool:
+        """This is triggered when an obsid dir is moved into
+        the processing directory, indicating it is ready to
+        have hyperdrive run on it"""
+        success: bool = False
+        file_no_path = item.split("/")
+        obs_id = file_no_path[-1][0:10]
+        data_files_path_and_wildcard = os.path.join(item, "*.fits")
+
+        # Run hyperdrive
+        success = run_hyperdrive(
+            self.logger,
+            self.hyperdrive_binary_path,
+            data_files_path_and_wildcard,
+            self.source_list_filename,
+            self.source_list_type,
+            self.hyperdrive_timeout,
+        )
+
+        return success
 
     def stop(self):
         """Shutsdown all processes"""
@@ -349,7 +417,9 @@ class MWAXCalvinProcessor:
                     status_bytes,
                     self.health_multicast_hops,
                 )
-            except Exception as catch_all_exception:  # pylint: disable=broad-except
+            except (
+                Exception
+            ) as catch_all_exception:  # pylint: disable=broad-except
                 self.logger.warning(
                     "health_handler: Failed to send health information."
                     f" {catch_all_exception}"
@@ -493,17 +563,17 @@ class MWAXCalvinProcessor:
         #
 
         # Get the watch dir
-        self.watch_path = utils.read_config(
+        self.incoming_watch_path = utils.read_config(
             self.logger,
             config,
             "assembly",
-            "watch_path",
+            "incoming_watch_path",
         )
 
-        if not os.path.exists(self.watch_path):
+        if not os.path.exists(self.incoming_watch_path):
             self.logger.error(
-                "watch_path location "
-                f" {self.watch_path} does not exist. Quitting."
+                "incoming_watch_path location "
+                f" {self.incoming_watch_path} does not exist. Quitting."
             )
             sys.exit(1)
 
@@ -548,6 +618,38 @@ class MWAXCalvinProcessor:
                 f" {self.processing_path} does not exist. Quitting."
             )
             sys.exit(1)
+
+        #
+        # Hyperdrive config
+        #
+        self.source_list_filename = utils.read_config(
+            self.logger,
+            config,
+            "processing",
+            "source_list_filename",
+        )
+
+        if not os.path.exists(self.source_list_filename):
+            self.logger.error(
+                "source_list_filename location "
+                f" {self.source_list_filename} does not exist. Quitting."
+            )
+            sys.exit(1)
+
+        self.source_list_type = utils.read_config(
+            self.logger,
+            config,
+            "processing",
+            "source_list_type",
+        )
+        self.hyperdrive_timeout = int(
+            utils.read_config(
+                self.logger,
+                config,
+                "processing",
+                "hyperdrive_timeout",
+            )
+        )
 
         # Get the hyperdrive binary
         self.hyperdrive_binary_path = utils.read_config(
