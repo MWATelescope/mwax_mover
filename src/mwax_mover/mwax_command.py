@@ -76,3 +76,89 @@ def run_command_ext(
             f"Exception executing {cmdline}: {str(command_exception)}"
         )
         return False, ""
+
+
+# This will return a popen process object which can be polled for exit
+# use shell should be used when you are using wildcards and other shell
+# features
+def run_command_popen(
+    logger,
+    command: str,
+    numa_node: int,
+    use_shell: bool = False,
+):
+    """Runs a command and returns success or failure and stdout"""
+    # Example: ["dada_diskdb", "-k 1234", "-f 1216447872_02_256_201.sub -s"]
+    if numa_node is None:
+        cmdline = f"{command}"
+    else:
+        if int(numa_node) > 0:
+            cmdline = (
+                "numactl"
+                f" --cpunodebind={str(numa_node)} --membind={str(numa_node)} "
+                f"{command}"
+            )
+        else:
+            cmdline = f"{command}"
+
+    logger.debug(f"Executing {cmdline}...")
+
+    # Parse the command into executable and args
+
+    if use_shell:
+        #
+        # NOTE: using shell=true in subprocess.run requires a string.
+        # Passing a list won't work!
+        #
+        args = cmdline
+    else:
+        args = shlex.split(cmdline)
+
+    # Execute the command
+    popen_process = subprocess.Popen(
+        args,
+        shell=use_shell,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    return popen_process
+
+
+def check_popen_finished(
+    logger, popen_process, timeout: int = 60
+) -> typing.Tuple[int, str, str]:
+    """Given a running popen_process object
+    wait for it to finish and return the exit code
+    and output stdout & stderr"""
+    stderror = ""
+    stdout = ""
+    return_code = -1
+
+    try:
+        return_code = popen_process.returncode
+        stdout, stderror = popen_process.communicate(timeout=timeout)
+
+        if return_code != 0:
+            logger.error(
+                f"Error executing {popen_process.args}. Return code:"
+                f" {return_code} StdErr: {stderror} StdOut: {stdout}"
+            )
+
+    except subprocess.TimeoutExpired as timeout_expired:
+        logger.error(f"Timeout expired executing {timeout_expired.cmd}")
+        stderror += "\nTimeout expired"
+
+    except subprocess.CalledProcessError as cpe:
+        logger.error(
+            f"CalledProcessError executing {popen_process.args}:"
+            f" {str(cpe)} {cpe.stderr}"
+        )
+
+    except Exception as command_exception:  # pylint: disable=broad-except
+        logger.error(
+            f"Exception executing {popen_process.args}:"
+            f" {str(command_exception)}"
+        )
+
+    return (return_code, stdout, stderror)

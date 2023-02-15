@@ -19,8 +19,8 @@ TEST_BASE_PATH = "tests/mock_mwax_calvin"
 # downloaded this observation (as a tar) and then extracted it
 # to the TEST_OBS_ID_LOCATION (feel free to change)
 #
-TEST_OBS_ID = 1329702928
-TEST_OBS_LOCATION = "/data/1329702928"
+TEST_OBS_ID = 1339580448
+TEST_OBS_LOCATION = f"/data/{TEST_OBS_ID}"
 
 
 def get_base_path() -> str:
@@ -61,6 +61,10 @@ def setup_mwax_calvin_test():
     # processing path
     processing_path = os.path.join(base_dir, "processing")
     check_and_make_dir(processing_path)
+
+    # processing error path
+    processing_error_path = os.path.join(base_dir, "processing_errors")
+    check_and_make_dir(processing_error_path)
 
     # Now check that the TEST_OBS files exist
     assert os.path.exists(TEST_OBS_LOCATION), (
@@ -126,16 +130,21 @@ def test_mwax_calvin_config_file():
     assert mcal.assemble_check_seconds == 10
 
     assert mcal.processing_path == os.path.join(base_dir, "processing")
-    assert (
-        mcal.hyperdrive_binary_path
-        == "../mwa_hyperdrive/target/release/hyperdrive"
+    assert mcal.processing_error_path == os.path.join(
+        base_dir, "processing_errors"
     )
     assert (
         mcal.source_list_filename
         == "../srclists/srclist_pumav3_EoR0aegean_fixedEoR1pietro+ForA_phase1+2.txt"
     )
     assert mcal.source_list_type == "rts"
+    assert (
+        mcal.hyperdrive_binary_path
+        == "../mwa_hyperdrive/target/release/hyperdrive"
+    )
     assert mcal.hyperdrive_timeout == 7200
+    assert mcal.birli_binary_path == "../Birli/target/release/birli"
+    assert mcal.birli_timeout == 3600
 
 
 def test_mwax_calvin_normal_pipeline_run():
@@ -178,10 +187,94 @@ def test_mwax_calvin_normal_pipeline_run():
 
         shutil.copyfile(filename, dest_filename)
         # delay by up to 1 sec
-        time.sleep(random.random())
+        time.sleep(random.random() / 2.0)
 
     # Wait for processing
-    time.sleep(10)
+    time.sleep(60)
+
+    # Quit
+    # Ok time's up! Stop the processor
+    mcal.signal_handler(signal.SIGINT, 0)
+    thrd.join()
+
+    # Assembly
+    assemble_files = glob.glob(
+        os.path.join(mcal.assemble_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}*.fits")
+    )
+    assert len(assemble_files) == 0
+
+    # processing
+    # Files are left here because we had to shutdown during processing
+    # there was no error as such
+    processing_files = glob.glob(
+        os.path.join(
+            mcal.processing_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}*.fits"
+        )
+    )
+    assert len(processing_files) == 25  # metafits plus the gpubox files
+
+    # also look for uvfits output from birli
+    birli_files = glob.glob(
+        os.path.join(
+            mcal.processing_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}*.uvfits"
+        )
+    )
+    assert len(birli_files) == 1
+
+    # processing errors
+    processing_error_files = glob.glob(
+        os.path.join(
+            mcal.processing_error_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}*.fits"
+        )
+    )
+    assert len(processing_error_files) == 0
+
+
+def test_mwax_calvin_hyperdrive_timeout():
+    """Tests that mwax_calvin does a normal
+    simple pipeline run but hyperdrive times out"""
+    # Setup all the paths
+    setup_mwax_calvin_test()
+
+    # Start mwax_subfile_distributor using our test config
+    mcal = MWAXCalvinProcessor()
+
+    # Override the hostname
+    mcal.hostname = "test_server"
+
+    # Determine config file location
+    config_filename = "tests/mwax_calvin_test.cfg"
+
+    # Call to read config <-- this is what we're testing!
+    mcal.initialise(config_filename)
+    mcal.hyperdrive_timeout = 5
+
+    # Start the pipeline
+    # Create and start a thread for the processor
+    thrd = threading.Thread(name="mcal_thread", target=mcal.start, daemon=True)
+
+    # Start the processor
+    thrd.start()
+
+    # allow things to start
+    time.sleep(5)
+
+    # Now we simulate TEST_OBS files being delivered into the watch dir
+    incoming_files = glob.glob(
+        os.path.join(TEST_OBS_LOCATION, f"{TEST_OBS_ID}_*_ch*.fits")
+    )
+
+    for filename in incoming_files:
+        dest_filename = os.path.join(
+            mcal.incoming_watch_path, os.path.basename(filename)
+        )
+
+        shutil.copyfile(filename, dest_filename)
+        # delay by up to 1 sec
+        time.sleep(random.random() / 2.0)
+
+    # Wait for processing
+    time.sleep(15)
 
     # Quit
     # Ok time's up! Stop the processor
@@ -189,14 +282,27 @@ def test_mwax_calvin_normal_pipeline_run():
     thrd.join()
 
     # Now check results
+
+    # Assembly
     assemble_files = glob.glob(
         os.path.join(mcal.assemble_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}*.fits")
     )
     assert len(assemble_files) == 0
 
+    # processing
     processing_files = glob.glob(
         os.path.join(
             mcal.processing_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}*.fits"
         )
     )
-    assert len(processing_files) == 25  # metafits plus the gpubox files
+    assert len(processing_files) == 0
+
+    # processing errors
+    # hyperdrive timed out so it is an error so we file it away
+    # into the processing errors dir
+    processing_error_files = glob.glob(
+        os.path.join(
+            mcal.processing_error_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}*.fits"
+        )
+    )
+    assert len(processing_error_files) == 25  # metafits plus the gpubox files

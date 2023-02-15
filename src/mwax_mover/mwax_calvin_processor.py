@@ -20,7 +20,10 @@ from mwax_mover import utils, version, mwax_watcher, mwax_queue_worker
 from mwax_mover.mwax_mover import (
     MODE_WATCH_DIR_FOR_NEW,
 )
-from mwax_mover.mwax_hyperdrive_utils import run_hyperdrive
+from mwax_mover.mwax_command import (
+    run_command_popen,
+    check_popen_finished,
+)
 
 
 class MWAXCalvinProcessor:
@@ -42,6 +45,7 @@ class MWAXCalvinProcessor:
         self.health_multicast_hops = None
 
         self.running = False
+        self.ready_to_exit = False
 
         self.watchers = []
         self.queue_workers = []
@@ -57,12 +61,20 @@ class MWAXCalvinProcessor:
 
         # processing
         self.processing_path = None
+        self.processing_error_path = None
         self.processing_queue = queue.Queue()
         self.source_list_filename = None
         self.source_list_type = None
-        self.hyperdrive_timeout = None
 
+        # birli
+        self.birli_timeout = None
+        self.birli_binary_path = None
+        self.birli_popen_process = None
+
+        # hyperdrive
+        self.hyperdrive_timeout = None
         self.hyperdrive_binary_path = None
+        self.hyperdrive_popen_process = None
 
     def start(self):
         """Start the processor"""
@@ -117,18 +129,21 @@ class MWAXCalvinProcessor:
             log=self.logger,
             requeue_to_eoq_on_failure=True,
             exit_once_queue_empty=False,
+            requeue_on_error=True,
         )
         self.queue_workers.append(new_worker)
 
         # Create queueworker for assembly queue
+        # if we fail, do not requeue, move to processing_error dir
         new_worker = mwax_queue_worker.QueueWorker(
             name="processing_worker",
             source_queue=self.processing_queue,
             executable_path=None,
             event_handler=self.processing_handler,
             log=self.logger,
-            requeue_to_eoq_on_failure=True,
+            requeue_to_eoq_on_failure=False,
             exit_once_queue_empty=False,
+            requeue_on_error=False,
         )
         self.queue_workers.append(new_worker)
 
@@ -183,6 +198,8 @@ class MWAXCalvinProcessor:
         #
         # Finished- do some clean up
         #
+        while not self.ready_to_exit:
+            time.sleep(1)
 
         # Final log message
         self.logger.info("Completed Successfully")
@@ -352,24 +369,173 @@ class MWAXCalvinProcessor:
             f" ({self.processing_queue.qsize()}) in queue."
         )
 
+    def write_failure_readme_file(
+        self, filename, cmd, exit_code, stdout, stderr
+    ):
+        """This will create a small readme.txt file which will
+        hopefully help whoever poor sap is checking why birli
+        or hyperdrive did not work!"""
+        try:
+            with open(filename, "w", encoding="UTF-8") as readme:
+                readme.write(
+                    "This run failed at:"
+                    f" {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n"
+                )
+                readme.write("Command that failed:\n")
+                readme.write(cmd)
+                readme.write("\n")
+                readme.write(f"Exit code: {exit_code}\n")
+                readme.write(f"stdout: {stdout}\n")
+                readme.write(f"stderr: {stderr}\n")
+
+        except Exception:
+            self.logger.warning(
+                (
+                    f"Could not write text file {filename} describing the"
+                    " problem observation."
+                ),
+                exc_info=True,
+            )
+
     def processing_handler(self, item) -> bool:
         """This is triggered when an obsid dir is moved into
         the processing directory, indicating it is ready to
-        have hyperdrive run on it"""
+        have birli then hyperdrive run on it"""
+        birli_success: bool = False
         success: bool = False
+
+        stdout = ""
+        elapsed = -1
+
         file_no_path = item.split("/")
         obs_id = file_no_path[-1][0:10]
-        data_files_path_and_wildcard = os.path.join(item, "*.fits")
+        data_files = glob.glob(os.path.join(item, "*.fits"))
 
-        # Run hyperdrive
-        success = run_hyperdrive(
-            self.logger,
-            self.hyperdrive_binary_path,
-            data_files_path_and_wildcard,
-            self.source_list_filename,
-            self.source_list_type,
-            self.hyperdrive_timeout,
-        )
+        data_file_arg = ""
+        for data_file in data_files:
+            data_file_arg += f"{data_file} "
+
+        uvfits_filename = os.path.join(item, str(obs_id) + ".uvfits")
+        metafits_filename = os.path.join(item, str(obs_id) + "_metafits.fits")
+
+        try:
+            # Run birli
+            cmdline = (
+                f"{self.birli_binary_path}"
+                " --no-draw-progress"
+                f" --uvfits-out={uvfits_filename}"
+                f" --flag-edge-width={80}"
+                f" --metafits {metafits_filename}"
+                f" {data_file_arg}"
+            )
+
+            start_time = time.time()
+
+            self.birli_popen_process = run_command_popen(
+                self.logger, cmdline, -1, False
+            )
+
+            return_val, stdout, stderr = check_popen_finished(
+                self.logger,
+                self.birli_popen_process,
+                self.birli_timeout,
+            )
+
+            # return_val, stdout = run_command_ext(logger, cmdline, -1, timeout, False)
+            elapsed = time.time() - start_time
+
+            if return_val:
+                self.logger.info(
+                    f"Birli run successful in {elapsed:.3f} seconds"
+                )
+                birli_success = True
+                self.birli_popen_process = None
+
+                ## Success!
+            else:
+                self.logger.error(
+                    f"Birli run FAILED: Exit code of {return_val} in"
+                    f" {elapsed:.3f} seconds: {stderr}"
+                )
+        except Exception as hyperdrive_run_exception:
+            self.logger.error(
+                "hyperdrive run FAILED: Unhandled exception"
+                f" {hyperdrive_run_exception} in {elapsed:.3f} seconds:"
+                f" {stderr}"
+            )
+
+        if birli_success:
+            # If all good run hyperdrive
+            try:
+                # Run hyperdrive
+                cmdline = (
+                    f"{self.hyperdrive_binary_path} di-calibrate"
+                    " --no-progress-bars"
+                    f" --data {uvfits_filename}"
+                    " --num-sources 5"
+                    f" --source-list={self.source_list_filename}"
+                    f" --source-list-type={self.source_list_type}"
+                )
+
+                start_time = time.time()
+
+                # run hyperdrive
+                self.hyperdrive_popen_process = run_command_popen(
+                    self.logger, cmdline, -1, False
+                )
+
+                return_val, stdout, stderr = check_popen_finished(
+                    self.logger,
+                    self.hyperdrive_popen_process,
+                    self.hyperdrive_timeout,
+                )
+
+                # return_val, stdout = run_command_ext(logger, cmdline, -1, timeout, False)
+                elapsed = time.time() - start_time
+
+                if return_val:
+                    self.logger.info(
+                        f"hyperdrive run successful in {elapsed:.3f} seconds"
+                    )
+                    success = True
+                    self.hyperdrive_popen_process = None
+
+                    ## Success!
+                else:
+                    self.logger.error(
+                        f"hyperdrive run FAILED: Exit code of {return_val} in"
+                        f" {elapsed:.3f} seconds: {stderr}"
+                    )
+            except Exception as hyperdrive_run_exception:
+                self.logger.error(
+                    "hyperdrive run FAILED: Unhandled exception"
+                    f" {hyperdrive_run_exception} in {elapsed:.3f} seconds:"
+                    f" {stderr}"
+                )
+
+        if not success:
+            # If we are not shutting down,
+            # Move the files to an error dir
+            #
+            # If we are shutting down, then this error is because
+            # we have effectively sent it a SIGINT. This should not be a
+            # reason to abandon processing. Leave it there to be picked up
+            # next run
+            if self.running:
+                error_path = os.path.join(self.processing_error_path, obs_id)
+                self.logger.info(
+                    f"{obs_id}: moving failed files to {error_path} for manual"
+                    " analysis and writing readme.txt"
+                )
+
+                # Move the processing dir
+                os.rename(item, error_path)
+
+                # Write out a useful file of error and command line info
+                readme_filename = os.path.join(error_path, "readme.txt")
+                self.write_failure_readme_file(
+                    readme_filename, cmdline, return_val, stdout, stderr
+                )
 
         return success
 
@@ -378,9 +544,18 @@ class MWAXCalvinProcessor:
         for watcher in self.watchers:
             watcher.stop()
 
-        if len(self.queue_workers) > 0:
-            for queue_worker in self.queue_workers:
-                queue_worker.stop()
+        for queue_worker in self.queue_workers:
+            queue_worker.stop()
+
+        # check for a hyperdrive process and kill it
+        self.logger.debug("Checking for running hyperdrive process...")
+        if self.hyperdrive_popen_process:
+            if not self.hyperdrive_popen_process.poll():
+                self.logger.debug(
+                    "Running hyperdrive process found. Sending it SIGINT..."
+                )
+                self.hyperdrive_popen_process.send_signal(signal.SIGINT)
+                self.logger.debug("SIGINT sent to Hyperdrive")
 
         # Wait for threads to finish
         for watcher_thread in self.watcher_threads:
@@ -396,8 +571,12 @@ class MWAXCalvinProcessor:
                 thread_name = worker_thread.name
                 self.logger.debug(f"QueueWorker {thread_name} Stopping...")
                 if worker_thread.is_alive():
-                    worker_thread.join()
+                    # Short timeout- everything other than a running hyperdrive
+                    # instance should have joined by now.
+                    worker_thread.join(timeout=10)
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
+
+        self.ready_to_exit = True
 
     def health_loop(self):
         """Send health information via UDP multicast"""
@@ -619,6 +798,21 @@ class MWAXCalvinProcessor:
             )
             sys.exit(1)
 
+        # Get the processing error dir
+        self.processing_error_path = utils.read_config(
+            self.logger,
+            config,
+            "processing",
+            "processing_error_path",
+        )
+
+        if not os.path.exists(self.processing_error_path):
+            self.logger.error(
+                "processing_error_path location "
+                f" {self.processing_error_path} does not exist. Quitting."
+            )
+            sys.exit(1)
+
         #
         # Hyperdrive config
         #
@@ -642,6 +836,8 @@ class MWAXCalvinProcessor:
             "processing",
             "source_list_type",
         )
+
+        # hyperdrive timeout
         self.hyperdrive_timeout = int(
             utils.read_config(
                 self.logger,
@@ -661,8 +857,33 @@ class MWAXCalvinProcessor:
 
         if not os.path.exists(self.hyperdrive_binary_path):
             self.logger.error(
-                "hyperdrive_binary_payj location "
+                "hyperdrive_binary_path location "
                 f" {self.hyperdrive_binary_path} does not exist. Quitting."
+            )
+            sys.exit(1)
+
+        # Birli timeout
+        self.birli_timeout = int(
+            utils.read_config(
+                self.logger,
+                config,
+                "processing",
+                "birli_timeout",
+            )
+        )
+
+        # Get the Birli binary
+        self.birli_binary_path = utils.read_config(
+            self.logger,
+            config,
+            "processing",
+            "birli_binary_path",
+        )
+
+        if not os.path.exists(self.birli_binary_path):
+            self.logger.error(
+                "birli_binary_path location "
+                f" {self.birli_binary_path} does not exist. Quitting."
             )
             sys.exit(1)
 
@@ -673,10 +894,11 @@ class MWAXCalvinProcessor:
         parser = argparse.ArgumentParser()
         parser.description = (
             "mwax_calvin_processor: a command line tool which is part of the"
-            " MWA correlator for the MWA. It will monitor directories on"
-            " each mwax server and, upon detecting a calibrator observation,"
-            " will execute hyperdrive to generate calibration solutions."
-            f" (mwax_mover v{version.get_mwax_mover_version_string()})\n"
+            " MWA correlator for the MWA. It will monitor directories on each"
+            " mwax server and, upon detecting a calibrator observation, will"
+            " execute birli then hyperdrive to generate calibration"
+            " solutions. (mwax_mover"
+            f" v{version.get_mwax_mover_version_string()})\n"
         )
 
         parser.add_argument(
