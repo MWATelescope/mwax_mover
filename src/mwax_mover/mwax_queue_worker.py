@@ -18,6 +18,10 @@ class QueueWorker(object):
     #                                         , False = keep retrying this
     #                                                   item (i.e. order
     #                                                   of items matters)
+    # requeue_on_error: if True the above logic holds. if False,
+    #                   it will not be retried or requeued. It's up to the event_handler
+    #                   to know what to do here. E.g. log it and ignore. Move to a "failed"
+    #                   dir, etc.
     def __init__(
         self,
         name: str,
@@ -30,6 +34,7 @@ class QueueWorker(object):
         backoff_initial_seconds: int = 1,
         backoff_factor: int = 2,
         backoff_limit_seconds: int = 60,
+        requeue_on_error: bool = True,
     ):
         self.name = name
         self.source_queue = source_queue
@@ -54,6 +59,7 @@ class QueueWorker(object):
         self.backoff_initial_seconds = backoff_initial_seconds
         self.backoff_factor = backoff_factor
         self.backoff_limit_seconds = backoff_limit_seconds
+        self.requeue_on_error = requeue_on_error
         # Use threading event instead of time.sleep to backoff
         self.event = threading.Event()
 
@@ -112,27 +118,34 @@ class QueueWorker(object):
                         # reset our error count and backoffs
                         self.consecutive_error_count = 0
                     else:
-                        self.consecutive_error_count += 1
-                        backoff = (
-                            self.backoff_initial_seconds
-                            * self.backoff_factor
-                            * self.consecutive_error_count
-                        )
-                        if backoff > self.backoff_limit_seconds:
-                            backoff = self.backoff_limit_seconds
+                        if self.requeue_on_error:
+                            self.consecutive_error_count += 1
+                            backoff = (
+                                self.backoff_initial_seconds
+                                * self.backoff_factor
+                                * self.consecutive_error_count
+                            )
+                            if backoff > self.backoff_limit_seconds:
+                                backoff = self.backoff_limit_seconds
 
-                        self.logger.info(
-                            f"{self.consecutive_error_count} consecutive"
-                            f" failures. Backing off for {backoff} seconds."
-                        )
-                        self.event.wait(backoff)
+                            self.logger.info(
+                                f"{self.consecutive_error_count} consecutive"
+                                " failures. Backing off for"
+                                f" {backoff} seconds."
+                            )
+                            self.event.wait(backoff)
 
-                        # If this option is set, add item back to the end of
-                        # the queue
-                        # If not set, just keep retrying the operation
-                        if self.requeue_to_eoq_on_failure:
+                            # If this option is set, add item back to the end of
+                            # the queue
+                            # If not set, just keep retrying the operation
+                            if self.requeue_to_eoq_on_failure:
+                                self.source_queue.task_done()
+                                self.source_queue.put(self.current_item)
+                                self.current_item = None
+                        else:
+                            # We are not requeuing after the error
+                            # so tell the queue we are done with this item
                             self.source_queue.task_done()
-                            self.source_queue.put(self.current_item)
                             self.current_item = None
 
                 except queue.Empty:
