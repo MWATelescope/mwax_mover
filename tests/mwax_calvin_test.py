@@ -189,8 +189,8 @@ def test_mwax_calvin_normal_pipeline_run():
         # delay by up to 1 sec
         time.sleep(random.random() / 2.0)
 
-    # Wait for processing
-    time.sleep(60)
+    # Wait for processing (up to 5 mins for birli and hyperdrive)
+    time.sleep(60 * 5)
 
     # Quit
     # Ok time's up! Stop the processor
@@ -220,6 +220,18 @@ def test_mwax_calvin_normal_pipeline_run():
         )
     )
     assert len(birli_files) == 1
+
+    # look for solutions
+    hyperdrive_solution_files = glob.glob(
+        os.path.join(
+            mcal.processing_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}_solutions.fits"
+        )
+    )
+    assert len(hyperdrive_solution_files) == 1
+    bin_solution_files = glob.glob(
+        os.path.join(mcal.processing_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}.bin")
+    )
+    assert len(bin_solution_files) == 1
 
     # processing errors
     processing_error_files = glob.glob(

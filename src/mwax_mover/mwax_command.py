@@ -133,16 +133,16 @@ def check_popen_finished(
     and output stdout & stderr"""
     stderror = ""
     stdout = ""
-    return_code = -1
+    exit_code = -1
 
     try:
-        return_code = popen_process.returncode
         stdout, stderror = popen_process.communicate(timeout=timeout)
+        exit_code = popen_process.returncode
 
-        if return_code != 0:
+        if exit_code != 0:
             logger.error(
                 f"Error executing {popen_process.args}. Return code:"
-                f" {return_code} StdErr: {stderror} StdOut: {stdout}"
+                f" {exit_code} StdErr: {stderror} StdOut: {stdout}"
             )
 
     except subprocess.TimeoutExpired as timeout_expired:
@@ -161,4 +161,4 @@ def check_popen_finished(
             f" {str(command_exception)}"
         )
 
-    return (return_code, stdout, stderror)
+    return (exit_code, stdout, stderror)

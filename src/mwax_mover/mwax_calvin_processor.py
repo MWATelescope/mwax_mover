@@ -369,21 +369,23 @@ class MWAXCalvinProcessor:
             f" ({self.processing_queue.qsize()}) in queue."
         )
 
-    def write_failure_readme_file(
-        self, filename, cmd, exit_code, stdout, stderr
-    ):
+    def write_readme_file(self, filename, cmd, exit_code, stdout, stderr):
         """This will create a small readme.txt file which will
         hopefully help whoever poor sap is checking why birli
-        or hyperdrive did not work!"""
+        or hyperdrive did or did not work!"""
         try:
             with open(filename, "w", encoding="UTF-8") as readme:
-                readme.write(
-                    "This run failed at:"
-                    f" {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n"
-                )
-                readme.write("Command that failed:\n")
-                readme.write(cmd)
-                readme.write("\n")
+                if exit_code == 0:
+                    readme.write(
+                        "This run succeded at:"
+                        f" {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n"
+                    )
+                else:
+                    readme.write(
+                        "This run failed at:"
+                        f" {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n"
+                    )
+                readme.write(f"Command: {cmd}")
                 readme.write(f"Exit code: {exit_code}\n")
                 readme.write(f"stdout: {stdout}\n")
                 readme.write(f"stderr: {stderr}\n")
@@ -409,23 +411,27 @@ class MWAXCalvinProcessor:
 
         file_no_path = item.split("/")
         obs_id = file_no_path[-1][0:10]
+        metafits_filename = os.path.join(item, str(obs_id) + "_metafits.fits")
+
+        # Get only data files
         data_files = glob.glob(os.path.join(item, "*.fits"))
+        # Remove the metafits (we specify it seperately)
+        data_files.remove(metafits_filename)
 
         data_file_arg = ""
         for data_file in data_files:
             data_file_arg += f"{data_file} "
 
         uvfits_filename = os.path.join(item, str(obs_id) + ".uvfits")
-        metafits_filename = os.path.join(item, str(obs_id) + "_metafits.fits")
 
         try:
             # Run birli
             cmdline = (
                 f"{self.birli_binary_path}"
+                f" --metafits {metafits_filename}"
                 " --no-draw-progress"
                 f" --uvfits-out={uvfits_filename}"
                 f" --flag-edge-width={80}"
-                f" --metafits {metafits_filename}"
                 f" {data_file_arg}"
             )
 
@@ -435,7 +441,7 @@ class MWAXCalvinProcessor:
                 self.logger, cmdline, -1, False
             )
 
-            return_val, stdout, stderr = check_popen_finished(
+            exit_code, stdout, stderr = check_popen_finished(
                 self.logger,
                 self.birli_popen_process,
                 self.birli_timeout,
@@ -444,7 +450,8 @@ class MWAXCalvinProcessor:
             # return_val, stdout = run_command_ext(logger, cmdline, -1, timeout, False)
             elapsed = time.time() - start_time
 
-            if return_val:
+            if exit_code == 0:
+                ## Success!
                 self.logger.info(
                     f"Birli run successful in {elapsed:.3f} seconds"
                 )
@@ -452,9 +459,14 @@ class MWAXCalvinProcessor:
                 self.birli_popen_process = None
 
                 ## Success!
+                # Write out a useful file of command line info
+                readme_filename = os.path.join(item, "readme_birli.txt")
+                self.write_readme_file(
+                    readme_filename, cmdline, exit_code, stdout, stderr
+                )
             else:
                 self.logger.error(
-                    f"Birli run FAILED: Exit code of {return_val} in"
+                    f"Birli run FAILED: Exit code of {exit_code} in"
                     f" {elapsed:.3f} seconds: {stderr}"
                 )
         except Exception as hyperdrive_run_exception:
@@ -467,14 +479,23 @@ class MWAXCalvinProcessor:
         if birli_success:
             # If all good run hyperdrive
             try:
+                hyperdrive_solution_filename = os.path.join(
+                    item, str(obs_id) + "_solutions.fits"
+                )
+                bin_solution_filename = os.path.join(
+                    item, str(obs_id) + ".bin"
+                )
+
                 # Run hyperdrive
+                # Output to hyperdrive format and old aocal format (bin)
                 cmdline = (
                     f"{self.hyperdrive_binary_path} di-calibrate"
-                    " --no-progress-bars"
-                    f" --data {uvfits_filename}"
-                    " --num-sources 5"
-                    f" --source-list={self.source_list_filename}"
-                    f" --source-list-type={self.source_list_type}"
+                    " --no-progress-bars --data"
+                    f" {uvfits_filename} {metafits_filename} --num-sources 5"
+                    " --source-list"
+                    f" {self.source_list_filename} --source-list-type"
+                    f" {self.source_list_type} --outputs"
+                    f" {hyperdrive_solution_filename} {bin_solution_filename}"
                 )
 
                 start_time = time.time()
@@ -484,7 +505,7 @@ class MWAXCalvinProcessor:
                     self.logger, cmdline, -1, False
                 )
 
-                return_val, stdout, stderr = check_popen_finished(
+                exit_code, stdout, stderr = check_popen_finished(
                     self.logger,
                     self.hyperdrive_popen_process,
                     self.hyperdrive_timeout,
@@ -493,7 +514,7 @@ class MWAXCalvinProcessor:
                 # return_val, stdout = run_command_ext(logger, cmdline, -1, timeout, False)
                 elapsed = time.time() - start_time
 
-                if return_val:
+                if exit_code == 0:
                     self.logger.info(
                         f"hyperdrive run successful in {elapsed:.3f} seconds"
                     )
@@ -501,9 +522,16 @@ class MWAXCalvinProcessor:
                     self.hyperdrive_popen_process = None
 
                     ## Success!
+                    # Write out a useful file of command line info
+                    readme_filename = os.path.join(
+                        item, "readme_hyperdrive.txt"
+                    )
+                    self.write_readme_file(
+                        readme_filename, cmdline, exit_code, stdout, stderr
+                    )
                 else:
                     self.logger.error(
-                        f"hyperdrive run FAILED: Exit code of {return_val} in"
+                        f"hyperdrive run FAILED: Exit code of {exit_code} in"
                         f" {elapsed:.3f} seconds: {stderr}"
                     )
             except Exception as hyperdrive_run_exception:
@@ -525,16 +553,16 @@ class MWAXCalvinProcessor:
                 error_path = os.path.join(self.processing_error_path, obs_id)
                 self.logger.info(
                     f"{obs_id}: moving failed files to {error_path} for manual"
-                    " analysis and writing readme.txt"
+                    " analysis and writing readme_error.txt"
                 )
 
                 # Move the processing dir
                 os.rename(item, error_path)
 
                 # Write out a useful file of error and command line info
-                readme_filename = os.path.join(error_path, "readme.txt")
-                self.write_failure_readme_file(
-                    readme_filename, cmdline, return_val, stdout, stderr
+                readme_filename = os.path.join(error_path, "readme_error.txt")
+                self.write_readme_file(
+                    readme_filename, cmdline, exit_code, stdout, stderr
                 )
 
         return success

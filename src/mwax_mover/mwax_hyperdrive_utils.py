@@ -1,4 +1,5 @@
 """Utility Functions to support Hyperdrive usage and validation"""
+import sys
 import numpy as np
 from astropy.io import fits
 
@@ -27,3 +28,7 @@ def print_convergence_summary(solutions_fits_file: str):
         "Average channel convergence:   "
         f" {np.mean(convergence_results[converged_channel_indices])}"
     )
+
+
+if __name__ == "__main__":
+    print_convergence_summary(sys.argv[1])
