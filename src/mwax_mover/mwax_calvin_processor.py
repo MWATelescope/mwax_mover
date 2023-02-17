@@ -11,12 +11,19 @@ import logging
 import logging.handlers
 import os
 import queue
+import shutil
 import signal
 import sys
 import threading
 import time
 from astropy import time as astrotime
-from mwax_mover import utils, version, mwax_watcher, mwax_queue_worker
+from mwax_mover import (
+    utils,
+    version,
+    mwax_watcher,
+    mwax_queue_worker,
+    mwax_calvin_utils,
+)
 from mwax_mover.mwax_mover import (
     MODE_WATCH_DIR_FOR_NEW,
 )
@@ -62,6 +69,8 @@ class MWAXCalvinProcessor:
         # processing
         self.processing_path = None
         self.processing_error_path = None
+        self.processing_complete_path = None
+        self.keep_completed_visibility_files = None
         self.processing_queue = queue.Queue()
         self.source_list_filename = None
         self.source_list_type = None
@@ -225,7 +234,7 @@ class MWAXCalvinProcessor:
         self.logger.info(
             f"{item} moving file into obs_id's assembly dir {new_filename}..."
         )
-        os.rename(item, new_filename)
+        shutil.move(item, new_filename)
         return True
 
     def check_obs_is_ready_to_process(
@@ -356,7 +365,7 @@ class MWAXCalvinProcessor:
                         )
 
                         # Move the directory to the processing path
-                        os.rename(obs_assemble_path, obs_processing_path)
+                        shutil.move(obs_assemble_path, obs_processing_path)
                         self.add_to_processing_queue(obs_processing_path)
         return True
 
@@ -368,36 +377,6 @@ class MWAXCalvinProcessor:
             f"{item} added to processing_queue."
             f" ({self.processing_queue.qsize()}) in queue."
         )
-
-    def write_readme_file(self, filename, cmd, exit_code, stdout, stderr):
-        """This will create a small readme.txt file which will
-        hopefully help whoever poor sap is checking why birli
-        or hyperdrive did or did not work!"""
-        try:
-            with open(filename, "w", encoding="UTF-8") as readme:
-                if exit_code == 0:
-                    readme.write(
-                        "This run succeded at:"
-                        f" {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n"
-                    )
-                else:
-                    readme.write(
-                        "This run failed at:"
-                        f" {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n"
-                    )
-                readme.write(f"Command: {cmd}")
-                readme.write(f"Exit code: {exit_code}\n")
-                readme.write(f"stdout: {stdout}\n")
-                readme.write(f"stderr: {stderr}\n")
-
-        except Exception:
-            self.logger.warning(
-                (
-                    f"Could not write text file {filename} describing the"
-                    " problem observation."
-                ),
-                exc_info=True,
-            )
 
     def processing_handler(self, item) -> bool:
         """This is triggered when an obsid dir is moved into
@@ -461,8 +440,13 @@ class MWAXCalvinProcessor:
                 ## Success!
                 # Write out a useful file of command line info
                 readme_filename = os.path.join(item, "readme_birli.txt")
-                self.write_readme_file(
-                    readme_filename, cmdline, exit_code, stdout, stderr
+                mwax_calvin_utils.write_readme_file(
+                    self.logger,
+                    readme_filename,
+                    cmdline,
+                    exit_code,
+                    stdout,
+                    stderr,
                 )
             else:
                 self.logger.error(
@@ -526,8 +510,13 @@ class MWAXCalvinProcessor:
                     readme_filename = os.path.join(
                         item, "readme_hyperdrive.txt"
                     )
-                    self.write_readme_file(
-                        readme_filename, cmdline, exit_code, stdout, stderr
+                    mwax_calvin_utils.write_readme_file(
+                        self.logger,
+                        readme_filename,
+                        cmdline,
+                        exit_code,
+                        stdout,
+                        stderr,
                     )
                 else:
                     self.logger.error(
@@ -541,7 +530,46 @@ class MWAXCalvinProcessor:
                     f" {stderr}"
                 )
 
-        if not success:
+        if success:
+            # Processing successful, now move the whole dir
+            # to the processing_complete_path
+            complete_path = os.path.join(self.processing_complete_path, obs_id)
+            self.logger.info(
+                f"{obs_id}: moving successfull files to {complete_path} for "
+                " analysis"
+            )
+            shutil.move(item, complete_path)
+
+            # update the hyperdrive_solution_filename (it has now moved!)
+            hyperdrive_solution_filename = os.path.join(
+                complete_path, os.path.basename(hyperdrive_solution_filename)
+            )
+            # update the metafits_filename (it has also moved!)
+            metafits_filename = os.path.join(
+                complete_path, os.path.basename(metafits_filename)
+            )
+
+            if not self.keep_completed_visibility_files:
+                visibility_files = glob.glob(
+                    os.path.join(item, f"{obs_id}_*_ch*.fits")
+                )
+
+                for file_to_delete in visibility_files:
+                    os.remove(file_to_delete)
+
+            # produce stats/plots
+            stats_filename = os.path.join(complete_path, "stats.txt")
+            mwax_calvin_utils.write_stats(
+                self.logger,
+                obs_id,
+                self.processing_complete_path,
+                stats_filename,
+                hyperdrive_solution_filename,
+                self.hyperdrive_binary_path,
+                metafits_filename,
+            )
+
+        else:
             # If we are not shutting down,
             # Move the files to an error dir
             #
@@ -557,12 +585,17 @@ class MWAXCalvinProcessor:
                 )
 
                 # Move the processing dir
-                os.rename(item, error_path)
+                shutil.move(item, error_path)
 
                 # Write out a useful file of error and command line info
                 readme_filename = os.path.join(error_path, "readme_error.txt")
-                self.write_readme_file(
-                    readme_filename, cmdline, exit_code, stdout, stderr
+                mwax_calvin_utils.write_readme_file(
+                    self.logger,
+                    readme_filename,
+                    cmdline,
+                    exit_code,
+                    stdout,
+                    stderr,
                 )
 
         return success
@@ -914,6 +947,28 @@ class MWAXCalvinProcessor:
                 f" {self.birli_binary_path} does not exist. Quitting."
             )
             sys.exit(1)
+
+        # Processing complete path
+        self.processing_complete_path = utils.read_config(
+            self.logger,
+            config,
+            "processing",
+            "processing_complete_path",
+        )
+
+        if not os.path.exists(self.processing_complete_path):
+            self.logger.error(
+                "processing_complete_path location "
+                f" {self.processing_complete_path} does not exist. Quitting."
+            )
+            sys.exit(1)
+
+        self.keep_completed_visibility_files = utils.read_config_bool(
+            self.logger,
+            config,
+            "processing",
+            "keep_completed_visibility_files",
+        )
 
     def initialise_from_command_line(self):
         """Initialise if initiated from command line"""

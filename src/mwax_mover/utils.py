@@ -78,7 +78,7 @@ def download_metafits_file(obs_id: int, metafits_path: str):
     url = f"http://ws.mwatelescope.org/metadata/fits?obs_id={obs_id}"
 
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=300)
     except Exception as catch_all_exception:
         raise Exception(
             f"Unable to get metafits file. {catch_all_exception}"
@@ -250,7 +250,9 @@ def validate_filename(
                 )
                 try:
                     download_metafits_file(obs_id, metafits_path)
-                except Exception as catch_all_exception:  # pylint: disable=broad-except
+                except (
+                    Exception
+                ) as catch_all_exception:  # pylint: disable=broad-except
                     valid = False
                     validation_error = (
                         f"Metafits file {metafits_filename} did not exist and"

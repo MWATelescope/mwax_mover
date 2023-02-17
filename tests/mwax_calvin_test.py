@@ -66,6 +66,10 @@ def setup_mwax_calvin_test():
     processing_error_path = os.path.join(base_dir, "processing_errors")
     check_and_make_dir(processing_error_path)
 
+    # processing complete path
+    processing_error_path = os.path.join(base_dir, "processing_complete")
+    check_and_make_dir(processing_error_path)
+
     # Now check that the TEST_OBS files exist
     assert os.path.exists(TEST_OBS_LOCATION), (
         "The module level var TEST_OBS_LOCATION is set to"
@@ -145,6 +149,10 @@ def test_mwax_calvin_config_file():
     assert mcal.hyperdrive_timeout == 7200
     assert mcal.birli_binary_path == "../Birli/target/release/birli"
     assert mcal.birli_timeout == 3600
+    assert mcal.processing_complete_path == os.path.join(
+        base_dir, "processing_complete"
+    )
+    assert mcal.keep_completed_visibility_files == 1
 
 
 def test_mwax_calvin_normal_pipeline_run():
@@ -190,7 +198,7 @@ def test_mwax_calvin_normal_pipeline_run():
         time.sleep(random.random() / 2.0)
 
     # Wait for processing (up to 5 mins for birli and hyperdrive)
-    time.sleep(60 * 5)
+    time.sleep(60 * 3)
 
     # Quit
     # Ok time's up! Stop the processor
@@ -203,35 +211,66 @@ def test_mwax_calvin_normal_pipeline_run():
     )
     assert len(assemble_files) == 0
 
-    # processing
-    # Files are left here because we had to shutdown during processing
+    # processing path should have been removed
+    assert (
+        os.path.exists(os.path.join(mcal.processing_path, f"{TEST_OBS_ID}"))
+        is False
+    )
+
+    # processing complete
+    # Files are left here because we successfully completed
     # there was no error as such
-    processing_files = glob.glob(
+    processing_complete_files = glob.glob(
         os.path.join(
-            mcal.processing_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}*.fits"
+            mcal.processing_complete_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}*.fits"
         )
     )
-    assert len(processing_files) == 25  # metafits plus the gpubox files
+    assert (
+        len(processing_complete_files) == 26
+    )  # metafits plus the gpubox files plus solution fits
 
     # also look for uvfits output from birli
     birli_files = glob.glob(
         os.path.join(
-            mcal.processing_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}*.uvfits"
+            mcal.processing_complete_path,
+            f"{TEST_OBS_ID}/{TEST_OBS_ID}*.uvfits",
         )
     )
-    assert len(birli_files) == 1
+    assert len(birli_files) == 1, f"{TEST_OBS_ID}*.uvfits not found"
+
+    assert os.path.exists(
+        os.path.join(
+            mcal.processing_complete_path, f"{TEST_OBS_ID}/readme_birli.txt"
+        )
+    ), "readme_birli.txt not found"
+
+    assert os.path.exists(
+        os.path.join(
+            mcal.processing_complete_path,
+            f"{TEST_OBS_ID}/readme_hyperdrive.txt",
+        )
+    ), "readme_hyperdrive.txt not found"
 
     # look for solutions
     hyperdrive_solution_files = glob.glob(
         os.path.join(
-            mcal.processing_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}_solutions.fits"
+            mcal.processing_complete_path,
+            f"{TEST_OBS_ID}/{TEST_OBS_ID}_solutions.fits",
         )
     )
     assert len(hyperdrive_solution_files) == 1
+
     bin_solution_files = glob.glob(
-        os.path.join(mcal.processing_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}.bin")
+        os.path.join(
+            mcal.processing_complete_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}.bin"
+        )
     )
     assert len(bin_solution_files) == 1
+
+    # look for stats.txt
+    assert os.path.exists(
+        os.path.join(mcal.processing_complete_path, f"{TEST_OBS_ID}/stats.txt")
+    )
 
     # processing errors
     processing_error_files = glob.glob(
@@ -286,7 +325,7 @@ def test_mwax_calvin_hyperdrive_timeout():
         time.sleep(random.random() / 2.0)
 
     # Wait for processing
-    time.sleep(15)
+    time.sleep(30)
 
     # Quit
     # Ok time's up! Stop the processor
@@ -314,7 +353,8 @@ def test_mwax_calvin_hyperdrive_timeout():
     # into the processing errors dir
     processing_error_files = glob.glob(
         os.path.join(
-            mcal.processing_error_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}*.fits"
+            mcal.processing_error_path,
+            f"{TEST_OBS_ID}/{TEST_OBS_ID}*.fits",
         )
     )
     assert len(processing_error_files) == 25  # metafits plus the gpubox files
