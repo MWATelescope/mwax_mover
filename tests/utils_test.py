@@ -12,6 +12,36 @@ import queue
 from mwax_mover import utils
 
 
+def test_correlator_mode_class():
+    test_mode: utils.CorrelatorMode = "NO_CAPTURE"
+
+    assert utils.CorrelatorMode.is_no_capture(test_mode)
+    assert not utils.CorrelatorMode.is_correlator(test_mode)
+    assert not utils.CorrelatorMode.is_vcs(test_mode)
+    assert not utils.CorrelatorMode.is_voltage_buffer(test_mode)
+
+    test_mode: utils.CorrelatorMode = "MWAX_CORRELATOR"
+
+    assert not utils.CorrelatorMode.is_no_capture(test_mode)
+    assert utils.CorrelatorMode.is_correlator(test_mode)
+    assert not utils.CorrelatorMode.is_vcs(test_mode)
+    assert not utils.CorrelatorMode.is_voltage_buffer(test_mode)
+
+    test_mode: utils.CorrelatorMode = "MWAX_VCS"
+
+    assert not utils.CorrelatorMode.is_no_capture(test_mode)
+    assert not utils.CorrelatorMode.is_correlator(test_mode)
+    assert utils.CorrelatorMode.is_vcs(test_mode)
+    assert not utils.CorrelatorMode.is_voltage_buffer(test_mode)
+
+    test_mode: utils.CorrelatorMode = "VOLTAGE_BUFFER"
+
+    assert not utils.CorrelatorMode.is_no_capture(test_mode)
+    assert not utils.CorrelatorMode.is_correlator(test_mode)
+    assert not utils.CorrelatorMode.is_vcs(test_mode)
+    assert utils.CorrelatorMode.is_voltage_buffer(test_mode)
+
+
 def test_validate_filename_valid1():
     """Test that validate_filename() correctly identifies attributes based on filename"""
     metafits_path = os.path.join(os.getcwd(), "tests/data/correlator_C001")

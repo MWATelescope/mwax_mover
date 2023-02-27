@@ -8,7 +8,6 @@ import shutil
 import sys
 import threading
 import time
-from enum import Enum
 from mwax_mover import (
     mwax_mover,
     utils,
@@ -16,47 +15,9 @@ from mwax_mover import (
     mwax_watcher,
     mwax_command,
 )
+from mwax_mover.utils import CorrelatorMode
 
 COMMAND_DADA_DISKDB = "dada_diskdb"
-
-
-class CorrelatorMode(Enum):
-    """Class representing correlator mode"""
-
-    NO_CAPTURE = "NO_CAPTURE"
-    CORR_MODE_CHANGE = "CORR_MODE_CHANGE"
-    HW_LFILES = "HW_LFILES"
-    MWAX_CORRELATOR = "MWAX_CORRELATOR"
-    VOLTAGE_START = "VOLTAGE_START"
-    VOLTAGE_BUFFER = "VOLTAGE_BUFFER"
-    VOLTAGE_STOP = "VOLTAGE_STOP"
-    MWAX_VCS = "MWAX_VCS"
-
-    @staticmethod
-    def is_no_capture(mode_string: str) -> bool:
-        """Returns true if mode is a no capture"""
-        return mode_string in [
-            CorrelatorMode.NO_CAPTURE.value,
-            CorrelatorMode.CORR_MODE_CHANGE.value,
-            CorrelatorMode.VOLTAGE_STOP.value,
-            CorrelatorMode.VOLTAGE_BUFFER.value,
-        ]
-
-    @staticmethod
-    def is_correlator(mode_string: str) -> bool:
-        """Returns true if mode is a correlator obs"""
-        return mode_string in [
-            CorrelatorMode.HW_LFILES.value,
-            CorrelatorMode.MWAX_CORRELATOR.value,
-        ]
-
-    @staticmethod
-    def is_vcs(mode_string: str) -> bool:
-        """Returns true if mode is a vcs obs"""
-        return mode_string in [
-            CorrelatorMode.VOLTAGE_START.value,
-            CorrelatorMode.MWAX_VCS.value,
-        ]
 
 
 class SubfileProcessor:
@@ -346,7 +307,9 @@ class SubfileProcessor:
                             self.copy_subfile_to_disk_timeout_sec,
                         )
 
-                    elif CorrelatorMode.is_no_capture(subfile_mode):
+                    elif CorrelatorMode.is_no_capture(
+                        subfile_mode
+                    ) or CorrelatorMode.is_voltage_buffer(subfile_mode):
                         self.logger.info(
                             f"{item}- ignoring due to mode: {subfile_mode}"
                         )
@@ -425,14 +388,16 @@ class SubfileProcessor:
                     success = True
                 else:
                     # Otherwise:
-                    # 1. If mode is correlator or vcs, then:
+                    # 1. If mode is correlator or vcs or voltage buffer, then:
                     # 2. Inject the relevant beamformer keywords into the
                     # header of the sub file
                     # 3. load file into PSRDADA ringbuffer for beamformer input
                     # 4. Rename .sub file to .free so that udpgrab can reuse it
-                    if CorrelatorMode.is_correlator(
-                        subfile_mode
-                    ) or CorrelatorMode.is_vcs(subfile_mode):
+                    if (
+                        CorrelatorMode.is_correlator(subfile_mode)
+                        or CorrelatorMode.is_vcs(subfile_mode)
+                        or CorrelatorMode.is_voltage_buffer(subfile_mode)
+                    ):
                         # Get the settings we want for the beamformer from the
                         # text file NOTE: this is read per subfile, and the
                         # idea is it can be updated at runtime but this makes
@@ -517,7 +482,9 @@ class SubfileProcessor:
                     if os.path.exists(item):
                         shutil.move(item, free_filename)
 
-                except Exception as move_exception:  # pylint: disable=broad-except
+                except (
+                    Exception
+                ) as move_exception:  # pylint: disable=broad-except
                     self.logger.error(
                         f"{item}- Could not rename {item} back to"
                         f" {free_filename}. Error {move_exception}"
