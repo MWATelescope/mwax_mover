@@ -49,13 +49,20 @@ def get_convergence_summary(solutions_fits_file: str):
 def write_stats(
     logger,
     obs_id,
-    completed_process_path,
+    stats_path,
     stats_filename,
     hyperdrive_solution_filename,
     hyperdrive_binary_path,
     metafits_filename,
-):
-    """This method produces convergence stats and plots"""
+) -> (bool, str):
+    """This method produces convergence stats and plots
+    Returns:
+    bool = Success/fail
+    str  = Error message if fail"""
+    logger.info(
+        f"{obs_id} Writing stats for {hyperdrive_solution_filename}..."
+    )
+
     try:
         conv_summary_list = get_convergence_summary(
             hyperdrive_solution_filename
@@ -75,34 +82,37 @@ def write_stats(
             logger, cmd, -1, timeout=10, use_shell=False
         )
 
+        logger.debug(
+            f"{obs_id} Finished running hyperdrive stats on"
+            f" {hyperdrive_solution_filename}. Return={return_value}"
+        )
+    except Exception as catch_all_exception:
+        return False, str(catch_all_exception)
+
+    try:
         if return_value:
             # Currently, hyperdrive writes the solution files to same dir as
             # the current directory mwax_calvin_processor is run from
             # Move them to the processing_complete dir
             amps_plot_filename = f"{obs_id}_solutions_amps.png"
             phase_plot_filename = f"{obs_id}_solutions_phases.png"
-
             shutil.move(
                 os.path.join(os.getcwd(), amps_plot_filename),
-                os.path.join(
-                    completed_process_path,
-                    f"{obs_id}/{amps_plot_filename}",
-                ),
+                os.path.join(stats_path, f"{amps_plot_filename}"),
             )
             shutil.move(
                 os.path.join(os.getcwd(), phase_plot_filename),
-                os.path.join(
-                    completed_process_path,
-                    f"{obs_id}/{phase_plot_filename}",
-                ),
+                os.path.join(stats_path, f"{phase_plot_filename}"),
             )
+            logger.debug(f"{obs_id} plots moved successfully to {stats_path}.")
 
             logger.info(f"{obs_id} write_stats() complete successfully")
         else:
             logger.debug(f"{obs_id} write_stats() failed")
-
     except Exception as catch_all_exception:
-        logger.exception(catch_all_exception, "Error in write_stats()")
+        return False, str(catch_all_exception)
+
+    return True, ""
 
 
 def write_readme_file(logger, filename, cmd, exit_code, stdout, stderr):

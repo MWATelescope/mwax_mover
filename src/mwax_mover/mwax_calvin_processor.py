@@ -432,14 +432,16 @@ class MWAXCalvinProcessor:
             if exit_code == 0:
                 ## Success!
                 self.logger.info(
-                    f"Birli run successful in {elapsed:.3f} seconds"
+                    f"{obs_id}: Birli run successful in {elapsed:.3f} seconds"
                 )
                 birli_success = True
                 self.birli_popen_process = None
 
                 ## Success!
                 # Write out a useful file of command line info
-                readme_filename = os.path.join(item, "readme_birli.txt")
+                readme_filename = os.path.join(
+                    item, f"{obs_id}_birli_readme.txt"
+                )
                 mwax_calvin_utils.write_readme_file(
                     self.logger,
                     readme_filename,
@@ -450,124 +452,187 @@ class MWAXCalvinProcessor:
                 )
             else:
                 self.logger.error(
-                    f"Birli run FAILED: Exit code of {exit_code} in"
+                    f"{obs_id}: Birli run FAILED: Exit code of {exit_code} in"
                     f" {elapsed:.3f} seconds: {stderr}"
                 )
         except Exception as hyperdrive_run_exception:
             self.logger.error(
-                "hyperdrive run FAILED: Unhandled exception"
+                f"{obs_id}: hyperdrive run FAILED: Unhandled exception"
                 f" {hyperdrive_run_exception} in {elapsed:.3f} seconds:"
                 f" {stderr}"
             )
 
         if birli_success:
-            # If all good run hyperdrive
-            try:
-                hyperdrive_solution_filename = os.path.join(
-                    item, str(obs_id) + "_solutions.fits"
-                )
-                bin_solution_filename = os.path.join(
-                    item, str(obs_id) + ".bin"
-                )
+            # If all good run hyperdrive- once per uvfits file created
+            # N (where N>1) uvfits are generated if Birli sees the obs is picket fence
+            # Therefore we need to run hyperdrive N times too
+            #
+            # get a list of the uvfits files
+            uvfits_files = glob.glob(os.path.join(item, "*.uvfits"))
 
-                # Run hyperdrive
-                # Output to hyperdrive format and old aocal format (bin)
-                cmdline = (
-                    f"{self.hyperdrive_binary_path} di-calibrate"
-                    " --no-progress-bars --data"
-                    f" {uvfits_filename} {metafits_filename} --num-sources 5"
-                    " --source-list"
-                    f" {self.source_list_filename} --source-list-type"
-                    f" {self.source_list_type} --outputs"
-                    f" {hyperdrive_solution_filename} {bin_solution_filename}"
-                )
+            self.logger.info(
+                f"{obs_id}: {len(uvfits_files)} contiguous bands detected."
+                f" Running hyperdrive {len(uvfits_files)} times...."
+            )
 
-                start_time = time.time()
+            # Keep track of the number of successful hyperdrive runs
+            hyperdrive_runs_success: int = 0
 
-                # run hyperdrive
-                self.hyperdrive_popen_process = run_command_popen(
-                    self.logger, cmdline, -1, False
-                )
+            for hyperdrive_run, uvfits_file in enumerate(uvfits_files):
+                # Take the filename which for picket fence will also have
+                # the band info and in all cases the obsid. We will use
+                # this as a base for other files we work with
+                obsid_and_band = uvfits_file.replace(".uvfits", "")
 
-                exit_code, stdout, stderr = check_popen_finished(
-                    self.logger,
-                    self.hyperdrive_popen_process,
-                    self.hyperdrive_timeout,
-                )
-
-                # return_val, stdout = run_command_ext(logger, cmdline, -1, timeout, False)
-                elapsed = time.time() - start_time
-
-                if exit_code == 0:
-                    self.logger.info(
-                        f"hyperdrive run successful in {elapsed:.3f} seconds"
+                try:
+                    hyperdrive_solution_filename = (
+                        f"{obsid_and_band}_solutions.fits"
                     )
-                    success = True
-                    self.hyperdrive_popen_process = None
+                    bin_solution_filename = f"{obsid_and_band}_solutions.bin"
 
-                    ## Success!
-                    # Write out a useful file of command line info
-                    readme_filename = os.path.join(
-                        item, "readme_hyperdrive.txt"
+                    # Run hyperdrive
+                    # Output to hyperdrive format and old aocal format (bin)
+                    cmdline = (
+                        f"{self.hyperdrive_binary_path} di-calibrate"
+                        " --no-progress-bars --data"
+                        f" {uvfits_file} {metafits_filename} --num-sources 5"
+                        " --source-list"
+                        f" {self.source_list_filename} --source-list-type"
+                        f" {self.source_list_type} --outputs"
+                        f" {hyperdrive_solution_filename} {bin_solution_filename}"
                     )
-                    mwax_calvin_utils.write_readme_file(
+
+                    start_time = time.time()
+
+                    # run hyperdrive
+                    self.hyperdrive_popen_process = run_command_popen(
+                        self.logger, cmdline, -1, False
+                    )
+
+                    exit_code, stdout, stderr = check_popen_finished(
                         self.logger,
-                        readme_filename,
-                        cmdline,
-                        exit_code,
-                        stdout,
-                        stderr,
+                        self.hyperdrive_popen_process,
+                        self.hyperdrive_timeout,
                     )
-                else:
+
+                    # return_val, stdout = run_command_ext(logger, cmdline, -1, timeout, False)
+                    elapsed = time.time() - start_time
+
+                    if exit_code == 0:
+                        self.logger.info(
+                            f"{obs_id}: hyperdrive run"
+                            f" {hyperdrive_run + 1}/{len(uvfits_files)} successful"
+                            f" in {elapsed:.3f} seconds"
+                        )
+                        success = True
+                        self.hyperdrive_popen_process = None
+
+                        ## Success!
+                        # Write out a useful file of command line info
+                        readme_filename = (
+                            f"{obsid_and_band}_hyperdrive_readme.txt"
+                        )
+
+                        mwax_calvin_utils.write_readme_file(
+                            self.logger,
+                            readme_filename,
+                            cmdline,
+                            exit_code,
+                            stdout,
+                            stderr,
+                        )
+
+                        hyperdrive_runs_success += 1
+                    else:
+                        self.logger.error(
+                            f"{obs_id}: hyperdrive run"
+                            f" {hyperdrive_run + 1}/{len(uvfits_files)} FAILED:"
+                            f" Exit code of {exit_code} in"
+                            f" {elapsed:.3f} seconds. StdErr: {stderr}"
+                        )
+                        # exit for loop- since run failed
+                        break
+                except Exception as hyperdrive_run_exception:
                     self.logger.error(
-                        f"hyperdrive run FAILED: Exit code of {exit_code} in"
-                        f" {elapsed:.3f} seconds: {stderr}"
+                        f"{obs_id}: hyperdrive run"
+                        f" {hyperdrive_run + 1}/{len(uvfits_files)} FAILED:"
+                        " Unhandled exception"
+                        f" {hyperdrive_run_exception} in"
+                        f" {elapsed:.3f} seconds. StdErr: {stderr}"
                     )
-            except Exception as hyperdrive_run_exception:
-                self.logger.error(
-                    "hyperdrive run FAILED: Unhandled exception"
-                    f" {hyperdrive_run_exception} in {elapsed:.3f} seconds:"
-                    f" {stderr}"
+                    # exit for loop since run failed
+                    break
+
+        # Did we have N number of successful runs?
+        if hyperdrive_runs_success == len(uvfits_files):
+            # Processing successful, run stats
+            # produce stats/plots
+            stats_successful: int = 0
+
+            self.logger.info(
+                f"{obs_id}: {len(uvfits_files)} contiguous bands detected."
+                f" Running hyperdrive stats {len(uvfits_files)} times...."
+            )
+
+            for hyperdrive_stats_run, uvfits_file in enumerate(uvfits_files):
+                # Take the filename which for picket fence will also have
+                # the band info and in all cases the obsid. We will use
+                # this as a base for other files we work with
+                obsid_and_band = uvfits_file.replace(".uvfits", "")
+
+                hyperdrive_solution_filename = (
+                    f"{obsid_and_band}_solutions.fits"
+                )
+                stats_filename = f"{obsid_and_band}_stats.txt"
+
+                (
+                    stats_success,
+                    stats_error,
+                ) = mwax_calvin_utils.write_stats(
+                    self.logger,
+                    obs_id,
+                    item,
+                    stats_filename,
+                    hyperdrive_solution_filename,
+                    self.hyperdrive_binary_path,
+                    metafits_filename,
                 )
 
-        if success:
-            # Processing successful, now move the whole dir
+                if stats_success:
+                    stats_successful += 1
+                else:
+                    self.logger.warning(
+                        f"{obs_id}: hyperdrive stats run"
+                        f" {hyperdrive_stats_run + 1}/{len(uvfits_files)} FAILED:"
+                        f" {stats_error} in {elapsed:.3f} seconds."
+                    )
+
+            if stats_successful == len(uvfits_files):
+                self.logger.info(
+                    f"{obs_id}: All {stats_successful} hyperdrive stats runs"
+                    " successful"
+                )
+            else:
+                self.logger.warning(
+                    f"{obs_id}: Not all hyperdrive stats runs were successful."
+                )
+
+            # now move the whole dir
             # to the processing_complete_path
             complete_path = os.path.join(self.processing_complete_path, obs_id)
             self.logger.info(
-                f"{obs_id}: moving successfull files to {complete_path} for "
-                " analysis"
+                f"{obs_id}: moving successfull files to"
+                f" {complete_path} for analysis"
             )
             shutil.move(item, complete_path)
 
-            # update the hyperdrive_solution_filename (it has now moved!)
-            hyperdrive_solution_filename = os.path.join(
-                complete_path, os.path.basename(hyperdrive_solution_filename)
-            )
-            # update the metafits_filename (it has also moved!)
-            metafits_filename = os.path.join(
-                complete_path, os.path.basename(metafits_filename)
-            )
-
             if not self.keep_completed_visibility_files:
                 visibility_files = glob.glob(
-                    os.path.join(item, f"{obs_id}_*_ch*.fits")
+                    os.path.join(item, f"{obs_id}_*_*_*.fits")
                 )
 
                 for file_to_delete in visibility_files:
                     os.remove(file_to_delete)
-
-            # produce stats/plots
-            stats_filename = os.path.join(complete_path, "stats.txt")
-            mwax_calvin_utils.write_stats(
-                self.logger,
-                obs_id,
-                self.processing_complete_path,
-                stats_filename,
-                hyperdrive_solution_filename,
-                self.hyperdrive_binary_path,
-                metafits_filename,
-            )
 
         else:
             # If we are not shutting down,
@@ -576,7 +641,7 @@ class MWAXCalvinProcessor:
             # If we are shutting down, then this error is because
             # we have effectively sent it a SIGINT. This should not be a
             # reason to abandon processing. Leave it there to be picked up
-            # next run
+            # next run (ie this will trigger the "else" which does nothing)
             if self.running:
                 error_path = os.path.join(self.processing_error_path, obs_id)
                 self.logger.info(

@@ -14,13 +14,16 @@ from mwax_mover.mwax_calvin_processor import MWAXCalvinProcessor
 TEST_BASE_PATH = "tests/mock_mwax_calvin"
 
 #
-# For testing, I have chosen a very small 24 file observation.
+# For testing, I have chosen a very small contiguous 24 file observation.
 # It is expected that to run the tests here you will need to have
 # downloaded this observation (as a tar) and then extracted it
 # to the TEST_OBS_ID_LOCATION (feel free to change)
 #
 TEST_OBS_ID = 1339580448
 TEST_OBS_LOCATION = f"/data/{TEST_OBS_ID}"
+
+TEST_PICKETFENCE_OBS_ID = 1361707216
+TEST_PICKETFENCE_OBS_LOCATION = f"/data/{TEST_PICKETFENCE_OBS_ID}"
 
 
 def get_base_path() -> str:
@@ -155,9 +158,29 @@ def test_mwax_calvin_config_file():
     assert mcal.keep_completed_visibility_files == 1
 
 
-def test_mwax_calvin_normal_pipeline_run():
+def test_mwax_calvin_normal_contiguous_pipeline_run():
     """Tests that mwax_calvin does a normal
-    simple pipeline run ok"""
+    simple contigous pipeline run ok"""
+    mwax_calvin_normal_pipeline_run(False)
+
+
+def test_mwax_calvin_normal_picket_fence_pipeline_run():
+    """Tests that mwax_calvin does a normal
+    non-contigous pipeline (picket fence) run ok"""
+    mwax_calvin_normal_pipeline_run(True)
+
+
+def mwax_calvin_normal_pipeline_run(picket_fence: bool):
+    """Creates a CalvinProcessor copies files in
+    and allows the process to run normally.
+    Param: picket_fence: bool, is there so we
+    can run the code twice- once for picket fence
+    and once for contiguous without copy and pasting"""
+    test_obs_location = (
+        TEST_PICKETFENCE_OBS_LOCATION if picket_fence else TEST_OBS_LOCATION
+    )
+    test_obs_id = TEST_PICKETFENCE_OBS_ID if picket_fence else TEST_OBS_ID
+
     # Setup all the paths
     setup_mwax_calvin_test()
 
@@ -185,20 +208,24 @@ def test_mwax_calvin_normal_pipeline_run():
 
     # Now we simulate TEST_OBS files being delivered into the watch dir
     incoming_files = glob.glob(
-        os.path.join(TEST_OBS_LOCATION, f"{TEST_OBS_ID}_*_ch*.fits")
+        os.path.join(test_obs_location, f"{test_obs_id}_*_ch*.fits")
     )
 
-    for filename in incoming_files:
+    for _file_number, filename in enumerate(incoming_files):
         dest_filename = os.path.join(
             mcal.incoming_watch_path, os.path.basename(filename)
         )
 
         shutil.copyfile(filename, dest_filename)
+
         # delay by up to 1 sec
         time.sleep(random.random() / 2.0)
 
     # Wait for processing (up to 5 mins for birli and hyperdrive)
-    time.sleep(60 * 3)
+    if picket_fence:
+        time.sleep(60 * 10)
+    else:
+        time.sleep(60 * 3)
 
     # Quit
     # Ok time's up! Stop the processor
@@ -207,78 +234,114 @@ def test_mwax_calvin_normal_pipeline_run():
 
     # Assembly
     assemble_files = glob.glob(
-        os.path.join(mcal.assemble_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}*.fits")
+        os.path.join(mcal.assemble_path, f"{test_obs_id}/{test_obs_id}*.fits")
     )
-    assert len(assemble_files) == 0
+    assert len(assemble_files) == 0, "number of assembled files is 0"
 
     # processing path should have been removed
     assert (
-        os.path.exists(os.path.join(mcal.processing_path, f"{TEST_OBS_ID}"))
+        os.path.exists(os.path.join(mcal.processing_path, f"{test_obs_id}"))
         is False
-    )
+    ), "processing path still exists"
 
     # processing complete
     # Files are left here because we successfully completed
     # there was no error as such
     processing_complete_files = glob.glob(
         os.path.join(
-            mcal.processing_complete_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}*.fits"
+            mcal.processing_complete_path, f"{test_obs_id}/{test_obs_id}*.fits"
         )
     )
+
+    expected_processing_complete_files = 24 if picket_fence else 26
+
     assert (
-        len(processing_complete_files) == 26
-    )  # metafits plus the gpubox files plus solution fits
+        len(processing_complete_files) == expected_processing_complete_files
+    ), (
+        "Number of processing complete files == expected processing complete"
+        " files"
+    )
+    # metafits plus the gpubox files plus solution fits
 
     # also look for uvfits output from birli
     birli_files = glob.glob(
         os.path.join(
             mcal.processing_complete_path,
-            f"{TEST_OBS_ID}/{TEST_OBS_ID}*.uvfits",
+            f"{test_obs_id}/{test_obs_id}*.uvfits",
         )
     )
-    assert len(birli_files) == 1, f"{TEST_OBS_ID}*.uvfits not found"
 
-    assert os.path.exists(
-        os.path.join(
-            mcal.processing_complete_path, f"{TEST_OBS_ID}/readme_birli.txt"
-        )
-    ), "readme_birli.txt not found"
+    expected_birli_files = 2 if picket_fence else 1
+
+    assert (
+        len(birli_files) == expected_birli_files
+    ), "Number of uvfits files found == expected uvfits files"
 
     assert os.path.exists(
         os.path.join(
             mcal.processing_complete_path,
-            f"{TEST_OBS_ID}/readme_hyperdrive.txt",
+            f"{test_obs_id}/{test_obs_id}_birli_readme.txt",
         )
-    ), "readme_hyperdrive.txt not found"
+    ), "test_obs_id_birli_readme.txt not found"
+
+    # look for hyperdrive readme files
+    hyperdrive_readme_files = glob.glob(
+        os.path.join(
+            mcal.processing_complete_path,
+            f"{test_obs_id}/{test_obs_id}*_hyperdrive_readme.txt",
+        )
+    )
+
+    expected_hyperdrive_readme_files = 2 if picket_fence else 1
+    assert (
+        len(hyperdrive_readme_files) == expected_hyperdrive_readme_files
+    ), "correct number of readme hyperdrive file not found"
 
     # look for solutions
     hyperdrive_solution_files = glob.glob(
         os.path.join(
             mcal.processing_complete_path,
-            f"{TEST_OBS_ID}/{TEST_OBS_ID}_solutions.fits",
+            f"{test_obs_id}/{test_obs_id}*_solutions.fits",
         )
     )
-    assert len(hyperdrive_solution_files) == 1
+
+    expected_hyperdrive_solution_files = 2 if picket_fence else 1
+
+    assert (
+        len(hyperdrive_solution_files) == expected_hyperdrive_solution_files
+    ), "correct number of hyperdrive solutions files not found"
 
     bin_solution_files = glob.glob(
         os.path.join(
-            mcal.processing_complete_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}.bin"
+            mcal.processing_complete_path, f"{test_obs_id}/{test_obs_id}*.bin"
         )
     )
-    assert len(bin_solution_files) == 1
+    # expected bin files should == expected solution files
+    assert (
+        len(bin_solution_files) == expected_hyperdrive_solution_files
+    ), "correct number of bin solution files not found"
 
     # look for stats.txt
-    assert os.path.exists(
-        os.path.join(mcal.processing_complete_path, f"{TEST_OBS_ID}/stats.txt")
+    stats_files = glob.glob(
+        os.path.join(
+            mcal.processing_complete_path,
+            f"{test_obs_id}/{test_obs_id}*_stats.txt",
+        )
     )
+
+    expected_hyperdrive_stats_files = 2 if picket_fence else 1
+
+    assert (
+        len(stats_files) == expected_hyperdrive_stats_files
+    ), "correct number of stats files not found"
 
     # processing errors
     processing_error_files = glob.glob(
         os.path.join(
-            mcal.processing_error_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}*.fits"
+            mcal.processing_error_path, f"{test_obs_id}/{test_obs_id}*.fits"
         )
     )
-    assert len(processing_error_files) == 0
+    assert len(processing_error_files) == 0, "processing_error_files is not 0"
 
 
 def test_mwax_calvin_hyperdrive_timeout():
