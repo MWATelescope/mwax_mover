@@ -81,7 +81,8 @@ def setup_test_dirs():
     base_dir = get_base_path()
 
     # Remove the path first
-    shutil.rmtree(base_dir)
+    if os.path.exists(base_dir):
+        shutil.rmtree(base_dir)
 
     # Now create it
     check_and_make_dir(base_dir)

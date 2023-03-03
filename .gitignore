@@ -9,6 +9,7 @@ mwax_mover.egg-info/
 tests/mock_mwacache_archiver
 tests/mock_mwax
 tests/mock_mwax_bf
+tests/mock_mwax_calvin
 logs
 .coverage
 .pylintrc

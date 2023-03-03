@@ -45,7 +45,8 @@ def setup_mwax_calvin_test():
     base_dir = get_base_path()
 
     # Remove the path first
-    shutil.rmtree(base_dir)
+    if os.path.exists(base_dir):
+        shutil.rmtree(base_dir)
 
     check_and_make_dir(base_dir)
 
