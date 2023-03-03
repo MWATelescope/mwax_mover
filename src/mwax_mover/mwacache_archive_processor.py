@@ -35,10 +35,10 @@ class MWACacheArchiveProcessor:
     """
 
     def __init__(self):
-
         self.logger = None
 
-        self.hostname = None
+        # Get this hosts hostname
+        self.hostname = utils.get_hostname()
         self.log_path = None
         self.metafits_path = None
         self.archive_to_location = None
@@ -385,7 +385,9 @@ class MWACacheArchiveProcessor:
                     status_bytes,
                     self.health_multicast_hops,
                 )
-            except Exception as catch_all_exception:  # pylint: disable=broad-except
+            except (
+                Exception
+            ) as catch_all_exception:  # pylint: disable=broad-except
                 self.logger.warning(
                     "health_handler: Failed to send health information."
                     f" {catch_all_exception}"
@@ -447,10 +449,6 @@ class MWACacheArchiveProcessor:
 
     def initialise(self, config_filename):
         """Do initial setup"""
-
-        # Get this hosts hostname
-        self.hostname = utils.get_hostname()
-
         if not os.path.exists(config_filename):
             print(
                 f"Configuration file location {config_filename} does not"
