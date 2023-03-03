@@ -10,6 +10,7 @@ import shutil
 import signal
 import time
 from mwax_mover.mwax_calvin_processor import MWAXCalvinProcessor
+from mwax_mover.utils import get_hostname
 
 TEST_BASE_PATH = "tests/mock_mwax_calvin"
 
@@ -20,10 +21,19 @@ TEST_BASE_PATH = "tests/mock_mwax_calvin"
 # to the TEST_OBS_ID_LOCATION (feel free to change)
 #
 TEST_OBS_ID = 1339580448
-TEST_OBS_LOCATION = f"/data/{TEST_OBS_ID}"
-
 TEST_PICKETFENCE_OBS_ID = 1361707216
-TEST_PICKETFENCE_OBS_LOCATION = f"/data/{TEST_PICKETFENCE_OBS_ID}"
+
+hostname = get_hostname()
+
+if hostname == "calvin1" or hostname == "calvin2":
+    # Special case for the real machines
+    TEST_OBS_LOCATION = f"/data/test_data/{TEST_OBS_ID}"
+    TEST_PICKETFENCE_OBS_LOCATION = (
+        f"/data/test_data/{TEST_PICKETFENCE_OBS_ID}"
+    )
+else:
+    TEST_OBS_LOCATION = f"/data/{TEST_OBS_ID}"
+    TEST_PICKETFENCE_OBS_LOCATION = f"/data/{TEST_PICKETFENCE_OBS_ID}"
 
 
 def get_base_path() -> str:
