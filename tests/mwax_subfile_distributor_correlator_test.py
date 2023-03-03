@@ -3,6 +3,7 @@ This is to test if MWAXSubfileDistributor correctly reads the tonnes of
 config correctly from a "correlator" config file.
 """
 import os
+import shutil
 from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
 
 TEST_BASE_PATH = "tests/mock_mwax"
@@ -26,6 +27,10 @@ def setup_test_dirs():
     # Setup dirs first!
     # Make the base dir
     base_dir = get_base_path()
+
+    if os.path.exists(base_dir):
+        shutil.rmtree(base_dir)
+
     check_and_make_dir(base_dir)
 
     # log path
@@ -118,7 +123,7 @@ def test_correlator_config_file():
         base_dir, "voltdata_outgoing"
     )
     assert msd.cfg_voltdata_dont_archive_path == os.path.join(
-        base_dir, "dont_archive"
+        base_dir, "voltdata_dont_archive"
     )
     assert msd.cfg_always_keep_subfiles == 1
     assert msd.cfg_archive_command_timeout_sec == 300
@@ -132,7 +137,7 @@ def test_correlator_config_file():
         base_dir, "visdata_incoming"
     )
     assert msd.cfg_corr_visdata_dont_archive_path == os.path.join(
-        base_dir, "dont_archive"
+        base_dir, "visdata_dont_archive"
     )
     assert msd.cfg_corr_visdata_processing_stats_path == os.path.join(
         base_dir, "visdata_processing_stats"
