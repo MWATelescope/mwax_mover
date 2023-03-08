@@ -84,9 +84,13 @@ def setup_mwax_calvin_test(test_name: str) -> str:
     processing_error_path = os.path.join(base_dir, "processing_errors")
     check_and_make_dir(processing_error_path)
 
-    # processing complete path
-    processing_error_path = os.path.join(base_dir, "processing_complete")
-    check_and_make_dir(processing_error_path)
+    # upload path
+    upload_path = os.path.join(base_dir, "upload")
+    check_and_make_dir(upload_path)
+
+    # complete path
+    complete_path = os.path.join(base_dir, "complete")
+    check_and_make_dir(complete_path)
 
     # Now check that the TEST_OBS files exist
     assert os.path.exists(TEST_OBS_LOCATION), (
@@ -167,9 +171,8 @@ def test_mwax_calvin_test01():
     assert mcal.hyperdrive_timeout == 7200
     assert mcal.birli_binary_path == "../Birli/target/release/birli"
     assert mcal.birli_timeout == 3600
-    assert mcal.processing_complete_path == os.path.join(
-        base_dir, "processing_complete"
-    )
+    assert mcal.complete_path == os.path.join(base_dir, "complete")
+    assert mcal.upload_path == os.path.join(base_dir, "upload")
     assert mcal.keep_completed_visibility_files == 1
 
 
@@ -239,9 +242,9 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
 
     # Wait for processing (very dependent on hardware!)
     if picket_fence:
-        time.sleep(80)
+        time.sleep(110)
     else:
-        time.sleep(60)
+        time.sleep(90)
 
     # Quit
     # Ok time's up! Stop the processor
@@ -264,9 +267,7 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
     # Files are left here because we successfully completed
     # there was no error as such
     processing_complete_files = glob.glob(
-        os.path.join(
-            mcal.processing_complete_path, f"{test_obs_id}/{test_obs_id}*.fits"
-        )
+        os.path.join(mcal.complete_path, f"{test_obs_id}/{test_obs_id}*.fits")
     )
 
     # non picket fence = 24 gpu + 1 metafits + 2 solution fits
@@ -280,7 +281,7 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
     # also look for uvfits output from birli
     birli_files = glob.glob(
         os.path.join(
-            mcal.processing_complete_path,
+            mcal.complete_path,
             f"{test_obs_id}/{test_obs_id}*.uvfits",
         )
     )
@@ -293,7 +294,7 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
 
     assert os.path.exists(
         os.path.join(
-            mcal.processing_complete_path,
+            mcal.complete_path,
             f"{test_obs_id}/{test_obs_id}_birli_readme.txt",
         )
     ), "test_obs_id_birli_readme.txt not found"
@@ -301,7 +302,7 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
     # look for hyperdrive readme files
     hyperdrive_readme_files = glob.glob(
         os.path.join(
-            mcal.processing_complete_path,
+            mcal.complete_path,
             f"{test_obs_id}/{test_obs_id}*_hyperdrive_readme.txt",
         )
     )
@@ -314,7 +315,7 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
     # look for solutions
     hyperdrive_solution_files = glob.glob(
         os.path.join(
-            mcal.processing_complete_path,
+            mcal.complete_path,
             f"{test_obs_id}/{test_obs_id}*_solutions.fits",
         )
     )
@@ -326,9 +327,7 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
     ), "correct number of hyperdrive solutions files not found"
 
     bin_solution_files = glob.glob(
-        os.path.join(
-            mcal.processing_complete_path, f"{test_obs_id}/{test_obs_id}*.bin"
-        )
+        os.path.join(mcal.complete_path, f"{test_obs_id}/{test_obs_id}*.bin")
     )
     # expected bin files should == expected solution files
     assert (
@@ -338,7 +337,7 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
     # look for stats.txt
     stats_files = glob.glob(
         os.path.join(
-            mcal.processing_complete_path,
+            mcal.complete_path,
             f"{test_obs_id}/{test_obs_id}*_stats.txt",
         )
     )

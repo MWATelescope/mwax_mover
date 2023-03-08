@@ -27,10 +27,6 @@ from mwax_mover import (
 from mwax_mover.mwax_mover import (
     MODE_WATCH_DIR_FOR_NEW,
 )
-from mwax_mover.mwax_command import (
-    run_command_popen,
-    check_popen_finished,
-)
 
 
 class MWAXCalvinProcessor:
@@ -69,11 +65,17 @@ class MWAXCalvinProcessor:
         # processing
         self.processing_path = None
         self.processing_error_path = None
-        self.processing_complete_path = None
-        self.keep_completed_visibility_files = None
         self.processing_queue = queue.Queue()
         self.source_list_filename = None
         self.source_list_type = None
+
+        # Upload
+        self.upload_path = None
+        self.upload_queue = queue.Queue()
+
+        # Complete
+        self.complete_path = None
+        self.keep_completed_visibility_files = None
 
         # birli
         self.birli_timeout = None
@@ -106,6 +108,17 @@ class MWAXCalvinProcessor:
         for item in scanned_dirs:
             if os.path.isdir(item):
                 self.add_to_processing_queue(item)
+
+        #
+        # Do initial scan for directories to add to the upload
+        # queue (in the processing_upload_path)
+        #
+        scanned_dirs = utils.scan_directory(
+            self.logger, self.upload_path, "", False, None
+        )
+        for item in scanned_dirs:
+            if os.path.isdir(item):
+                self.add_to_upload_queue(item)
 
         #
         # Create watchers
@@ -142,7 +155,7 @@ class MWAXCalvinProcessor:
         )
         self.queue_workers.append(new_worker)
 
-        # Create queueworker for assembly queue
+        # Create queueworker for processing queue
         # if we fail, do not requeue, move to processing_error dir
         new_worker = mwax_queue_worker.QueueWorker(
             name="processing_worker",
@@ -153,6 +166,21 @@ class MWAXCalvinProcessor:
             requeue_to_eoq_on_failure=False,
             exit_once_queue_empty=False,
             requeue_on_error=False,
+        )
+        self.queue_workers.append(new_worker)
+
+        # Create queueworker for upload queue
+        # if we fail, DO requeue as it is likely the db is down
+        # as opposed to a permafail
+        new_worker = mwax_queue_worker.QueueWorker(
+            name="upload_worker",
+            source_queue=self.upload_queue,
+            executable_path=None,
+            event_handler=self.upload_handler,
+            log=self.logger,
+            requeue_to_eoq_on_failure=False,
+            exit_once_queue_empty=False,
+            requeue_on_error=True,
         )
         self.queue_workers.append(new_worker)
 
@@ -381,86 +409,24 @@ class MWAXCalvinProcessor:
     def processing_handler(self, item) -> bool:
         """This is triggered when an obsid dir is moved into
         the processing directory, indicating it is ready to
-        have birli then hyperdrive run on it"""
+        have birli then hyperdrive run on it.
+        item is the processing directory"""
         birli_success: bool = False
         success: bool = False
-
-        stdout = ""
-        elapsed = -1
 
         file_no_path = item.split("/")
         obs_id = file_no_path[-1][0:10]
         metafits_filename = os.path.join(item, str(obs_id) + "_metafits.fits")
-
-        # Get only data files
-        data_files = glob.glob(os.path.join(item, "*.fits"))
-        # Remove the metafits (we specify it seperately)
-        data_files.remove(metafits_filename)
-
-        data_file_arg = ""
-        for data_file in data_files:
-            data_file_arg += f"{data_file} "
-
         uvfits_filename = os.path.join(item, str(obs_id) + ".uvfits")
 
-        try:
-            # Run birli
-            cmdline = (
-                f"{self.birli_binary_path}"
-                f" --metafits {metafits_filename}"
-                " --no-draw-progress"
-                f" --uvfits-out={uvfits_filename}"
-                f" --flag-edge-width={80}"
-                f" {data_file_arg}"
-            )
-
-            start_time = time.time()
-
-            self.birli_popen_process = run_command_popen(
-                self.logger, cmdline, -1, False
-            )
-
-            exit_code, stdout, stderr = check_popen_finished(
-                self.logger,
-                self.birli_popen_process,
-                self.birli_timeout,
-            )
-
-            # return_val, stdout = run_command_ext(logger, cmdline, -1, timeout, False)
-            elapsed = time.time() - start_time
-
-            if exit_code == 0:
-                ## Success!
-                self.logger.info(
-                    f"{obs_id}: Birli run successful in {elapsed:.3f} seconds"
-                )
-                birli_success = True
-                self.birli_popen_process = None
-
-                ## Success!
-                # Write out a useful file of command line info
-                readme_filename = os.path.join(
-                    item, f"{obs_id}_birli_readme.txt"
-                )
-                mwax_calvin_utils.write_readme_file(
-                    self.logger,
-                    readme_filename,
-                    cmdline,
-                    exit_code,
-                    stdout,
-                    stderr,
-                )
-            else:
-                self.logger.error(
-                    f"{obs_id}: Birli run FAILED: Exit code of {exit_code} in"
-                    f" {elapsed:.3f} seconds: {stderr}"
-                )
-        except Exception as hyperdrive_run_exception:
-            self.logger.error(
-                f"{obs_id}: hyperdrive run FAILED: Unhandled exception"
-                f" {hyperdrive_run_exception} in {elapsed:.3f} seconds:"
-                f" {stderr}"
-            )
+        # Run Birli
+        birli_success = mwax_calvin_utils.run_birli(
+            self,
+            metafits_filename,
+            uvfits_filename,
+            obs_id,
+            item,
+        )
 
         if birli_success:
             # If all good run hyperdrive- once per uvfits file created
@@ -470,161 +436,70 @@ class MWAXCalvinProcessor:
             # get a list of the uvfits files
             uvfits_files = glob.glob(os.path.join(item, "*.uvfits"))
 
-            self.logger.info(
-                f"{obs_id}: {len(uvfits_files)} contiguous bands detected."
-                f" Running hyperdrive {len(uvfits_files)} times...."
+            # Run hyperdrive
+            hyperdrive_success: bool = mwax_calvin_utils.run_hyperdrive(
+                self, uvfits_files, metafits_filename, obs_id, item
             )
 
-            # Keep track of the number of successful hyperdrive runs
-            hyperdrive_runs_success: int = 0
-
-            for hyperdrive_run, uvfits_file in enumerate(uvfits_files):
-                # Take the filename which for picket fence will also have
-                # the band info and in all cases the obsid. We will use
-                # this as a base for other files we work with
-                obsid_and_band = uvfits_file.replace(".uvfits", "")
-
-                try:
-                    hyperdrive_solution_filename = (
-                        f"{obsid_and_band}_solutions.fits"
-                    )
-                    bin_solution_filename = f"{obsid_and_band}_solutions.bin"
-
-                    # Run hyperdrive
-                    # Output to hyperdrive format and old aocal format (bin)
-                    cmdline = (
-                        f"{self.hyperdrive_binary_path} di-calibrate"
-                        " --no-progress-bars --data"
-                        f" {uvfits_file} {metafits_filename} --num-sources 5"
-                        " --source-list"
-                        f" {self.source_list_filename} --source-list-type"
-                        f" {self.source_list_type} --outputs"
-                        f" {hyperdrive_solution_filename} {bin_solution_filename}"
-                    )
-
-                    start_time = time.time()
-
-                    # run hyperdrive
-                    self.hyperdrive_popen_process = run_command_popen(
-                        self.logger, cmdline, -1, False
-                    )
-
-                    exit_code, stdout, stderr = check_popen_finished(
-                        self.logger,
-                        self.hyperdrive_popen_process,
-                        self.hyperdrive_timeout,
-                    )
-
-                    # return_val, stdout = run_command_ext(logger, cmdline, -1, timeout, False)
-                    elapsed = time.time() - start_time
-
-                    if exit_code == 0:
-                        self.logger.info(
-                            f"{obs_id}: hyperdrive run"
-                            f" {hyperdrive_run + 1}/{len(uvfits_files)} successful"
-                            f" in {elapsed:.3f} seconds"
-                        )
-                        success = True
-                        self.hyperdrive_popen_process = None
-
-                        ## Success!
-                        # Write out a useful file of command line info
-                        readme_filename = (
-                            f"{obsid_and_band}_hyperdrive_readme.txt"
-                        )
-
-                        mwax_calvin_utils.write_readme_file(
-                            self.logger,
-                            readme_filename,
-                            cmdline,
-                            exit_code,
-                            stdout,
-                            stderr,
-                        )
-
-                        hyperdrive_runs_success += 1
-                    else:
-                        self.logger.error(
-                            f"{obs_id}: hyperdrive run"
-                            f" {hyperdrive_run + 1}/{len(uvfits_files)} FAILED:"
-                            f" Exit code of {exit_code} in"
-                            f" {elapsed:.3f} seconds. StdErr: {stderr}"
-                        )
-                        # exit for loop- since run failed
-                        break
-                except Exception as hyperdrive_run_exception:
-                    self.logger.error(
-                        f"{obs_id}: hyperdrive run"
-                        f" {hyperdrive_run + 1}/{len(uvfits_files)} FAILED:"
-                        " Unhandled exception"
-                        f" {hyperdrive_run_exception} in"
-                        f" {elapsed:.3f} seconds. StdErr: {stderr}"
-                    )
-                    # exit for loop since run failed
-                    break
-
-        # Did we have N number of successful runs?
-        if hyperdrive_runs_success == len(uvfits_files):
-            # Processing successful, run stats
-            # produce stats/plots
-            stats_successful: int = 0
-
-            self.logger.info(
-                f"{obs_id}: {len(uvfits_files)} contiguous bands detected."
-                f" Running hyperdrive stats {len(uvfits_files)} times...."
-            )
-
-            for hyperdrive_stats_run, uvfits_file in enumerate(uvfits_files):
-                # Take the filename which for picket fence will also have
-                # the band info and in all cases the obsid. We will use
-                # this as a base for other files we work with
-                obsid_and_band = uvfits_file.replace(".uvfits", "")
-
-                hyperdrive_solution_filename = (
-                    f"{obsid_and_band}_solutions.fits"
-                )
-                stats_filename = f"{obsid_and_band}_stats.txt"
-
-                (
-                    stats_success,
-                    stats_error,
-                ) = mwax_calvin_utils.write_stats(
-                    self.logger,
-                    obs_id,
-                    item,
-                    stats_filename,
-                    hyperdrive_solution_filename,
-                    self.hyperdrive_binary_path,
-                    metafits_filename,
+            # Did we have N number of successful runs?
+            if hyperdrive_success:
+                # Run hyperdrive and get plots and stats
+                _stats_success: bool = mwax_calvin_utils.run_hyperdrive_stats(
+                    self, uvfits_files, metafits_filename, obs_id, item
                 )
 
-                if stats_success:
-                    stats_successful += 1
-                else:
-                    self.logger.warning(
-                        f"{obs_id}: hyperdrive stats run"
-                        f" {hyperdrive_stats_run + 1}/{len(uvfits_files)} FAILED:"
-                        f" {stats_error} in {elapsed:.3f} seconds."
-                    )
-
-            if stats_successful == len(uvfits_files):
+                # now move the whole dir
+                # to the upload_path
+                upload_path = os.path.join(self.upload_path, obs_id)
                 self.logger.info(
-                    f"{obs_id}: All {stats_successful} hyperdrive stats runs"
-                    " successful"
+                    f"{obs_id}: moving successfull files to"
+                    f" {upload_path} for upload"
                 )
-            else:
-                self.logger.warning(
-                    f"{obs_id}: Not all hyperdrive stats runs were successful."
-                )
+                shutil.move(item, upload_path)
+                # Now add to queue
+                self.add_to_upload_queue(upload_path)
 
+        return success
+
+    def add_to_upload_queue(self, item):
+        """Adds a dir containing all the files for an obsid
+        to the upload queue"""
+        self.upload_queue.put(item)
+        self.logger.info(
+            f"{item} added to upload_queue."
+            f" ({self.upload_queue.qsize()}) in queue."
+        )
+
+    def upload_handler(self, item) -> bool:
+        """Will deal with completed hyperdrive solutions
+        by getting them into a format we can insert into
+        the calibration database"""
+        # Now attempt to upload the solutions into the database
+
+        # get obs_id
+        file_no_path = item.split("/")
+        obs_id: int = int(file_no_path[-1][0:10])
+
+        fits_solution_files = glob.glob(os.path.join(item, "*_solutions.fits"))
+        _bin_solution_files = glob.glob(os.path.join(item, "*_solutions.bin"))
+        self.logger.debug(
+            f"{item} - solutions to be uploaded:"
+            f" {sol for sol in fits_solution_files}"
+        )
+
+        # on success move to complete
+        success = True
+        if success:
             # now move the whole dir
-            # to the processing_complete_path
-            complete_path = os.path.join(self.processing_complete_path, obs_id)
+            # to the complete path
+            self.logger.debug(f"{item}-here1")
+            complete_path = os.path.join(self.complete_path, obs_id)
             self.logger.info(
                 f"{obs_id}: moving successfull files to"
-                f" {complete_path} for analysis"
+                f" {complete_path} for review."
             )
             shutil.move(item, complete_path)
+            self.logger.debug(f"{item}-here2")
 
             if not self.keep_completed_visibility_files:
                 visibility_files = glob.glob(
@@ -633,36 +508,7 @@ class MWAXCalvinProcessor:
 
                 for file_to_delete in visibility_files:
                     os.remove(file_to_delete)
-
-        else:
-            # If we are not shutting down,
-            # Move the files to an error dir
-            #
-            # If we are shutting down, then this error is because
-            # we have effectively sent it a SIGINT. This should not be a
-            # reason to abandon processing. Leave it there to be picked up
-            # next run (ie this will trigger the "else" which does nothing)
-            if self.running:
-                error_path = os.path.join(self.processing_error_path, obs_id)
-                self.logger.info(
-                    f"{obs_id}: moving failed files to {error_path} for manual"
-                    " analysis and writing readme_error.txt"
-                )
-
-                # Move the processing dir
-                shutil.move(item, error_path)
-
-                # Write out a useful file of error and command line info
-                readme_filename = os.path.join(error_path, "readme_error.txt")
-                mwax_calvin_utils.write_readme_file(
-                    self.logger,
-                    readme_filename,
-                    cmdline,
-                    exit_code,
-                    stdout,
-                    stderr,
-                )
-
+        self.logger.debug(f"{item}-here3")
         return success
 
     def stop(self):
@@ -1013,25 +859,40 @@ class MWAXCalvinProcessor:
             )
             sys.exit(1)
 
-        # Processing complete path
-        self.processing_complete_path = utils.read_config(
+        # upload path
+        self.upload_path = utils.read_config(
             self.logger,
             config,
-            "processing",
-            "processing_complete_path",
+            "upload",
+            "upload_path",
         )
 
-        if not os.path.exists(self.processing_complete_path):
+        if not os.path.exists(self.upload_path):
             self.logger.error(
-                "processing_complete_path location "
-                f" {self.processing_complete_path} does not exist. Quitting."
+                "processing_upload_path location "
+                f" {self.upload_path} does not exist. Quitting."
+            )
+            sys.exit(1)
+
+        # complete path
+        self.complete_path = utils.read_config(
+            self.logger,
+            config,
+            "complete",
+            "complete_path",
+        )
+
+        if not os.path.exists(self.complete_path):
+            self.logger.error(
+                "complete_path location "
+                f" {self.complete_path} does not exist. Quitting."
             )
             sys.exit(1)
 
         self.keep_completed_visibility_files = utils.read_config_bool(
             self.logger,
             config,
-            "processing",
+            "complete",
             "keep_completed_visibility_files",
         )
 
