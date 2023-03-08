@@ -241,7 +241,7 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
     if picket_fence:
         time.sleep(80)
     else:
-        time.sleep(40)
+        time.sleep(60)
 
     # Quit
     # Ok time's up! Stop the processor
