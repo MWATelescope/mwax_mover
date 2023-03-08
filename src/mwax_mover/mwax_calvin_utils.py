@@ -94,8 +94,12 @@ def write_stats(
             # Currently, hyperdrive writes the solution files to same dir as
             # the current directory mwax_calvin_processor is run from
             # Move them to the processing_complete dir
-            amps_plot_filename = f"{obs_id}_solutions_amps.png"
-            phase_plot_filename = f"{obs_id}_solutions_phases.png"
+            plot_filename_base = os.path.basename(
+                f"{os.path.splitext(hyperdrive_solution_filename)[0]}"
+            )
+
+            amps_plot_filename = f"{plot_filename_base}_amps.png"
+            phase_plot_filename = f"{plot_filename_base}_phases.png"
             shutil.move(
                 os.path.join(os.getcwd(), amps_plot_filename),
                 os.path.join(stats_path, f"{amps_plot_filename}"),

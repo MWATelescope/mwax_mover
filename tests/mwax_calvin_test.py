@@ -5,7 +5,6 @@ config correctly from a "mwacache_archiver" config file.
 import glob
 import threading
 import os
-import random
 import shutil
 import signal
 import time
@@ -36,9 +35,14 @@ else:
     TEST_PICKETFENCE_OBS_LOCATION = f"/data/{TEST_PICKETFENCE_OBS_ID}"
 
 
-def get_base_path() -> str:
+def get_base_path(test_name: str) -> str:
     """Utility function to get the base path for these tests"""
-    return os.path.join(os.getcwd(), TEST_BASE_PATH)
+    return f"{TEST_BASE_PATH}_{test_name}"
+
+
+def get_full_base_path(test_name: str) -> str:
+    """Utility function to get the base path for these tests"""
+    return os.path.join(os.getcwd(), get_base_path(test_name))
 
 
 def check_and_make_dir(path):
@@ -48,11 +52,11 @@ def check_and_make_dir(path):
         os.mkdir(path)
 
 
-def setup_mwax_calvin_test():
-    """Gets the mwax_calvin tests ready"""
+def setup_mwax_calvin_test(test_name: str) -> str:
+    """Gets the mwax_calvin tests ready and returns the test base path"""
     # Setup dirs first!
     # Make the base dir
-    base_dir = get_base_path()
+    base_dir = get_base_path(test_name)
 
     # Remove the path first
     if os.path.exists(base_dir):
@@ -109,15 +113,13 @@ def setup_mwax_calvin_test():
         " mwax_calvin_processor."
     )
 
+    return base_dir
 
-def test_mwax_calvin_config_file():
+
+def test_mwax_calvin_test01():
     """Tests that mwax_calvin reads a config file ok"""
     # Setup all the paths
-    setup_mwax_calvin_test()
-
-    # This will test mwax_calvin_processor based
-    # on mwax_calvin_test.cfg
-    base_dir = TEST_BASE_PATH
+    base_dir = setup_mwax_calvin_test("test01")
 
     # Start mwax_subfile_distributor using our test config
     mcal = MWAXCalvinProcessor()
@@ -126,7 +128,7 @@ def test_mwax_calvin_config_file():
     mcal.hostname = "test_server"
 
     # Determine config file location
-    config_filename = "tests/mwax_calvin_test.cfg"
+    config_filename = "tests/mwax_calvin_test01.cfg"
 
     # Call to read config <-- this is what we're testing!
     mcal.initialise(config_filename)
@@ -136,7 +138,9 @@ def test_mwax_calvin_config_file():
     #
 
     # mwax_mover section
-    assert mcal.log_path == os.path.join(base_dir, "logs")
+    assert mcal.log_path == os.path.join(
+        base_dir, "logs"
+    ), f"log path mismatch: {mcal.log_path} {os.path.join(base_dir, 'logs')}"
 
     assert mcal.health_multicast_interface_name == "eth0"
     assert mcal.health_multicast_ip == "224.250.0.0"
@@ -169,13 +173,13 @@ def test_mwax_calvin_config_file():
     assert mcal.keep_completed_visibility_files == 1
 
 
-def test_mwax_calvin_normal_contiguous_pipeline_run():
+def test_mwax_calvin_test02():
     """Tests that mwax_calvin does a normal
     simple contigous pipeline run ok"""
     mwax_calvin_normal_pipeline_run(False)
 
 
-def test_mwax_calvin_normal_picket_fence_pipeline_run():
+def test_mwax_calvin_test03():
     """Tests that mwax_calvin does a normal
     non-contigous pipeline (picket fence) run ok"""
     mwax_calvin_normal_pipeline_run(True)
@@ -193,16 +197,20 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
     test_obs_id = TEST_PICKETFENCE_OBS_ID if picket_fence else TEST_OBS_ID
 
     # Setup all the paths
-    setup_mwax_calvin_test()
+    if picket_fence:
+        _base_dir = setup_mwax_calvin_test("test03")
+        # Determine config file location
+        config_filename = "tests/mwax_calvin_test03.cfg"
+    else:
+        _base_dir = setup_mwax_calvin_test("test02")
+        # Determine config file location
+        config_filename = "tests/mwax_calvin_test02.cfg"
 
     # Start mwax_subfile_distributor using our test config
     mcal = MWAXCalvinProcessor()
 
     # Override the hostname
     mcal.hostname = "test_server"
-
-    # Determine config file location
-    config_filename = "tests/mwax_calvin_test.cfg"
 
     # Call to read config <-- this is what we're testing!
     mcal.initialise(config_filename)
@@ -229,14 +237,11 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
 
         shutil.copyfile(filename, dest_filename)
 
-        # delay by up to 1 sec
-        time.sleep(random.random() / 2.0)
-
-    # Wait for processing (up to 5 mins for birli and hyperdrive)
+    # Wait for processing (very dependent on hardware!)
     if picket_fence:
-        time.sleep(60 * 10)
+        time.sleep(80)
     else:
-        time.sleep(60 * 3)
+        time.sleep(40)
 
     # Quit
     # Ok time's up! Stop the processor
@@ -264,14 +269,12 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
         )
     )
 
-    expected_processing_complete_files = 24 if picket_fence else 26
+    # non picket fence = 24 gpu + 1 metafits + 2 solution fits
+    # picket fence = 24 gpu + 1 metafits + 1 solution fits
+    expected_processing_complete_files = 27 if picket_fence else 26
 
-    assert (
-        len(processing_complete_files) == expected_processing_complete_files
-    ), (
-        "Number of processing complete files == expected processing complete"
-        " files"
-    )
+    assert len(processing_complete_files) == expected_processing_complete_files
+
     # metafits plus the gpubox files plus solution fits
 
     # also look for uvfits output from birli
@@ -286,7 +289,7 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
 
     assert (
         len(birli_files) == expected_birli_files
-    ), "Number of uvfits files found == expected uvfits files"
+    ), "Number of uvfits files found != expected uvfits files"
 
     assert os.path.exists(
         os.path.join(
@@ -355,11 +358,11 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
     assert len(processing_error_files) == 0, "processing_error_files is not 0"
 
 
-def test_mwax_calvin_hyperdrive_timeout():
+def test_mwax_calvin_test04():
     """Tests that mwax_calvin does a normal
     simple pipeline run but hyperdrive times out"""
     # Setup all the paths
-    setup_mwax_calvin_test()
+    _base_path = setup_mwax_calvin_test("test04")
 
     # Start mwax_subfile_distributor using our test config
     mcal = MWAXCalvinProcessor()
@@ -368,7 +371,7 @@ def test_mwax_calvin_hyperdrive_timeout():
     mcal.hostname = "test_server"
 
     # Determine config file location
-    config_filename = "tests/mwax_calvin_test.cfg"
+    config_filename = "tests/mwax_calvin_test04.cfg"
 
     # Call to read config <-- this is what we're testing!
     mcal.initialise(config_filename)
@@ -395,11 +398,9 @@ def test_mwax_calvin_hyperdrive_timeout():
         )
 
         shutil.copyfile(filename, dest_filename)
-        # delay by up to 1 sec
-        time.sleep(random.random() / 2.0)
 
     # Wait for processing
-    time.sleep(30)
+    time.sleep(20)
 
     # Quit
     # Ok time's up! Stop the processor
