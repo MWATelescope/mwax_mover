@@ -478,7 +478,7 @@ class MWAXCalvinProcessor:
 
         # get obs_id
         file_no_path = item.split("/")
-        obs_id: int = int(file_no_path[-1][0:10])
+        obs_id = file_no_path[-1][0:10]
 
         fits_solution_files = glob.glob(os.path.join(item, "*_solutions.fits"))
         _bin_solution_files = glob.glob(os.path.join(item, "*_solutions.bin"))
@@ -492,14 +492,12 @@ class MWAXCalvinProcessor:
         if success:
             # now move the whole dir
             # to the complete path
-            self.logger.debug(f"{item}-here1")
             complete_path = os.path.join(self.complete_path, obs_id)
             self.logger.info(
                 f"{obs_id}: moving successfull files to"
                 f" {complete_path} for review."
             )
             shutil.move(item, complete_path)
-            self.logger.debug(f"{item}-here2")
 
             if not self.keep_completed_visibility_files:
                 visibility_files = glob.glob(
@@ -508,7 +506,6 @@ class MWAXCalvinProcessor:
 
                 for file_to_delete in visibility_files:
                     os.remove(file_to_delete)
-        self.logger.debug(f"{item}-here3")
         return success
 
     def stop(self):
