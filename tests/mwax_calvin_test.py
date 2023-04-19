@@ -270,8 +270,8 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
         os.path.join(mcal.complete_path, f"{test_obs_id}/{test_obs_id}*.fits")
     )
 
-    # non picket fence = 24 gpu + 1 metafits + 2 solution fits
-    # picket fence = 24 gpu + 1 metafits + 1 solution fits
+    # non picket fence = 24 gpu + 1 metafits + 1 solution fits
+    # picket fence = 24 gpu + 1 metafits + 2 solution fits
     expected_processing_complete_files = 27 if picket_fence else 26
 
     assert len(processing_complete_files) == expected_processing_complete_files
@@ -359,7 +359,7 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
 
 def test_mwax_calvin_test04():
     """Tests that mwax_calvin does a normal
-    simple pipeline run but hyperdrive times out"""
+    simple pipeline run but hyperdrive gets interrupted by a SIGINT"""
     # Setup all the paths
     _base_path = setup_mwax_calvin_test("test04")
 

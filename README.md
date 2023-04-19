@@ -8,9 +8,11 @@ Three executable python scripts:
 * **mwax_subfile_distributor** - this is an essential part of the MWAX correlator and beamformer which is responsible for
 sending new subobservations to the correlator, beamformer or to disk; and archiving subfiles or correlated visibilities.
 Output from the beamformer gets sent to another host running FREDDA (FRB detection pipeline). FREDDA can then signal
-this process to dump subfiles to disk if a detection is made.
-* **mwacache_archiver** - this runs on the mwacache servers at Curtin. It monitors for new files sent from MWAX servers
+this process to dump subfiles to disk if a detection is made. It also facilitates the `voltage buffer dump` mechanism which will be called via webservice from the M&C system.
+* **mwacache_archiver_processor** - this runs on the mwacache servers at Curtin. It monitors for new files sent from MWAX servers
 and then sends them to Pawsey's Long Term Storage and updates the MWA metadata db to confirm they were archived.
+* **mwax_calvin_processor** - this runs on the Calvin1 server at the MRO. MWAX servers send any FITS files from calibrator observations
+directly to Calvin1 into an 'incoming' directory. The mwax_calvin_processor monitors that directory and starts assembling all the files from the same obs_id into an 'assembly' directory. Once all the files for an observation arrive, Birli is run to flag the data and output a UVFITS file. Then Hyperdrive is run on the one or more UVFITS file outputs (one per contiguous band) to produce one or more calibration solutions files. The solution(s) are then analysed and used to create data which then gets inserted into the MWA database at the MRO. The secondary function of the mwax_calvin_processor is to detect any calibration_requests from the MWA database, download the data from the MWA ASVO and extract the files into the 'incoming' directory. From there the processing of the observation is the same as when it comes direct from MWAX, except that there is an extra step to update the database to mark that calibration request as being completed.
 
 ## Installing
 
@@ -56,20 +58,52 @@ Parameters:
     * WATCH_DIR_FOR_RENAME: Watch watchdir for renamed files forever. Launch executable.
     * PROCESS_DIR: For each file in watchdir, launch executable. Exit.
 
-## mwax_subfile_distrubutor
-
-### Running
-
-```bash
-./mwax_subfile_distributor --cfg path_to_cfg/config.cfg
-```
-
 ## mwacache_archiver
 
 ### Running
 
 ```bash
 ./mwacache_archiver --cfg path_to_cfg/config.cfg
+```
+
+### Interacting via Web Services
+
+```bash
+# Example call:
+http://host:port/command[?param1&param2]
+```
+
+Web service commands:
+
+* /status
+  * Reports status of all processes in JSON format
+
+## mwax_calvin_processor
+
+### Running
+
+```bash
+./mwax_calvin_processor --cfg path_to_cfg/config.cfg
+```
+
+### Interacting via Web Services
+
+```bash
+# Example call:
+http://host:port/command[?param1&param2]
+```
+
+Web service commands:
+
+* /status
+  * Reports status of all processes in JSON format
+
+## mwax_subfile_distrubutor
+
+### Running
+
+```bash
+./mwax_subfile_distributor --cfg path_to_cfg/config.cfg
 ```
 
 ### Interacting via Web Services
