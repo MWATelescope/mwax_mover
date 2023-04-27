@@ -33,28 +33,21 @@ class CorrelatorMode(Enum):
     """Class representing correlator mode"""
 
     NO_CAPTURE = "NO_CAPTURE"
-    CORR_MODE_CHANGE = "CORR_MODE_CHANGE"
-    HW_LFILES = "HW_LFILES"
     MWAX_CORRELATOR = "MWAX_CORRELATOR"
-    VOLTAGE_START = "VOLTAGE_START"
-    VOLTAGE_BUFFER = "VOLTAGE_BUFFER"
-    VOLTAGE_STOP = "VOLTAGE_STOP"
     MWAX_VCS = "MWAX_VCS"
+    MWAX_BUFFER = "MWAX_BUFFER"
 
     @staticmethod
     def is_no_capture(mode_string: str) -> bool:
         """Returns true if mode is a no capture"""
         return mode_string in [
             CorrelatorMode.NO_CAPTURE.value,
-            CorrelatorMode.CORR_MODE_CHANGE.value,
-            CorrelatorMode.VOLTAGE_STOP.value,
         ]
 
     @staticmethod
     def is_correlator(mode_string: str) -> bool:
         """Returns true if mode is a correlator obs"""
         return mode_string in [
-            CorrelatorMode.HW_LFILES.value,
             CorrelatorMode.MWAX_CORRELATOR.value,
         ]
 
@@ -62,14 +55,13 @@ class CorrelatorMode(Enum):
     def is_vcs(mode_string: str) -> bool:
         """Returns true if mode is a vcs obs"""
         return mode_string in [
-            CorrelatorMode.VOLTAGE_START.value,
             CorrelatorMode.MWAX_VCS.value,
         ]
 
     @staticmethod
     def is_voltage_buffer(mode_string: str) -> bool:
         """Returns true if mode is voltage buffer"""
-        return mode_string == CorrelatorMode.VOLTAGE_BUFFER.value
+        return mode_string == CorrelatorMode.MWAX_BUFFER.value
 
 
 class MWADataFileType(Enum):

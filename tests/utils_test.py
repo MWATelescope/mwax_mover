@@ -34,7 +34,7 @@ def test_correlator_mode_class():
     assert utils.CorrelatorMode.is_vcs(test_mode)
     assert not utils.CorrelatorMode.is_voltage_buffer(test_mode)
 
-    test_mode: utils.CorrelatorMode = "VOLTAGE_BUFFER"
+    test_mode: utils.CorrelatorMode = "MWAX_BUFFER"
 
     assert not utils.CorrelatorMode.is_no_capture(test_mode)
     assert not utils.CorrelatorMode.is_correlator(test_mode)
