@@ -24,8 +24,16 @@ from mwax_mover import (
     mwax_queue_worker,
     mwax_calvin_utils,
 )
+import numpy as np
+import pandas as pd
+import itertools
+from nptyping import NDArray, Int, Float, Complex
+
 from mwax_mover.mwax_mover import (
     MODE_WATCH_DIR_FOR_NEW,
+)
+from mwax_mover.mwax_calvin_utils import (
+    HyperfitsSolution, Metafits, Tile, debug_phase_fits, fit_phase_line, PhaseFitInfo
 )
 
 
@@ -36,7 +44,7 @@ class MWAXCalvinProcessor:
         self,
     ):
         # General
-        self.logger = None
+        self.logger = logging.getLogger(__name__)
         self.log_path = None
         self.hostname = None
 
@@ -474,24 +482,237 @@ class MWAXCalvinProcessor:
         """Will deal with completed hyperdrive solutions
         by getting them into a format we can insert into
         the calibration database"""
-        # Now attempt to upload the solutions into the database
+        
+        phase_fit_niter = 3  # TODO(dev): get from config?
 
         # get obs_id
         file_no_path = item.split("/")
         obs_id = file_no_path[-1][0:10]
 
-        fits_solution_files = glob.glob(os.path.join(item, "*_solutions.fits"))
-        _bin_solution_files = glob.glob(os.path.join(item, "*_solutions.bin"))
-        self.logger.debug(
-            f"{item} - solutions to be uploaded:"
-            f" {sol for sol in fits_solution_files}"
+        metafits_files = glob.glob(os.path.join(item, "*_metafits.fits"))
+        self.logger.debug(f"{item} - {metafits_files=}")
+
+        if len(metafits_files) > 1:
+            self.logger.warning(f"{item} - more than one metafits file found.")
+
+        # get tiles from metafits
+        metafits = Metafits(metafits_files[0])
+        tiles = metafits.get_tiles_df()
+        self.logger.debug(f"{item} - tiles:\n{tiles.to_string(max_rows=999)}")
+
+        # determine refant
+        unflagged_tiles = tiles[tiles.flag == 0]
+        if not len(unflagged_tiles):
+            raise ValueError("No unflagged tiles found")
+        refant = unflagged_tiles.sort_values(by=["id"]).iloc[0]
+        self.logger.debug(f"{item} - {refant['name']=} ({refant['id']})")
+
+        # get channel info from metafits
+        chaninfo = metafits.get_chan_info()
+        self.logger.debug(f"{item} - {chaninfo=}")
+
+        all_coarse_chan_ranges = sorted(itertools.chain(*[
+                Metafits(metafits_file).get_chan_info().coarse_chan_ranges 
+                for metafits_file in metafits_files
+            ]),
+            key=lambda x: x[0]
         )
+        # print(all_coarse_chan_ranges)
+
+        # all_coarse_chan_ranges = [*itertools.chain(*all_coarse_chan_ranges)]
+
+        # read solutions
+        fits_solution_files = sorted(glob.glob(os.path.join(item, "*_solutions.fits")))
+        # _bin_solution_files = glob.glob(os.path.join(item, "*_solutions.bin"))
+        self.logger.debug( f"{item} - uploading {fits_solution_files=}" )
+
+        if len(fits_solution_files) != len(all_coarse_chan_ranges):
+            raise RuntimeError(
+                f"{item} - number of solution files ({len(fits_solution_files)})"
+                f" does not match number of coarse chan ranges in metafits {len(chaninfo.coarse_chan_ranges)}"
+            )
+
+        # sort fits_solution_files by first channel frequency
+        solns = sorted([HyperfitsSolution(f) for f in fits_solution_files], key=lambda x: x.get_chanblocks_hz()[0])
+        
+        chanblocks_per_coarse = None
+        all_chanblocks_hz = None
+        all_results = None
+        all_ch_flags = None
+        all_results = None
+        soln_tile_ids = []
+        ref_tile_idx = None
+        all_xx_solns = None
+        all_yy_solns = None
+
+        for coarse_chans, soln in zip(all_coarse_chan_ranges, solns):
+            # validate channel selection
+            chanblocks_hz, _chanblocks_per_coarse = soln.validate_chanblocks(chaninfo, coarse_chans)
+            if chanblocks_per_coarse is None:
+                chanblocks_per_coarse = _chanblocks_per_coarse
+                self.logger.debug(f"{soln.filename} - {chanblocks_per_coarse=}")
+            elif chanblocks_per_coarse != _chanblocks_per_coarse:
+                raise RuntimeError(
+                    f"{soln.filename} - chanblocks_per_coarse {chanblocks_per_coarse}"
+                    f" does not match previous value {_chanblocks_per_coarse}"
+                )
+            
+            self.logger.debug(f"{soln.filename} - adding {len(chanblocks_hz)} channels"
+                              f" from {chanblocks_hz[0]} to {chanblocks_hz[-1]}")
+            if all_chanblocks_hz is None:
+                all_chanblocks_hz = chanblocks_hz
+            else:
+                all_chanblocks_hz = np.concatenate((all_chanblocks_hz, chanblocks_hz))  # type: ignore
+
+            results = soln.get_convergence_results()
+            if all_results is None:
+                all_results = chanblocks_hz
+            else:
+                all_results = np.concatenate((all_results, results))  # type: ignore
+            
+
+            # TODO: ch_flags = hdus['CHANBLOCKS'].data['Flag']
+            # TODO: results = hdus['RESULTS'].data.flatten()
+
+            # validate tile selection
+            # join the tile dataframe on name, just in case order is different
+            soln_tiles = pd.merge(
+                pd.DataFrame(soln.get_tile_names_flags(), columns=["name", "flag"]), 
+                tiles, on="name", how="left", suffixes=["_soln", "_metafits"],
+            )
+            soln_tiles.insert(2, "flag", np.logical_or(soln_tiles["flag_soln"], soln_tiles["flag_metafits"]))
+            soln_tiles.drop(columns=["flag_soln", "flag_metafits"], inplace=True)
+            # self.logger.debug(f"{soln.filename} - tiles:\n{soln_tiles.to_string(max_rows=999)}")
+            _ref_tile = soln_tiles[soln_tiles["name"] == refant["name"]]
+            if not len(_ref_tile):
+                raise RuntimeError(
+                    f"{soln.filename} - reference tile {refant['name']}"
+                    f" not found in solution file"
+                )
+            _ref_tile_idx = _ref_tile.index[0]
+            _ref_tile_flag = _ref_tile["flag"][0]
+            if _ref_tile_flag:
+                raise RuntimeError(
+                    f"{soln.filename} - reference tile {refant['name']}"
+                    f" is flagged in solutions file (index {_ref_tile_idx})"
+                )
+            _tile_ids = soln_tiles["id"].to_numpy()
+            # _tile_ids, _ref_tile_idx = soln.validate_tiles(tiles_by_name, refant)
+            if not len(soln_tile_ids):
+                soln_tile_ids = soln_tiles["id"].to_numpy()
+                self.logger.debug(f"{soln.filename} - found {len(soln_tile_ids)} tiles")  # type: ignore
+            elif not np.array_equal(soln_tile_ids, _tile_ids):
+                raise RuntimeError(
+                    f"{soln.filename} - tile selection in solution file"
+                    f" does not match previous solution files.\n"
+                    f" previous:\n{_tile_ids}\n"
+                    f" this:\n{soln_tile_ids}"
+                )
+            if not ref_tile_idx:
+                ref_tile_idx = _ref_tile_idx
+                self.logger.debug(f"{soln.filename} - ref tile found at index {ref_tile_idx}")
+            elif ref_tile_idx != _ref_tile_idx:
+                raise RuntimeError(
+                    f"{soln.filename} - reference tile in solution file"
+                    f" does not match previous solution files"
+                )
+            
+            # validate timeblocks
+            avg_times = soln.get_average_times()
+            # TODO: support multiple timeblocks
+            if len(avg_times) != 1:
+                raise RuntimeError(
+                    f"{soln.filename} - exactly 1 timeblock must be provided: ({len(avg_times)})"
+                )
+            # TODO: compare with metafits times
+
+            # validate solutions
+            solutions = soln.get_ref_solutions(ref_tile_idx)
+            for solution in solutions:  
+                if (ntimes:=solution.shape[0]) != 1:
+                    raise RuntimeError(
+                        f"{soln.filename} - number of timeblocks in SOLUTIONS HDU ({ntimes})"
+                        f" does not match number of timeblocks in TIMEBLOCKS HDU ({len(avg_times)})"
+                    )
+                if (ntiles:=solution.shape[1]) != len(soln_tile_ids):
+                    raise RuntimeError(
+                        f"{soln.filename} - number of tiles in SOLUTIONS HDU ({ntiles})"
+                        f" does not match number of tiles in TILES HDU ({len(soln_tile_ids)})"
+                    )
+                if (nchans:=solution.shape[2]) != len(chanblocks_hz):
+                    raise RuntimeError(
+                        f"{soln.filename} - number of channels in SOLUTIONS HDU ({nchans})"
+                        f" does not match number of channels in CHANBLOCKS HDU ({len(chanblocks_hz)})"
+                    )
+
+            # TODO: sanity check, ref_solutions should be identity matrix or NaN
+
+            if all_xx_solns is None:
+                all_xx_solns = solutions[0]
+            else:
+                all_xx_solns = np.concatenate((all_xx_solns, solutions[0]), axis=2)
+            if all_yy_solns is None:
+                all_yy_solns = solutions[3]
+            else:
+                all_yy_solns = np.concatenate((all_yy_solns, solutions[3]), axis=2)
+
+        if all_xx_solns is None or all_yy_solns is None:
+            raise RuntimeError("No valid solutions found")
+        if all_chanblocks_hz is None:
+            raise RuntimeError("No valid channels found")
+        if all_results is None:
+            raise RuntimeError("No valid results found")
+        
+        exp_results = np.exp(-all_results)
+        weights = np.nan_to_num((exp_results - np.nanmin(exp_results)) / (np.nanmax(exp_results) - np.nanmin(exp_results)))
+
+        fits = []
+        for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
+            # tile = tiles[tiles["id"] == tile_id].iloc[0]
+            # tile_name = tile['name']
+            for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
+                try:
+                    fit = fit_phase_line(all_chanblocks_hz, solns, weights, niter=phase_fit_niter)  # type: ignore
+                except Exception as exc:
+                    self.logger.error(f"{item} - {tile_id=:4} {pol} {exc}")
+                    continue
+                self.logger.debug(f"{item} - {tile_id=:4} {pol} {fit=}")
+                fits.append([tile_id, soln_idx, pol, *fit])
+
+        fits = pd.DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])  # type: ignore
+        fits = debug_phase_fits(item, fits, tiles, all_chanblocks_hz, all_xx_solns[0], all_yy_solns[0], weights)
+
+        # __import__('ipdb').set_trace()
+        # self.logger.debug(f"{item} - {tile_id=} length={fit.get_length()}. {fit=}")
+        self.logger.debug(f"{item} - fits:\n{fits.to_string(max_rows=512)}")
+
+        # x_delay_m,
+        # x_gains_fit_quality,
+        # x_gains_pol0[],
+        # x_gains_pol1[],
+        # x_gains_sigma_resid[],
+        # x_gains[],
+        # x_intercept,
+        # x_phase_chi2dof,
+        # x_phase_fit_quality,
+        # x_phase_sigma_resid,
+
+        # TODO: Dev
+        # open questions: see readme
+        #   - which refant?
+        #   - sourcelist?
+        #       - 
+        #   - why phase_resid / phase_median_thickness?
+        #   - unflag all antennas before calibration?
+        #   - birli write out channel flags
 
         # on success move to complete
-        success = True
+        success = False
         if success:
             # now move the whole dir
             # to the complete path
+            if not self.complete_path:
+                raise ValueError("No complete path specified")
             complete_path = os.path.join(self.complete_path, obs_id)
             self.logger.info(
                 f"{obs_id}: moving successfull files to"

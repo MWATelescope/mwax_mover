@@ -430,13 +430,15 @@ def insert_calibration_fits_row(
     obs_id: int,
     code_version: str,
     creator: str,
+    fit_niter: int = 10,
+    fit_limit: int = 20,
 ) -> bool:
     """Insert a  calibration_fit row.
     This row represents the calibration for an obsid."""
     sql = (
         "INSERT INTO calibration_fits"
         " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit)"
-        " VALUES (%s,%s,%s,now(),%s,10,20);"
+        " VALUES (%s,%s,%s,now(),%s,%s,%s);"
     )
 
     sql_values = (
@@ -444,6 +446,8 @@ def insert_calibration_fits_row(
         obs_id,
         code_version,
         creator,
+        fit_niter,
+        fit_limit,
     )
 
     try:
@@ -512,11 +516,11 @@ def insert_calibration_solutions_row(
                                                 x_delay_m,x_intercept,x_gains,
                                                 y_delay_m,y_intercept,y_gains,
                                                 x_gains_pol1,y_gains_pol1,
-                                                x_phase_sigma_resid,x_phase_chi2dof,x_phase_fit_quality, 
+                                                x_phase_sigma_resid,x_phase_chi2dof,x_phase_fit_quality,
                                                 y_phase_sigma_resid,y_phase_chi2dof,y_phase_fit_quality,
                                                 x_gains_fit_quality,y_gains_fit_quality,
                                                 x_gains_sigma_resid,y_gains_sigma_resid,
-                                                x_gains_pol0,y_gains_pol0) 
+                                                x_gains_pol0,y_gains_pol0)
                             VALUES (%s,%s,%s,
                                     %s,%s,ARRAY[%s],
                                     %s,%s,ARRAY[%s],
