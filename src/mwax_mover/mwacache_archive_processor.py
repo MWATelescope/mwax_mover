@@ -13,6 +13,7 @@ import threading
 import time
 import astropy
 import boto3
+import botocore
 from boto3 import Session
 from mwax_mover import (
     mwax_mover,
@@ -35,7 +36,6 @@ class MWACacheArchiveProcessor:
     """
 
     def __init__(self):
-
         self.logger = None
 
         self.hostname = None
@@ -385,7 +385,9 @@ class MWACacheArchiveProcessor:
                     status_bytes,
                     self.health_multicast_hops,
                 )
-            except Exception as catch_all_exception:  # pylint: disable=broad-except
+            except (
+                Exception
+            ) as catch_all_exception:  # pylint: disable=broad-except
                 self.logger.warning(
                     "health_handler: Failed to send health information."
                     f" {catch_all_exception}"
@@ -504,6 +506,7 @@ class MWACacheArchiveProcessor:
         self.logger.info(f"Python v{py_version}")
         self.logger.info(f"astropy v{astropy.__version__}")
         self.logger.info(f"boto3 v{boto3.__version__}")
+        self.logger.info(f"botocore v{botocore.__version__}")
 
         i = 1
         self.watch_dirs = []
