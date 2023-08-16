@@ -23,6 +23,7 @@ PSRDADA_HEADER_BYTES = 4096
 # PSRDADA keywords
 PSRDADA_MODE = "MODE"
 PSRDADA_SUBOBS_ID = "SUBOBS_ID"
+PSRDADA_TRIGGER_ID = "TRIGGER_ID"
 
 # This is global mutex so we don't try to create the same metafits
 # file with multiple threads
@@ -124,8 +125,7 @@ def download_metafits_file(obs_id: int, metafits_path: str):
             handler.write(metafits)
     else:
         raise Exception(
-            "Unable to get metafits file. Response code"
-            f" {response.status_code}"
+            "Unable to get metafits file. Response code" f" {response.status_code}"
         )
 
     return
@@ -176,8 +176,7 @@ def validate_filename(
         if not obs_id_check.isdigit():
             valid = False
             validation_error = (
-                "Filename does not start with a 10 digit observation_id-"
-                " ignoring"
+                "Filename does not start with a 10 digit observation_id-" " ignoring"
             )
         else:
             obs_id = int(obs_id_check)
@@ -207,9 +206,7 @@ def validate_filename(
         else:
             # Error - unknown filetype
             valid = False
-            validation_error = (
-                f"Unknown file extension {file_ext_part}- ignoring"
-            )
+            validation_error = f"Unknown file extension {file_ext_part}- ignoring"
 
     # 4. Check length of filename
     if valid:
@@ -265,9 +262,7 @@ def validate_filename(
     if valid and filetype_id != MWADataFileType.MWA_PPD_FILE.value:
         # Now check that the observation is a calibrator by
         # looking at the associated metafits file
-        metafits_filename = os.path.join(
-            metafits_path, f"{obs_id}_metafits.fits"
-        )
+        metafits_filename = os.path.join(metafits_path, f"{obs_id}_metafits.fits")
 
     elif valid and filetype_id == MWADataFileType.MWA_PPD_FILE.value:
         # this file IS a metafits! So check it
@@ -284,9 +279,7 @@ def validate_filename(
                 )
                 try:
                     download_metafits_file(obs_id, metafits_path)
-                except (
-                    Exception
-                ) as catch_all_exception:  # pylint: disable=broad-except
+                except Exception as catch_all_exception:  # pylint: disable=broad-except
                     valid = False
                     validation_error = (
                         f"Metafits file {metafits_filename} did not exist and"
@@ -295,9 +288,7 @@ def validate_filename(
                     )
 
             if valid:
-                (calibrator, project_id) = get_metafits_values(
-                    metafits_filename
-                )
+                (calibrator, project_id) = get_metafits_values(metafits_filename)
 
     return ValidationData(
         valid,
@@ -350,9 +341,7 @@ def get_metafits_values(metafits_filename: str) -> (bool, str):
     try:
         with fits.open(metafits_filename) as hdul:
             # Read key from primary HDU- it is bool
-            is_calibrator = hdul[0].header[  # pylint: disable=no-member
-                "CALIBRAT"
-            ]
+            is_calibrator = hdul[0].header["CALIBRAT"]  # pylint: disable=no-member
             project_id = hdul[0].header["PROJECT"]  # pylint: disable=no-member
             return is_calibrator, project_id
     except Exception as catch_all_exception:
@@ -362,9 +351,7 @@ def get_metafits_values(metafits_filename: str) -> (bool, str):
         ) from catch_all_exception
 
 
-def read_config(
-    logger, config: ConfigParser, section: str, key: str, b64encoded=False
-):
+def read_config(logger, config: ConfigParser, section: str, key: str, b64encoded=False):
     """Reads a value from a config file"""
     raw_value = config.get(section, key)
 
@@ -462,9 +449,7 @@ def process_mwax_stats(
     logger.info(f"{full_filename}- attempting to run stats: {cmd}")
 
     start_time = time.time()
-    return_value, stdout = mwax_command.run_command_ext(
-        logger, cmd, numa_node, timeout
-    )
+    return_value, stdout = mwax_command.run_command_ext(logger, cmd, numa_node, timeout)
     elapsed = time.time() - start_time
 
     if return_value:
@@ -479,18 +464,14 @@ def load_psrdada_ringbuffer(
     logger, full_filename: str, ringbuffer_key: str, numa_node, timeout: int
 ) -> bool:
     """Loads a subfile into a PSRDADA ringbuffer"""
-    logger.info(
-        f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}"
-    )
+    logger.info(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
 
     cmd = f"dada_diskdb -k {ringbuffer_key} -f {full_filename}"
 
     size = os.path.getsize(full_filename)
 
     start_time = time.time()
-    return_value, stdout = mwax_command.run_command_ext(
-        logger, cmd, numa_node, timeout
-    )
+    return_value, stdout = mwax_command.run_command_ext(logger, cmd, numa_node, timeout)
     elapsed = time.time() - start_time
 
     size_gigabytes = size / (1000 * 1000 * 1000)
@@ -504,8 +485,7 @@ def load_psrdada_ringbuffer(
         )
     else:
         logger.error(
-            f"{full_filename} load_psrdada_ringbuffer failed with error"
-            f" {stdout}"
+            f"{full_filename} load_psrdada_ringbuffer failed with error" f" {stdout}"
         )
 
     return return_value
@@ -523,9 +503,7 @@ def scan_for_existing_files_and_add_to_queue(
     Scans a directory for a file pattern and then enqueues all items into
     a regular queue
     """
-    files = scan_directory(
-        logger, watch_dir, pattern, recursive, exclude_pattern
-    )
+    files = scan_directory(logger, watch_dir, pattern, recursive, exclude_pattern)
     files = sorted(files)
     logger.info(f"Found {len(files)} files")
 
@@ -549,9 +527,7 @@ def scan_for_existing_files_and_add_to_priority_queue(
     Scans a directory for a file pattern and then enqueues all items into
     a priority queue
     """
-    files = scan_directory(
-        logger, watch_dir, pattern, recursive, exclude_pattern
-    )
+    files = scan_directory(logger, watch_dir, pattern, recursive, exclude_pattern)
     files = sorted(files)
     logger.info(f"Found {len(files)} files")
 
@@ -574,12 +550,8 @@ def scan_directory(
     # Watch dir must end in a slash for the iglob to work
     # Just loop through all files and add them to the queue
     if recursive:
-        find_pattern = os.path.join(
-            os.path.abspath(watch_dir), "**/*" + pattern
-        )
-        logger.info(
-            f"Scanning recursively for files matching {find_pattern}..."
-        )
+        find_pattern = os.path.join(os.path.abspath(watch_dir), "**/*" + pattern)
+        logger.info(f"Scanning recursively for files matching {find_pattern}...")
     else:
         find_pattern = os.path.join(os.path.abspath(watch_dir), "*" + pattern)
         logger.info(f"Scanning for files matching {find_pattern}...")
@@ -588,9 +560,7 @@ def scan_directory(
 
     # Now exclude files if they match the exclude pattern
     if exclude_pattern:
-        exclude_glob = os.path.join(
-            os.path.abspath(watch_dir), "*" + exclude_pattern
-        )
+        exclude_glob = os.path.join(os.path.abspath(watch_dir), "*" + exclude_pattern)
         logger.info(f"Excluding files {exclude_glob}...")
         return [fn for fn in files if fn not in glob.glob(exclude_glob)]
     else:
@@ -662,9 +632,7 @@ def get_disk_space_bytes(path: str) -> typing.Tuple[int, int, int]:
     return shutil.disk_usage(path)
 
 
-def do_checksum_md5(
-    logger, full_filename: str, numa_node: int, timeout: int
-) -> str:
+def do_checksum_md5(logger, full_filename: str, numa_node: int, timeout: int) -> str:
     """Return an md5 checksum of a file"""
 
     # default output of md5 hash command is:
@@ -706,9 +674,7 @@ def do_checksum_md5(
                 f"Calculated MD5 checksum is not valid: md5 output {md5output}"
             )
     else:
-        raise Exception(
-            f"md5sum returned an unexpected return code {return_value}"
-        )
+        raise Exception(f"md5sum returned an unexpected return code {return_value}")
 
 
 def get_priority(
@@ -763,8 +729,11 @@ def get_priority(
     return return_priority
 
 
-def inject_beamformer_headers(subfile_filename: str, beamformer_settings: str):
-    """Appends the beamformer settings to the existing subfile header"""
+def inject_subfile_header(subfile_filename: str, key_value_pairs: str):
+    """Appends the key_value_pair setting to the existing subfile header
+    Multiple key value pairs should have a \n to split each setting.
+    Each key_value_pair should be space separated: 'KEY VALUE' and
+    end with a \n newline"""
     data = []
 
     # Read the psrdada header data in to a list (one line per item)
@@ -774,9 +743,9 @@ def inject_beamformer_headers(subfile_filename: str, beamformer_settings: str):
     last_line_index = len(data) - 1
     last_row_len = len(data[last_line_index])
 
-    beamformer_settings_len = len(beamformer_settings)
-    null_trail = "\0" * (last_row_len - beamformer_settings_len)
-    data[last_line_index] = beamformer_settings + null_trail
+    new_settings_len = len(key_value_pairs)
+    null_trail = "\0" * (last_row_len - new_settings_len)
+    data[last_line_index] = key_value_pairs + null_trail
 
     # convert our list of lines back to a byte array
     new_string = "\n".join(data)
@@ -784,7 +753,7 @@ def inject_beamformer_headers(subfile_filename: str, beamformer_settings: str):
     new_bytes = bytes(new_string, "UTF-8")
     if len(new_bytes) != PSRDADA_HEADER_BYTES:
         raise Exception(
-            "_inject_beamformer_headers(): new_bytes length is not"
+            "inject_subfile_header(): new_bytes length is not"
             f" {PSRDADA_HEADER_BYTES} as expected it is {len(new_bytes)}."
             f" Newbytes = [{new_string}]"
         )
@@ -793,6 +762,11 @@ def inject_beamformer_headers(subfile_filename: str, beamformer_settings: str):
     with open(subfile_filename, "r+b") as subfile:
         subfile.seek(0)
         subfile.write(new_bytes)
+
+
+def inject_beamformer_headers(subfile_filename: str, beamformer_settings: str):
+    """Appends the beamformer settings to the existing subfile header"""
+    inject_subfile_header(subfile_filename, beamformer_settings)
 
 
 def read_subfile_value(filename: str, key: str) -> str:
@@ -816,6 +790,17 @@ def read_subfile_value(filename: str, key: str) -> str:
                     break
 
     return subfile_value
+
+
+def read_subfile_trigger_value(subfile_filename: str):
+    """Reads the TRIGGER_ID values from a subfile header
+    Returns trigger_id as an INT or None if not found"""
+    value = read_subfile_value(subfile_filename, PSRDADA_TRIGGER_ID)
+
+    if value:
+        return int(value)
+    else:
+        return None
 
 
 def write_mock_subfile_from_header(output_filename, header):

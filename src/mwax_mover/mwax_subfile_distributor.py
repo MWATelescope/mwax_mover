@@ -58,17 +58,13 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
                 self.wfile.write(data.encode())
 
             elif parsed_path == "/pause_archiving":
-                self.server.context.archive_processor.pause_archiving(
-                    paused=True
-                )
+                self.server.context.archive_processor.pause_archiving(paused=True)
                 self.send_response(200)
                 self.end_headers()
                 self.wfile.write(b"OK")
 
             elif parsed_path == "/resume_archiving":
-                self.server.context.archive_processor.pause_archiving(
-                    paused=False
-                )
+                self.server.context.archive_processor.pause_archiving(paused=False)
                 self.send_response(200)
                 self.end_headers()
                 self.wfile.write(b"OK")
@@ -78,6 +74,7 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
                 try:
                     starttime = int(parameter_list["start"][0])
                     endtime = int(parameter_list["end"][0])
+                    trigger_id = int(parameter_list["trigger_id"][0])
 
                     # Special test mode- if start and end == 0 just return 200
                     if starttime == endtime == 0:
@@ -92,23 +89,20 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
                             )
 
                         if len(str(endtime)) != 10:
-                            raise ValueError(
-                                "end must be gps seconds and length 10"
-                            )
+                            raise ValueError("end must be gps seconds and length 10")
 
                         if endtime - starttime <= 0:
                             raise ValueError("end must be after start")
 
                         # Check to see if we aren't already doing a dump
                         if (
-                            self.server.context.subfile_processor.dump_start_gps
-                            is None
+                            self.server.context.subfile_processor.dump_start_gps is None
                             and self.server.context.subfile_processor.dump_end_gps
                             is None
                         ):
                             # Now call the method to dump the voltages
                             if self.server.context.subfile_processor.dump_voltages(
-                                starttime, endtime
+                                starttime, endtime, trigger_id
                             ):
                                 self.send_response(200)
                                 self.end_headers()
@@ -126,14 +120,18 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
                                 b" Request canceled."
                             )
 
-                except ValueError as parameters_exception:  # pylint: disable=broad-except
+                except (
+                    ValueError
+                ) as parameters_exception:  # pylint: disable=broad-except
                     self.send_response(400)
                     self.end_headers()
                     self.wfile.write(
                         f"Value Error: {parameters_exception}".encode("utf-8")
                     )
 
-                except Exception as dump_voltages_exception:  # pylint: disable=broad-except
+                except (
+                    Exception
+                ) as dump_voltages_exception:  # pylint: disable=broad-except
                     self.send_response(400)
                     self.end_headers()
                     self.wfile.write(
@@ -144,22 +142,16 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
             else:
                 self.send_response(400)
                 self.end_headers()
-                self.wfile.write(
-                    f"Unknown command {parsed_path}".encode("utf-8")
-                )
+                self.wfile.write(f"Unknown command {parsed_path}".encode("utf-8"))
 
         except Exception as catch_all_exception:  # pylint: disable=broad-except
-            self.server.context.logger.error(
-                f"GET: Error {str(catch_all_exception)}"
-            )
+            self.server.context.logger.error(f"GET: Error {str(catch_all_exception)}")
             self.send_response(400)
             self.end_headers()
 
     def log_message(self, format: str, *args):
         """Logs a message"""
-        self.server.context.logger.debug(
-            f"{self.address_string()} {format % args}"
-        )
+        self.server.context.logger.debug(f"{self.address_string()} {format % args}")
         return
 
 
@@ -299,9 +291,7 @@ class MWAXSubfileDistributor:
         self.cfg_log_path = self.config.get("mwax mover", "log_path")
 
         if not os.path.exists(self.cfg_log_path):
-            self.logger.error(
-                f"log_path {self.cfg_log_path} does not exist. Quiting."
-            )
+            self.logger.error(f"log_path {self.cfg_log_path} does not exist. Quiting.")
             sys.exit(1)
 
         # It's now safe to start logging
@@ -310,9 +300,7 @@ class MWAXSubfileDistributor:
         console_log = logging.StreamHandler()
         console_log.setLevel(logging.DEBUG)
         console_log.setFormatter(
-            logging.Formatter(
-                "%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"
-            )
+            logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s")
         )
         self.logger.addHandler(console_log)
 
@@ -321,9 +309,7 @@ class MWAXSubfileDistributor:
         )
         file_log.setLevel(logging.DEBUG)
         file_log.setFormatter(
-            logging.Formatter(
-                "%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"
-            )
+            logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s")
         )
         self.logger.addHandler(file_log)
 
@@ -397,8 +383,7 @@ class MWAXSubfileDistributor:
             self.cfg_health_multicast_interface_name
         )
         self.logger.info(
-            "IP for sending multicast:"
-            f" {self.cfg_health_multicast_interface_ip}"
+            f"IP for sending multicast: {self.cfg_health_multicast_interface_ip}"
         )
 
         if not os.path.exists(self.cfg_voltdata_dont_archive_path):
@@ -595,21 +580,17 @@ class MWAXSubfileDistributor:
 
             # Get list of projectids which are to be given
             # high priority when archiving
-            self.cfg_corr_high_priority_correlator_projectids = (
-                utils.read_config_list(
-                    self.logger,
-                    self.config,
-                    "correlator",
-                    "high_priority_correlator_projectids",
-                )
+            self.cfg_corr_high_priority_correlator_projectids = utils.read_config_list(
+                self.logger,
+                self.config,
+                "correlator",
+                "high_priority_correlator_projectids",
             )
-            self.cfg_corr_high_priority_vcs_projectids = (
-                utils.read_config_list(
-                    self.logger,
-                    self.config,
-                    "correlator",
-                    "high_priority_vcs_projectids",
-                )
+            self.cfg_corr_high_priority_vcs_projectids = utils.read_config_list(
+                self.logger,
+                self.config,
+                "correlator",
+                "high_priority_vcs_projectids",
             )
 
             if not os.path.exists(self.cfg_corr_visdata_incoming_path):
@@ -770,9 +751,7 @@ class MWAXSubfileDistributor:
             self.cfg_corr_calibrator_destination_enabled = False
 
         # Create and start web server
-        self.logger.info(
-            f"Starting http server on port {self.cfg_webserver_port}..."
-        )
+        self.logger.info(f"Starting http server on port {self.cfg_webserver_port}...")
         self.web_server = MWAXHTTPServer(
             ("", int(self.cfg_webserver_port)), MWAXHTTPGetHandler
         )
@@ -813,34 +792,32 @@ class MWAXSubfileDistributor:
                     " archived and nothing will be sent for calibration."
                 )
 
-            self.archive_processor = (
-                mwax_archive_processor.MWAXArchiveProcessor(
-                    self,
-                    self.hostname,
-                    self.cfg_corr_archive_destination_enabled,
-                    self.cfg_corr_archive_command_numa_node,
-                    self.cfg_corr_archive_destination_host,
-                    self.cfg_corr_archive_destination_port,
-                    self.cfg_archive_command_timeout_sec,
-                    self.cfg_corr_mwax_stats_executable,
-                    self.cfg_corr_mwax_stats_dump_dir,
-                    self.cfg_corr_mwax_stats_timeout_sec,
-                    self.db_handler,
-                    self.cfg_voltdata_incoming_path,
-                    self.cfg_voltdata_outgoing_path,
-                    self.cfg_corr_visdata_incoming_path,
-                    self.cfg_corr_visdata_processing_stats_path,
-                    self.cfg_corr_visdata_outgoing_path,
-                    self.cfg_corr_calibrator_outgoing_path,
-                    self.cfg_corr_calibrator_destination_host,
-                    self.cfg_corr_calibrator_destination_port,
-                    self.cfg_corr_calibrator_destination_enabled,
-                    self.cfg_corr_metafits_path,
-                    self.cfg_corr_visdata_dont_archive_path,
-                    self.cfg_voltdata_dont_archive_path,
-                    self.cfg_corr_high_priority_correlator_projectids,
-                    self.cfg_corr_high_priority_vcs_projectids,
-                )
+            self.archive_processor = mwax_archive_processor.MWAXArchiveProcessor(
+                self,
+                self.hostname,
+                self.cfg_corr_archive_destination_enabled,
+                self.cfg_corr_archive_command_numa_node,
+                self.cfg_corr_archive_destination_host,
+                self.cfg_corr_archive_destination_port,
+                self.cfg_archive_command_timeout_sec,
+                self.cfg_corr_mwax_stats_executable,
+                self.cfg_corr_mwax_stats_dump_dir,
+                self.cfg_corr_mwax_stats_timeout_sec,
+                self.db_handler,
+                self.cfg_voltdata_incoming_path,
+                self.cfg_voltdata_outgoing_path,
+                self.cfg_corr_visdata_incoming_path,
+                self.cfg_corr_visdata_processing_stats_path,
+                self.cfg_corr_visdata_outgoing_path,
+                self.cfg_corr_calibrator_outgoing_path,
+                self.cfg_corr_calibrator_destination_host,
+                self.cfg_corr_calibrator_destination_port,
+                self.cfg_corr_calibrator_destination_enabled,
+                self.cfg_corr_metafits_path,
+                self.cfg_corr_visdata_dont_archive_path,
+                self.cfg_voltdata_dont_archive_path,
+                self.cfg_corr_high_priority_correlator_projectids,
+                self.cfg_corr_high_priority_vcs_projectids,
             )
 
             # Add this processor to list of processors we manage

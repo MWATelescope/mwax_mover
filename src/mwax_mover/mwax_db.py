@@ -125,8 +125,7 @@ class MWAXDBHandler:
                 # Our connection is toast. Clear it so we attempt a reconnect
                 self.con = None
                 self.logger.error(
-                    "select_one_row_postgres(): postgres InterfaceError-"
-                    f" {int_error}"
+                    f"select_one_row_postgres(): postgres InterfaceError- {int_error}"
                 )
                 # Reraise error
                 raise int_error
@@ -145,8 +144,7 @@ class MWAXDBHandler:
                 # Any other error- likely to be a database error rather than
                 # connection based
                 self.logger.error(
-                    "select_one_row_postgres(): unknown Error-"
-                    f" {exception_info}"
+                    f"select_one_row_postgres(): unknown Error- {exception_info}"
                 )
                 raise exception_info
 
@@ -190,8 +188,7 @@ class MWAXDBHandler:
                 # Our connection is toast. Clear it so we attempt a reconnect
                 self.con = None
                 self.logger.error(
-                    "execute_single_dml_row(): postgres OperationalError-"
-                    f" {conn_error}"
+                    f"execute_single_dml_row(): postgres OperationalError- {conn_error}"
                 )
                 # Reraise error
                 raise conn_error
@@ -200,8 +197,7 @@ class MWAXDBHandler:
                 # Our connection is toast. Clear it so we attempt a reconnect
                 self.con = None
                 self.logger.error(
-                    "execute_single_dml_row(): postgres InterfaceError-"
-                    f" {int_error}"
+                    f"execute_single_dml_row(): postgres InterfaceError- {int_error}"
                 )
                 # Reraise error
                 raise int_error
@@ -210,8 +206,7 @@ class MWAXDBHandler:
                 # A programming/SQL error - e.g. table does not exist. Don't
                 # reconnect connection
                 self.logger.error(
-                    "execute_single_dml_row(): postgres ProgrammingError-"
-                    f" {prog_error}"
+                    f"execute_single_dml_row(): postgres ProgrammingError- {prog_error}"
                 )
                 # Reraise error
                 raise prog_error
@@ -220,8 +215,7 @@ class MWAXDBHandler:
                 # Any other error- likely to be a database error rather than
                 # connection based
                 self.logger.error(
-                    "execute_single_dml_row(): unknown Error-"
-                    f" {exception_info}"
+                    f"execute_single_dml_row(): unknown Error- {exception_info}"
                 )
                 raise exception_info
 
@@ -263,9 +257,7 @@ def get_data_file_row(db_handler_object, full_filename: str) -> DataFileRow:
                 return None
         else:
             # Run query and get the data_files row info for this file
-            obsid, size, checksum = db_handler_object.select_one_row(
-                sql, (filename,)
-            )
+            obsid, size, checksum = db_handler_object.select_one_row(sql, (filename,))
 
             data_files_row = DataFileRow()
             data_files_row.observation_num = int(obsid)
@@ -294,6 +286,7 @@ def insert_data_file_row(
     hostname: str,
     checksum_type: int,
     checksum: str,
+    trigger_id,
 ) -> bool:
     """Insert a data_files row"""
     # Prepare the fields
@@ -303,6 +296,9 @@ def insert_data_file_row(
     file_size = os.stat(archive_filename).st_size
     deleted = False
     remote_archived = False
+
+    if trigger_id == -1:
+        trigger_id = None
 
     # We actually do an insert
     sql = ""
@@ -328,8 +324,9 @@ def insert_data_file_row(
                 remote_archived,
                 deleted,
                 checksum_type,
-                checksum)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                checksum,
+                trigger_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
 
             db_handler_object.execute_single_dml_row(
                 sql,
@@ -343,6 +340,7 @@ def insert_data_file_row(
                     deleted,
                     checksum_type,
                     checksum,
+                    trigger_id,
                 ),
             )
 

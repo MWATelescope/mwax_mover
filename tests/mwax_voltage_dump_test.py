@@ -10,7 +10,7 @@ import threading
 import time
 import requests
 from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
-from mwax_mover.utils import write_mock_subfile
+from mwax_mover.utils import write_mock_subfile, read_subfile_trigger_value
 
 TEST_BASE_PATH = "tests/mock_mwax_dump"
 TEST_CONFIG_FILE = "tests/mwax_voltage_dump_test.cfg"
@@ -121,9 +121,7 @@ def setup_test_dirs():
     check_and_make_dir(visdata_incoming_path)
 
     # visdata_processing_stats_path
-    visdata_processing_stats_path = os.path.join(
-        base_dir, "visdata_processing_stats"
-    )
+    visdata_processing_stats_path = os.path.join(base_dir, "visdata_processing_stats")
     check_and_make_dir(visdata_processing_stats_path)
 
     # visdata_outgoing_path
@@ -170,8 +168,9 @@ def test_voltage_dump_test_params():
     # Trigger a dump
     start = 0
     end = 0
+    trigger_id = 123
     response = requests.get(
-        f"http://127.0.0.1:9997/dump_voltages?start={start}&end={end}"
+        f"http://127.0.0.1:9997/dump_voltages?start={start}&end={end}&trigger_id={trigger_id}"
     )
 
     assert response.status_code == 200
@@ -182,7 +181,7 @@ def test_voltage_dump_test_params():
     msd.signal_handler(signal.SIGINT, 0)
 
 
-def test_voltage_dump():
+def test_voltage_dump_in_the_past():
     """Tests that SubfileDistributor correctly processes a voltage dump"""
     # Setup all the paths
     setup_test_dirs()
@@ -223,8 +222,9 @@ def test_voltage_dump():
     start = 1300000000
     sub_obs_to_dump = 4
     end = start + (sub_obs_to_dump * 8)
+    trigger_id = 123
     response = requests.get(
-        f"http://127.0.0.1:9997/dump_voltages?start={start}&end={end}"
+        f"http://127.0.0.1:9997/dump_voltages?start={start}&end={end}&trigger_id={trigger_id}"
     )
     msd.logger.debug(response.text)
 
@@ -289,3 +289,190 @@ def test_voltage_dump():
 
     assert len(destination_sub_files) == 2 + 1 + 2
     assert len(destination_free_files) == 0
+
+    # check that each dumped subfile contains the trigger!
+
+    # 2 Dumped files
+    assert (
+        read_subfile_trigger_value(
+            os.path.join(destination_dir, "1300000000_1300000016_169.sub"),
+        )
+        == 123
+    )
+    assert (
+        read_subfile_trigger_value(
+            os.path.join(destination_dir, "1300000000_1300000024_169.sub"),
+        )
+        == 123
+    )
+
+    # 3 subsequent files
+    assert (
+        read_subfile_trigger_value(
+            os.path.join(destination_dir, "1300000032_1300000032_169.sub"),
+        )
+        is None
+    )
+    assert (
+        read_subfile_trigger_value(
+            os.path.join(destination_dir, "1300000040_1300000040_169.sub"),
+        )
+        is None
+    )
+    assert (
+        read_subfile_trigger_value(
+            os.path.join(destination_dir, "1300000040_1300000048_169.sub"),
+        )
+        is None
+    )
+
+
+def test_voltage_dump_past_and_future():
+    """Tests that SubfileDistributor correctly processes a voltage dump"""
+    # Setup all the paths
+    setup_test_dirs()
+
+    dev_shm_dir = os.path.join(get_base_path(), "dev_shm")
+    dev_shm_temp_dir = os.path.join(get_base_path(), "dev_shm_temp")
+
+    # Start mwax_subfile_distributor using our test config
+    msd = MWAXSubfileDistributor()
+
+    # Override the hostname
+    msd.hostname = "test_server"
+
+    # Call to read config
+    msd.initialise(TEST_CONFIG_FILE)
+
+    # Create and start a thread for the processor
+    thrd = threading.Thread(name="msd_thread", target=msd.start, daemon=True)
+
+    # Start the processor
+    thrd.start()
+
+    # allow things to start
+    time.sleep(5)
+
+    # create mock subfiles
+    # 1300000000 - 1300000024 are NO_CAPTURE
+    create_observation_subfiles(
+        1300000000, 4, "NO_CAPTURE", 169, 0, dev_shm_temp_dir, dev_shm_dir
+    )
+
+    # 1300000032 - is MWAX_VCS -  will not be dumped or assigned a trigger
+    create_observation_subfiles(
+        1300000032, 1, "MWAX_VCS", 169, 0, dev_shm_temp_dir, dev_shm_dir
+    )
+
+    # Trigger a dump which ends 1 subobs in the future
+    start = 1300000000
+    sub_obs_to_dump = 6
+    end = start + (sub_obs_to_dump * 8)
+    trigger_id = 123
+    response = requests.get(
+        f"http://127.0.0.1:9997/dump_voltages?start={start}&end={end}&trigger_id={trigger_id}"
+    )
+    msd.logger.debug(response.text)
+
+    # Wait for processing
+    time.sleep(3)
+
+    # Now send through a MWAX_VCS and then some NO_CAPTURES
+    # To test that:
+    # When we hit the MWAX_VCS we do not do any archiving of free files
+    # When we hit the NO_CAPTUREs we DO archive free files (oldest first)
+    # 1300000040 - 1300000048 is MWAX_VCS
+    create_observation_subfiles(
+        1300000040, 2, "MWAX_VCS", 169, 0, dev_shm_temp_dir, dev_shm_dir
+    )
+
+    # 1300000056 - 1300000080 is NO_CAPTURE
+    create_observation_subfiles(
+        1300000056, 4, "NO_CAPTURE", 169, 0, dev_shm_temp_dir, dev_shm_dir
+    )
+
+    # Ok time's up! Stop the processor
+    msd.signal_handler(signal.SIGINT, 0)
+    while thrd.is_alive():
+        # keep waiting
+        time.sleep(1)
+
+    #
+    # Now check output
+    #
+
+    # Check dev/shm- all the keep files should now be back as .free
+    dev_shm_sub_files = glob.glob(os.path.join(dev_shm_dir, "*.sub"))
+    dev_shm_free_files = glob.glob(os.path.join(dev_shm_dir, "*.free"))
+
+    assert len(dev_shm_sub_files) == 0
+    assert len(dev_shm_free_files) == 11
+
+    # Check destination
+    # Should be 2 .sub files 1300000016 and 1300000024 which were "kept"
+    # (1300000000 and 1300000008 are ignored because we keep 2 free files)
+    # Plus one "real" VCS subfile 1300000032
+    # Plus two "real" VCS subfiles 1300000080 and 1300000088
+    destination_dir = os.path.join(get_base_path(), "volt_dont_archive")
+    destination_sub_files = glob.glob(os.path.join(destination_dir, "*.sub"))
+    destination_free_files = glob.glob(os.path.join(destination_dir, "*.free"))
+
+    # 2 Dumped files
+    assert os.path.exists(
+        os.path.join(destination_dir, "1300000000_1300000016_169.sub")
+    )
+    assert os.path.exists(
+        os.path.join(destination_dir, "1300000000_1300000024_169.sub")
+    )
+
+    # 3 subsequent files
+    assert os.path.exists(
+        os.path.join(destination_dir, "1300000032_1300000032_169.sub")
+    )
+    assert os.path.exists(
+        os.path.join(destination_dir, "1300000040_1300000040_169.sub")
+    )
+    assert os.path.exists(
+        os.path.join(destination_dir, "1300000040_1300000048_169.sub")
+    )
+
+    assert len(destination_sub_files) == 2 + 1 + 2
+    assert len(destination_free_files) == 0
+
+    # check that each dumped subfile contains the trigger!
+    assert (
+        read_subfile_trigger_value(
+            os.path.join(destination_dir, "1300000000_1300000016_169.sub"),
+        )
+        == 123
+    )
+    assert (
+        read_subfile_trigger_value(
+            os.path.join(destination_dir, "1300000000_1300000024_169.sub"),
+        )
+        == 123
+    )
+
+    # This is a VCS subobs, so it is already on it's way to be archived by
+    # the time we saw the trigger, so this will NOT have the triggerid in
+    # the header.
+    assert (
+        read_subfile_trigger_value(
+            os.path.join(destination_dir, "1300000032_1300000032_169.sub"),
+        )
+        is None
+    )
+
+    # This will be tagged with the trigger
+    assert (
+        read_subfile_trigger_value(
+            os.path.join(destination_dir, "1300000040_1300000040_169.sub"),
+        )
+        == 123
+    )
+    assert (
+        read_subfile_trigger_value(
+            os.path.join(destination_dir, "1300000040_1300000048_169.sub"),
+        )
+        is None
+    )

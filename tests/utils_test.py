@@ -56,9 +56,7 @@ def test_validate_filename_valid1():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(
-        logger, filename, metafits_path
-    )
+    val: utils.ValidationData = utils.validate_filename(logger, filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1244973688
@@ -70,9 +68,7 @@ def test_validate_filename_valid1():
 
 def test_validate_filename_valid2():
     """Test that validate_filename() correctly identifies attributes based on filename"""
-    metafits_path = os.path.join(
-        os.getcwd(), "tests/data/correlator_calibrator"
-    )
+    metafits_path = os.path.join(os.getcwd(), "tests/data/correlator_calibrator")
     logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
@@ -84,9 +80,7 @@ def test_validate_filename_valid2():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(
-        logger, filename, metafits_path
-    )
+    val: utils.ValidationData = utils.validate_filename(logger, filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1347318488
@@ -110,9 +104,7 @@ def test_validate_filename_valid3():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(
-        logger, filename, metafits_path
-    )
+    val: utils.ValidationData = utils.validate_filename(logger, filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1220738720
@@ -136,9 +128,7 @@ def test_validate_filename_valid4():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(
-        logger, filename, metafits_path
-    )
+    val: utils.ValidationData = utils.validate_filename(logger, filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1220738720
@@ -162,9 +152,7 @@ def test_validate_filename_valid5():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(
-        logger, filename, metafits_path
-    )
+    val: utils.ValidationData = utils.validate_filename(logger, filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1220738720
@@ -188,9 +176,7 @@ def test_validate_filename_valid6():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(
-        logger, filename, metafits_path
-    )
+    val: utils.ValidationData = utils.validate_filename(logger, filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1328239120
@@ -214,9 +200,7 @@ def test_validate_filename_valid7():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(
-        logger, filename, metafits_path
-    )
+    val: utils.ValidationData = utils.validate_filename(logger, filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1328239120
@@ -760,10 +744,8 @@ def test_inject_beamformer_headers():
     )
 
     # we can also test utils.read_subfile_value(item, key)
-    assert (
-        utils.read_subfile_value(subfile_name, utils.PSRDADA_MODE)
-        == "NO_CAPTURE"
-    )
-    assert (
-        utils.read_subfile_value(subfile_name, "NUM_INCOHERENT_BEAMS") == "2"
-    )
+    assert utils.read_subfile_value(subfile_name, utils.PSRDADA_MODE) == "NO_CAPTURE"
+    assert utils.read_subfile_value(subfile_name, "NUM_INCOHERENT_BEAMS") == "2"
+
+    # check for None on a non-existant key
+    assert utils.read_subfile_value(subfile_name, "MISSING_KEY123") is None

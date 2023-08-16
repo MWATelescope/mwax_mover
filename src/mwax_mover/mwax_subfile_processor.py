@@ -55,9 +55,7 @@ class SubfileProcessor:
         )
         file_log.setLevel(logging.DEBUG)
         file_log.setFormatter(
-            logging.Formatter(
-                "%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"
-            )
+            logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s")
         )
         self.logger.addHandler(file_log)
 
@@ -72,6 +70,7 @@ class SubfileProcessor:
         # Voltage buffer dump vars
         self.dump_start_gps = None
         self.dump_end_gps = None
+        self.dump_trigger_id = None
         self.dump_keep_file_queue = queue.Queue()
 
         # Watchers and workers
@@ -101,9 +100,7 @@ class SubfileProcessor:
         self.corr_diskdb_numa_node = corr_diskdb_numa_node
 
         self.psrdada_timeout_sec = psrdada_timeout_sec
-        self.copy_subfile_to_disk_timeout_sec = (
-            copy_subfile_to_disk_timeout_sec
-        )
+        self.copy_subfile_to_disk_timeout_sec = copy_subfile_to_disk_timeout_sec
 
     def start(self):
         """Start the processor"""
@@ -153,8 +150,7 @@ class SubfileProcessor:
         keep_filename = self.dump_keep_file_queue.get()
 
         self.logger.info(
-            "SubfileProcessor.handle_next_keep_file is handling"
-            f" {keep_filename}..."
+            "SubfileProcessor.handle_next_keep_file is handling" f" {keep_filename}..."
         )
 
         # Copy the .keep file to the voltdata incoming dir
@@ -226,15 +222,10 @@ class SubfileProcessor:
                 # like a VCS observation
                 #
                 # Read the SUBOBSID from the subfile
-                subobs_id = int(
-                    utils.read_subfile_value(item, utils.PSRDADA_SUBOBS_ID)
-                )
+                subobs_id = int(utils.read_subfile_value(item, utils.PSRDADA_SUBOBS_ID))
 
                 if (
-                    (
-                        self.dump_start_gps is not None
-                        and self.dump_end_gps is not None
-                    )
+                    (self.dump_start_gps is not None and self.dump_end_gps is not None)
                     and subobs_id >= self.dump_start_gps
                     and subobs_id < self.dump_end_gps
                 ):
@@ -243,7 +234,8 @@ class SubfileProcessor:
                     self.logger.info(
                         f"{item}- ignoring existing mode: {subfile_mode} as we"
                         f" are within a voltage dump ({self.dump_start_gps} <"
-                        f" {self.dump_end_gps}). Doing VCS instead."
+                        f" {self.dump_end_gps}) for trigger {self.dump_trigger_id}."
+                        " Doing VCS instead."
                     )
 
                     # Pause archiving so we have the disk to ourselves
@@ -252,6 +244,17 @@ class SubfileProcessor:
                     ):
                         self.subfile_distributor_context.archive_processor.pause_archiving(  # pylint: disable=line-too-long
                             True
+                        )
+
+                    # See if there already is a TRIGGER_ID keyword in the subfile- if so
+                    # don't overwrite it. We must have overlapping triggers happening
+                    if not utils.read_subfile_trigger_value(item):
+                        # No TRIGGER_ID yet, so add it
+                        self.logger.info(
+                            f"{item}- injecting {utils.PSRDADA_TRIGGER_ID} {self.dump_trigger_id} into subfile..."
+                        )
+                        utils.inject_subfile_header(
+                            item, f"{utils.PSRDADA_TRIGGER_ID} {self.dump_trigger_id}\n"
                         )
 
                     success = self.copy_subfile_to_disk(
@@ -343,32 +346,33 @@ class SubfileProcessor:
 
                     else:
                         self.logger.error(
-                            f"{item}- Unknown subfile mode {subfile_mode},"
-                            " ignoring."
+                            f"{item}- Unknown subfile mode {subfile_mode}," " ignoring."
                         )
                         success = False
 
                     # There is a semi-rare case where in between the top of this code and now
                     # a voltage trigger has been received. If so THIS subfile may not have been added to
                     # the keep list, so deal with it now
-                    if (
-                        (
-                            self.dump_start_gps is not None
-                            and self.dump_end_gps is not None
-                        )
-                        and subobs_id >= self.dump_start_gps
-                        and subobs_id < self.dump_end_gps
-                    ):
-                        # Rename it now to .keep
-                        keep_filename = item.replace(
-                            self.ext_sub_file, self.ext_keep_file
-                        )
 
-                        os.rename(item, keep_filename)
-
-                        # add it to the queue
-                        # Lucky for us it will add it to the bottom.
-                        self.dump_keep_file_queue.put(keep_filename)
+                    # Commenting out below for now as it is not necessary I think...
+                    # if (
+                    #    (
+                    #        self.dump_start_gps is not None
+                    #        and self.dump_end_gps is not None
+                    #    )
+                    #    and subobs_id >= self.dump_start_gps
+                    #    and subobs_id < self.dump_end_gps
+                    # ):
+                    #    # Rename it now to .keep
+                    #    keep_filename = item.replace(
+                    #        self.ext_sub_file, self.ext_keep_file
+                    #    )
+                    #
+                    #    os.rename(item, keep_filename)
+                    #
+                    #    # add it to the queue
+                    #    # Lucky for us it will add it to the bottom.
+                    #    self.dump_keep_file_queue.put(keep_filename)
 
                 # Check if we need to clear the dump info
                 if self.dump_end_gps is not None:
@@ -376,6 +380,7 @@ class SubfileProcessor:
                         # Reset the dump start and end
                         self.dump_start_gps = None
                         self.dump_end_gps = None
+                        self.dump_trigger_id = None
 
             if self.bf_enabled:
                 # Don't run beamformer if we are in correlator mode too and we
@@ -412,18 +417,14 @@ class SubfileProcessor:
                         # added into the sub file (e.g. a failed load into ringbuffer)
                         # So check first, before appending them again!
                         if (
-                            utils.read_subfile_value(
-                                item, "NUM_INCOHERENT_BEAMS"
-                            )
+                            utils.read_subfile_value(item, "NUM_INCOHERENT_BEAMS")
                             is None
                         ):
                             self.logger.info(
                                 f"{item}- injecting beamformer header into"
                                 " subfile..."
                             )
-                            utils.inject_beamformer_headers(
-                                item, beamformer_settings
-                            )
+                            utils.inject_beamformer_headers(item, beamformer_settings)
                         else:
                             self.logger.info(
                                 f"{item}- beamformer header exists in subfile."
@@ -448,8 +449,7 @@ class SubfileProcessor:
 
                     else:
                         self.logger.error(
-                            f"{item}- Unknown subfile mode {subfile_mode},"
-                            " ignoring."
+                            f"{item}- Unknown subfile mode {subfile_mode}," " ignoring."
                         )
                         success = False
 
@@ -472,9 +472,7 @@ class SubfileProcessor:
                     )
 
                 # Rename subfile so that udpgrab can reuse it
-                free_filename = str(item).replace(
-                    self.ext_sub_file, self.ext_free_file
-                )
+                free_filename = str(item).replace(self.ext_sub_file, self.ext_free_file)
 
                 try:
                     # Check it exists first- the dump process
@@ -482,9 +480,7 @@ class SubfileProcessor:
                     if os.path.exists(item):
                         shutil.move(item, free_filename)
 
-                except (
-                    Exception
-                ) as move_exception:  # pylint: disable=broad-except
+                except Exception as move_exception:  # pylint: disable=broad-except
                     self.logger.error(
                         f"{item}- Could not rename {item} back to"
                         f" {free_filename}. Error {move_exception}"
@@ -553,17 +549,18 @@ class SubfileProcessor:
 
         return retval
 
-    def dump_voltages(self, start_gps_time: int, end_gps_time: int) -> bool:
+    def dump_voltages(
+        self, start_gps_time: int, end_gps_time: int, trigger_id: int
+    ) -> bool:
         """Dump whatever subfiles we have from /dev/shm to disk"""
         # Set module level variables
-        self.dump_start_gps = (
-            start_gps_time  # note, this may be 0! meaning 'earliest'
-        )
+        self.dump_start_gps = start_gps_time  # note, this may be 0! meaning 'earliest'
         self.dump_end_gps = end_gps_time
+        self.dump_trigger_id = trigger_id
 
         self.logger.info(
             f"dump_voltages: from {str(start_gps_time)} to"
-            f" {str(end_gps_time)}..."
+            f" {str(end_gps_time)} for trigger {trigger_id}..."
         )
 
         # Look for any .free files which have the first 10 characters of
@@ -611,7 +608,17 @@ class SubfileProcessor:
                     utils.read_subfile_value(free_filename, utils.PSRDADA_MODE)
                     != CorrelatorMode.MWAX_VCS.value
                 ):
-                    self.logger.info(f"dump_voltages: keeping {free_filename}")
+                    self.logger.info(
+                        f"dump_voltages: keeping {free_filename}, and updating subfile header with 'TRIGGER_ID {trigger_id}'"
+                    )
+
+                    # See if there already is a TRIGGER_ID keyword in the subfile- if so
+                    # don't overwrite it. We must have overlapping triggers happening
+                    if not utils.read_subfile_trigger_value(free_filename):
+                        # No TRIGGER_ID yet, so add it
+                        utils.inject_subfile_header(
+                            free_filename, f"{utils.PSRDADA_TRIGGER_ID} {trigger_id}\n"
+                        )
 
                     # For any that exist, rename them immediately to .keep
                     keep_filename = free_filename.replace(
@@ -635,9 +642,7 @@ class SubfileProcessor:
         watcher_list = []
 
         if self.subfile_watcher:
-            status = dict(
-                {"Unix timestamp": time.time(), "name": "subfile watcher"}
-            )
+            status = dict({"Unix timestamp": time.time(), "name": "subfile watcher"})
             status.update(self.subfile_watcher.get_status())
             watcher_list.append(status)
 

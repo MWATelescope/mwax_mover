@@ -68,9 +68,7 @@ class MWAXArchiveProcessor:
         )
         file_log.setLevel(logging.DEBUG)
         file_log.setFormatter(
-            logging.Formatter(
-                "%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"
-            )
+            logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s")
         )
         self.logger.addHandler(file_log)
 
@@ -126,9 +124,7 @@ class MWAXArchiveProcessor:
         self.list_of_correlator_high_priority_projects = (
             high_priority_correlator_projectids,
         )
-        self.list_of_vcs_high_priority_projects = (
-            high_priority_vcs_projectids,
-        )
+        self.list_of_vcs_high_priority_projects = (high_priority_vcs_projectids,)
 
     def start(self):
         """This method is used to start the processor"""
@@ -294,15 +290,13 @@ class MWAXArchiveProcessor:
             self.workers.append(queue_worker_processing_stats_vis)
 
             # Create queueworker for outgoing queue
-            queue_worker_outgoing = (
-                mwax_priority_queue_worker.PriorityQueueWorker(
-                    name="outgoing worker",
-                    source_queue=self.queue_outgoing,
-                    executable_path=None,
-                    event_handler=self.archive_handler,
-                    log=self.logger,
-                    exit_once_queue_empty=False,
-                )
+            queue_worker_outgoing = mwax_priority_queue_worker.PriorityQueueWorker(
+                name="outgoing worker",
+                source_queue=self.queue_outgoing,
+                executable_path=None,
+                event_handler=self.archive_handler,
+                log=self.logger,
+                exit_once_queue_empty=False,
             )
             self.workers.append(queue_worker_outgoing)
 
@@ -336,9 +330,7 @@ class MWAXArchiveProcessor:
                 target=queue_worker_processing_stats_vis.start,
                 daemon=True,
             )
-            self.worker_threads.append(
-                queue_worker_vis_processing_stats_thread
-            )
+            self.worker_threads.append(queue_worker_vis_processing_stats_thread)
 
             # Setup thread for processing items on the outgoing queue
             queue_worker_outgoing_thread = threading.Thread(
@@ -369,8 +361,7 @@ class MWAXArchiveProcessor:
                 or len(next(os.walk(self.watch_dir_outgoing_volt))[2]) > 0
                 or len(next(os.walk(self.watch_dir_outgoing_vis))[2]) > 0
                 or len(next(os.walk(self.watch_dir_outgoing_cal))[2]) > 0
-                or len(next(os.walk(self.watch_dir_processing_stats_vis))[2])
-                > 0
+                or len(next(os.walk(self.watch_dir_processing_stats_vis))[2]) > 0
             ):
                 self.logger.error(
                     "Error- voltage incoming/outgoing and/or visibility "
@@ -553,6 +544,11 @@ class MWAXArchiveProcessor:
                 self.logger, item, int(self.archive_command_numa_node), 180
             )
 
+            # if file is a VCS subfile, check if it is from a trigger and
+            # grab the trigger_id as an int
+            # If not found it will return None
+            trigger_id = utils.read_subfile_trigger_value(item)
+
             # Insert record into metadata database
             if not mwax_db.insert_data_file_row(
                 self.db_handler_object,
@@ -562,6 +558,7 @@ class MWAXArchiveProcessor:
                 self.hostname,
                 checksum_type_id,
                 checksum,
+                trigger_id,
             ):
                 # if something went wrong, requeue
                 return False
@@ -659,18 +656,14 @@ class MWAXArchiveProcessor:
             )
             is not True
         ):
-            self.logger.warning(
-                f"{item}- stats_handler() mwax_stats failed. Skipping."
-            )
+            self.logger.warning(f"{item}- stats_handler() mwax_stats failed. Skipping.")
 
         # Take the input filename - strip the path, then append the output path
         outgoing_filename = os.path.join(
             self.watch_dir_outgoing_cal, os.path.basename(item)
         )
 
-        self.logger.debug(
-            f"{item}- stats_handler() moving file to outgoing cal dir"
-        )
+        self.logger.debug(f"{item}- stats_handler() moving file to outgoing cal dir")
         os.rename(item, outgoing_filename)
 
         self.logger.info(f"{item}- stats_handler() Finished")
@@ -741,8 +734,7 @@ class MWAXArchiveProcessor:
                     return False
             else:
                 self.logger.debug(
-                    f"{item}- cal_handler() observation IS NOT calibrator."
-                    " Skipping."
+                    f"{item}- cal_handler() observation IS NOT calibrator." " Skipping."
                 )
         else:
             self.logger.info(
@@ -755,9 +747,7 @@ class MWAXArchiveProcessor:
             self.watch_dir_outgoing_vis, os.path.basename(item)
         )
 
-        self.logger.debug(
-            f"{item}- cal_handler() moving file to vis outgoing dir"
-        )
+        self.logger.debug(f"{item}- cal_handler() moving file to vis outgoing dir")
         os.rename(item, outgoing_filename)
 
         self.logger.info(f"{item}- cal_handler() Finished")
