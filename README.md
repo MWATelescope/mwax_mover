@@ -89,10 +89,10 @@ Web service commands:
 * /resume_archiving
   * Resuming archiving processes. (This is called automatically once the correlator is no longer running in
   VOLTAGE_START mode)
-* /dump_voltages?start=X&end=X
-  * This will pause archiving and rename all *.free subfiles to*.keep, then write the .keep files to disk. Once
-  written successfully, all *.keep files are renamed back to*.free so mwax_udpgrab can continue to use them. This
-  webservice call is generally trigged by something like FREDDA if a transient detection occurs.
+* /dump_voltages?start=X&end=X&trigger_id=X
+  * This will pause archiving and rename all *.free subfiles to*.keep, add the trigger_id to the subfile header,
+  then write the .keep files to disk. Once written successfully, all *.keep files are renamed back to*.free so
+  mwax_u2s can continue to use them. This webservice call is generally trigged by the M&C system.
 
 ### mwax_subfile_distributor has two distinct jobs
 
