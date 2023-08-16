@@ -287,15 +287,15 @@ def insert_data_file_row(
     checksum_type: int,
     checksum: str,
     trigger_id,
+    file_size: int,
 ) -> bool:
     """Insert a data_files row"""
     # Prepare the fields
     # immediately add this file to the db so we insert a record into metadata
     # data_files table
-    filename = os.path.basename(archive_filename)
-    file_size = os.stat(archive_filename).st_size
     deleted = False
     remote_archived = False
+    filename = os.path.basename(archive_filename)
 
     if trigger_id == -1:
         trigger_id = None

@@ -537,17 +537,27 @@ class MWAXArchiveProcessor:
         )
 
         if val.valid:
-            # checksum then add this file to the db so we insert a record into
-            # metadata data_files table
-            checksum_type_id: int = 1  # MD5
-            checksum: str = utils.do_checksum_md5(
-                self.logger, item, int(self.archive_command_numa_node), 180
-            )
+            try:
+                # Determine file size
+                file_size = os.stat(item).st_size
 
-            # if file is a VCS subfile, check if it is from a trigger and
-            # grab the trigger_id as an int
-            # If not found it will return None
-            trigger_id = utils.read_subfile_trigger_value(item)
+                # checksum then add this file to the db so we insert a record into
+                # metadata data_files table
+                checksum_type_id: int = 1  # MD5
+                checksum: str = utils.do_checksum_md5(
+                    self.logger, item, int(self.archive_command_numa_node), 180
+                )
+
+                # if file is a VCS subfile, check if it is from a trigger and
+                # grab the trigger_id as an int
+                # If not found it will return None
+                trigger_id = utils.read_subfile_trigger_value(item)
+            except FileNotFoundError:
+                # The filename was not valid
+                self.logger.warning(
+                    f"{item}- checksum_and_db_handler() file was removed while processing."
+                )
+                return True
 
             # Insert record into metadata database
             if not mwax_db.insert_data_file_row(
@@ -559,6 +569,7 @@ class MWAXArchiveProcessor:
                 checksum_type_id,
                 checksum,
                 trigger_id,
+                file_size,
             ):
                 # if something went wrong, requeue
                 return False
