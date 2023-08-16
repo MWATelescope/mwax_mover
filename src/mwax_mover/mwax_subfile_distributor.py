@@ -891,6 +891,7 @@ class MWAXSubfileDistributor:
             "correlator": self.cfg_corr_enabled,
             "correlator archiving": self.cfg_corr_archive_destination_enabled,
             "cal sending:": self.cfg_corr_calibrator_destination_enabled,
+            "cmdline": " ".join(sys.argv[1:]),
         }
 
         processor_status_list = []

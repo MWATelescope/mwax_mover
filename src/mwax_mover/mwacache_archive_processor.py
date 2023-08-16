@@ -154,17 +154,15 @@ class MWACacheArchiveProcessor:
         self.logger.info("Creating workers...")
 
         for archive_worker in range(0, self.concurrent_archive_workers):
-            new_worker = (
-                mwax_ceph_priority_queue_worker.CephPriorityQueueWorker(
-                    name=f"Archiver{archive_worker}",
-                    source_queue=self.queue,
-                    executable_path=None,
-                    event_handler=self.archive_handler,
-                    log=self.logger,
-                    requeue_to_eoq_on_failure=True,
-                    ceph_profile=self.s3_profile,
-                    exit_once_queue_empty=False,
-                )
+            new_worker = mwax_ceph_priority_queue_worker.CephPriorityQueueWorker(
+                name=f"Archiver{archive_worker}",
+                source_queue=self.queue,
+                executable_path=None,
+                event_handler=self.archive_handler,
+                log=self.logger,
+                requeue_to_eoq_on_failure=True,
+                ceph_profile=self.s3_profile,
+                exit_once_queue_empty=False,
             )
             self.queue_workers.append(new_worker)
 
@@ -244,8 +242,7 @@ class MWACacheArchiveProcessor:
             if actual_file_size == 0:
                 # File size is 0- lets just blow it away
                 self.logger.warning(
-                    f"{item}- archive_handler() File size is 0 bytes. Deleting"
-                    " file"
+                    f"{item}- archive_handler() File size is 0 bytes. Deleting" " file"
                 )
                 mwax_mover.remove_file(self.logger, item, raise_error=False)
 
@@ -266,8 +263,7 @@ class MWACacheArchiveProcessor:
                 return True
 
             self.logger.debug(
-                f"{item}- archive_handler() File size matches metadata"
-                " database"
+                f"{item}- archive_handler() File size matches metadata" " database"
             )
 
             # Determine where to archive it
@@ -322,9 +318,7 @@ class MWACacheArchiveProcessor:
                 return False
         else:
             # The filename was not valid
-            self.logger.error(
-                f"{item}- archive_handler() {val.validation_message}"
-            )
+            self.logger.error(f"{item}- archive_handler() {val.validation_message}")
             return False
 
     def pause_archiving(self, paused: bool):
@@ -385,9 +379,7 @@ class MWACacheArchiveProcessor:
                     status_bytes,
                     self.health_multicast_hops,
                 )
-            except (
-                Exception
-            ) as catch_all_exception:  # pylint: disable=broad-except
+            except Exception as catch_all_exception:  # pylint: disable=broad-except
                 self.logger.warning(
                     "health_handler: Failed to send health information."
                     f" {catch_all_exception}"
@@ -410,6 +402,7 @@ class MWACacheArchiveProcessor:
             "host": self.hostname,
             "running": self.running,
             "archiving": archiving,
+            "cmdline": " ".join(sys.argv[1:]),
         }
 
         watcher_list = []
@@ -478,20 +471,14 @@ class MWACacheArchiveProcessor:
         console_log = logging.StreamHandler()
         console_log.setLevel(logging.DEBUG)
         console_log.setFormatter(
-            logging.Formatter(
-                "%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"
-            )
+            logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s")
         )
         self.logger.addHandler(console_log)
 
-        file_log = logging.FileHandler(
-            filename=os.path.join(self.log_path, "main.log")
-        )
+        file_log = logging.FileHandler(filename=os.path.join(self.log_path, "main.log"))
         file_log.setLevel(logging.DEBUG)
         file_log.setFormatter(
-            logging.Formatter(
-                "%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"
-            )
+            logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s")
         )
         self.logger.addHandler(file_log)
 
@@ -524,9 +511,7 @@ class MWACacheArchiveProcessor:
             sys.exit(1)
 
         self.archive_to_location = int(
-            utils.read_config(
-                self.logger, config, "mwax mover", "archive_to_location"
-            )
+            utils.read_config(self.logger, config, "mwax mover", "archive_to_location")
         )
         self.concurrent_archive_workers = int(
             utils.read_config(
@@ -598,9 +583,7 @@ class MWACacheArchiveProcessor:
             )
 
         # s3 options
-        self.s3_profile = utils.read_config(
-            self.logger, config, s3_section, "profile"
-        )
+        self.s3_profile = utils.read_config(self.logger, config, s3_section, "profile")
 
         self.s3_ceph_endpoints = utils.read_config_list(
             self.logger,
@@ -613,9 +596,7 @@ class MWACacheArchiveProcessor:
             self.logger, config, s3_section, "multipart_threshold_bytes"
         )
         if self.s3_multipart_threshold_bytes is not None:
-            self.s3_multipart_threshold_bytes = int(
-                self.s3_multipart_threshold_bytes
-            )
+            self.s3_multipart_threshold_bytes = int(self.s3_multipart_threshold_bytes)
 
         self.s3_chunk_size_bytes = utils.read_optional_config(
             self.logger, config, s3_section, "chunk_size_bytes"
