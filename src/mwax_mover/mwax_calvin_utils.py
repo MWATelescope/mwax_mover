@@ -284,7 +284,7 @@ def fit_phase_line(
     Credit: Dr. Sammy McSweeny
     """
 
-    # original number of frequencies 
+    # original number of frequencies
     nfreqs = len(freqs_hz)
 
     # sort by frequency
@@ -297,7 +297,7 @@ def fit_phase_line(
     # - Assume the frequencies are "quantised" (i.e. all integer multiples of some constant)
     # - Assume there is at least one example of a pair of consecutive bins present
     # - Do not assume the arrays are ordered in increasing frequency
-    
+
     # Get the minimum difference between two (now-ordered) consecutive bins, and
     # declare this to be the bin width
     dν = np.min(np.diff(freqs_hz)) * u.Hz
@@ -312,12 +312,12 @@ def fit_phase_line(
     solution = solution[mask]
     freqs_hz = freqs_hz[mask]
     weights = weights[mask]
-    
+
     # normalise
     solution /= np.abs(solution)
     solution *= weights
     # print(f"{np.angle(solution)[:4]=}, ")
-    
+
     # Now we want to "adjust" the solution data so that it
     #   - is roughly centered on the DC bin
     #   - has a large amount of zero padding on either side
@@ -334,9 +334,9 @@ def fit_phase_line(
     dt = dm / c           # The target time resolution
     νmax = 0.5 / dt               # The Nyquist rate
     N = 2*int(np.round(νmax/dν))  # The number of bins to use during the FFTs
-    
+
     shifted_bins[shifted_bins < 0] += N  # Now the "negative" frequencies are put at the end, which is where FFT wants them
-    
+
     # Create a zero-padded, shifted version of the spectrum, which I'll call sol0
     # sol0: This shifts the non-zero data down to a set of frequencies straddling the DC bin.
     #       This makes the peak in delay space broad, and lets us hone in near the optimal solution by
@@ -349,31 +349,29 @@ def fit_phase_line(
     t = -np.fft.fftfreq(len(sol0), d=dν.to(u.Hz).value) * u.s  # (Not sure why this negative is needed)
     d = np.fft.fftshift(c*t)
     isol0 = np.fft.fftshift(isol0)
-    
+
     # Find max peak, and the equivalent slope
     imax = np.argmax(np.abs(isol0))
     dmax = d[imax]
     # print(f"{dmax=:.02f}")
     slope = (2*np.pi*u.rad*dmax/c).to(u.rad/u.Hz)
     # print(f"{slope=:.10f}")
-    
+
     # Now that we're near a local minimum, get a better one by doing a standard minimisation
     # To get the y-intercept, divide the original data by the constructed data
     # and find the average phase of the result
     if fit_iono:
-        def model(ν, m, c, α):
-            return np.exp(1j*(m*ν + c + α/ν**2))
+        model = lambda ν, m, c, α: np.exp(1j*(m*ν + c + α/ν**2))
         y_int = np.angle(np.mean(solution/model(ν.to(u.Hz).value, slope.value, 0, 0)))
         params = (slope.value, y_int, 0)
     else:
-        def model(ν, m, c):
-            return np.exp(1j*(m*ν + c))
+        model = lambda ν, m, c: np.exp(1j*(m*ν + c))
         y_int = np.angle(np.mean(solution/model(ν.to(u.Hz).value, slope.value, 0)))
         params = (slope.value, y_int)
-        
+
     def objective(params, ν, data):
         constructed = model(ν, *params)
-        residuals = np.angle(data) - np.angle(constructed)
+        residuals = wrap_angle(np.angle(data) - np.angle(constructed))
         cost = np.sum(np.abs(residuals)**2)
         return cost
 
@@ -387,7 +385,7 @@ def fit_phase_line(
         # print(f"{np.angle(solution)[:3]=}")
         constructed = model(ν.to(u.Hz).value, *params)
         # print(f"{constructed[:3]=}")
-        residuals = np.angle(solution) - np.angle(constructed)
+        residuals = wrap_angle(np.angle(solution) - np.angle(constructed))
         # print(f"{residuals[:3]=}")
         chi2dof = np.sum(np.abs(residuals)**2) / (len(residuals) - len(params))
         # print(f"{chi2dof=}")
@@ -400,8 +398,12 @@ def fit_phase_line(
         mask = np.where(np.abs(residuals) < 2 * stderr[0])[0]
         solution = solution[mask]
         ν = ν[mask]
+        # TODO: iterations?
+        # niter = niter-1
+        # if len(mask) < 2 or niter <= 0:
+        #     break
         break
-    
+
     period = ((params[0] * u.rad / u.Hz) / (2 * np.pi * u.rad)).to(u.s)
     quality = len(mask) / nfreqs
 
