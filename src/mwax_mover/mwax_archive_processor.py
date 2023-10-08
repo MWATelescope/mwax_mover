@@ -145,13 +145,16 @@ class MWAXArchiveProcessor:
             # This will watch for mwax visibilities being renamed OR
             # fits files being created
             # (e.g. metafits ppd files being copied into /visdata).
-            watcher_incoming_vis = mwax_watcher.Watcher(
+            watcher_incoming_vis = mwax_priority_watcher.PriorityWatcher(
                 name="watcher_incoming_vis",
                 path=self.watch_dir_incoming_vis,
                 dest_queue=self.queue_checksum_and_db,
                 pattern=".fits",
                 log=self.logger,
                 mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+                metafits_path=self.metafits_path,
+                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
+                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
                 recursive=False,
             )
             self.watchers.append(watcher_incoming_vis)
@@ -268,13 +271,15 @@ class MWAXArchiveProcessor:
             #
 
             # Create queueworker for the checksum and db queue
-            queue_worker_checksum_and_db = mwax_queue_worker.QueueWorker(
-                name="checksum and database worker",
-                source_queue=self.queue_checksum_and_db,
-                executable_path=None,
-                event_handler=self.checksum_and_db_handler,
-                log=self.logger,
-                exit_once_queue_empty=False,
+            queue_worker_checksum_and_db = (
+                mwax_priority_queue_worker.PriorityQueueWorker(
+                    name="checksum and database worker",
+                    source_queue=self.queue_checksum_and_db,
+                    executable_path=None,
+                    event_handler=self.checksum_and_db_handler,
+                    log=self.logger,
+                    exit_once_queue_empty=False,
+                )
             )
             self.workers.append(queue_worker_checksum_and_db)
 
@@ -555,7 +560,8 @@ class MWAXArchiveProcessor:
             except FileNotFoundError:
                 # The filename was not valid
                 self.logger.warning(
-                    f"{item}- checksum_and_db_handler() file was removed while processing."
+                    f"{item}- checksum_and_db_handler() file was removed while"
+                    " processing."
                 )
                 return True
 
@@ -745,12 +751,11 @@ class MWAXArchiveProcessor:
                     return False
             else:
                 self.logger.debug(
-                    f"{item}- cal_handler() observation IS NOT calibrator." " Skipping."
+                    f"{item}- cal_handler() observation IS NOT calibrator. Skipping."
                 )
         else:
             self.logger.info(
-                f"{item}- cal_handler() calibrator_destination is disbaled."
-                " Skipping."
+                f"{item}- cal_handler() calibrator_destination is disbaled. Skipping."
             )
 
         # Take the input filename - strip the path, then append the output path
