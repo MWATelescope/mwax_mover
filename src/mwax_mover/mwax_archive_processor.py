@@ -130,13 +130,16 @@ class MWAXArchiveProcessor:
         """This method is used to start the processor"""
         if self.archive_destination_enabled:
             # Create watcher for voltage data -> checksum+db queue
-            watcher_incoming_volt = mwax_watcher.Watcher(
+            watcher_incoming_volt = mwax_priority_watcher.PriorityWatcher(
                 name="watcher_incoming_volt",
                 path=self.watch_dir_incoming_volt,
                 dest_queue=self.queue_checksum_and_db,
                 pattern=".sub",
                 log=self.logger,
                 mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
+                metafits_path=self.metafits_path,
+                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
+                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
                 recursive=False,
             )
             self.watchers.append(watcher_incoming_volt)
