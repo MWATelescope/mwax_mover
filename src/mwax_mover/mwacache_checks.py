@@ -2,6 +2,7 @@
 import argparse
 import logging
 import os
+import time
 import boto3
 from mwax_mover.mwa_archiver import (
     ceph_get_s3_session,
@@ -28,6 +29,9 @@ def check_pawsey_lts(
     ceph_upload_to_pawsey(
         logger, test_bucket, input_filename, profile_name, endpoint, filename_checksum
     )
+
+    logger.info("Delaying download by 15 seconds to allow Ceph to settle")
+    time.sleep(15)
 
     ceph_download_from_pawsey(
         logger, test_bucket, input_filename, output_filename, profile_name, endpoint
