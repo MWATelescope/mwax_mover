@@ -4,6 +4,7 @@ import logging
 import os
 import time
 import boto3
+import botocore.errorfactory
 from mwax_mover.mwa_archiver import (
     ceph_get_s3_session,
     ceph_get_s3_resource,
@@ -30,8 +31,8 @@ def check_pawsey_lts(
         logger, test_bucket, input_filename, profile_name, endpoint, filename_checksum
     )
 
-    logger.info("Delaying download by 15 seconds to allow Ceph to settle")
-    time.sleep(15)
+    logger.info("Delaying download by 5 seconds to allow Ceph to settle")
+    time.sleep(5)
 
     ceph_download_from_pawsey(
         logger, test_bucket, input_filename, output_filename, profile_name, endpoint
@@ -71,8 +72,11 @@ def ceph_remove_file(logger, bucket, filename, profile_name, endpoint):
     logger.info(f"About to delete {endpoint}/{bucket}/{key}")
 
     # Delete file
-    s3_object = resource.Object(bucket, key)
-    s3_object.delete()
+    try:
+        s3_object = resource.Object(bucket, key)
+        s3_object.delete()
+    except botocore.errorfactory.NoSuchBucket:
+        pass
 
 
 def ceph_upload_to_pawsey(
