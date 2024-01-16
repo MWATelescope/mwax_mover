@@ -4,7 +4,6 @@ import logging
 import os
 import time
 import boto3
-import botocore.errorfactory
 from mwax_mover.mwa_archiver import (
     ceph_get_s3_session,
     ceph_get_s3_resource,
@@ -75,8 +74,8 @@ def ceph_remove_file(logger, bucket, filename, profile_name, endpoint):
     try:
         s3_object = resource.Object(bucket, key)
         s3_object.delete()
-    except botocore.errorfactory.NoSuchBucket:
-        pass
+    except Exception:
+        logger.exception(f"Failed to delete {bucket}/{key} from {profile_name}")
 
 
 def ceph_upload_to_pawsey(
