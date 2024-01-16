@@ -19,6 +19,7 @@ def check_pawsey_lts(
     input_filename: str,
     test_bucket: str,
     output_filename: str,
+    leave_file_on_ceph: bool,
 ):
     # Remove old file from ceph if it exists
     ceph_remove_file(logger, test_bucket, input_filename, profile_name, endpoint)
@@ -57,7 +58,8 @@ def check_pawsey_lts(
     os.remove(output_filename)
 
     # Remove file from ceph too
-    ceph_remove_file(logger, test_bucket, input_filename, profile_name, endpoint)
+    if not leave_file_on_ceph:
+        ceph_remove_file(logger, test_bucket, input_filename, profile_name, endpoint)
 
 
 def ceph_remove_file(logger, bucket, filename, profile_name, endpoint):
@@ -152,8 +154,25 @@ def main():
         help="S3 profile name to test with (from ~/.aws/config).\n",
     )
     parser.add_argument("-e", "--endpoint", required=True, help="S3 endpoint.\n")
+    parser.add_argument(
+        "-b",
+        "--bucket",
+        default="mwacache-checks",
+        required=True,
+        help="Ceph Bucket name (will be created if doesn't exist).\n",
+    )
     parser.add_argument("-i", "--input_file", required=True, help="Input filename.\n")
     parser.add_argument("-o", "--output_file", required=True, help="Output filename.\n")
+    parser.add_argument(
+        "-l",
+        "--leave_file_on_ceph",
+        required=True,
+        type=bool,
+        help=(
+            "Leave uploaded file on Ceph (i.e. don't delete after the test"
+            " completes).\n"
+        ),
+    )
 
     args = vars(parser.parse_args())
 
@@ -162,7 +181,8 @@ def main():
     profile_name = args["profile_name"]
     input_filename = args["input_file"]
     output_filename = args["output_file"]
-    bucket = "mwacache-checks"
+    leave_file_on_ceph = args["leave_file_on_ceph"]
+    bucket = args["bucket"]
 
     if not os.path.exists(input_filename):
         print(f"Parameter: input_file {input_filename} does not exist. Exiting.")
@@ -177,11 +197,12 @@ def main():
 
     logger.info("Starting mwacache_checks to ensure Acacia and Banksia are working OK.")
     logger.info("Parameters:")
-    logger.info(f"\tProfile    : {profile_name}")
-    logger.info(f"\tEndpoint   : {endpoint}")
-    logger.info(f"\tInput file : {input_filename}")
-    logger.info(f"\tOutput file: {output_filename}")
-    logger.info(f"\tBucket     : {bucket}")
+    logger.info(f"\tProfile           : {profile_name}")
+    logger.info(f"\tEndpoint          : {endpoint}")
+    logger.info(f"\tInput file        : {input_filename}")
+    logger.info(f"\tOutput file       : {output_filename}")
+    logger.info(f"\tBucket            : {bucket}")
+    logger.info(f"\tLeave file on Ceph: {leave_file_on_ceph}")
 
     check_pawsey_lts(
         logger,
@@ -190,6 +211,7 @@ def main():
         input_filename,
         bucket,
         output_filename,
+        leave_file_on_ceph,
     )
 
 
