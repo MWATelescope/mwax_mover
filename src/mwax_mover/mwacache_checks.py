@@ -166,8 +166,7 @@ def main():
     parser.add_argument(
         "-l",
         "--leave_file_on_ceph",
-        required=True,
-        type=bool,
+        action="store_true",
         help=(
             "Leave uploaded file on Ceph (i.e. don't delete after the test"
             " completes).\n"
