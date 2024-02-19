@@ -760,8 +760,8 @@ class MWAXSubfileDistributor:
             name="webserver",
             target=self.web_server_loop,
             args=(self.web_server,),
-        )
-        self.web_server_thread.setDaemon(True)
+            daemon=True
+        )        
         self.web_server_thread.start()
 
         # Start the processors
