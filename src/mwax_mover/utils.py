@@ -113,7 +113,7 @@ def download_metafits_file(obs_id: int, metafits_path: str):
     url = f"http://ws.mwatelescope.org/metadata/fits?obs_id={obs_id}"
 
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=30)
     except Exception as catch_all_exception:
         raise Exception(
             f"Unable to get metafits file. {catch_all_exception}"
@@ -333,7 +333,7 @@ def get_bucket_name_from_obs_id(obs_id: int) -> str:
     return f"mwaingest-{str(obs_id)[0:5]}"
 
 
-def get_metafits_values(metafits_filename: str) -> (bool, str):
+def get_metafits_values(metafits_filename: str) -> tuple[bool, str]:
     """
     Returns a tuple of is_calibrator (bool) and
     the project_id (string) from a metafits file.
