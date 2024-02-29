@@ -13,6 +13,7 @@ import struct
 import threading
 import time
 import typing
+from typing import Tuple
 import astropy.io.fits as fits
 import requests
 from mwax_mover import mwax_command
@@ -273,7 +274,7 @@ def validate_filename(
                     )
 
             if valid:
-                (calibrator, project_id) = get_metafits_values(metafits_filename)
+                calibrator, project_id = get_metafits_values(metafits_filename)
 
     return ValidationData(
         valid,
@@ -318,7 +319,7 @@ def get_bucket_name_from_obs_id(obs_id: int) -> str:
     return f"mwaingest-{str(obs_id)[0:5]}"
 
 
-def get_metafits_values(metafits_filename: str) -> tuple[bool, str]:
+def get_metafits_values(metafits_filename: str) -> Tuple[bool, str]:
     """
     Returns a tuple of is_calibrator (bool) and
     the project_id (string) from a metafits file.
