@@ -1,7 +1,6 @@
-inotify==0.2.*
-psycopg2-binary==2.*
-requests==2.*
-tenacity==8.*
-python-openstackclient==5.*
-boto3==1.*
-astropy==5.*
+inotify
+psycopg2-binary
+requests
+tenacity
+boto3
+astropy
