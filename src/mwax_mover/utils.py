@@ -1,4 +1,5 @@
 """Various utility functions used throughout the package"""
+
 import base64
 from configparser import ConfigParser
 from enum import Enum
@@ -115,18 +116,14 @@ def download_metafits_file(obs_id: int, metafits_path: str):
     try:
         response = requests.get(url, timeout=30)
     except Exception as catch_all_exception:
-        raise Exception(
-            f"Unable to get metafits file. {catch_all_exception}"
-        ) from catch_all_exception
+        raise Exception(f"Unable to get metafits file. {catch_all_exception}") from catch_all_exception
 
     if response.status_code == 200:
         metafits = response.content
         with open(metafits_file_path, "wb") as handler:
             handler.write(metafits)
     else:
-        raise Exception(
-            "Unable to get metafits file. Response code" f" {response.status_code}"
-        )
+        raise Exception("Unable to get metafits file. Response code" f" {response.status_code}")
 
     return
 
@@ -175,9 +172,7 @@ def validate_filename(
 
         if not obs_id_check.isdigit():
             valid = False
-            validation_error = (
-                "Filename does not start with a 10 digit observation_id-" " ignoring"
-            )
+            validation_error = "Filename does not start with a 10 digit observation_id-" " ignoring"
         else:
             obs_id = int(obs_id_check)
 
@@ -188,10 +183,7 @@ def validate_filename(
         elif file_ext_part.lower() == ".fits":
             # Could be metafits (e.g. 1316906688_metafits_ppds.fits) or
             # visibilitlies
-            if (
-                file_name_part[10:] == "_metafits_ppds"
-                or file_name_part[10:] == "_metafits"
-            ):
+            if file_name_part[10:] == "_metafits_ppds" or file_name_part[10:] == "_metafits":
                 filetype_id = MWADataFileType.MWA_PPD_FILE.value
             else:
                 filetype_id = MWADataFileType.MWAX_VISIBILITIES.value
@@ -235,11 +227,7 @@ def validate_filename(
         elif filetype_id == MWADataFileType.MWA_PPD_FILE.value:
             # filename format should be obsid_metafits_ppds.fits or
             # obsid_metafits.fits or obsid.metafits
-            if (
-                len(file_name_part) != 24
-                and len(file_name_part) != 19
-                and len(file_name_part) != 10
-            ):
+            if len(file_name_part) != 24 and len(file_name_part) != 19 and len(file_name_part) != 10:
                 valid = False
                 validation_error = (
                     "Filename (excluding extension) is not in the correct"
@@ -273,10 +261,7 @@ def validate_filename(
     if valid:
         with metafits_file_lock:
             if not os.path.exists(metafits_filename):
-                logger.info(
-                    f"Metafits file {metafits_filename} not found. Atempting"
-                    " to download it"
-                )
+                logger.info(f"Metafits file {metafits_filename} not found. Atempting" " to download it")
                 try:
                     download_metafits_file(obs_id, metafits_path)
                 except Exception as catch_all_exception:  # pylint: disable=broad-except
@@ -346,8 +331,7 @@ def get_metafits_values(metafits_filename: str) -> tuple[bool, str]:
             return is_calibrator, project_id
     except Exception as catch_all_exception:
         raise Exception(
-            f"Error reading metafits file: {metafits_filename}:"
-            f" {catch_all_exception}"
+            f"Error reading metafits file: {metafits_filename}: {catch_all_exception}"
         ) from catch_all_exception
 
 
@@ -366,9 +350,7 @@ def read_config(logger, config: ConfigParser, section: str, key: str, b64encoded
     return value
 
 
-def read_optional_config(
-    logger, config: ConfigParser, section: str, key: str, b64encoded=False
-):
+def read_optional_config(logger, config: ConfigParser, section: str, key: str, b64encoded=False):
     """Reads an optional value from a config file"""
     raw_value = config.get(section, key)
     value = None
@@ -402,8 +384,7 @@ def read_config_list(logger, config: ConfigParser, section: str, key: str):
         return_list = []
 
     logger.info(
-        f"Read cfg [{section}].{key}: '{string_value}' converted to list of"
-        f" {len(return_list)} items: {return_list}"
+        f"Read cfg [{section}].{key}: '{string_value}' converted to list of" f" {len(return_list)} items: {return_list}"
     )
     return return_list
 
@@ -441,10 +422,7 @@ def process_mwax_stats(
 
     metafits_filename = os.path.join(metafits_path, f"{obs_id}_metafits.fits")
 
-    cmd = (
-        f"{mwax_stats_executable} -t {full_filename} -m"
-        f" {metafits_filename} -o {stats_dump_dir}"
-    )
+    cmd = f"{mwax_stats_executable} -t {full_filename} -m" f" {metafits_filename} -o {stats_dump_dir}"
 
     logger.info(f"{full_filename}- attempting to run stats: {cmd}")
 
@@ -460,9 +438,7 @@ def process_mwax_stats(
     return return_value
 
 
-def load_psrdada_ringbuffer(
-    logger, full_filename: str, ringbuffer_key: str, numa_node, timeout: int
-) -> bool:
+def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, numa_node, timeout: int) -> bool:
     """Loads a subfile into a PSRDADA ringbuffer"""
     logger.info(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
 
@@ -484,9 +460,7 @@ def load_psrdada_ringbuffer(
             f" {gbps_per_sec:.3f} Gbps)"
         )
     else:
-        logger.error(
-            f"{full_filename} load_psrdada_ringbuffer failed with error" f" {stdout}"
-        )
+        logger.error(f"{full_filename} load_psrdada_ringbuffer failed with error" f" {stdout}")
 
     return return_value
 
@@ -543,9 +517,7 @@ def scan_for_existing_files_and_add_to_priority_queue(
         logger.info(f"{filename} added to queue with priority {priority}")
 
 
-def scan_directory(
-    logger, watch_dir: str, pattern: str, recursive: bool, exclude_pattern
-) -> list:
+def scan_directory(logger, watch_dir: str, pattern: str, recursive: bool, exclude_pattern) -> list:
     """Scan a directory based on a pattern and adds the files into a list"""
     # Watch dir must end in a slash for the iglob to work
     # Just loop through all files and add them to the queue
@@ -648,9 +620,7 @@ def do_checksum_md5(logger, full_filename: str, numa_node: int, timeout: int) ->
     size = os.path.getsize(full_filename)
 
     start_time = time.time()
-    return_value, md5output = mwax_command.run_command_ext(
-        logger, cmdline, numa_node, timeout, False
-    )
+    return_value, md5output = mwax_command.run_command_ext(logger, cmdline, numa_node, timeout, False)
     elapsed = time.time() - start_time
 
     size_megabytes = size / (1000 * 1000)
@@ -670,9 +640,7 @@ def do_checksum_md5(logger, full_filename: str, numa_node: int, timeout: int) ->
             )
             return checksum
         else:
-            raise Exception(
-                f"Calculated MD5 checksum is not valid: md5 output {md5output}"
-            )
+            raise Exception(f"Calculated MD5 checksum is not valid: md5 output {md5output}")
     else:
         raise Exception(f"md5sum returned an unexpected return code {return_value}")
 
@@ -722,9 +690,7 @@ def get_priority(
             else:
                 return_priority = 90
     else:
-        raise Exception(
-            f"File {filename} is not valid! Reason: {val.validation_message}"
-        )
+        raise Exception(f"File {filename} is not valid! Reason: {val.validation_message}")
 
     return return_priority
 
@@ -769,7 +735,7 @@ def inject_beamformer_headers(subfile_filename: str, beamformer_settings: str):
     inject_subfile_header(subfile_filename, beamformer_settings)
 
 
-def read_subfile_value(filename: str, key: str) -> str:
+def read_subfile_value(filename: str, key: str) -> typing.Union[str, None]:
     """Returns key as a string from a subfile header"""
     subfile_value = None
 
@@ -882,3 +848,13 @@ def write_mock_subfile(
     )
 
     write_mock_subfile_from_header(output_filename, header)
+
+
+def should_project_be_archived(project_id: str) -> bool:
+    """If the project code is C123 then do not archive the data!
+    If we ever get more codes or they change more often this should
+    move into the config file"""
+    if project_id.upper() == "C123":
+        return True
+    else:
+        return False

@@ -1,4 +1,5 @@
 """Module to execute arbitrary commands"""
+
 import subprocess
 import shlex
 import typing
@@ -20,11 +21,7 @@ def run_command_ext(
         cmdline = f"{command}"
     else:
         if int(numa_node) > 0:
-            cmdline = (
-                "numactl"
-                f" --cpunodebind={str(numa_node)} --membind={str(numa_node)} "
-                f"{command}"
-            )
+            cmdline = "numactl" f" --cpunodebind={str(numa_node)} --membind={str(numa_node)} " f"{command}"
         else:
             cmdline = f"{command}"
 
@@ -58,21 +55,16 @@ def run_command_ext(
 
         if return_code != 0:
             logger.error(
-                f"Error executing {cmdline}. Return code:"
-                f" {return_code} StdErr: {stderror} StdOut: {stdout}"
+                f"Error executing {cmdline}. Return code:" f" {return_code} StdErr: {stderror} StdOut: {stdout}"
             )
             return False, ""
         else:
             return True, stdout
 
     except subprocess.CalledProcessError as cpe:
-        logger.error(
-            f"CalledProcessError executing {cmdline}: {str(cpe)} {cpe.stderr}"
-        )
+        logger.error(f"CalledProcessError executing {cmdline}: {str(cpe)} {cpe.stderr}")
         return False, ""
 
     except Exception as command_exception:  # pylint: disable=broad-except
-        logger.error(
-            f"Exception executing {cmdline}: {str(command_exception)}"
-        )
+        logger.error(f"Exception executing {cmdline}: {str(command_exception)}")
         return False, ""

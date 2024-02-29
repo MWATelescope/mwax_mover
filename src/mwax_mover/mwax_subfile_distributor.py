@@ -1,4 +1,5 @@
 """Module for mwax_subfile_distributor"""
+
 import argparse
 from configparser import ConfigParser
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -84,8 +85,7 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
                     else:
                         if len(str(starttime)) != 10 and starttime != 0:
                             raise ValueError(
-                                "start must be gps seconds and length 10 (or 0"
-                                " for as early as possible)"
+                                "start must be gps seconds and length 10 (or 0" " for as early as possible)"
                             )
 
                         if len(str(endtime)) != 10:
@@ -97,13 +97,10 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
                         # Check to see if we aren't already doing a dump
                         if (
                             self.server.context.subfile_processor.dump_start_gps is None
-                            and self.server.context.subfile_processor.dump_end_gps
-                            is None
+                            and self.server.context.subfile_processor.dump_end_gps is None
                         ):
                             # Now call the method to dump the voltages
-                            if self.server.context.subfile_processor.dump_voltages(
-                                starttime, endtime, trigger_id
-                            ):
+                            if self.server.context.subfile_processor.dump_voltages(starttime, endtime, trigger_id):
                                 self.send_response(200)
                                 self.end_headers()
                                 self.wfile.write(b"OK")
@@ -115,28 +112,18 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
                             # Reject this request
                             self.send_response(400)
                             self.end_headers()
-                            self.wfile.write(
-                                b"Voltage Buffer Dump already in progress."
-                                b" Request canceled."
-                            )
+                            self.wfile.write(b"Voltage Buffer Dump already in progress." b" Request canceled.")
 
-                except (
-                    ValueError
-                ) as parameters_exception:  # pylint: disable=broad-except
+                except ValueError as parameters_exception:  # pylint: disable=broad-except
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(f"Value Error: {parameters_exception}".encode("utf-8"))
+
+                except Exception as dump_voltages_exception:  # pylint: disable=broad-except
                     self.send_response(400)
                     self.end_headers()
                     self.wfile.write(
-                        f"Value Error: {parameters_exception}".encode("utf-8")
-                    )
-
-                except (
-                    Exception
-                ) as dump_voltages_exception:  # pylint: disable=broad-except
-                    self.send_response(400)
-                    self.end_headers()
-                    self.wfile.write(
-                        "Unhandled exception running dump_voltages"
-                        f" {dump_voltages_exception}".encode("utf-8")
+                        "Unhandled exception running dump_voltages" f" {dump_voltages_exception}".encode("utf-8")
                     )
 
             else:
@@ -263,9 +250,7 @@ class MWAXSubfileDistributor:
             f" v{version.get_mwax_mover_version_string()})\n"
         )
 
-        parser.add_argument(
-            "-c", "--cfg", required=True, help="Configuration file location.\n"
-        )
+        parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
 
         args = vars(parser.parse_args())
 
@@ -277,10 +262,7 @@ class MWAXSubfileDistributor:
     def initialise(self, config_filename):
         """Initialise common code"""
         if not os.path.exists(config_filename):
-            self.logger.error(
-                f"Configuration file location {config_filename} does not"
-                " exist. Quitting."
-            )
+            self.logger.error(f"Configuration file location {config_filename} does not" " exist. Quitting.")
             sys.exit(1)
 
         # Parse config file
@@ -299,27 +281,16 @@ class MWAXSubfileDistributor:
         self.logger.setLevel(logging.DEBUG)
         console_log = logging.StreamHandler()
         console_log.setLevel(logging.DEBUG)
-        console_log.setFormatter(
-            logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s")
-        )
+        console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(console_log)
 
-        file_log = logging.FileHandler(
-            filename=os.path.join(self.cfg_log_path, "main.log")
-        )
+        file_log = logging.FileHandler(filename=os.path.join(self.cfg_log_path, "main.log"))
         file_log.setLevel(logging.DEBUG)
-        file_log.setFormatter(
-            logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s")
-        )
+        file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(file_log)
 
-        self.logger.info(
-            "Starting mwax_subfile_distributor"
-            f" processor...v{version.get_mwax_mover_version_string()}"
-        )
-        self.cfg_webserver_port = utils.read_config(
-            self.logger, self.config, "mwax mover", "webserver_port"
-        )
+        self.logger.info("Starting mwax_subfile_distributor" f" processor...v{version.get_mwax_mover_version_string()}")
+        self.cfg_webserver_port = utils.read_config(self.logger, self.config, "mwax mover", "webserver_port")
         self.cfg_voltdata_dont_archive_path = utils.read_config(
             self.logger,
             self.config,
@@ -341,24 +312,16 @@ class MWAXSubfileDistributor:
             "mwax mover",
             "health_multicast_interface_name",
         )
-        self.cfg_health_multicast_ip = utils.read_config(
-            self.logger, self.config, "mwax mover", "health_multicast_ip"
-        )
+        self.cfg_health_multicast_ip = utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_ip")
         self.cfg_health_multicast_port = int(
-            utils.read_config(
-                self.logger, self.config, "mwax mover", "health_multicast_port"
-            )
+            utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_port")
         )
         self.cfg_health_multicast_hops = int(
-            utils.read_config(
-                self.logger, self.config, "mwax mover", "health_multicast_hops"
-            )
+            utils.read_config(self.logger, self.config, "mwax mover", "health_multicast_hops")
         )
 
         self.cfg_psrdada_timeout_sec = int(
-            utils.read_config(
-                self.logger, self.config, "mwax mover", "psrdada_timeout_sec"
-            )
+            utils.read_config(self.logger, self.config, "mwax mover", "psrdada_timeout_sec")
         )
         self.cfg_copy_subfile_to_disk_timeout_sec = int(
             utils.read_config(
@@ -379,12 +342,8 @@ class MWAXSubfileDistributor:
         )
 
         # get this hosts primary network interface ip
-        self.cfg_health_multicast_interface_ip = utils.get_ip_address(
-            self.cfg_health_multicast_interface_name
-        )
-        self.logger.info(
-            f"IP for sending multicast: {self.cfg_health_multicast_interface_ip}"
-        )
+        self.cfg_health_multicast_interface_ip = utils.get_ip_address(self.cfg_health_multicast_interface_name)
+        self.logger.info(f"IP for sending multicast: {self.cfg_health_multicast_interface_ip}")
 
         if not os.path.exists(self.cfg_voltdata_dont_archive_path):
             self.logger.error(
@@ -395,24 +354,15 @@ class MWAXSubfileDistributor:
             sys.exit(1)
 
         if not os.path.exists(self.cfg_subfile_incoming_path):
-            self.logger.error(
-                f"Subfile file location {self.cfg_subfile_incoming_path} does"
-                " not exist. Quitting."
-            )
+            self.logger.error(f"Subfile file location {self.cfg_subfile_incoming_path} does" " not exist. Quitting.")
             sys.exit(1)
 
         if not os.path.exists(self.cfg_voltdata_incoming_path):
-            self.logger.error(
-                "Voltdata file location"
-                f" {self.cfg_voltdata_incoming_path} does not exist. Quitting."
-            )
+            self.logger.error("Voltdata file location" f" {self.cfg_voltdata_incoming_path} does not exist. Quitting.")
             sys.exit(1)
 
         if not os.path.exists(self.cfg_voltdata_outgoing_path):
-            self.logger.error(
-                "Voltdata file location"
-                f" {self.cfg_voltdata_outgoing_path} does not exist. Quitting."
-            )
+            self.logger.error("Voltdata file location" f" {self.cfg_voltdata_outgoing_path} does not exist. Quitting.")
             sys.exit(1)
 
         self.cfg_always_keep_subfiles = (
@@ -440,15 +390,10 @@ class MWAXSubfileDistributor:
             self.cfg_bf_ringbuffer_key = utils.read_config(
                 self.logger, self.config, "beamformer", "input_ringbuffer_key"
             )
-            self.cfg_bf_fildata_path = utils.read_config(
-                self.logger, self.config, "beamformer", "fildata_path"
-            )
+            self.cfg_bf_fildata_path = utils.read_config(self.logger, self.config, "beamformer", "fildata_path")
 
             if not os.path.exists(self.cfg_bf_fildata_path):
-                self.logger.error(
-                    f"Fildata file location {self.cfg_bf_fildata_path} does"
-                    " not exist. Quitting."
-                )
+                self.logger.error(f"Fildata file location {self.cfg_bf_fildata_path} does" " not exist. Quitting.")
                 sys.exit(1)
 
             self.cfg_bf_settings_path = utils.read_config(
@@ -459,15 +404,11 @@ class MWAXSubfileDistributor:
             )
             if not os.path.exists(self.cfg_bf_settings_path):
                 self.logger.error(
-                    "Beamformer settings file location"
-                    f" {self.cfg_bf_settings_path} does not exist. Quitting."
+                    "Beamformer settings file location" f" {self.cfg_bf_settings_path} does not exist. Quitting."
                 )
                 sys.exit(1)
 
-            self.logger.info(
-                "Beam settings will be read from:"
-                f" {self.cfg_bf_settings_path} at runtime."
-            )
+            self.logger.info("Beam settings will be read from:" f" {self.cfg_bf_settings_path} at runtime.")
 
             # Read filterbank config specific to this host
             self.cfg_bf_archive_destination_host = utils.read_config(
@@ -574,9 +515,7 @@ class MWAXSubfileDistributor:
                 )
             )
 
-            self.cfg_corr_metafits_path = utils.read_config(
-                self.logger, self.config, "correlator", "metafits_path"
-            )
+            self.cfg_corr_metafits_path = utils.read_config(self.logger, self.config, "correlator", "metafits_path")
 
             # Get list of projectids which are to be given
             # high priority when archiving
@@ -595,9 +534,7 @@ class MWAXSubfileDistributor:
 
             if not os.path.exists(self.cfg_corr_visdata_incoming_path):
                 self.logger.error(
-                    "Visdata file location"
-                    f" {self.cfg_corr_visdata_incoming_path} does not exist."
-                    " Quitting."
+                    "Visdata file location" f" {self.cfg_corr_visdata_incoming_path} does not exist." " Quitting."
                 )
                 sys.exit(1)
 
@@ -619,17 +556,13 @@ class MWAXSubfileDistributor:
 
             if not os.path.exists(self.cfg_corr_visdata_outgoing_path):
                 self.logger.error(
-                    "Visdata file location"
-                    f" {self.cfg_corr_visdata_outgoing_path} does not exist."
-                    " Quitting."
+                    "Visdata file location" f" {self.cfg_corr_visdata_outgoing_path} does not exist." " Quitting."
                 )
                 sys.exit(1)
 
             if not os.path.exists(self.cfg_corr_mwax_stats_executable):
                 self.logger.error(
-                    "mwax_stats executable"
-                    f" {self.cfg_corr_mwax_stats_executable} does not exist."
-                    " Quitting."
+                    "mwax_stats executable" f" {self.cfg_corr_mwax_stats_executable} does not exist." " Quitting."
                 )
                 sys.exit(1)
 
@@ -642,23 +575,14 @@ class MWAXSubfileDistributor:
                 sys.exit(1)
 
             if not os.path.exists(self.cfg_corr_metafits_path):
-                self.logger.error(
-                    f"metafits location {self.cfg_corr_metafits_path} does not"
-                    " exist. Quitting."
-                )
+                self.logger.error(f"metafits location {self.cfg_corr_metafits_path} does not" " exist. Quitting.")
                 sys.exit(1)
 
-            self.cfg_metadatadb_host = utils.read_config(
-                self.logger, self.config, "mwa metadata database", "host"
-            )
+            self.cfg_metadatadb_host = utils.read_config(self.logger, self.config, "mwa metadata database", "host")
 
             if self.cfg_metadatadb_host != mwax_db.DUMMY_DB:
-                self.cfg_metadatadb_db = utils.read_config(
-                    self.logger, self.config, "mwa metadata database", "db"
-                )
-                self.cfg_metadatadb_user = utils.read_config(
-                    self.logger, self.config, "mwa metadata database", "user"
-                )
+                self.cfg_metadatadb_db = utils.read_config(self.logger, self.config, "mwa metadata database", "db")
+                self.cfg_metadatadb_user = utils.read_config(self.logger, self.config, "mwa metadata database", "user")
                 self.cfg_metadatadb_pass = utils.read_config(
                     self.logger,
                     self.config,
@@ -666,9 +590,7 @@ class MWAXSubfileDistributor:
                     "pass",
                     True,
                 )
-                self.cfg_metadatadb_port = utils.read_config(
-                    self.logger, self.config, "mwa metadata database", "port"
-                )
+                self.cfg_metadatadb_port = utils.read_config(self.logger, self.config, "mwa metadata database", "port")
 
             # Read config specific to this host
             self.cfg_corr_archive_destination_host = utils.read_config(
@@ -752,16 +674,11 @@ class MWAXSubfileDistributor:
 
         # Create and start web server
         self.logger.info(f"Starting http server on port {self.cfg_webserver_port}...")
-        self.web_server = MWAXHTTPServer(
-            ("", int(self.cfg_webserver_port)), MWAXHTTPGetHandler
-        )
+        self.web_server = MWAXHTTPServer(("", int(self.cfg_webserver_port)), MWAXHTTPGetHandler)
         self.web_server.context = self
         self.web_server_thread = threading.Thread(
-            name="webserver",
-            target=self.web_server_loop,
-            args=(self.web_server,),
-            daemon=True
-        )        
+            name="webserver", target=self.web_server_loop, args=(self.web_server,), daemon=True
+        )
         self.web_server_thread.start()
 
         # Start the processors
@@ -825,23 +742,20 @@ class MWAXSubfileDistributor:
 
         if self.cfg_bf_enabled:
             if self.cfg_bf_archive_destination_enabled:
-                self.filterbank_processor = (
-                    mwax_filterbank_processor.FilterbankProcessor(
-                        self,
-                        self.hostname,
-                        self.cfg_bf_fildata_path,
-                        self.cfg_bf_archive_destination_host,
-                        self.cfg_bf_archive_destination_port,
-                        self.cfg_bf_archive_command_numa_node,
-                    )
+                self.filterbank_processor = mwax_filterbank_processor.FilterbankProcessor(
+                    self,
+                    self.hostname,
+                    self.cfg_bf_fildata_path,
+                    self.cfg_bf_archive_destination_host,
+                    self.cfg_bf_archive_destination_port,
+                    self.cfg_bf_archive_command_numa_node,
                 )
 
                 # Add this processor to list of processors we manage
                 self.processors.append(self.filterbank_processor)
             else:
                 self.logger.info(
-                    "Filterbank Archiving is disabled due to configuration"
-                    " setting `fil_destination_enabled`."
+                    "Filterbank Archiving is disabled due to configuration" " setting `fil_destination_enabled`."
                 )
 
         # Make sure we can Ctrl-C / kill out of this
@@ -870,10 +784,7 @@ class MWAXSubfileDistributor:
                     self.cfg_health_multicast_hops,
                 )
             except Exception as catch_all_exception:  # pylint: disable=broad-except
-                self.logger.warning(
-                    "health_handler: Failed to send health information."
-                    f" {catch_all_exception}"
-                )
+                self.logger.warning("health_handler: Failed to send health information." f" {catch_all_exception}")
 
             # Sleep for a second
             time.sleep(1)
@@ -909,9 +820,7 @@ class MWAXSubfileDistributor:
 
     def signal_handler(self, _signum, _frame):
         """Handle SIGINT, SIGTERM"""
-        self.logger.warning(
-            f"Interrupted. Shutting down {len(self.processors)} processors..."
-        )
+        self.logger.warning(f"Interrupted. Shutting down {len(self.processors)} processors...")
         self.running = False
 
         # Stop any Processors
@@ -941,9 +850,7 @@ class MWAXSubfileDistributor:
 
         # create a health thread
         self.logger.info("Starting health_thread...")
-        health_thread = threading.Thread(
-            name="health_thread", target=self.health_handler, daemon=True
-        )
+        health_thread = threading.Thread(name="health_thread", target=self.health_handler, daemon=True)
         health_thread.start()
 
         while self.running:

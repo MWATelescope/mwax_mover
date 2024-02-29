@@ -1,4 +1,5 @@
 """Module for handling FilterBank file creation from a ringbuffer"""
+
 import logging
 import logging.handlers
 import os
@@ -21,7 +22,7 @@ class FilterbankProcessor:
         archive_port: int,
         archive_command_numa_node: int,
     ):
-        self.subfile_distributor_context = context
+        self.sd_ctx = context
 
         # Setup logging
         self.logger = logging.getLogger(__name__)
@@ -30,16 +31,12 @@ class FilterbankProcessor:
         self.logger.setLevel(logging.DEBUG)
         file_log = logging.FileHandler(
             filename=os.path.join(
-                self.subfile_distributor_context.cfg_log_path,
+                self.sd_ctx.cfg_log_path,
                 f"{__name__}.log",
             )
         )
         file_log.setLevel(logging.DEBUG)
-        file_log.setFormatter(
-            logging.Formatter(
-                "%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"
-            )
-        )
+        file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(file_log)
 
         self.hostname = hostname
@@ -83,16 +80,12 @@ class FilterbankProcessor:
         )
 
         # Setup thread for watching filesystem
-        watcher_fil_thread = threading.Thread(
-            name="watch_fil", target=self.watcher_fil.start, daemon=True
-        )
+        watcher_fil_thread = threading.Thread(name="watch_fil", target=self.watcher_fil.start, daemon=True)
         self.watcher_threads.append(watcher_fil_thread)
         watcher_fil_thread.start()
 
         # Setup thread for processing items
-        queue_worker_fil_thread = threading.Thread(
-            name="work_fil", target=self.queue_worker_fil.start, daemon=True
-        )
+        queue_worker_fil_thread = threading.Thread(name="work_fil", target=self.queue_worker_fil.start, daemon=True)
         self.worker_threads.append(queue_worker_fil_thread)
         queue_worker_fil_thread.start()
 

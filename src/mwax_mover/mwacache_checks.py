@@ -1,4 +1,5 @@
 """Tests for the mwacache_archiver ceph primitives"""
+
 import argparse
 import logging
 import os
@@ -27,31 +28,21 @@ def check_pawsey_lts(
     # Get checksum of local file
     filename_checksum = do_checksum_md5(logger, input_filename, -1, 600)
 
-    ceph_upload_to_pawsey(
-        logger, test_bucket, input_filename, profile_name, endpoint, filename_checksum
-    )
+    ceph_upload_to_pawsey(logger, test_bucket, input_filename, profile_name, endpoint, filename_checksum)
 
     logger.info("Delaying download by 5 seconds to allow Ceph to settle")
     time.sleep(5)
 
-    ceph_download_from_pawsey(
-        logger, test_bucket, input_filename, output_filename, profile_name, endpoint
-    )
+    ceph_download_from_pawsey(logger, test_bucket, input_filename, output_filename, profile_name, endpoint)
 
     temp_filename_checksum = do_checksum_md5(logger, output_filename, -1, 600)
 
     # Check they match
     if filename_checksum != temp_filename_checksum:
-        logger.error(
-            f"Checksums do not match! Local: {filename_checksum} vs Downloaded"
-            f" {temp_filename_checksum}"
-        )
+        logger.error(f"Checksums do not match! Local: {filename_checksum} vs Downloaded" f" {temp_filename_checksum}")
         exit(-1)
 
-    logger.info(
-        f"Checksums match OK: Local: {filename_checksum} vs Downloaded"
-        f" {temp_filename_checksum}"
-    )
+    logger.info(f"Checksums match OK: Local: {filename_checksum} vs Downloaded" f" {temp_filename_checksum}")
 
     # Remove temp file
     logger.info(f"Removing output file: {output_filename}")
@@ -65,9 +56,7 @@ def check_pawsey_lts(
 def ceph_remove_file(logger, bucket, filename, profile_name, endpoint):
     session: boto3.Session = ceph_get_s3_session(profile_name)
 
-    resource: boto3.session.Session.resource = ceph_get_s3_resource(
-        logger, session, [endpoint]
-    )
+    resource: boto3.session.Session.resource = ceph_get_s3_resource(logger, session, [endpoint])
 
     key = os.path.basename(filename)
     logger.info(f"About to delete {endpoint}/{bucket}/{key}")
@@ -117,9 +106,7 @@ def ceph_download_from_pawsey(
 ):
     session: boto3.Session = ceph_get_s3_session(profile_name)
 
-    resource: boto3.session.Session.resource = ceph_get_s3_resource(
-        logger, session, [endpoint]
-    )
+    resource: boto3.session.Session.resource = ceph_get_s3_resource(logger, session, [endpoint])
 
     # Download file
     key = os.path.basename(filename)
@@ -136,16 +123,12 @@ def main():
     logger.setLevel(logging.DEBUG)
     console_log = logging.StreamHandler()
     console_log.setLevel(logging.DEBUG)
-    console_log.setFormatter(
-        logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s")
-    )
+    console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
     logger.addHandler(console_log)
 
     # Get command line args
     parser = argparse.ArgumentParser()
-    parser.description = (
-        "mwacache_checks- tests to ensure Acacia and Banksia are working OK.\n"
-    )
+    parser.description = "mwacache_checks- tests to ensure Acacia and Banksia are working OK.\n"
 
     parser.add_argument(
         "-p",
@@ -167,10 +150,7 @@ def main():
         "-l",
         "--leave_file_on_ceph",
         action="store_true",
-        help=(
-            "Leave uploaded file on Ceph (i.e. don't delete after the test"
-            " completes).\n"
-        ),
+        help=("Leave uploaded file on Ceph (i.e. don't delete after the test" " completes).\n"),
     )
 
     args = vars(parser.parse_args())

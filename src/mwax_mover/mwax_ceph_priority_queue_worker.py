@@ -1,4 +1,5 @@
 """Module for the CephQueueWorker"""
+
 import os
 import queue
 import time
@@ -56,9 +57,7 @@ class CephPriorityQueueWorker(PriorityQueueWorker):
         try:
             self.ceph_session = ceph_get_s3_session(self.ceph_profile)
         except Exception as catch_all_exception:  # pylint: disable=broad-except
-            self.logger.error(
-                f"Error getting Ceph Session: {catch_all_exception}"
-            )
+            self.logger.error(f"Error getting Ceph Session: {catch_all_exception}")
             return
 
         self._running = True
@@ -71,9 +70,7 @@ class CephPriorityQueueWorker(PriorityQueueWorker):
                     success = False
 
                     if self.current_item is None:
-                        self.current_item = self.source_queue.get(
-                            block=True, timeout=0.5
-                        )
+                        self.current_item = self.source_queue.get(block=True, timeout=0.5)
                     self.logger.info(f"Processing {self.current_item}...")
 
                     start_time = time.time()
@@ -86,9 +83,7 @@ class CephPriorityQueueWorker(PriorityQueueWorker):
                         if self._executable_path:
                             success = self.run_command(filename)
                         else:
-                            success = self._event_handler(
-                                filename, self.ceph_session
-                            )
+                            success = self._event_handler(filename, self.ceph_session)
 
                         if success:
                             # Dequeue the item, but requeue if it was not
@@ -108,9 +103,7 @@ class CephPriorityQueueWorker(PriorityQueueWorker):
 
                     elapsed = time.time() - start_time
                     self.logger.info(
-                        "Complete. Queue size:"
-                        f" {self.source_queue.qsize()} Elapsed:"
-                        f" {elapsed:.2f} sec"
+                        "Complete. Queue size:" f" {self.source_queue.qsize()} Elapsed:" f" {elapsed:.2f} sec"
                     )
 
                     if not success:

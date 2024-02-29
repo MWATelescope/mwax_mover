@@ -1,4 +1,5 @@
 """Standalong mwax_mover module"""
+
 import argparse
 import logging
 import logging.handlers
@@ -33,16 +34,10 @@ def remove_file(logger, filename: str, raise_error: bool) -> bool:
 
     except Exception as delete_exception:  # pylint: disable=broad-except
         if raise_error:
-            logger.error(
-                f"{filename}- Error deleting: {delete_exception}. Retrying up"
-                " to 5 times."
-            )
+            logger.error(f"{filename}- Error deleting: {delete_exception}. Retrying up" " to 5 times.")
             raise delete_exception
         else:
-            logger.warning(
-                f"{filename}- Error deleting: {delete_exception}. File may"
-                " have been moved or removed."
-            )
+            logger.warning(f"{filename}- Error deleting: {delete_exception}. File may" " have been moved or removed.")
             return True
 
 
@@ -69,10 +64,7 @@ class Processor:
         """Initialisation/setup"""
         # Get command line args
         parser = argparse.ArgumentParser()
-        parser.description = (
-            "mwax_mover: a command line tool which is part of the mwax"
-            " correlator for the MWA.\n"
-        )
+        parser.description = "mwax_mover: a command line tool which is part of the mwax" " correlator for the MWA.\n"
         parser.add_argument(
             "-w",
             "--watchdir",
@@ -146,17 +138,11 @@ class Processor:
             self.recursive = args["recursive"]
 
         if not os.path.isdir(self.watch_dir):
-            print(
-                f"Error: --watchdir '{self.watch_dir}' does not exist or you"
-                " don't have permission"
-            )
+            print(f"Error: --watchdir '{self.watch_dir}' does not exist or you" " don't have permission")
             sys.exit(1)
 
         if not self.watch_ext[0] == ".":
-            print(
-                f"Error: --watchext '{self.watch_ext}' should start with a '.'"
-                " e.g. '.sub'"
-            )
+            print(f"Error: --watchext '{self.watch_ext}' should start with a '.'" " e.g. '.sub'")
             sys.exit(1)
 
         # start logging
@@ -165,9 +151,7 @@ class Processor:
 
         handler = logging.StreamHandler()
         handler.setLevel(logging.DEBUG)
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s, %(levelname)s, %(message)s")
-        )
+        handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(message)s"))
         self.logger.addHandler(handler)
 
         self.logger.info("Starting mwax_mover processor...")
@@ -213,19 +197,11 @@ class Processor:
 
         self.logger.info(f"Running in mode {self.mode}")
 
-        if (
-            self.mode == MODE_WATCH_DIR_FOR_RENAME
-            or self.mode == MODE_WATCH_DIR_FOR_NEW
-        ):
-            self.logger.info(
-                f"Scanning {self.watch_dir} for files matching"
-                f" {'*' + self.watch_ext}..."
-            )
+        if self.mode == MODE_WATCH_DIR_FOR_RENAME or self.mode == MODE_WATCH_DIR_FOR_NEW:
+            self.logger.info(f"Scanning {self.watch_dir} for files matching" f" {'*' + self.watch_ext}...")
 
             # Setup thread for watching filesystem
-            watcher_thread = threading.Thread(
-                target=self.watch.start, daemon=True
-            )
+            watcher_thread = threading.Thread(target=self.watch.start, daemon=True)
 
             # Start watcher
             watcher_thread.start()
@@ -245,9 +221,7 @@ class Processor:
             watcher_thread = None
 
         # Setup thread for processing items
-        queueworker_thread = threading.Thread(
-            target=self.queueworker.start, daemon=True
-        )
+        queueworker_thread = threading.Thread(target=self.queueworker.start, daemon=True)
 
         # Start queue worker
         queueworker_thread.start()

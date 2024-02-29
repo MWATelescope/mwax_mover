@@ -1,4 +1,5 @@
 """Module for the QueueWorker class"""
+
 import os
 import queue
 import time
@@ -46,10 +47,7 @@ class PriorityQueueWorker(object):
         if (event_handler is None and executable_path is None) or (
             event_handler is not None and executable_path is not None
         ):
-            raise Exception(
-                "QueueWorker requires event_handler OR executable_path not"
-                " both and not neither!"
-            )
+            raise Exception("QueueWorker requires event_handler OR executable_path not" " both and not neither!")
 
         self._executable_path = executable_path
         self._event_handler = event_handler
@@ -80,9 +78,7 @@ class PriorityQueueWorker(object):
                     success = False
 
                     if self.current_item is None:
-                        self.current_item = self.source_queue.get(
-                            block=True, timeout=0.5
-                        )
+                        self.current_item = self.source_queue.get(block=True, timeout=0.5)
                     self.logger.info(f"Processing {self.current_item}...")
 
                     start_time = time.time()
@@ -115,9 +111,7 @@ class PriorityQueueWorker(object):
 
                     elapsed = time.time() - start_time
                     self.logger.info(
-                        "Complete. Queue size:"
-                        f" {self.source_queue.qsize()} Elapsed:"
-                        f" {elapsed:.2f} sec"
+                        "Complete. Queue size:" f" {self.source_queue.qsize()} Elapsed:" f" {elapsed:.2f} sec"
                     )
 
                     if success:
@@ -125,11 +119,7 @@ class PriorityQueueWorker(object):
                         self.consecutive_error_count = 0
                     else:
                         self.consecutive_error_count += 1
-                        backoff = (
-                            self.backoff_initial_seconds
-                            * self.backoff_factor
-                            * self.consecutive_error_count
-                        )
+                        backoff = self.backoff_initial_seconds * self.backoff_factor * self.consecutive_error_count
                         if backoff > self.backoff_limit_seconds:
                             backoff = self.backoff_limit_seconds
 
@@ -182,9 +172,7 @@ class PriorityQueueWorker(object):
         command = command.replace(mwax_mover.FILE_REPLACEMENT_TOKEN, filename)
 
         filename_no_ext = os.path.splitext(filename)[0]
-        command = command.replace(
-            mwax_mover.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext
-        )
+        command = command.replace(mwax_mover.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext)
 
         return mwax_command.run_command_ext(self.logger, command, -1, 60, True)
 
@@ -192,8 +180,6 @@ class PriorityQueueWorker(object):
         """Return the status as a dictionary"""
         return {
             "Unix timestamp": time.time(),
-            "current item": ""
-            if self.current_item is None
-            else str(self.current_item[1]),
+            "current item": "" if self.current_item is None else str(self.current_item[1]),
             "priority_queue_size": self.source_queue.qsize(),
         }

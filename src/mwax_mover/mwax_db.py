@@ -1,4 +1,5 @@
 """Module for database operations"""
+
 import os
 import threading
 import time
@@ -52,8 +53,7 @@ class MWAXDBHandler:
                 )
 
             self.logger.info(
-                "MWAXDBHandler.connect(): Connected to database:"
-                f" {self.user}@{self.host}:{self.port}/{self.db_name}"
+                "MWAXDBHandler.connect(): Connected to database:" f" {self.user}@{self.host}:{self.port}/{self.db_name}"
             )
 
         except OperationalError as err:
@@ -114,38 +114,28 @@ class MWAXDBHandler:
             except OperationalError as conn_error:
                 # Our connection is toast. Clear it so we attempt a reconnect
                 self.con = None
-                self.logger.error(
-                    "select_one_row_postgres(): postgres OperationalError-"
-                    f" {conn_error}"
-                )
+                self.logger.error("select_one_row_postgres(): postgres OperationalError-" f" {conn_error}")
                 # Reraise error
                 raise conn_error
 
             except InterfaceError as int_error:
                 # Our connection is toast. Clear it so we attempt a reconnect
                 self.con = None
-                self.logger.error(
-                    f"select_one_row_postgres(): postgres InterfaceError- {int_error}"
-                )
+                self.logger.error(f"select_one_row_postgres(): postgres InterfaceError- {int_error}")
                 # Reraise error
                 raise int_error
 
             except psycopg2.ProgrammingError as prog_error:
                 # A programming/SQL error - e.g. table does not exist. Don't
                 # reconnect connection
-                self.logger.error(
-                    "select_one_row_postgres(): postgres ProgrammingError-"
-                    f" {prog_error}"
-                )
+                self.logger.error("select_one_row_postgres(): postgres ProgrammingError-" f" {prog_error}")
                 # Reraise error
                 raise prog_error
 
             except Exception as exception_info:
                 # Any other error- likely to be a database error rather than
                 # connection based
-                self.logger.error(
-                    f"select_one_row_postgres(): unknown Error- {exception_info}"
-                )
+                self.logger.error(f"select_one_row_postgres(): unknown Error- {exception_info}")
                 raise exception_info
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(30))
@@ -187,36 +177,28 @@ class MWAXDBHandler:
             except OperationalError as conn_error:
                 # Our connection is toast. Clear it so we attempt a reconnect
                 self.con = None
-                self.logger.error(
-                    f"execute_single_dml_row(): postgres OperationalError- {conn_error}"
-                )
+                self.logger.error(f"execute_single_dml_row(): postgres OperationalError- {conn_error}")
                 # Reraise error
                 raise conn_error
 
             except InterfaceError as int_error:
                 # Our connection is toast. Clear it so we attempt a reconnect
                 self.con = None
-                self.logger.error(
-                    f"execute_single_dml_row(): postgres InterfaceError- {int_error}"
-                )
+                self.logger.error(f"execute_single_dml_row(): postgres InterfaceError- {int_error}")
                 # Reraise error
                 raise int_error
 
             except psycopg2.ProgrammingError as prog_error:
                 # A programming/SQL error - e.g. table does not exist. Don't
                 # reconnect connection
-                self.logger.error(
-                    f"execute_single_dml_row(): postgres ProgrammingError- {prog_error}"
-                )
+                self.logger.error(f"execute_single_dml_row(): postgres ProgrammingError- {prog_error}")
                 # Reraise error
                 raise prog_error
 
             except Exception as exception_info:
                 # Any other error- likely to be a database error rather than
                 # connection based
-                self.logger.error(
-                    f"execute_single_dml_row(): unknown Error- {exception_info}"
-                )
+                self.logger.error(f"execute_single_dml_row(): unknown Error- {exception_info}")
                 raise exception_info
 
 
@@ -345,8 +327,7 @@ def insert_data_file_row(
             )
 
             db_handler_object.logger.info(
-                f"{filename} insert_data_file_row() Successfully wrote into"
-                " data_files table"
+                f"{filename} insert_data_file_row() Successfully wrote into" " data_files table"
             )
             return True
 
@@ -408,8 +389,7 @@ def update_data_file_row_as_archived(
                 return True
         else:
             db_handler_object.logger.info(
-                f"{filename} update_data_file_row_as_archived() Successfully"
-                " updated data_files table"
+                f"{filename} update_data_file_row_as_archived() Successfully" " updated data_files table"
             )
             return True
 

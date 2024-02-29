@@ -1,6 +1,7 @@
 """
 Version handling for mwax_mover
 """
+
 import typing
 import pkg_resources  # part of setuptools
 

@@ -1,4 +1,5 @@
 """Contains various methods dealing with archiving"""
+
 import os
 import hashlib
 import random
@@ -25,10 +26,7 @@ def archive_file_rsync(
     try:
         file_size = os.path.getsize(full_filename)
     except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
-        logger.error(
-            f"{full_filename}: Error determining file size. Error"
-            f" {catch_all_exceptiion}"
-        )
+        logger.error(f"{full_filename}: Error determining file size. Error" f" {catch_all_exceptiion}")
         return False
 
     # Build final command line
@@ -46,9 +44,7 @@ def archive_file_rsync(
     start_time = time.time()
 
     # run xrdcp
-    return_val, stdout = mwax_command.run_command_ext(
-        logger, cmdline, archive_numa_node, timeout, False
-    )
+    return_val, stdout = mwax_command.run_command_ext(logger, cmdline, archive_numa_node, timeout, False)
 
     if return_val:
         elapsed = time.time() - start_time
@@ -63,9 +59,7 @@ def archive_file_rsync(
         )
         return True
     else:
-        logger.error(
-            f"{full_filename} archive_file_rsync failed. Error {stdout}"
-        )
+        logger.error(f"{full_filename} archive_file_rsync failed. Error {stdout}")
         return False
 
 
@@ -83,10 +77,7 @@ def archive_file_xrootd(
     try:
         file_size = os.path.getsize(full_filename)
     except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
-        logger.error(
-            f"{full_filename}: Error determining file size. Error"
-            f" {catch_all_exceptiion}"
-        )
+        logger.error(f"{full_filename}: Error determining file size. Error" f" {catch_all_exceptiion}")
         return False
 
     # Gather some info for later
@@ -97,9 +88,7 @@ def archive_file_xrootd(
     # the path
     destination_host = archive_destination_host.split(":")[0]
     destination_path = archive_destination_host.split(":")[1]
-    full_destination_temp_filename = os.path.join(
-        destination_path, temp_filename
-    )
+    full_destination_temp_filename = os.path.join(destination_path, temp_filename)
     full_destination_final_filename = os.path.join(destination_path, filename)
 
     # Build final command line
@@ -118,9 +107,7 @@ def archive_file_xrootd(
     start_time = time.time()
 
     # run xrdcp
-    return_val, stdout = mwax_command.run_command_ext(
-        logger, cmdline, archive_numa_node, timeout, False
-    )
+    return_val, stdout = mwax_command.run_command_ext(logger, cmdline, archive_numa_node, timeout, False)
 
     if return_val:
         elapsed = time.time() - start_time
@@ -142,9 +129,7 @@ def archive_file_xrootd(
 
         # run the mv command to rename the temp file to the final file
         # If this works, then mwacache will actually do its thing
-        return_val, stdout = mwax_command.run_command_ext(
-            logger, cmdline, archive_numa_node, timeout, False
-        )
+        return_val, stdout = mwax_command.run_command_ext(logger, cmdline, archive_numa_node, timeout, False)
 
         if return_val:
             logger.info(
@@ -155,15 +140,10 @@ def archive_file_xrootd(
             )
             return True
         else:
-            logger.error(
-                f"{full_filename} archive_file_xrootd rename failed. Error"
-                f" {stdout}"
-            )
+            logger.error(f"{full_filename} archive_file_xrootd rename failed. Error" f" {stdout}")
             return False
     else:
-        logger.error(
-            f"{full_filename} archive_file_xrootd failed. Error {stdout}"
-        )
+        logger.error(f"{full_filename} archive_file_xrootd failed. Error {stdout}")
         return False
 
 
@@ -186,21 +166,14 @@ def archive_file_ceph(
     try:
         file_size = os.path.getsize(full_filename)
     except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
-        logger.error(
-            f"{full_filename}: Error determining file size. Error"
-            f" {catch_all_exceptiion}"
-        )
+        logger.error(f"{full_filename}: Error determining file size. Error" f" {catch_all_exceptiion}")
         return False
 
     # Get a valid s3 resource
-    ceph_resource: boto3.resource = ceph_get_s3_resource(
-        logger, ceph_session, ceph_endpoints
-    )
+    ceph_resource: boto3.resource = ceph_get_s3_resource(logger, ceph_session, ceph_endpoints)
 
     # create bucket if required
-    logger.debug(
-        f"{full_filename} creating S3 bucket {bucket_name} (if required)..."
-    )
+    logger.debug(f"{full_filename} creating S3 bucket {bucket_name} (if required)...")
     try:
         ceph_create_bucket(ceph_resource, bucket_name)
     except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
@@ -210,9 +183,7 @@ def archive_file_ceph(
         )
         return False
 
-    logger.debug(
-        f"{full_filename} attempting upload to S3 bucket {bucket_name}..."
-    )
+    logger.debug(f"{full_filename} attempting upload to S3 bucket {bucket_name}...")
 
     # start timer
     start_time = time.time()
@@ -229,10 +200,7 @@ def archive_file_ceph(
             max_concurrency,
         )
     except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
-        logger.error(
-            f"{full_filename}: Error uploading to S3 bucket {bucket_name}."
-            f"Error {catch_all_exceptiion}"
-        )
+        logger.error(f"{full_filename}: Error uploading to S3 bucket {bucket_name}." f"Error {catch_all_exceptiion}")
         return False
 
     # end timer
@@ -260,6 +228,7 @@ def archive_file_ceph(
 # Boto3 will use this file to authenticate and fail if it is not there or is
 # not valid
 #
+
 
 #
 # Dervied from: https://github.com/tlastowka/calculate_multipart_etag/blob
@@ -300,9 +269,7 @@ def ceph_get_s3_session(profile: str) -> boto3.Session:
     return session
 
 
-def ceph_get_s3_resource(
-    logger, session: boto3.Session, endpoints: list
-) -> boto3.resource:
+def ceph_get_s3_resource(logger, session: boto3.Session, endpoints: list) -> boto3.resource:
     """Returns an S3 resource object"""
     # This ensures the default boto retries and timeouts don't leave us
     # hanging too long
@@ -316,9 +283,7 @@ def ceph_get_s3_resource(
             # Get an enpoint at random from what is left on the list
             endpoint = random.choice(endpoints)
 
-            s3_resource = session.resource(
-                "s3", endpoint_url=endpoint, config=config
-            )
+            s3_resource = session.resource("s3", endpoint_url=endpoint, config=config)
             logger.debug(f"Using endpoint {endpoint}")
 
         except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
@@ -364,11 +329,7 @@ def ceph_upload_file(
     bucket = ceph_resource.Bucket(bucket_name)
 
     # configure the xfer to use multiparts if specified
-    if (
-        multipart_threshold_bytes is not None
-        and chunk_size_bytes is not None
-        and max_concurrency is not None
-    ):
+    if multipart_threshold_bytes is not None and chunk_size_bytes is not None and max_concurrency is not None:
         # 5GB is the limit Ceph has for parts, so only split if >= 2GB
         config = TransferConfig(
             multipart_threshold=multipart_threshold_bytes,

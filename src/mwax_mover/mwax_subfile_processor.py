@@ -1,4 +1,5 @@
 """Module for subfile processor"""
+
 import glob
 import logging
 import logging.handlers
@@ -40,7 +41,7 @@ class SubfileProcessor:
         psrdada_timeout_sec: int,
         copy_subfile_to_disk_timeout_sec: int,
     ):
-        self.subfile_distributor_context = context
+        self.sd_ctx = context
 
         # Setup logging
         self.logger = logging.getLogger(__name__)
@@ -49,14 +50,12 @@ class SubfileProcessor:
         self.logger.setLevel(logging.DEBUG)
         file_log = logging.FileHandler(
             filename=os.path.join(
-                self.subfile_distributor_context.cfg_log_path,
+                self.sd_ctx.cfg_log_path,
                 f"{__name__}.log",
             )
         )
         file_log.setLevel(logging.DEBUG)
-        file_log.setFormatter(
-            logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s")
-        )
+        file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(file_log)
 
         self.ext_sub_file = ".sub"
@@ -127,9 +126,7 @@ class SubfileProcessor:
         )
 
         # Setup thread for watching filesystem
-        watcher_thread = threading.Thread(
-            name="watch_sub", target=self.subfile_watcher.start, daemon=True
-        )
+        watcher_thread = threading.Thread(name="watch_sub", target=self.subfile_watcher.start, daemon=True)
         self.watcher_threads.append(watcher_thread)
         watcher_thread.start()
 
@@ -149,9 +146,7 @@ class SubfileProcessor:
         # Get next keep file off the queue
         keep_filename = self.dump_keep_file_queue.get()
 
-        self.logger.info(
-            "SubfileProcessor.handle_next_keep_file is handling" f" {keep_filename}..."
-        )
+        self.logger.info("SubfileProcessor.handle_next_keep_file is handling" f" {keep_filename}...")
 
         # Copy the .keep file to the voltdata incoming dir
         # and ensure it is named as a ".sub" file
@@ -160,23 +155,18 @@ class SubfileProcessor:
             self.corr_diskdb_numa_node,
             self.voltdata_incoming_path,
             self.copy_subfile_to_disk_timeout_sec,
-            os.path.basename(keep_filename).replace(
-                self.ext_keep_file, self.ext_sub_file
-            ),
+            os.path.basename(keep_filename).replace(self.ext_keep_file, self.ext_sub_file),
         )
 
         if copy_success:
             # Rename kept subfile so that mwax_u2s can reuse it
-            free_filename = keep_filename.replace(
-                self.ext_keep_file, self.ext_free_file
-            )
+            free_filename = keep_filename.replace(self.ext_keep_file, self.ext_free_file)
 
             try:
                 shutil.move(keep_filename, free_filename)
             except Exception as move_exception:  # pylint: disable=broad-except
                 self.logger.error(
-                    f"Could not rename {keep_filename} back to"
-                    f" {free_filename}. Error {move_exception}"
+                    f"Could not rename {keep_filename} back to" f" {free_filename}. Error {move_exception}"
                 )
                 sys.exit(2)
 
@@ -196,9 +186,7 @@ class SubfileProcessor:
         """When subfile detected this handles it"""
         success = False
 
-        self.logger.info(
-            f"{item}- SubfileProcessor.subfile_handler is handling {item}..."
-        )
+        self.logger.info(f"{item}- SubfileProcessor.subfile_handler is handling {item}...")
 
         # `keep_subfiles_path` is used after doing the main work. If we are
         # running in with `always_keep_subfiles`=1,
@@ -239,12 +227,8 @@ class SubfileProcessor:
                     )
 
                     # Pause archiving so we have the disk to ourselves
-                    if (
-                        self.subfile_distributor_context.cfg_corr_archive_destination_enabled  # pylint: disable=line-too-long
-                    ):
-                        self.subfile_distributor_context.archive_processor.pause_archiving(  # pylint: disable=line-too-long
-                            True
-                        )
+                    if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
+                        self.sd_ctx.archive_processor.pause_archiving(True)  # pylint: disable=line-too-long
 
                     # See if there already is a TRIGGER_ID keyword in the subfile- if so
                     # don't overwrite it. We must have overlapping triggers happening
@@ -253,9 +237,7 @@ class SubfileProcessor:
                         self.logger.info(
                             f"{item}- injecting {utils.PSRDADA_TRIGGER_ID} {self.dump_trigger_id} into subfile..."
                         )
-                        utils.inject_subfile_header(
-                            item, f"{utils.PSRDADA_TRIGGER_ID} {self.dump_trigger_id}\n"
-                        )
+                        utils.inject_subfile_header(item, f"{utils.PSRDADA_TRIGGER_ID} {self.dump_trigger_id}\n")
 
                     success = self.copy_subfile_to_disk(
                         item,
@@ -276,12 +258,8 @@ class SubfileProcessor:
                     # 3. Rename .sub file to .free so that udpgrab can reuse it
                     if CorrelatorMode.is_correlator(subfile_mode):
                         # This is a normal MWAX_CORRELATOR obs, continue as normal
-                        if (
-                            self.subfile_distributor_context.cfg_corr_archive_destination_enabled  # pylint: disable=line-too-long
-                        ):
-                            self.subfile_distributor_context.archive_processor.pause_archiving(  # pylint: disable=line-too-long
-                                False
-                            )
+                        if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
+                            self.sd_ctx.archive_processor.pause_archiving(False)  # pylint: disable=line-too-long
 
                         success = utils.load_psrdada_ringbuffer(
                             self.logger,
@@ -296,12 +274,8 @@ class SubfileProcessor:
 
                     elif CorrelatorMode.is_vcs(subfile_mode):
                         # Pause archiving so we have the disk to ourselves
-                        if (
-                            self.subfile_distributor_context.cfg_corr_archive_destination_enabled  # pylint: disable=line-too-long
-                        ):
-                            self.subfile_distributor_context.archive_processor.pause_archiving(  # pylint: disable=line-too-long
-                                True
-                            )
+                        if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
+                            self.sd_ctx.archive_processor.pause_archiving(True)  # pylint: disable=line-too-long
 
                         success = self.copy_subfile_to_disk(
                             item,
@@ -310,12 +284,8 @@ class SubfileProcessor:
                             self.copy_subfile_to_disk_timeout_sec,
                         )
 
-                    elif CorrelatorMode.is_no_capture(
-                        subfile_mode
-                    ) or CorrelatorMode.is_voltage_buffer(subfile_mode):
-                        self.logger.info(
-                            f"{item}- ignoring due to mode: {subfile_mode}"
-                        )
+                    elif CorrelatorMode.is_no_capture(subfile_mode) or CorrelatorMode.is_voltage_buffer(subfile_mode):
+                        self.logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
 
                         #
                         # This is our opportunity to write any "keep" files to disk
@@ -323,31 +293,21 @@ class SubfileProcessor:
                         #
                         if self.dump_keep_file_queue.qsize() > 0:
                             # Pause archiving
-                            if (
-                                self.subfile_distributor_context.cfg_corr_archive_destination_enabled  # pylint: disable=line-too-long
-                            ):
-                                self.subfile_distributor_context.archive_processor.pause_archiving(  # pylint: disable=line-too-long
-                                    True
-                                )
+                            if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
+                                self.sd_ctx.archive_processor.pause_archiving(True)  # pylint: disable=line-too-long
 
                             # Since we're not doing anything with this subfile we can
                             # try and handle any remaining keep files
                             self.handle_next_keep_file()
                         else:
                             # Unpause archiving
-                            if (
-                                self.subfile_distributor_context.cfg_corr_archive_destination_enabled  # pylint: disable=line-too-long
-                            ):
-                                self.subfile_distributor_context.archive_processor.pause_archiving(  # pylint: disable=line-too-long
-                                    False
-                                )
+                            if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
+                                self.sd_ctx.archive_processor.pause_archiving(False)  # pylint: disable=line-too-long
 
                         success = True
 
                     else:
-                        self.logger.error(
-                            f"{item}- Unknown subfile mode {subfile_mode}," " ignoring."
-                        )
+                        self.logger.error(f"{item}- Unknown subfile mode {subfile_mode}," " ignoring.")
                         success = False
 
                     # There is a semi-rare case where in between the top of this code and now
@@ -408,27 +368,17 @@ class SubfileProcessor:
                         # idea is it can be updated at runtime but this makes
                         # it a bit less efficient than reading it once and
                         # using it many times.
-                        with open(
-                            self.bf_settings_path, "r", encoding="utf-8"
-                        ) as bf_settings_file:
+                        with open(self.bf_settings_path, "r", encoding="utf-8") as bf_settings_file:
                             beamformer_settings = bf_settings_file.read()
 
                         # It is possible the beamformer settings are already
                         # added into the sub file (e.g. a failed load into ringbuffer)
                         # So check first, before appending them again!
-                        if (
-                            utils.read_subfile_value(item, "NUM_INCOHERENT_BEAMS")
-                            is None
-                        ):
-                            self.logger.info(
-                                f"{item}- injecting beamformer header into"
-                                " subfile..."
-                            )
+                        if utils.read_subfile_value(item, "NUM_INCOHERENT_BEAMS") is None:
+                            self.logger.info(f"{item}- injecting beamformer header into" " subfile...")
                             utils.inject_beamformer_headers(item, beamformer_settings)
                         else:
-                            self.logger.info(
-                                f"{item}- beamformer header exists in subfile."
-                            )
+                            self.logger.info(f"{item}- beamformer header exists in subfile.")
 
                         success = utils.load_psrdada_ringbuffer(
                             self.logger,
@@ -442,15 +392,11 @@ class SubfileProcessor:
                             keep_subfiles_path = self.voltdata_incoming_path
 
                     elif CorrelatorMode.is_no_capture(subfile_mode):
-                        self.logger.info(
-                            f"{item}- ignoring due to mode: {subfile_mode}"
-                        )
+                        self.logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
                         success = True
 
                     else:
-                        self.logger.error(
-                            f"{item}- Unknown subfile mode {subfile_mode}," " ignoring."
-                        )
+                        self.logger.error(f"{item}- Unknown subfile mode {subfile_mode}," " ignoring.")
                         success = False
 
         except Exception as handler_exception:  # pylint: disable=broad-except
@@ -482,14 +428,11 @@ class SubfileProcessor:
 
                 except Exception as move_exception:  # pylint: disable=broad-except
                     self.logger.error(
-                        f"{item}- Could not rename {item} back to"
-                        f" {free_filename}. Error {move_exception}"
+                        f"{item}- Could not rename {item} back to" f" {free_filename}. Error {move_exception}"
                     )
                     sys.exit(2)
 
-            self.logger.info(
-                f"{item}- SubfileProcessor.subfile_handler finished handling."
-            )
+            self.logger.info(f"{item}- SubfileProcessor.subfile_handler finished handling.")
 
         return success
 
@@ -529,9 +472,7 @@ class SubfileProcessor:
         command = f"cp {filename} {destination_path}/{destination_filename}"
 
         start_time = time.time()
-        retval, stdout = mwax_command.run_command_ext(
-            self.logger, command, numa_node, timeout, False
-        )
+        retval, stdout = mwax_command.run_command_ext(self.logger, command, numa_node, timeout, False)
         elapsed = time.time() - start_time
 
         if retval:
@@ -549,9 +490,7 @@ class SubfileProcessor:
 
         return retval
 
-    def dump_voltages(
-        self, start_gps_time: int, end_gps_time: int, trigger_id: int
-    ) -> bool:
+    def dump_voltages(self, start_gps_time: int, end_gps_time: int, trigger_id: int) -> bool:
         """Dump whatever subfiles we have from /dev/shm to disk"""
         # Set module level variables
         self.dump_start_gps = start_gps_time  # note, this may be 0! meaning 'earliest'
@@ -559,15 +498,12 @@ class SubfileProcessor:
         self.dump_trigger_id = trigger_id
 
         self.logger.info(
-            f"dump_voltages: from {str(start_gps_time)} to"
-            f" {str(end_gps_time)} for trigger {trigger_id}..."
+            f"dump_voltages: from {str(start_gps_time)} to" f" {str(end_gps_time)} for trigger {trigger_id}..."
         )
 
         # Look for any .free files which have the first 10 characters of
         # filename from starttime to endtime
-        free_file_list = sorted(
-            glob.glob(f"{self.subfile_incoming_path}/*{self.ext_free_file}")
-        )
+        free_file_list = sorted(glob.glob(f"{self.subfile_incoming_path}/*{self.ext_free_file}"))
 
         #
         # We need to keep at least N free files
@@ -580,9 +516,7 @@ class SubfileProcessor:
             free_file_list = free_file_list[free_files_to_retain:]
         else:
             # We don't have enough free files to do a dump, so exit
-            self.logger.warning(
-                "dump_voltages: not enough free files for voltage dump."
-            )
+            self.logger.warning("dump_voltages: not enough free files for voltage dump.")
             return True
 
         for free_filename in free_file_list:
@@ -604,34 +538,27 @@ class SubfileProcessor:
                 # Now we need to check they are no VCS observations.
                 # If so, they are already archived so we don't bother
                 # archivng them again
-                if (
-                    utils.read_subfile_value(free_filename, utils.PSRDADA_MODE)
-                    != CorrelatorMode.MWAX_VCS.value
-                ):
+                if utils.read_subfile_value(free_filename, utils.PSRDADA_MODE) != CorrelatorMode.MWAX_VCS.value:
                     self.logger.info(
-                        f"dump_voltages: keeping {free_filename}, and updating subfile header with 'TRIGGER_ID {trigger_id}'"
+                        f"dump_voltages: keeping {free_filename}, and updating subfile header "
+                        f"with 'TRIGGER_ID {trigger_id}'"
                     )
 
                     # See if there already is a TRIGGER_ID keyword in the subfile- if so
                     # don't overwrite it. We must have overlapping triggers happening
                     if not utils.read_subfile_trigger_value(free_filename):
                         # No TRIGGER_ID yet, so add it
-                        utils.inject_subfile_header(
-                            free_filename, f"{utils.PSRDADA_TRIGGER_ID} {trigger_id}\n"
-                        )
+                        utils.inject_subfile_header(free_filename, f"{utils.PSRDADA_TRIGGER_ID} {trigger_id}\n")
 
                     # For any that exist, rename them immediately to .keep
-                    keep_filename = free_filename.replace(
-                        self.ext_free_file, self.ext_keep_file
-                    )
+                    keep_filename = free_filename.replace(self.ext_free_file, self.ext_keep_file)
                     shutil.move(free_filename, keep_filename)
 
                     # append to queue so it can be copied off when in NO_CAPTURE mode
                     self.dump_keep_file_queue.put(keep_filename)
                 else:
                     self.logger.info(
-                        f"dump_voltages: NOT keeping {free_filename} as it is"
-                        " a MWAX_VCS subobservation"
+                        f"dump_voltages: NOT keeping {free_filename} as it is" " a MWAX_VCS subobservation"
                     )
 
         self.logger.info("dump_voltages: complete")
