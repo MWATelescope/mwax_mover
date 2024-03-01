@@ -664,12 +664,12 @@ def get_priority(
     called.
 
     Priority order is:
-    1 Calibrator correlator observations
-    2 reserved for correlator high prioriry projects
+    1 metafits_ppds (small and can be quickly archived)
+    2 Calibrator correlator observations
+    3 reserved for correlator high prioriry projects
     20 reserved for vcs high prioriry projects
     30 normal correlator observations
     90 vcs observations
-    100 metafits_ppds
     """
     return_priority = 100  # default if we don't do anything else
 
@@ -679,10 +679,10 @@ def get_priority(
     if val.valid:
         if val.filetype_id == MWADataFileType.MWAX_VISIBILITIES.value:
             if val.calibrator:
-                return_priority = 1
+                return_priority = 2
             else:
                 if val.project_id in list_of_correlator_high_priority_projects:
-                    return_priority = 2
+                    return_priority = 3
                 else:
                     return_priority = 30
         elif val.filetype_id == MWADataFileType.MWAX_VOLTAGES.value:
@@ -690,6 +690,8 @@ def get_priority(
                 return_priority = 20
             else:
                 return_priority = 90
+        elif val.filetype_id == MWADataFileType.MWA_PPD_FILE.value:
+            return_priority = 1
     else:
         raise Exception(f"File {filename} is not valid! Reason: {val.validation_message}")
 

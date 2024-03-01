@@ -5,6 +5,7 @@ NOTE: some tests (e.g. validate_filename and get_priority) use filenames
 which do not exist in the git repo. This is fine as the main thing being
 tested is the filename and metafits file (which is included).
 """
+
 from configparser import ConfigParser
 import logging
 import os
@@ -218,9 +219,7 @@ def test_get_metafits_values_correlator():
     #
     # Run test
     #
-    is_calibrator, project_id = utils.get_metafits_values(
-        "tests/data/correlator_C001/1244973688_metafits.fits"
-    )
+    is_calibrator, project_id = utils.get_metafits_values("tests/data/correlator_C001/1244973688_metafits.fits")
     assert is_calibrator is False
     assert project_id == "C001"
 
@@ -236,18 +235,14 @@ def test_scan_for_existing_files_and_add_to_queue():
     #
     # Run test
     #
-    utils.scan_for_existing_files_and_add_to_queue(
-        logger, watch_dir, pattern, recursive, queue_target
-    )
+    utils.scan_for_existing_files_and_add_to_queue(logger, watch_dir, pattern, recursive, queue_target)
 
     assert queue_target.qsize() == 2
     assert queue_target.get() == os.path.join(
         os.getcwd(),
         os.path.join(watch_dir, "1244973688_20190619100110_ch114_000.fits"),
     )
-    assert queue_target.get() == os.path.join(
-        os.getcwd(), os.path.join(watch_dir, "1244973688_metafits.fits")
-    )
+    assert queue_target.get() == os.path.join(os.getcwd(), os.path.join(watch_dir, "1244973688_metafits.fits"))
 
 
 def test_scan_for_existing_files_and_add_to_priority_queue():
@@ -278,19 +273,17 @@ def test_scan_for_existing_files_and_add_to_priority_queue():
     # Get first item
     item1 = queue_target.get()
 
-    assert str(item1[1]) == os.path.join(
-        os.getcwd(),
-        os.path.join(watch_dir, "1244973688_20190619100110_ch114_000.fits"),
-    )
-    assert item1[0] == 30  # Regular correlator obs
+    assert str(item1[1]) == os.path.join(os.getcwd(), os.path.join(watch_dir, "1244973688_metafits.fits"))
+    assert item1[0] == 1  # metafits ppd file
 
     # get second item
     item2 = queue_target.get()
 
     assert str(item2[1]) == os.path.join(
-        os.getcwd(), os.path.join(watch_dir, "1244973688_metafits.fits")
+        os.getcwd(),
+        os.path.join(watch_dir, "1244973688_20190619100110_ch114_000.fits"),
     )
-    assert item2[0] == 100  # metafits ppd file
+    assert item2[0] == 30  # Regular correlator obs
 
 
 def test_scan_directory():
@@ -303,18 +296,14 @@ def test_scan_directory():
     #
     # Run test
     #
-    list_of_files = utils.scan_directory(
-        logger, watch_dir, pattern, recursive, exclude_pattern=None
-    )
+    list_of_files = utils.scan_directory(logger, watch_dir, pattern, recursive, exclude_pattern=None)
 
     assert len(list_of_files) == 2
     assert list_of_files[0] == os.path.join(
         os.getcwd(),
         os.path.join(watch_dir, "1244973688_20190619100110_ch114_000.fits"),
     )
-    assert list_of_files[1] == os.path.join(
-        os.getcwd(), os.path.join(watch_dir, "1244973688_metafits.fits")
-    )
+    assert list_of_files[1] == os.path.join(os.getcwd(), os.path.join(watch_dir, "1244973688_metafits.fits"))
 
 
 def test_get_priority_correlator_calibrator():
@@ -331,7 +320,7 @@ def test_get_priority_correlator_calibrator():
         ["D0006"],
         ["C001"],
     )
-    assert priority == 1
+    assert priority == 2
 
 
 def test_get_priority_correlator_high_priority_list():
@@ -351,7 +340,7 @@ def test_get_priority_correlator_high_priority_list():
         ["D0006"],
         ["C001"],
     )
-    assert priority == 2
+    assert priority == 3
 
 
 def test_get_priority_vcs_c001():
@@ -419,7 +408,7 @@ def test_get_priority_metafits_ppd():
         ["D0006"],
         ["C001"],
     )
-    assert priority == 100
+    assert priority == 1
 
 
 def test_do_checksum_md5():
@@ -506,15 +495,11 @@ def test_config_get_list_valid():
     An empty string would result in and empty list []
     """
     logger = logging.getLogger("test")
-    config_filename = os.path.join(
-        os.getcwd(), "tests/mwax_subfile_distributor_correlator_test.cfg"
-    )
+    config_filename = os.path.join(os.getcwd(), "tests/mwax_subfile_distributor_correlator_test.cfg")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    return_list = utils.read_config_list(
-        logger, config, "correlator", "high_priority_vcs_projectids"
-    )
+    return_list = utils.read_config_list(logger, config, "correlator", "high_priority_vcs_projectids")
 
     assert return_list == ["D0006", "G0058"]
 
@@ -526,15 +511,11 @@ def test_config_get_list_empty():
     An empty string would result in and empty list []
     """
     logger = logging.getLogger("test")
-    config_filename = os.path.join(
-        os.getcwd(), "tests/mwax_subfile_distributor_correlator_test.cfg"
-    )
+    config_filename = os.path.join(os.getcwd(), "tests/mwax_subfile_distributor_correlator_test.cfg")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    return_list = utils.read_config_list(
-        logger, config, "correlator", "high_priority_correlator_projectids"
-    )
+    return_list = utils.read_config_list(logger, config, "correlator", "high_priority_correlator_projectids")
 
     assert return_list == []
 
@@ -547,13 +528,9 @@ def test_config_get_optional_value():
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    empty_return_val = utils.read_optional_config(
-        logger, config, "banksia", "max_concurrency"
-    )
+    empty_return_val = utils.read_optional_config(logger, config, "banksia", "max_concurrency")
 
-    non_empty_return_val = utils.read_optional_config(
-        logger, config, "acacia", "max_concurrency"
-    )
+    non_empty_return_val = utils.read_optional_config(logger, config, "acacia", "max_concurrency")
 
     assert empty_return_val is None
     assert non_empty_return_val is not None
@@ -567,13 +544,9 @@ def test_config_get_optional_value_spaces_not_empty_string():
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    empty_return_val = utils.read_optional_config(
-        logger, config, "banksia", "chunk_size_bytes"
-    )
+    empty_return_val = utils.read_optional_config(logger, config, "banksia", "chunk_size_bytes")
 
-    non_empty_return_val = utils.read_optional_config(
-        logger, config, "acacia", "chunk_size_bytes"
-    )
+    non_empty_return_val = utils.read_optional_config(logger, config, "acacia", "chunk_size_bytes")
 
     assert empty_return_val is None
     assert non_empty_return_val is not None
@@ -739,9 +712,7 @@ def test_inject_beamformer_headers():
     utils.inject_beamformer_headers(subfile_name, beamformer_settings_string)
 
     # Check file size
-    assert os.path.getsize(subfile_name) == utils.PSRDADA_HEADER_BYTES + len(
-        bytearray(data_padding)
-    )
+    assert os.path.getsize(subfile_name) == utils.PSRDADA_HEADER_BYTES + len(bytearray(data_padding))
 
     # we can also test utils.read_subfile_value(item, key)
     assert utils.read_subfile_value(subfile_name, utils.PSRDADA_MODE) == "NO_CAPTURE"
