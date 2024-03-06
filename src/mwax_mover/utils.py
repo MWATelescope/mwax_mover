@@ -858,6 +858,6 @@ def should_project_be_archived(project_id: str) -> bool:
     If we ever get more codes or they change more often this should
     move into the config file"""
     if project_id.upper() == "C123":
-        return True
-    else:
         return False
+    else:
+        return True

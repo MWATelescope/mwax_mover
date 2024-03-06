@@ -720,3 +720,10 @@ def test_inject_beamformer_headers():
 
     # check for None on a non-existant key
     assert utils.read_subfile_value(subfile_name, "MISSING_KEY123") is None
+
+
+def test_should_project_be_archived():
+    assert utils.should_project_be_archived("C001") is True
+    assert utils.should_project_be_archived("c001") is True
+    assert utils.should_project_be_archived("C123") is False
+    assert utils.should_project_be_archived("c123") is False
