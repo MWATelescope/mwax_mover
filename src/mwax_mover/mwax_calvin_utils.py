@@ -4,6 +4,7 @@ import glob
 import os
 import shutil
 import time
+import traceback
 import numpy as np
 from astropy.io import fits
 from enum import Enum
@@ -23,6 +24,7 @@ import numpy.typing as npt
 from numpy.typing import ArrayLike, NDArray
 from typing import NamedTuple, List, Tuple, Dict
 # from nptyping import NDArray, Shape
+import sys
 
 class Tile(NamedTuple):
     """Info about an MWA tile"""
@@ -32,6 +34,18 @@ class Tile(NamedTuple):
     # index: int
     rx: int
     slot: int
+    flavor: str = ""
+
+class Input(NamedTuple):
+    """Info about an MWA tile"""
+    name: str
+    id: int
+    flag: bool
+    # index: int
+    pol: str
+    rx: int
+    slot: int
+    length: float
     flavor: str = ""
 
 class ChanInfo(NamedTuple):
@@ -57,6 +71,12 @@ class ChanInfo(NamedTuple):
 #         else:
 #             raise ValueError(f"Unknown array config with {nlb=} and {nhex=}")
 
+def ensure_system_byte_order(arr):
+    system_byte_order = '>' if sys.byteorder == 'big' else '<'
+    if arr.dtype.byteorder not in f'{system_byte_order}|=':
+        return arr.newbyteorder(system_byte_order)
+    return arr
+
 class Metafits:
     """MWA Metadata file in FITS format"""
     def __init__(self, filename: str):
@@ -67,22 +87,45 @@ class Metafits:
         """Get tile info from metafits, sorted by index"""
 
         with fits.open(self.filename) as hdus:
-            metafits_tiles = hdus['TILEDATA'].data  # type: ignore
+            metafits_inputs = hdus['TILEDATA'].data  # type: ignore
 
         # using a set here to avoid duplicates (pol=X,Y)
         tiles = set(
             Tile(
-                name=metafits_tile["TileName"],
-                id=metafits_tile["Tile"],
-                flag=metafits_tile["Flag"],
-                # index=metafits_tile["Antenna"],
-                rx=metafits_tile["Rx"],
-                slot=metafits_tile["Slot"],
-                flavor=metafits_tile["Flavors"],
-            ) for metafits_tile in metafits_tiles
+                name=metafits_input["TileName"],
+                id=metafits_input["Tile"],
+                flag=metafits_input["Flag"],
+                # index=metafits_input["Antenna"],
+                rx=metafits_input["Rx"],
+                slot=metafits_input["Slot"],
+                flavor=metafits_input["Flavors"],
+            ) for metafits_input in metafits_inputs
         )
 
         return sorted([*tiles], key=lambda tile: tile.id)
+
+    @property
+    def inputs(self) -> List[Input]:
+        """Get tile info from metafits, sorted by index"""
+
+        with fits.open(self.filename) as hdus:
+            metafits_inputs = hdus['TILEDATA'].data  # type: ignore
+
+        inputs = set(
+            Input(
+                id=metafits_input["Input"],
+                name=metafits_input["TileName"]+metafits_input["Pol"],
+                flag=metafits_input["Flag"],
+                pol=metafits_input["Pol"],
+                # index=metafits_input["Antenna"],
+                rx=metafits_input["Rx"],
+                slot=metafits_input["Slot"],
+                flavor=metafits_input["Flavors"],
+                length=float(metafits_input["Length"][3:]),
+            ) for metafits_input in metafits_inputs
+        )
+
+        return sorted([*inputs], key=lambda inp: inp.id)
 
     @property
     def tiles_df(self) -> pd.DataFrame:
@@ -96,6 +139,10 @@ class Metafits:
         #     raise ValueError("No unflagged tiles found")
         # # tiles_by_id = sorted(tiles, key=lambda tile: tile.id)
         # return unflagged.sort_values(by=["id"]).take([0])["name"], tiles
+
+    @property
+    def inputs_df(self) -> pd.DataFrame:
+        return pd.DataFrame(self.inputs, columns=Input._fields)
 
     @property
     def chan_info(self) -> ChanInfo:
@@ -154,8 +201,8 @@ class HyperfitsSolution:
     def chanblocks_hz(self) -> NDArray[np.float_]:
         """Get channels from solution file"""
         with fits.open(self.filename) as hdus:
-            freq_data = np.array(hdus['CHANBLOCKS'].data['Freq']) # type: ignore
-        return freq_data
+            freq_data = hdus['CHANBLOCKS'].data['Freq'].astype(np.float_)
+        return np.array(ensure_system_byte_order(freq_data))
 
     def validate_chanblocks(self,
                             chaninfo: ChanInfo,
@@ -177,10 +224,9 @@ class HyperfitsSolution:
 
         chans_per_block = chanblock_width_hz // chaninfo.fine_chan_width_hz
         chanblocks_per_coarse = chaninfo.fine_chans_per_coarse // chans_per_block
-
         if (range_ncoarse:=len(coarse_chans)) != (soln_ncoarse:= len(chanblocks_hz) // chanblocks_per_coarse):  # type: ignore
-            raise RuntimeError(
-                f"{self.filename} - number of coarse channels in solution file ({soln_ncoarse})"
+            print(
+                f"{self.filename} - warning: number of coarse channels in solution file ({soln_ncoarse})"
                 f" does not match number of coarse channels in metafits for this range ({range_ncoarse})"
                 f" given {chanblocks_per_coarse=}, {chans_per_block=}"
             )
@@ -189,52 +235,33 @@ class HyperfitsSolution:
             chanblocks_per_coarse
         )
 
+    # @property
+    # def tile_names_flags(self) -> List[Tuple[str, bool]]:
+    #     """Get the tile names and flags ordered by index"""
+    #     with fits.open(self.filename) as hdus:
+    #         tile_data = hdus['TILES'].data  # type: ignore
+    #     return [
+    #         (tile["TileName"], tile["Flag"])
+    #         for tile in tile_data
+    #     ]
+
     @property
-    def tile_names_flags(self) -> List[Tuple[str, bool]]:
-        """Get the tile names and flags ordered by index"""
+    def tile_flags(self) -> List[bool]:
+        """Get the tile flags ordered by Antenna index"""
         with fits.open(self.filename) as hdus:
             tile_data = hdus['TILES'].data  # type: ignore
-        return [
-            (tile["TileName"], tile["Flag"])
-            for tile in tile_data
-        ]
-
-    # def validate_tiles(self, tiles_by_name: Dict[str, Tile], refant: Tile) -> Tuple[NDArray[np.int_], int]:
-    #     """Validate that the tiles in the solution match the tiles in the metafits"""
-    #     tile_ids = []
-    #     ref_tile_idx = None
-    #     for tile_name, flag in self.tile_names_flags:
-    #         if tile_name not in tiles_by_name:
-    #             raise RuntimeError(
-    #                 f"{self.filename} - tile {tile_name} in solution file"
-    #                 f" is not in metafits"
-    #             )
-    #         if tile_name == refant.name:
-    #             if flag:
-    #                 raise RuntimeError(
-    #                     f"{self.filename} - reference tile {refant.name}"
-    #                     f" is flagged in solutions file"
-    #                 )
-    #             ref_tile_idx = len(tile_ids)
-    #         tile_ids.append(tiles_by_name[tile_name].id)
-    #     if ref_tile_idx is None:
-    #         raise RuntimeError(
-    #             f"{self.filename} - reference tile {refant.name}"
-    #             f" not found in solution file"
-    #         )
-    #     return (
-    #         tile_ids,
-    #         ref_tile_idx,
-    #     )
+        return tile_data['Flag']
 
     def get_average_times(self) -> List[float]:
-        """Get the average time for each timeblock"""
+        """Get the average time for each timeblock
+
+        Raises KeyError if TIMEBLOCKS not present
+        """
         with fits.open(self.filename) as hdus:
             time_data = hdus['TIMEBLOCKS'].data  # type: ignore
-
-        return [
-            time['Average'] for time in time_data
-        ]
+            return [
+                time['Average'] for time in time_data
+            ]
 
     def get_solutions(self) -> List[NDArray[np.complex_]]:
         """Get solutions as a complex array for each pol: [time, tile, chan]"""
@@ -375,6 +402,24 @@ class HyperfitsSolutionGroup:
         return tiles_df
 
     @property
+    def refant(self) -> pd.Series:
+        """
+        Get reference antenna (unflagged tile with lowest id) which is not flagged in solutions
+        """
+        tiles_df = self.metafits_tiles_df.copy()
+        # flag tiles_df with solution flags
+        for soln in self.solns:
+            tiles_df['flag_metafits'] = tiles_df['flag']
+            tiles_df['flag_soln'] = soln.tile_flags
+            tiles_df["flag"] = np.logical_or(tiles_df["flag_metafits"], tiles_df["flag_soln"])
+            tiles_df.drop(columns=["flag_metafits", "flag_soln"], inplace=True)
+        tiles = tiles_df[tiles_df.flag == 0]
+        if not len(tiles):
+            raise ValueError("No unflagged tiles found")
+        # tiles_by_id = sorted(tiles, key=lambda tile: tile.id)
+        return tiles.sort_values(by=["id"]).take([0]).iloc[0]
+
+    @property
     def calibrator(self):
         calibrators = set(filter(None, [meta.calibrator for meta in self.metafits]))
         return ' '.join(calibrators)  # type: ignore
@@ -399,11 +444,14 @@ class HyperfitsSolutionGroup:
         """
         Generate an array of weights for each solution, based on results
         """
-        results = self.results
-        results[results < 0] = np.nan
-        results[results > 1e-4] = np.nan
-        exp_results = np.exp(-results)
-        return np.nan_to_num((exp_results - np.nanmin(exp_results)) / (np.nanmax(exp_results) - np.nanmin(exp_results)))
+        try:
+            results = self.results
+            results[results < 0] = np.nan
+            results[results > 1e-4] = np.nan
+            exp_results = np.exp(-results)
+            return np.nan_to_num((exp_results - np.nanmin(exp_results)) / (np.nanmax(exp_results) - np.nanmin(exp_results)))
+        except KeyError:
+            return np.full(len(self.all_chanblocks_hz[0]), 1.0)
 
 
     def get_solns(self, refant_name: str) -> Tuple[NDArray[np.int_], NDArray[np.complex_], NDArray[np.complex_]]:
@@ -422,12 +470,12 @@ class HyperfitsSolutionGroup:
 
             # validate tile selection
             # join the tile dataframe on name, just in case order is different
-            soln_tiles = pd.merge(
-                pd.DataFrame(soln.tile_names_flags, columns=["name", "flag"]),
-                self.metafits_tiles_df, on="name", how="left", suffixes=["_soln", "_metafits"],
-            )
-            soln_tiles.insert(2, "flag", np.logical_or(soln_tiles["flag_soln"], soln_tiles["flag_metafits"]))
-            soln_tiles.drop(columns=["flag_soln", "flag_metafits"], inplace=True)
+
+            soln_tiles = self.metafits_tiles_df.copy()
+            soln_tiles['flag_metafits'] = soln_tiles['flag']
+            soln_tiles['flag_soln'] = soln.tile_flags
+            soln_tiles["flag"] = np.logical_or(soln_tiles["flag_soln"], soln_tiles["flag_metafits"])
+            soln_tiles.drop(columns=["flag_metafits", "flag_soln"], inplace=True)
             # self.logger.debug(f"{soln.filename} - tiles:\n{soln_tiles.to_string(max_rows=999)}")
             _ref_tiles = soln_tiles[soln_tiles["name"] == refant_name]
             if not len(_ref_tiles):
@@ -469,7 +517,14 @@ class HyperfitsSolutionGroup:
                 )
 
             # validate timeblocks
-            avg_times = soln.get_average_times()
+            try:
+                avg_times = soln.get_average_times()
+            except KeyError:
+                # actual time values are not actually used anyway, just length.
+                solutions = soln.get_solutions()
+                n_times = solutions[0].shape[0]
+                avg_times = [float('nan')] * n_times
+
             # TODO: support multiple timeblocks
             if len(avg_times) != 1:
                 raise RuntimeError(
@@ -682,6 +737,38 @@ def fit_phase_line(
         # median_thickness=median_thickness,
     )
 
+
+def poly_str(coeffs, independent_var="x"):
+    def xpow(i):
+        if i == 0:
+            return ""
+        elif i == 1:
+            return f"×{independent_var}"
+        else:
+            return f"×{independent_var}" + "⁰¹²³⁴⁵⁶⁷⁸⁹"[i]
+    return " ".join(filter(None,[
+        f"{coeff:+.3}{xpow(i)}" # if abs(coeff) > 1e-20 else ""
+        for i, coeff in enumerate(coeffs[::-1])
+    ]))
+
+def textwrap(s, width=70):
+    words = s.split()
+    lines = []
+    current_line = []
+    current_length = 0
+
+    for word in words:
+        if current_length + len(word) <= width:
+            current_line.append(word)
+            current_length += len(word) + 1  # +1 for the space
+        else:
+            lines.append(" ".join(current_line))
+            current_line = [word]
+            current_length = len(word)
+
+    lines.append(" ".join(current_line))
+    return '\n'.join(lines)
+
 def debug_phase_fits(
         phase_fits: pd.DataFrame,
         tiles: pd.DataFrame,
@@ -692,13 +779,14 @@ def debug_phase_fits(
         prefix: str = './',
         show: bool = False,
         title: str = '',
+        plot_residual: bool = False,
+        residual_vmax = None,
     ) -> pd.DataFrame:
     import matplotlib as mpl
     from matplotlib import pyplot as plt
     from matplotlib.axes import Axes
     from matplotlib import cm
     from matplotlib.colors import LinearSegmentedColormap
-
     figsize = (20, 36)
     mpl.rcParams['figure.figsize'] = figsize
 
@@ -709,6 +797,102 @@ def debug_phase_fits(
     )
 
     flavor_fits = pd.merge(phase_fits, tiles, left_on="tile_id", right_on="id")
+
+    def ensure_system_byte_order(arr):
+        system_byte_order = '>' if sys.byteorder == 'big' else '<'
+        if arr.dtype.byteorder != system_byte_order and arr.dtype.byteorder not in '|=':
+            return arr.newbyteorder(system_byte_order)
+        return arr
+
+    freqs = ensure_system_byte_order(freqs)
+    weights = ensure_system_byte_order(weights)
+    soln_xx = ensure_system_byte_order(soln_xx)
+    soln_yy = ensure_system_byte_order(soln_yy)
+
+    if plot_residual:
+        plt.clf()
+        g = sns.FacetGrid(flavor_fits, row="flavor", col="pol", hue="flavor",
+                        sharex=True, sharey=False)
+
+        df = pd.DataFrame({
+            "freq": freqs,
+            "weights": weights,
+        })
+
+        def plot_residual(
+            soln_idxs: pd.Series,
+            pols: pd.Series,
+            flavs: pd.Series,
+            lengths: pd.Series,
+            intercepts: pd.Series,
+            **kwargs
+        ):
+            gradients = (2 * np.pi * u.rad * (lengths.to_numpy() * u.m) / c).to(u.rad/u.Hz).value
+            intercepts = intercepts.to_numpy()
+            pol = pols.iloc[0]
+            flav = flavs.iloc[0]
+            if pol == 'XX':
+                solns = soln_xx[soln_idxs.values]
+            elif pol == 'YY':
+                solns = soln_yy[soln_idxs.values]
+            else:
+                raise RuntimeError(f"wut pol? {pol}")
+            models = gradients[:, np.newaxis] * freqs[np.newaxis, :] + intercepts[:, np.newaxis]
+            resids = wrap_angle(np.angle(solns) - models)
+            medians = np.nanmedian(resids, axis=0)
+            min_mse = np.inf
+            best_coeffs = None
+            best_indep = None
+            mask = np.where(np.logical_and(
+                np.isfinite(medians),
+                np.logical_not(np.isnan(medians)),
+                weights > 0
+            ))[0]
+            df[f"{flav}_{pol}"] = medians
+            # np.savetxt(
+            #     f"{prefix}residuals_{flav}_{pol}.tsv",
+            #     np.stack((freqs[mask], medians[mask])).transpose(),
+            #     delimiter='\t'
+            # )
+            for indep_var in ['ν', 'λ']:
+                if indep_var == 'ν':
+                    xs = freqs[mask]
+                elif indep_var == 'λ':
+                    xs = 1.0 / freqs[mask]
+
+                for order in range(1, 9):
+                    try:
+                        coeffs = np.polyfit(xs, medians[mask], order)
+                    except ValueError:
+                        print(traceback.format_exc())
+                        print(f"Skipping polyfit({order=}, {indep_var=}) due to ValueError for {flav=} {pol=}.\n{xs=}\n{medians[mask]=}")
+                        continue
+
+                    mse = order * np.nanmean((medians - np.poly1d(coeffs)(freqs)) ** 2)
+                    if mse < min_mse:
+                        min_mse = mse
+                        best_coeffs = coeffs
+                        best_indep = indep_var
+
+            sns.scatterplot(x=freqs, y=medians, hue=weights, **dict(**kwargs, marker='+'))
+            if best_coeffs is not None and best_indep is not None:
+                sns.lineplot(x=freqs, y=np.poly1d(best_coeffs)(freqs), **kwargs)
+                eqn = poly_str(best_coeffs, independent_var=best_indep)
+                poly_wrap = textwrap(f"[{len(best_coeffs)}] {eqn}", width=40)
+                plt.text(0.05, 0.1, poly_wrap, transform=plt.gca().transAxes, fontsize=7)
+            if residual_vmax is not None:
+                ylim=float(residual_vmax)
+                plt.ylim(-ylim, ylim)
+
+            print(f"{flav=} {pol=} {eqn=}")
+        g.map(plot_residual, "soln_idx", "pol", "flavor", "length", "intercept")
+        g.set_axis_labels("freq", "phase")
+        if title:
+            plt.suptitle(title)
+        plt.savefig(f'{prefix}residual.png', dpi=200, bbox_inches='tight')
+        # save df to csv
+        df.to_csv(f'{prefix}residual.tsv', sep='\t', index=False)
+
     plt.clf()
     g = sns.FacetGrid(flavor_fits, row="flavor", col="pol", hue="flavor",
         subplot_kws=dict(projection='polar'),
@@ -765,32 +949,16 @@ def debug_phase_fits(
             angle = np.angle(signal)  # type: ignore
             mask_freq: ArrayLike = freqs[mask]  # type: ignore
             model_freqs = np.linspace(mask_freq.min(), mask_freq.max(), len(freqs))  # type: ignore
-
             rx_idx = np.where(rxs == fit['rx'])[0][0]
             slot_idx = np.where(slots == fit['slot'])[0][0]
             ax: Axes = axs[rx_idx][slot_idx]  # type: ignore
             ax.axis('on')
-            # ax.title.set_size(8)
             gradient = (2 * np.pi * u.rad * (fit[f'length_{pol}'] * u.m) / c).to(u.rad/u.Hz).value
             intercept = fit[f'intercept_{pol}']
-
-            # model = gradient * mask_freq + intercept
-            # ax.scatter(mask_freq, wrap_angle(model), c='red', s=1)
             model = gradient * model_freqs + intercept
             ax.scatter(model_freqs, wrap_angle(model), c='red', s=0.5)
-
-            # ax.scatter(mask_freq, wrap_angle(angle[mask]), c='blue', s=1)
             mask_weights: ArrayLike = weights[mask] # type: ignore
-            # mask_angle = angle[mask]
-            # print(f'{mask=}')
-            # print(f'{mask_freq=}')
-            # print(f'{angle=}')
-            # print(f'{mask_weights=}')
             ax.scatter(mask_freq, wrap_angle(angle[mask]), c=mask_weights, cmap=half_blues, s=2)
-            # mask_unwrapped = np.unwrap(mask_angle)
-            # ax.scatter(mask_freq, mask_unwrapped, c=mask_weights, cmap='Blues', s=1)
-            # ax.scatter(mask_freq, wrap_angle(mask_unwrapped), c='blue', s=1)
-            # fit['name']
             ax.set_title('\n'.join([
                 f"{fit['name']}|{fit['soln_idx']}",
                 f"X{fit[f'chi2dof_{pol}']:.4f}",

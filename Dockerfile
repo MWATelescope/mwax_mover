@@ -38,10 +38,12 @@ RUN apt-get -y update; \
 
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
 
+# pre-installl deps
+RUN pip install --no-cache-dir astropy==5.* autopage boto3==1.* cffi cliff cmd2 cryptography debtcollector dogpile.cache importlib-metadata inotify==0.2.* iso8601 jsonpatch jsonpointer keystoneauth1 matplotlib msgpack netaddr netifaces nptyping numpy openstacksdk os-service-types osc-lib oslo.config oslo.serialization platformdirs PrettyTable psycopg2-binary==2.* pycparser pyperclip python-cinderclient python-keystoneclient python-novaclient python-openstackclient requests==2.* rfc3986 scipy setuptools simplejson stevedore tabulate tenacity==8.* typing-extensions tzdata wheel wrapt zipp
 # copy the repository into the container in the /app directory
 ADD . /app
 WORKDIR /app
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # install the python module in the container
 RUN pip install .

@@ -178,3 +178,55 @@ mwax_subfile_distributor can be run in either of two modes:
        fil file, it will transfer the data via bbcp to a host  which is running FREDDA.
     2. If FREDDA makes a detection, then FREDDA will call the /dump_voltages web service which will dump out the subfiles
        to disk for later analysis. (See /dump_voltages for more info).
+
+## testing mwax_calvin on calvin1
+
+```
+# change into parent dir of mwax_mover
+cd ..
+
+# setup sourcelists
+git clone https://github.com/JLBLine/srclists.git
+
+# setup rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+# setup cargo
+echo "source \${HOME}/.cargo/env" >> ~/.bashrc
+
+# setup nvcc
+echo "export PATH=\"\${PATH}:/usr/local/cuda/bin/\" >> ~/.bashrc
+echo "export INCLUDES=\${INCLUDES} -I/usr/local/cuda/include\" >> ~/.bashrc
+echo "export LD_LIBRARY_PATH=\"\${LD_LIBRARY_PATH}:/usr/local/cuda/lib/\" >> ~/.bashrc
+
+# setup hyperdrive
+git clone https://github.com/MWATelescope/mwa_hyperdrive.git
+cd mwa_hyperdrive
+cargo install --path . --features=cuda-single
+# --features=gpu-single,cuda on hyperdrive >=0.3
+cd ..
+
+# setup Birli
+git clone https://github.com/MWATelescope/Birli.git
+cd Birli
+cargo build --release
+cargo install --path .
+cd ..
+
+# setup beam
+mkdir beam
+cd beam
+wget http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5
+echo "export MWA_BEAM_FILE=${PWD}/mwa_full_embedded_element_pattern.h5" >> ~/.bashrc
+cd ..
+
+# setup mwax_stats
+# TODO
+
+# setup locale for casa / perl
+echo "export LC_ALL=en_US.UTF-8" >> ~/.bashrc
+echo "export LANG=en_US.UTF-8" >> ~/.bashrc
+
+# run tests
+cd mwax_mover
+pytest
+```

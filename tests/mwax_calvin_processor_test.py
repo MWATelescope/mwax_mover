@@ -23,3 +23,13 @@ def test_upload_handler_lightning():
     testdir = os.path.dirname(os.path.abspath(__file__))
     upload = os.path.join(testdir, 'data/solution_handler_lightning')
     upload_handler_helper(upload)
+
+def test_upload_handler_compact_hyda_picket():
+    testdir = os.path.dirname(os.path.abspath(__file__))
+    upload = os.path.join(testdir, 'data/solution_handler_hyda_picket3')
+    upload_handler_helper(upload)
+
+def test_upload_handler_1094488624_50():
+    testdir = os.path.dirname(os.path.abspath(__file__))
+    upload = os.path.join(testdir, 'data/solution_handler_1094488624.50 - Tile073')
+    upload_handler_helper(upload)

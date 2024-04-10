@@ -20,7 +20,9 @@ def parse_args(argv=None):
     parser.add_argument( "--solns", type=str, nargs='+' )
     parser.add_argument( "--name", type=str)
     parser.add_argument( "--out-dir", type=str, default='.')
-    parser.add_argument( "--phase-diff-path", type=str, default='phase_diff.txt')
+    parser.add_argument( "--plot-residual", default=False, action='store_true')
+    parser.add_argument( "--residual-vmax", default=None)
+    parser.add_argument( "--phase-diff-path", default=None)
     return parser.parse_args(argv)
 
 def main():
@@ -34,6 +36,7 @@ def main():
         [Metafits(f) for f in args.metafits],
         [HyperfitsSolution(f) for f in args.solns]
     )
+    print(vars(args))
     obsids = np.array(soln_group.obsids)
 
     min_obsid=obsids.min()
@@ -50,46 +53,20 @@ def main():
 
 
     tiles = soln_group.metafits_tiles_df
-    unflagged_tiles = tiles[tiles.flag == 0]
-    # print(f"{len(unflagged_tiles)=}")
-    refant = unflagged_tiles.sort_values(by=["id"]).iloc[0]
+    refant_name = soln_group.refant['name']
     # print(f"{refant=}")
     chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz)
     # print(f"{len(chanblocks_hz)=}")
-    soln_tile_ids, all_xx_solns, all_yy_solns = soln_group.get_solns(refant["name"])
+    soln_tile_ids, all_xx_solns, all_yy_solns = soln_group.get_solns(refant_name)
     # matrix plot of phase angle vs frequency
     weights = soln_group.weights
-
-    plt.clf()
-    plt.imshow(np.angle(all_xx_solns[0]), aspect="auto", cmap='hsv', interpolation='none')
-    if title:
-        plt.suptitle(title)
-    if show:
-        plt.show()
-    plt.savefig(f'{args.out_dir}/{title} grid_xx')
-
-    plt.clf()
-    plt.imshow(np.angle(all_yy_solns[0]), aspect="auto", cmap='hsv', interpolation='none')
-    if title:
-        plt.suptitle(title)
-    if show:
-        plt.show()
-    plt.savefig(f'{args.out_dir}/{title} grid_yy')
-
-    plt.clf()
-    plt.scatter(chanblocks_hz, soln_group.results, vmin=0, vmax=1)
-    if title:
-        plt.suptitle(title)
-    if show:
-        plt.show()
-    plt.savefig(f'{args.out_dir}/{title} weights')
 
     phase_fit_niter = 1
 
     phase_fits = []
     # by default we don't want to apply any phase rotation.
     phase_diff = np.full((len(chanblocks_hz),), 1.0, dtype=np.complex128)
-    if os.path.exists(args.phase_diff_path):
+    if args.phase_diff_path is not None and os.path.exists(args.phase_diff_path):
         # phase_diff_raw is an array, first column is frequency, second column is phase difference
         phase_diff_raw = np.loadtxt(args.phase_diff_path)
         for i, chanblock_hz in enumerate(chanblocks_hz):
@@ -97,6 +74,8 @@ def main():
             idx = np.abs(phase_diff_raw[:,0] - chanblock_hz).argmin()
             diff = phase_diff_raw[idx,1]
             phase_diff[i] = np.exp(-1j * diff)
+    else:
+        print(f"not applying phase correction")
 
     for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
         tile: Tile = tiles[tiles.id == tile_id].iloc[0]
@@ -118,19 +97,9 @@ def main():
 
     phase_fits = debug_phase_fits(
         phase_fits, tiles, chanblocks_hz, all_xx_solns[0], all_yy_solns[0], weights,
-        prefix=f'{args.out_dir}/{title} ', show=show, title=title
+        prefix=f'{args.out_dir}/{title} ', show=show, title=title,
+        plot_residual=args.plot_residual, residual_vmax=args.residual_vmax
     )  # type: ignore
-
-    # g = sns.FacetGrid(phase_fits, row="flavor", col="pol", hue="flavor",
-    #               subplot_kws=dict(projection='polar'),
-    #               sharex=False, sharey=False, despine=False)
-
-    # plt.suptitle(title)
-    # g.map((lambda theta, r, size, **kwargs: plt.scatter(x=theta, y=r, s=10/(0.1 + size), **kwargs)), "intercept", "length", "sigma_resid")
-    # plt.show()
-    # plt.savefig(f'intercepts_{title}_{args.name}')
-    # if show:
-    #     phase_fits.tail(50)
 
 if __name__ == '__main__':
     main()
