@@ -5,6 +5,7 @@ from configparser import ConfigParser
 from enum import Enum
 import fcntl
 import glob
+import json
 import os
 import queue
 import shutil
@@ -317,6 +318,22 @@ def get_bucket_name_from_obs_id(obs_id: int) -> str:
     # This is to reduce the chances of vcs jobs filling a bucket to more than
     # 100K of files
     return f"mwaingest-{str(obs_id)[0:5]}"
+
+
+def get_metafits_value(metafits_filename: str, key: str):
+    """
+    Returns a metafits value based on key in primary HDU
+    """
+    try:
+        with fits.open(metafits_filename) as hdul:
+            # Read key from primary HDU
+            return hdul[0].header[key]  # pylint: disable=no-member
+
+    except Exception as catch_all_exception:
+        raise Exception(
+            f"Error reading metafits file: {metafits_filename}:"
+            f" {catch_all_exception}"
+        ) from catch_all_exception
 
 
 def get_metafits_values(metafits_filename: str) -> Tuple[bool, str]:
@@ -861,3 +878,13 @@ def should_project_be_archived(project_id: str) -> bool:
         return False
     else:
         return True
+
+
+def get_data_files_for_obsid_from_webservice(obsid: int):
+    """Calls an MWA webservice, passing in an obsid and returning a json metadata structure"""
+    result = requests.get(
+        "http://ws.mwatelescope.org/metadata/data_files",
+        data={"obs_id": obsid, "terse": False},
+    )
+    metadict = json.loads(result.text)
+    return metadict

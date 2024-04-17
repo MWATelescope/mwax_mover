@@ -400,3 +400,186 @@ def update_data_file_row_as_archived(
             f" was {sql}"
         )
         return False
+
+
+def insert_calibration_fits_row(
+    db_handler_object,
+    fit_id: int,
+    obs_id: int,
+    code_version: str,
+    creator: str,
+    fit_niter: int = 10,
+    fit_limit: int = 20,
+) -> bool:
+    """Insert a  calibration_fit row.
+    This row represents the calibration for an obsid."""
+    sql = (
+        "INSERT INTO calibration_fits"
+        " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit)"
+        " VALUES (%s,%s,%s,now(),%s,%s,%s);"
+    )
+
+    sql_values = (
+        fit_id,
+        obs_id,
+        code_version,
+        creator,
+        fit_niter,
+        fit_limit,
+    )
+
+    try:
+        if db_handler_object.dummy:
+            # We have a mutex here to ensure only 1 user of
+            # the connection at a time
+            with db_handler_object.db_lock:
+                db_handler_object.logger.warning(
+                    "insert_calibration_fits_row(): Using dummy database"
+                    " connection. No data is really being inserted. SQL="
+                    f"'{sql}' Values: {sql_values}"
+                )
+                time.sleep(1)  # simulate a slow transaction
+                return True
+        else:
+            db_handler_object.execute_single_dml_row(
+                sql,
+                sql_values,
+            )
+
+            db_handler_object.logger.info(
+                f"{obs_id}: insert_calibration_fits_row() Successfully wrote"
+                " into calibration_fits table"
+            )
+            return True
+
+    except Exception as insert_exception:  # pylint: disable=broad-except
+        db_handler_object.logger.error(
+            f"{obs_id}: insert_data_file_row() error inserting"
+            f" calibration_fits record in table: {insert_exception}. SQL was"
+            f" {sql} Values: {sql_values}"
+        )
+        return False
+
+
+def insert_calibration_solutions_row(
+    db_handler_object,
+    fit_id: int,
+    obs_id: int,
+    tile_id: int,
+    x_delay_m,
+    x_intercept,
+    x_gains,
+    y_delay_m,
+    y_intercept,
+    y_gains,
+    x_gains_pol1,
+    y_gains_pol1,
+    x_phase_sigma_resid,
+    x_phase_chi2dof,
+    x_phase_fit_quality,
+    y_phase_sigma_resid,
+    y_phase_chi2dof,
+    y_phase_fit_quality,
+    x_gains_fit_quality,
+    y_gains_fit_quality,
+    x_gains_sigma_resid,
+    y_gains_sigma_resid,
+    x_gains_pol0,
+    y_gains_pol0,
+) -> bool:
+    """Insert a  calibration_solutions row.
+    This row represents the calibration solution for a tile/obsid."""
+
+    sql = """INSERT INTO calibration_solutions (fitid,obsid,tileid,
+                                                x_delay_m,x_intercept,x_gains,
+                                                y_delay_m,y_intercept,y_gains,
+                                                x_gains_pol1,y_gains_pol1,
+                                                x_phase_sigma_resid,x_phase_chi2dof,x_phase_fit_quality,
+                                                y_phase_sigma_resid,y_phase_chi2dof,y_phase_fit_quality,
+                                                x_gains_fit_quality,y_gains_fit_quality,
+                                                x_gains_sigma_resid,y_gains_sigma_resid,
+                                                x_gains_pol0,y_gains_pol0)
+                            VALUES (%s,%s,%s,
+                                    %s,%s,ARRAY[%s],
+                                    %s,%s,ARRAY[%s],
+                                    ARRAY[%s],ARRAY[%s],
+                                    %s,%s,%s,
+                                    %s,%s,%s,
+                                    %s,%s,
+                                    ARRAY[%s],ARRAY[%s],
+                                    ARRAY[%s],ARRAY[%s])"""
+
+    # Format data before we insert it
+    x_delay_m = f"{x_delay_m:.4f}"
+    x_intercept = f"{x_intercept:.4f}"
+    y_delay_m = f"{y_delay_m:.4f}"
+    y_intercept = f"{y_intercept:.4f}"
+
+    x_phase_sigma_resid = f"{x_phase_sigma_resid:.4f}"
+    x_phase_chi2dof = f"{x_phase_chi2dof:.4f}"
+    x_phase_fit_quality = f"{x_phase_fit_quality:.4f}"
+    y_phase_sigma_resid = f"{y_phase_sigma_resid:.4f}"
+    y_phase_chi2dof = f"{y_phase_chi2dof:.4f}"
+    y_phase_fit_quality = f"{y_phase_fit_quality:.4f}"
+
+    x_gains_sigma_resid = f"{x_gains_sigma_resid:.4f}"
+    y_gains_sigma_resid = f"{y_gains_sigma_resid:.4f}"
+
+    # Create the tuple of values
+    sql_values = (
+        fit_id,
+        obs_id,
+        tile_id,
+        x_delay_m,
+        x_intercept,
+        x_gains,
+        y_delay_m,
+        y_intercept,
+        y_gains,
+        x_gains_pol1,
+        y_gains_pol1,
+        x_phase_sigma_resid,
+        x_phase_chi2dof,
+        x_phase_fit_quality,
+        y_phase_sigma_resid,
+        y_phase_chi2dof,
+        y_phase_fit_quality,
+        x_gains_fit_quality,
+        y_gains_fit_quality,
+        x_gains_sigma_resid,
+        y_gains_sigma_resid,
+        x_gains_pol0,
+        y_gains_pol0,
+    )
+
+    try:
+        if db_handler_object.dummy:
+            # We have a mutex here to ensure only 1 user of
+            # the connection at a time
+            with db_handler_object.db_lock:
+                db_handler_object.logger.warning(
+                    "insert_calibration_fits_row(): Using dummy database"
+                    " connection. No data is really being inserted. SQL="
+                    f"'{sql}' Values: {sql_values}"
+                )
+                time.sleep(1)  # simulate a slow transaction
+                return True
+        else:
+            db_handler_object.execute_single_dml_row(
+                sql,
+                sql_values,
+            )
+
+            db_handler_object.logger.info(
+                f"{obs_id} tile {tile_id}: insert_calibration_solutions_row()"
+                " Successfully wrote into insert_calibration_solutions table"
+            )
+            return True
+
+    except Exception as insert_exception:  # pylint: disable=broad-except
+        db_handler_object.logger.error(
+            f"{obs_id}: insert_calibration_solutions_row() error inserting"
+            " insert_calibration_solutions record in table:"
+            f" {insert_exception}. SQL was {sql} Values {sql_values}"
+        )
+        return False

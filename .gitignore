@@ -9,8 +9,14 @@ mwax_mover.egg-info/
 tests/mock_mwacache_archiver
 tests/mock_mwax
 tests/mock_mwax_bf
+tests/mock_mwax_calvin_test01
+tests/mock_mwax_calvin_test02
+tests/mock_mwax_calvin_test03
+tests/mock_mwax_calvin_test04
+tests/mock_mwax_dump
 logs
 .coverage
 .pylintrc
 .python-version
 .vscode/
+.pytest_cache
