@@ -3,12 +3,12 @@ Version handling for mwax_mover
 """
 
 import typing
-import pkg_resources  # part of setuptools
+import importlib_metadata  # part of setuptools
 
 
 def get_mwax_mover_version_string() -> str:
     """Returns the major, minor and patch version of mwax_mover as a string"""
-    package_version = pkg_resources.require("mwax_mover")[0].version
+    package_version = importlib_metadata.version("mwax_mover")
     return package_version
 
 

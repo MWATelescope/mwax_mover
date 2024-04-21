@@ -25,6 +25,7 @@ os-service-types
 osc-lib
 oslo.config
 oslo.serialization
+pandas
 platformdirs
 PrettyTable
 psycopg2-binary==2.*
@@ -36,6 +37,7 @@ python-novaclient
 python-openstackclient
 requests==2.*
 rfc3986
+seaborn
 scipy
 setuptools
 simplejson
