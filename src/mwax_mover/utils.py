@@ -10,6 +10,7 @@ import queue
 import shutil
 import socket
 import struct
+from tenacity import retry, stop_after_attempt, wait_fixed
 import threading
 import time
 import typing
@@ -861,3 +862,20 @@ def should_project_be_archived(project_id: str) -> bool:
         return False
     else:
         return True
+
+
+@retry(stop=stop_after_attempt(5), wait=wait_fixed(10))
+def remove_file(logger, filename: str, raise_error: bool) -> bool:
+    """Deletes a file from the filesystem"""
+    try:
+        os.remove(filename)
+        logger.info(f"{filename}- file deleted")
+        return True
+
+    except Exception as delete_exception:  # pylint: disable=broad-except
+        if raise_error:
+            logger.error(f"{filename}- Error deleting: {delete_exception}. Retrying up" " to 5 times.")
+            raise delete_exception
+        else:
+            logger.warning(f"{filename}- Error deleting: {delete_exception}. File may" " have been moved or removed.")
+            return True
