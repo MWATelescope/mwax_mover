@@ -239,7 +239,13 @@ def get_data_file_row(db_handler_object, full_filename: str, obs_id: int) -> Dat
                 return None
         else:
             # Run query and get the data_files row info for this file
-            obsid, size, checksum = db_handler_object.select_one_row(sql, (filename,))
+            obsid, size, checksum = db_handler_object.select_one_row(
+                sql,
+                (
+                    filename,
+                    obs_id,
+                ),
+            )
 
             data_files_row = DataFileRow()
             data_files_row.observation_num = int(obsid)
