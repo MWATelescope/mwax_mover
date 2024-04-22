@@ -212,6 +212,9 @@ def archive_file_ceph(
                 chunk_size_bytes,
                 max_concurrency,
             )
+            # We've done the upload- get out of the loop
+            break
+
         except Exception as upload_error:  # pylint: disable=broad-except
             logger.error(
                 f"{full_filename}: Error uploading to S3 {endpoint_url} bucket {bucket_name}."
