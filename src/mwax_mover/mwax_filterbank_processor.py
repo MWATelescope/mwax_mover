@@ -5,7 +5,7 @@ import logging.handlers
 import os
 import queue
 import threading
-from mwax_mover import mwax_mover, mwa_archiver
+from mwax_mover import mwax_mover, mwa_archiver, utils
 from mwax_mover import mwax_queue_worker
 from mwax_mover import mwax_watcher
 
@@ -107,7 +107,7 @@ class FilterbankProcessor:
                 return False
 
             self.logger.debug(f"{item}- filterbank_handler() Deleting file")
-            mwax_mover.remove_file(self.logger, item, raise_error=False)
+            utils.remove_file(self.logger, item, raise_error=False)
 
             self.logger.info(f"{item}- filterbank_handler() Finished")
             return True

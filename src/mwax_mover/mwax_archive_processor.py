@@ -706,7 +706,7 @@ class MWAXArchiveProcessor:
             return False
 
         self.logger.debug(f"{item}- archive_handler() Deleting file")
-        mwax_mover.remove_file(self.logger, item, raise_error=False)
+        utils.remove_file(self.logger, item, raise_error=False)
 
         self.logger.info(f"{item}- archive_handler() Finished")
         return True

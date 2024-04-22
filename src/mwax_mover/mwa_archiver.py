@@ -6,9 +6,10 @@ import random
 import time
 import uuid
 import boto3
+from typing import Tuple
+from mwax_mover.mwax_command import run_command_ext
 from boto3.s3.transfer import TransferConfig
 from botocore.client import Config
-from mwax_mover import mwax_command
 
 
 def archive_file_rsync(
@@ -44,7 +45,7 @@ def archive_file_rsync(
     start_time = time.time()
 
     # run xrdcp
-    return_val, stdout = mwax_command.run_command_ext(logger, cmdline, archive_numa_node, timeout, False)
+    return_val, stdout = run_command_ext(logger, cmdline, archive_numa_node, timeout, False)
 
     if return_val:
         elapsed = time.time() - start_time
@@ -107,7 +108,7 @@ def archive_file_xrootd(
     start_time = time.time()
 
     # run xrdcp
-    return_val, stdout = mwax_command.run_command_ext(logger, cmdline, archive_numa_node, timeout, False)
+    return_val, stdout = run_command_ext(logger, cmdline, archive_numa_node, timeout, False)
 
     if return_val:
         elapsed = time.time() - start_time
@@ -129,7 +130,7 @@ def archive_file_xrootd(
 
         # run the mv command to rename the temp file to the final file
         # If this works, then mwacache will actually do its thing
-        return_val, stdout = mwax_command.run_command_ext(logger, cmdline, archive_numa_node, timeout, False)
+        return_val, stdout = run_command_ext(logger, cmdline, archive_numa_node, timeout, False)
 
         if return_val:
             logger.info(
@@ -169,51 +170,83 @@ def archive_file_ceph(
         logger.error(f"{full_filename}: Error determining file size. Error" f" {catch_all_exceptiion}")
         return False
 
-    # Get a valid s3 resource
-    ceph_resource: boto3.resource = ceph_get_s3_resource(logger, ceph_session, ceph_endpoints)
+    # Start fresh with a list of all possible endpoints (from the config file)
+    endpoints = ceph_endpoints.copy()
 
-    # create bucket if required
-    logger.debug(f"{full_filename} creating S3 bucket {bucket_name} (if required)...")
-    try:
-        ceph_create_bucket(ceph_resource, bucket_name)
-    except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
-        logger.error(
-            f"{full_filename}: Error creating/checking existence of S3 bucket"
-            f" {bucket_name}. Error {catch_all_exceptiion}"
+    while len(endpoints) > 0:
+        # Get an s3 resource based on a random endpoint
+        ceph_resource, endpoint_url = ceph_get_s3_resource(logger, ceph_session, endpoints)
+
+        # create bucket if required
+        logger.debug(f"{full_filename} creating S3 bucket {bucket_name} using {endpoint_url} (if required)...")
+        try:
+            ceph_create_bucket(ceph_resource, bucket_name)
+        except Exception as bucket_check_error:  # pylint: disable=broad-except
+            logger.error(
+                f"{full_filename}: Error creating/checking existence of S3 {endpoint_url} bucket {bucket_name}."
+                f"Endpoint: {1 + len(ceph_endpoints) - len(endpoints)} of {len(ceph_endpoints)}."
+                f"Detail: {bucket_check_error}"
+            )
+            # Remove this endpoint from the list for this file and try again if there are more
+            # endpoints left.
+            # It is possible the error is nothing to do with THIS endpoint but it's very difficult
+            # to go down to that level. If we blow through all endpoints (e.g. Banksia has 6) and
+            # We still hit the exception, then either all endpoints are down or it's some other
+            # error in which case we return False which will put us in a retry/backoff cycle
+            endpoints.remove(endpoint_url)
+            continue
+
+        logger.debug(f"{full_filename} attempting upload to S3 {endpoint_url} bucket {bucket_name}...")
+
+        # start timer
+        start_time = time.time()
+
+        # Do upload
+        try:
+            ceph_upload_file(
+                ceph_resource,
+                bucket_name,
+                full_filename,
+                md5hash,
+                multipart_threshold_bytes,
+                chunk_size_bytes,
+                max_concurrency,
+            )
+            # We've done the upload- get out of the loop
+            break
+
+        except Exception as upload_error:  # pylint: disable=broad-except
+            logger.error(
+                f"{full_filename}: Error uploading to S3 {endpoint_url} bucket {bucket_name}."
+                f"Endpoint: {1 + len(ceph_endpoints) - len(endpoints)} of {len(ceph_endpoints)}."
+                f"Detail: {upload_error}"
+            )
+            # Remove this endpoint from the list for this file and try again if there are more
+            # endpoints left.
+            # It is possible the error is nothing to do with THIS endpoint but it's very difficult
+            # to go down to that level. If we blow through all endpoints (e.g. Banksia has 6) and
+            # We still hit the exception, then either all endpoints are down or it's some other
+            # error in which case we return False which will put us in a retry/backoff cycle
+            endpoints.remove(endpoint_url)
+            continue
+
+    if len(endpoints) > 0:
+        # Upload succeeded
+        # end timer
+        elapsed = time.time() - start_time
+
+        size_gigabytes = float(file_size) / (1000.0 * 1000.0 * 1000.0)
+        gbps_per_sec = (size_gigabytes * 8) / elapsed
+
+        logger.info(
+            f"{full_filename} archive_file_ceph success. ({size_gigabytes:.3f}GB"
+            f" in {elapsed:.3f} seconds at {gbps_per_sec:.3f} Gbps)"
         )
+        return True
+    else:
+        # We tried with all available endpoints but still did not succeed
+        logger.warning(f"{full_filename} could not be archived after trying all {len(ceph_endpoints)} endpoint(s).")
         return False
-
-    logger.debug(f"{full_filename} attempting upload to S3 bucket {bucket_name}...")
-
-    # start timer
-    start_time = time.time()
-
-    # Do upload
-    try:
-        ceph_upload_file(
-            ceph_resource,
-            bucket_name,
-            full_filename,
-            md5hash,
-            multipart_threshold_bytes,
-            chunk_size_bytes,
-            max_concurrency,
-        )
-    except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
-        logger.error(f"{full_filename}: Error uploading to S3 bucket {bucket_name}." f"Error {catch_all_exceptiion}")
-        return False
-
-    # end timer
-    elapsed = time.time() - start_time
-
-    size_gigabytes = float(file_size) / (1000.0 * 1000.0 * 1000.0)
-    gbps_per_sec = (size_gigabytes * 8) / elapsed
-
-    logger.info(
-        f"{full_filename} archive_file_ceph success. ({size_gigabytes:.3f}GB"
-        f" in {elapsed:.3f} seconds at {gbps_per_sec:.3f} Gbps)"
-    )
-    return True
 
 
 #
@@ -228,8 +261,6 @@ def archive_file_ceph(
 # Boto3 will use this file to authenticate and fail if it is not there or is
 # not valid
 #
-
-
 #
 # Dervied from: https://github.com/tlastowka/calculate_multipart_etag/blob
 # /master/calculate_multipart_etag.py
@@ -269,35 +300,18 @@ def ceph_get_s3_session(profile: str) -> boto3.Session:
     return session
 
 
-def ceph_get_s3_resource(logger, session: boto3.Session, endpoints: list) -> boto3.resource:
+def ceph_get_s3_resource(logger, session: boto3.Session, endpoints: list) -> Tuple[boto3.resource, str]:
     """Returns an S3 resource object"""
     # This ensures the default boto retries and timeouts don't leave us
     # hanging too long
     config = Config(connect_timeout=5, retries={"mode": "standard"})
 
-    endpoint_count = len(endpoints)
+    # Get an enpoint at random from what is left on the list
+    endpoint = random.choice(endpoints)
 
-    # Try all of the available endpoints
-    for attempt in range(endpoint_count):
-        try:
-            # Get an enpoint at random from what is left on the list
-            endpoint = random.choice(endpoints)
-
-            s3_resource = session.resource("s3", endpoint_url=endpoint, config=config)
-            logger.debug(f"Using endpoint {endpoint}")
-
-        except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
-            # Attempt failed! Probably due to end point being down.
-            logger.warning(
-                f"Could not connect to Ceph endpoint (attempt {attempt + 1} of"
-                f" {endpoint_count}) {endpoint}: {catch_all_exceptiion}"
-            )
-            # Remove this endpoint from our list
-            endpoints.remove(endpoint)
-        else:
-            return s3_resource
-
-    raise Exception(f"Could not connect to any Ceph endpoints ({endpoints})")
+    s3_resource = session.resource("s3", endpoint_url=endpoint, config=config)
+    logger.debug(f"Using endpoint {endpoint}")
+    return s3_resource, endpoint
 
 
 def ceph_create_bucket(s3_resource: boto3.resource, bucket_name: str):

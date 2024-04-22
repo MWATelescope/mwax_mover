@@ -214,7 +214,7 @@ class DataFileRow:
         self.checksum = ""
 
 
-def get_data_file_row(db_handler_object, full_filename: str) -> DataFileRow:
+def get_data_file_row(db_handler_object, full_filename: str, obs_id: int) -> DataFileRow:
     """Return a data file row instance on success or None on Failure"""
     # Prepare the fields
     # immediately add this file to the db so we insert a record into metadata
@@ -225,7 +225,7 @@ def get_data_file_row(db_handler_object, full_filename: str) -> DataFileRow:
                     size,
                     checksum
             FROM data_files
-            WHERE filename = %s"""
+            WHERE filename = %s AND observation_num = %s"""
     try:
         if db_handler_object.dummy:
             # We have a mutex here to ensure only 1 user of the connection at
@@ -239,7 +239,13 @@ def get_data_file_row(db_handler_object, full_filename: str) -> DataFileRow:
                 return None
         else:
             # Run query and get the data_files row info for this file
-            obsid, size, checksum = db_handler_object.select_one_row(sql, (filename,))
+            obsid, size, checksum = db_handler_object.select_one_row(
+                sql,
+                (
+                    filename,
+                    obs_id,
+                ),
+            )
 
             data_files_row = DataFileRow()
             data_files_row.observation_num = int(obsid)

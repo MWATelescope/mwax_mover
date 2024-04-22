@@ -222,7 +222,7 @@ class MWACacheArchiveProcessor:
             self.logger.debug(f"{item}- archive_handler() file size on disk is" f" {actual_file_size} bytes")
 
             # Lookup file from db
-            data_files_row: DataFileRow = mwax_db.get_data_file_row(self.remote_db_handler_object, item)
+            data_files_row: DataFileRow = mwax_db.get_data_file_row(self.remote_db_handler_object, item, val.obs_id)
 
             database_file_size = data_files_row.size
 
@@ -230,7 +230,7 @@ class MWACacheArchiveProcessor:
             if actual_file_size == 0:
                 # File size is 0- lets just blow it away
                 self.logger.warning(f"{item}- archive_handler() File size is 0 bytes. Deleting" " file")
-                mwax_mover.remove_file(self.logger, item, raise_error=False)
+                utils.remove_file(self.logger, item, raise_error=False)
 
                 # even though its a problem,we return true as we are finished
                 # with the item and it should not be requeued
@@ -242,7 +242,7 @@ class MWACacheArchiveProcessor:
                     f" {actual_file_size} does not match {database_file_size}."
                     " Deleting file"
                 )
-                mwax_mover.remove_file(self.logger, item, raise_error=False)
+                utils.remove_file(self.logger, item, raise_error=False)
 
                 # even though its a problem,we return true as we are finished
                 # with the item and it should not be requeued
@@ -290,7 +290,7 @@ class MWACacheArchiveProcessor:
                 # If all is well, we have the file safely archived and the
                 # database updated, so remove the file
                 self.logger.debug(f"{item}- archive_handler() Deleting file")
-                mwax_mover.remove_file(self.logger, item, raise_error=False)
+                utils.remove_file(self.logger, item, raise_error=False)
 
                 self.logger.info(f"{item}- archive_handler() Finished")
                 return True

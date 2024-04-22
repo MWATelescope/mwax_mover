@@ -11,6 +11,7 @@ import queue
 import shutil
 import socket
 import struct
+from tenacity import retry, stop_after_attempt, wait_fixed
 import threading
 import time
 import typing
@@ -331,8 +332,7 @@ def get_metafits_value(metafits_filename: str, key: str):
 
     except Exception as catch_all_exception:
         raise Exception(
-            f"Error reading metafits file: {metafits_filename}:"
-            f" {catch_all_exception}"
+            f"Error reading metafits file: {metafits_filename}:" f" {catch_all_exception}"
         ) from catch_all_exception
 
 
@@ -888,3 +888,20 @@ def get_data_files_for_obsid_from_webservice(obsid: int):
     )
     metadict = json.loads(result.text)
     return metadict
+
+
+@retry(stop=stop_after_attempt(5), wait=wait_fixed(10))
+def remove_file(logger, filename: str, raise_error: bool) -> bool:
+    """Deletes a file from the filesystem"""
+    try:
+        os.remove(filename)
+        logger.info(f"{filename}- file deleted")
+        return True
+
+    except Exception as delete_exception:  # pylint: disable=broad-except
+        if raise_error:
+            logger.error(f"{filename}- Error deleting: {delete_exception}. Retrying up" " to 5 times.")
+            raise delete_exception
+        else:
+            logger.warning(f"{filename}- Error deleting: {delete_exception}. File may" " have been moved or removed.")
+            return True
