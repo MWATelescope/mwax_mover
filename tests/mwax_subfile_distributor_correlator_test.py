@@ -2,6 +2,7 @@
 This is to test if MWAXSubfileDistributor correctly reads the tonnes of
 config correctly from a "correlator" config file.
 """
+
 import os
 import shutil
 from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
@@ -50,13 +51,11 @@ def setup_test_dirs():
     check_and_make_dir(voltdata_outgoing_path)
 
     # visdata_dont_archive_path
-    visdata_dont_archive_path = os.path.join(base_dir, "visdata_dont_archive")
+    visdata_dont_archive_path = os.path.join(base_dir, "dont_archive")
     check_and_make_dir(visdata_dont_archive_path)
 
     # visdata_dont_archive_path
-    voltdata_dont_archive_path = os.path.join(
-        base_dir, "voltdata_dont_archive"
-    )
+    voltdata_dont_archive_path = os.path.join(base_dir, "dont_archive")
     check_and_make_dir(voltdata_dont_archive_path)
 
     # visdata_incoming_path
@@ -64,9 +63,7 @@ def setup_test_dirs():
     check_and_make_dir(visdata_incoming_path)
 
     # visdata_processing_stats_path
-    visdata_processing_stats_path = os.path.join(
-        base_dir, "visdata_processing_stats"
-    )
+    visdata_processing_stats_path = os.path.join(base_dir, "visdata_processing_stats")
     check_and_make_dir(visdata_processing_stats_path)
 
     # visdata_outgoing_path
@@ -116,15 +113,9 @@ def test_correlator_config_file():
     assert msd.cfg_health_multicast_port == 8005
     assert msd.cfg_health_multicast_hops == 1
     assert msd.cfg_subfile_incoming_path == os.path.join(base_dir, "dev_shm")
-    assert msd.cfg_voltdata_incoming_path == os.path.join(
-        base_dir, "voltdata_incoming"
-    )
-    assert msd.cfg_voltdata_outgoing_path == os.path.join(
-        base_dir, "voltdata_outgoing"
-    )
-    assert msd.cfg_voltdata_dont_archive_path == os.path.join(
-        base_dir, "voltdata_dont_archive"
-    )
+    assert msd.cfg_voltdata_incoming_path == os.path.join(base_dir, "voltdata_incoming")
+    assert msd.cfg_voltdata_outgoing_path == os.path.join(base_dir, "voltdata_outgoing")
+    assert msd.cfg_voltdata_dont_archive_path == os.path.join(base_dir, "dont_archive")
     assert msd.cfg_always_keep_subfiles == 1
     assert msd.cfg_archive_command_timeout_sec == 300
     assert msd.cfg_psrdada_timeout_sec == 32
@@ -133,38 +124,19 @@ def test_correlator_config_file():
 
     # correlator section
     assert msd.cfg_corr_input_ringbuffer_key == "0x1234"
-    assert msd.cfg_corr_visdata_incoming_path == os.path.join(
-        base_dir, "visdata_incoming"
-    )
-    assert msd.cfg_corr_visdata_dont_archive_path == os.path.join(
-        base_dir, "visdata_dont_archive"
-    )
-    assert msd.cfg_corr_visdata_processing_stats_path == os.path.join(
-        base_dir, "visdata_processing_stats"
-    )
-    assert msd.cfg_corr_visdata_outgoing_path == os.path.join(
-        base_dir, "visdata_outgoing"
-    )
-    assert (
-        msd.cfg_corr_mwax_stats_executable
-        == "../mwax_stats/target/release/mwax_stats"
-    )
+    assert msd.cfg_corr_visdata_incoming_path == os.path.join(base_dir, "visdata_incoming")
+    assert msd.cfg_corr_visdata_dont_archive_path == os.path.join(base_dir, "dont_archive")
+    assert msd.cfg_corr_visdata_processing_stats_path == os.path.join(base_dir, "visdata_processing_stats")
+    assert msd.cfg_corr_visdata_outgoing_path == os.path.join(base_dir, "visdata_outgoing")
+    assert msd.cfg_corr_mwax_stats_executable == "../mwax_stats/target/release/mwax_stats"
 
-    assert msd.cfg_corr_mwax_stats_dump_dir == os.path.join(
-        base_dir, "mwax_stats_dump"
-    )
+    assert msd.cfg_corr_mwax_stats_dump_dir == os.path.join(base_dir, "mwax_stats_dump")
     assert msd.cfg_corr_mwax_stats_timeout_sec == 600
-    assert msd.cfg_corr_calibrator_outgoing_path == os.path.join(
-        base_dir, "visdata_cal_outgoing"
-    )
-    assert (
-        msd.cfg_corr_calibrator_destination_host == "192.168.120.1://dest/path"
-    )
+    assert msd.cfg_corr_calibrator_outgoing_path == os.path.join(base_dir, "visdata_cal_outgoing")
+    assert msd.cfg_corr_calibrator_destination_host == "192.168.120.1://dest/path"
     assert msd.cfg_corr_calibrator_destination_port == "1094"
     assert msd.cfg_corr_calibrator_destination_enabled == 1
-    assert msd.cfg_corr_metafits_path == os.path.join(
-        base_dir, "vulcan_metafits"
-    )
+    assert msd.cfg_corr_metafits_path == os.path.join(base_dir, "vulcan_metafits")
     assert not msd.cfg_corr_high_priority_correlator_projectids
     assert msd.cfg_corr_high_priority_vcs_projectids == ["D0006", "G0058"]
 
@@ -176,10 +148,7 @@ def test_correlator_config_file():
     assert msd.cfg_metadatadb_pass is None
 
     # test_server section
-    assert (
-        msd.cfg_corr_archive_destination_host
-        == "host2.destination.com://dest/path"
-    )
+    assert msd.cfg_corr_archive_destination_host == "host2.destination.com://dest/path"
     assert msd.cfg_corr_archive_destination_port == "1094"
     assert msd.cfg_corr_archive_destination_enabled is True
     assert msd.cfg_corr_diskdb_numa_node == -1

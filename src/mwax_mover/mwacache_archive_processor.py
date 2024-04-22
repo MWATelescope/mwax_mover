@@ -39,8 +39,7 @@ class MWACacheArchiveProcessor:
     def __init__(self):
         self.logger = None
 
-        # Get this hosts hostname
-        self.hostname = utils.get_hostname()
+        self.hostname = None
         self.log_path = None
         self.metafits_path = None
         self.archive_to_location = None
@@ -96,6 +95,9 @@ class MWACacheArchiveProcessor:
     def start(self):
         """This method is used to start the processor"""
         self.running = True
+
+        # Get this hosts hostname
+        self.hostname = utils.get_hostname()
 
         # create a health thread
         self.logger.info("Starting health_thread...")

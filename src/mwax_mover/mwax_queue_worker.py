@@ -112,10 +112,11 @@ class QueueWorker(object):
                         # reset our error count and backoffs
                         self.consecutive_error_count = 0
                     else:
-                        self.consecutive_error_count += 1
-                        backoff = self.backoff_initial_seconds * self.backoff_factor * self.consecutive_error_count
-                        if backoff > self.backoff_limit_seconds:
-                            backoff = self.backoff_limit_seconds
+                        if self.requeue_on_error:
+                            self.consecutive_error_count += 1
+                            backoff = self.backoff_initial_seconds * self.backoff_factor * self.consecutive_error_count
+                            if backoff > self.backoff_limit_seconds:
+                                backoff = self.backoff_limit_seconds
 
                             self.logger.info(
                                 f"{self.consecutive_error_count} consecutive"
