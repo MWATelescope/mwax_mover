@@ -722,7 +722,11 @@ class MWAXArchiveProcessor:
         val: ValidationData = utils.validate_filename(self.logger, item, self.metafits_path)
 
         # if this project id is not for archiving we don't want to pass it to calvin either
-        if utils.should_project_be_archived(val.project_id):
+        #
+        # GJS 26-Apr-2024: HACK / TODO remove the 'or 1==1' from the below IF. It is only
+        # there while are testing SHAO rx.
+        #
+        if utils.should_project_be_archived(val.project_id) or 1 == 1:
             # Do we even need to check for a calibrator?
             if self.calibrator_destination_enabled == 1:
                 self.logger.debug(
