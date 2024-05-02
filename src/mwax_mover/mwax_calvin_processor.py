@@ -32,6 +32,7 @@ import pandas as pd
 # import itertools
 import numpy.typing
 
+from mwax_mover.mwax_db import insert_calibration_fits_row
 from mwax_mover.mwax_mover import (
     MODE_WATCH_DIR_FOR_NEW,
 )
@@ -449,6 +450,10 @@ class MWAXCalvinProcessor:
     def process_phase_fits(
         self, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
     ):
+        """
+        Fit a line to each tile phase solution, return a dataframe of phase fit parameters for each
+        tile and pol
+        """
         fits = []
         phase_diff_path = os.path.join(item, "phase_diff.txt")
         # by default we don't want to apply any phase rotation.
@@ -472,6 +477,25 @@ class MWAXCalvinProcessor:
                 #     continue
                 try:
                     fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)  # type: ignore
+                except Exception as exc:
+                    self.logger.error(f"{item} - {tile_id=:4} {pol} ({name}) {exc}")
+                    continue
+                self.logger.debug(f"{item} - {tile_id=:4} {pol} ({name}) {fit=}")
+                fits.append([tile_id, soln_idx, pol, *fit])
+
+        return pd.DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])  # type: ignore
+
+    def process_gain_fits(self, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids):
+        """
+        for each tile, pol, fit a GainFitInfo to the gains
+        """
+        fits = []
+        for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
+            for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
+                tile = tiles[tiles.id == tile_id].iloc[0]
+                name = tile.name
+                try:
+                    fit = fit_gain(chanblocks_hz, solns, weights)  # type: ignore
                 except Exception as exc:
                     self.logger.error(f"{item} - {tile_id=:4} {pol} ({name}) {exc}")
                     continue
@@ -535,35 +559,23 @@ class MWAXCalvinProcessor:
 
         weights = soln_group.weights
 
-        fits = self.process_phase_fits(
-            item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
-        )
+        phase_fits = self.process_phase_fits(item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter)
+        gain_fits = self.process_gain_fits(item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids)
 
-        fits = debug_phase_fits(fits, tiles, all_chanblocks_hz, all_xx_solns[0], all_yy_solns[0], weights, f"{item}/")
+        phase_fits_pivot = debug_phase_fits(phase_fits, tiles, all_chanblocks_hz, all_xx_solns[0], all_yy_solns[0], weights, f'{item}/')
 
-        # __import__('ipdb').set_trace()
-        # self.logger.debug(f"{item} - {tile_id=} length={fit.get_length()}. {fit=}")
-        self.logger.debug(f"{item} - fits:\n{fits.to_string(max_rows=512)}")
+        self.logger.debug(f"{item} - fits:\n{phase_fits_pivot.to_string(max_rows=512)}")
 
-        # x_delay_m,
-        # x_gains_fit_quality,
-        # x_gains_pol0[],
-        # x_gains_pol1[],
-        # x_gains_sigma_resid[],
-        # x_gains[],
-        # x_intercept,
-        # x_phase_chi2dof,
-        # x_phase_fit_quality,
-        # x_phase_sigma_resid,
+        fit_id = time.time()
 
-        # TODO: Dev
-        # open questions: see readme
-        #   - which refant?
-        #   - sourcelist?
-        #       -
-        #   - why phase_resid / phase_median_thickness?
-        #   - unflag all antennas before calibration?
-        #   - birli write out channel flags
+        # TODO:
+        # insert_calibration_fits_row(
+        #     self.db_handler,
+        #     fit_id,
+        #     obs_id,
+
+        # )
+
 
         # on success move to complete
         success = False
