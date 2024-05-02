@@ -2,6 +2,7 @@
 Module hosting the MWAXCalvinProcessor for near-realtime
 calibration
 """
+
 import argparse
 from configparser import ConfigParser
 import datetime
@@ -26,14 +27,21 @@ from mwax_mover import (
 )
 import numpy as np
 import pandas as pd
-import itertools
-from nptyping import NDArray, Int, Float, Complex
+
+# import itertools
+import numpy.typing
 
 from mwax_mover.mwax_mover import (
     MODE_WATCH_DIR_FOR_NEW,
 )
 from mwax_mover.mwax_calvin_utils import (
-    HyperfitsSolution, HyperfitsSolutionGroup, Metafits, Tile, debug_phase_fits, fit_phase_line, PhaseFitInfo
+    HyperfitsSolution,
+    HyperfitsSolutionGroup,
+    Metafits,
+    #   Tile,
+    debug_phase_fits,
+    fit_phase_line,
+    PhaseFitInfo,
 )
 
 
@@ -101,18 +109,14 @@ class MWAXCalvinProcessor:
 
         # create a health thread
         self.logger.info("Starting health_thread...")
-        health_thread = threading.Thread(
-            name="health_thread", target=self.health_loop, daemon=True
-        )
+        health_thread = threading.Thread(name="health_thread", target=self.health_loop, daemon=True)
         health_thread.start()
 
         #
         # Do initial scan for directories to add to the processing
         # queue (in the processing_path)
         #
-        scanned_dirs = utils.scan_directory(
-            self.logger, self.processing_path, "", False, None
-        )
+        scanned_dirs = utils.scan_directory(self.logger, self.processing_path, "", False, None)
         for item in scanned_dirs:
             if os.path.isdir(item):
                 self.add_to_processing_queue(item)
@@ -121,9 +125,7 @@ class MWAXCalvinProcessor:
         # Do initial scan for directories to add to the upload
         # queue (in the processing_upload_path)
         #
-        scanned_dirs = utils.scan_directory(
-            self.logger, self.upload_path, "", False, None
-        )
+        scanned_dirs = utils.scan_directory(self.logger, self.upload_path, "", False, None)
         for item in scanned_dirs:
             if os.path.isdir(item):
                 self.add_to_upload_queue(item)
@@ -195,9 +197,7 @@ class MWAXCalvinProcessor:
         self.logger.info("Starting watchers...")
         # Setup threads for watching filesystem
         for i, watcher in enumerate(self.watchers):
-            watcher_thread = threading.Thread(
-                name=f"watch_thread{i}", target=watcher.start, daemon=True
-            )
+            watcher_thread = threading.Thread(name=f"watch_thread{i}", target=watcher.start, daemon=True)
             self.watcher_threads.append(watcher_thread)
             watcher_thread.start()
 
@@ -214,9 +214,7 @@ class MWAXCalvinProcessor:
         self.logger.info("Starting workers...")
         # Setup threads for processing items
         for i, worker in enumerate(self.queue_workers):
-            queue_worker_thread = threading.Thread(
-                name=f"worker_thread{i}", target=worker.start, daemon=True
-            )
+            queue_worker_thread = threading.Thread(name=f"worker_thread{i}", target=worker.start, daemon=True)
             self.worker_threads.append(queue_worker_thread)
             queue_worker_thread.start()
 
@@ -258,33 +256,24 @@ class MWAXCalvinProcessor:
 
         obsid_assembly_dir = os.path.join(self.assemble_path, str(obs_id))
         if not os.path.exists(obsid_assembly_dir):
-            self.logger.info(
-                f"{item} creating obs_id's assembly dir"
-                f" {obsid_assembly_dir}..."
-            )
+            self.logger.info(f"{item} creating obs_id's assembly dir" f" {obsid_assembly_dir}...")
             # This is the first file of this obs_id to be seen
             os.mkdir(obsid_assembly_dir)
 
         # Relocate this file to the obs_id_work_dir
         new_filename = os.path.join(obsid_assembly_dir, filename)
-        self.logger.info(
-            f"{item} moving file into obs_id's assembly dir {new_filename}..."
-        )
+        self.logger.info(f"{item} moving file into obs_id's assembly dir {new_filename}...")
         shutil.move(item, new_filename)
         return True
 
-    def check_obs_is_ready_to_process(
-        self, obs_id, obsid_assembly_dir
-    ) -> bool:
+    def check_obs_is_ready_to_process(self, obs_id, obsid_assembly_dir) -> bool:
         """This routine checks to see if an observation is ready to be processed
         by hyperdrive"""
         #
         # Check we have a metafits
         #
         metafits_filename = f"{obs_id}_metafits.fits"
-        metafits_assembly_filename = os.path.join(
-            obsid_assembly_dir, metafits_filename
-        )
+        metafits_assembly_filename = os.path.join(obsid_assembly_dir, metafits_filename)
 
         if not os.path.exists(metafits_assembly_filename):
             # download the metafits file to the assembly dir for the obs
@@ -302,20 +291,14 @@ class MWAXCalvinProcessor:
 
         # Get the duration of the obs from the metafits and only proceed
         # if the current gps time is > the obs_id + duration + a constant
-        exp_time = int(
-            utils.get_metafits_value(metafits_assembly_filename, "EXPOSURE")
-        )
-        current_gpstime = astrotime.Time(
-            datetime.datetime.utcnow(), scale="utc"
-        ).gps
+        exp_time = int(utils.get_metafits_value(metafits_assembly_filename, "EXPOSURE"))
+        current_gpstime = astrotime.Time(datetime.datetime.utcnow(), scale="utc").gps
 
         if current_gpstime > (int(obs_id) + exp_time):
             #
             # perform web service call to get list of data files from obsid
             #
-            json_metadata = utils.get_data_files_for_obsid_from_webservice(
-                obs_id
-            )
+            json_metadata = utils.get_data_files_for_obsid_from_webservice(obs_id)
 
             #
             # we need a list of files from the web service
@@ -330,12 +313,8 @@ class MWAXCalvinProcessor:
 
             # Check for gpubox files (mwax OR legacy)
             glob_spec = "*.fits"
-            assembly_dir_full_path_files = glob.glob(
-                os.path.join(obsid_assembly_dir, glob_spec)
-            )
-            assembly_dir_filenames = [
-                os.path.basename(i) for i in assembly_dir_full_path_files
-            ]
+            assembly_dir_full_path_files = glob.glob(os.path.join(obsid_assembly_dir, glob_spec))
+            assembly_dir_filenames = [os.path.basename(i) for i in assembly_dir_full_path_files]
             assembly_dir_filenames.sort()
             # Remove the metafits file
             assembly_dir_filenames.remove(metafits_filename)
@@ -361,15 +340,11 @@ class MWAXCalvinProcessor:
         to check if there are any completely assembled sets of
         gpubox files which we should process"""
         while self.running:
-            self.logger.debug(
-                f"sleeping for {self.assemble_check_seconds} secs"
-            )
+            self.logger.debug(f"sleeping for {self.assemble_check_seconds} secs")
             time.sleep(self.assemble_check_seconds)
 
             if self.running:
-                self.logger.debug(
-                    "Waking up and checking un-assembled observations..."
-                )
+                self.logger.debug("Waking up and checking un-assembled observations...")
 
                 obs_id_list = []
 
@@ -384,20 +359,13 @@ class MWAXCalvinProcessor:
 
                 # Check each one
                 for obs_id in obs_id_list:
-                    obs_assemble_path = os.path.join(
-                        self.assemble_path, obs_id
-                    )
-                    if self.check_obs_is_ready_to_process(
-                        obs_id, obs_assemble_path
-                    ):
+                    obs_assemble_path = os.path.join(self.assemble_path, obs_id)
+                    if self.check_obs_is_ready_to_process(obs_id, obs_assemble_path):
                         # do processing
-                        obs_processing_path = os.path.join(
-                            self.processing_path, obs_id
-                        )
+                        obs_processing_path = os.path.join(self.processing_path, obs_id)
 
                         self.logger.info(
-                            f"{obs_id} is ready for processing. Moving"
-                            f" {obs_assemble_path} to {obs_processing_path}"
+                            f"{obs_id} is ready for processing. Moving" f" {obs_assemble_path} to {obs_processing_path}"
                         )
 
                         # Move the directory to the processing path
@@ -409,10 +377,7 @@ class MWAXCalvinProcessor:
         """Adds a dir containing all the files for an obsid
         to the processing queue"""
         self.processing_queue.put(item)
-        self.logger.info(
-            f"{item} added to processing_queue."
-            f" ({self.processing_queue.qsize()}) in queue."
-        )
+        self.logger.info(f"{item} added to processing_queue." f" ({self.processing_queue.qsize()}) in queue.")
 
     def processing_handler(self, item) -> bool:
         """This is triggered when an obsid dir is moved into
@@ -459,10 +424,7 @@ class MWAXCalvinProcessor:
                 # now move the whole dir
                 # to the upload_path
                 upload_path = os.path.join(self.upload_path, obs_id)
-                self.logger.info(
-                    f"{obs_id}: moving successfull files to"
-                    f" {upload_path} for upload"
-                )
+                self.logger.info(f"{obs_id}: moving successfull files to" f" {upload_path} for upload")
                 shutil.move(item, upload_path)
                 # Now add to queue
                 self.add_to_upload_queue(upload_path)
@@ -473,14 +435,13 @@ class MWAXCalvinProcessor:
         """Adds a dir containing all the files for an obsid
         to the upload queue"""
         self.upload_queue.put(item)
-        self.logger.info(
-            f"{item} added to upload_queue."
-            f" ({self.upload_queue.qsize()}) in queue."
-        )
+        self.logger.info(f"{item} added to upload_queue." f" ({self.upload_queue.qsize()}) in queue.")
 
-    def process_phase_fits(self, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter):
+    def process_phase_fits(
+        self, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
+    ):
         fits = []
-        phase_diff_path = os.path.join(item, 'phase_diff.txt')
+        phase_diff_path = os.path.join(item, "phase_diff.txt")
         # by default we don't want to apply any phase rotation.
         phase_diff = np.full((len(chanblocks_hz),), 1.0, dtype=np.complex128)
         if os.path.exists(phase_diff_path):
@@ -488,10 +449,9 @@ class MWAXCalvinProcessor:
             phase_diff_raw = np.loadtxt(phase_diff_path)
             for i, chanblock_hz in enumerate(chanblocks_hz):
                 # find the closest frequency in phase_diff_raw
-                idx = np.abs(phase_diff_raw[:,0] - chanblock_hz).argmin()
-                diff = phase_diff_raw[idx,1]
+                idx = np.abs(phase_diff_raw[:, 0] - chanblock_hz).argmin()
+                diff = phase_diff_raw[idx, 1]
                 phase_diff[i] = np.exp(-1j * diff)
-
 
         for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
             for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
@@ -529,9 +489,11 @@ class MWAXCalvinProcessor:
         self.logger.debug(f"{item} - {metafits_files=}")
         fits_solution_files = sorted(glob.glob(os.path.join(item, "*_solutions.fits")))
         # _bin_solution_files = glob.glob(os.path.join(item, "*_solutions.bin"))
-        self.logger.debug( f"{item} - uploading {fits_solution_files=}" )
+        self.logger.debug(f"{item} - uploading {fits_solution_files=}")
 
-        soln_group = HyperfitsSolutionGroup([Metafits(f) for f in metafits_files], [HyperfitsSolution(f) for f in fits_solution_files])
+        soln_group = HyperfitsSolutionGroup(
+            [Metafits(f) for f in metafits_files], [HyperfitsSolution(f) for f in fits_solution_files]
+        )
 
         # get tiles
         tiles = soln_group.metafits_tiles_df
@@ -564,9 +526,11 @@ class MWAXCalvinProcessor:
 
         weights = soln_group.weights
 
-        fits = self.process_phase_fits(item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter)
+        fits = self.process_phase_fits(
+            item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
+        )
 
-        fits = debug_phase_fits(fits, tiles, all_chanblocks_hz, all_xx_solns[0], all_yy_solns[0], weights, f'{item}/')
+        fits = debug_phase_fits(fits, tiles, all_chanblocks_hz, all_xx_solns[0], all_yy_solns[0], weights, f"{item}/")
 
         # __import__('ipdb').set_trace()
         # self.logger.debug(f"{item} - {tile_id=} length={fit.get_length()}. {fit=}")
@@ -600,16 +564,11 @@ class MWAXCalvinProcessor:
             if not self.complete_path:
                 raise ValueError("No complete path specified")
             complete_path = os.path.join(self.complete_path, obs_id)
-            self.logger.info(
-                f"{obs_id}: moving successfull files to"
-                f" {complete_path} for review."
-            )
+            self.logger.info(f"{obs_id}: moving successfull files to" f" {complete_path} for review.")
             shutil.move(item, complete_path)
 
             if not self.keep_completed_visibility_files:
-                visibility_files = glob.glob(
-                    os.path.join(item, f"{obs_id}_*_*_*.fits")
-                )
+                visibility_files = glob.glob(os.path.join(item, f"{obs_id}_*_*_*.fits"))
 
                 for file_to_delete in visibility_files:
                     os.remove(file_to_delete)
@@ -627,9 +586,7 @@ class MWAXCalvinProcessor:
         self.logger.debug("Checking for running hyperdrive process...")
         if self.hyperdrive_popen_process:
             if not self.hyperdrive_popen_process.poll():
-                self.logger.debug(
-                    "Running hyperdrive process found. Sending it SIGINT..."
-                )
+                self.logger.debug("Running hyperdrive process found. Sending it SIGINT...")
                 self.hyperdrive_popen_process.send_signal(signal.SIGINT)
                 self.logger.debug("SIGINT sent to Hyperdrive")
 
@@ -672,13 +629,8 @@ class MWAXCalvinProcessor:
                     status_bytes,
                     self.health_multicast_hops,
                 )
-            except (
-                Exception
-            ) as catch_all_exception:  # pylint: disable=broad-except
-                self.logger.warning(
-                    "health_handler: Failed to send health information."
-                    f" {catch_all_exception}"
-                )
+            except Exception as catch_all_exception:  # pylint: disable=broad-except
+                self.logger.warning("health_handler: Failed to send health information." f" {catch_all_exception}")
 
             # Sleep for a second
             time.sleep(1)
@@ -734,10 +686,7 @@ class MWAXCalvinProcessor:
         self.hostname = utils.get_hostname()
 
         if not os.path.exists(config_filename):
-            print(
-                f"Configuration file location {config_filename} does not"
-                " exist. Quitting."
-            )
+            print(f"Configuration file location {config_filename} does not" " exist. Quitting.")
             sys.exit(1)
 
         # Make sure we can Ctrl-C / kill out of this
@@ -761,43 +710,20 @@ class MWAXCalvinProcessor:
         self.logger.setLevel(logging.DEBUG)
         console_log = logging.StreamHandler()
         console_log.setLevel(logging.DEBUG)
-        console_log.setFormatter(
-            logging.Formatter(
-                "%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"
-            )
-        )
+        console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(console_log)
 
-        file_log = logging.FileHandler(
-            filename=os.path.join(self.log_path, "main.log")
-        )
+        file_log = logging.FileHandler(filename=os.path.join(self.log_path, "main.log"))
         file_log.setLevel(logging.DEBUG)
-        file_log.setFormatter(
-            logging.Formatter(
-                "%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"
-            )
-        )
+        file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(file_log)
 
-        self.logger.info(
-            "Starting mwax_calvin_processor"
-            f" processor...v{version.get_mwax_mover_version_string()}"
-        )
+        self.logger.info("Starting mwax_calvin_processor" f" processor...v{version.get_mwax_mover_version_string()}")
 
         # health
-        self.health_multicast_ip = utils.read_config(
-            self.logger, config, "mwax mover", "health_multicast_ip"
-        )
-        self.health_multicast_port = int(
-            utils.read_config(
-                self.logger, config, "mwax mover", "health_multicast_port"
-            )
-        )
-        self.health_multicast_hops = int(
-            utils.read_config(
-                self.logger, config, "mwax mover", "health_multicast_hops"
-            )
-        )
+        self.health_multicast_ip = utils.read_config(self.logger, config, "mwax mover", "health_multicast_ip")
+        self.health_multicast_port = int(utils.read_config(self.logger, config, "mwax mover", "health_multicast_port"))
+        self.health_multicast_hops = int(utils.read_config(self.logger, config, "mwax mover", "health_multicast_hops"))
         self.health_multicast_interface_name = utils.read_config(
             self.logger,
             config,
@@ -806,12 +732,8 @@ class MWAXCalvinProcessor:
         )
 
         # get this hosts primary network interface ip
-        self.health_multicast_interface_ip = utils.get_ip_address(
-            self.health_multicast_interface_name
-        )
-        self.logger.info(
-            f"IP for sending multicast: {self.health_multicast_interface_ip}"
-        )
+        self.health_multicast_interface_ip = utils.get_ip_address(self.health_multicast_interface_name)
+        self.logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
 
         #
         # Assembly config
@@ -826,10 +748,7 @@ class MWAXCalvinProcessor:
         )
 
         if not os.path.exists(self.incoming_watch_path):
-            self.logger.error(
-                "incoming_watch_path location "
-                f" {self.incoming_watch_path} does not exist. Quitting."
-            )
+            self.logger.error("incoming_watch_path location " f" {self.incoming_watch_path} does not exist. Quitting.")
             sys.exit(1)
 
         # Get the assemble dir
@@ -841,19 +760,12 @@ class MWAXCalvinProcessor:
         )
 
         if not os.path.exists(self.assemble_path):
-            self.logger.error(
-                "assemble_path location "
-                f" {self.assemble_path} does not exist. Quitting."
-            )
+            self.logger.error("assemble_path location " f" {self.assemble_path} does not exist. Quitting.")
             sys.exit(1)
 
         # Set assemble_check_seconds
         # How many secs between waiting for all gpubox files to arrive?
-        self.assemble_check_seconds = int(
-            utils.read_config(
-                self.logger, config, "assembly", "assemble_check_seconds"
-            )
-        )
+        self.assemble_check_seconds = int(utils.read_config(self.logger, config, "assembly", "assemble_check_seconds"))
 
         #
         # processing config
@@ -868,10 +780,7 @@ class MWAXCalvinProcessor:
         )
 
         if not os.path.exists(self.processing_path):
-            self.logger.error(
-                "processing_path location "
-                f" {self.processing_path} does not exist. Quitting."
-            )
+            self.logger.error("processing_path location " f" {self.processing_path} does not exist. Quitting.")
             sys.exit(1)
 
         # Get the processing error dir
@@ -884,8 +793,7 @@ class MWAXCalvinProcessor:
 
         if not os.path.exists(self.processing_error_path):
             self.logger.error(
-                "processing_error_path location "
-                f" {self.processing_error_path} does not exist. Quitting."
+                "processing_error_path location " f" {self.processing_error_path} does not exist. Quitting."
             )
             sys.exit(1)
 
@@ -901,8 +809,7 @@ class MWAXCalvinProcessor:
 
         if not os.path.exists(self.source_list_filename):
             self.logger.error(
-                "source_list_filename location "
-                f" {self.source_list_filename} does not exist. Quitting."
+                "source_list_filename location " f" {self.source_list_filename} does not exist. Quitting."
             )
             sys.exit(1)
 
@@ -933,8 +840,7 @@ class MWAXCalvinProcessor:
 
         if not os.path.exists(self.hyperdrive_binary_path):
             self.logger.error(
-                "hyperdrive_binary_path location "
-                f" {self.hyperdrive_binary_path} does not exist. Quitting."
+                "hyperdrive_binary_path location " f" {self.hyperdrive_binary_path} does not exist. Quitting."
             )
             sys.exit(1)
 
@@ -957,10 +863,7 @@ class MWAXCalvinProcessor:
         )
 
         if not os.path.exists(self.birli_binary_path):
-            self.logger.error(
-                "birli_binary_path location "
-                f" {self.birli_binary_path} does not exist. Quitting."
-            )
+            self.logger.error("birli_binary_path location " f" {self.birli_binary_path} does not exist. Quitting.")
             sys.exit(1)
 
         # upload path
@@ -972,10 +875,7 @@ class MWAXCalvinProcessor:
         )
 
         if not os.path.exists(self.upload_path):
-            self.logger.error(
-                "processing_upload_path location "
-                f" {self.upload_path} does not exist. Quitting."
-            )
+            self.logger.error("processing_upload_path location " f" {self.upload_path} does not exist. Quitting.")
             sys.exit(1)
 
         # complete path
@@ -987,10 +887,7 @@ class MWAXCalvinProcessor:
         )
 
         if not os.path.exists(self.complete_path):
-            self.logger.error(
-                "complete_path location "
-                f" {self.complete_path} does not exist. Quitting."
-            )
+            self.logger.error("complete_path location " f" {self.complete_path} does not exist. Quitting.")
             sys.exit(1)
 
         self.keep_completed_visibility_files = utils.read_config_bool(
@@ -1014,9 +911,7 @@ class MWAXCalvinProcessor:
             f" v{version.get_mwax_mover_version_string()})\n"
         )
 
-        parser.add_argument(
-            "-c", "--cfg", required=True, help="Configuration file location.\n"
-        )
+        parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
 
         args = vars(parser.parse_args())
 
