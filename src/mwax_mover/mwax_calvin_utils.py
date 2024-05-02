@@ -596,13 +596,45 @@ class PhaseFitInfo(NamedTuple):
     #     """The equivalent cable length of the phase ramp"""
     #     return v_light_m_s / self.slope
 
+    @staticmethod
+    def nan():
+        return PhaseFitInfo(
+            length=np.nan,
+            intercept=np.nan,
+            sigma_resid=np.nan,
+            chi2dof=np.nan,
+            quality=np.nan,
+            stderr=np.nan,
+            # median_thickness=np.nan,
+        )
+
 
 class GainFitInfo(NamedTuple):
-    gains_fit_quality: float
+    quality: float
     gains: List[float]
-    gains_pol0: List[float]
-    gains_pol1: List[float]
-    gains_sigma_resid: List[float]
+    pol0: List[float]
+    pol1: List[float]
+    sigma_resid: List[float]
+
+    @staticmethod
+    def default():
+        return GainFitInfo(
+            quality=1.0,
+            gains=[1.0] * 24,
+            pol0=[0.0] * 24,
+            pol1=[0.0] * 24,
+            sigma_resid=[0.0] * 24,
+        )
+
+    @staticmethod
+    def nan():
+        return GainFitInfo(
+            quality=np.nan,
+            gains=[np.nan] * 24,
+            pol0=[np.nan] * 24,
+            pol1=[np.nan] * 24,
+            sigma_resid=[np.nan] * 24,
+        )
 
 
 def wrap_angle(angle):
@@ -778,11 +810,11 @@ def fit_gain(chanblocks_hz, solns, weights) -> GainFitInfo:
     # TODO(Dev): finish this bit
 
     return GainFitInfo(
-        gains_fit_quality=1.0,
+        quality=1.0,
         gains=[1.0] * 24,
-        gains_pol0=[0.0] * 24,
-        gains_pol1=[0.0] * 24,
-        gains_sigma_resid=[0.0] * 24,
+        pol0=[0.0] * 24,
+        pol1=[0.0] * 24,
+        sigma_resid=[0.0] * 24,
     )
 
 

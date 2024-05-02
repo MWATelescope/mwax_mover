@@ -17,6 +17,7 @@ import signal
 import sys
 import threading
 import time
+from typing import NamedTuple
 from astropy import time as astrotime
 from mwax_mover import (
     utils,
@@ -504,6 +505,7 @@ class MWAXCalvinProcessor:
                     continue
                 self.logger.debug(f"{item} - {tile_id=:4} {pol} ({name}) {fit=}")
                 fits.append([tile_id, soln_idx, pol, *fit])
+        self.logger.warning("TODO: fake gain fits!")
 
         return pd.DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *GainFitInfo._fields])  # type: ignore
 
@@ -565,40 +567,101 @@ class MWAXCalvinProcessor:
         phase_fits = self.process_phase_fits(
             item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
         )
-        # _gain_fits = self.process_gain_fits(
-        #     item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids
-        # )
+        gain_fits = self.process_gain_fits(
+            item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids
+        )
+
+        success = True
+        if ~np.any(np.isfinite(phase_fits["length"])):
+            self.logger.error(f"{item} - no valid phase fits found")
+            success = False
 
         # phase_fits_pivot = debug_phase_fits(
         #     phase_fits, tiles, all_chanblocks_hz, all_xx_solns[0], all_yy_solns[0], weights, f"{item}/"
         # )
-        phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
+        # phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
+        # self.logger.debug(f"{item} - fits:\n{phase_fits_pivot.to_string(max_rows=512)}")
 
-        self.logger.debug(f"{item} - fits:\n{phase_fits_pivot.to_string(max_rows=512)}")
+        if success:
 
-        fit_id = time.time()
+            fit_id = time.time()
 
-        assert self.db_handler_object is not None, "No database handler object"
+            class DummyDBHandler(NamedTuple):
+                dummy: bool = True
+                logger: logging.Logger = self.logger
 
-        # TODO:
-        # insert_calibration_fits_row(
-        #     self.db_handler_object,
-        #     fit_id,
-        #     obs_id,
-        #     0,  # TODO: code version?
-        #     niter=phase_fit_niter,
-        # )
+            self.db_handler_object = DummyDBHandler()
+            # assert self.db_handler_object is not None, "No database handler object"
 
-        # for row in phase_fits.itertuples(index=False):
-        #     insert_calibration_solutions_row(
-        #         self.db_handler_object,
-        #         fit_id,
-        #         obs_id,
-        #         ...
-        #     )
+            insert_calibration_fits_row(
+                self.db_handler_object,
+                fit_id,
+                obs_id,
+                0,  # TODO: code version?
+                fit_niter=phase_fit_niter,
+            )
+
+            for tile_id in soln_tile_ids:
+                some_fits = False
+                try:
+                    x_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "XX")].iloc[0]
+                    some_fits = True
+                except IndexError:
+                    x_gains = GainFitInfo.nan()
+
+                try:
+                    y_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "YY")].iloc[0]
+                    some_fits = True
+                except IndexError:
+                    y_gains = GainFitInfo.nan()
+
+                try:
+                    x_phase = phase_fits[(phase_fits.tile_id == tile_id) & (phase_fits.pol == "XX")].iloc[0]
+                    some_fits = True
+                except IndexError:
+                    x_phase = PhaseFitInfo.nan()
+
+                try:
+                    y_phase = phase_fits[(phase_fits.tile_id == tile_id) & (phase_fits.pol == "YY")].iloc[0]
+                    some_fits = True
+                except IndexError:
+                    y_phase = PhaseFitInfo.nan()
+
+                if not some_fits:
+                    continue
+
+                success &= insert_calibration_solutions_row(
+                    self.db_handler_object,
+                    fit_id,
+                    obs_id,
+                    tile_id,
+                    x_phase.length,
+                    x_phase.intercept,
+                    x_gains.gains,
+                    y_phase.length,
+                    y_phase.intercept,
+                    y_gains.gains,
+                    x_gains.pol1,
+                    y_gains.pol1,
+                    x_phase.sigma_resid,
+                    x_phase.chi2dof,
+                    x_phase.quality,
+                    y_phase.sigma_resid,
+                    y_phase.chi2dof,
+                    y_phase.quality,
+                    x_gains.quality,
+                    y_gains.quality,
+                    x_gains.sigma_resid,
+                    y_gains.sigma_resid,
+                    x_gains.pol0,
+                    y_gains.pol0,
+                )
+
+                if not success:
+                    self.logger.error(f"{item} - failed to insert calibration solutions")
+                    break
 
         # on success move to complete
-        success = False
         if success:
             # now move the whole dir
             # to the complete path
