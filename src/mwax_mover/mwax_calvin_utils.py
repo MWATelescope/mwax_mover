@@ -8,8 +8,6 @@ import time
 import traceback
 import numpy as np
 from astropy.io import fits
-from enum import Enum
-from scipy import stats
 from astropy import units as u
 from astropy.constants import c
 from scipy.optimize import minimize
@@ -21,9 +19,9 @@ from mwax_mover.mwax_command import (
     check_popen_finished,
 )
 
-import numpy.typing as npt
+import numpy.typing as npt  # noqa: F401
 from numpy.typing import ArrayLike, NDArray
-from typing import NamedTuple, List, Tuple, Dict
+from typing import NamedTuple, List, Tuple, Dict  # noqa: F401
 
 # from nptyping import NDArray, Shape
 import sys
@@ -241,7 +239,9 @@ class HyperfitsSolution:
 
         chans_per_block = chanblock_width_hz // chaninfo.fine_chan_width_hz
         chanblocks_per_coarse = chaninfo.fine_chans_per_coarse // chans_per_block
-        if (range_ncoarse := len(coarse_chans)) != (soln_ncoarse := len(chanblocks_hz) // chanblocks_per_coarse):  # type: ignore
+        range_ncoarse = len(coarse_chans)
+        soln_ncoarse = len(chanblocks_hz) // chanblocks_per_coarse
+        if range_ncoarse != soln_ncoarse:  # type: ignore
             print(
                 f"{self.filename} - warning: number of coarse channels in solution file ({soln_ncoarse})"
                 f" does not match number of coarse channels in metafits for this range ({range_ncoarse})"
@@ -294,7 +294,10 @@ class HyperfitsSolution:
         # divide solutions by reference
         ref_solutions = [solution[:, ref_tile_idx, :] for solution in solutions]  # type: ignore
         # divide solutions jones matrix by reference jones matrix, via inverse determinant
-        ref_inv_det = np.divide(1 + 0j, ref_solutions[0] * ref_solutions[3] - ref_solutions[1] * ref_solutions[2])  # type: ignore
+        ref_inv_det = np.divide(
+            1 + 0j,
+            ref_solutions[0] * ref_solutions[3] - ref_solutions[1] * ref_solutions[2]  # type: ignore
+        )
         return [  # type: ignore
             (solutions[0] * ref_solutions[3] - solutions[1] * ref_solutions[2]) * ref_inv_det,
             (solutions[1] * ref_solutions[0] - solutions[0] * ref_solutions[1]) * ref_inv_det,
@@ -471,7 +474,8 @@ class HyperfitsSolutionGroup:
 
     def get_solns(self, refant_name: str) -> Tuple[NDArray[np.int_], NDArray[np.complex_], NDArray[np.complex_]]:
         """
-        Get the tile ids in the order they appear in the solutions, as well as xx and yy solutions for the reference antenna
+        Get the tile ids in the order they appear in the solutions, as well as xx and yy solutions
+        for the reference antenna
         """
         soln_tile_ids = None
         ref_tile_idx = None
@@ -594,18 +598,19 @@ class PhaseFitInfo(NamedTuple):
 
 
 class GainFitInfo(NamedTuple):
-    x_gains_fit_quality: float
-    x_gains: List[float]
-    x_gains_pol0: List[float]
-    x_gains_pol1: List[float]
-    x_gains_sigma_resid: List[float]
+    gains_fit_quality: float
+    gains: List[float]
+    gains_pol0: List[float]
+    gains_pol1: List[float]
+    gains_sigma_resid: List[float]
+
 
 def wrap_angle(angle):
     return np.mod(angle + np.pi, 2 * np.pi) - np.pi
 
 
 def fit_phase_line(
-    freqs_hz: NDArray[np.float_],  #  NDArray[np.float_],
+    freqs_hz: NDArray[np.float_],
     solution: NDArray[np.complex_],
     weights: NDArray[np.float_],
     niter: int = 1,
@@ -698,14 +703,16 @@ def fit_phase_line(
     # Now that we're near a local minimum, get a better one by doing a standard minimisation
     # To get the y-intercept, divide the original data by the constructed data
     # and find the average phase of the result
-    if fit_iono:
-        model = lambda ν, m, c, α: np.exp(1j * (m * ν + c + α / ν**2))
-        y_int = np.angle(np.mean(solution / model(ν.to(u.Hz).value, slope.value, 0, 0)))
-        params = (slope.value, y_int, 0)
-    else:
-        model = lambda ν, m, c: np.exp(1j * (m * ν + c))
-        y_int = np.angle(np.mean(solution / model(ν.to(u.Hz).value, slope.value, 0)))
-        params = (slope.value, y_int)
+    # if fit_iono:
+    #     model = lambda ν, m, c, α: np.exp(1j * (m * ν + c + α / ν**2))
+    #     y_int = np.angle(np.mean(solution / model(ν.to(u.Hz).value, slope.value, 0, 0)))
+    #     params = (slope.value, y_int, 0)
+
+    def model(ν, m, c):
+        return np.exp(1j * (m * ν + c))
+
+    y_int = np.angle(np.mean(solution / model(ν.to(u.Hz).value, slope.value, 0)))
+    params = (slope.value, y_int)
 
     def objective(params, ν, data):
         constructed = model(ν, *params)
@@ -761,39 +768,23 @@ def fit_gain(chanblocks_hz, solns, weights) -> GainFitInfo:
     Fit gain solutions
     """
     # remove nans and zero weights
-    mask = np.where(np.logical_and(
-        np.isfinite(solns),
-        weights > 0
-    ))[0]
+    mask = np.where(np.logical_and(np.isfinite(solns), weights > 0))[0]
     if len(mask) < 2:
         raise RuntimeError(f"Not enough valid gains to fit ({len(mask)})")
     solns = solns[mask]
     chanblocks_hz = chanblocks_hz[mask]
     weights = weights[mask]
 
-    # Now we want to "adjust" the solution data so that it
-    #   - is roughly centered on the DC bin
-    #   - has a large amount of zero padding on either side
-    # Choose a suitable frequency bin width:
-    # - Assume the frequencies are "quantised" (i.e. all integer multiples of some constant)
-    # - Assume there is at least one example of a pair of consecutive bins present
-    # - Do not assume the arrays are ordered in increasing frequency
+    # TODO(Dev): finish this bit
 
-    # Get the minimum difference between two (now-ordered) consecutive bins, and
-    # declare this to be the bin width
-    dν = np.min(np.diff(chanblocks_hz)) * u.Hz
+    return GainFitInfo(
+        gains_fit_quality=1.0,
+        gains=[1.0] * 24,
+        gains_pol0=[0.0] * 24,
+        gains_pol1=[0.0] * 24,
+        gains_sigma_resid=[0.0] * 24,
+    )
 
-    # ν = chanblocks_hz * u.Hz  # type: ignore
-    bins = np.round((chanblocks_hz/dν).decompose().value).astype(int)
-    ctr_bin = (np.min(bins) + np.max(bins))//2
-    shifted_bins = bins - ctr_bin # Now "bins" represents where I want to put the solution values
-
-    # ...except that ~1/2 of them are negative, so I'll have to add a certain amount
-    # once I decide how much zero padding to include.
-    # This is set by the resolution I want in delay space (Nyquist rate)
-    # type: ignore
-    dm = 0.01 * u.m  # type: ignore
-    dt = dm / c           # The target time resolution
 
 def poly_str(coeffs, independent_var="x"):
     """
@@ -839,18 +830,18 @@ def textwrap(s, width=70):
 
 
 def debug_phase_fits(
-        phase_fits: pd.DataFrame,
-        tiles: pd.DataFrame,
-        freqs: NDArray[np.float_],
-        soln_xx: NDArray[np.complex_],
-        soln_yy: NDArray[np.complex_],
-        weights: NDArray[np.float_],
-        prefix: str = './',
-        show: bool = False,
-        title: str = '',
-        plot_residual: bool = False,
-        residual_vmax = None,
-    ) -> pd.DataFrame:
+    phase_fits: pd.DataFrame,
+    tiles: pd.DataFrame,
+    freqs: NDArray[np.float_],
+    soln_xx: NDArray[np.complex_],
+    soln_yy: NDArray[np.complex_],
+    weights: NDArray[np.float_],
+    prefix: str = "./",
+    show: bool = False,
+    title: str = "",
+    plot_residual: bool = False,
+    residual_vmax=None,
+) -> pd.DataFrame:
     """
     Given a dataframe of [tile, pol, fit...]:
     - plot intercepts
@@ -862,23 +853,23 @@ def debug_phase_fits(
     """
     import matplotlib as mpl
     from matplotlib import pyplot as plt
-    from matplotlib.axes import Axes
     from matplotlib import cm
     from matplotlib.colors import LinearSegmentedColormap
+
     figsize = (20, 36)
-    mpl.rcParams['figure.figsize'] = figsize
+    mpl.rcParams["figure.figsize"] = figsize
 
     # make a new colormap for weighted data
     half_blues = LinearSegmentedColormap.from_list(
-        colors=cm.get_cmap('Blues')(np.linspace(0.5, 1, 256)),
-        name='HalfBlues',
+        colors=cm.get_cmap("Blues")(np.linspace(0.5, 1, 256)),
+        name="HalfBlues",
     )
 
     flavor_fits = pd.merge(phase_fits, tiles, left_on="tile_id", right_on="id")
 
     def ensure_system_byte_order(arr):
-        system_byte_order = '>' if sys.byteorder == 'big' else '<'
-        if arr.dtype.byteorder != system_byte_order and arr.dtype.byteorder not in '|=':
+        system_byte_order = ">" if sys.byteorder == "big" else "<"
+        if arr.dtype.byteorder != system_byte_order and arr.dtype.byteorder not in "|=":
             return arr.newbyteorder(system_byte_order)
         return arr
 
@@ -888,56 +879,60 @@ def debug_phase_fits(
     soln_yy = ensure_system_byte_order(soln_yy)
 
     if plot_residual:
-        plot_phase_residual(freqs, soln_xx, soln_yy, weights, prefix, title, plot_residual, residual_vmax, plt, flavor_fits)
+        plot_phase_residual(
+            freqs, soln_xx, soln_yy, weights, prefix, title, plot_residual, residual_vmax, plt, flavor_fits
+        )
 
     plot_phase_intercepts(prefix, show, title, plt, flavor_fits)
 
     phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
-    weights2 = weights ** 2
+    weights2 = weights**2
 
     if prefix:
-        phase_fits_pivot.to_csv(f'{prefix}phase_fits.tsv', sep='\t', index=False)
+        phase_fits_pivot.to_csv(f"{prefix}phase_fits.tsv", sep="\t", index=False)
 
     plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, plt, half_blues, phase_fits_pivot, weights2)
 
     return phase_fits_pivot
 
+
 def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, plt, cmap, phase_fits_pivot, weights2):
     rxs = np.sort(np.unique(phase_fits_pivot["rx"]))
     slots = np.sort(np.unique(phase_fits_pivot["slot"]))
 
-    for pol, soln in zip(['xx', 'yy'], [soln_xx, soln_yy]):
+    for pol, soln in zip(["xx", "yy"], [soln_xx, soln_yy]):
         plt.clf()
-        fig, axs = plt.subplots(len(rxs), len(slots), sharex=True, sharey='row', squeeze=True)
+        fig, axs = plt.subplots(len(rxs), len(slots), sharex=True, sharey="row", squeeze=True)
         for ax in axs.flatten():
-            ax.axis('off')
+            ax.axis("off")
         for _, fit in phase_fits_pivot.iterrows():
-            signal = soln[fit['soln_idx']]  # type: ignore
-            if fit['flag'] or np.isnan(signal).all():
+            signal = soln[fit["soln_idx"]]  # type: ignore
+            if fit["flag"] or np.isnan(signal).all():
                 continue
-            mask = np.where(np.logical_and(
-                np.isfinite(signal),
-                weights2 > 0
-            ))[0]
+            mask = np.where(np.logical_and(np.isfinite(signal), weights2 > 0))[0]
             angle = np.angle(signal)  # type: ignore
             mask_freq: ArrayLike = freqs[mask]  # type: ignore
             model_freqs = np.linspace(mask_freq.min(), mask_freq.max(), len(freqs))  # type: ignore
-            rx_idx = np.where(rxs == fit['rx'])[0][0]
-            slot_idx = np.where(slots == fit['slot'])[0][0]
-            ax: Axes = axs[rx_idx][slot_idx]  # type: ignore
-            ax.axis('on')
-            gradient = (2 * np.pi * u.rad * (fit[f'length_{pol}'] * u.m) / c).to(u.rad/u.Hz).value
-            intercept = fit[f'intercept_{pol}']
+            rx_idx = np.where(rxs == fit["rx"])[0][0]
+            slot_idx = np.where(slots == fit["slot"])[0][0]
+            ax = axs[rx_idx][slot_idx]  # type: ignore
+            ax.axis("on")
+            gradient = (2 * np.pi * u.rad * (fit[f"length_{pol}"] * u.m) / c).to(u.rad / u.Hz).value
+            intercept = fit[f"intercept_{pol}"]
             model = gradient * model_freqs + intercept
-            ax.scatter(model_freqs, wrap_angle(model), c='red', s=0.5)
-            mask_weights: ArrayLike = weights2[mask] # type: ignore
+            ax.scatter(model_freqs, wrap_angle(model), c="red", s=0.5)
+            mask_weights: ArrayLike = weights2[mask]  # type: ignore
             ax.scatter(mask_freq, wrap_angle(angle[mask]), c=mask_weights, cmap=cmap, s=2)
-            ax.set_title('\n'.join([
-                f"{fit['name']}|{fit['soln_idx']}",
-                f"X{fit[f'chi2dof_{pol}']:.4f}",
-                f"S{fit[f'sigma_resid_{pol}']:.4f}",
-                f"Q{fit[f'quality_{pol}']:.2f}",
-            ])) # |{fit['id']}
+            ax.set_title(
+                "\n".join(
+                    [
+                        f"{fit['name']}|{fit['soln_idx']}",
+                        f"X{fit[f'chi2dof_{pol}']:.4f}",
+                        f"S{fit[f'sigma_resid_{pol}']:.4f}",
+                        f"Q{fit[f'quality_{pol}']:.2f}",
+                    ]
+                )
+            )  # |{fit['id']}
 
         # fig.set_size_inches(*figsize)
         if title:
@@ -946,16 +941,26 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, plt, cmap, pha
             plt.show()
         if prefix:
             plt.tight_layout()
-            fig.savefig(f'{prefix}phase_fits_{pol}.png', dpi=300, bbox_inches='tight')
+            fig.savefig(f"{prefix}phase_fits_{pol}.png", dpi=300, bbox_inches="tight")
+
 
 def plot_phase_intercepts(prefix, show, title, plt, flavor_fits):
     plt.clf()
-    g = sns.FacetGrid(flavor_fits, row="flavor", col="pol", hue="flavor",
-        subplot_kws=dict(projection='polar'),
-        sharex=False, sharey=False, despine=False)
+    g = sns.FacetGrid(
+        flavor_fits,
+        row="flavor",
+        col="pol",
+        hue="flavor",
+        subplot_kws=dict(projection="polar"),
+        sharex=False,
+        sharey=False,
+        despine=False,
+    )
     g.map(
-        (lambda theta, r, size, **kwargs: plt.scatter(x=theta, y=r, s=10/(0.1 + size), **kwargs)),
-        "intercept", "length", "sigma_resid"
+        (lambda theta, r, size, **kwargs: plt.scatter(x=theta, y=r, s=10 / (0.1 + size), **kwargs)),
+        "intercept",
+        "length",
+        "sigma_resid",
     )
     if title:
         plt.suptitle(title)
@@ -963,33 +968,32 @@ def plot_phase_intercepts(prefix, show, title, plt, flavor_fits):
         plt.show()
     if prefix:
         plt.tight_layout()
-        plt.savefig(f'{prefix}intercepts.png', dpi=300, bbox_inches='tight')
+        plt.savefig(f"{prefix}intercepts.png", dpi=300, bbox_inches="tight")
 
-def plot_phase_residual(freqs, soln_xx, soln_yy, weights, prefix, title, plot_residual, residual_vmax, plt, flavor_fits):
+
+def plot_phase_residual(
+    freqs, soln_xx, soln_yy, weights, prefix, title, plot_residual, residual_vmax, plt, flavor_fits
+):
     plt.clf()
-    g = sns.FacetGrid(flavor_fits, row="flavor", col="pol", hue="flavor",
-                        sharex=True, sharey=False)
+    g = sns.FacetGrid(flavor_fits, row="flavor", col="pol", hue="flavor", sharex=True, sharey=False)
 
-    df = pd.DataFrame({
+    df = pd.DataFrame(
+        {
             "freq": freqs,
             "weights": weights,
-        })
+        }
+    )
 
     def plot_residual(
-        soln_idxs: pd.Series,
-        pols: pd.Series,
-        flavs: pd.Series,
-        lengths: pd.Series,
-        intercepts: pd.Series,
-        **kwargs
+        soln_idxs: pd.Series, pols: pd.Series, flavs: pd.Series, lengths: pd.Series, intercepts: pd.Series, **kwargs
     ):
-        gradients = (2 * np.pi * u.rad * (lengths.to_numpy() * u.m) / c).to(u.rad/u.Hz).value
+        gradients = (2 * np.pi * u.rad * (lengths.to_numpy() * u.m) / c).to(u.rad / u.Hz).value
         intercepts = intercepts.to_numpy()
         pol = pols.iloc[0]
         flav = flavs.iloc[0]
-        if pol == 'XX':
+        if pol == "XX":
             solns = soln_xx[soln_idxs.values]
-        elif pol == 'YY':
+        elif pol == "YY":
             solns = soln_yy[soln_idxs.values]
         else:
             raise RuntimeError(f"wut pol? {pol}")
@@ -999,16 +1003,12 @@ def plot_phase_residual(freqs, soln_xx, soln_yy, weights, prefix, title, plot_re
         min_mse = np.inf
         best_coeffs = None
         best_indep = None
-        mask = np.where(np.logical_and(
-                np.isfinite(medians),
-                np.logical_not(np.isnan(medians)),
-                weights > 0
-            ))[0]
+        mask = np.where(np.logical_and(np.isfinite(medians), np.logical_not(np.isnan(medians)), weights > 0))[0]
         df[f"{flav}_{pol}"] = medians
-        for indep_var in ['ν', 'λ']:
-            if indep_var == 'ν':
+        for indep_var in ["ν", "λ"]:
+            if indep_var == "ν":
                 xs = freqs[mask]
-            elif indep_var == 'λ':
+            elif indep_var == "λ":
                 xs = 1.0 / freqs[mask]
 
             for order in range(1, 9):
@@ -1016,7 +1016,10 @@ def plot_phase_residual(freqs, soln_xx, soln_yy, weights, prefix, title, plot_re
                     coeffs = np.polyfit(xs, medians[mask], order)
                 except ValueError:
                     print(traceback.format_exc())
-                    print(f"Skipping polyfit({order=}, {indep_var=}) due to ValueError for {flav=} {pol=}.\n{xs=}\n{medians[mask]=}")
+                    print(
+                        f"Skipping polyfit({order=}, {indep_var=}) due to "
+                        f"ValueError for {flav=} {pol=}.\n{xs=}\n{medians[mask]=}"
+                    )
                     continue
 
                 mse = order * np.nanmean((medians - np.poly1d(coeffs)(freqs)) ** 2)
@@ -1025,24 +1028,26 @@ def plot_phase_residual(freqs, soln_xx, soln_yy, weights, prefix, title, plot_re
                     best_coeffs = coeffs
                     best_indep = indep_var
 
-        sns.scatterplot(x=freqs, y=medians, hue=weights, **dict(**kwargs, marker='+'))
+        sns.scatterplot(x=freqs, y=medians, hue=weights, **dict(**kwargs, marker="+"))
         if best_coeffs is not None and best_indep is not None:
             sns.lineplot(x=freqs, y=np.poly1d(best_coeffs)(freqs), **kwargs)
             eqn = poly_str(best_coeffs, independent_var=best_indep)
             poly_wrap = textwrap(f"[{len(best_coeffs)}] {eqn}", width=40)
             plt.text(0.05, 0.1, poly_wrap, transform=plt.gca().transAxes, fontsize=7)
         if residual_vmax is not None:
-            ylim=float(residual_vmax)
+            ylim = float(residual_vmax)
             plt.ylim(-ylim, ylim)
 
         print(f"{flav=} {pol=} {eqn=}")
+
     g.map(plot_residual, "soln_idx", "pol", "flavor", "length", "intercept")
     g.set_axis_labels("freq", "phase")
     if title:
         plt.suptitle(title)
-    plt.savefig(f'{prefix}residual.png', dpi=200, bbox_inches='tight')
-        # save df to csv
-    df.to_csv(f'{prefix}residual.tsv', sep='\t', index=False)
+    plt.savefig(f"{prefix}residual.png", dpi=200, bbox_inches="tight")
+    # save df to csv
+    df.to_csv(f"{prefix}residual.tsv", sep="\t", index=False)
+
 
 def pivot_phase_fits(
     phase_fits: pd.DataFrame,
@@ -1057,13 +1062,14 @@ def pivot_phase_fits(
     phase_fits = pd.merge(
         phase_fits[phase_fits["pol"] == "XX"].drop(columns=["pol"]),
         phase_fits[phase_fits["pol"] == "YY"].drop(columns=["pol", "soln_idx"]),
-        on=["tile_id"], suffixes=["_xx", "_yy"]
+        on=["tile_id"],
+        suffixes=["_xx", "_yy"],
     )
     phase_fits = pd.merge(phase_fits, tiles, left_on="tile_id", right_on="id")
     phase_fits.drop("id", axis=1, inplace=True)
     # tile_columns = ["soln_idx", "tile_id"] + [*(set(tiles.columns)-set(["id"]))]
     tile_columns = ["soln_idx", "name", "tile_id", "rx", "slot", "flavor"]
-    tile_columns += [*(set(tiles.columns)-set(tile_columns)-set(["id"]))]
+    tile_columns += [*(set(tiles.columns) - set(tile_columns) - set(["id"]))]
     print(f"{tile_columns=}")
     fit_columns = [column for column in phase_fits.columns if column not in tile_columns]
     fit_columns.sort()

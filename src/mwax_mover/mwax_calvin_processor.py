@@ -32,7 +32,7 @@ import pandas as pd
 # import itertools
 import numpy.typing
 
-from mwax_mover.mwax_db import insert_calibration_fits_row
+from mwax_mover.mwax_db import insert_calibration_fits_row, insert_calibration_solutions_row
 from mwax_mover.mwax_mover import (
     MODE_WATCH_DIR_FOR_NEW,
 )
@@ -43,7 +43,10 @@ from mwax_mover.mwax_calvin_utils import (
     #   Tile,
     debug_phase_fits,
     fit_phase_line,
+    fit_gain,
     PhaseFitInfo,
+    GainFitInfo,
+    pivot_phase_fits,
 )
 
 
@@ -502,7 +505,7 @@ class MWAXCalvinProcessor:
                 self.logger.debug(f"{item} - {tile_id=:4} {pol} ({name}) {fit=}")
                 fits.append([tile_id, soln_idx, pol, *fit])
 
-        return pd.DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])  # type: ignore
+        return pd.DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *GainFitInfo._fields])  # type: ignore
 
     def upload_handler(self, item) -> bool:
         """Will deal with completed hyperdrive solutions
@@ -559,23 +562,40 @@ class MWAXCalvinProcessor:
 
         weights = soln_group.weights
 
-        phase_fits = self.process_phase_fits(item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter)
-        gain_fits = self.process_gain_fits(item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids)
+        phase_fits = self.process_phase_fits(
+            item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
+        )
+        # _gain_fits = self.process_gain_fits(
+        #     item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids
+        # )
 
-        phase_fits_pivot = debug_phase_fits(phase_fits, tiles, all_chanblocks_hz, all_xx_solns[0], all_yy_solns[0], weights, f'{item}/')
+        # phase_fits_pivot = debug_phase_fits(
+        #     phase_fits, tiles, all_chanblocks_hz, all_xx_solns[0], all_yy_solns[0], weights, f"{item}/"
+        # )
+        phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
 
         self.logger.debug(f"{item} - fits:\n{phase_fits_pivot.to_string(max_rows=512)}")
 
         fit_id = time.time()
 
+        assert self.db_handler_object is not None, "No database handler object"
+
         # TODO:
         # insert_calibration_fits_row(
-        #     self.db_handler,
+        #     self.db_handler_object,
         #     fit_id,
         #     obs_id,
-
+        #     0,  # TODO: code version?
+        #     niter=phase_fit_niter,
         # )
 
+        # for row in phase_fits.itertuples(index=False):
+        #     insert_calibration_solutions_row(
+        #         self.db_handler_object,
+        #         fit_id,
+        #         obs_id,
+        #         ...
+        #     )
 
         # on success move to complete
         success = False
