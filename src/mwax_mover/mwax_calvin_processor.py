@@ -24,6 +24,7 @@ from mwax_mover import (
     mwax_watcher,
     mwax_queue_worker,
     mwax_calvin_utils,
+    mwax_db,
 )
 import numpy as np
 import pandas as pd
@@ -55,6 +56,7 @@ class MWAXCalvinProcessor:
         self.logger = logging.getLogger(__name__)
         self.log_path = None
         self.hostname = None
+        self.db_handler_object = None
 
         # health
         self.health_multicast_interface_ip = None
@@ -741,6 +743,32 @@ class MWAXCalvinProcessor:
         # get this hosts primary network interface ip
         self.health_multicast_interface_ip = utils.get_ip_address(self.health_multicast_interface_name)
         self.logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
+
+        #
+        # MRO database
+        #
+        self.mro_metadatadb_host = utils.read_config(self.logger, config, "mro metadata database", "host")
+
+        if self.mro_metadatadb_host != mwax_db.DUMMY_DB:
+            self.mro_metadatadb_db = utils.read_config(self.logger, config, "mro metadata database", "db")
+            self.mro_metadatadb_user = utils.read_config(self.logger, config, "mro metadata database", "user")
+            self.mro_metadatadb_pass = utils.read_config(self.logger, config, "mro metadata database", "pass", True)
+            self.mro_metadatadb_port = utils.read_config(self.logger, config, "mro metadata database", "port")
+        else:
+            self.mro_metadatadb_db = None
+            self.mro_metadatadb_user = None
+            self.mro_metadatadb_pass = None
+            self.mro_metadatadb_port = None
+
+        # Initiate database connection for rmo metadata db
+        self.mro_db_handler_object = mwax_db.MWAXDBHandler(
+            logger=self.logger,
+            host=self.mro_metadatadb_host,
+            port=self.mro_metadatadb_port,
+            db_name=self.mro_metadatadb_db,
+            user=self.mro_metadatadb_user,
+            password=self.mro_metadatadb_pass,
+        )
 
         #
         # Assembly config

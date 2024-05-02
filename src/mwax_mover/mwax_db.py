@@ -3,7 +3,7 @@
 import os
 import threading
 import time
-from typing import Optional
+from typing import Optional, Tuple
 import psycopg2
 from psycopg2 import InterfaceError, OperationalError
 from tenacity import retry, stop_after_attempt, wait_fixed
@@ -410,20 +410,21 @@ def update_data_file_row_as_archived(
 
 def insert_calibration_fits_row(
     db_handler_object,
-    fit_id: int,
     obs_id: int,
     code_version: str,
     creator: str,
     fit_niter: int = 10,
     fit_limit: int = 20,
-) -> bool:
-    """Insert a  calibration_fit row.
-    This row represents the calibration for an obsid."""
+) -> Tuple[bool, int]:
+    """Inserts a new calibration_fits row and return the fit_id if successful
+    This row represents the calibration 'header' for an obsid."""
     sql = (
         "INSERT INTO calibration_fits"
         " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit)"
         " VALUES (%s,%s,%s,now(),%s,%s,%s);"
     )
+
+    fit_id = time.time()
 
     sql_values = (
         fit_id,
@@ -445,7 +446,7 @@ def insert_calibration_fits_row(
                     f"'{sql}' Values: {sql_values}"
                 )
                 time.sleep(1)  # simulate a slow transaction
-                return True
+                return (True, fit_id)
         else:
             db_handler_object.execute_single_dml_row(
                 sql,
@@ -453,10 +454,9 @@ def insert_calibration_fits_row(
             )
 
             db_handler_object.logger.info(
-                f"{obs_id}: insert_calibration_fits_row() Successfully wrote"
-                " into calibration_fits table"
+                f"{obs_id}: insert_calibration_fits_row() Successfully wrote" " into calibration_fits table"
             )
-            return True
+            return (True, fit_id)
 
     except Exception as insert_exception:  # pylint: disable=broad-except
         db_handler_object.logger.error(
@@ -464,7 +464,7 @@ def insert_calibration_fits_row(
             f" calibration_fits record in table: {insert_exception}. SQL was"
             f" {sql} Values: {sql_values}"
         )
-        return False
+        return (False, None)
 
 
 def insert_calibration_solutions_row(
@@ -528,8 +528,8 @@ def insert_calibration_solutions_row(
     y_phase_chi2dof = f"{y_phase_chi2dof:.4f}"
     y_phase_fit_quality = f"{y_phase_fit_quality:.4f}"
 
-    x_gains_sigma_resid = f"{x_gains_sigma_resid:.4f}"
-    y_gains_sigma_resid = f"{y_gains_sigma_resid:.4f}"
+    # x_gains_sigma_resid = f"{x_gains_sigma_resid:.4f}"
+    # y_gains_sigma_resid = f"{y_gains_sigma_resid:.4f}"
 
     # Create the tuple of values
     sql_values = (
