@@ -529,44 +529,44 @@ class MWAXArchiveProcessor:
         val: ValidationData = utils.validate_filename(self.logger, item, self.metafits_path)
 
         if val.valid:
+            try:
+                # Determine file size
+                file_size = os.stat(item).st_size
+
+                # checksum then add this file to the db so we insert a record into
+                # metadata data_files table
+                checksum_type_id: int = 1  # MD5
+                checksum: str = utils.do_checksum_md5(self.logger, item, int(self.archive_command_numa_node), 180)
+
+                # if file is a VCS subfile, check if it is from a trigger and
+                # grab the trigger_id as an int
+                # If not found it will return None
+                trigger_id = utils.read_subfile_trigger_value(item)
+            except FileNotFoundError:
+                # The filename was not valid
+                self.logger.warning(f"{item}- checksum_and_db_handler() file was removed while" " processing.")
+                return True
+
+            # Insert record into metadata database
+            if not mwax_db.insert_data_file_row(
+                self.db_handler_object,
+                val.obs_id,
+                item,
+                val.filetype_id,
+                self.hostname,
+                checksum_type_id,
+                checksum,
+                trigger_id,
+                file_size,
+            ):
+                # if something went wrong, requeue
+                return False
+
             #
-            # If the project_id is the special code C999 then
-            # do not add it to the database or do a checksum.
+            # If the project_id is the special code C123 then
+            # do not archive it.
             #
             if utils.should_project_be_archived(val.project_id):
-                try:
-                    # Determine file size
-                    file_size = os.stat(item).st_size
-
-                    # checksum then add this file to the db so we insert a record into
-                    # metadata data_files table
-                    checksum_type_id: int = 1  # MD5
-                    checksum: str = utils.do_checksum_md5(self.logger, item, int(self.archive_command_numa_node), 180)
-
-                    # if file is a VCS subfile, check if it is from a trigger and
-                    # grab the trigger_id as an int
-                    # If not found it will return None
-                    trigger_id = utils.read_subfile_trigger_value(item)
-                except FileNotFoundError:
-                    # The filename was not valid
-                    self.logger.warning(f"{item}- checksum_and_db_handler() file was removed while" " processing.")
-                    return True
-
-                # Insert record into metadata database
-                if not mwax_db.insert_data_file_row(
-                    self.db_handler_object,
-                    val.obs_id,
-                    item,
-                    val.filetype_id,
-                    self.hostname,
-                    checksum_type_id,
-                    checksum,
-                    trigger_id,
-                    file_size,
-                ):
-                    # if something went wrong, requeue
-                    return False
-
                 # immediately add this file (and a ptr to it's queue) to the
                 # voltage or vis queue which will deal with archiving
                 if val.filetype_id == MWADataFileType.MWAX_VOLTAGES.value:
@@ -758,10 +758,14 @@ class MWAXArchiveProcessor:
             else:
                 self.logger.info(f"{item}- cal_handler() calibrator_destination is disbaled. Skipping.")
 
+        #
+        # If we should be archived, the move the file to the outgoing dir,
+        # otherwise move it to the don't_archive dir
+        #
+        if utils.should_project_be_archived(val.project_id) and self.archive_destination_enabled:
             # Take the input filename - strip the path, then append the output path
-            outgoing_filename = os.path.join(self.watch_dir_outgoing_vis, os.path.basename(item))
-
             self.logger.debug(f"{item}- cal_handler() moving file to vis outgoing dir")
+            outgoing_filename = os.path.join(self.watch_dir_outgoing_vis, os.path.basename(item))
             os.rename(item, outgoing_filename)
         else:
             # Pass it to the dont_archive_vis handler
