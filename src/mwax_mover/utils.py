@@ -885,7 +885,7 @@ def get_data_files_for_obsid_from_webservice(obsid: int):
     of all the data_files - all_files: True means to get all files whether they are
     archived at Pawsey or not"""
     result = requests.get(
-        "http://ws.mwatelescope.org/metadata/data_files",
+        "http://mro.mwa128t.org/metadata/data_files",
         data={"obs_id": obsid, "terse": False, "all_files": True},
     )
     if result.text:
