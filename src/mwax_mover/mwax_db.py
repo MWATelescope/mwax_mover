@@ -472,26 +472,26 @@ def insert_calibration_solutions_row(
     fit_id: int,
     obs_id: int,
     tile_id: int,
-    x_delay_m,
-    x_intercept,
-    x_gains,
-    y_delay_m,
-    y_intercept,
-    y_gains,
-    x_gains_pol1,
-    y_gains_pol1,
-    x_phase_sigma_resid,
-    x_phase_chi2dof,
-    x_phase_fit_quality,
-    y_phase_sigma_resid,
-    y_phase_chi2dof,
-    y_phase_fit_quality,
-    x_gains_fit_quality,
-    y_gains_fit_quality,
-    x_gains_sigma_resid,
-    y_gains_sigma_resid,
-    x_gains_pol0,
-    y_gains_pol0,
+    x_delay_m: float,
+    x_intercept: float,
+    x_gains: list[float],
+    y_delay_m: float,
+    y_intercept: float,
+    y_gains: list[float],
+    x_gains_pol1: list[float],
+    y_gains_pol1: list[float],
+    x_phase_sigma_resid: float,
+    x_phase_chi2dof: float,
+    x_phase_fit_quality: float,
+    y_phase_sigma_resid: float,
+    y_phase_chi2dof: float,
+    y_phase_fit_quality: float,
+    x_gains_fit_quality: float,
+    y_gains_fit_quality: float,
+    x_gains_sigma_resid: list[float],
+    y_gains_sigma_resid: list[float],
+    x_gains_pol0: list[float],
+    y_gains_pol0: list[float],
 ) -> bool:
     """Insert a  calibration_solutions row.
     This row represents the calibration solution for a tile/obsid."""
@@ -514,22 +514,6 @@ def insert_calibration_solutions_row(
                                     %s,%s,
                                     ARRAY[%s],ARRAY[%s],
                                     ARRAY[%s],ARRAY[%s])"""
-
-    # Format data before we insert it
-    x_delay_m = f"{x_delay_m:.4f}"
-    x_intercept = f"{x_intercept:.4f}"
-    y_delay_m = f"{y_delay_m:.4f}"
-    y_intercept = f"{y_intercept:.4f}"
-
-    x_phase_sigma_resid = f"{x_phase_sigma_resid:.4f}"
-    x_phase_chi2dof = f"{x_phase_chi2dof:.4f}"
-    x_phase_fit_quality = f"{x_phase_fit_quality:.4f}"
-    y_phase_sigma_resid = f"{y_phase_sigma_resid:.4f}"
-    y_phase_chi2dof = f"{y_phase_chi2dof:.4f}"
-    y_phase_fit_quality = f"{y_phase_fit_quality:.4f}"
-
-    # x_gains_sigma_resid = f"{x_gains_sigma_resid:.4f}"
-    # y_gains_sigma_resid = f"{y_gains_sigma_resid:.4f}"
 
     # Create the tuple of values
     sql_values = (
