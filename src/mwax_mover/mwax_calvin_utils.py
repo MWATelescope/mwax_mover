@@ -1072,7 +1072,7 @@ def debug_phase_fits(
 #     return success
 
 
-# def get_calibration_solutions(
+# def insert_calibration_solutions(
 #     logger, db_handler, obs_id, fit_id, solution_bin_files
 # ) -> bool:
 #     """Given calibration bin files for an obsid,
@@ -1126,6 +1126,7 @@ def get_convergence_summary(solutions_fits_file: str):
     results = soln.results
     converged_channel_indices = np.where(~np.isnan(results))
     summary = []
+    summary.append(results)
     summary.append(("Total number of channels", len(results)))
     summary.append(
         (
@@ -1397,7 +1398,7 @@ def run_hyperdrive(
                 )
                 processor.hyperdrive_popen_process = None
 
-                ## Success!
+                # Success!
                 # Write out a useful file of command line info
                 readme_filename = f"{obsid_and_band}_hyperdrive_readme.txt"
 
