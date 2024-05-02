@@ -886,8 +886,10 @@ def get_data_files_for_obsid_from_webservice(obsid: int):
         "http://ws.mwatelescope.org/metadata/data_files",
         data={"obs_id": obsid, "terse": False},
     )
-    metadict = json.loads(result.text)
-    return metadict
+    if result.text:
+        return json.loads(result.text)
+    else:
+        return None
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_fixed(10))

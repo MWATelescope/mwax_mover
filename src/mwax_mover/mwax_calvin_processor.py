@@ -300,34 +300,41 @@ class MWAXCalvinProcessor:
             #
             json_metadata = utils.get_data_files_for_obsid_from_webservice(obs_id)
 
-            #
-            # we need a list of files from the web service
-            # this should just be the filenames
-            #
-            web_service_filenames = [filename for filename in json_metadata]
-            web_service_filenames.sort()
+            if json_metadata:
+                #
+                # we need a list of files from the web service
+                # this should just be the filenames
+                #
+                web_service_filenames = [filename for filename in json_metadata]
+                web_service_filenames.sort()
 
-            # we need a list of files from the work dir
-            # this first list has the full path
-            # put a basic UNIX pattern so we don't pick up the metafits
+                # we need a list of files from the work dir
+                # this first list has the full path
+                # put a basic UNIX pattern so we don't pick up the metafits
 
-            # Check for gpubox files (mwax OR legacy)
-            glob_spec = "*.fits"
-            assembly_dir_full_path_files = glob.glob(os.path.join(obsid_assembly_dir, glob_spec))
-            assembly_dir_filenames = [os.path.basename(i) for i in assembly_dir_full_path_files]
-            assembly_dir_filenames.sort()
-            # Remove the metafits file
-            assembly_dir_filenames.remove(metafits_filename)
+                # Check for gpubox files (mwax OR legacy)
+                glob_spec = "*.fits"
+                assembly_dir_full_path_files = glob.glob(os.path.join(obsid_assembly_dir, glob_spec))
+                assembly_dir_filenames = [os.path.basename(i) for i in assembly_dir_full_path_files]
+                assembly_dir_filenames.sort()
+                # Remove the metafits file
+                assembly_dir_filenames.remove(metafits_filename)
 
-            # How does what we need compare to what we have?
-            return_value = web_service_filenames == assembly_dir_filenames
+                # How does what we need compare to what we have?
+                return_value = web_service_filenames == assembly_dir_filenames
 
-            self.logger.debug(
-                f"{obs_id} check_obs_is_ready_to_process() =="
-                f" {return_value} (WS: {len(web_service_filenames)},"
-                f" assembly_dir: {len(assembly_dir_filenames)})"
-            )
-            return return_value
+                self.logger.debug(
+                    f"{obs_id} check_obs_is_ready_to_process() =="
+                    f" {return_value} (WS: {len(web_service_filenames)},"
+                    f" assembly_dir: {len(assembly_dir_filenames)})"
+                )
+                return return_value
+            else:
+                # Web service didn't return any files
+                # This is usually because there ARE no files in the database
+                # Best to fail
+                self.logger.error(f"utils.get_data_files_for_obsid_from_webservice({obs_id}) did not return any files.")
+                return False
         else:
             self.logger.info(
                 f"{obs_id} Observation is still in progress:"
