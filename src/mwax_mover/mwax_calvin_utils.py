@@ -1,4 +1,5 @@
 """Utility Functions to support mwax_calvin processor"""
+
 import datetime
 import glob
 import os
@@ -23,11 +24,14 @@ from mwax_mover.mwax_command import (
 import numpy.typing as npt
 from numpy.typing import ArrayLike, NDArray
 from typing import NamedTuple, List, Tuple, Dict
+
 # from nptyping import NDArray, Shape
 import sys
 
+
 class Tile(NamedTuple):
     """Info about an MWA tile"""
+
     name: str
     id: int
     flag: bool
@@ -36,8 +40,10 @@ class Tile(NamedTuple):
     slot: int
     flavor: str = ""
 
+
 class Input(NamedTuple):
     """Info about an MWA tile"""
+
     name: str
     id: int
     flag: bool
@@ -48,11 +54,14 @@ class Input(NamedTuple):
     length: float
     flavor: str = ""
 
+
 class ChanInfo(NamedTuple):
     """channel selection info"""
-    coarse_chan_ranges: List[NDArray[np.int_]] # List[Tuple(int, int)]
+
+    coarse_chan_ranges: List[NDArray[np.int_]]  # List[Tuple(int, int)]
     fine_chans_per_coarse: int
     fine_chan_width_hz: float
+
 
 # class Config(Enum):
 #     """Array configuration"""
@@ -71,14 +80,17 @@ class ChanInfo(NamedTuple):
 #         else:
 #             raise ValueError(f"Unknown array config with {nlb=} and {nhex=}")
 
+
 def ensure_system_byte_order(arr):
-    system_byte_order = '>' if sys.byteorder == 'big' else '<'
-    if arr.dtype.byteorder not in f'{system_byte_order}|=':
+    system_byte_order = ">" if sys.byteorder == "big" else "<"
+    if arr.dtype.byteorder not in f"{system_byte_order}|=":
         return arr.newbyteorder(system_byte_order)
     return arr
 
+
 class Metafits:
     """MWA Metadata file in FITS format"""
+
     def __init__(self, filename: str):
         self.filename = filename
 
@@ -87,7 +99,7 @@ class Metafits:
         """Get tile info from metafits, sorted by index"""
 
         with fits.open(self.filename) as hdus:
-            metafits_inputs = hdus['TILEDATA'].data  # type: ignore
+            metafits_inputs = hdus["TILEDATA"].data  # type: ignore
 
         # using a set here to avoid duplicates (pol=X,Y)
         tiles = set(
@@ -99,7 +111,8 @@ class Metafits:
                 rx=metafits_input["Rx"],
                 slot=metafits_input["Slot"],
                 flavor=metafits_input["Flavors"],
-            ) for metafits_input in metafits_inputs
+            )
+            for metafits_input in metafits_inputs
         )
 
         return sorted([*tiles], key=lambda tile: tile.id)
@@ -109,12 +122,12 @@ class Metafits:
         """Get tile info from metafits, sorted by index"""
 
         with fits.open(self.filename) as hdus:
-            metafits_inputs = hdus['TILEDATA'].data  # type: ignore
+            metafits_inputs = hdus["TILEDATA"].data  # type: ignore
 
         inputs = set(
             Input(
                 id=metafits_input["Input"],
-                name=metafits_input["TileName"]+metafits_input["Pol"],
+                name=metafits_input["TileName"] + metafits_input["Pol"],
                 flag=metafits_input["Flag"],
                 pol=metafits_input["Pol"],
                 # index=metafits_input["Antenna"],
@@ -122,7 +135,8 @@ class Metafits:
                 slot=metafits_input["Slot"],
                 flavor=metafits_input["Flavors"],
                 length=float(metafits_input["Length"][3:]),
-            ) for metafits_input in metafits_inputs
+            )
+            for metafits_input in metafits_inputs
         )
 
         return sorted([*inputs], key=lambda inp: inp.id)
@@ -148,16 +162,16 @@ class Metafits:
     def chan_info(self) -> ChanInfo:
         """Get coarse channels from metafits, sorted"""
         with fits.open(self.filename) as hdus:
-            hdu = hdus['PRIMARY']
-            header: fits.header.Header = hdu.header # type: ignore
+            hdu = hdus["PRIMARY"]
+            header: fits.header.Header = hdu.header  # type: ignore
 
             # get a list of coarse channels
-            coarse_chans = header["CHANNELS"].split(",") # type: ignore
+            coarse_chans = header["CHANNELS"].split(",")  # type: ignore
             coarse_chans = np.array(sorted(int(i) for i in coarse_chans))
             # fine channel width
-            fine_chan_width_hz = float(header["FINECHAN"]) * 1000 # type: ignore
+            fine_chan_width_hz = float(header["FINECHAN"]) * 1000  # type: ignore
             # number of fine channels in observation
-            obs_num_fine_chans: int = header["NCHANS"] # type: ignore
+            obs_num_fine_chans: int = header["NCHANS"]  # type: ignore
             # calculate number of fine channels per coarse channel
             if obs_num_fine_chans % len(coarse_chans) != 0:
                 raise ValueError(
@@ -179,21 +193,23 @@ class Metafits:
     @property
     def calibrator(self):
         with fits.open(self.filename) as hdus:
-            hdu = hdus['PRIMARY']
-            header = hdu.header # type: ignore
+            hdu = hdus["PRIMARY"]
+            header = hdu.header  # type: ignore
             if header.get("CALIBSRC"):
                 return header["CALIBSRC"]
 
     @property
     def obsid(self):
         with fits.open(self.filename) as hdus:
-            hdu = hdus['PRIMARY']
-            header = hdu.header # type: ignore
+            hdu = hdus["PRIMARY"]
+            header = hdu.header  # type: ignore
             if header.get("GPSTIME"):
                 return header["GPSTIME"]
 
+
 class HyperfitsSolution:
     """A single calibration solution in hyperdrive FITS format"""
+
     def __init__(self, filename) -> None:
         self.filename = filename
 
@@ -201,13 +217,14 @@ class HyperfitsSolution:
     def chanblocks_hz(self) -> NDArray[np.float_]:
         """Get channels from solution file"""
         with fits.open(self.filename) as hdus:
-            freq_data = hdus['CHANBLOCKS'].data['Freq'].astype(np.float_)
+            freq_data = hdus["CHANBLOCKS"].data["Freq"].astype(np.float_)
         return np.array(ensure_system_byte_order(freq_data))
 
-    def validate_chanblocks(self,
-                            chaninfo: ChanInfo,
-                            coarse_chans: NDArray[np.int_],
-        ) -> Tuple[NDArray[np.float_], float]:
+    def validate_chanblocks(
+        self,
+        chaninfo: ChanInfo,
+        coarse_chans: NDArray[np.int_],
+    ) -> Tuple[NDArray[np.float_], float]:
         """
         Validate that the chanblocks in the solution match the chanblocks in the metafits.
         Returns the chanblock frequencies and the number of chanblocks per coarse channel.
@@ -224,16 +241,13 @@ class HyperfitsSolution:
 
         chans_per_block = chanblock_width_hz // chaninfo.fine_chan_width_hz
         chanblocks_per_coarse = chaninfo.fine_chans_per_coarse // chans_per_block
-        if (range_ncoarse:=len(coarse_chans)) != (soln_ncoarse:= len(chanblocks_hz) // chanblocks_per_coarse):  # type: ignore
+        if (range_ncoarse := len(coarse_chans)) != (soln_ncoarse := len(chanblocks_hz) // chanblocks_per_coarse):  # type: ignore
             print(
                 f"{self.filename} - warning: number of coarse channels in solution file ({soln_ncoarse})"
                 f" does not match number of coarse channels in metafits for this range ({range_ncoarse})"
                 f" given {chanblocks_per_coarse=}, {chans_per_block=}"
             )
-        return (
-            chanblocks_hz,
-            chanblocks_per_coarse
-        )
+        return (chanblocks_hz, chanblocks_per_coarse)
 
     # @property
     # def tile_names_flags(self) -> List[Tuple[str, bool]]:
@@ -249,8 +263,8 @@ class HyperfitsSolution:
     def tile_flags(self) -> List[bool]:
         """Get the tile flags ordered by Antenna index"""
         with fits.open(self.filename) as hdus:
-            tile_data = hdus['TILES'].data  # type: ignore
-        return tile_data['Flag']
+            tile_data = hdus["TILES"].data  # type: ignore
+        return tile_data["Flag"]
 
     def get_average_times(self) -> List[float]:
         """Get the average time for each timeblock
@@ -258,15 +272,13 @@ class HyperfitsSolution:
         Raises KeyError if TIMEBLOCKS not present
         """
         with fits.open(self.filename) as hdus:
-            time_data = hdus['TIMEBLOCKS'].data  # type: ignore
-            return [
-                time['Average'] for time in time_data
-            ]
+            time_data = hdus["TIMEBLOCKS"].data  # type: ignore
+            return [time["Average"] for time in time_data]
 
     def get_solutions(self) -> List[NDArray[np.complex_]]:
         """Get solutions as a complex array for each pol: [time, tile, chan]"""
         with fits.open(self.filename) as hdus:
-            solutions = hdus['SOLUTIONS'].data  # type: ignore
+            solutions = hdus["SOLUTIONS"].data  # type: ignore
         return [
             solutions[:, :, :, 0] + 1j * solutions[:, :, :, 1],
             solutions[:, :, :, 2] + 1j * solutions[:, :, :, 3],
@@ -283,7 +295,7 @@ class HyperfitsSolution:
         ref_solutions = [solution[:, ref_tile_idx, :] for solution in solutions]  # type: ignore
         # divide solutions jones matrix by reference jones matrix, via inverse determinant
         ref_inv_det = np.divide(1 + 0j, ref_solutions[0] * ref_solutions[3] - ref_solutions[1] * ref_solutions[2])  # type: ignore
-        return [ # type: ignore
+        return [  # type: ignore
             (solutions[0] * ref_solutions[3] - solutions[1] * ref_solutions[2]) * ref_inv_det,
             (solutions[1] * ref_solutions[0] - solutions[0] * ref_solutions[1]) * ref_inv_det,
             (solutions[2] * ref_solutions[3] - solutions[3] * ref_solutions[2]) * ref_inv_det,
@@ -298,10 +310,12 @@ class HyperfitsSolution:
 
         # Not sure why I need flatten!
 
+
 class HyperfitsSolutionGroup:
     """
     A group of Hyperdrive .fits calibration solutions and corresponding metafits files
     """
+
     def __init__(self, metafits: List[Metafits], solns: List[HyperfitsSolution]):
         if not len(metafits):
             raise RuntimeError("no metafits files provided")
@@ -311,8 +325,9 @@ class HyperfitsSolutionGroup:
         self.solns = solns
         self.metafits_tiles_df = HyperfitsSolutionGroup.get_metafits_tiles_df(self.metafits)
         self.metafits_chan_info = HyperfitsSolutionGroup.get_metafits_chan_info(self.metafits)
-        self.chanblocks_per_coarse, self.all_chanblocks_hz = \
-            HyperfitsSolutionGroup.get_soln_chan_info(self.metafits_chan_info, self.solns)
+        self.chanblocks_per_coarse, self.all_chanblocks_hz = HyperfitsSolutionGroup.get_soln_chan_info(
+            self.metafits_chan_info, self.solns
+        )
 
     @classmethod
     def get_metafits_chan_info(cls, metafits: List[Metafits]) -> ChanInfo:
@@ -345,10 +360,7 @@ class HyperfitsSolutionGroup:
         # assert coarse channel ranges do not overlap
         for left, right in zip(all_ranges[:-1], all_ranges[1:]):
             if left[0] == right[0] or left[-1] >= right[0]:
-                raise RuntimeError(
-                    "coarse channel ranges from metafits overlap. "
-                    f"{[left, right]}, {metafits=}"
-                )
+                raise RuntimeError("coarse channel ranges from metafits overlap. " f"{[left, right]}, {metafits=}")
         return ChanInfo(
             coarse_chan_ranges=all_ranges,
             fine_chan_width_hz=first_chan_info.fine_chan_width_hz,
@@ -356,7 +368,9 @@ class HyperfitsSolutionGroup:
         )
 
     @classmethod
-    def get_soln_chan_info(cls, metafits_chan_info: ChanInfo, solns: List[HyperfitsSolution]) -> Tuple[ChanInfo, List[NDArray[np.float_]]]:
+    def get_soln_chan_info(
+        cls, metafits_chan_info: ChanInfo, solns: List[HyperfitsSolution]
+    ) -> Tuple[ChanInfo, List[NDArray[np.float_]]]:
         """
         Get the chanblocks_per_coarse and chanblocks_hz array for each provided solutions
 
@@ -409,8 +423,8 @@ class HyperfitsSolutionGroup:
         tiles_df = self.metafits_tiles_df.copy()
         # flag tiles_df with solution flags
         for soln in self.solns:
-            tiles_df['flag_metafits'] = tiles_df['flag']
-            tiles_df['flag_soln'] = soln.tile_flags
+            tiles_df["flag_metafits"] = tiles_df["flag"]
+            tiles_df["flag_soln"] = soln.tile_flags
             tiles_df["flag"] = np.logical_or(tiles_df["flag_metafits"], tiles_df["flag_soln"])
             tiles_df.drop(columns=["flag_metafits", "flag_soln"], inplace=True)
         tiles = tiles_df[tiles_df.flag == 0]
@@ -422,7 +436,7 @@ class HyperfitsSolutionGroup:
     @property
     def calibrator(self):
         calibrators = set(filter(None, [meta.calibrator for meta in self.metafits]))
-        return ' '.join(calibrators)  # type: ignore
+        return " ".join(calibrators)  # type: ignore
 
     @property
     def obsids(self):
@@ -449,10 +463,11 @@ class HyperfitsSolutionGroup:
             results[results < 0] = np.nan
             results[results > 1e-4] = np.nan
             exp_results = np.exp(-results)
-            return np.nan_to_num((exp_results - np.nanmin(exp_results)) / (np.nanmax(exp_results) - np.nanmin(exp_results)))
+            return np.nan_to_num(
+                (exp_results - np.nanmin(exp_results)) / (np.nanmax(exp_results) - np.nanmin(exp_results))
+            )
         except KeyError:
             return np.full(len(self.all_chanblocks_hz[0]), 1.0)
-
 
     def get_solns(self, refant_name: str) -> Tuple[NDArray[np.int_], NDArray[np.complex_], NDArray[np.complex_]]:
         """
@@ -472,21 +487,17 @@ class HyperfitsSolutionGroup:
             # join the tile dataframe on name, just in case order is different
 
             soln_tiles = self.metafits_tiles_df.copy()
-            soln_tiles['flag_metafits'] = soln_tiles['flag']
-            soln_tiles['flag_soln'] = soln.tile_flags
+            soln_tiles["flag_metafits"] = soln_tiles["flag"]
+            soln_tiles["flag_soln"] = soln.tile_flags
             soln_tiles["flag"] = np.logical_or(soln_tiles["flag_soln"], soln_tiles["flag_metafits"])
             soln_tiles.drop(columns=["flag_metafits", "flag_soln"], inplace=True)
             # self.logger.debug(f"{soln.filename} - tiles:\n{soln_tiles.to_string(max_rows=999)}")
             _ref_tiles = soln_tiles[soln_tiles["name"] == refant_name]
             if not len(_ref_tiles):
-                raise RuntimeError(
-                    f"{soln.filename} - reference tile {refant_name}"
-                    f" not found in solution file"
-                )
+                raise RuntimeError(f"{soln.filename} - reference tile {refant_name}" f" not found in solution file")
             if len(_ref_tiles) > 1:
                 raise RuntimeError(
-                    f"{soln.filename} - more than one tile with name {refant_name}"
-                    f" found in solution file"
+                    f"{soln.filename} - more than one tile with name {refant_name}" f" found in solution file"
                 )
             _ref_tile_idx = _ref_tiles.index[0]
             _ref_tile_flag = _ref_tiles.iloc[0]["flag"]
@@ -512,8 +523,7 @@ class HyperfitsSolutionGroup:
                 # self.logger.debug(f"{soln.filename} - ref tile found at index {ref_tile_idx}")
             elif ref_tile_idx != _ref_tile_idx:
                 raise RuntimeError(
-                    f"{soln.filename} - reference tile in solution file"
-                    f" does not match previous solution files"
+                    f"{soln.filename} - reference tile in solution file" f" does not match previous solution files"
                 )
 
             # validate timeblocks
@@ -523,29 +533,27 @@ class HyperfitsSolutionGroup:
                 # actual time values are not actually used anyway, just length.
                 solutions = soln.get_solutions()
                 n_times = solutions[0].shape[0]
-                avg_times = [float('nan')] * n_times
+                avg_times = [float("nan")] * n_times
 
             # TODO: support multiple timeblocks
             if len(avg_times) != 1:
-                raise RuntimeError(
-                    f"{soln.filename} - exactly 1 timeblock must be provided: ({len(avg_times)})"
-                )
+                raise RuntimeError(f"{soln.filename} - exactly 1 timeblock must be provided: ({len(avg_times)})")
             # TODO: compare with metafits times
 
             # validate solutions
             solutions = soln.get_ref_solutions(ref_tile_idx)
             for solution in solutions:
-                if (ntimes:=solution.shape[0]) != 1:
+                if (ntimes := solution.shape[0]) != 1:
                     raise RuntimeError(
                         f"{soln.filename} - number of timeblocks in SOLUTIONS HDU ({ntimes})"
                         f" does not match number of timeblocks in TIMEBLOCKS HDU ({len(avg_times)})"
                     )
-                if (ntiles:=solution.shape[1]) != len(soln_tile_ids):
+                if (ntiles := solution.shape[1]) != len(soln_tile_ids):
                     raise RuntimeError(
                         f"{soln.filename} - number of tiles in SOLUTIONS HDU ({ntiles})"
                         f" does not match number of tiles in TILES HDU ({len(soln_tile_ids)})"
                     )
-                if (nchans:=solution.shape[2]) != len(chanblocks_hz):
+                if (nchans := solution.shape[2]) != len(chanblocks_hz):
                     raise RuntimeError(
                         f"{soln.filename} - number of channels in SOLUTIONS HDU ({nchans})"
                         f" does not match number of channels in CHANBLOCKS HDU ({len(chanblocks_hz)})"
@@ -569,6 +577,8 @@ class HyperfitsSolutionGroup:
 
 
 v_light_m_s = 299792458.0
+
+
 class PhaseFitInfo(NamedTuple):
     length: float
     intercept: float
@@ -582,19 +592,21 @@ class PhaseFitInfo(NamedTuple):
     #     """The equivalent cable length of the phase ramp"""
     #     return v_light_m_s / self.slope
 
+
 def wrap_angle(angle):
     return np.mod(angle + np.pi, 2 * np.pi) - np.pi
 
+
 def fit_phase_line(
-        freqs_hz: NDArray[np.float_],  #  NDArray[np.float_],
-        solution: NDArray[np.complex_],
-        weights: NDArray[np.float_],
-        niter: int = 1,
-        fit_iono: bool = False,
-        # chanblocks_per_coarse: int,
-        # bin_size: int = 10,
-        # typical_thickness: float = 3.9,
-    ) -> PhaseFitInfo:
+    freqs_hz: NDArray[np.float_],  #  NDArray[np.float_],
+    solution: NDArray[np.complex_],
+    weights: NDArray[np.float_],
+    niter: int = 1,
+    fit_iono: bool = False,
+    # chanblocks_per_coarse: int,
+    # bin_size: int = 10,
+    # typical_thickness: float = 3.9,
+) -> PhaseFitInfo:
     """
     Linear fit phases
         - freqs: array of frequencies in Hz
@@ -623,10 +635,7 @@ def fit_phase_line(
     dν = np.min(np.diff(freqs_hz)) * u.Hz
 
     # remove nans and zero weights
-    mask = np.where(np.logical_and(
-        np.isfinite(solution),
-        weights > 0
-    ))[0]
+    mask = np.where(np.logical_and(np.isfinite(solution), weights > 0))[0]
     if len(mask) < 2:
         raise RuntimeError(f"Not enough valid phases to fit ({len(mask)})")
     solution = solution[mask]
@@ -642,20 +651,22 @@ def fit_phase_line(
     #   - is roughly centered on the DC bin
     #   - has a large amount of zero padding on either side
     ν = freqs_hz * u.Hz  # type: ignore
-    bins = np.round((ν/dν).decompose().value).astype(int)
-    ctr_bin = (np.min(bins) + np.max(bins))//2
-    shifted_bins = bins - ctr_bin # Now "bins" represents where I want to put the solution values
+    bins = np.round((ν / dν).decompose().value).astype(int)
+    ctr_bin = (np.min(bins) + np.max(bins)) // 2
+    shifted_bins = bins - ctr_bin  # Now "bins" represents where I want to put the solution values
 
     # ...except that ~1/2 of them are negative, so I'll have to add a certain amount
     # once I decide how much zero padding to include.
     # This is set by the resolution I want in delay space (Nyquist rate)
     # type: ignore
     dm = 0.01 * u.m  # type: ignore
-    dt = dm / c           # The target time resolution
-    νmax = 0.5 / dt               # The Nyquist rate
-    N = 2*int(np.round(νmax/dν))  # The number of bins to use during the FFTs
+    dt = dm / c  # The target time resolution
+    νmax = 0.5 / dt  # The Nyquist rate
+    N = 2 * int(np.round(νmax / dν))  # The number of bins to use during the FFTs
 
-    shifted_bins[shifted_bins < 0] += N  # Now the "negative" frequencies are put at the end, which is where FFT wants them
+    shifted_bins[
+        shifted_bins < 0
+    ] += N  # Now the "negative" frequencies are put at the end, which is where FFT wants them
 
     # Create a zero-padded, shifted version of the spectrum, which I'll call sol0
     # sol0: This shifts the non-zero data down to a set of frequencies straddling the DC bin.
@@ -667,32 +678,32 @@ def fit_phase_line(
     # IFFT of sol0 to get the approximate solution as the peak in delay space
     isol0 = np.fft.ifft(sol0)
     t = -np.fft.fftfreq(len(sol0), d=dν.to(u.Hz).value) * u.s  # (Not sure why this negative is needed)
-    d = np.fft.fftshift(c*t)
+    d = np.fft.fftshift(c * t)
     isol0 = np.fft.fftshift(isol0)
 
     # Find max peak, and the equivalent slope
     imax = np.argmax(np.abs(isol0))
     dmax = d[imax]
     # print(f"{dmax=:.02f}")
-    slope = (2*np.pi*u.rad*dmax/c).to(u.rad/u.Hz)
+    slope = (2 * np.pi * u.rad * dmax / c).to(u.rad / u.Hz)
     # print(f"{slope=:.10f}")
 
     # Now that we're near a local minimum, get a better one by doing a standard minimisation
     # To get the y-intercept, divide the original data by the constructed data
     # and find the average phase of the result
     if fit_iono:
-        model = lambda ν, m, c, α: np.exp(1j*(m*ν + c + α/ν**2))
-        y_int = np.angle(np.mean(solution/model(ν.to(u.Hz).value, slope.value, 0, 0)))
+        model = lambda ν, m, c, α: np.exp(1j * (m * ν + c + α / ν**2))
+        y_int = np.angle(np.mean(solution / model(ν.to(u.Hz).value, slope.value, 0, 0)))
         params = (slope.value, y_int, 0)
     else:
-        model = lambda ν, m, c: np.exp(1j*(m*ν + c))
-        y_int = np.angle(np.mean(solution/model(ν.to(u.Hz).value, slope.value, 0)))
+        model = lambda ν, m, c: np.exp(1j * (m * ν + c))
+        y_int = np.angle(np.mean(solution / model(ν.to(u.Hz).value, slope.value, 0)))
         params = (slope.value, y_int)
 
     def objective(params, ν, data):
         constructed = model(ν, *params)
         residuals = wrap_angle(np.angle(data) - np.angle(constructed))
-        cost = np.sum(np.abs(residuals)**2)
+        cost = np.sum(np.abs(residuals) ** 2)
         return cost
 
     resid_std, chi2dof, stderr = None, None, None
@@ -707,7 +718,7 @@ def fit_phase_line(
         # print(f"{constructed[:3]=}")
         residuals = wrap_angle(np.angle(solution) - np.angle(constructed))
         # print(f"{residuals[:3]=}")
-        chi2dof = np.sum(np.abs(residuals)**2) / (len(residuals) - len(params))
+        chi2dof = np.sum(np.abs(residuals) ** 2) / (len(residuals) - len(params))
         # print(f"{chi2dof=}")
         resid_std = residuals.std()
         # print(f"{resid_std=}")
@@ -746,10 +757,11 @@ def poly_str(coeffs, independent_var="x"):
             return f"×{independent_var}"
         else:
             return f"×{independent_var}" + "⁰¹²³⁴⁵⁶⁷⁸⁹"[i]
-    return " ".join(filter(None,[
-        f"{coeff:+.3}{xpow(i)}" # if abs(coeff) > 1e-20 else ""
-        for i, coeff in enumerate(coeffs[::-1])
-    ]))
+
+    return " ".join(
+        filter(None, [f"{coeff:+.3}{xpow(i)}" for i, coeff in enumerate(coeffs[::-1])])  # if abs(coeff) > 1e-20 else ""
+    )
+
 
 def textwrap(s, width=70):
     words = s.split()
@@ -767,40 +779,42 @@ def textwrap(s, width=70):
             current_length = len(word)
 
     lines.append(" ".join(current_line))
-    return '\n'.join(lines)
+    return "\n".join(lines)
+
 
 def debug_phase_fits(
-        phase_fits: pd.DataFrame,
-        tiles: pd.DataFrame,
-        freqs: NDArray[np.float_],
-        soln_xx: NDArray[np.complex_],
-        soln_yy: NDArray[np.complex_],
-        weights: NDArray[np.float_],
-        prefix: str = './',
-        show: bool = False,
-        title: str = '',
-        plot_residual: bool = False,
-        residual_vmax = None,
-    ) -> pd.DataFrame:
+    phase_fits: pd.DataFrame,
+    tiles: pd.DataFrame,
+    freqs: NDArray[np.float_],
+    soln_xx: NDArray[np.complex_],
+    soln_yy: NDArray[np.complex_],
+    weights: NDArray[np.float_],
+    prefix: str = "./",
+    show: bool = False,
+    title: str = "",
+    plot_residual: bool = False,
+    residual_vmax=None,
+) -> pd.DataFrame:
     import matplotlib as mpl
     from matplotlib import pyplot as plt
     from matplotlib.axes import Axes
     from matplotlib import cm
     from matplotlib.colors import LinearSegmentedColormap
+
     figsize = (20, 36)
-    mpl.rcParams['figure.figsize'] = figsize
+    mpl.rcParams["figure.figsize"] = figsize
 
     # make a new colormap for weighted data
     half_blues = LinearSegmentedColormap.from_list(
-        colors=cm.get_cmap('Blues')(np.linspace(0.5, 1, 256)),
-        name='HalfBlues',
+        colors=cm.get_cmap("Blues")(np.linspace(0.5, 1, 256)),
+        name="HalfBlues",
     )
 
     flavor_fits = pd.merge(phase_fits, tiles, left_on="tile_id", right_on="id")
 
     def ensure_system_byte_order(arr):
-        system_byte_order = '>' if sys.byteorder == 'big' else '<'
-        if arr.dtype.byteorder != system_byte_order and arr.dtype.byteorder not in '|=':
+        system_byte_order = ">" if sys.byteorder == "big" else "<"
+        if arr.dtype.byteorder != system_byte_order and arr.dtype.byteorder not in "|=":
             return arr.newbyteorder(system_byte_order)
         return arr
 
@@ -811,29 +825,25 @@ def debug_phase_fits(
 
     if plot_residual:
         plt.clf()
-        g = sns.FacetGrid(flavor_fits, row="flavor", col="pol", hue="flavor",
-                        sharex=True, sharey=False)
+        g = sns.FacetGrid(flavor_fits, row="flavor", col="pol", hue="flavor", sharex=True, sharey=False)
 
-        df = pd.DataFrame({
-            "freq": freqs,
-            "weights": weights,
-        })
+        df = pd.DataFrame(
+            {
+                "freq": freqs,
+                "weights": weights,
+            }
+        )
 
         def plot_residual(
-            soln_idxs: pd.Series,
-            pols: pd.Series,
-            flavs: pd.Series,
-            lengths: pd.Series,
-            intercepts: pd.Series,
-            **kwargs
+            soln_idxs: pd.Series, pols: pd.Series, flavs: pd.Series, lengths: pd.Series, intercepts: pd.Series, **kwargs
         ):
-            gradients = (2 * np.pi * u.rad * (lengths.to_numpy() * u.m) / c).to(u.rad/u.Hz).value
+            gradients = (2 * np.pi * u.rad * (lengths.to_numpy() * u.m) / c).to(u.rad / u.Hz).value
             intercepts = intercepts.to_numpy()
             pol = pols.iloc[0]
             flav = flavs.iloc[0]
-            if pol == 'XX':
+            if pol == "XX":
                 solns = soln_xx[soln_idxs.values]
-            elif pol == 'YY':
+            elif pol == "YY":
                 solns = soln_yy[soln_idxs.values]
             else:
                 raise RuntimeError(f"wut pol? {pol}")
@@ -843,21 +853,17 @@ def debug_phase_fits(
             min_mse = np.inf
             best_coeffs = None
             best_indep = None
-            mask = np.where(np.logical_and(
-                np.isfinite(medians),
-                np.logical_not(np.isnan(medians)),
-                weights > 0
-            ))[0]
+            mask = np.where(np.logical_and(np.isfinite(medians), np.logical_not(np.isnan(medians)), weights > 0))[0]
             df[f"{flav}_{pol}"] = medians
             # np.savetxt(
             #     f"{prefix}residuals_{flav}_{pol}.tsv",
             #     np.stack((freqs[mask], medians[mask])).transpose(),
             #     delimiter='\t'
             # )
-            for indep_var in ['ν', 'λ']:
-                if indep_var == 'ν':
+            for indep_var in ["ν", "λ"]:
+                if indep_var == "ν":
                     xs = freqs[mask]
-                elif indep_var == 'λ':
+                elif indep_var == "λ":
                     xs = 1.0 / freqs[mask]
 
                 for order in range(1, 9):
@@ -865,7 +871,9 @@ def debug_phase_fits(
                         coeffs = np.polyfit(xs, medians[mask], order)
                     except ValueError:
                         print(traceback.format_exc())
-                        print(f"Skipping polyfit({order=}, {indep_var=}) due to ValueError for {flav=} {pol=}.\n{xs=}\n{medians[mask]=}")
+                        print(
+                            f"Skipping polyfit({order=}, {indep_var=}) due to ValueError for {flav=} {pol=}.\n{xs=}\n{medians[mask]=}"
+                        )
                         continue
 
                     mse = order * np.nanmean((medians - np.poly1d(coeffs)(freqs)) ** 2)
@@ -874,32 +882,42 @@ def debug_phase_fits(
                         best_coeffs = coeffs
                         best_indep = indep_var
 
-            sns.scatterplot(x=freqs, y=medians, hue=weights, **dict(**kwargs, marker='+'))
+            sns.scatterplot(x=freqs, y=medians, hue=weights, **dict(**kwargs, marker="+"))
             if best_coeffs is not None and best_indep is not None:
                 sns.lineplot(x=freqs, y=np.poly1d(best_coeffs)(freqs), **kwargs)
                 eqn = poly_str(best_coeffs, independent_var=best_indep)
                 poly_wrap = textwrap(f"[{len(best_coeffs)}] {eqn}", width=40)
                 plt.text(0.05, 0.1, poly_wrap, transform=plt.gca().transAxes, fontsize=7)
             if residual_vmax is not None:
-                ylim=float(residual_vmax)
+                ylim = float(residual_vmax)
                 plt.ylim(-ylim, ylim)
 
             print(f"{flav=} {pol=} {eqn=}")
+
         g.map(plot_residual, "soln_idx", "pol", "flavor", "length", "intercept")
         g.set_axis_labels("freq", "phase")
         if title:
             plt.suptitle(title)
-        plt.savefig(f'{prefix}residual.png', dpi=200, bbox_inches='tight')
+        plt.savefig(f"{prefix}residual.png", dpi=200, bbox_inches="tight")
         # save df to csv
-        df.to_csv(f'{prefix}residual.tsv', sep='\t', index=False)
+        df.to_csv(f"{prefix}residual.tsv", sep="\t", index=False)
 
     plt.clf()
-    g = sns.FacetGrid(flavor_fits, row="flavor", col="pol", hue="flavor",
-        subplot_kws=dict(projection='polar'),
-        sharex=False, sharey=False, despine=False)
+    g = sns.FacetGrid(
+        flavor_fits,
+        row="flavor",
+        col="pol",
+        hue="flavor",
+        subplot_kws=dict(projection="polar"),
+        sharex=False,
+        sharey=False,
+        despine=False,
+    )
     g.map(
-        (lambda theta, r, size, **kwargs: plt.scatter(x=theta, y=r, s=10/(0.1 + size), **kwargs)),
-        "intercept", "length", "sigma_resid"
+        (lambda theta, r, size, **kwargs: plt.scatter(x=theta, y=r, s=10 / (0.1 + size), **kwargs)),
+        "intercept",
+        "length",
+        "sigma_resid",
     )
     if title:
         plt.suptitle(title)
@@ -907,64 +925,66 @@ def debug_phase_fits(
         plt.show()
     if prefix:
         plt.tight_layout()
-        plt.savefig(f'{prefix}intercepts.png', dpi=300, bbox_inches='tight')
+        plt.savefig(f"{prefix}intercepts.png", dpi=300, bbox_inches="tight")
 
     phase_fits = pd.merge(
         phase_fits[phase_fits["pol"] == "XX"].drop(columns=["pol"]),
         phase_fits[phase_fits["pol"] == "YY"].drop(columns=["pol", "soln_idx"]),
-        on=["tile_id"], suffixes=["_xx", "_yy"]
+        on=["tile_id"],
+        suffixes=["_xx", "_yy"],
     )
     phase_fits = pd.merge(phase_fits, tiles, left_on="tile_id", right_on="id")
     phase_fits.drop("id", axis=1, inplace=True)
     # tile_columns = ["soln_idx", "tile_id"] + [*(set(tiles.columns)-set(["id"]))]
     tile_columns = ["soln_idx", "name", "tile_id", "rx", "slot", "flavor"]
-    tile_columns += [*(set(tiles.columns)-set(tile_columns)-set(["id"]))]
+    tile_columns += [*(set(tiles.columns) - set(tile_columns) - set(["id"]))]
     print(f"{tile_columns=}")
     fit_columns = [column for column in phase_fits.columns if column not in tile_columns]
     fit_columns.sort()
     # fit_columns = sorted([*(set(fit_columns).difference(tile_columns))])
     print(f"{fit_columns=}")
     phase_fits = pd.concat([phase_fits[tile_columns], phase_fits[fit_columns]], axis=1)
-    weights = weights ** 2
+    weights = weights**2
 
     if prefix:
-        phase_fits.to_csv(f'{prefix}phase_fits.tsv', sep='\t', index=False)
+        phase_fits.to_csv(f"{prefix}phase_fits.tsv", sep="\t", index=False)
 
     rxs = np.sort(np.unique(phase_fits["rx"]))
     slots = np.sort(np.unique(phase_fits["slot"]))
 
-    for pol, soln in zip(['xx', 'yy'], [soln_xx, soln_yy]):
+    for pol, soln in zip(["xx", "yy"], [soln_xx, soln_yy]):
         plt.clf()
-        fig, axs = plt.subplots(len(rxs), len(slots), sharex=True, sharey='row', squeeze=True)
+        fig, axs = plt.subplots(len(rxs), len(slots), sharex=True, sharey="row", squeeze=True)
         for ax in axs.flatten():
-            ax.axis('off')
+            ax.axis("off")
         for _, fit in phase_fits.iterrows():
-            signal = soln[fit['soln_idx']]  # type: ignore
-            if fit['flag'] or np.isnan(signal).all():
+            signal = soln[fit["soln_idx"]]  # type: ignore
+            if fit["flag"] or np.isnan(signal).all():
                 continue
-            mask = np.where(np.logical_and(
-                np.isfinite(signal),
-                weights > 0
-            ))[0]
+            mask = np.where(np.logical_and(np.isfinite(signal), weights > 0))[0]
             angle = np.angle(signal)  # type: ignore
             mask_freq: ArrayLike = freqs[mask]  # type: ignore
             model_freqs = np.linspace(mask_freq.min(), mask_freq.max(), len(freqs))  # type: ignore
-            rx_idx = np.where(rxs == fit['rx'])[0][0]
-            slot_idx = np.where(slots == fit['slot'])[0][0]
+            rx_idx = np.where(rxs == fit["rx"])[0][0]
+            slot_idx = np.where(slots == fit["slot"])[0][0]
             ax: Axes = axs[rx_idx][slot_idx]  # type: ignore
-            ax.axis('on')
-            gradient = (2 * np.pi * u.rad * (fit[f'length_{pol}'] * u.m) / c).to(u.rad/u.Hz).value
-            intercept = fit[f'intercept_{pol}']
+            ax.axis("on")
+            gradient = (2 * np.pi * u.rad * (fit[f"length_{pol}"] * u.m) / c).to(u.rad / u.Hz).value
+            intercept = fit[f"intercept_{pol}"]
             model = gradient * model_freqs + intercept
-            ax.scatter(model_freqs, wrap_angle(model), c='red', s=0.5)
-            mask_weights: ArrayLike = weights[mask] # type: ignore
+            ax.scatter(model_freqs, wrap_angle(model), c="red", s=0.5)
+            mask_weights: ArrayLike = weights[mask]  # type: ignore
             ax.scatter(mask_freq, wrap_angle(angle[mask]), c=mask_weights, cmap=half_blues, s=2)
-            ax.set_title('\n'.join([
-                f"{fit['name']}|{fit['soln_idx']}",
-                f"X{fit[f'chi2dof_{pol}']:.4f}",
-                f"S{fit[f'sigma_resid_{pol}']:.4f}",
-                f"Q{fit[f'quality_{pol}']:.2f}",
-            ])) # |{fit['id']}
+            ax.set_title(
+                "\n".join(
+                    [
+                        f"{fit['name']}|{fit['soln_idx']}",
+                        f"X{fit[f'chi2dof_{pol}']:.4f}",
+                        f"S{fit[f'sigma_resid_{pol}']:.4f}",
+                        f"Q{fit[f'quality_{pol}']:.2f}",
+                    ]
+                )
+            )  # |{fit['id']}
 
         # fig.set_size_inches(*figsize)
         if title:
@@ -973,7 +993,7 @@ def debug_phase_fits(
             plt.show()
         if prefix:
             plt.tight_layout()
-            fig.savefig(f'{prefix}phase_fits_{pol}.png', dpi=300, bbox_inches='tight')
+            fig.savefig(f"{prefix}phase_fits_{pol}.png", dpi=300, bbox_inches="tight")
 
     return phase_fits
 
@@ -1116,9 +1136,7 @@ def get_convergence_summary(solutions_fits_file: str):
     summary.append(
         (
             "Fraction of converged channels",
-            (
-                f" {len(converged_channel_indices[0]) / len(results) * 100}%"
-            ),
+            (f" {len(converged_channel_indices[0]) / len(results) * 100}%"),
         )
     )
     summary.append(
@@ -1143,32 +1161,22 @@ def write_stats(
     Returns:
     bool = Success/fail
     str  = Error message if fail"""
-    logger.info(
-        f"{obs_id} Writing stats for {hyperdrive_solution_filename}..."
-    )
+    logger.info(f"{obs_id} Writing stats for {hyperdrive_solution_filename}...")
 
     try:
-        conv_summary_list = get_convergence_summary(
-            hyperdrive_solution_filename
-        )
+        conv_summary_list = get_convergence_summary(hyperdrive_solution_filename)
 
         with open(stats_filename, "w", encoding="UTF-8") as stats:
             for row in conv_summary_list:
                 stats.write(f"{row[0]}: {row[1]}\n")
 
         # Now run hyperdrive again to do some plots
-        cmd = (
-            f"{hyperdrive_binary_path} solutions-plot -m"
-            f" {metafits_filename} {hyperdrive_solution_filename}"
-        )
+        cmd = f"{hyperdrive_binary_path} solutions-plot -m" f" {metafits_filename} {hyperdrive_solution_filename}"
 
-        return_value, _ = run_command_ext(
-            logger, cmd, -1, timeout=10, use_shell=False
-        )
+        return_value, _ = run_command_ext(logger, cmd, -1, timeout=10, use_shell=False)
 
         logger.debug(
-            f"{obs_id} Finished running hyperdrive stats on"
-            f" {hyperdrive_solution_filename}. Return={return_value}"
+            f"{obs_id} Finished running hyperdrive stats on" f" {hyperdrive_solution_filename}. Return={return_value}"
         )
     except Exception as catch_all_exception:
         return False, str(catch_all_exception)
@@ -1178,9 +1186,7 @@ def write_stats(
             # Currently, hyperdrive writes the solution files to same dir as
             # the current directory mwax_calvin_processor is run from
             # Move them to the processing_complete dir
-            plot_filename_base = os.path.basename(
-                f"{os.path.splitext(hyperdrive_solution_filename)[0]}"
-            )
+            plot_filename_base = os.path.basename(f"{os.path.splitext(hyperdrive_solution_filename)[0]}")
 
             amps_plot_filename = f"{plot_filename_base}_amps.png"
             phase_plot_filename = f"{plot_filename_base}_phases.png"
@@ -1210,15 +1216,9 @@ def write_readme_file(logger, filename, cmd, exit_code, stdout, stderr):
     try:
         with open(filename, "w", encoding="UTF-8") as readme:
             if exit_code == 0:
-                readme.write(
-                    "This run succeded at:"
-                    f" {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n"
-                )
+                readme.write("This run succeded at:" f" {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
             else:
-                readme.write(
-                    "This run failed at:"
-                    f" {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n"
-                )
+                readme.write("This run failed at:" f" {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
             readme.write(f"Command: {cmd}")
             readme.write(f"Exit code: {exit_code}\n")
             readme.write(f"stdout: {stdout}\n")
@@ -1226,10 +1226,7 @@ def write_readme_file(logger, filename, cmd, exit_code, stdout, stderr):
 
     except Exception:
         logger.warning(
-            (
-                f"Could not write text file {filename} describing the"
-                " problem observation."
-            ),
+            (f"Could not write text file {filename} describing the" " problem observation."),
             exc_info=True,
         )
 
@@ -1243,11 +1240,18 @@ def run_birli(
 ) -> bool:
     """Execute Birli, returning true on success, false on failure"""
     birli_success: bool = False
+    start_time = time.time()
+    stderr = ""
+
     try:
         # Get only data files
         data_files = glob.glob(os.path.join(processing_dir, "*.fits"))
         # Remove the metafits (we specify it seperately)
-        data_files.remove(metafits_filename)
+        try:
+            data_files.remove(metafits_filename)
+        except ValueError:
+            # Metafits was not in the file list
+            raise Exception(f"Metafits file '{metafits_filename}' was not found. Cannot run birli.")
 
         data_file_arg = ""
         for data_file in data_files:
@@ -1263,11 +1267,7 @@ def run_birli(
             f" {data_file_arg}"
         )
 
-        start_time = time.time()
-
-        processor.birli_popen_process = run_command_popen(
-            processor.logger, cmdline, -1, False
-        )
+        processor.birli_popen_process = run_command_popen(processor.logger, cmdline, -1, False)
 
         exit_code, stdout, stderr = check_popen_finished(
             processor.logger,
@@ -1279,18 +1279,14 @@ def run_birli(
         elapsed = time.time() - start_time
 
         if exit_code == 0:
-            ## Success!
-            processor.logger.info(
-                f"{obs_id}: Birli run successful in {elapsed:.3f} seconds"
-            )
+            # Success!
+            processor.logger.info(f"{obs_id}: Birli run successful in {elapsed:.3f} seconds")
             birli_success = True
             processor.birli_popen_process = None
 
-            ## Success!
+            # Success!
             # Write out a useful file of command line info
-            readme_filename = os.path.join(
-                processing_dir, f"{obs_id}_birli_readme.txt"
-            )
+            readme_filename = os.path.join(processing_dir, f"{obs_id}_birli_readme.txt")
             write_readme_file(
                 processor.logger,
                 readme_filename,
@@ -1301,10 +1297,10 @@ def run_birli(
             )
         else:
             processor.logger.error(
-                f"{obs_id}: Birli run FAILED: Exit code of {exit_code} in"
-                f" {elapsed:.3f} seconds: {stderr}"
+                f"{obs_id}: Birli run FAILED: Exit code of {exit_code} in" f" {elapsed:.3f} seconds: {stderr}"
             )
     except Exception as hyperdrive_run_exception:
+        elapsed = time.time() - start_time
         processor.logger.error(
             f"{obs_id}: hyperdrive run FAILED: Unhandled exception"
             f" {hyperdrive_run_exception} in {elapsed:.3f} seconds:"
@@ -1322,8 +1318,7 @@ def run_birli(
         if processor.running:
             error_path = os.path.join(processor.processing_error_path, obs_id)
             processor.logger.info(
-                f"{obs_id}: moving failed files to {error_path} for manual"
-                " analysis and writing readme_error.txt"
+                f"{obs_id}: moving failed files to {error_path} for manual" " analysis and writing readme_error.txt"
             )
 
             # Move the processing dir
@@ -1352,8 +1347,7 @@ def run_hyperdrive(
 ) -> int:
     """Runs hyperdrive N times and returns number of successful runs"""
     processor.logger.info(
-        f"{obs_id}: {len(uvfits_files)} contiguous bands detected."
-        f" Running hyperdrive {len(uvfits_files)} times...."
+        f"{obs_id}: {len(uvfits_files)} contiguous bands detected." f" Running hyperdrive {len(uvfits_files)} times...."
     )
 
     # Keep track of the number of successful hyperdrive runs
@@ -1384,9 +1378,7 @@ def run_hyperdrive(
             start_time = time.time()
 
             # run hyperdrive
-            processor.hyperdrive_popen_process = run_command_popen(
-                processor.logger, cmdline, -1, False
-            )
+            processor.hyperdrive_popen_process = run_command_popen(processor.logger, cmdline, -1, False)
 
             exit_code, stdout, stderr = check_popen_finished(
                 processor.logger,
@@ -1451,8 +1443,7 @@ def run_hyperdrive(
         if processor.running:
             error_path = os.path.join(processor.processing_error_path, obs_id)
             processor.logger.info(
-                f"{obs_id}: moving failed files to {error_path} for manual"
-                " analysis and writing readme_error.txt"
+                f"{obs_id}: moving failed files to {error_path} for manual" " analysis and writing readme_error.txt"
             )
 
             # Move the processing dir
@@ -1521,13 +1512,8 @@ def run_hyperdrive_stats(
             )
 
     if stats_successful == len(uvfits_files):
-        processor.logger.info(
-            f"{obs_id}: All {stats_successful} hyperdrive stats"
-            " runs successful"
-        )
+        processor.logger.info(f"{obs_id}: All {stats_successful} hyperdrive stats" " runs successful")
         return True
     else:
-        processor.logger.warning(
-            f"{obs_id}: Not all hyperdrive stats runs were successful."
-        )
+        processor.logger.warning(f"{obs_id}: Not all hyperdrive stats runs were successful.")
         return False
