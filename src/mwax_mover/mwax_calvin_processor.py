@@ -625,7 +625,10 @@ class MWAXCalvinProcessor:
                     y_phase = PhaseFitInfo.nan()
 
                 if not some_fits:
-                    continue
+                    # we could `continue` here, which avoids inserting an empty row in the
+                    # database, however we want to stick to the old behaviour for now.
+                    # continue
+                    pass
 
                 success &= insert_calibration_solutions_row(
                     self.db_handler_object,
