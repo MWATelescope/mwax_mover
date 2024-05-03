@@ -1060,6 +1060,7 @@ def plot_phase_residual(
                     best_coeffs = coeffs
                     best_indep = indep_var
 
+        _ = kwargs.pop("label")
         sns.scatterplot(x=freqs, y=medians, hue=weights, **dict(**kwargs, marker="+"))
         if best_coeffs is not None and best_indep is not None:
             sns.lineplot(x=freqs, y=np.poly1d(best_coeffs)(freqs), **kwargs)
