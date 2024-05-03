@@ -592,15 +592,18 @@ class MWAXCalvinProcessor:
 
             if success:
 
-                fit_id = time.time()
-
-                insert_calibration_fits_row(
+                (success, fit_id) = insert_calibration_fits_row(
                     self.db_handler_object,
-                    fit_id,
-                    obs_id,
-                    version.get_mwax_mover_version_string(),
+                    obs_id=obs_id,
+                    code_version=version.get_mwax_mover_version_string(),
+                    creator="calvin",
                     fit_niter=self.phase_fit_niter,
+                    fit_limit=20,
                 )
+
+                if not success:
+                    self.logger.error(f"{item} - failed to insert calibration fit")
+                    return False
 
                 for tile_id in soln_tile_ids:
                     some_fits = False

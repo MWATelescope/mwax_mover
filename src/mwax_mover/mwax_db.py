@@ -454,7 +454,8 @@ def insert_calibration_fits_row(
             )
 
             db_handler_object.logger.info(
-                f"{obs_id}: insert_calibration_fits_row() Successfully wrote" " into calibration_fits table"
+                f"{obs_id}: insert_calibration_fits_row() Successfully wrote "
+                f"into calibration_fits table. fit_id={fit_id}"
             )
             return (True, fit_id)
 
