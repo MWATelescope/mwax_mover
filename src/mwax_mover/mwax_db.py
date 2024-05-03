@@ -1,6 +1,7 @@
 """Module for database operations"""
 
 import os
+import math
 import threading
 import time
 from typing import Optional, Tuple
@@ -424,7 +425,8 @@ def insert_calibration_fits_row(
         " VALUES (%s,%s,%s,now(),%s,%s,%s);"
     )
 
-    fit_id = time.time()
+    # Fit ID is the Unix timestamp to nearest integer
+    fit_id = math.floor(time.time())
 
     sql_values = (
         fit_id,
