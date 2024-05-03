@@ -867,7 +867,7 @@ class MWAXCalvinProcessor:
         self.metadata_webservice_url = utils.read_config(
             self.logger,
             config,
-            "general",
+            "mwax mover",
             "metadata_webservice_url",
         )
 
