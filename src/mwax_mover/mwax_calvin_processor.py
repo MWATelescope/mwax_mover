@@ -307,7 +307,9 @@ class MWAXCalvinProcessor:
             #
             # perform web service call to get list of data files from obsid
             #
-            json_metadata = utils.get_data_files_for_obsid_from_webservice(obs_id, self.metadata_webservice_url)
+            json_metadata = utils.get_data_files_for_obsid_from_webservice(
+                self.logger, obs_id, self.metadata_webservice_url
+            )
 
             if json_metadata:
                 #
@@ -343,7 +345,8 @@ class MWAXCalvinProcessor:
                 # This is usually because there ARE no files in the database
                 # Best to fail
                 self.logger.error(
-                    f"utils.get_data_files_for_obsid_from_webservice({obs_id}, {self.metadata_webservice_url}) did not return any files."
+                    f"utils.get_data_files_for_obsid_from_webservice({obs_id}, "
+                    f"{self.metadata_webservice_url}) did not return any files."
                 )
                 return False
         else:
