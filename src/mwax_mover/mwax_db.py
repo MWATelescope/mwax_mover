@@ -506,14 +506,14 @@ def insert_calibration_solutions_row(
                                                 x_gains_sigma_resid,y_gains_sigma_resid,
                                                 x_gains_pol0,y_gains_pol0)
                             VALUES (%s,%s,%s,
-                                    %s,%s,ARRAY[%s],
-                                    %s,%s,ARRAY[%s],
-                                    ARRAY[%s],ARRAY[%s],
                                     %s,%s,%s,
                                     %s,%s,%s,
                                     %s,%s,
-                                    ARRAY[%s],ARRAY[%s],
-                                    ARRAY[%s],ARRAY[%s])"""
+                                    %s,%s,%s,
+                                    %s,%s,%s,
+                                    %s,%s,
+                                    %s,%s,
+                                    %s,%s)"""
 
     # Create the tuple of values
     sql_values = (
