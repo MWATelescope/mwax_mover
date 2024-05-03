@@ -69,6 +69,7 @@ class MWAXCalvinProcessor:
         self.health_multicast_ip = None
         self.health_multicast_port = None
         self.health_multicast_hops = None
+        self.metadata_webservice_url = None
 
         self.running = False
         self.ready_to_exit = False
@@ -91,6 +92,7 @@ class MWAXCalvinProcessor:
         self.processing_queue = queue.Queue()
         self.source_list_filename = None
         self.source_list_type = None
+        self.phase_fit_niter = None
 
         # Upload
         self.upload_path = None
@@ -305,7 +307,7 @@ class MWAXCalvinProcessor:
             #
             # perform web service call to get list of data files from obsid
             #
-            json_metadata = utils.get_data_files_for_obsid_from_webservice(obs_id)
+            json_metadata = utils.get_data_files_for_obsid_from_webservice(obs_id, self.metadata_webservice_url)
 
             if json_metadata:
                 #
@@ -340,7 +342,9 @@ class MWAXCalvinProcessor:
                 # Web service didn't return any files
                 # This is usually because there ARE no files in the database
                 # Best to fail
-                self.logger.error(f"utils.get_data_files_for_obsid_from_webservice({obs_id}) did not return any files.")
+                self.logger.error(
+                    f"utils.get_data_files_for_obsid_from_webservice({obs_id}, {self.metadata_webservice_url}) did not return any files."
+                )
                 return False
         else:
             self.logger.info(
@@ -514,169 +518,163 @@ class MWAXCalvinProcessor:
         by getting them into a format we can insert into
         the calibration database"""
 
-        phase_fit_niter = 3  # TODO(dev): get from config?
+        try:
+            # get obs_id
+            file_no_path = item.split("/")
+            obs_id = file_no_path[-1][0:10]
 
-        # get obs_id
-        file_no_path = item.split("/")
-        obs_id = file_no_path[-1][0:10]
+            metafits_files = glob.glob(os.path.join(item, "*_metafits.fits"))
+            # if len(metafits_files) > 1:
+            #     self.logger.warning(f"{item} - more than one metafits file found.")
 
-        metafits_files = glob.glob(os.path.join(item, "*_metafits.fits"))
-        # if len(metafits_files) > 1:
-        #     self.logger.warning(f"{item} - more than one metafits file found.")
+            self.logger.debug(f"{item} - {metafits_files=}")
+            fits_solution_files = sorted(glob.glob(os.path.join(item, "*_solutions.fits")))
+            # _bin_solution_files = glob.glob(os.path.join(item, "*_solutions.bin"))
+            self.logger.debug(f"{item} - uploading {fits_solution_files=}")
 
-        self.logger.debug(f"{item} - {metafits_files=}")
-        fits_solution_files = sorted(glob.glob(os.path.join(item, "*_solutions.fits")))
-        # _bin_solution_files = glob.glob(os.path.join(item, "*_solutions.bin"))
-        self.logger.debug(f"{item} - uploading {fits_solution_files=}")
-
-        soln_group = HyperfitsSolutionGroup(
-            [Metafits(f) for f in metafits_files], [HyperfitsSolution(f) for f in fits_solution_files]
-        )
-
-        # get tiles
-        tiles = soln_group.metafits_tiles_df
-        self.logger.debug(f"{item} - metafits tiles:\n{tiles.to_string(max_rows=999)}")
-
-        # determine refant
-        unflagged_tiles = tiles[tiles.flag == 0]
-        if not len(unflagged_tiles):
-            raise ValueError("No unflagged tiles found")
-        refant = unflagged_tiles.sort_values(by=["id"]).iloc[0]
-        self.logger.debug(f"{item} - {refant['name']=} ({refant['id']})")
-
-        # get channel info
-        chaninfo = soln_group.metafits_chan_info
-        self.logger.debug(f"{item} - {chaninfo=}")
-        all_coarse_chan_ranges = chaninfo.coarse_chan_ranges
-
-        if len(fits_solution_files) != len(all_coarse_chan_ranges):
-            raise RuntimeError(
-                f"{item} - number of solution files ({len(fits_solution_files)})"
-                f" does not match number of coarse chan ranges in metafits {len(all_coarse_chan_ranges)}"
+            soln_group = HyperfitsSolutionGroup(
+                [Metafits(f) for f in metafits_files], [HyperfitsSolution(f) for f in fits_solution_files]
             )
 
-        chanblocks_per_coarse = soln_group.chanblocks_per_coarse
-        # all_chanblocks_hz = soln_group.all_chanblocks_hz
-        all_chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz)
-        self.logger.debug(f"{item} - {chanblocks_per_coarse=}, {all_chanblocks_hz=}")
+            # get tiles
+            tiles = soln_group.metafits_tiles_df
+            self.logger.debug(f"{item} - metafits tiles:\n{tiles.to_string(max_rows=999)}")
 
-        soln_tile_ids, all_xx_solns, all_yy_solns = soln_group.get_solns(refant["name"])
+            # determine refant
+            unflagged_tiles = tiles[tiles.flag == 0]
+            if not len(unflagged_tiles):
+                raise ValueError("No unflagged tiles found")
+            refant = unflagged_tiles.sort_values(by=["id"]).iloc[0]
+            self.logger.debug(f"{item} - {refant['name']=} ({refant['id']})")
 
-        weights = soln_group.weights
+            # get channel info
+            chaninfo = soln_group.metafits_chan_info
+            self.logger.debug(f"{item} - {chaninfo=}")
+            all_coarse_chan_ranges = chaninfo.coarse_chan_ranges
 
-        phase_fits = self.process_phase_fits(
-            item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
-        )
-        gain_fits = self.process_gain_fits(
-            item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids
-        )
+            if len(fits_solution_files) != len(all_coarse_chan_ranges):
+                raise RuntimeError(
+                    f"{item} - number of solution files ({len(fits_solution_files)})"
+                    f" does not match number of coarse chan ranges in metafits {len(all_coarse_chan_ranges)}"
+                )
 
-        success = True
-        if ~np.any(np.isfinite(phase_fits["length"])):
-            self.logger.error(f"{item} - no valid phase fits found")
-            success = False
+            chanblocks_per_coarse = soln_group.chanblocks_per_coarse
+            # all_chanblocks_hz = soln_group.all_chanblocks_hz
+            all_chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz)
+            self.logger.debug(f"{item} - {chanblocks_per_coarse=}, {all_chanblocks_hz=}")
 
-        # phase_fits_pivot = debug_phase_fits(
-        #     phase_fits, tiles, all_chanblocks_hz, all_xx_solns[0], all_yy_solns[0], weights, f"{item}/"
-        # )
-        # phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
-        # self.logger.debug(f"{item} - fits:\n{phase_fits_pivot.to_string(max_rows=512)}")
+            soln_tile_ids, all_xx_solns, all_yy_solns = soln_group.get_solns(refant["name"])
 
-        if success:
+            weights = soln_group.weights
 
-            fit_id = time.time()
-
-            class DummyDBHandler(NamedTuple):
-                dummy: bool = True
-                logger: logging.Logger = self.logger
-
-            self.db_handler_object = DummyDBHandler()
-            # assert self.db_handler_object is not None, "No database handler object"
-
-            insert_calibration_fits_row(
-                self.db_handler_object,
-                fit_id,
-                obs_id,
-                0,  # TODO: code version?
-                fit_niter=phase_fit_niter,
+            phase_fits = self.process_phase_fits(
+                item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, self.phase_fit_niter
+            )
+            gain_fits = self.process_gain_fits(
+                item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids
             )
 
-            for tile_id in soln_tile_ids:
-                some_fits = False
-                try:
-                    x_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "XX")].iloc[0]
-                    some_fits = True
-                except IndexError:
-                    x_gains = GainFitInfo.nan()
+            success = True
+            if ~np.any(np.isfinite(phase_fits["length"])):
+                self.logger.error(f"{item} - no valid phase fits found")
+                success = False
 
-                try:
-                    y_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "YY")].iloc[0]
-                    some_fits = True
-                except IndexError:
-                    y_gains = GainFitInfo.nan()
+            # phase_fits_pivot = debug_phase_fits(
+            #     phase_fits, tiles, all_chanblocks_hz, all_xx_solns[0], all_yy_solns[0], weights, f"{item}/"
+            # )
+            # phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
+            # self.logger.debug(f"{item} - fits:\n{phase_fits_pivot.to_string(max_rows=512)}")
 
-                try:
-                    x_phase = phase_fits[(phase_fits.tile_id == tile_id) & (phase_fits.pol == "XX")].iloc[0]
-                    some_fits = True
-                except IndexError:
-                    x_phase = PhaseFitInfo.nan()
+            if success:
 
-                try:
-                    y_phase = phase_fits[(phase_fits.tile_id == tile_id) & (phase_fits.pol == "YY")].iloc[0]
-                    some_fits = True
-                except IndexError:
-                    y_phase = PhaseFitInfo.nan()
+                fit_id = time.time()
 
-                if not some_fits:
-                    continue
-
-                success &= insert_calibration_solutions_row(
+                insert_calibration_fits_row(
                     self.db_handler_object,
                     fit_id,
                     obs_id,
-                    tile_id,
-                    x_phase.length,
-                    x_phase.intercept,
-                    x_gains.gains,
-                    y_phase.length,
-                    y_phase.intercept,
-                    y_gains.gains,
-                    x_gains.pol1,
-                    y_gains.pol1,
-                    x_phase.sigma_resid,
-                    x_phase.chi2dof,
-                    x_phase.quality,
-                    y_phase.sigma_resid,
-                    y_phase.chi2dof,
-                    y_phase.quality,
-                    x_gains.quality,
-                    y_gains.quality,
-                    x_gains.sigma_resid,
-                    y_gains.sigma_resid,
-                    x_gains.pol0,
-                    y_gains.pol0,
+                    version.get_mwax_mover_version_string(),
+                    fit_niter=self.phase_fit_niter,
                 )
 
-                if not success:
-                    self.logger.error(f"{item} - failed to insert calibration solutions")
-                    break
+                for tile_id in soln_tile_ids:
+                    some_fits = False
+                    try:
+                        x_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "XX")].iloc[0]
+                        some_fits = True
+                    except IndexError:
+                        x_gains = GainFitInfo.nan()
 
-        # on success move to complete
-        if success:
-            # now move the whole dir
-            # to the complete path
-            if not self.complete_path:
-                raise ValueError("No complete path specified")
-            complete_path = os.path.join(self.complete_path, obs_id)
-            self.logger.info(f"{obs_id}: moving successfull files to" f" {complete_path} for review.")
-            shutil.move(item, complete_path)
+                    try:
+                        y_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "YY")].iloc[0]
+                        some_fits = True
+                    except IndexError:
+                        y_gains = GainFitInfo.nan()
 
-            if not self.keep_completed_visibility_files:
-                visibility_files = glob.glob(os.path.join(item, f"{obs_id}_*_*_*.fits"))
+                    try:
+                        x_phase = phase_fits[(phase_fits.tile_id == tile_id) & (phase_fits.pol == "XX")].iloc[0]
+                        some_fits = True
+                    except IndexError:
+                        x_phase = PhaseFitInfo.nan()
 
-                for file_to_delete in visibility_files:
-                    os.remove(file_to_delete)
-        return success
+                    try:
+                        y_phase = phase_fits[(phase_fits.tile_id == tile_id) & (phase_fits.pol == "YY")].iloc[0]
+                        some_fits = True
+                    except IndexError:
+                        y_phase = PhaseFitInfo.nan()
+
+                    if not some_fits:
+                        continue
+
+                    success &= insert_calibration_solutions_row(
+                        self.db_handler_object,
+                        fit_id,
+                        obs_id,
+                        tile_id,
+                        x_phase.length,
+                        x_phase.intercept,
+                        x_gains.gains,
+                        y_phase.length,
+                        y_phase.intercept,
+                        y_gains.gains,
+                        x_gains.pol1,
+                        y_gains.pol1,
+                        x_phase.sigma_resid,
+                        x_phase.chi2dof,
+                        x_phase.quality,
+                        y_phase.sigma_resid,
+                        y_phase.chi2dof,
+                        y_phase.quality,
+                        x_gains.quality,
+                        y_gains.quality,
+                        x_gains.sigma_resid,
+                        y_gains.sigma_resid,
+                        x_gains.pol0,
+                        y_gains.pol0,
+                    )
+
+                    if not success:
+                        self.logger.error(f"{item} - failed to insert calibration solutions")
+                        break
+
+            # on success move to complete
+            if success:
+                # now move the whole dir
+                # to the complete path
+                if not self.complete_path:
+                    raise ValueError("No complete path specified")
+                complete_path = os.path.join(self.complete_path, obs_id)
+                self.logger.info(f"{obs_id}: moving successfull files to" f" {complete_path} for review.")
+                shutil.move(item, complete_path)
+
+                if not self.keep_completed_visibility_files:
+                    visibility_files = glob.glob(os.path.join(item, f"{obs_id}_*_*_*.fits"))
+
+                    for file_to_delete in visibility_files:
+                        os.remove(file_to_delete)
+            return success
+        except Exception:
+            self.logger.exception("Error in upload_handler")
 
     def stop(self):
         """Shutsdown all processes"""
@@ -865,6 +863,14 @@ class MWAXCalvinProcessor:
             password=self.mro_metadatadb_pass,
         )
 
+        # metadata web service URL
+        self.metadata_webservice_url = utils.read_config(
+            self.logger,
+            config,
+            "general",
+            "metadata_webservice_url",
+        )
+
         #
         # Assembly config
         #
@@ -926,6 +932,15 @@ class MWAXCalvinProcessor:
                 "processing_error_path location " f" {self.processing_error_path} does not exist. Quitting."
             )
             sys.exit(1)
+
+        self.phase_fit_niter = int(
+            utils.read_config(
+                self.logger,
+                config,
+                "processing",
+                "phase_fit_niter",
+            )
+        )
 
         #
         # Hyperdrive config
