@@ -522,7 +522,7 @@ class MWAXCalvinProcessor:
         try:
             # get obs_id
             file_no_path = item.split("/")
-            obs_id = file_no_path[-1][0:10]
+            obs_id = int(file_no_path[-1][0:10])
 
             metafits_files = glob.glob(os.path.join(item, "*_metafits.fits"))
             # if len(metafits_files) > 1:
@@ -632,9 +632,9 @@ class MWAXCalvinProcessor:
 
                 success &= insert_calibration_solutions_row(
                     self.db_handler_object,
-                    fit_id,
-                    obs_id,
-                    tile_id,
+                    int(fit_id),
+                    int(obs_id),
+                    int(tile_id),
                     x_phase.length,
                     x_phase.intercept,
                     x_gains.gains,
@@ -667,7 +667,7 @@ class MWAXCalvinProcessor:
                 # to the complete path
                 if not self.complete_path:
                     raise ValueError("No complete path specified")
-                complete_path = os.path.join(self.complete_path, obs_id)
+                complete_path = os.path.join(self.complete_path, str(obs_id))
                 self.logger.info(f"{obs_id}: moving successfull files to" f" {complete_path} for review.")
                 shutil.move(item, complete_path)
 
