@@ -880,12 +880,12 @@ def should_project_be_archived(project_id: str) -> bool:
         return True
 
 
-def get_data_files_for_obsid_from_webservice(obsid: int):
+def get_data_files_for_obsid_from_webservice(obsid: int, metadata_webservice_url: str):
     """Calls an MWA webservice, passing in an obsid and returning a json metadata structure
     of all the data_files - all_files: True means to get all files whether they are
     archived at Pawsey or not"""
     result = requests.get(
-        "http://ws.mwatelescope.org/metadata/data_files",
+        f"{metadata_webservice_url}/metadata/data_files",
         data={"obs_id": obsid, "terse": False, "all_files": True},
     )
     if result.text:
