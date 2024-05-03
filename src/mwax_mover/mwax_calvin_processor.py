@@ -859,7 +859,7 @@ class MWAXCalvinProcessor:
             self.mro_metadatadb_port = None
 
         # Initiate database connection for rmo metadata db
-        self.mro_db_handler_object = mwax_db.MWAXDBHandler(
+        self.db_handler_object = mwax_db.MWAXDBHandler(
             logger=self.logger,
             host=self.mro_metadatadb_host,
             port=self.mro_metadatadb_port,
