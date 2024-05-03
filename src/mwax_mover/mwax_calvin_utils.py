@@ -1285,7 +1285,11 @@ def write_stats(
                 stats.write(f"{row[0]}: {row[1]}\n")
 
         # Now run hyperdrive again to do some plots
-        cmd = f"{hyperdrive_binary_path} solutions-plot -m" f" {metafits_filename} {hyperdrive_solution_filename}"
+        hyp_soln_plot_args = "--max-amp 2 --no-ref-tile"
+        cmd = (
+            f"{hyperdrive_binary_path} solutions-plot {hyp_soln_plot_args} "
+            f"-m" f" {metafits_filename} {hyperdrive_solution_filename}"
+        )
 
         return_value, _ = run_command_ext(logger, cmd, -1, timeout=10, use_shell=False)
 
