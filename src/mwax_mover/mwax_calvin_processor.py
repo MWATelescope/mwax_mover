@@ -29,9 +29,7 @@ from mwax_mover import (
 )
 import numpy as np
 import pandas as pd
-
-# import itertools
-import numpy.typing
+import traceback
 
 from mwax_mover.mwax_db import insert_calibration_fits_row, insert_calibration_solutions_row
 from mwax_mover.mwax_mover import (
@@ -685,7 +683,7 @@ class MWAXCalvinProcessor:
                         os.remove(file_to_delete)
             return success
         except Exception:
-            self.logger.exception("Error in upload_handler")
+            self.logger.exception(f"Error in upload_handler:\n{traceback.format_exc()}")
 
     def stop(self):
         """Shutsdown all processes"""
