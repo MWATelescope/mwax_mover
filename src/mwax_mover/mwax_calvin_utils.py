@@ -1185,127 +1185,6 @@ def pivot_phase_fits(
     return phase_fits
 
 
-# Greg: Here starts my WIP for trying to emulate Marcin's code
-# If you uncomment below blocks of code you'll need to import struct, namedtuple and get_mwax_mover_version_string
-
-
-# def read_cal_solutions(logger, obs_id, metafits_filename, solution_bin_file):
-#     """Reads in a single aocal (.bin) calibration solution and returns
-#     a list of tuples containing the cal solution info:
-#     """
-#     tile_info = []
-
-#     # Get tile info from metafits
-#     with fits.open(metafits_filename) as metafits_hdul:
-#         metafits_tiles = metafits_hdul[1].data  # pylint: disable=no-member
-
-#         for metafits_tile in metafits_tiles:
-#             tile = Tile()
-#             tile.tile_name = metafits_tile["TileName"]
-#             tile.tile_id = metafits_tile["Tile"]
-#             tile.flag = metafits_tile["Flag"]
-#             tile.tile_index = metafits_tile["Antenna"]
-
-#             tile_info.append(tile)
-
-#     # Loop through the bin file and get info per tile and pol (xx,xy,yx,yy)
-#     Header = namedtuple(
-#         "header",
-#         (
-#             "intro fileType structureType intervalCount antennaCount"
-#             " channelCount polarizationCount timeStart timeEnd"
-#         ),
-#     )
-#     HEADER_INTRO = "MWAOCAL\0"
-#     HEADER_FORMAT = "8s6I2d"
-#     HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
-#     Header.__new__.__defaults__ = (HEADER_INTRO, 0, 0, 0, 0, 0, 0, 0.0, 0.0)
-
-#     with open(solution_bin_file, "rb") as cal_file:
-#         header_string = cal_file.read(struct.calcsize(HEADER_FORMAT))
-#         header = Header._make(struct.unpack(HEADER_FORMAT, header_string))
-#         assert header.intro == HEADER_INTRO, "File is not a calibrator file"
-#         assert header.fileType == 0, (
-#             "fileType not recognised. Only 0 (complex Jones solutions) is"
-#             " recognised in mwatools/solutionfile.h as of 2013-08-30"
-#         )
-#         assert header.structureType == 0, (
-#             "structureType not recognised. Only 0 (ordered real/imag,"
-#             " polarization, channel, antenna, time) is recognised in"
-#             " mwatools/solutionfile.h as of 2013-08-30"
-#         )
-#         count = (
-#             header.intervalCount
-#             * header.antennaCount
-#             * header.channelCount
-#             * header.polarizationCount
-#         )
-#         assert os.path.getsize(
-#             solution_bin_file
-#         ) == HEADER_SIZE + 2 * count * struct.calcsize(
-#             "d"
-#         ), "File is the wrong size."
-
-
-# def get_calibration_fits(logger, db_handler, obs_id) -> bool:
-#     """Inserts a calibration fits row"""
-#     success = True
-#     fit_id = time.time()
-#     code_version = get_mwax_mover_version_string()
-
-#     insert_calibration_fits_row(
-#         db_handler, fit_id, obs_id, code_version, "mwax_calvin_processor"
-#     )
-#     return success
-
-
-# def insert_calibration_solutions(
-#     logger, db_handler, obs_id, fit_id, solution_bin_files
-# ) -> bool:
-#     """Given calibration bin files for an obsid,
-#     generate the data needed for the calibration_solution rows.
-#     """
-#     tiles = [
-#         1,
-#     ]
-
-#     for tile_id in tiles:
-#         pass
-#         # insert_calibration_solutions_row(
-#         #     db_handler,
-#         #     fit_id,
-#         #     obs_id,
-#         #     tile_id,
-#         #     x_delay_m,
-#         #     x_intercept,
-#         #     x_gains,
-#         #     y_delay_m,
-#         #     y_intercept,
-#         #     y_gains,
-#         #     x_gains_pol1,
-#         #     y_gains_pol1,
-#         #     x_phase_sigma_resid,
-#         #     x_phase_chi2dof,
-#         #     x_phase_fit_quality,
-#         #     y_phase_sigma_resid,
-#         #     y_phase_chi2dof,
-#         #     y_phase_fit_quality,
-#         #     x_gains_fit_quality,
-#         #     y_gains_fit_quality,
-#         #     x_gains_sigma_resid,
-#         #     y_gains_sigma_resid,
-#         #     x_gains_pol0,
-#         #     y_gains_pol0,
-#         # )
-#     success = True
-#     return success
-
-
-#
-# Here Ends my WIP for trying to emulate Marcin's code
-#
-
-
 def get_convergence_summary(solutions_fits_file: str):
     """Returns a list of tuples which represent a summary
     of the convergence of the solutions"""
@@ -1560,7 +1439,7 @@ def run_hyperdrive(
             cmdline = (
                 f"{processor.hyperdrive_binary_path} di-calibrate"
                 " --no-progress-bars --data"
-                f" {uvfits_file} {metafits_filename} --num-sources 5"
+                f" {uvfits_file} {metafits_filename} --num-sources 99"
                 " --source-list"
                 f" {processor.source_list_filename} --source-list-type"
                 f" {processor.source_list_type} --outputs"
