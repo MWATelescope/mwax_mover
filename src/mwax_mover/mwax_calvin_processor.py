@@ -30,6 +30,7 @@ from mwax_mover import (
 import numpy as np
 import pandas as pd
 import traceback
+import coloredlogs
 
 from mwax_mover.mwax_db import insert_calibration_fits_row, insert_calibration_solutions_row
 from mwax_mover.mwax_mover import (
@@ -818,6 +819,9 @@ class MWAXCalvinProcessor:
         console_log.setLevel(logging.DEBUG)
         console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(console_log)
+
+        if config.getboolean("mwax mover", "coloredlogs", fallback=False):
+            coloredlogs.install(level="DEBUG", logger=self.logger)
 
         file_log = logging.FileHandler(filename=os.path.join(self.log_path, "main.log"))
         file_log.setLevel(logging.DEBUG)

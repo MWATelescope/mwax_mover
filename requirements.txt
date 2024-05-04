@@ -1,6 +1,7 @@
 astropy==5.*
 autopage
 boto3==1.*
+coloredlogs
 cffi
 cliff
 cmd2
