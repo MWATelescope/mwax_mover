@@ -13,6 +13,8 @@ from astropy.constants import c
 from scipy.optimize import minimize
 import pandas as pd
 import seaborn as sns
+import matplotlib as mpl
+from matplotlib import pyplot as plt
 from mwax_mover.mwax_command import (
     run_command_ext,
     run_command_popen,
@@ -883,13 +885,25 @@ def debug_phase_fits(
     - plot residuals
     - return pivoted dataframe
     """
-    import matplotlib as mpl
-    from matplotlib import pyplot as plt
+    n_total = len(phase_fits)
+    if n_total == 0:
+        return
+
+    phase_fits = reject_outliers(phase_fits, 'chi2dof')
+    phase_fits = reject_outliers(phase_fits, 'sigma_resid')
+
+    n_good = len(phase_fits[~phase_fits["outlier"]])
+    if n_good == 0:
+        return
+
+    flavor_fits = pd.merge(phase_fits, tiles, left_on="tile_id", right_on="id")
+    bad_fits = flavor_fits[flavor_fits["outlier"]]
+    if len(bad_fits) > 0:
+        print(f"flagged {len(bad_fits)} of {n_total} fits as outliers:")
+        print(bad_fits[['name', 'pol']].to_string(index=False))
+
     from matplotlib import cm
     from matplotlib.colors import LinearSegmentedColormap
-
-    figsize = (20, 36)
-    mpl.rcParams["figure.figsize"] = figsize
 
     # make a new colormap for weighted data
     half_blues = LinearSegmentedColormap.from_list(
@@ -897,7 +911,9 @@ def debug_phase_fits(
         name="HalfBlues",
     )
 
-    flavor_fits = pd.merge(phase_fits, tiles, left_on="tile_id", right_on="id")
+    if len(flavor_fits):
+        rx_means = plot_rx_lengths(flavor_fits, prefix, show, title)
+        # print(f"{rx_means=}")
 
     def ensure_system_byte_order(arr):
         system_byte_order = ">" if sys.byteorder == "big" else "<"
@@ -912,10 +928,10 @@ def debug_phase_fits(
 
     if plot_residual:
         plot_phase_residual(
-            freqs, soln_xx, soln_yy, weights, prefix, title, plot_residual, residual_vmax, plt, flavor_fits
+            freqs, soln_xx, soln_yy, weights, prefix, title, plot_residual, residual_vmax, flavor_fits
         )
     if len(flavor_fits):
-        plot_phase_intercepts(prefix, show, title, plt, flavor_fits)
+        plot_phase_intercepts(prefix, show, title, flavor_fits)
 
     phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
     weights2 = weights**2
@@ -924,12 +940,60 @@ def debug_phase_fits(
         phase_fits_pivot.to_csv(f"{prefix}phase_fits.tsv", sep="\t", index=False)
 
     if len(phase_fits_pivot):
-        plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, plt, half_blues, phase_fits_pivot, weights2)
+        plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, half_blues, phase_fits_pivot, weights2)
 
     return phase_fits_pivot
 
+def reject_outliers(data, quality_key, nstd=3.0):
+    if nstd == 0:
+        return data
+    if 'outlier' not in data.columns:
+        data['outlier'] = False
+    for pol in data['pol'].unique():
+        idx_pol_good = np.where(np.logical_and(data['pol'] == pol, ~data['outlier']))[0]
+        quality_thresh = data.loc[idx_pol_good, quality_key].mean() + nstd * data.loc[idx_pol_good, quality_key].std()
+        if nstd >= 0:
+            data.loc[data[quality_key] >= quality_thresh, "outlier"] = True
+        else:
+            data.loc[data[quality_key] <= quality_thresh, "outlier"] = True
 
-def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, plt, cmap, phase_fits_pivot, weights2):
+    return data
+
+
+def plot_rx_lengths(flavor_fits, prefix, show, title):
+    good_fits = flavor_fits[~flavor_fits["outlier"]]
+    rxs = sorted(good_fits["rx"].unique())
+    means = good_fits.groupby(['rx'])['length'].mean()
+
+    plt.clf()
+    box_plot = sns.boxplot(data=good_fits, y="rx", x="length", hue="pol", orient='h', fliersize=0.5)
+    # offset = good_fits['length'].median() * 0.05 # offset from median for display
+    box_plot.grid(axis="x")
+    x_text = np.max(box_plot.get_xlim())
+
+    for ytick in box_plot.get_yticks():
+        rx = rxs[ytick]
+        mean = means[rx]
+        box_plot.text(
+            x_text, ytick, f"rx{rx:02} = {mean:+6.2f}m",
+            horizontalalignment='left', weight='semibold', fontfamily='monospace'
+        )
+        box_plot.add_line(plt.Line2D([mean, mean], [ytick - 0.5, ytick + 0.5], color='red', linewidth=1))
+
+    if title:
+        plt.suptitle(title)
+    if show:
+        plt.show()
+    if prefix:
+        plt.tight_layout()
+        plt.savefig(f"{prefix}rx_lengths.png", dpi=300, bbox_inches="tight")
+
+    return means
+
+def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fits_pivot, weights2):
+    figsize = (20, 30)
+    mpl.rcParams["figure.figsize"] = figsize
+
     rxs = np.sort(np.unique(phase_fits_pivot["rx"]))
     slots = np.sort(np.unique(phase_fits_pivot["slot"]))
 
@@ -956,16 +1020,28 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, plt, cmap, pha
             ax.scatter(model_freqs, wrap_angle(model), c="red", s=0.5)
             mask_weights: ArrayLike = weights2[mask]  # type: ignore
             ax.scatter(mask_freq, wrap_angle(angle[mask]), c=mask_weights, cmap=cmap, s=2)
+            outlier = fit[f'outlier_{pol}']
+            color = "red" if outlier else "black"
             ax.set_title(
-                "\n".join(
-                    [
-                        f"{fit['name']}|{fit['soln_idx']}",
-                        f"X{fit[f'chi2dof_{pol}']:.4f}",
-                        f"S{fit[f'sigma_resid_{pol}']:.4f}",
-                        f"Q{fit[f'quality_{pol}']:.2f}",
-                    ]
-                )
+                f"{fit['name']}|{fit['soln_idx']}", color=color,
+                weight='semibold', fontfamily='monospace'
             )  # |{fit['id']}
+            x_text = np.mean(ax.get_xlim())
+            y_text = np.mean(ax.get_ylim())
+            text = "\n".join([
+                f"L{fit[f'length_{pol}']:+6.2f}m",
+                f"X{fit[f'chi2dof_{pol}']:.4f}",
+                # f"S{fit[f'sigma_resid_{pol}']:.4f}",
+                # f"Q{fit[f'quality_{pol}']:.2f}",
+            ])
+            ax.text(
+                x_text, y_text, text,
+                ha="center", va="center",
+                zorder=10,
+                horizontalalignment='left',
+                weight='semibold', fontfamily='monospace',
+                color=color, backgroundcolor=("white", 0.5)
+            )
 
         # fig.set_size_inches(*figsize)
         if title:
@@ -977,7 +1053,7 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, plt, cmap, pha
             fig.savefig(f"{prefix}phase_fits_{pol}.png", dpi=300, bbox_inches="tight")
 
 
-def plot_phase_intercepts(prefix, show, title, plt, flavor_fits):
+def plot_phase_intercepts(prefix, show, title, flavor_fits):
     plt.clf()
     g = sns.FacetGrid(
         flavor_fits,
@@ -1005,7 +1081,7 @@ def plot_phase_intercepts(prefix, show, title, plt, flavor_fits):
 
 
 def plot_phase_residual(
-    freqs, soln_xx, soln_yy, weights, prefix, title, plot_residual, residual_vmax, plt, flavor_fits
+    freqs, soln_xx, soln_yy, weights, prefix, title, plot_residual, residual_vmax, flavor_fits
 ):
     plt.clf()
     g = sns.FacetGrid(flavor_fits, row="flavor", col="pol", hue="flavor", sharex=True, sharey=False)
@@ -1101,14 +1177,10 @@ def pivot_phase_fits(
     )
     phase_fits = pd.merge(phase_fits, tiles, left_on="tile_id", right_on="id")
     phase_fits.drop("id", axis=1, inplace=True)
-    # tile_columns = ["soln_idx", "tile_id"] + [*(set(tiles.columns)-set(["id"]))]
     tile_columns = ["soln_idx", "name", "tile_id", "rx", "slot", "flavor"]
     tile_columns += [*(set(tiles.columns) - set(tile_columns) - set(["id"]))]
-    print(f"{tile_columns=}")
     fit_columns = [column for column in phase_fits.columns if column not in tile_columns]
     fit_columns.sort()
-    # fit_columns = sorted([*(set(fit_columns).difference(tile_columns))])
-    print(f"{fit_columns=}")
     phase_fits = pd.concat([phase_fits[tile_columns], phase_fits[fit_columns]], axis=1)
     return phase_fits
 
