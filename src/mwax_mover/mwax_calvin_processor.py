@@ -575,12 +575,12 @@ class MWAXCalvinProcessor:
                 item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids
             )
 
-            if ~np.any(np.isfinite(phase_fits["length"])):
-                self.logger.warning(f"{item} - no valid phase fits found, continuing anyway")
+            # if ~np.any(np.isfinite(phase_fits["length"])):
+            #     self.logger.warning(f"{item} - no valid phase fits found, continuing anyway")
 
-            # phase_fits_pivot = debug_phase_fits(
-            #     phase_fits, tiles, all_chanblocks_hz, all_xx_solns[0], all_yy_solns[0], weights, f"{item}/"
-            # )
+            phase_fits_pivot = debug_phase_fits(
+                phase_fits, tiles, all_chanblocks_hz, all_xx_solns[0], all_yy_solns[0], weights, f"{item}/"
+            )
             # phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
             # self.logger.debug(f"{item} - fits:\n{phase_fits_pivot.to_string(max_rows=512)}")
             success = True

@@ -914,8 +914,8 @@ def debug_phase_fits(
         plot_phase_residual(
             freqs, soln_xx, soln_yy, weights, prefix, title, plot_residual, residual_vmax, plt, flavor_fits
         )
-
-    plot_phase_intercepts(prefix, show, title, plt, flavor_fits)
+    if len(flavor_fits):
+        plot_phase_intercepts(prefix, show, title, plt, flavor_fits)
 
     phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
     weights2 = weights**2
@@ -923,7 +923,8 @@ def debug_phase_fits(
     if prefix:
         phase_fits_pivot.to_csv(f"{prefix}phase_fits.tsv", sep="\t", index=False)
 
-    plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, plt, half_blues, phase_fits_pivot, weights2)
+    if len(phase_fits_pivot):
+        plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, plt, half_blues, phase_fits_pivot, weights2)
 
     return phase_fits_pivot
 
