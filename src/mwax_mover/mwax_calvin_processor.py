@@ -583,8 +583,18 @@ class MWAXCalvinProcessor:
             # self.logger.debug(f"{item} - fits:\n{phase_fits_pivot.to_string(max_rows=512)}")
             success = True
 
-            (success, fit_id, transaction_cursor) = insert_calibration_fits_row(
+            # get a database connection, unless we are using dummy connection (for testing)
+            conn = None
+            transaction_cursor = None
+            if not self.db_handler_object.dummy:
+                conn = self.db_handler_object.pool.getconn()
+
+                # Create a cursor
+                transaction_cursor = conn.cursor()
+
+            (success, fit_id) = insert_calibration_fits_row(
                 self.db_handler_object,
+                transaction_cursor,
                 obs_id=obs_id,
                 code_version=version.get_mwax_mover_version_string(),
                 creator="calvin",
@@ -597,7 +607,7 @@ class MWAXCalvinProcessor:
 
                 if transaction_cursor:
                     # Rollback the calibration_fit row
-                    self.db_handler_object.con.rollback()
+                    conn.rollback()
                     # close the cursor
                     transaction_cursor.close()
                 return False
@@ -666,7 +676,7 @@ class MWAXCalvinProcessor:
                     self.logger.error(f"{item} - failed to insert calibration solution for tile {tile_id}")
                     if transaction_cursor:
                         # Rollback the calibration_fit row and any solutions rows already inserted
-                        self.db_handler_object.con.rollback()
+                        conn.rollback()
                         # close the cursor
                         transaction_cursor.close()
 
@@ -677,7 +687,7 @@ class MWAXCalvinProcessor:
                 # The whole calibration solution was inserted ok. Commit the transation
                 # unless we are a dummy db_handler
                 if transaction_cursor:
-                    self.db_handler_object.con.commit()
+                    conn.commit()
                     transaction_cursor.close()
 
                 # now move the whole dir
@@ -698,6 +708,10 @@ class MWAXCalvinProcessor:
         except Exception:
             self.logger.exception(f"Error in upload_handler:\n{traceback.format_exc()}")
             return False
+        finally:
+            if not self.db_handler_object.dummy:
+                if conn:
+                    self.db_handler_object.pool.putconn(conn)
 
     def stop(self):
         """Shutsdown all processes"""
