@@ -139,10 +139,10 @@ class MWAXDBHandler:
                 self.logger.error(f"select_one_row_postgres(): unknown Error- {exception_info}")
                 raise exception_info
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(30))
     def execute_single_dml_row(self, sql: str, parm_list: list):
         """This executes an INSERT, UPDATE or DELETE that should only affect
-        one row"""
+        one row. Since this is all in a with (context) block, rollback is
+        called on failure and commit on success."""
 
         # We have a mutex here to ensure only 1 user of the connection at a
         # time
@@ -201,6 +201,68 @@ class MWAXDBHandler:
                 # connection based
                 self.logger.error(f"execute_single_dml_row(): unknown Error- {exception_info}")
                 raise exception_info
+
+
+def execute_dml_row_within_transaction(self, sql: str, parm_list: list, transaction_cursor: psycopg2.cursor):
+    """This executes an INSERT, UPDATE or DELETE that should only affect
+    one row.
+
+    NOTES: it is up to the caller to supply a cursor which all of the operations
+    within the transaction share. Also it is up to the caller to call self.con.commit() or
+    self.con.rollback() at the conclusion of the operations (or on error)"""
+
+    # We have a mutex here to ensure only 1 user of the connection at a
+    # time
+    with self.db_lock:
+        # Assuming we have a connection, try to do the database operation
+        # using our cursor
+        try:
+            # Run the sql
+            transaction_cursor.execute(sql, parm_list)
+
+            # Check how many rows we affected
+            rows_affected = transaction_cursor.rowcount
+
+            if rows_affected != 1:
+                # An exception in here will trigger a rollback
+                # which is good
+                self.logger.error(
+                    "execute_dml_row_within_transaction(): Error- query"
+                    f" affected {rows_affected} rows, expected 1."
+                    f" SQL={sql}"
+                )
+                raise Exception(
+                    "execute_dml_row_within_transaction(): Error- query"
+                    f" affected {rows_affected} rows, expected 1."
+                    f" SQL={sql}"
+                )
+
+        except OperationalError as conn_error:
+            # Our connection is toast. Clear it so we attempt a reconnect
+            self.con = None
+            self.logger.error(f"execute_single_dml_row(): postgres OperationalError- {conn_error}")
+            # Reraise error
+            raise conn_error
+
+        except InterfaceError as int_error:
+            # Our connection is toast. Clear it so we attempt a reconnect
+            self.con = None
+            self.logger.error(f"execute_single_dml_row(): postgres InterfaceError- {int_error}")
+            # Reraise error
+            raise int_error
+
+        except psycopg2.ProgrammingError as prog_error:
+            # A programming/SQL error - e.g. table does not exist. Don't
+            # reconnect connection
+            self.logger.error(f"execute_single_dml_row(): postgres ProgrammingError- {prog_error}")
+            # Reraise error
+            raise prog_error
+
+        except Exception as exception_info:
+            # Any other error- likely to be a database error rather than
+            # connection based
+            self.logger.error(f"execute_single_dml_row(): unknown Error- {exception_info}")
+            raise exception_info
 
 
 #
@@ -413,7 +475,7 @@ def insert_calibration_fits_row(
     creator: str,
     fit_niter: int = 10,
     fit_limit: int = 20,
-) -> Tuple[bool, int]:
+) -> Tuple[bool, int, Optional[psycopg2.cursor]]:
     """Inserts a new calibration_fits row and return the fit_id if successful
     This row represents the calibration 'header' for an obsid."""
     sql = (
@@ -445,18 +507,18 @@ def insert_calibration_fits_row(
                     f"'{sql}' Values: {sql_values}"
                 )
                 time.sleep(1)  # simulate a slow transaction
-                return (True, fit_id)
+                return (True, fit_id, None)
         else:
-            db_handler_object.execute_single_dml_row(
-                sql,
-                sql_values,
-            )
+            # Start a cursor so that if we have DB failure we can rollback everything
+            transaction_cursor = db_handler_object.con.cursor()
+
+            db_handler_object.execute_dml_row_within_transaction(sql, sql_values, transaction_cursor)
 
             db_handler_object.logger.info(
                 f"{obs_id}: insert_calibration_fits_row() Successfully wrote "
                 f"into calibration_fits table. fit_id={fit_id}"
             )
-            return (True, fit_id)
+            return (True, fit_id, transaction_cursor)
 
     except Exception as insert_exception:  # pylint: disable=broad-except
         db_handler_object.logger.error(
@@ -464,11 +526,13 @@ def insert_calibration_fits_row(
             f" calibration_fits record in table: {insert_exception}. SQL was"
             f" {sql} Values: {sql_values}"
         )
-        return (False, None)
+        db_handler_object.con.rollback()
+        return (False, None, None)
 
 
 def insert_calibration_solutions_row(
     db_handler_object,
+    transaction_cursor: Optional[psycopg2.cursor],
     fit_id: int,
     obs_id: int,
     tile_id: int,
@@ -494,7 +558,11 @@ def insert_calibration_solutions_row(
     y_gains_pol0: list[float],
 ) -> bool:
     """Insert a  calibration_solutions row.
-    This row represents the calibration solution for a tile/obsid."""
+    This row represents the calibration solution for a tile/obsid.
+    Unless using a DUMMY db_handler object, we assume that caller is
+    passing in a valid transaction cursor (psycopg2.cursor) which means
+    the caller has to manage commiting or rolling back the fit, plus
+    1..n calibration_solutions rows."""
 
     sql = """INSERT INTO calibration_solutions (fitid,obsid,tileid,
                                                 x_delay_m,x_intercept,x_gains,
@@ -555,10 +623,7 @@ def insert_calibration_solutions_row(
                 time.sleep(1)  # simulate a slow transaction
                 return True
         else:
-            db_handler_object.execute_single_dml_row(
-                sql,
-                sql_values,
-            )
+            db_handler_object.execute_dml_row_within_transaction(sql, sql_values, transaction_cursor)
 
             db_handler_object.logger.info(
                 f"{obs_id} tile {tile_id}: insert_calibration_solutions_row()"

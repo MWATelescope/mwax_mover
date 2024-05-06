@@ -17,7 +17,6 @@ import signal
 import sys
 import threading
 import time
-from typing import NamedTuple
 from astropy import time as astrotime
 from mwax_mover import (
     utils,
@@ -40,13 +39,11 @@ from mwax_mover.mwax_calvin_utils import (
     HyperfitsSolution,
     HyperfitsSolutionGroup,
     Metafits,
-    #   Tile,
     debug_phase_fits,
     fit_phase_line,
     fit_gain,
     PhaseFitInfo,
     GainFitInfo,
-    pivot_phase_fits,
 )
 
 
@@ -198,7 +195,7 @@ class MWAXCalvinProcessor:
             log=self.logger,
             requeue_to_eoq_on_failure=False,
             exit_once_queue_empty=False,
-            requeue_on_error=True,
+            requeue_on_error=False,
         )
         self.queue_workers.append(new_worker)
 
@@ -586,7 +583,7 @@ class MWAXCalvinProcessor:
             # self.logger.debug(f"{item} - fits:\n{phase_fits_pivot.to_string(max_rows=512)}")
             success = True
 
-            (success, fit_id) = insert_calibration_fits_row(
+            (success, fit_id, transaction_cursor) = insert_calibration_fits_row(
                 self.db_handler_object,
                 obs_id=obs_id,
                 code_version=version.get_mwax_mover_version_string(),
@@ -597,6 +594,12 @@ class MWAXCalvinProcessor:
 
             if not success:
                 self.logger.error(f"{item} - failed to insert calibration fit")
+
+                if transaction_cursor:
+                    # Rollback the calibration_fit row
+                    self.db_handler_object.con.rollback()
+                    # close the cursor
+                    transaction_cursor.close()
                 return False
 
             for tile_id in soln_tile_ids:
@@ -631,8 +634,9 @@ class MWAXCalvinProcessor:
                     # continue
                     pass
 
-                success &= insert_calibration_solutions_row(
+                success = insert_calibration_solutions_row(
                     self.db_handler_object,
+                    transaction_cursor,
                     int(fit_id),
                     int(obs_id),
                     int(tile_id),
@@ -659,11 +663,23 @@ class MWAXCalvinProcessor:
                 )
 
                 if not success:
-                    self.logger.error(f"{item} - failed to insert calibration solutions")
-                    break
+                    self.logger.error(f"{item} - failed to insert calibration solution for tile {tile_id}")
+                    if transaction_cursor:
+                        # Rollback the calibration_fit row and any solutions rows already inserted
+                        self.db_handler_object.con.rollback()
+                        # close the cursor
+                        transaction_cursor.close()
+
+                    return False
 
             # on success move to complete
             if success:
+                # The whole calibration solution was inserted ok. Commit the transation
+                # unless we are a dummy db_handler
+                if transaction_cursor:
+                    self.db_handler_object.con.commit()
+                    transaction_cursor.close()
+
                 # now move the whole dir
                 # to the complete path
                 if not self.complete_path:
@@ -677,9 +693,11 @@ class MWAXCalvinProcessor:
 
                     for file_to_delete in visibility_files:
                         os.remove(file_to_delete)
-            return success
+
+                return True
         except Exception:
             self.logger.exception(f"Error in upload_handler:\n{traceback.format_exc()}")
+            return False
 
     def stop(self):
         """Shutsdown all processes"""
