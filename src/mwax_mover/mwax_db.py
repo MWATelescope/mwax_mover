@@ -2,10 +2,10 @@
 
 import os
 import math
-import threading
 import time
 from typing import Optional, Tuple
 import psycopg2
+import psycopg2.pool
 from psycopg2 import InterfaceError, OperationalError
 from tenacity import retry, stop_after_attempt, wait_fixed
 
@@ -32,38 +32,13 @@ class MWAXDBHandler:
         self.user = user
         self.password = password
         self.dummy = self.host == DUMMY_DB
-        self.con = None
 
-        # We use a mutex so we only run one db command at a time
-        self.db_lock = threading.Lock()
-
-    def connect(self):
-        """Attempts to connect to the database"""
-        try:
-            self.logger.info(
-                "MWAXDBHandler.connect(): Attempting to connect to database: "
-                f"{self.user}@{self.host}:{self.port}/{self.db_name}"
+        if self.dummy:
+            self.pool = None
+        else:
+            self.pool = psycopg2.pool.ThreadedConnectionPool(
+                1, 3, user=self.user, password=self.password, host=self.host, port=self.port, database=self.db_name
             )
-
-            if not self.dummy:
-                self.con = psycopg2.connect(
-                    host=self.host,
-                    database=self.db_name,
-                    user=self.user,
-                    password=self.password,
-                )
-
-            self.logger.info(
-                "MWAXDBHandler.connect(): Connected to database:" f" {self.user}@{self.host}:{self.port}/{self.db_name}"
-            )
-
-        except OperationalError as err:
-            self.logger.error(
-                "MWAXDBHandler.connect(): error connecting to database:"
-                f" {self.user}@{self.host}:{self.port}/{self.db_name} Error:"
-                f" {err}"
-            )
-            raise err
 
     def select_one_row(self, sql: str, parm_list: list) -> int:
         """
@@ -78,175 +53,93 @@ class MWAXDBHandler:
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(30))
     def select_one_row_postgres(self, sql: str, parm_list: list):
         """Returns a single row from postgres given SQL and params"""
-        # We have a mutex here to ensure only 1 user of the connection at a
-        # time
-        with self.db_lock:
-            # Do we have a database connection?
-            if self.con is None:
-                self.connect()
+        # Assuming we have a connection, try to do the database operation
+        try:
+            conn = self.pool.getconn()
 
-            # Assuming we have a connection, try to do the database operation
-            try:
-                with self.con as con:
-                    with con.cursor() as cursor:
-                        # Run the sql
-                        cursor.execute(sql, parm_list)
+            with conn.cursor() as cursor:
+                # Run the sql
+                cursor.execute(sql, parm_list)
 
-                        # Fetch results as a list of tuples
-                        rows = cursor.fetchall()
+                # Fetch results as a list of tuples
+                rows = cursor.fetchall()
 
-                        # Check how many rows we affected
-                        rows_affected = len(rows)
+                # Check how many rows we affected
+                rows_affected = len(rows)
 
-                        if rows_affected == 1:
-                            # Success - return the tuple
-                            return rows[0]
-                        else:
-                            # Something went wrong
-                            self.logger.error(
-                                "select_one_row_postgres(): Error- queried"
-                                f" {rows_affected} rows, expected 1. SQL={sql}"
-                            )
-                            raise Exception(
-                                "select_one_row_postgres(): Error- queried"
-                                f" {rows_affected} rows, expected 1. SQL={sql}"
-                            )
+                if rows_affected == 1:
+                    # Success - return the tuple
+                    return rows[0]
+                else:
+                    # Something went wrong
+                    self.logger.error(
+                        "select_one_row_postgres(): Error- queried" f" {rows_affected} rows, expected 1. SQL={sql}"
+                    )
+                    raise Exception(
+                        "select_one_row_postgres(): Error- queried" f" {rows_affected} rows, expected 1. SQL={sql}"
+                    )
 
-            except OperationalError as conn_error:
-                # Our connection is toast. Clear it so we attempt a reconnect
-                self.con = None
-                self.logger.error("select_one_row_postgres(): postgres OperationalError-" f" {conn_error}")
-                # Reraise error
-                raise conn_error
+        except OperationalError as conn_error:
+            self.logger.error("select_one_row_postgres(): postgres OperationalError-" f" {conn_error}")
+            # Reraise error
+            raise conn_error
 
-            except InterfaceError as int_error:
-                # Our connection is toast. Clear it so we attempt a reconnect
-                self.con = None
-                self.logger.error(f"select_one_row_postgres(): postgres InterfaceError- {int_error}")
-                # Reraise error
-                raise int_error
+        except InterfaceError as int_error:
+            self.logger.error(f"select_one_row_postgres(): postgres InterfaceError- {int_error}")
+            # Reraise error
+            raise int_error
 
-            except psycopg2.ProgrammingError as prog_error:
-                # A programming/SQL error - e.g. table does not exist. Don't
-                # reconnect connection
-                self.logger.error("select_one_row_postgres(): postgres ProgrammingError-" f" {prog_error}")
-                # Reraise error
-                raise prog_error
+        except psycopg2.ProgrammingError as prog_error:
+            # A programming/SQL error - e.g. table does not exist. Don't
+            # reconnect connection
+            self.logger.error("select_one_row_postgres(): postgres ProgrammingError-" f" {prog_error}")
+            # Reraise error
+            raise prog_error
 
-            except Exception as exception_info:
-                # Any other error- likely to be a database error rather than
-                # connection based
-                self.logger.error(f"select_one_row_postgres(): unknown Error- {exception_info}")
-                raise exception_info
+        except Exception as exception_info:
+            # Any other error- likely to be a database error rather than
+            # connection based
+            self.logger.error(f"select_one_row_postgres(): unknown Error- {exception_info}")
+            raise exception_info
+        finally:
+            self.pool.putconn(conn)
 
     def execute_single_dml_row(self, sql: str, parm_list: list):
         """This executes an INSERT, UPDATE or DELETE that should only affect
         one row. Since this is all in a with (context) block, rollback is
         called on failure and commit on success."""
 
-        # We have a mutex here to ensure only 1 user of the connection at a
-        # time
-        with self.db_lock:
-            # Do we have a database connection?
-            if self.con is None:
-                self.connect()
-
-            # Assuming we have a connection, try to do the database operation
-            try:
-                with self.con as con:
-                    with con.cursor() as cursor:
-                        # Run the sql
-                        cursor.execute(sql, parm_list)
-
-                        # Check how many rows we affected
-                        rows_affected = cursor.rowcount
-
-                        if rows_affected != 1:
-                            # An exception in here will trigger a rollback
-                            # which is good
-                            self.logger.error(
-                                "execute_single_dml_row(): Error- query"
-                                f" affected {rows_affected} rows, expected 1."
-                                f" SQL={sql}"
-                            )
-                            raise Exception(
-                                "execute_single_dml_row(): Error- query"
-                                f" affected {rows_affected} rows, expected 1."
-                                f" SQL={sql}"
-                            )
-
-            except OperationalError as conn_error:
-                # Our connection is toast. Clear it so we attempt a reconnect
-                self.con = None
-                self.logger.error(f"execute_single_dml_row(): postgres OperationalError- {conn_error}")
-                # Reraise error
-                raise conn_error
-
-            except InterfaceError as int_error:
-                # Our connection is toast. Clear it so we attempt a reconnect
-                self.con = None
-                self.logger.error(f"execute_single_dml_row(): postgres InterfaceError- {int_error}")
-                # Reraise error
-                raise int_error
-
-            except psycopg2.ProgrammingError as prog_error:
-                # A programming/SQL error - e.g. table does not exist. Don't
-                # reconnect connection
-                self.logger.error(f"execute_single_dml_row(): postgres ProgrammingError- {prog_error}")
-                # Reraise error
-                raise prog_error
-
-            except Exception as exception_info:
-                # Any other error- likely to be a database error rather than
-                # connection based
-                self.logger.error(f"execute_single_dml_row(): unknown Error- {exception_info}")
-                raise exception_info
-
-
-def execute_dml_row_within_transaction(self, sql: str, parm_list: list, transaction_cursor: psycopg2.cursor):
-    """This executes an INSERT, UPDATE or DELETE that should only affect
-    one row.
-
-    NOTES: it is up to the caller to supply a cursor which all of the operations
-    within the transaction share. Also it is up to the caller to call self.con.commit() or
-    self.con.rollback() at the conclusion of the operations (or on error)"""
-
-    # We have a mutex here to ensure only 1 user of the connection at a
-    # time
-    with self.db_lock:
         # Assuming we have a connection, try to do the database operation
-        # using our cursor
         try:
-            # Run the sql
-            transaction_cursor.execute(sql, parm_list)
+            conn = self.pool.getconn()
 
-            # Check how many rows we affected
-            rows_affected = transaction_cursor.rowcount
+            with conn.cursor() as cursor:
+                # Run the sql
+                cursor.execute(sql, parm_list)
 
-            if rows_affected != 1:
-                # An exception in here will trigger a rollback
-                # which is good
-                self.logger.error(
-                    "execute_dml_row_within_transaction(): Error- query"
-                    f" affected {rows_affected} rows, expected 1."
-                    f" SQL={sql}"
-                )
-                raise Exception(
-                    "execute_dml_row_within_transaction(): Error- query"
-                    f" affected {rows_affected} rows, expected 1."
-                    f" SQL={sql}"
-                )
+                # Check how many rows we affected
+                rows_affected = cursor.rowcount
+
+                if rows_affected != 1:
+                    # An exception in here will trigger a rollback
+                    # which is good
+                    self.logger.error(
+                        "execute_single_dml_row(): Error- query"
+                        f" affected {rows_affected} rows, expected 1."
+                        f" SQL={sql}"
+                    )
+                    raise Exception(
+                        "execute_single_dml_row(): Error- query"
+                        f" affected {rows_affected} rows, expected 1."
+                        f" SQL={sql}"
+                    )
 
         except OperationalError as conn_error:
-            # Our connection is toast. Clear it so we attempt a reconnect
-            self.con = None
             self.logger.error(f"execute_single_dml_row(): postgres OperationalError- {conn_error}")
             # Reraise error
             raise conn_error
 
         except InterfaceError as int_error:
-            # Our connection is toast. Clear it so we attempt a reconnect
-            self.con = None
             self.logger.error(f"execute_single_dml_row(): postgres InterfaceError- {int_error}")
             # Reraise error
             raise int_error
@@ -263,6 +156,69 @@ def execute_dml_row_within_transaction(self, sql: str, parm_list: list, transact
             # connection based
             self.logger.error(f"execute_single_dml_row(): unknown Error- {exception_info}")
             raise exception_info
+        finally:
+            self.pool.putconn(conn)
+
+
+def execute_dml_row_within_transaction(self, sql: str, parm_list: list, transaction_cursor: psycopg2.extensions.cursor):
+    """This executes an INSERT, UPDATE or DELETE that should only affect
+    one row.
+
+    NOTES: it is up to the caller to supply a cursor which all of the operations
+    within the transaction share. Also it is up to the caller to call:
+    1. conn = self.pool.getconn() # get a connection
+    2. curs = conn.cursor()
+    3. Call this method (possibly multiple times), passing in "curs"
+    4. conn.rollback() # On exception or failure
+    5. conn.commit() # On success
+    6. self.pool.putconn(conn)
+    """
+
+    # Assuming we have a connection, try to do the database operation
+    # using our cursor
+    try:
+        # Run the sql
+        transaction_cursor.execute(sql, parm_list)
+
+        # Check how many rows we affected
+        rows_affected = transaction_cursor.rowcount
+
+        if rows_affected != 1:
+            # An exception in here will trigger a rollback
+            # which is good
+            self.logger.error(
+                "execute_dml_row_within_transaction(): Error- query"
+                f" affected {rows_affected} rows, expected 1."
+                f" SQL={sql}"
+            )
+            raise Exception(
+                "execute_dml_row_within_transaction(): Error- query"
+                f" affected {rows_affected} rows, expected 1."
+                f" SQL={sql}"
+            )
+
+    except OperationalError as conn_error:
+        self.logger.error(f"execute_single_dml_row(): postgres OperationalError- {conn_error}")
+        # Reraise error
+        raise conn_error
+
+    except InterfaceError as int_error:
+        self.logger.error(f"execute_single_dml_row(): postgres InterfaceError- {int_error}")
+        # Reraise error
+        raise int_error
+
+    except psycopg2.ProgrammingError as prog_error:
+        # A programming/SQL error - e.g. table does not exist. Don't
+        # reconnect connection
+        self.logger.error(f"execute_single_dml_row(): postgres ProgrammingError- {prog_error}")
+        # Reraise error
+        raise prog_error
+
+    except Exception as exception_info:
+        # Any other error- likely to be a database error rather than
+        # connection based
+        self.logger.error(f"execute_single_dml_row(): unknown Error- {exception_info}")
+        raise exception_info
 
 
 #
@@ -291,15 +247,12 @@ def get_data_file_row(db_handler_object, full_filename: str, obs_id: int) -> Dat
             WHERE filename = %s AND observation_num = %s"""
     try:
         if db_handler_object.dummy:
-            # We have a mutex here to ensure only 1 user of the connection at
-            # a time
-            with db_handler_object.db_lock:
-                db_handler_object.logger.warning(
-                    f"{full_filename} get_data_file_row() Using dummy database"
-                    " connection. No data is really being queried."
-                )
-                time.sleep(2)  # simulate a slow transaction
-                return None
+            db_handler_object.logger.warning(
+                f"{full_filename} get_data_file_row() Using dummy database"
+                " connection. No data is really being queried."
+            )
+            time.sleep(2)  # simulate a slow transaction
+            return None
         else:
             # Run query and get the data_files row info for this file
             obsid, size, checksum = db_handler_object.select_one_row(
@@ -355,15 +308,12 @@ def insert_data_file_row(
 
     try:
         if db_handler_object.dummy:
-            # We have a mutex here to ensure only 1 user of
-            # the connection at a time
-            with db_handler_object.db_lock:
-                db_handler_object.logger.warning(
-                    f"{filename} insert_data_file_row() Using dummy database"
-                    " connection. No data is really being inserted."
-                )
-                time.sleep(10)  # simulate a slow transaction
-                return True
+            db_handler_object.logger.warning(
+                f"{filename} insert_data_file_row() Using dummy database"
+                " connection. No data is really being inserted."
+            )
+            time.sleep(10)  # simulate a slow transaction
+            return True
         else:
             sql = """INSERT INTO data_files
                 (observation_num,
@@ -443,16 +393,13 @@ def update_data_file_row_as_archived(
         )
 
         if db_handler_object.dummy:
-            # We have a mutex here to ensure only 1 user of
-            # the connection at a time
-            with db_handler_object.db_lock:
-                db_handler_object.logger.warning(
-                    f"{filename} update_data_file_row_as_archived() Using"
-                    " dummy database connection. No data is really being"
-                    " updated."
-                )
-                time.sleep(10)  # simulate a slow transaction
-                return True
+            db_handler_object.logger.warning(
+                f"{filename} update_data_file_row_as_archived() Using"
+                " dummy database connection. No data is really being"
+                " updated."
+            )
+            time.sleep(10)  # simulate a slow transaction
+            return True
         else:
             db_handler_object.logger.info(
                 f"{filename} update_data_file_row_as_archived() Successfully" " updated data_files table"
@@ -470,12 +417,13 @@ def update_data_file_row_as_archived(
 
 def insert_calibration_fits_row(
     db_handler_object,
+    transaction_cursor: Optional[psycopg2.extensions.cursor],
     obs_id: int,
     code_version: str,
     creator: str,
     fit_niter: int = 10,
     fit_limit: int = 20,
-) -> Tuple[bool, int, Optional[psycopg2.cursor]]:
+) -> Tuple[bool, int, Optional[psycopg2.extensions.cursor]]:
     """Inserts a new calibration_fits row and return the fit_id if successful
     This row represents the calibration 'header' for an obsid."""
     sql = (
@@ -498,27 +446,21 @@ def insert_calibration_fits_row(
 
     try:
         if db_handler_object.dummy:
-            # We have a mutex here to ensure only 1 user of
-            # the connection at a time
-            with db_handler_object.db_lock:
-                db_handler_object.logger.warning(
-                    "insert_calibration_fits_row(): Using dummy database"
-                    " connection. No data is really being inserted. SQL="
-                    f"'{sql}' Values: {sql_values}"
-                )
-                time.sleep(1)  # simulate a slow transaction
-                return (True, fit_id, None)
+            db_handler_object.logger.warning(
+                "insert_calibration_fits_row(): Using dummy database"
+                " connection. No data is really being inserted. SQL="
+                f"'{sql}' Values: {sql_values}"
+            )
+            time.sleep(1)  # simulate a slow transaction
+            return (True, fit_id)
         else:
-            # Start a cursor so that if we have DB failure we can rollback everything
-            transaction_cursor = db_handler_object.con.cursor()
-
             db_handler_object.execute_dml_row_within_transaction(sql, sql_values, transaction_cursor)
 
             db_handler_object.logger.info(
                 f"{obs_id}: insert_calibration_fits_row() Successfully wrote "
                 f"into calibration_fits table. fit_id={fit_id}"
             )
-            return (True, fit_id, transaction_cursor)
+            return (True, fit_id)
 
     except Exception as insert_exception:  # pylint: disable=broad-except
         db_handler_object.logger.error(
@@ -527,12 +469,12 @@ def insert_calibration_fits_row(
             f" {sql} Values: {sql_values}"
         )
         db_handler_object.con.rollback()
-        return (False, None, None)
+        return (False, None)
 
 
 def insert_calibration_solutions_row(
     db_handler_object,
-    transaction_cursor: Optional[psycopg2.cursor],
+    transaction_cursor: Optional[psycopg2.extensions.cursor],
     fit_id: int,
     obs_id: int,
     tile_id: int,
@@ -612,16 +554,13 @@ def insert_calibration_solutions_row(
 
     try:
         if db_handler_object.dummy:
-            # We have a mutex here to ensure only 1 user of
-            # the connection at a time
-            with db_handler_object.db_lock:
-                db_handler_object.logger.warning(
-                    "insert_calibration_fits_row(): Using dummy database"
-                    " connection. No data is really being inserted. SQL="
-                    f"'{sql}' Values: {sql_values}"
-                )
-                time.sleep(1)  # simulate a slow transaction
-                return True
+            db_handler_object.logger.warning(
+                "insert_calibration_fits_row(): Using dummy database"
+                " connection. No data is really being inserted. SQL="
+                f"'{sql}' Values: {sql_values}"
+            )
+            time.sleep(1)  # simulate a slow transaction
+            return True
         else:
             db_handler_object.execute_dml_row_within_transaction(sql, sql_values, transaction_cursor)
 
