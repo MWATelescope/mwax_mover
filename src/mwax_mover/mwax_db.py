@@ -282,7 +282,6 @@ def insert_data_file_row(
     # Prepare the fields
     # immediately add this file to the db so we insert a record into metadata
     # data_files table
-    deleted = False
     remote_archived = False
     filename = os.path.basename(archive_filename)
 
@@ -311,7 +310,6 @@ def insert_data_file_row(
                 filename,
                 host,
                 remote_archived,
-                deleted,
                 checksum_type,
                 checksum,
                 trigger_id)
@@ -326,7 +324,6 @@ def insert_data_file_row(
                     filename,
                     hostname,
                     remote_archived,
-                    deleted,
                     checksum_type,
                     checksum,
                     trigger_id,
