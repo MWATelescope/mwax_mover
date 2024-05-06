@@ -50,51 +50,33 @@ class MWAXDBHandler:
         else:
             return self.select_one_row_postgres(sql, parm_list)
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(30))
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(60))
     def select_one_row_postgres(self, sql: str, parm_list: list):
         """Returns a single row from postgres given SQL and params"""
         # Assuming we have a connection, try to do the database operation
         try:
-            conn = self.pool.getconn()
+            with self.pool.getconn() as conn:
+                with conn.cursor() as cursor:
+                    # Run the sql
+                    cursor.execute(sql, parm_list)
 
-            with conn.cursor() as cursor:
-                # Run the sql
-                cursor.execute(sql, parm_list)
+                    # Fetch results as a list of tuples
+                    rows = cursor.fetchall()
 
-                # Fetch results as a list of tuples
-                rows = cursor.fetchall()
+                    # Check how many rows we affected
+                    rows_affected = len(rows)
 
-                # Check how many rows we affected
-                rows_affected = len(rows)
-
-                if rows_affected == 1:
-                    # Success - return the tuple
-                    return rows[0]
-                else:
-                    # Something went wrong
-                    self.logger.error(
-                        "select_one_row_postgres(): Error- queried" f" {rows_affected} rows, expected 1. SQL={sql}"
-                    )
-                    raise Exception(
-                        "select_one_row_postgres(): Error- queried" f" {rows_affected} rows, expected 1. SQL={sql}"
-                    )
-
-        except OperationalError as conn_error:
-            self.logger.error("select_one_row_postgres(): postgres OperationalError-" f" {conn_error}")
-            # Reraise error
-            raise conn_error
-
-        except InterfaceError as int_error:
-            self.logger.error(f"select_one_row_postgres(): postgres InterfaceError- {int_error}")
-            # Reraise error
-            raise int_error
-
-        except psycopg2.ProgrammingError as prog_error:
-            # A programming/SQL error - e.g. table does not exist. Don't
-            # reconnect connection
-            self.logger.error("select_one_row_postgres(): postgres ProgrammingError-" f" {prog_error}")
-            # Reraise error
-            raise prog_error
+                    if rows_affected == 1:
+                        # Success - return the tuple
+                        return rows[0]
+                    else:
+                        # Something went wrong
+                        self.logger.error(
+                            "select_one_row_postgres(): Error- queried" f" {rows_affected} rows, expected 1. SQL={sql}"
+                        )
+                        raise Exception(
+                            "select_one_row_postgres(): Error- queried" f" {rows_affected} rows, expected 1. SQL={sql}"
+                        )
 
         except Exception as exception_info:
             # Any other error- likely to be a database error rather than
@@ -102,7 +84,8 @@ class MWAXDBHandler:
             self.logger.error(f"select_one_row_postgres(): unknown Error- {exception_info}")
             raise exception_info
         finally:
-            self.pool.putconn(conn)
+            if conn:
+                self.pool.putconn(conn)
 
     def execute_single_dml_row(self, sql: str, parm_list: list):
         """This executes an INSERT, UPDATE or DELETE that should only affect
@@ -111,45 +94,28 @@ class MWAXDBHandler:
 
         # Assuming we have a connection, try to do the database operation
         try:
-            conn = self.pool.getconn()
+            with self.pool.getconn() as conn:
+                with conn.cursor() as cursor:
+                    # Run the sql
+                    cursor.execute(sql, parm_list)
+                    conn.commit()
 
-            with conn.cursor() as cursor:
-                # Run the sql
-                cursor.execute(sql, parm_list)
+                    # Check how many rows we affected
+                    rows_affected = cursor.rowcount
 
-                # Check how many rows we affected
-                rows_affected = cursor.rowcount
-
-                if rows_affected != 1:
-                    # An exception in here will trigger a rollback
-                    # which is good
-                    self.logger.error(
-                        "execute_single_dml_row(): Error- query"
-                        f" affected {rows_affected} rows, expected 1."
-                        f" SQL={sql}"
-                    )
-                    raise Exception(
-                        "execute_single_dml_row(): Error- query"
-                        f" affected {rows_affected} rows, expected 1."
-                        f" SQL={sql}"
-                    )
-
-        except OperationalError as conn_error:
-            self.logger.error(f"execute_single_dml_row(): postgres OperationalError- {conn_error}")
-            # Reraise error
-            raise conn_error
-
-        except InterfaceError as int_error:
-            self.logger.error(f"execute_single_dml_row(): postgres InterfaceError- {int_error}")
-            # Reraise error
-            raise int_error
-
-        except psycopg2.ProgrammingError as prog_error:
-            # A programming/SQL error - e.g. table does not exist. Don't
-            # reconnect connection
-            self.logger.error(f"execute_single_dml_row(): postgres ProgrammingError- {prog_error}")
-            # Reraise error
-            raise prog_error
+                    if rows_affected != 1:
+                        # An exception in here will trigger a rollback
+                        # which is good
+                        self.logger.error(
+                            "execute_single_dml_row(): Error- query"
+                            f" affected {rows_affected} rows, expected 1."
+                            f" SQL={sql}"
+                        )
+                        raise Exception(
+                            "execute_single_dml_row(): Error- query"
+                            f" affected {rows_affected} rows, expected 1."
+                            f" SQL={sql}"
+                        )
 
         except Exception as exception_info:
             # Any other error- likely to be a database error rather than
@@ -157,7 +123,8 @@ class MWAXDBHandler:
             self.logger.error(f"execute_single_dml_row(): unknown Error- {exception_info}")
             raise exception_info
         finally:
-            self.pool.putconn(conn)
+            if conn:
+                self.pool.putconn(conn)
 
     def execute_dml_row_within_transaction(
         self, sql: str, parm_list: list, transaction_cursor: psycopg2.extensions.cursor

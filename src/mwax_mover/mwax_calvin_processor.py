@@ -748,6 +748,11 @@ class MWAXCalvinProcessor:
                     worker_thread.join(timeout=10)
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
+        # Close all database connections
+        if not self.db_handler_object.dummy:
+            if self.db_handler_object.pool:
+                self.db_handler_object.pool.closeall()
+
         self.ready_to_exit = True
 
     def health_loop(self):

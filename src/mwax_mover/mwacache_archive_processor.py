@@ -341,6 +341,11 @@ class MWACacheArchiveProcessor:
                     worker_thread.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
+        # Close all database connections
+        if not self.db_handler_object.dummy:
+            if self.db_handler_object.pool:
+                self.db_handler_object.pool.closeall()
+
     def health_handler(self):
         """Send multicast health data"""
         while self.running:
