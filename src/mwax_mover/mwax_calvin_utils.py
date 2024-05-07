@@ -980,19 +980,20 @@ def plot_rx_lengths(flavor_fits, prefix, show, title):
         )
         box_plot.add_line(plt.Line2D([mean, mean], [ytick - 0.5, ytick + 0.5], color='red', linewidth=1))
 
+    fig = plt.gcf()
     if title:
-        plt.suptitle(title)
+        fig.suptitle(title)
+        # fig.subplots_adjust(top=0.88)
     if show:
         plt.show()
     if prefix:
         plt.tight_layout()
-        plt.savefig(f"{prefix}rx_lengths.png", dpi=300, bbox_inches="tight")
+        fig.savefig(f"{prefix}rx_lengths.png", dpi=300, bbox_inches="tight")
 
     return means
 
 def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fits_pivot, weights2):
     figsize = (20, 30)
-    mpl.rcParams["figure.figsize"] = figsize
 
     rxs = np.sort(np.unique(phase_fits_pivot["rx"]))
     slots = np.sort(np.unique(phase_fits_pivot["slot"]))
@@ -1043,9 +1044,10 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fi
                 color=color, backgroundcolor=("white", 0.5)
             )
 
-        # fig.set_size_inches(*figsize)
+        fig.set_size_inches(*figsize)
         if title:
-            plt.suptitle(title)
+            fig.suptitle(title)
+            fig.subplots_adjust(top=0.88)
         if show:
             plt.show()
         if prefix:
@@ -1071,13 +1073,15 @@ def plot_phase_intercepts(prefix, show, title, flavor_fits):
         "length",
         "sigma_resid",
     )
+    fig = plt.gcf()
     if title:
-        plt.suptitle(title)
+        fig.suptitle(title)
+        fig.subplots_adjust(top=0.95)
     if show:
         plt.show()
     if prefix:
         plt.tight_layout()
-        plt.savefig(f"{prefix}intercepts.png", dpi=300, bbox_inches="tight")
+        fig.savefig(f"{prefix}intercepts.png", dpi=300, bbox_inches="tight")
 
 
 def plot_phase_residual(
@@ -1152,9 +1156,12 @@ def plot_phase_residual(
 
     g.map(plot_residual, "soln_idx", "pol", "flavor", "length", "intercept")
     g.set_axis_labels("freq", "phase")
+
+    fig = plt.gcf()
     if title:
-        plt.suptitle(title)
-    plt.savefig(f"{prefix}residual.png", dpi=200, bbox_inches="tight")
+        fig.suptitle(title)
+        fig.subplots_adjust(top=0.95)
+    fig.savefig(f"{prefix}residual.png", dpi=200, bbox_inches="tight")
     # save df to csv
     df.to_csv(f"{prefix}residual.tsv", sep="\t", index=False)
 
@@ -1326,6 +1333,8 @@ def run_birli(
 
         data_file_arg = ""
         for data_file in data_files:
+            if data_file.endswith("solutions.fits"):
+                continue
             data_file_arg += f"{data_file} "
 
         # Run birli
