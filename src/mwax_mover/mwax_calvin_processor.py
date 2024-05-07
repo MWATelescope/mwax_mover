@@ -325,10 +325,11 @@ class MWAXCalvinProcessor:
                 assembly_dir_filenames = [os.path.basename(i) for i in assembly_dir_full_path_files]
                 assembly_dir_filenames.sort()
                 # Remove the metafits file
-                assembly_dir_filenames.remove(metafits_filename)
+                if metafits_filename in assembly_dir_filenames:
+                    assembly_dir_filenames.remove(metafits_filename)
 
                 # How does what we need compare to what we have?
-                return_value = web_service_filenames == assembly_dir_filenames
+                return_value = set(assembly_dir_filenames).issuperset(web_service_filenames)
 
                 self.logger.debug(
                     f"{obs_id} check_obs_is_ready_to_process() =="
@@ -476,7 +477,12 @@ class MWAXCalvinProcessor:
 
         for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
             for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
-                tile = tiles[tiles.id == tile_id].iloc[0]
+                id_matches = tiles[tiles.id == tile_id]
+                if len(id_matches) != 1:
+                    continue
+                tile = id_matches.iloc[0]
+                if tile.flag:
+                    continue
                 name = tile.name
                 if tile.flavor.endswith("-NI"):
                     solns *= phase_diff
@@ -499,7 +505,12 @@ class MWAXCalvinProcessor:
         fits = []
         for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
             for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
-                tile = tiles[tiles.id == tile_id].iloc[0]
+                id_matches = tiles[tiles.id == tile_id]
+                if len(id_matches) != 1:
+                    continue
+                tile = id_matches.iloc[0]
+                if tile.flag:
+                    continue
                 name = tile.name
                 try:
                     fit = fit_gain(chanblocks_hz, solns, weights)  # type: ignore
@@ -567,10 +578,12 @@ class MWAXCalvinProcessor:
             weights = soln_group.weights
 
             phase_fits = self.process_phase_fits(
-                item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, self.phase_fit_niter
+                item, unflagged_tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights,
+                soln_tile_ids, self.phase_fit_niter
             )
             gain_fits = self.process_gain_fits(
-                item, tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids
+                item, unflagged_tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights,
+                soln_tile_ids
             )
 
             # if ~np.any(np.isfinite(phase_fits["length"])):
