@@ -1445,6 +1445,9 @@ def run_birli(
     start_time = time.time()
     stderr = ""
 
+    cmdline = None
+    exit_code = None
+    stdout = None
     try:
         # Get only data files
         data_files = glob.glob(os.path.join(processing_dir, "*.fits"))
@@ -1503,11 +1506,11 @@ def run_birli(
             processor.logger.error(
                 f"{obs_id}: Birli run FAILED: Exit code of {exit_code} in" f" {elapsed:.3f} seconds: {stderr}"
             )
-    except Exception as hyperdrive_run_exception:
+    except Exception as birli_run_exception:
         elapsed = time.time() - start_time
         processor.logger.error(
-            f"{obs_id}: hyperdrive run FAILED: Unhandled exception"
-            f" {hyperdrive_run_exception} in {elapsed:.3f} seconds:"
+            f"{obs_id}: birli run FAILED: Unhandled exception"
+            f" {birli_run_exception} in {elapsed:.3f} seconds:"
             f" {stderr}"
         )
 
