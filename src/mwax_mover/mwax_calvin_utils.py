@@ -87,6 +87,12 @@ def ensure_system_byte_order(arr):
         return arr.newbyteorder(system_byte_order)
     return arr
 
+def parse_csv_header(value: str, dtype: type) -> ArrayLike:
+    """
+    parse comma separated values (in metafits header)
+    """
+    return np.array(value.split(","), dtype=dtype)
+
 
 class Metafits:
     """MWA Metadata file in FITS format"""
@@ -133,7 +139,8 @@ class Metafits:
                 # index=metafits_input["Antenna"],
                 rx=metafits_input["Rx"],
                 slot=metafits_input["Slot"],
-                flavor=metafits_input["Flavors"],
+                # flavor=metafits_input["Flavors"],
+                flavor=metafits_input["Receiver_Types"],
                 length=float(metafits_input["Length"][3:]),
             )
             for metafits_input in metafits_inputs
@@ -160,25 +167,50 @@ class Metafits:
 
     @property
     def chan_info(self) -> ChanInfo:
-        """Get coarse channels from metafits, sorted"""
+        """
+        Get coarse channels from metafits, sorted
+
+        Assumptions:
+        - fine_chan_width is a multiple of 200Hz (or 10kHz), so is an integer
+        - total_bandwidth is a multiple of fine_chan_width, so is an integer
+        """
         with fits.open(self.filename) as hdus:
             hdu = hdus["PRIMARY"]
             header: fits.header.Header = hdu.header  # type: ignore
 
-            # get a list of coarse channels
-            coarse_chans = header["CHANNELS"].split(",")  # type: ignore
-            coarse_chans = np.array(sorted(int(i) for i in coarse_chans))
-            # fine channel width
-            fine_chan_width_hz = float(header["FINECHAN"]) * 1000  # type: ignore
-            # number of fine channels in observation
-            obs_num_fine_chans: int = header["NCHANS"]  # type: ignore
-            # calculate number of fine channels per coarse channel
-            if obs_num_fine_chans % len(coarse_chans) != 0:
-                raise ValueError(
-                    f"Number of fine channels ({obs_num_fine_chans}) "
-                    f"not a multiple of the number of coarse channels ({len(coarse_chans)})"
+            # coarse channels
+            coarse_chans = parse_csv_header(header["CHANNELS"], int)
+            # coarse channel selection
+            chansel = parse_csv_header(header["CHANSEL"], int)
+            if len(chansel) != len(coarse_chans):
+                raise RuntimeError(
+                    f"channel selection is not tested. {chansel=}"
                 )
-            fine_chans_per_coarse = obs_num_fine_chans // len(coarse_chans)
+            # coarse_chans = np.sort(coarse_chans[chansel])
+            coarse_chans = np.sort(coarse_chans)
+
+            # fine channel width
+            fine_chan_width_hz = int(float(header["FINECHAN"]) * 1000)  # type: ignore
+            # total observation bandwidth
+            total_bandwidth_hz = int(float(header["BANDWDTH"]) * 1000000)  # type: ignore
+            # number of fine channels in observation
+            obs_num_fine_chans = int(header["NCHANS"])  # type: ignore
+
+        # sanity checks
+        if total_bandwidth_hz != fine_chan_width_hz * obs_num_fine_chans:
+            raise ValueError(
+                f"{self.filename} - ({total_bandwidth_hz=})"
+                f" != ({fine_chan_width_hz=}) * ({obs_num_fine_chans=})"
+            )
+
+        if obs_num_fine_chans % len(coarse_chans) != 0:
+            raise ValueError(
+                f"Number of fine channels ({obs_num_fine_chans}) "
+                f"not a multiple of the number of coarse channels ({len(coarse_chans)})"
+            )
+
+        # calculate number of fine channels per coarse channel
+        fine_chans_per_coarse = obs_num_fine_chans // len(coarse_chans)
 
         coarse_chan_ranges = []
         for _, g in enumerate(np.split(coarse_chans, np.where(np.diff(coarse_chans) != 1)[0] + 1)):
@@ -214,42 +246,31 @@ class HyperfitsSolution:
         self.filename = filename
 
     @property
-    def chanblocks_hz(self) -> NDArray[np.float_]:
-        """Get channels from solution file"""
+    def chanblocks_hz(self) -> NDArray[np.int_]:
+        """
+        Get channels from solution file
+
+        Validate:
+        - channels are contiguous
+        - channels are in ascending order
+
+        Assumptions:
+        - channel frequencies are multiples of 200Hz, so are integer Hz values
+
+        """
         with fits.open(self.filename) as hdus:
-            freq_data = hdus["CHANBLOCKS"].data["Freq"].astype(np.float_)
-        return np.array(ensure_system_byte_order(freq_data))
+            freq_data = hdus["CHANBLOCKS"].data["Freq"].astype(np.int_)
+        result = np.array(ensure_system_byte_order(freq_data))
+        assert len(result), f"no chanblocks found in {self.filename}"
+        # if multiple chanblocks, validate they are in order
+        if len(result) > 1:
+            diff = np.diff(result)
+            if not np.all(diff >= 0):
+                raise RuntimeError(f"chanblocks are not in ascending order. {result=}")
+            if not np.all(diff[1:] == diff[0]):
+                raise RuntimeError(f"chanblocks are not contiguous. {result=}")
 
-    def validate_chanblocks(
-        self,
-        chaninfo: ChanInfo,
-        coarse_chans: NDArray[np.int_],
-    ) -> Tuple[NDArray[np.float_], float]:
-        """
-        Validate that the chanblocks in the solution match the chanblocks in the metafits.
-        Returns the chanblock frequencies and the number of chanblocks per coarse channel.
-        """
-        # TODO: validate the actual frequencies agains coarse_chans
-        # coarse_chans = chaninfo.coarse_chan_ranges[coarse_chan_range_idx]
-        chanblocks_hz = self.chanblocks_hz
-        chanblock_width_hz = chanblocks_hz[1] - chanblocks_hz[0]  # type: ignore
-        if chanblock_width_hz % chaninfo.fine_chan_width_hz != 0:
-            raise RuntimeError(
-                f"{self.filename} - chanblock width in solution file ({chanblock_width_hz})"
-                f" is not a multiple of fine channel width in metafits ({chaninfo.fine_chan_width_hz})"
-            )
-
-        chans_per_block = chanblock_width_hz // chaninfo.fine_chan_width_hz
-        chanblocks_per_coarse = chaninfo.fine_chans_per_coarse // chans_per_block
-        range_ncoarse = len(coarse_chans)
-        soln_ncoarse = len(chanblocks_hz) // chanblocks_per_coarse
-        if range_ncoarse != soln_ncoarse:  # type: ignore
-            print(
-                f"{self.filename} - warning: number of coarse channels in solution file ({soln_ncoarse})"
-                f" does not match number of coarse channels in metafits for this range ({range_ncoarse})"
-                f" given {chanblocks_per_coarse=}, {chans_per_block=}"
-            )
-        return (chanblocks_hz, chanblocks_per_coarse)
+        return result
 
     # @property
     # def tile_names_flags(self) -> List[Tuple[str, bool]]:
@@ -375,31 +396,85 @@ class HyperfitsSolutionGroup:
     @classmethod
     def get_soln_chan_info(
         cls, metafits_chan_info: ChanInfo, solns: List[HyperfitsSolution]
-    ) -> Tuple[ChanInfo, List[NDArray[np.float_]]]:
+    ) -> Tuple[int, List[NDArray[np.int_]]]:
         """
-        Get the chanblocks_per_coarse and chanblocks_hz array for each provided solutions
+        Get the chanblocks_per_coarse and chanblocks_hz array for provided solutions
 
-        Validate that channel info is consistent
+        Validate that channel info from metafits is consistent with solutions:
+            - should all have the same chanblocks_per_coarse
         """
 
         chanblocks_per_coarse = None
         all_chanblocks_hz = []
+        metafits_coarse_chans = np.concatenate(metafits_chan_info.coarse_chan_ranges)
+        metafits_fine_chan_width_hz = metafits_chan_info.fine_chan_width_hz
+        metafits_fine_chans_per_coarse = metafits_chan_info.fine_chans_per_coarse
+        metafits_coarse_bandwidth_hz = metafits_fine_chan_width_hz * metafits_fine_chans_per_coarse
 
-        for coarse_chans, soln in zip(metafits_chan_info.coarse_chan_ranges, solns):
-            # validate channel selection
-            chanblocks_hz, _chanblocks_per_coarse = soln.validate_chanblocks(metafits_chan_info, coarse_chans)
-            if chanblocks_per_coarse is None:
-                chanblocks_per_coarse = _chanblocks_per_coarse
-            elif chanblocks_per_coarse != _chanblocks_per_coarse:
+        for soln in solns:
+            # coarse_chans = chaninfo.coarse_chan_ranges[coarse_chan_range_idx]
+            chanblocks_hz = soln.chanblocks_hz
+            if len(chanblocks_hz) < 2:
+                raise RuntimeError(f"{soln.filename} - not enough chanblocks found ({chanblocks_hz=})")
+
+            chanblock_width_hz = chanblocks_hz[1] - chanblocks_hz[0]  # type: ignore
+            if chanblock_width_hz % metafits_fine_chan_width_hz != 0:
                 raise RuntimeError(
-                    f"{soln.filename} - chanblocks_per_coarse {chanblocks_per_coarse}"
-                    f" does not match previous value {_chanblocks_per_coarse}"
+                    f"{soln.filename} - chanblock width in solution file ({chanblock_width_hz})"
+                    f" is not a multiple of fine channel width in metafits ({metafits_fine_chan_width_hz})"
                 )
+
+            chans_per_block = int(chanblock_width_hz // metafits_fine_chan_width_hz)
+            chanblocks_per_coarse_ = int(metafits_fine_chans_per_coarse // chans_per_block)
+            if chanblocks_per_coarse is None:
+                chanblocks_per_coarse = chanblocks_per_coarse_
+            else:
+                if chanblocks_per_coarse != chanblocks_per_coarse_:
+                    raise RuntimeError(
+                        f"{soln.filename} - chanblocks_per_coarse {chanblocks_per_coarse_}"
+                        f" does not match previous value {chanblocks_per_coarse}"
+                    )
+
+            # break chanblocks into coarse channels
+            soln_coarse_chans = []
+            for coarse_chanblocks in np.split(chanblocks_hz, len(chanblocks_hz) // chanblocks_per_coarse):
+                if len(coarse_chanblocks) == 1:
+                    coarse_centroid_hz = coarse_chanblocks[0]
+                else:
+                    coarse_bandwidth_hz = coarse_chanblocks[-1] - coarse_chanblocks[0]
+                    if coarse_bandwidth_hz > metafits_coarse_bandwidth_hz:
+                        raise RuntimeError(
+                            f"{soln.filename} - solution {coarse_bandwidth_hz=}"
+                            f" > {metafits_coarse_bandwidth_hz=}"
+                        )
+                    coarse_centroid_hz = np.mean(coarse_chanblocks + chanblock_width_hz / 2)
+                coarse_chan_idx = np.round(coarse_centroid_hz // metafits_coarse_bandwidth_hz)
+                if coarse_chan_idx not in metafits_coarse_chans:
+                    raise RuntimeError(
+                        f"{soln.filename} - solution coarse centroid {coarse_centroid_hz}Hz ({coarse_chan_idx=}) "
+                        "not found in metafits coarse channels"
+                    )
+                if coarse_chan_idx in soln_coarse_chans:
+                    raise RuntimeError(
+                        f"{soln.filename} - solution coarse centroid {coarse_centroid_hz}Hz ({coarse_chan_idx=}) "
+                        "already found in solution coarse channels"
+                    )
+                soln_coarse_chans.append(coarse_chan_idx)
+
+            range_ncoarse = len(soln_coarse_chans)
+            soln_ncoarse = len(chanblocks_hz) // chanblocks_per_coarse
+            if range_ncoarse != soln_ncoarse:
+                print(
+                    f"{soln.filename} - warning: number of coarse channels in solution file ({soln_ncoarse=})"
+                    f" does not match number of coarse channels in metafits for this range ({range_ncoarse=})"
+                    f" given {chanblocks_per_coarse=}, {chans_per_block=}"
+                )
+
             all_chanblocks_hz.append(chanblocks_hz)
-            # all_chanblocks_hz = np.concatenate((all_chanblocks_hz, chanblocks_hz))  # type: ignore
+
         if all_chanblocks_hz is None:
             raise RuntimeError("No valid channels found")
-        return (chanblocks_per_coarse, all_chanblocks_hz)  # type: ignore
+        return (chanblocks_per_coarse, all_chanblocks_hz)
 
     @classmethod
     def get_metafits_tiles_df(cls, metafits) -> pd.DataFrame:
@@ -452,7 +527,16 @@ class HyperfitsSolutionGroup:
     def results(self) -> NDArray[np.float_]:
         """
         Get the combined results array for all solutions
+
+        Pad results if edge channels have been removed
         """
+        for soln, chanblocks_hz in zip(self.solns, self.all_chanblocks_hz):
+            if len(chanblocks_hz) != len(soln.results):
+                raise RuntimeError(
+                    f"{soln.filename} - number of chanblocks ({len(chanblocks_hz)})"
+                    f" does not match number of results ({len(soln.results)})"
+                )
+
         results = np.concatenate([soln.results for soln in self.solns])
         if results.size == 0:
             raise RuntimeError("No valid results found")
@@ -797,26 +881,52 @@ def fit_phase_line(
     )
 
 
-def fit_gain(chanblocks_hz, solns, weights) -> GainFitInfo:
+def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse) -> GainFitInfo:
     """
     Fit gain solutions
     """
-    # remove nans and zero weights
-    mask = np.where(np.logical_and(np.isfinite(solns), weights > 0))[0]
-    if len(mask) < 2:
-        raise RuntimeError(f"Not enough valid gains to fit ({len(mask)})")
-    solns = solns[mask]
-    chanblocks_hz = chanblocks_hz[mask]
-    weights = weights[mask]
+    # length check
+    assert len(chanblocks_hz) == len(solns) == len(weights)
+    n_coarse = len(chanblocks_hz) // chanblocks_per_coarse
 
-    # TODO(Dev): finish this bit
+    amps = np.abs(solns)
+
+    gains = np.full(n_coarse, np.nan)
+    pol0 = np.full(n_coarse, np.nan)
+    pol1 = np.full(n_coarse, np.nan)
+    sigma_resid = np.full(n_coarse, np.nan)
+
+    # split chans, solns, weights into chunks of chanblocks_per_coarse
+    for coarse_idx, (
+        coarse_hz, coarse_amps, coarse_weights,
+    ) in enumerate(zip(
+        np.split(chanblocks_hz, n_coarse),
+        np.split(amps, n_coarse),
+        np.split(weights, n_coarse),
+    )):
+        # remove nans and zero weights
+        coarse_mask = np.where(np.logical_and(np.isfinite(coarse_amps), coarse_weights > 0))[0]
+        if len(coarse_mask) < 2:
+            continue
+        coarse_amps = coarse_amps[coarse_mask]
+        coarse_hz = coarse_hz[coarse_mask]
+        coarse_weights = coarse_weights[coarse_mask]
+
+        gains[coarse_idx] = np.sum(coarse_amps * coarse_weights) / np.sum(coarse_weights)
+        # TODO(Dev): finish this bit
+        pol0[coarse_idx] = 0.
+        pol1[coarse_idx] = 0.
+        sigma_resid[coarse_idx] = 0.
+
+    # TODO(Dev): calculate quality
+    quality = 1.
 
     return GainFitInfo(
-        quality=1.0,
-        gains=[1.0] * 24,
-        pol0=[0.0] * 24,
-        pol1=[0.0] * 24,
-        sigma_resid=[0.0] * 24,
+        quality=quality,
+        gains=gains.tolist(),
+        pol0=pol0.tolist(),
+        pol1=pol1.tolist(),
+        sigma_resid=sigma_resid.tolist(),
     )
 
 
@@ -993,14 +1103,25 @@ def plot_rx_lengths(flavor_fits, prefix, show, title):
     return means
 
 def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fits_pivot, weights2):
-    figsize = (20, 30)
 
     rxs = np.sort(np.unique(phase_fits_pivot["rx"]))
     slots = np.sort(np.unique(phase_fits_pivot["slot"]))
+    figsize = (
+        np.clip(len(slots) * 2.5, 5, 20),
+        np.clip(len(rxs) * 3, 5, 30)
+    )
 
     for pol, soln in zip(["xx", "yy"], [soln_xx, soln_yy]):
         plt.clf()
         fig, axs = plt.subplots(len(rxs), len(slots), sharex=True, sharey="row", squeeze=True)
+        # rest of the code assumes axs is 2D array
+        if len(rxs) == 1 and len(slots) == 1:
+            axs = np.array([[axs]])
+        elif len(rxs) == 1:
+            axs = axs[np.newaxis, :]
+        elif len(slots) == 1:
+            axs = axs[:, np.newaxis]
+
         for ax in axs.flatten():
             ax.axis("off")
         for _, fit in phase_fits_pivot.iterrows():
@@ -1089,6 +1210,9 @@ def plot_phase_residual(
 ):
     plt.clf()
     g = sns.FacetGrid(flavor_fits, row="flavor", col="pol", hue="flavor", sharex=True, sharey=False)
+
+    if len(freqs) != len(weights):
+        raise RuntimeError(f"({len(freqs)=}) and ({len(weights)=}) must be the same length")
 
     df = pd.DataFrame(
         {

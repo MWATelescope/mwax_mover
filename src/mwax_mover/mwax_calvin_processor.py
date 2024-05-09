@@ -28,6 +28,7 @@ from mwax_mover import (
 )
 import numpy as np
 import pandas as pd
+from pandas import DataFrame
 import traceback
 import coloredlogs
 
@@ -456,7 +457,8 @@ class MWAXCalvinProcessor:
         self.logger.info(f"{item} added to upload_queue." f" ({self.upload_queue.qsize()}) in queue.")
 
     def process_phase_fits(
-        self, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
+        self, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights,
+        soln_tile_ids, phase_fit_niter
     ):
         """
         Fit a line to each tile phase solution, return a dataframe of phase fit parameters for each
@@ -489,16 +491,19 @@ class MWAXCalvinProcessor:
                 # else:
                 #     continue
                 try:
-                    fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)  # type: ignore
+                    fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)
                 except Exception as exc:
                     self.logger.error(f"{item} - {tile_id=:4} {pol} ({name}) {exc}")
                     continue
                 self.logger.debug(f"{item} - {tile_id=:4} {pol} ({name}) {fit=}")
                 fits.append([tile_id, soln_idx, pol, *fit])
 
-        return pd.DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])  # type: ignore
+        return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])
 
-    def process_gain_fits(self, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids):
+    def process_gain_fits(
+        self, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights,
+        soln_tile_ids, chanblocks_per_coarse
+    ):
         """
         for each tile, pol, fit a GainFitInfo to the gains
         """
@@ -513,7 +518,7 @@ class MWAXCalvinProcessor:
                     continue
                 name = tile.name
                 try:
-                    fit = fit_gain(chanblocks_hz, solns, weights)  # type: ignore
+                    fit = fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse)
                 except Exception as exc:
                     self.logger.error(f"{item} - {tile_id=:4} {pol} ({name}) {exc}")
                     continue
@@ -521,13 +526,14 @@ class MWAXCalvinProcessor:
                 fits.append([tile_id, soln_idx, pol, *fit])
         self.logger.warning("TODO: fake gain fits!")
 
-        return pd.DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *GainFitInfo._fields])  # type: ignore
+        return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *GainFitInfo._fields])
 
-    def upload_handler(self, item) -> bool:
+    def upload_handler(self, item: str) -> bool:
         """Will deal with completed hyperdrive solutions
         by getting them into a format we can insert into
         the calibration database"""
 
+        conn = None
         try:
             # get obs_id
             file_no_path = item.split("/")
@@ -583,21 +589,21 @@ class MWAXCalvinProcessor:
             )
             gain_fits = self.process_gain_fits(
                 item, unflagged_tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights,
-                soln_tile_ids
+                soln_tile_ids, chanblocks_per_coarse
             )
 
             # if ~np.any(np.isfinite(phase_fits["length"])):
             #     self.logger.warning(f"{item} - no valid phase fits found, continuing anyway")
 
             phase_fits_pivot = debug_phase_fits(
-                phase_fits, tiles, all_chanblocks_hz, all_xx_solns[0], all_yy_solns[0], weights, f"{item}/"
+                phase_fits, tiles, all_chanblocks_hz, all_xx_solns[0], all_yy_solns[0], weights,
+                prefix=f"{item}/", plot_residual=True
             )
             # phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
             # self.logger.debug(f"{item} - fits:\n{phase_fits_pivot.to_string(max_rows=512)}")
             success = True
 
             # get a database connection, unless we are using dummy connection (for testing)
-            conn = None
             transaction_cursor = None
             if not self.db_handler_object.dummy:
                 conn = self.db_handler_object.pool.getconn()
