@@ -727,3 +727,41 @@ def test_should_project_be_archived():
     assert utils.should_project_be_archived("c001") is True
     assert utils.should_project_be_archived("C123") is False
     assert utils.should_project_be_archived("c123") is False
+
+
+def test_get_data_files_for_obsid_from_webservice():
+    logger = logging.getLogger("test")
+
+    # Uknown obsid- returns None
+    assert utils.get_data_files_for_obsid_from_webservice(logger, 1234567890, "http://ws.mwatelescope.org") is None
+
+    # Good obsid with 24 gpubox files and 1 flags and 1 metafits. Only return the 24 gpubox files
+    file_list = utils.get_data_files_for_obsid_from_webservice(logger, 1157306584, "http://ws.mwatelescope.org")
+    assert len(file_list) == 24
+
+    assert file_list == [
+        "1157306584_20160907180249_gpubox01_00.fits",
+        "1157306584_20160907180249_gpubox02_00.fits",
+        "1157306584_20160907180249_gpubox03_00.fits",
+        "1157306584_20160907180249_gpubox04_00.fits",
+        "1157306584_20160907180249_gpubox05_00.fits",
+        "1157306584_20160907180249_gpubox06_00.fits",
+        "1157306584_20160907180249_gpubox07_00.fits",
+        "1157306584_20160907180249_gpubox08_00.fits",
+        "1157306584_20160907180249_gpubox09_00.fits",
+        "1157306584_20160907180249_gpubox10_00.fits",
+        "1157306584_20160907180249_gpubox11_00.fits",
+        "1157306584_20160907180249_gpubox12_00.fits",
+        "1157306584_20160907180249_gpubox13_00.fits",
+        "1157306584_20160907180249_gpubox14_00.fits",
+        "1157306584_20160907180249_gpubox15_00.fits",
+        "1157306584_20160907180249_gpubox16_00.fits",
+        "1157306584_20160907180249_gpubox17_00.fits",
+        "1157306584_20160907180249_gpubox18_00.fits",
+        "1157306584_20160907180249_gpubox19_00.fits",
+        "1157306584_20160907180249_gpubox20_00.fits",
+        "1157306584_20160907180249_gpubox21_00.fits",
+        "1157306584_20160907180249_gpubox22_00.fits",
+        "1157306584_20160907180249_gpubox23_00.fits",
+        "1157306584_20160907180249_gpubox24_00.fits",
+    ]

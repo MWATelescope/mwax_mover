@@ -72,6 +72,7 @@ class CorrelatorMode(Enum):
 class MWADataFileType(Enum):
     """Enum for the possible MWA data file types"""
 
+    HW_LFILES = 8
     MWA_FLAG_FILE = 10
     MWA_PPD_FILE = 14
     MWAX_VOLTAGES = 17
@@ -880,16 +881,29 @@ def should_project_be_archived(project_id: str) -> bool:
         return True
 
 
-def get_data_files_for_obsid_from_webservice(logger, obsid: int, metadata_webservice_url: str):
-    """Calls an MWA webservice, passing in an obsid and returning a json metadata structure
-    of all the data_files - all_files: True means to get all files whether they are
-    archived at Pawsey or not"""
+def get_data_files_for_obsid_from_webservice(
+    logger,
+    obsid: int,
+    metadata_webservice_url: str,
+) -> list[str]:
+    """Calls an MWA webservice, passing in an obsid and returning a list of filenames
+    of all the data_files (MWAX_VISIBILITIES or HW_LFILES) of the given filetype or None if there was an error.
+    metadata_webservice_url is the base url - e.g. http://ws.mwatelescope.org
+    - all_files: True means to get all files whether they are archived at Pawsey or not"""
     result = requests.get(
         f"{metadata_webservice_url}/metadata/data_files",
         data={"obs_id": obsid, "terse": False, "all_files": True},
     )
     if result.text:
-        return json.loads(result.text)
+        files = json.loads(result.text)
+        file_list = [
+            file
+            for file in files
+            if files[file]["filetype"] == MWADataFileType.MWAX_VISIBILITIES.value
+            or files[file]["filetype"] == MWADataFileType.HW_LFILES.value
+        ]
+        file_list.sort()
+        return file_list
     else:
         logger.error(f"Error getting data files for obsid {obsid}, status code {result.status_code}")
         return None

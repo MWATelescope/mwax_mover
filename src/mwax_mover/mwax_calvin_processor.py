@@ -302,18 +302,11 @@ class MWAXCalvinProcessor:
             #
             # perform web service call to get list of data files from obsid
             #
-            json_metadata = utils.get_data_files_for_obsid_from_webservice(
+            web_service_filenames = utils.get_data_files_for_obsid_from_webservice(
                 self.logger, obs_id, self.metadata_webservice_url
             )
 
-            if json_metadata:
-                #
-                # we need a list of files from the web service
-                # this should just be the filenames
-                #
-                web_service_filenames = [filename for filename in json_metadata]
-                web_service_filenames.sort()
-
+            if web_service_filenames:
                 # we need a list of files from the work dir
                 # this first list has the full path
                 # put a basic UNIX pattern so we don't pick up the metafits
