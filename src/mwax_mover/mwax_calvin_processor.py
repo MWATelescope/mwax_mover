@@ -33,9 +33,7 @@ import traceback
 import coloredlogs
 
 from mwax_mover.mwax_db import insert_calibration_fits_row, insert_calibration_solutions_row
-from mwax_mover.mwax_mover import (
-    MODE_WATCH_DIR_FOR_NEW,
-)
+from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
 from mwax_mover.mwax_calvin_utils import (
     HyperfitsSolution,
     HyperfitsSolutionGroup,
@@ -147,7 +145,7 @@ class MWAXCalvinProcessor:
             dest_queue=self.assembly_watch_queue,
             pattern=".fits",
             log=self.logger,
-            mode=MODE_WATCH_DIR_FOR_NEW,
+            mode=MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
             recursive=False,
             exclude_pattern=None,
         )
@@ -457,8 +455,7 @@ class MWAXCalvinProcessor:
         self.logger.info(f"{item} added to upload_queue." f" ({self.upload_queue.qsize()}) in queue.")
 
     def process_phase_fits(
-        self, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights,
-        soln_tile_ids, phase_fit_niter
+        self, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
     ):
         """
         Fit a line to each tile phase solution, return a dataframe of phase fit parameters for each
@@ -501,8 +498,7 @@ class MWAXCalvinProcessor:
         return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])
 
     def process_gain_fits(
-        self, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights,
-        soln_tile_ids, chanblocks_per_coarse
+        self, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, chanblocks_per_coarse
     ):
         """
         for each tile, pol, fit a GainFitInfo to the gains
@@ -584,20 +580,38 @@ class MWAXCalvinProcessor:
             weights = soln_group.weights
 
             phase_fits = self.process_phase_fits(
-                item, unflagged_tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights,
-                soln_tile_ids, self.phase_fit_niter
+                item,
+                unflagged_tiles,
+                all_chanblocks_hz,
+                all_xx_solns,
+                all_yy_solns,
+                weights,
+                soln_tile_ids,
+                self.phase_fit_niter,
             )
             gain_fits = self.process_gain_fits(
-                item, unflagged_tiles, all_chanblocks_hz, all_xx_solns, all_yy_solns, weights,
-                soln_tile_ids, chanblocks_per_coarse
+                item,
+                unflagged_tiles,
+                all_chanblocks_hz,
+                all_xx_solns,
+                all_yy_solns,
+                weights,
+                soln_tile_ids,
+                chanblocks_per_coarse,
             )
 
             # if ~np.any(np.isfinite(phase_fits["length"])):
             #     self.logger.warning(f"{item} - no valid phase fits found, continuing anyway")
 
             phase_fits_pivot = debug_phase_fits(
-                phase_fits, tiles, all_chanblocks_hz, all_xx_solns[0], all_yy_solns[0], weights,
-                prefix=f"{item}/", plot_residual=True
+                phase_fits,
+                tiles,
+                all_chanblocks_hz,
+                all_xx_solns[0],
+                all_yy_solns[0],
+                weights,
+                prefix=f"{item}/",
+                plot_residual=True,
             )
             # phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
             # self.logger.debug(f"{item} - fits:\n{phase_fits_pivot.to_string(max_rows=512)}")
