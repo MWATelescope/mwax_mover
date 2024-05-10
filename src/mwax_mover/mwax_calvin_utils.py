@@ -1421,7 +1421,7 @@ def write_readme_file(logger, filename, cmd, exit_code, stdout, stderr):
                 readme.write("This run succeded at:" f" {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
             else:
                 readme.write("This run failed at:" f" {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
-            readme.write(f"Command: {cmd}")
+            readme.write(f"Command: {cmd}\n")
             readme.write(f"Exit code: {exit_code}\n")
             readme.write(f"stdout: {stdout}\n")
             readme.write(f"stderr: {stderr}\n")
