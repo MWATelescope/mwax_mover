@@ -1,0 +1,315 @@
+"""
+Module hosting the MWAXCalvinDownloadProcessor to
+download any unprocessed MWA calibration solution
+requests
+"""
+
+import argparse
+import coloredlogs
+from configparser import ConfigParser
+import json
+import logging
+import logging.handlers
+import os
+import signal
+import sys
+import threading
+import time
+from mwax_mover import version, mwax_db, utils, mwax_asvo_helper
+
+
+class MWAXCalvinDownloadProcessor:
+    """The main class processing calibration solution requests and downloading data"""
+
+    def __init__(
+        self,
+    ):
+        # General
+        self.logger = logging.getLogger(__name__)
+        self.log_path = None
+        self.hostname = None
+        self.db_handler_object = None
+
+        # health
+        self.health_multicast_interface_ip = None
+        self.health_multicast_interface_name = None
+        self.health_multicast_ip = None
+        self.health_multicast_port = None
+        self.health_multicast_hops = None
+
+        # mwa asvo
+        self.download_path = None
+        self.mwa_asvo_longest_wait_time_seconds = None
+        self.giant_squid_binary_path = None
+        self.giant_squid_list_timeout_seconds = None
+        self.giant_squid_submitvis_timeout_seconds = None
+        self.giant_squid_download_timeout_seconds = None
+
+        # Helper for MWA ASVO interactions and job record keeping
+        self.mwax_asvo_helper: mwax_asvo_helper.MWAASVOHelper = mwax_asvo_helper.MWAASVOHelper()
+
+        self.running = False
+        self.ready_to_exit = False
+
+    def start(self):
+        """Start the processor"""
+        self.running = True
+
+        # create a health thread
+        self.logger.info("Starting health_thread...")
+        health_thread = threading.Thread(name="health_thread", target=self.health_loop, daemon=True)
+        health_thread.start()
+
+        self.logger.info("Started...")
+
+        while self.running:
+            pass
+
+        #
+        # Finished- do some clean up
+        #
+        while not self.ready_to_exit:
+            time.sleep(1)
+
+        # Final log message
+        self.logger.info("Completed Successfully")
+
+    def stop(self):
+        """Shutsdown all processes"""
+
+        # Close all database connections
+        if not self.db_handler_object.dummy:
+            if self.db_handler_object.pool:
+                self.db_handler_object.pool.closeall()
+
+        self.ready_to_exit = True
+
+    def health_loop(self):
+        """Send health information via UDP multicast"""
+        while self.running:
+            # Code to run by the health thread
+            status_dict = self.get_status()
+
+            # Convert the status to bytes
+            status_bytes = json.dumps(status_dict).encode("utf-8")
+
+            # Send the bytes
+            try:
+                utils.send_multicast(
+                    self.health_multicast_interface_ip,
+                    self.health_multicast_ip,
+                    self.health_multicast_port,
+                    status_bytes,
+                    self.health_multicast_hops,
+                )
+            except Exception as catch_all_exception:  # pylint: disable=broad-except
+                self.logger.warning("health_handler: Failed to send health information." f" {catch_all_exception}")
+
+            # Sleep for a second
+            time.sleep(1)
+
+    def get_status(self) -> dict:
+        """Returns status of process as a dictionary"""
+        main_status = {
+            "Unix timestamp": time.time(),
+            "process": type(self).__name__,
+            "version": version.get_mwax_mover_version_string(),
+            "host": self.hostname,
+            "running": self.running,
+        }
+
+        job_status_list = []
+        for job in self.mwax_asvo_helper.current_asvo_jobs:
+            job_status_list.append(job.status)
+
+        status = {"main": main_status, "jobs": job_status_list}
+
+        return status
+
+    def signal_handler(self, _signum, _frame):
+        """Handles SIGINT and SIGTERM"""
+        self.logger.warning("Interrupted. Shutting down processor...")
+        self.running = False
+
+        # Stop any Processors
+        self.stop()
+
+    def initialise(self, config_filename):
+        """Initialise the processor from the command line"""
+        # Get this hosts hostname
+        self.hostname = utils.get_hostname()
+
+        if not os.path.exists(config_filename):
+            print(f"Configuration file location {config_filename} does not" " exist. Quitting.")
+            sys.exit(1)
+
+        # Make sure we can Ctrl-C / kill out of this
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
+
+        # Parse config file
+        config = ConfigParser()
+        config.read_file(open(config_filename, "r", encoding="utf-8"))
+
+        # read from config file
+        self.log_path = config.get("mwax mover", "log_path")
+
+        if not os.path.exists(self.log_path):
+            print(f"log_path {self.log_path} does not exist. Quiting.")
+            sys.exit(1)
+
+        # It's now safe to start logging
+        # start logging
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.DEBUG)
+        console_log = logging.StreamHandler()
+        console_log.setLevel(logging.DEBUG)
+        console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
+        self.logger.addHandler(console_log)
+
+        if config.getboolean("mwax mover", "coloredlogs", fallback=False):
+            coloredlogs.install(level="DEBUG", logger=self.logger)
+
+        file_log = logging.FileHandler(filename=os.path.join(self.log_path, "main.log"))
+        file_log.setLevel(logging.DEBUG)
+        file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
+        self.logger.addHandler(file_log)
+
+        self.logger.info("Starting mwax_calvin_download_processor" f" ...v{version.get_mwax_mover_version_string()}")
+
+        # health
+        self.health_multicast_ip = utils.read_config(self.logger, config, "mwax mover", "health_multicast_ip")
+        self.health_multicast_port = int(utils.read_config(self.logger, config, "mwax mover", "health_multicast_port"))
+        self.health_multicast_hops = int(utils.read_config(self.logger, config, "mwax mover", "health_multicast_hops"))
+        self.health_multicast_interface_name = utils.read_config(
+            self.logger,
+            config,
+            "mwax mover",
+            "health_multicast_interface_name",
+        )
+
+        # get this hosts primary network interface ip
+        self.health_multicast_interface_ip = utils.get_ip_address(self.health_multicast_interface_name)
+        self.logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
+
+        #
+        # MRO database
+        #
+        self.mro_metadatadb_host = utils.read_config(self.logger, config, "mro metadata database", "host")
+
+        if self.mro_metadatadb_host != mwax_db.DUMMY_DB:
+            self.mro_metadatadb_db = utils.read_config(self.logger, config, "mro metadata database", "db")
+            self.mro_metadatadb_user = utils.read_config(self.logger, config, "mro metadata database", "user")
+            self.mro_metadatadb_pass = utils.read_config(self.logger, config, "mro metadata database", "pass", True)
+            self.mro_metadatadb_port = utils.read_config(self.logger, config, "mro metadata database", "port")
+        else:
+            self.mro_metadatadb_db = None
+            self.mro_metadatadb_user = None
+            self.mro_metadatadb_pass = None
+            self.mro_metadatadb_port = None
+
+        # Initiate database connection for rmo metadata db
+        self.db_handler_object = mwax_db.MWAXDBHandler(
+            logger=self.logger,
+            host=self.mro_metadatadb_host,
+            port=self.mro_metadatadb_port,
+            db_name=self.mro_metadatadb_db,
+            user=self.mro_metadatadb_user,
+            password=self.mro_metadatadb_pass,
+        )
+
+        #
+        # MWA ASVO config
+        #
+
+        # Get the incoming dir
+        self.download_path = utils.read_config(
+            self.logger,
+            config,
+            "mwa_asvo",
+            "download_path",
+        )
+
+        if not os.path.exists(self.download_path):
+            self.logger.error("download_path location " f" {self.download_path} does not exist. Quitting.")
+            sys.exit(1)
+
+        # How many secs do we wait for MWA ASVO to get us a completed job??
+        self.mwa_asvo_longest_wait_time_seconds = int(
+            utils.read_config(self.logger, config, "mwa_asvo", "mwa_asvo_longest_wait_time_seconds")
+        )
+
+        # Get the giant squid binary
+        self.giant_squid_binary_path = utils.read_config(
+            self.logger,
+            config,
+            "mwa_asvo",
+            "giant_squid_binary_path",
+        )
+
+        if not os.path.exists(self.giant_squid_binary_path):
+            self.logger.error(
+                "giant_squid_binary_path location " f" {self.giant_squid_binary_path} does not exist. Quitting."
+            )
+            sys.exit(1)
+
+        self.giant_squid_list_timeout_seconds = int(
+            utils.read_config(self.logger, config, "mwa_asvo", "giant_squid_list_timeout_seconds")
+        )
+        self.giant_squid_submitvis_timeout_seconds = int(
+            utils.read_config(self.logger, config, "mwa_asvo", "giant_squid_submitvis_timeout_seconds")
+        )
+        self.giant_squid_download_timeout_seconds = int(
+            utils.read_config(self.logger, config, "mwa_asvo", "giant_squid_download_timeout_seconds")
+        )
+
+        # Setup the MWA ASVO Helper
+        self.mwax_asvo_helper.initialise(
+            self.logger,
+            self.giant_squid_binary_path,
+            self.giant_squid_list_timeout_seconds,
+            self.giant_squid_submitvis_timeout_seconds,
+            self.giant_squid_download_timeout_seconds,
+            self.download_path,
+        )
+
+    def initialise_from_command_line(self):
+        """Initialise if initiated from command line"""
+
+        # Get command line args
+        parser = argparse.ArgumentParser()
+        parser.description = (
+            "mwax_calvin_download_processor: a command line tool which is part of the"
+            " MWA calvin calibration service for the MWA. It checks for unprocessed records in"
+            " the calibration_requests table, submits and manages an MWA ASVO job for"
+            " each, then once ready, downloads the data for the calvin_processor to"
+            f" calibrate. (mwax_mover v{version.get_mwax_mover_version_string()})\n"
+        )
+
+        parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
+
+        args = vars(parser.parse_args())
+
+        # Check that config file exists
+        config_filename = args["cfg"]
+
+        self.initialise(config_filename)
+
+
+def main():
+    """Mainline function"""
+    processor = MWAXCalvinDownloadProcessor()
+
+    try:
+        processor.initialise_from_command_line()
+        processor.start()
+        sys.exit(0)
+    except Exception as catch_all_exception:  # pylint: disable=broad-except
+        if processor.logger:
+            processor.logger.exception(str(catch_all_exception))
+        else:
+            print(str(catch_all_exception))
+
+
+if __name__ == "__main__":
+    main()

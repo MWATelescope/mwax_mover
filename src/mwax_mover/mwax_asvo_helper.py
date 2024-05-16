@@ -52,6 +52,14 @@ class MWAASVOJob:
         """Returns the number of seconds between Now and the submitted datetime"""
         return (datetime.datetime.now() - self.submitted_datetime).total_seconds()
 
+    def get_status(self) -> dict:
+        return {
+            "job_id": self.job_id,
+            "obs_id": self.obs_id,
+            "state": self.job_state,
+            "last_seen": self.last_seen_datetime,
+        }
+
 
 """
 This class is the main helper to allow the CalvinProcessor to interact with MWA ASVO
@@ -80,10 +88,6 @@ class MWAASVOHelper:
         # Probably the incoming directory of the calvin_processor
         self.download_path = None
 
-        # Number of seconds we are willing to wait for MWA ASVO
-        # to complete a job
-        self.mwa_asvo_job_timeout_seconds = None
-
         # List of Jobs and obs_ids the helper is keeping track of
         self.current_asvo_jobs = None
 
@@ -95,7 +99,6 @@ class MWAASVOHelper:
         giant_squid_submitvis_timeout_seconds: int,
         giant_squid_download_timeout_seconds: int,
         download_path: str,
-        mwa_asvo_job_timeout_seconds: int,
     ):
         # Set class variables
         self.logger = logger
@@ -104,7 +107,6 @@ class MWAASVOHelper:
         self.giant_squid_submitvis_timeout_seconds = giant_squid_submitvis_timeout_seconds
         self.giant_squid_download_timeout_seconds = giant_squid_download_timeout_seconds
         self.download_path = download_path
-        self.mwa_asvo_job_timeout_seconds = mwa_asvo_job_timeout_seconds
         self.current_asvo_jobs: List[MWAASVOJob] = []
 
     def submit_download_job(self, obs_id: int):
@@ -206,6 +208,10 @@ class MWAASVOHelper:
             raise Exception(f"_run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. Error: {stdout}")
 
     def download_asvo_job(self, job: MWAASVOJob):
+        """Download the data product for the given job.
+        This method checks the job is in the right state
+        and that the download path exists and raises exceptions
+        on error"""
         if job.job_state == MWAASVOJobState.Ready:
             if os.path.exists(self.download_path):
                 stdout = self._run_giant_squid(
@@ -305,10 +311,10 @@ def get_existing_job_id_from_giant_squid_stdout(stdout: str) -> int | None:
     a specific error which corresponds to the job already existing
     for that obs id.
     Example stdout output in this case:
-    {"error": "Job already queued, processing or complete.", "error_code": 2, "job_id": 10001610}
+    {"error": "Job already queued, processing or complete", "error_code": 2, "job_id": 10001610}
     """
     regex_match = re.search(
-        r'{"error": "Job already queued, processing or complete.", "error_code": 2, "job_id": (\d+)}', stdout
+        r'{"error": "Job already queued, processing or complete", "error_code": 2, "job_id": (\d+)}', stdout
     )
 
     if regex_match:

@@ -2,6 +2,7 @@
 This is to test if MWACacheArchiveProcessor correctly reads the tonnes of
 config correctly from a "mwacache_archiver" config file.
 """
+
 import os
 from mwax_mover.mwacache_archive_processor import MWACacheArchiveProcessor
 

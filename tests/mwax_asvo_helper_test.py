@@ -86,16 +86,19 @@ def test_get_status_from_giant_squid_stdout_valid():
 def test_get_existing_job_id_from_giant_squid_stdout():
     stdout = """12:16:45 [WARN] Using 'acacia' for ASVO delivery
 Error: The server responded with status code 400 Bad Request, message:
-{"error": "Job already queued or processing.", "error_code": 2, "job_id": 10001509}"""
+{"error": "Job already queued, processing or complete", "error_code": 2, "job_id": 10001509}"""
 
     assert get_existing_job_id_from_giant_squid_stdout(stdout) == 10001509
 
     stdout = """Error: The server responded with status code 400 Bad Request, message:
-{"error": "Job already queued, processing or complete.", "error_code": 2, "job_id": 766638}"""
+{"error": "Job already queued, processing or complete", "error_code": 2, "job_id": 766638}"""
     assert get_existing_job_id_from_giant_squid_stdout(stdout) == 766638
 
     stdout = "Something else here we're not expecting"
     assert get_existing_job_id_from_giant_squid_stdout(stdout) is None
+
+    stdout = '{"error": "Job already queued, processing or complete", "error_code": 2, "job_id": 766840}'
+    assert get_existing_job_id_from_giant_squid_stdout(stdout) == 766840
 
 
 def test_get_status_from_giant_squid_stdout_invalid():
@@ -131,7 +134,6 @@ def test_mwax_asvo_helper():
         10,
         3600,
         "/tmp",
-        24 * 3600,
     )
     asvo.submit_download_job(1354865168)
 
@@ -143,6 +145,11 @@ def test_mwax_asvo_helper():
         for job in asvo.current_asvo_jobs:
             if job.obs_id == 1354865168 and job.job_state == MWAASVOJobState.Ready:
                 asvo.download_asvo_job(job)
+
+                # Remove it from the list
+                asvo.current_asvo_jobs.remove(job)
                 running = False
 
         time.sleep(10)
+
+    assert len(asvo.current_asvo_jobs) == 0

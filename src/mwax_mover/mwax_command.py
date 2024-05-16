@@ -54,9 +54,20 @@ def run_command_ext(
         stderror = completed_process.stderr
 
         if return_code != 0:
-            # Remove \n from output to make the log message nicer
-            stderror_log = stderror.replace("\n", " ")
-            stdout_log = stdout.replace("\n", " ")
+            # Remove \n from outputs to make the log message nicer
+            stderror_log = ""
+            if stderror:
+                stderror_log = stderror.replace("\n", " ")
+            else:
+                # if it is None, change it to empty string
+                stderror = ""
+
+            stdout_log = ""
+            if stdout:
+                stdout_log = stdout.replace("\n", " ")
+            else:
+                # if it is None, change it to empty string
+                stdout = ""
 
             logger.error(
                 f"Error executing {cmdline}. Return code: {return_code} "
