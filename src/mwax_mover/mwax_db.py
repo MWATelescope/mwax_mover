@@ -568,7 +568,9 @@ def select_unattempted_calsolution_requests(db_handler_object):
     SELECT obsid, unixtime, status, error, obsid_target
     FROM public.calsolution_request
     WHERE status = 0 -- not attempted
-    ORDER BY unixtime; -- Get oldest request first"""
+    ORDER BY unixtime LIMIT 5; -- Get oldest request first"""
+
+    # TODO: remove LIMIT!
 
     try:
         if db_handler_object.dummy:
@@ -578,17 +580,16 @@ def select_unattempted_calsolution_requests(db_handler_object):
                 f"'{sql}'"
             )
             time.sleep(1)  # simulate a slow transaction
-            return True
+            return 1
         else:
             results = db_handler_object.select_many_rows_postgres(sql, None)
 
             db_handler_object.logger.debug(
                 f"select_unattempted_calsolution_requests(): Successfully got {len(results)} requests."
             )
-            return True
+            return results
 
-    except Exception:  # pylint: disable=broad-except
-        db_handler_object.logger.exception(
+    except Exception as catch_all:  # pylint: disable=broad-except
+        raise Exception(
             f"select_unattempted_calsolution_requests(): error querying calsolution_request table. SQL was {sql}"
-        )
-        return False
+        ) from catch_all

@@ -12,6 +12,14 @@ from typing import List
 from mwax_mover.mwax_command import run_command_ext
 
 
+class GiantSquidException(Exception):
+    """Raised when an unknow exception is thrown when running giant-squid"""
+
+
+class GiantSquidMWAASVOOutageException(Exception):
+    """Raised when giant-squid reports that MWA ASVO is in an outage"""
+
+
 class GiantSquidJobAlreadyExistsException(Exception):
     """Raised when giant-squid reports that an obs_id already exists in
     the MWA ASVO queue in queued, processing or ready state"""
@@ -54,10 +62,11 @@ class MWAASVOJob:
 
     def get_status(self) -> dict:
         return {
-            "job_id": self.job_id,
-            "obs_id": self.obs_id,
-            "state": self.job_state,
-            "last_seen": self.last_seen_datetime,
+            "job_id": str(self.job_id),
+            "obs_id": str(self.obs_id),
+            "state": str(self.job_state.value),
+            "submitted": (self.submitted_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.submitted_datetime else ""),
+            "last_seen": (self.last_seen_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.last_seen_datetime else ""),
         }
 
 
@@ -109,6 +118,14 @@ class MWAASVOHelper:
         self.download_path = download_path
         self.current_asvo_jobs: List[MWAASVOJob] = []
 
+    def get_first_job_for_obs_id(self, obs_id) -> MWAASVOJob | None:
+        for job in self.current_asvo_jobs:
+            if job.obs_id == obs_id:
+                return job
+
+        # not found
+        return None
+
     def submit_download_job(self, obs_id: int):
         """Submits an MWA ASVO Download Job by executing giant-squid
         and adds the details to our internal list
@@ -137,14 +154,11 @@ class MWAASVOHelper:
 
             self.logger.info(f"{obs_id}: MWA ASVO job {job_id} already exists.")
 
-        except Exception as giant_squid_exception:
-            raise Exception() from giant_squid_exception
-
         # create, populate and add the MWAASVOJob
         self.current_asvo_jobs.append(MWAASVOJob(obs_id=obs_id, job_id=job_id))
         self.logger.info(f"{obs_id}: Added job {job_id}. Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs")
 
-    def update_all_job_status(self):
+    def update_all_job_status(self, add_missing_jobs_to_current_jobs: bool):
         """Updates the status of all our jobs using giant-squid list
 
         Parameters:
@@ -162,19 +176,70 @@ class MWAASVOHelper:
         # Convert stdout into json
         json_stdout = json.loads(stdout)
 
+        self.logger.debug(f"giant-squid list returned {len(json_stdout)} jobs")
+
+        # We'll set all the jobs we see to this exact datetime so
+        # we can figure out if one of our in memory jobs is no longer
+        # reported by giant-squid
+        update_datetime = datetime.datetime.now()
+
         # Iterate through each job
         for json_one_job in json_stdout:
-            # Extract the job_id, state and a download url (if status is Ready)
-            job_id, job_state, download_url = get_job_state_from_giant_squid_json(json_stdout, json_one_job)
+            job_found: bool = False
 
-            # Find the job in our list
+            # Extract the job_id, state and a download url (if status is Ready)
+            obs_id, job_id, job_state, download_url = get_job_info_from_giant_squid_json(json_stdout, json_one_job)
+
+            # Find the giant squid job in our in memory list
             for job in self.current_asvo_jobs:
                 if job.job_id == job_id:
-                    job.job_state = job_state
-                    job.download_url = download_url
-                    job.last_seen_datetime = datetime.datetime.now()
-                    self.logger.debug(f"{job.obs_id}: updated - {job.job_id} {job.job_state.value} {job.download_url}")
+                    job_found = True
+                    changed: bool = False
+
+                    if job.job_state != job_state:
+                        job.job_state = job_state
+                        changed = True
+
+                    if job.download_url != download_url:
+                        job.download_url = download_url
+                        changed = True
+
+                    job.last_seen_datetime = update_datetime
+
+                    if changed:
+                        self.logger.debug(
+                            f"{job.obs_id}: updated - {job.job_id} {job.job_state.value} {job.download_url}"
+                        )
                     break
+
+            # Job was in the giant squid list but not in my in memory list
+            # Maybe this code was run earlier, stopped and restarted?
+            # Better add the exitsing giant-squid jobs to my interal list
+            # if add_missing_jobs_to_current_jobs is True
+            if add_missing_jobs_to_current_jobs and not job_found:
+                new_job = MWAASVOJob(obs_id, job_id)
+                new_job.job_state = job_state
+                new_job.download_url = download_url
+                new_job.last_seen_datetime = update_datetime
+                new_job.submitted_datetime = new_job.last_seen_datetime
+
+                self.current_asvo_jobs.append(new_job)
+                self.logger.debug(
+                    f"{new_job.obs_id}: added job from giant-squid: {new_job.job_id} "
+                    f"{new_job.job_state.value} {new_job.download_url}"
+                )
+
+        # Finally, we need to check for any jobs in memory which were not seen anymore
+        # in giant squid
+        for job in self.current_asvo_jobs:
+            if job.last_seen_datetime != update_datetime:
+                # We didn't see this job
+                # We should log it and remove it
+                self.logger.debug(
+                    f"{job.obs_id}: removed - {job.job_id} {job.job_state.value} {job.download_url} as it was not "
+                    f"seen by giant-squid-list. {update_datetime} vs {job.last_seen_datetime}"
+                )
+                self.current_asvo_jobs.remove(job)
 
     def _run_giant_squid(self, subcommand: str, args: str, timeout_seconds: int) -> str:
         """Runs giant-squid and returns stdout output if successful or
@@ -195,6 +260,8 @@ class MWAASVOHelper:
             return stdout
         else:
             # Bad return code, failure!
+            if ("outage" in stdout) or ("archive location of the observation is down" in stdout):
+                raise GiantSquidMWAASVOOutageException("Unable to communicate with MWA ASVO- an outage is in progress")
 
             # Special case if subcommand is submit-vis- check for existing job and raise different exception
             # In this case, we don't need to submit the job
@@ -205,7 +272,9 @@ class MWAASVOHelper:
                 if job_id:
                     raise GiantSquidJobAlreadyExistsException("Job already exists", job_id)
 
-            raise Exception(f"_run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. Error: {stdout}")
+            raise GiantSquidException(
+                f"_run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. Error: {stdout}"
+            )
 
     def download_asvo_job(self, job: MWAASVOJob):
         """Download the data product for the given job.
@@ -255,8 +324,8 @@ def get_job_id_from_giant_squid_stdout(stdout: str) -> int:
     raise Exception(f"No job_id could be found in the output from giant-squid '{stdout}'")
 
 
-def get_job_state_from_giant_squid_json(stdout_json, json_for_one_job) -> tuple[int, MWAASVOJobState, str | None]:
-    """Returns an MWAASVOJobState Enum from the json for one job
+def get_job_info_from_giant_squid_json(stdout_json, json_for_one_job) -> tuple[int, int, MWAASVOJobState, str | None]:
+    """Returns an obs_id, Job_id and MWAASVOJobState Enum and URL from the json for one job
     NOTE: MWA ASVO returns funky json! E.g. some are just string values.
     Others are a dictionary. Very annoying!
     "Ready"
@@ -277,6 +346,7 @@ def get_job_state_from_giant_squid_json(stdout_json, json_for_one_job) -> tuple[
     """
 
     job_id: int = int(json_for_one_job)
+    obs_id: int = int(stdout_json[json_for_one_job]["obsid"])
     job_state_json = stdout_json[json_for_one_job]["jobState"]
 
     # Some job_state_json values are just strings, others are dicts!
@@ -299,7 +369,7 @@ def get_job_state_from_giant_squid_json(stdout_json, json_for_one_job) -> tuple[
                 files_json = stdout_json[json_for_one_job]["files"]
                 url = files_json[0]["fileUrl"]
 
-            return job_id, state, url
+            return obs_id, job_id, state, url
 
     # Nothing matched
     raise Exception(f"{job_id}: giant-squid unknown job status code {job_state}.")

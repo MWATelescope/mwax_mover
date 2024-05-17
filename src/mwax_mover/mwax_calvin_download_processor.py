@@ -39,6 +39,7 @@ class MWAXCalvinDownloadProcessor:
 
         # mwa asvo
         self.download_path = None
+        self.check_interval_seconds = None
         self.mwa_asvo_longest_wait_time_seconds = None
         self.giant_squid_binary_path = None
         self.giant_squid_list_timeout_seconds = None
@@ -51,6 +52,63 @@ class MWAXCalvinDownloadProcessor:
         self.running = False
         self.ready_to_exit = False
 
+    def main_loop_handler(self):
+        """This is the main loop handler for this process.
+        1. check and handle MWA ASVO jobs in progress
+        2. check and handle new requests in the database"""
+
+        # 1. Find out the status of all this user's jobs in MWA ASVO
+        # If a job returned by giant-squid-list is not already in the
+        # mwax_asvo_helper.current_asvo_jobs_list, then add them
+
+        # Get the job list from giant-squid, populating current_asvo_jobs
+        try:
+            self.mwax_asvo_helper.update_all_job_status(add_missing_jobs_to_current_jobs=True)
+
+        except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
+            # Handle me!
+            self.logger.info("MWA ASVO has an outage. Doing nothing this loop.")
+            return
+        except Exception:
+            self.logger.exception("Fatal exception- exiting!")
+            self.running = False
+            self.stop()
+
+        # 2. Get the list of outstanding calibration_requests from the db
+        results = mwax_db.select_unattempted_calsolution_requests(self.db_handler_object)
+        for result in results:
+            #
+            # Each result is: (obsid, unix_timestamp, error_code, error_message, obsid_target)
+            # obsid is the obsid we want to download
+            # obsid_target is the one MWA ASVO is doing this for!
+            #
+            # First check that we don't already have this obsid tracked
+            obs_id = int(result[0])
+
+            if not self.mwax_asvo_helper.get_first_job_for_obs_id(result[0]):
+                # doesn't exist- submit it and add it to our list
+                self.mwax_asvo_helper.submit_download_job(obs_id)
+
+        # 3. See if any in the list need actioning
+        self.handle_mwa_asvo_jobs()
+
+    def handle_mwa_asvo_jobs(self):
+        """This code will check for any jobs which can be downloaded and start
+        downloading them"""
+
+        for job in self.mwax_asvo_helper.current_asvo_jobs:
+            # Check job is in Ready state
+            if job.job_state == mwax_asvo_helper.MWAASVOJobState.Ready:
+                pass
+                # Download the data
+                # self.mwax_asvo_helper.download_asvo_job(job)
+
+                # Do we keep the job in our list for now?
+                # Maybe we should note it has been sent off to
+                # get calibrated, so we don't pick it up
+                # next time we poll the database for new
+                # requests?
+
     def start(self):
         """Start the processor"""
         self.running = True
@@ -62,8 +120,14 @@ class MWAXCalvinDownloadProcessor:
 
         self.logger.info("Started...")
 
+        # Main loop
         while self.running:
-            pass
+            self.main_loop_handler()
+
+            self.logger.debug(f"Tracking Jobs  : {list(job.job_id for job in self.mwax_asvo_helper.current_asvo_jobs)}")
+            self.logger.debug(f"Tracking ObsIds: {list(job.obs_id for job in self.mwax_asvo_helper.current_asvo_jobs)}")
+            self.logger.debug(f"Sleeping for {self.check_interval_seconds} seconds")
+            time.sleep(self.check_interval_seconds)
 
         #
         # Finished- do some clean up
@@ -76,6 +140,8 @@ class MWAXCalvinDownloadProcessor:
 
     def stop(self):
         """Shutsdown all processes"""
+
+        self.logger.warning("Stopping...")
 
         # Close all database connections
         if not self.db_handler_object.dummy:
@@ -120,7 +186,7 @@ class MWAXCalvinDownloadProcessor:
 
         job_status_list = []
         for job in self.mwax_asvo_helper.current_asvo_jobs:
-            job_status_list.append(job.status)
+            job_status_list.append(job.get_status())
 
         status = {"main": main_status, "jobs": job_status_list}
 
@@ -234,6 +300,9 @@ class MWAXCalvinDownloadProcessor:
             self.logger.error("download_path location " f" {self.download_path} does not exist. Quitting.")
             sys.exit(1)
 
+        # How long between iterations of the main loop (in seconds)
+        self.check_interval_seconds = int(utils.read_config(self.logger, config, "mwa_asvo", "check_interval_seconds"))
+
         # How many secs do we wait for MWA ASVO to get us a completed job??
         self.mwa_asvo_longest_wait_time_seconds = int(
             utils.read_config(self.logger, config, "mwa_asvo", "mwa_asvo_longest_wait_time_seconds")
@@ -253,12 +322,17 @@ class MWAXCalvinDownloadProcessor:
             )
             sys.exit(1)
 
+        # How long do we wait for giant-squid to execute a list subcommand
         self.giant_squid_list_timeout_seconds = int(
             utils.read_config(self.logger, config, "mwa_asvo", "giant_squid_list_timeout_seconds")
         )
+
+        # How long do we wait for giant-squid to execute a submit-vis subcommand
         self.giant_squid_submitvis_timeout_seconds = int(
             utils.read_config(self.logger, config, "mwa_asvo", "giant_squid_submitvis_timeout_seconds")
         )
+
+        # How long do we wait for giant-squid to execute a download subcommand
         self.giant_squid_download_timeout_seconds = int(
             utils.read_config(self.logger, config, "mwa_asvo", "giant_squid_download_timeout_seconds")
         )

@@ -4,7 +4,7 @@ import logging
 import pytest
 from mwax_mover.mwax_asvo_helper import (
     get_job_id_from_giant_squid_stdout,
-    get_job_state_from_giant_squid_json,
+    get_job_info_from_giant_squid_json,
     get_existing_job_id_from_giant_squid_stdout,
     MWAASVOJobState,
     MWAASVOHelper,
@@ -18,20 +18,22 @@ def test_get_jobid_from_giant_squid_stdout():
 
     assert (
         get_job_id_from_giant_squid_stdout(
-            "17:19:03 [INFO] Submitted 1234567890 as ASVO job ID 123\n# 17:19:03 [INFO] Submitted 1 obsids for visibility download.\n"
+            "17:19:03 [INFO] Submitted 1234567890 as ASVO job ID 123\n"
+            "17:19:03 [INFO] Submitted 1 obsids for visibility download.\n"
         )
         == 123
     )
 
     assert (
         get_job_id_from_giant_squid_stdout(
-            "17:19:03 [INFO] Submitted 1234567890 as ASVO job ID 1234567\n# 17:19:03 [INFO] Submitted 1 obsids for visibility download.\n"
+            "17:19:03 [INFO] Submitted 1234567890 as ASVO job ID 1234567\n"
+            "17:19:03 [INFO] Submitted 1 obsids for visibility download.\n"
         )
         == 1234567
     )
 
 
-def test_get_status_from_giant_squid_stdout_valid():
+def test_get_job_info_from_giant_squid_json_valid():
     stdout = """{
   "766223": {
     "obsid": 1396629320,
@@ -66,10 +68,11 @@ def test_get_status_from_giant_squid_stdout_valid():
         job_state = None
         url = None
 
-        job_id, job_state, url = get_job_state_from_giant_squid_json(json_stdout, json_one_job)
+        obs_id, job_id, job_state, url = get_job_info_from_giant_squid_json(json_stdout, json_one_job)
 
         match i:
             case 1:
+                assert obs_id == 1396629320
                 assert job_id == 766223
                 assert job_state == MWAASVOJobState.Ready
                 assert (
@@ -77,6 +80,7 @@ def test_get_status_from_giant_squid_stdout_valid():
                     == "https://projects.pawsey.org.au/mwa-asvo/1396629320_766223_vis_meta.tar?AWSAccessKeyId=a5e466f891734d45a67676504a309c35&Signature=VpZCOQ2exlVfIFc7nBtOqOsN8ME%3D&Expires=1715920096"
                 )
             case 2:
+                assert obs_id == 1290094336
                 assert job_id == 766227
                 assert job_state == MWAASVOJobState.Error
                 assert url is None
@@ -118,7 +122,7 @@ def test_get_status_from_giant_squid_stdout_invalid():
 
     for json_one_job in json_stdout:
         with pytest.raises(Exception) as excinfo:
-            job_id, job_state = get_job_state_from_giant_squid_json(json_stdout, json_one_job)
+            obs_id, job_id, job_state, url = get_job_info_from_giant_squid_json(json_stdout, json_one_job)
 
             assert str(excinfo.value) == ("766227: giant-squid unknown job status code UnhandledErrorCode.")
 
@@ -140,7 +144,7 @@ def test_mwax_asvo_helper():
     running = True
 
     while running:
-        asvo.update_all_job_status()
+        asvo.update_all_job_status(False)
 
         for job in asvo.current_asvo_jobs:
             if job.obs_id == 1354865168 and job.job_state == MWAASVOJobState.Ready:
