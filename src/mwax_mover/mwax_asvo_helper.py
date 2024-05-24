@@ -260,21 +260,48 @@ class MWAASVOHelper:
             return stdout
         else:
             # Bad return code, failure!
-            if ("outage" in stdout) or ("archive location of the observation is down" in stdout):
-                raise GiantSquidMWAASVOOutageException("Unable to communicate with MWA ASVO- an outage is in progress")
 
-            # Special case if subcommand is submit-vis- check for existing job and raise different exception
-            # In this case, we don't need to submit the job
-            if subcommand == "submit-vis":
-                # Get job_id
-                job_id = get_existing_job_id_from_giant_squid_stdout(stdout)
+            # Known errors have error codes:
+            # These exist in manta-ray/asvo_server/views_dispatch.py
+            # 0 = Invalid input, outage_in_progress
+            # 1 = job_limit_reached
+            # 2 = job_running_or_complete
+            # 3 = job_not_found
+            # Error code looks like this in StdOut:  "error_code": 2
+            regex_match = re.search(r'"error_code": (\d+)', stdout)
 
-                if job_id:
-                    raise GiantSquidJobAlreadyExistsException("Job already exists", job_id)
+            if regex_match:
+                # We found an error code in the stdout
+                error_code_str = regex_match.group(1)
+                error_code: int = int(error_code_str)
 
-            raise GiantSquidException(
-                f"_run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. Error: {stdout}"
-            )
+                if error_code == 2 and subcommand == "submit-vis":
+                    # Special case if subcommand is submit-vis- check for existing job and raise different exception
+                    # In this case, we don't need to submit the job
+
+                    # Get job_id
+                    job_id = get_existing_job_id_from_giant_squid_stdout(stdout)
+
+                    if job_id:
+                        raise GiantSquidJobAlreadyExistsException("Job already exists", job_id)
+                    else:
+                        # hmm could not find the job id!
+                        raise GiantSquidException(
+                            f"_run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. " f"Error: {stdout}"
+                        )
+                elif error_code == 0 and "outage" in stdout:
+                    raise GiantSquidMWAASVOOutageException(
+                        "Unable to communicate with MWA ASVO- an outage is in progress"
+                    )
+                else:
+                    raise GiantSquidException(
+                        f"_run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. Error: {stdout}"
+                    )
+            else:
+                # There was no "error_code" in stdout, so just report the whole stdout error message
+                raise GiantSquidException(
+                    f"_run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. Error: {stdout}"
+                )
 
     def download_asvo_job(self, job: MWAASVOJob):
         """Download the data product for the given job.
