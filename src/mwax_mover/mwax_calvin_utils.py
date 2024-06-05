@@ -116,7 +116,7 @@ class Metafits:
                 # index=metafits_input["Antenna"],
                 rx=metafits_input["Rx"],
                 slot=metafits_input["Slot"],
-                flavor=metafits_input["Flavors"],
+                flavor=metafits_input["Receiver_Types"],
             )
             for metafits_input in metafits_inputs
         )
