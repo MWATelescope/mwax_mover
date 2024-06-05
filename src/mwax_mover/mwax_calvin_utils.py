@@ -61,6 +61,11 @@ class ChanInfo(NamedTuple):
     coarse_chan_ranges: List[NDArray[np.int_]]  # List[Tuple(int, int)]
     fine_chans_per_coarse: int
     fine_chan_width_hz: float
+    
+class TimeInfo(NamedTuple):
+    """timestep info"""
+    num_times: int
+    int_time_s: float
 
 
 # class Config(Enum):
@@ -220,6 +225,23 @@ class Metafits:
             coarse_chan_ranges=coarse_chan_ranges,
             fine_chan_width_hz=fine_chan_width_hz,
             fine_chans_per_coarse=fine_chans_per_coarse,
+        )
+
+    @property
+    def time_info(self) -> TimeInfo:
+        """
+        Get time info from metafits
+        """
+        with fits.open(self.filename) as hdus:
+            hdu = hdus["PRIMARY"]
+            header = hdu.header
+
+            inttime = header["INTTIME"]
+            nscans = header["NSCANS"]
+
+        return TimeInfo(
+            num_times=nscans,
+            int_time_s=inttime,
         )
 
     @property
@@ -1466,14 +1488,35 @@ def run_birli(
                 continue
             data_file_arg += f"{data_file} "
 
+        metafits = Metafits(metafits_filename)
+        fine_chan_width_hz = metafits.chan_info.fine_chan_width_hz
+        time_time_s = metafits.time_info.int_time_s
+
+        # TODO: set default edge_width res from config
+        edge_width_hz = 80e3  # default
+        edge_width_hz = np.max([fine_chan_width_hz, edge_width_hz])
+        assert edge_width_hz >= fine_chan_width_hz, f"{edge_width_hz=} must be >= {fine_chan_width_hz=}"
+        assert edge_width_hz % fine_chan_width_hz == 0, f"{edge_width_hz=} must multiple of {fine_chan_width_hz=}"
+
+        # TODO: set minimum freq res from config
+        min_freq_res = 20e3
+        avg_arg = ""
+        if fine_chan_width_hz < min_freq_res:
+            avg_arg += f" --avg-freq-res={int(min_freq_res/1e3)}"
+
+        # TODO: set minimum time res from config
+        min_time_res = 1
+        if time_time_s < min_time_res:
+            avg_arg += f" --avg-time-res={min_time_res}"
+
         # Run birli
         cmdline = (
             f"{processor.birli_binary_path}"
             f" --metafits {metafits_filename}"
             " --no-draw-progress"
             f" --uvfits-out={uvfits_filename}"
-            f" --flag-edge-width={80}"
-            f" {data_file_arg}"
+            f" --flag-edge-width={int(edge_width_hz/1e3)}"
+            f" {avg_arg} {data_file_arg}"
         )
 
         processor.birli_popen_process = run_command_popen(processor.logger, cmdline, -1, False)
