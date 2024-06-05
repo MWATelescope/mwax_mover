@@ -1462,6 +1462,8 @@ def run_birli(
         for data_file in data_files:
             if data_file.endswith("solutions.fits"):
                 continue
+            if data_file.endswith("metafits_ppds.fits"):
+                continue
             data_file_arg += f"{data_file} "
 
         # Run birli
