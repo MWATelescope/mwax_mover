@@ -15,6 +15,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib as mpl
 from matplotlib import pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 from mwax_mover.mwax_command import (
     run_command_ext,
     run_command_popen,
@@ -61,7 +62,7 @@ class ChanInfo(NamedTuple):
     coarse_chan_ranges: List[NDArray[np.int_]]  # List[Tuple(int, int)]
     fine_chans_per_coarse: int
     fine_chan_width_hz: float
-    
+
 class TimeInfo(NamedTuple):
     """timestep info"""
     num_times: int
@@ -1034,12 +1035,9 @@ def debug_phase_fits(
         print(f"flagged {len(bad_fits)} of {n_total} fits as outliers:")
         print(bad_fits[['name', 'pol']].to_string(index=False))
 
-    from matplotlib import cm
-    from matplotlib.colors import LinearSegmentedColormap
-
     # make a new colormap for weighted data
     half_blues = LinearSegmentedColormap.from_list(
-        colors=cm.get_cmap("Blues")(np.linspace(0.5, 1, 256)),
+        colors=mpl.colormaps["Blues"](np.linspace(0.5, 1, 256)),
         name="HalfBlues",
     )
 

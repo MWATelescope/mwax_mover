@@ -732,7 +732,7 @@ class MWAXCalvinProcessor:
 
                 return True
         except Exception:
-            self.logger.exception(f"Error in upload_handler:\n{traceback.format_exc()}")
+            self.logger.exception(f"{item} - Error in upload_handler:\n{traceback.format_exc()}")
             return False
         finally:
             if not self.db_handler_object.dummy:

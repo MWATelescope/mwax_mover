@@ -14,7 +14,7 @@ iso8601
 jsonpatch
 jsonpointer
 keystoneauth1
-matplotlib
+matplotlib==3.9.*
 msgpack
 mwalib
 netaddr
