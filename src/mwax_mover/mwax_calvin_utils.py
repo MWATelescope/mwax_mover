@@ -1497,13 +1497,13 @@ def run_birli(
         assert edge_width_hz % fine_chan_width_hz == 0, f"{edge_width_hz=} must multiple of {fine_chan_width_hz=}"
 
         # TODO: set minimum freq res from config
-        min_freq_res = 20e3
+        min_freq_res = 40e3
         avg_arg = ""
         if fine_chan_width_hz < min_freq_res:
             avg_arg += f" --avg-freq-res={int(min_freq_res/1e3)}"
 
         # TODO: set minimum time res from config
-        min_time_res = 1
+        min_time_res = 2
         if time_time_s < min_time_res:
             avg_arg += f" --avg-time-res={min_time_res}"
 
