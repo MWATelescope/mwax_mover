@@ -332,11 +332,11 @@ class HyperfitsSolution:
             solutions[:, :, :, 6] + 1j * solutions[:, :, :, 7],
         ]
 
-    def get_ref_solutions(self, ref_tile_idx) -> List[NDArray[np.complex_]]:
-        if ref_tile_idx is None:
-            raise RuntimeError("no ref_tile_idx")
+    def get_ref_solutions(self, ref_tile_idx=None) -> List[NDArray[np.complex_]]:
         """Get solutions divided by reference tile as a complex array for each pol: [time, tile, chan]"""
         solutions = self.get_solutions()
+        if ref_tile_idx is None:
+            return solutions
         # divide solutions by reference
         ref_solutions = [solution[:, ref_tile_idx, :] for solution in solutions]  # type: ignore
         # divide solutions jones matrix by reference jones matrix, via inverse determinant
@@ -581,7 +581,7 @@ class HyperfitsSolutionGroup:
         except KeyError:
             return np.full(len(self.all_chanblocks_hz[0]), 1.0)
 
-    def get_solns(self, refant_name: str) -> Tuple[NDArray[np.int_], NDArray[np.complex_], NDArray[np.complex_]]:
+    def get_solns(self, refant_name=None) -> Tuple[NDArray[np.int_], NDArray[np.complex_], NDArray[np.complex_]]:
         """
         Get the tile ids in the order they appear in the solutions, as well as xx and yy solutions
         for the reference antenna
@@ -605,20 +605,31 @@ class HyperfitsSolutionGroup:
             soln_tiles["flag"] = np.logical_or(soln_tiles["flag_soln"], soln_tiles["flag_metafits"])
             soln_tiles.drop(columns=["flag_metafits", "flag_soln"], inplace=True)
             # self.logger.debug(f"{soln.filename} - tiles:\n{soln_tiles.to_string(max_rows=999)}")
-            _ref_tiles = soln_tiles[soln_tiles["name"] == refant_name]
-            if not len(_ref_tiles):
-                raise RuntimeError(f"{soln.filename} - reference tile {refant_name}" f" not found in solution file")
-            if len(_ref_tiles) > 1:
-                raise RuntimeError(
-                    f"{soln.filename} - more than one tile with name {refant_name}" f" found in solution file"
-                )
-            _ref_tile_idx = _ref_tiles.index[0]
-            _ref_tile_flag = _ref_tiles.iloc[0]["flag"]
-            if _ref_tile_flag:
-                raise RuntimeError(
-                    f"{soln.filename} - reference tile {refant_name}"
-                    f" is flagged in solutions file (index {_ref_tile_idx})"
-                )
+            if refant_name != None:
+                _ref_tiles = soln_tiles[soln_tiles["name"] == refant_name]
+                if not len(_ref_tiles):
+                    raise RuntimeError(f"{soln.filename} - reference tile {refant_name}" f" not found in solution file")
+                if len(_ref_tiles) > 1:
+                    raise RuntimeError(
+                        f"{soln.filename} - more than one tile with name {refant_name}" f" found in solution file"
+                    )
+                _ref_tile_idx = _ref_tiles.index[0]
+                _ref_tile_flag = _ref_tiles.iloc[0]["flag"]
+                if _ref_tile_flag:
+                    raise RuntimeError(
+                        f"{soln.filename} - reference tile {refant_name}"
+                        f" is flagged in solutions file (index {_ref_tile_idx})"
+                    )
+
+                if not ref_tile_idx:
+                    ref_tile_idx = _ref_tile_idx
+                    # self.logger.debug(f"{soln.filename} - ref tile found at index {ref_tile_idx}")
+                elif ref_tile_idx != _ref_tile_idx:
+                    raise RuntimeError(
+                        f"{soln.filename} - reference tile in solution file"
+                        f" does not match previous solution files"
+                    )
+
             _tile_ids = soln_tiles["id"].to_numpy()
             # _tile_ids, _ref_tile_idx = soln.validate_tiles(tiles_by_name, refant)
             if soln_tile_ids is None or not len(soln_tile_ids):
@@ -630,13 +641,6 @@ class HyperfitsSolutionGroup:
                     f" does not match previous solution files.\n"
                     f" previous:\n{_tile_ids}\n"
                     f" this:\n{soln_tile_ids}"
-                )
-            if not ref_tile_idx:
-                ref_tile_idx = _ref_tile_idx
-                # self.logger.debug(f"{soln.filename} - ref tile found at index {ref_tile_idx}")
-            elif ref_tile_idx != _ref_tile_idx:
-                raise RuntimeError(
-                    f"{soln.filename} - reference tile in solution file" f" does not match previous solution files"
                 )
 
             # validate timeblocks
