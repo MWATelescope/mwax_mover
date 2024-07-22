@@ -2,6 +2,7 @@
 This is to test if mwax_calvin_processor correctly reads the tonnes of
 config correctly from a "mwacache_archiver" config file.
 """
+
 import glob
 import threading
 import os
@@ -27,9 +28,7 @@ hostname = get_hostname()
 if hostname == "calvin1" or hostname == "calvin2":
     # Special case for the real machines
     TEST_OBS_LOCATION = f"/data/test_data/{TEST_OBS_ID}"
-    TEST_PICKETFENCE_OBS_LOCATION = (
-        f"/data/test_data/{TEST_PICKETFENCE_OBS_ID}"
-    )
+    TEST_PICKETFENCE_OBS_LOCATION = f"/data/test_data/{TEST_PICKETFENCE_OBS_ID}"
 else:
     TEST_OBS_LOCATION = f"/data/{TEST_OBS_ID}"
     TEST_PICKETFENCE_OBS_LOCATION = f"/data/{TEST_PICKETFENCE_OBS_ID}"
@@ -102,14 +101,7 @@ def setup_mwax_calvin_test(test_name: str) -> str:
     )
 
     # And check we have all the files
-    assert (
-        len(
-            glob.glob(
-                os.path.join(TEST_OBS_LOCATION, f"{TEST_OBS_ID}_*_ch*.fits")
-            )
-        )
-        == 24
-    ), (
+    assert len(glob.glob(os.path.join(TEST_OBS_LOCATION, f"{TEST_OBS_ID}_*_ch*.fits"))) == 24, (
         "There seem to be files missing in"
         f" {TEST_OBS_LOCATION} for {TEST_OBS_ID} observation. Please"
         f" download the {TEST_OBS_ID} observation from MWA ASVO and extract"
@@ -156,24 +148,16 @@ def test_mwax_calvin_test01():
     assert mcal.assemble_check_seconds == 10
 
     assert mcal.processing_path == os.path.join(base_dir, "processing")
-    assert mcal.processing_error_path == os.path.join(
-        base_dir, "processing_errors"
-    )
-    assert (
-        mcal.source_list_filename
-        == "../srclists/srclist_pumav3_EoR0aegean_fixedEoR1pietro+ForA_phase1+2.txt"
-    )
+    assert mcal.processing_error_path == os.path.join(base_dir, "processing_errors")
+    assert mcal.source_list_filename == "../srclists/srclist_pumav3_EoR0aegean_fixedEoR1pietro+ForA_phase1+2.txt"
     assert mcal.source_list_type == "rts"
-    assert (
-        mcal.hyperdrive_binary_path
-        == "../mwa_hyperdrive/target/release/hyperdrive"
-    )
+    assert mcal.hyperdrive_binary_path == "../mwa_hyperdrive/target/release/hyperdrive"
     assert mcal.hyperdrive_timeout == 7200
     assert mcal.birli_binary_path == "../Birli/target/release/birli"
     assert mcal.birli_timeout == 3600
     assert mcal.complete_path == os.path.join(base_dir, "complete")
     assert mcal.upload_path == os.path.join(base_dir, "upload")
-    assert mcal.keep_completed_visibility_files == 1
+    assert mcal.keep_completed_visibility_files == 0
 
 
 def test_mwax_calvin_test02():
@@ -194,9 +178,7 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
     Param: picket_fence: bool, is there so we
     can run the code twice- once for picket fence
     and once for contiguous without copy and pasting"""
-    test_obs_location = (
-        TEST_PICKETFENCE_OBS_LOCATION if picket_fence else TEST_OBS_LOCATION
-    )
+    test_obs_location = TEST_PICKETFENCE_OBS_LOCATION if picket_fence else TEST_OBS_LOCATION
     test_obs_id = TEST_PICKETFENCE_OBS_ID if picket_fence else TEST_OBS_ID
 
     # Setup all the paths
@@ -229,14 +211,10 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
     time.sleep(5)
 
     # Now we simulate TEST_OBS files being delivered into the watch dir
-    incoming_files = glob.glob(
-        os.path.join(test_obs_location, f"{test_obs_id}_*_ch*.fits")
-    )
+    incoming_files = glob.glob(os.path.join(test_obs_location, f"{test_obs_id}_*_ch*.fits"))
 
     for _file_number, filename in enumerate(incoming_files):
-        dest_filename = os.path.join(
-            mcal.incoming_watch_path, os.path.basename(filename)
-        )
+        dest_filename = os.path.join(mcal.incoming_watch_path, os.path.basename(filename))
 
         shutil.copyfile(filename, dest_filename)
 
@@ -252,23 +230,16 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
     thrd.join()
 
     # Assembly
-    assemble_files = glob.glob(
-        os.path.join(mcal.assemble_path, f"{test_obs_id}/{test_obs_id}*.fits")
-    )
+    assemble_files = glob.glob(os.path.join(mcal.assemble_path, f"{test_obs_id}/{test_obs_id}*.fits"))
     assert len(assemble_files) == 0, "number of assembled files is 0"
 
     # processing path should have been removed
-    assert (
-        os.path.exists(os.path.join(mcal.processing_path, f"{test_obs_id}"))
-        is False
-    ), "processing path still exists"
+    assert os.path.exists(os.path.join(mcal.processing_path, f"{test_obs_id}")) is False, "processing path still exists"
 
     # processing complete
     # Files are left here because we successfully completed
     # there was no error as such
-    processing_complete_files = glob.glob(
-        os.path.join(mcal.complete_path, f"{test_obs_id}/{test_obs_id}*.fits")
-    )
+    processing_complete_files = glob.glob(os.path.join(mcal.complete_path, f"{test_obs_id}/{test_obs_id}*.fits"))
 
     # non picket fence = 24 gpu + 1 metafits + 1 solution fits
     # picket fence = 24 gpu + 1 metafits + 2 solution fits
@@ -288,9 +259,7 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
 
     expected_birli_files = 2 if picket_fence else 1
 
-    assert (
-        len(birli_files) == expected_birli_files
-    ), "Number of uvfits files found != expected uvfits files"
+    assert len(birli_files) == expected_birli_files, "Number of uvfits files found != expected uvfits files"
 
     assert os.path.exists(
         os.path.join(
@@ -326,9 +295,7 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
         len(hyperdrive_solution_files) == expected_hyperdrive_solution_files
     ), "correct number of hyperdrive solutions files not found"
 
-    bin_solution_files = glob.glob(
-        os.path.join(mcal.complete_path, f"{test_obs_id}/{test_obs_id}*.bin")
-    )
+    bin_solution_files = glob.glob(os.path.join(mcal.complete_path, f"{test_obs_id}/{test_obs_id}*.bin"))
     # expected bin files should == expected solution files
     assert (
         len(bin_solution_files) == expected_hyperdrive_solution_files
@@ -344,16 +311,10 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
 
     expected_hyperdrive_stats_files = 2 if picket_fence else 1
 
-    assert (
-        len(stats_files) == expected_hyperdrive_stats_files
-    ), "correct number of stats files not found"
+    assert len(stats_files) == expected_hyperdrive_stats_files, "correct number of stats files not found"
 
     # processing errors
-    processing_error_files = glob.glob(
-        os.path.join(
-            mcal.processing_error_path, f"{test_obs_id}/{test_obs_id}*.fits"
-        )
-    )
+    processing_error_files = glob.glob(os.path.join(mcal.processing_error_path, f"{test_obs_id}/{test_obs_id}*.fits"))
     assert len(processing_error_files) == 0, "processing_error_files is not 0"
 
 
@@ -387,14 +348,10 @@ def test_mwax_calvin_test04():
     time.sleep(5)
 
     # Now we simulate TEST_OBS files being delivered into the watch dir
-    incoming_files = glob.glob(
-        os.path.join(TEST_OBS_LOCATION, f"{TEST_OBS_ID}_*_ch*.fits")
-    )
+    incoming_files = glob.glob(os.path.join(TEST_OBS_LOCATION, f"{TEST_OBS_ID}_*_ch*.fits"))
 
     for filename in incoming_files:
-        dest_filename = os.path.join(
-            mcal.incoming_watch_path, os.path.basename(filename)
-        )
+        dest_filename = os.path.join(mcal.incoming_watch_path, os.path.basename(filename))
 
         shutil.copyfile(filename, dest_filename)
 
@@ -409,17 +366,11 @@ def test_mwax_calvin_test04():
     # Now check results
 
     # Assembly
-    assemble_files = glob.glob(
-        os.path.join(mcal.assemble_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}*.fits")
-    )
+    assemble_files = glob.glob(os.path.join(mcal.assemble_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}*.fits"))
     assert len(assemble_files) == 0
 
     # processing
-    processing_files = glob.glob(
-        os.path.join(
-            mcal.processing_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}*.fits"
-        )
-    )
+    processing_files = glob.glob(os.path.join(mcal.processing_path, f"{TEST_OBS_ID}/{TEST_OBS_ID}*.fits"))
     assert len(processing_files) == 0
 
     # processing errors
