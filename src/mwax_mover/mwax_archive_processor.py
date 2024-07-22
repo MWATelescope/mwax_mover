@@ -748,7 +748,7 @@ class MWAXArchiveProcessor:
                             item,
                             int(self.archive_command_numa_node),
                             self.calibrator_destination_host,
-                            self.archive_command_timeout_sec,
+                            1200,  # TODO: make this a config parameter
                         )
                         is not True
                     ):
