@@ -6,7 +6,7 @@ import time
 from typing import Optional
 import psycopg2
 from psycopg2 import InterfaceError, OperationalError
-from tenacity import retry, stop_after_attempt, wait_fixed
+from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_not_exception_type
 
 
 DUMMY_DB = "dummy"
@@ -138,7 +138,11 @@ class MWAXDBHandler:
                 self.logger.error(f"select_one_row_postgres(): unknown Error- {exception_info}")
                 raise exception_info
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(30))
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(30),
+        retry=retry_if_not_exception_type(psycopg2.errors.ForeignKeyViolation),
+    )
     def execute_single_dml_row(self, sql: str, parm_list: list):
         """This executes an INSERT, UPDATE or DELETE that should only affect
         one row"""
@@ -187,6 +191,14 @@ class MWAXDBHandler:
                 self.logger.error(f"execute_single_dml_row(): postgres InterfaceError- {int_error}")
                 # Reraise error
                 raise int_error
+
+            except psycopg2.errors.ForeignKeyViolation as fk_error:
+                # Trying to insert or update but a value of a field violates the FK constraint-
+                # e.g. insert into data_files fails due to observation_num not existing in mwa_setting.starttime
+                # We need to reraise the error so our caller can handle in this "insert_data_file_row" case!
+                self.logger.error(f"execute_single_dml_row(): postgres ForeignKeyViolation- {fk_error}")
+                # Reraise error
+                raise fk_error
 
             except psycopg2.ProgrammingError as prog_error:
                 # A programming/SQL error - e.g. table does not exist. Don't
@@ -336,6 +348,20 @@ def insert_data_file_row(
                 f"{filename} insert_data_file_row() Successfully wrote into" " data_files table"
             )
             return True
+
+    except psycopg2.errors.ForeignKeyViolation:
+        # In this scenario it means M&C deleted the observation BUT the metafits was already generated
+        # so mwax_u2s et al. thought it was still a real observation
+        # we should just delete this file and move on
+        db_handler_object.logger.warning(
+            f"{filename} insert_data_file_row() observation_num {obsid} has been deleted by M&C."
+            "Deleting this data file."
+        )
+        os.remove(filename)
+
+        # returning True here will cause the item to be ack'd off the queue so it is not tried again
+        # but we need the caller to check if the file still exists- otherwise we may archive it!
+        return True
 
     except Exception as upsert_exception:  # pylint: disable=broad-except
         db_handler_object.logger.error(

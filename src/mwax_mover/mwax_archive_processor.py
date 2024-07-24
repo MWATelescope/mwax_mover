@@ -562,6 +562,12 @@ class MWAXArchiveProcessor:
                 # if something went wrong, requeue
                 return False
 
+            # Check to see if the file is still there- the above call could have deleted it
+            # if we got an FK error
+            if not os.path.exists(item):
+                # Return True, telling the queue worker we are done with this item
+                return True
+
             #
             # If the project_id is the special code C123 then
             # do not archive it.
