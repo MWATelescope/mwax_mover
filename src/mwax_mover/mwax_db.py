@@ -357,7 +357,7 @@ def insert_data_file_row(
             f"{filename} insert_data_file_row() observation_num {obsid} has been deleted by M&C."
             "Deleting this data file."
         )
-        os.remove(filename)
+        os.remove(archive_filename)
 
         # returning True here will cause the item to be ack'd off the queue so it is not tried again
         # but we need the caller to check if the file still exists- otherwise we may archive it!
