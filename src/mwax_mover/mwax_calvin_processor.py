@@ -27,7 +27,6 @@ from mwax_mover import (
     mwax_db,
 )
 import numpy as np
-import pandas as pd
 from pandas import DataFrame
 import traceback
 import coloredlogs
@@ -75,8 +74,10 @@ class MWAXCalvinProcessor:
         self.worker_threads = []
 
         # assembly
-        self.incoming_watch_path = None
-        self.assembly_watch_queue = queue.Queue()
+        self.incoming_realtime_watch_path = None
+        self.incoming_asvo_watch_path = None
+        self.assembly_realtime_watch_queue = queue.Queue()
+        self.assembly_asvo_watch_queue = queue.Queue()
         self.assemble_path = None
         self.assemble_check_seconds = None
         self.obsid_check_assembled_thread = None
@@ -138,11 +139,24 @@ class MWAXCalvinProcessor:
         # Create watchers
         #
         self.logger.info("Creating watchers...")
-        # Create watcher for the incoming watch path queue
+        # Create watcher for the incoming realtime watch path queue
         new_watcher = mwax_watcher.Watcher(
-            name="incoming_watcher",
-            path=self.incoming_watch_path,
-            dest_queue=self.assembly_watch_queue,
+            name="incoming_realtime_watcher",
+            path=self.incoming_realtime_watch_path,
+            dest_queue=self.assembly_realtime_watch_queue,
+            pattern=".fits",
+            log=self.logger,
+            mode=MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+            recursive=False,
+            exclude_pattern=None,
+        )
+        self.watchers.append(new_watcher)
+
+        # Create watcher for the incoming asvo watch path queue
+        new_watcher = mwax_watcher.Watcher(
+            name="incoming_asvo_watcher",
+            path=self.incoming_asvo_watch_path,
+            dest_queue=self.assembly_asvo_watch_queue,
             pattern=".fits",
             log=self.logger,
             mode=MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
@@ -158,12 +172,25 @@ class MWAXCalvinProcessor:
         # Create queueworker for assembly queue
         self.logger.info("Creating workers...")
         new_worker = mwax_queue_worker.QueueWorker(
-            name="incoming_worker",
-            source_queue=self.assembly_watch_queue,
+            name="incoming_realtime_worker",
+            source_queue=self.assembly_realtime_watch_queue,
             executable_path=None,
-            event_handler=self.incoming_handler,
+            event_handler=self.incoming_realtime_handler,
             log=self.logger,
             requeue_to_eoq_on_failure=True,
+            exit_once_queue_empty=False,
+            requeue_on_error=True,
+        )
+        self.queue_workers.append(new_worker)
+
+        # For the ASVO queue, don't requeue to the back of queue. Keep it where it is! Order matters!
+        new_worker = mwax_queue_worker.QueueWorker(
+            name="incoming_asvo_worker",
+            source_queue=self.assembly_asvo_watch_queue,
+            executable_path=None,
+            event_handler=self.incoming_asvo_handler,
+            log=self.logger,
+            requeue_to_eoq_on_failure=False,
             exit_once_queue_empty=False,
             requeue_on_error=True,
         )
@@ -204,6 +231,8 @@ class MWAXCalvinProcessor:
             watcher_thread = threading.Thread(name=f"watch_thread{i}", target=watcher.start, daemon=True)
             self.watcher_threads.append(watcher_thread)
             watcher_thread.start()
+            # Wait 2 seconds- this ensures the watchers start in the correct order
+            time.sleep(2)
 
         self.logger.info("Waiting for all watchers to finish scanning....")
         count_of_watchers_still_scanning = len(self.watchers)
@@ -251,10 +280,12 @@ class MWAXCalvinProcessor:
         # Final log message
         self.logger.info("Completed Successfully")
 
-    def incoming_handler(self, item) -> bool:
+    def incoming_realtime_handler(self, item) -> bool:
         """This is triggered each time a new fits file
-        appears in the incoming_path"""
-        self.logger.info(f"Handling... incoming FITS file {item}...")
+        appears in the incoming_realtime_path
+
+        Realtime requests have higher priority than MWA ASVO"""
+        self.logger.info(f"Handling... incoming realtime FITS file {item}...")
         filename = os.path.basename(item)
         obs_id: int = int(filename[0:10])
 
@@ -269,6 +300,36 @@ class MWAXCalvinProcessor:
         self.logger.info(f"{item} moving file into obs_id's assembly dir {new_filename}...")
         shutil.move(item, new_filename)
         return True
+
+    def incoming_asvo_handler(self, item) -> bool:
+        """This is triggered each time a new fits file
+        appears in the incoming_asvo_path
+
+        MWA ASVO requests have lower priority than realtime"""
+
+        # Only handle MWA ASVO if the incoming_realtime_queue is empty
+        if self.assembly_realtime_watch_queue.qsize() == 0:
+            self.logger.info(f"Handling... incoming MWA ASVO FITS file {item}...")
+            filename = os.path.basename(item)
+            obs_id: int = int(filename[0:10])
+
+            obsid_assembly_dir = os.path.join(self.assemble_path, str(obs_id))
+            if not os.path.exists(obsid_assembly_dir):
+                self.logger.info(f"{item} creating obs_id's assembly dir" f" {obsid_assembly_dir}...")
+                # This is the first file of this obs_id to be seen
+                os.mkdir(obsid_assembly_dir)
+
+            # Relocate this file to the obs_id_work_dir
+            new_filename = os.path.join(obsid_assembly_dir, filename)
+            self.logger.info(f"{item} moving file into obs_id's assembly dir {new_filename}...")
+            shutil.move(item, new_filename)
+            return True
+        else:
+            # Sleep this thread for a minute so we don't go into
+            # a tight loop
+            # Returning false will cause this item to just be put back on the queue
+            time.sleep(60)
+            return False
 
     def check_obs_is_ready_to_process(self, obs_id, obsid_assembly_dir) -> bool:
         """This routine checks to see if an observation is ready to be processed
@@ -427,9 +488,7 @@ class MWAXCalvinProcessor:
             # Did we have N number of successful runs?
             if hyperdrive_success:
                 # Run hyperdrive and get plots and stats
-                _stats_success: bool = mwax_calvin_utils.run_hyperdrive_stats(
-                    self, uvfits_files, metafits_filename, obs_id, item
-                )
+                mwax_calvin_utils.run_hyperdrive_stats(self, uvfits_files, metafits_filename, obs_id, item)
 
                 # now move the whole dir
                 # to the upload_path
@@ -520,7 +579,10 @@ class MWAXCalvinProcessor:
     def upload_handler(self, item: str) -> bool:
         """Will deal with completed hyperdrive solutions
         by getting them into a format we can insert into
-        the calibration database"""
+        the calibration database
+
+        item is a fully qualified directory which MUST
+        end in the obsid"""
 
         conn = None
         try:
@@ -946,16 +1008,33 @@ class MWAXCalvinProcessor:
         # Assembly config
         #
 
-        # Get the watch dir
-        self.incoming_watch_path = utils.read_config(
+        # Get the watch dirs
+        self.incoming_realtime_watch_path = utils.read_config(
             self.logger,
             config,
             "assembly",
-            "incoming_watch_path",
+            "incoming_realtime_watch_path",
         )
 
-        if not os.path.exists(self.incoming_watch_path):
-            self.logger.error("incoming_watch_path location " f" {self.incoming_watch_path} does not exist. Quitting.")
+        if not os.path.exists(self.incoming_realtime_watch_path):
+            self.logger.error(
+                "incoming_realtime_watch_path location "
+                f" {self.incoming_realtime_watch_path} does not exist. Quitting."
+            )
+            sys.exit(1)
+
+        self.incoming_asvo_watch_path = utils.read_config(
+            self.logger,
+            config,
+            "assembly",
+            "incoming_asvo_watch_path",
+        )
+
+        if not os.path.exists(self.incoming_realtime_watch_path):
+            self.logger.error(
+                "incoming_realtime_watch_path location "
+                f" {self.incoming_realtime_watch_path} does not exist. Quitting."
+            )
             sys.exit(1)
 
         # Get the assemble dir

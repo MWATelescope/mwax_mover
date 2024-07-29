@@ -6,7 +6,6 @@ import time
 from typing import Optional, Tuple
 import psycopg2
 import psycopg2.pool
-from psycopg2 import InterfaceError, OperationalError
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 
@@ -50,9 +49,40 @@ class MWAXDBHandler:
         else:
             return self.select_one_row_postgres(sql, parm_list)
 
+    def select_many_rows(self, sql: str, parm_list: list) -> int:
+        """
+        Returns many rows from SQL and params, handling
+        both the real and dummy database case.
+        """
+        if self.dummy:
+            return [
+                1,
+            ]
+        else:
+            return self.select_many_rows_postgres(sql, parm_list)
+
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(60))
     def select_one_row_postgres(self, sql: str, parm_list: list):
         """Returns a single row from postgres given SQL and params"""
+        # Assuming we have a connection, try to do the database operation
+        rows = self.select_postgres(sql, parm_list, 1)
+
+        # Just return the first row
+        return rows[0]
+
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(60))
+    def select_many_rows_postgres(self, sql: str, parm_list: list):
+        """Returns a single row from postgres given SQL and params"""
+        # Assuming we have a connection, try to do the database operation
+        rows = self.select_postgres(sql, parm_list, None)
+
+        # Just return all rows
+        return rows
+
+    def select_postgres(self, sql: str, parm_list: list, expected_rows: None | int):
+        """Returns rows from postgres given SQL and params. If expected rows is passed
+        then it will check it returned the correct number of rows and riase exception
+        if not"""
         # Assuming we have a connection, try to do the database operation
         try:
             with self.pool.getconn() as conn:
@@ -66,23 +96,26 @@ class MWAXDBHandler:
                     # Check how many rows we affected
                     rows_affected = len(rows)
 
-                    if rows_affected == 1:
-                        # Success - return the tuple
-                        return rows[0]
+                    if expected_rows:
+                        if expected_rows == rows_affected:
+                            return rows
+                        else:
+                            # Something went wrong
+                            self.logger.error(
+                                "select_one_row_postgres(): Error- queried"
+                                f" {rows_affected} rows, expected 1. SQL={sql}"
+                            )
+                            raise Exception(
+                                "select_one_row_postgres(): Error- queried"
+                                f" {rows_affected} rows, expected 1. SQL={sql}"
+                            )
                     else:
-                        # Something went wrong
-                        self.logger.error(
-                            "select_one_row_postgres(): Error- queried" f" {rows_affected} rows, expected 1. SQL={sql}"
-                        )
-                        raise Exception(
-                            "select_one_row_postgres(): Error- queried" f" {rows_affected} rows, expected 1. SQL={sql}"
-                        )
+                        # Success - return all rows
+                        return rows
 
-        except Exception as exception_info:
-            # Any other error- likely to be a database error rather than
-            # connection based
-            self.logger.error(f"select_one_row_postgres(): unknown Error- {exception_info}")
-            raise exception_info
+        except Exception as sql_exception:
+            self.logger.exception("select_one_row_postgres()")
+            raise Exception from sql_exception
         finally:
             if conn:
                 self.pool.putconn(conn)
@@ -117,11 +150,9 @@ class MWAXDBHandler:
                             f" SQL={sql}"
                         )
 
-        except Exception as exception_info:
-            # Any other error- likely to be a database error rather than
-            # connection based
-            self.logger.error(f"execute_single_dml_row(): unknown Error- {exception_info}")
-            raise exception_info
+        except Exception as sql_exception:
+            self.logger.exception("execute_single_dml_row()")
+            raise Exception from sql_exception
         finally:
             if conn:
                 self.pool.putconn(conn)
@@ -165,28 +196,9 @@ class MWAXDBHandler:
                     f" SQL={sql}"
                 )
 
-        except OperationalError as conn_error:
-            self.logger.error(f"execute_single_dml_row(): postgres OperationalError- {conn_error}")
-            # Reraise error
-            raise conn_error
-
-        except InterfaceError as int_error:
-            self.logger.error(f"execute_single_dml_row(): postgres InterfaceError- {int_error}")
-            # Reraise error
-            raise int_error
-
-        except psycopg2.ProgrammingError as prog_error:
-            # A programming/SQL error - e.g. table does not exist. Don't
-            # reconnect connection
-            self.logger.error(f"execute_single_dml_row(): postgres ProgrammingError- {prog_error}")
-            # Reraise error
-            raise prog_error
-
-        except Exception as exception_info:
-            # Any other error- likely to be a database error rather than
-            # connection based
-            self.logger.error(f"execute_single_dml_row(): unknown Error- {exception_info}")
-            raise exception_info
+        except Exception as sql_exception:
+            self.logger.exception("execute_single_dml_row_within_transaction()")
+            raise Exception from sql_exception
 
 
 #
@@ -315,10 +327,10 @@ def insert_data_file_row(
             )
             return True
 
-    except Exception as upsert_exception:  # pylint: disable=broad-except
-        db_handler_object.logger.error(
+    except Exception:  # pylint: disable=broad-except
+        db_handler_object.logger.exception(
             f"{filename} insert_data_file_row() error inserting data_files"
-            f" record in data_files table: {upsert_exception}. SQL was {sql}"
+            f" record in data_files table. SQL was {sql}"
         )
         return False
 
@@ -374,10 +386,10 @@ def update_data_file_row_as_archived(
             )
             return True
 
-    except Exception as upsert_exception:  # pylint: disable=broad-except
-        db_handler_object.logger.error(
+    except Exception:  # pylint: disable=broad-except
+        db_handler_object.logger.exception(
             f"{filename} update_data_file_row_as_archived() error updating"
-            f" data_files record in data_files table: {upsert_exception}. SQL"
+            f" data_files record in data_files table. SQL"
             f" was {sql}"
         )
         return False
@@ -430,10 +442,10 @@ def insert_calibration_fits_row(
             )
             return (True, fit_id)
 
-    except Exception as insert_exception:  # pylint: disable=broad-except
-        db_handler_object.logger.error(
+    except Exception:  # pylint: disable=broad-except
+        db_handler_object.logger.exception(
             f"{obs_id}: insert_data_file_row() error inserting"
-            f" calibration_fits record in table: {insert_exception}. SQL was"
+            f" calibration_fits record in table. SQL was"
             f" {sql} Values: {sql_values}"
         )
         db_handler_object.con.rollback()
@@ -538,10 +550,49 @@ def insert_calibration_solutions_row(
             )
             return True
 
-    except Exception as insert_exception:  # pylint: disable=broad-except
-        db_handler_object.logger.error(
+    except Exception:  # pylint: disable=broad-except
+        db_handler_object.logger.exception(
             f"{obs_id}: insert_calibration_solutions_row() error inserting"
-            " insert_calibration_solutions record in table:"
-            f" {insert_exception}. SQL was {sql} Values {sql_values}"
+            f" insert_calibration_solutions record in table. SQL was {sql} Values {sql_values}"
         )
         return False
+
+
+def select_unattempted_calsolution_requests(db_handler_object):
+    """Return all unattempted calibration_requests.
+    NOTE: this could include duplicate obs_ids in theory"""
+
+    sql = """
+    -- status 0 = Not attempted
+    -- status 2 = success
+    -- status 1,-1,-2 = Error occurred
+    -- obsid is the calibrator
+    -- obsid_target is the obs to have the cal solution applied to
+    SELECT obsid, unixtime, status, error, obsid_target
+    FROM public.calsolution_request
+    WHERE status = 0 -- not attempted
+    ORDER BY unixtime LIMIT 5; -- Get oldest request first"""
+
+    # TODO: remove LIMIT!
+
+    try:
+        if db_handler_object.dummy:
+            db_handler_object.logger.warning(
+                "select_unattempted_calsolution_requests(): Using dummy database"
+                " connection. No data is really being selected. SQL="
+                f"'{sql}'"
+            )
+            time.sleep(1)  # simulate a slow transaction
+            return 1
+        else:
+            results = db_handler_object.select_many_rows_postgres(sql, None)
+
+            db_handler_object.logger.debug(
+                f"select_unattempted_calsolution_requests(): Successfully got {len(results)} requests."
+            )
+            return results
+
+    except Exception as catch_all:  # pylint: disable=broad-except
+        raise Exception(
+            f"select_unattempted_calsolution_requests(): error querying calsolution_request table. SQL was {sql}"
+        ) from catch_all

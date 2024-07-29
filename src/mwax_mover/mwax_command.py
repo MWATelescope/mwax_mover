@@ -43,7 +43,7 @@ def run_command_ext(
         completed_process = subprocess.run(
             args,
             shell=use_shell,
-            check=True,
+            check=False,
             timeout=timeout,
             capture_output=True,
             text=True,
@@ -54,20 +54,34 @@ def run_command_ext(
         stderror = completed_process.stderr
 
         if return_code != 0:
+            # Remove \n from outputs to make the log message nicer
+            stderror_log = ""
+            if stderror:
+                stderror_log = stderror.replace("\n", " ")
+            else:
+                # if it is None, change it to empty string
+                stderror = ""
+
+            stdout_log = ""
+            if stdout:
+                stdout_log = stdout.replace("\n", " ")
+            else:
+                # if it is None, change it to empty string
+                stdout = ""
+
             logger.error(
-                f"Error executing {cmdline}. Return code:" f" {return_code} StdErr: {stderror} StdOut: {stdout}"
+                f"Error executing {cmdline}. Return code: {return_code} "
+                f"StdErr: {stderror_log} "
+                f"StdOut: {stdout_log}"
             )
-            return False, ""
+            return False, stderror
         else:
             return True, stdout
 
-    except subprocess.CalledProcessError as cpe:
-        logger.error(f"CalledProcessError executing {cmdline}: {str(cpe)} {cpe.stderr}")
-        return False, ""
-
     except Exception as command_exception:  # pylint: disable=broad-except
-        logger.error(f"Exception executing {cmdline}: {str(command_exception)}")
-        return False, ""
+        error = f"Exception executing {cmdline}: {str(command_exception)}"
+        logger.exception(f"Exception executing {cmdline}:")
+        return False, error
 
 
 # This will return a popen process object which can be polled for exit
@@ -85,11 +99,7 @@ def run_command_popen(
         cmdline = f"{command}"
     else:
         if int(numa_node) > 0:
-            cmdline = (
-                "numactl"
-                f" --cpunodebind={str(numa_node)} --membind={str(numa_node)} "
-                f"{command}"
-            )
+            cmdline = "numactl" f" --cpunodebind={str(numa_node)} --membind={str(numa_node)} " f"{command}"
         else:
             cmdline = f"{command}"
 
@@ -117,9 +127,7 @@ def run_command_popen(
     return popen_process
 
 
-def check_popen_finished(
-    logger, popen_process, timeout: int = 60
-) -> typing.Tuple[int, str, str]:
+def check_popen_finished(logger, popen_process, timeout: int = 60) -> typing.Tuple[int, str, str]:
     """Given a running popen_process object
     wait for it to finish and return the exit code
     and output stdout & stderr"""
@@ -142,15 +150,9 @@ def check_popen_finished(
         stderror += "\nTimeout expired"
 
     except subprocess.CalledProcessError as cpe:
-        logger.error(
-            f"CalledProcessError executing {popen_process.args}:"
-            f" {str(cpe)} {cpe.stderr}"
-        )
+        logger.error(f"CalledProcessError executing {popen_process.args}:" f" {str(cpe)} {cpe.stderr}")
 
     except Exception as command_exception:  # pylint: disable=broad-except
-        logger.error(
-            f"Exception executing {popen_process.args}:"
-            f" {str(command_exception)}"
-        )
+        logger.error(f"Exception executing {popen_process.args}:" f" {str(command_exception)}")
 
     return (exit_code, stdout, stderror)
