@@ -57,24 +57,15 @@ class MWAXCalvinDownloadProcessor:
         1. check and handle MWA ASVO jobs in progress
         2. check and handle new requests in the database"""
 
-        # 1. Find out the status of all this user's jobs in MWA ASVO
-        # If a job returned by giant-squid-list is not already in the
-        # mwax_asvo_helper.current_asvo_jobs_list, then add them
+        # Background- this code needs to handle the following cases:
+        # a) Normal operation. Process has been running and keeps running.
+        # b) Process stopped (for some reason). Then process restarts.
+        #    Need to deal with:
+        #    * Cal requests which are already under way- in ASVO
+        #    * or already processing on calvin
+        #    * or already processed and failed on calvin
 
-        # Get the job list from giant-squid, populating current_asvo_jobs
-        try:
-            self.mwax_asvo_helper.update_all_job_status(add_missing_jobs_to_current_jobs=True)
-
-        except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
-            # Handle me!
-            self.logger.info("MWA ASVO has an outage. Doing nothing this loop.")
-            return
-        except Exception:
-            self.logger.exception("Fatal exception- exiting!")
-            self.running = False
-            self.stop()
-
-        # 2. Get the list of outstanding calibration_requests from the db
+        # 1. Get the list of outstanding calibration_requests from the db
         results = mwax_db.select_unattempted_calsolution_requests(self.db_handler_object)
         for result in results:
             #
@@ -82,12 +73,37 @@ class MWAXCalvinDownloadProcessor:
             # obsid is the obsid we want to download
             # obsid_target is the one MWA ASVO is doing this for!
             #
-            # First check that we don't already have this obsid tracked
+            # Get the obs_id
             obs_id = int(result[0])
 
-            if not self.mwax_asvo_helper.get_first_job_for_obs_id(result[0]):
-                # doesn't exist- submit it and add it to our list
+            # Check if we have this obs_id tracked
+            asvo_job = None
+
+            for job in self.mwax_asvo_helper.current_asvo_jobs:
+                if job.obs_id == obs_id:
+                    asvo_job = job
+                    break
+
+            if not asvo_job:
+                # Submit job and add to the ones we are tracking
                 self.mwax_asvo_helper.submit_download_job(obs_id)
+
+        # 2. Find out the status of all this user's jobs in MWA ASVO
+        # Get the job list from giant-squid, populating current_asvo_jobs
+        # If we find a job in giant-squid which we don't know about,
+        # DON'T include it in the list we track
+        try:
+            self.mwax_asvo_helper.update_all_job_status(add_missing_jobs_to_current_jobs=False)
+
+        except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
+            # Handle me!
+            self.logger.info("MWA ASVO has an outage. Doing nothing this loop.")
+            return
+        except Exception:
+            # TODO - maybe some exceptions we should back off instead of exiting?
+            self.logger.exception("Fatal exception- exiting!")
+            self.running = False
+            self.stop()
 
         # 3. See if any in the list need actioning
         self.handle_mwa_asvo_jobs()
@@ -99,15 +115,17 @@ class MWAXCalvinDownloadProcessor:
         for job in self.mwax_asvo_helper.current_asvo_jobs:
             # Check job is in Ready state
             if job.job_state == mwax_asvo_helper.MWAASVOJobState.Ready:
-                pass
                 # Download the data
-                # self.mwax_asvo_helper.download_asvo_job(job)
+                self.mwax_asvo_helper.download_asvo_job(job)
 
-                # Do we keep the job in our list for now?
-                # Maybe we should note it has been sent off to
-                # get calibrated, so we don't pick it up
-                # next time we poll the database for new
-                # requests?
+                # Data will be downloaded into calvin's incoming
+                # dir. BUT calvin processor may be off. So
+                # we will update the database here.
+                # TODO Update database!
+                # Something like:
+                # UPDATE calibration_requests
+                # SET status=??  <-- need to find out which non-zero status to use!
+                # WHERE obs_id = <job.obsid>
 
     def start(self):
         """Start the processor"""

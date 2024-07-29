@@ -504,6 +504,29 @@ def test_config_get_list_valid():
     assert return_list == ["D0006", "G0058"]
 
 
+def test_config_get_bool_true():
+    logger = logging.getLogger("test")
+
+    config_filename = os.path.join(os.getcwd(), "tests/mwax_calvin_test02.cfg")
+    config = ConfigParser()
+    config.read_file(open(config_filename, "r", encoding="utf-8"))
+
+    true_bool = utils.read_config_bool(logger, config, "complete", "keep_completed_visibility_files")
+
+    assert true_bool is True
+
+
+def test_config_get_bool_false():
+    logger = logging.getLogger("test")
+    config_filename = os.path.join(os.getcwd(), "tests/mwax_calvin_test01.cfg")
+    config = ConfigParser()
+    config.read_file(open(config_filename, "r", encoding="utf-8"))
+
+    false_bool = utils.read_config_bool(logger, config, "complete", "keep_completed_visibility_files")
+
+    assert false_bool is False
+
+
 def test_config_get_list_empty():
     """Read a string from a config file, then
     split (by comma) into a list

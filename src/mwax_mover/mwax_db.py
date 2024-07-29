@@ -559,6 +559,9 @@ def insert_calibration_solutions_row(
 
 
 def select_unattempted_calsolution_requests(db_handler_object):
+    """Return all unattempted calibration_requests.
+    NOTE: this could include duplicate obs_ids in theory"""
+
     sql = """
     -- status 0 = Not attempted
     -- status 2 = success
