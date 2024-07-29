@@ -562,6 +562,12 @@ class MWAXArchiveProcessor:
                 # if something went wrong, requeue
                 return False
 
+            # Check to see if the file is still there- the above call could have deleted it
+            # if we got an FK error
+            if not os.path.exists(item):
+                # Return True, telling the queue worker we are done with this item
+                return True
+
             #
             # If the project_id is the special code C123 then
             # do not archive it.
@@ -748,7 +754,7 @@ class MWAXArchiveProcessor:
                             item,
                             int(self.archive_command_numa_node),
                             self.calibrator_destination_host,
-                            self.archive_command_timeout_sec,
+                            1200,  # TODO: make this a config parameter
                         )
                         is not True
                     ):

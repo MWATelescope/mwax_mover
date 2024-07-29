@@ -6,7 +6,7 @@ import time
 from typing import Optional, Tuple
 import psycopg2
 import psycopg2.pool
-from tenacity import retry, stop_after_attempt, wait_fixed
+from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_not_exception_type
 
 
 DUMMY_DB = "dummy"
@@ -109,17 +109,39 @@ class MWAXDBHandler:
                                 "select_one_row_postgres(): Error- queried"
                                 f" {rows_affected} rows, expected 1. SQL={sql}"
                             )
-                    else:
-                        # Success - return all rows
-                        return rows
 
-        except Exception as sql_exception:
-            self.logger.exception("select_one_row_postgres()")
-            raise Exception from sql_exception
-        finally:
-            if conn:
-                self.pool.putconn(conn)
+            except OperationalError as conn_error:
+                # Our connection is toast. Clear it so we attempt a reconnect
+                self.con = None
+                self.logger.error("select_one_row_postgres(): postgres OperationalError-" f" {conn_error}")
+                # Reraise error
+                raise conn_error
 
+            except InterfaceError as int_error:
+                # Our connection is toast. Clear it so we attempt a reconnect
+                self.con = None
+                self.logger.error(f"select_one_row_postgres(): postgres InterfaceError- {int_error}")
+                # Reraise error
+                raise int_error
+
+            except psycopg2.ProgrammingError as prog_error:
+                # A programming/SQL error - e.g. table does not exist. Don't
+                # reconnect connection
+                self.logger.error("select_one_row_postgres(): postgres ProgrammingError-" f" {prog_error}")
+                # Reraise error
+                raise prog_error
+
+            except Exception as exception_info:
+                # Any other error- likely to be a database error rather than
+                # connection based
+                self.logger.error(f"select_one_row_postgres(): unknown Error- {exception_info}")
+                raise exception_info
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(30),
+        retry=retry_if_not_exception_type(psycopg2.errors.ForeignKeyViolation),
+    )
     def execute_single_dml_row(self, sql: str, parm_list: list):
         """This executes an INSERT, UPDATE or DELETE that should only affect
         one row. Since this is all in a with (context) block, rollback is
@@ -150,55 +172,40 @@ class MWAXDBHandler:
                             f" SQL={sql}"
                         )
 
-        except Exception as sql_exception:
-            self.logger.exception("execute_single_dml_row()")
-            raise Exception from sql_exception
-        finally:
-            if conn:
-                self.pool.putconn(conn)
+            except OperationalError as conn_error:
+                # Our connection is toast. Clear it so we attempt a reconnect
+                self.con = None
+                self.logger.error(f"execute_single_dml_row(): postgres OperationalError- {conn_error}")
+                # Reraise error
+                raise conn_error
 
-    def execute_dml_row_within_transaction(
-        self, sql: str, parm_list: list, transaction_cursor: psycopg2.extensions.cursor
-    ):
-        """This executes an INSERT, UPDATE or DELETE that should only affect
-        one row.
+            except InterfaceError as int_error:
+                # Our connection is toast. Clear it so we attempt a reconnect
+                self.con = None
+                self.logger.error(f"execute_single_dml_row(): postgres InterfaceError- {int_error}")
+                # Reraise error
+                raise int_error
 
-        NOTES: it is up to the caller to supply a cursor which all of the operations
-        within the transaction share. Also it is up to the caller to call:
-        1. conn = self.pool.getconn() # get a connection
-        2. curs = conn.cursor()
-        3. Call this method (possibly multiple times), passing in "curs"
-        4. conn.rollback() # On exception or failure
-        5. conn.commit() # On success
-        6. self.pool.putconn(conn)
-        """
+            except psycopg2.errors.ForeignKeyViolation as fk_error:
+                # Trying to insert or update but a value of a field violates the FK constraint-
+                # e.g. insert into data_files fails due to observation_num not existing in mwa_setting.starttime
+                # We need to reraise the error so our caller can handle in this "insert_data_file_row" case!
+                self.logger.error(f"execute_single_dml_row(): postgres ForeignKeyViolation- {fk_error}")
+                # Reraise error
+                raise fk_error
 
-        # Assuming we have a connection, try to do the database operation
-        # using our cursor
-        try:
-            # Run the sql
-            transaction_cursor.execute(sql, parm_list)
+            except psycopg2.ProgrammingError as prog_error:
+                # A programming/SQL error - e.g. table does not exist. Don't
+                # reconnect connection
+                self.logger.error(f"execute_single_dml_row(): postgres ProgrammingError- {prog_error}")
+                # Reraise error
+                raise prog_error
 
-            # Check how many rows we affected
-            rows_affected = transaction_cursor.rowcount
-
-            if rows_affected != 1:
-                # An exception in here will trigger a rollback
-                # which is good
-                self.logger.error(
-                    "execute_dml_row_within_transaction(): Error- query"
-                    f" affected {rows_affected} rows, expected 1."
-                    f" SQL={sql}"
-                )
-                raise Exception(
-                    "execute_dml_row_within_transaction(): Error- query"
-                    f" affected {rows_affected} rows, expected 1."
-                    f" SQL={sql}"
-                )
-
-        except Exception as sql_exception:
-            self.logger.exception("execute_single_dml_row_within_transaction()")
-            raise Exception from sql_exception
+            except Exception as exception_info:
+                # Any other error- likely to be a database error rather than
+                # connection based
+                self.logger.error(f"execute_single_dml_row(): unknown Error- {exception_info}")
+                raise exception_info
 
 
 #
@@ -327,8 +334,22 @@ def insert_data_file_row(
             )
             return True
 
-    except Exception:  # pylint: disable=broad-except
-        db_handler_object.logger.exception(
+    except psycopg2.errors.ForeignKeyViolation:
+        # In this scenario it means M&C deleted the observation BUT the metafits was already generated
+        # so mwax_u2s et al. thought it was still a real observation
+        # we should just delete this file and move on
+        db_handler_object.logger.warning(
+            f"{filename} insert_data_file_row() observation_num {obsid} has been deleted by M&C."
+            "Deleting this data file."
+        )
+        os.remove(archive_filename)
+
+        # returning True here will cause the item to be ack'd off the queue so it is not tried again
+        # but we need the caller to check if the file still exists- otherwise we may archive it!
+        return True
+
+    except Exception as upsert_exception:  # pylint: disable=broad-except
+        db_handler_object.logger.error(
             f"{filename} insert_data_file_row() error inserting data_files"
             f" record in data_files table. SQL was {sql}"
         )
