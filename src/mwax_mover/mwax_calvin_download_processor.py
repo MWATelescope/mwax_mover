@@ -161,7 +161,8 @@ class MWAXCalvinDownloadProcessor:
         # Close all database connections
         if not self.db_handler_object.dummy:
             if self.db_handler_object.pool:
-                self.db_handler_object.pool.closeall()
+                if not self.db_handler_object.pool.closed:
+                    self.db_handler_object.pool.closeall()
 
         self.ready_to_exit = True
 
