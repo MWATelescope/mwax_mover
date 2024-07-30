@@ -67,26 +67,28 @@ class MWAXCalvinDownloadProcessor:
 
         # 1. Get the list of outstanding calibration_requests from the db
         results = mwax_db.select_unattempted_calsolution_requests(self.db_handler_object)
-        for result in results:
-            #
-            # Each result is: (obsid, unix_timestamp, error_code, error_message, obsid_target)
-            # obsid is the obsid we want to download
-            # obsid_target is the one MWA ASVO is doing this for!
-            #
-            # Get the obs_id
-            obs_id = int(result[0])
 
-            # Check if we have this obs_id tracked
-            asvo_job = None
+        if results:
+            for result in results:
+                #
+                # Each result is: (obsid, unix_timestamp, error_code, error_message, obsid_target)
+                # obsid is the obsid we want to download
+                # obsid_target is the one MWA ASVO is doing this for!
+                #
+                # Get the obs_id
+                obs_id = int(result[0])
 
-            for job in self.mwax_asvo_helper.current_asvo_jobs:
-                if job.obs_id == obs_id:
-                    asvo_job = job
-                    break
+                # Check if we have this obs_id tracked
+                asvo_job = None
 
-            if not asvo_job:
-                # Submit job and add to the ones we are tracking
-                self.mwax_asvo_helper.submit_download_job(obs_id)
+                for job in self.mwax_asvo_helper.current_asvo_jobs:
+                    if job.obs_id == obs_id:
+                        asvo_job = job
+                        break
+
+                if not asvo_job:
+                    # Submit job and add to the ones we are tracking
+                    self.mwax_asvo_helper.submit_download_job(obs_id)
 
         # 2. Find out the status of all this user's jobs in MWA ASVO
         # Get the job list from giant-squid, populating current_asvo_jobs
@@ -118,18 +120,13 @@ class MWAXCalvinDownloadProcessor:
                 # Download the data
                 self.mwax_asvo_helper.download_asvo_job(job)
 
-                # Data will be downloaded into calvin's incoming
-                # dir. BUT calvin processor may be off. So
-                # we will update the database here.
-                # TODO Update database!
-                # Something like:
-                # UPDATE calibration_requests
-                # SET status=??  <-- need to find out which non-zero status to use!
-                # WHERE obs_id = <job.obsid>
-
     def start(self):
         """Start the processor"""
         self.running = True
+
+        # creating database connection pool(s)
+        self.logger.info("Starting database connection pool...")
+        self.db_handler_object.start_database_pool()
 
         # create a health thread
         self.logger.info("Starting health_thread...")
@@ -260,6 +257,8 @@ class MWAXCalvinDownloadProcessor:
         self.logger.addHandler(file_log)
 
         self.logger.info("Starting mwax_calvin_download_processor" f" ...v{version.get_mwax_mover_version_string()}")
+
+        self.logger.info(f"Reading config file: {config_filename}")
 
         # health
         self.health_multicast_ip = utils.read_config(self.logger, config, "mwax mover", "health_multicast_ip")

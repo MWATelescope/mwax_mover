@@ -75,12 +75,14 @@ class MWAXCalvinProcessor:
 
         # assembly
         self.incoming_realtime_watch_path = None
+        self.remove_partial_files_check_seconds = 60 * 60 * 4
         self.incoming_asvo_watch_path = None
         self.assembly_realtime_watch_queue = queue.Queue()
         self.assembly_asvo_watch_queue = queue.Queue()
         self.assemble_path = None
         self.assemble_check_seconds = None
         self.obsid_check_assembled_thread = None
+        self.check_and_remove_partial_files_thread = None
 
         # processing
         self.processing_path = None
@@ -91,6 +93,7 @@ class MWAXCalvinProcessor:
         self.phase_fit_niter = None
 
         # Upload
+        self.produce_debug_plots = True  # default to true- for now only off if running via pytest
         self.upload_path = None
         self.upload_queue = queue.Queue()
 
@@ -111,6 +114,10 @@ class MWAXCalvinProcessor:
     def start(self):
         """Start the processor"""
         self.running = True
+
+        # creating database connection pool(s)
+        self.logger.info("Starting database connection pool...")
+        self.db_handler_object.start_database_pool()
 
         # create a health thread
         self.logger.info("Starting health_thread...")
@@ -260,6 +267,16 @@ class MWAXCalvinProcessor:
         self.obsid_check_assembled_thread.start()
         self.worker_threads.append(self.obsid_check_assembled_thread)
 
+        # Start check_and_remove_partial_files_thread
+
+        self.check_and_remove_partial_files_thread = threading.Thread(
+            name="check_and_remove_partial_files_thread",
+            target=self.check_and_remove_partial_files_handler,
+            daemon=True,
+        )
+        self.check_and_remove_partial_files_thread.start()
+        self.worker_threads.append(self.check_and_remove_partial_files_thread)
+
         self.logger.info("Started...")
 
         while self.running:
@@ -405,6 +422,40 @@ class MWAXCalvinProcessor:
                 f" {current_gpstime} < ({obs_id} - {int(obs_id)+exp_time})"
             )
             return False
+
+    def check_and_remove_partial_files_handler(self):
+        """This thread sleeps most of the time, but wakes up
+        to check if there are any orphaned realtime incoming
+        visibility files orphaned. This can happen if the mwax
+        boxes are interrupted when xrdcp'ing files to calvin"""
+        while self.running:
+            self.logger.debug(f"sleeping for {self.remove_partial_files_check_seconds} secs")
+            time.sleep(self.remove_partial_files_check_seconds)
+
+            if self.running:
+                self.logger.debug("Waking up and checking for and removing orphaned partial realtime files...")
+
+                #
+                # Remove any partial files first if they are old
+                #
+                partial_files = glob(os.path.join(self.incoming_realtime_watch_path, "*.part*"))
+                for partial_file in partial_files:
+                    # Ensure now minus the last mod time of the partial file
+                    # is > 4 hours, it is definitely safe to delete
+                    # In theory we could be starting up as mwax is sending
+                    # us a new file and we don't want to delete an real
+                    # in progress file.
+                    min_partial_purge_age_secs = 60 * 60 * 4  # 4 hours
+
+                    if time.time() - os.path.getmtime(partial_file) > min_partial_purge_age_secs:
+                        self.logger.warning(
+                            f"Partial file {partial_file} is older than"
+                            f" {min_partial_purge_age_secs} seconds and will be"
+                            " removed..."
+                        )
+                        os.remove(partial_file)
+                        self.logger.warning(f"Partial file {partial_file} deleted")
+        return True
 
     def obsid_check_assembled_handler(self):
         """This thread sleeps most of the time, but wakes up
@@ -658,16 +709,19 @@ class MWAXCalvinProcessor:
             # if ~np.any(np.isfinite(phase_fits["length"])):
             #     self.logger.warning(f"{item} - no valid phase fits found, continuing anyway")
 
-            phase_fits_pivot = debug_phase_fits(
-                phase_fits,
-                tiles,
-                all_chanblocks_hz,
-                all_xx_solns[0],
-                all_yy_solns[0],
-                weights,
-                prefix=f"{item}/",
-                plot_residual=True,
-            )
+            # Matplotlib stuff seems to break pytest so we will
+            # pass false in for pytest stuff (or if we don't want debug)
+            if self.produce_debug_plots:
+                phase_fits_pivot = debug_phase_fits(
+                    phase_fits,
+                    tiles,
+                    all_chanblocks_hz,
+                    all_xx_solns[0],
+                    all_yy_solns[0],
+                    weights,
+                    prefix=f"{item}/",
+                    plot_residual=True,
+                )
             # phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
             # self.logger.debug(f"{item} - fits:\n{phase_fits_pivot.to_string(max_rows=512)}")
             success = True
@@ -777,6 +831,10 @@ class MWAXCalvinProcessor:
                 if transaction_cursor:
                     conn.commit()
                     transaction_cursor.close()
+
+                #
+                # If this cal solution was a requested one, update it to completed
+                #
 
                 # now move the whole dir
                 # to the complete path
@@ -954,6 +1012,7 @@ class MWAXCalvinProcessor:
         self.logger.addHandler(file_log)
 
         self.logger.info("Starting mwax_calvin_processor" f" processor...v{version.get_mwax_mover_version_string()}")
+        self.logger.info(f"Reading config file: {config_filename}")
 
         # health
         self.health_multicast_ip = utils.read_config(self.logger, config, "mwax mover", "health_multicast_ip")
@@ -1022,6 +1081,10 @@ class MWAXCalvinProcessor:
                 f" {self.incoming_realtime_watch_path} does not exist. Quitting."
             )
             sys.exit(1)
+
+        self.remove_partial_files_check_seconds = utils.read_config(
+            self.logger, config, "assembly", "remove_partial_files_check_seconds"
+        )
 
         self.incoming_asvo_watch_path = utils.read_config(
             self.logger,

@@ -32,12 +32,16 @@ class MWAXDBHandler:
         self.password = password
         self.dummy = self.host == DUMMY_DB
 
-        if self.dummy:
-            self.pool = None
-        else:
-            self.pool = psycopg2.pool.ThreadedConnectionPool(
-                1, 3, user=self.user, password=self.password, host=self.host, port=self.port, database=self.db_name
-            )
+        self.pool = None
+
+    def start_database_pool(self):
+        # Check we're not a dummy db
+        if not self.dummy:
+            # Check we are not already started
+            if not self.pool:
+                self.pool = psycopg2.pool.ThreadedConnectionPool(
+                    1, 3, user=self.user, password=self.password, host=self.host, port=self.port, database=self.db_name
+                )
 
     def select_one_row(self, sql: str, parm_list: list) -> int:
         """
@@ -110,32 +114,32 @@ class MWAXDBHandler:
                                 f" {rows_affected} rows, expected 1. SQL={sql}"
                             )
 
-            except OperationalError as conn_error:
-                # Our connection is toast. Clear it so we attempt a reconnect
-                self.con = None
-                self.logger.error("select_one_row_postgres(): postgres OperationalError-" f" {conn_error}")
-                # Reraise error
-                raise conn_error
+        except psycopg2.errors.OperationalError as conn_error:
+            # Our connection is toast. Clear it so we attempt a reconnect
+            self.con = None
+            self.logger.error("select_one_row_postgres(): postgres OperationalError-" f" {conn_error}")
+            # Reraise error
+            raise conn_error
 
-            except InterfaceError as int_error:
-                # Our connection is toast. Clear it so we attempt a reconnect
-                self.con = None
-                self.logger.error(f"select_one_row_postgres(): postgres InterfaceError- {int_error}")
-                # Reraise error
-                raise int_error
+        except psycopg2.errors.InterfaceError as int_error:
+            # Our connection is toast. Clear it so we attempt a reconnect
+            self.con = None
+            self.logger.error(f"select_one_row_postgres(): postgres InterfaceError- {int_error}")
+            # Reraise error
+            raise int_error
 
-            except psycopg2.ProgrammingError as prog_error:
-                # A programming/SQL error - e.g. table does not exist. Don't
-                # reconnect connection
-                self.logger.error("select_one_row_postgres(): postgres ProgrammingError-" f" {prog_error}")
-                # Reraise error
-                raise prog_error
+        except psycopg2.ProgrammingError as prog_error:
+            # A programming/SQL error - e.g. table does not exist. Don't
+            # reconnect connection
+            self.logger.error("select_one_row_postgres(): postgres ProgrammingError-" f" {prog_error}")
+            # Reraise error
+            raise prog_error
 
-            except Exception as exception_info:
-                # Any other error- likely to be a database error rather than
-                # connection based
-                self.logger.error(f"select_one_row_postgres(): unknown Error- {exception_info}")
-                raise exception_info
+        except Exception as exception_info:
+            # Any other error- likely to be a database error rather than
+            # connection based
+            self.logger.error(f"select_one_row_postgres(): unknown Error- {exception_info}")
+            raise exception_info
 
     @retry(
         stop=stop_after_attempt(3),
@@ -172,40 +176,40 @@ class MWAXDBHandler:
                             f" SQL={sql}"
                         )
 
-            except OperationalError as conn_error:
-                # Our connection is toast. Clear it so we attempt a reconnect
-                self.con = None
-                self.logger.error(f"execute_single_dml_row(): postgres OperationalError- {conn_error}")
-                # Reraise error
-                raise conn_error
+        except psycopg2.errors.OperationalError as conn_error:
+            # Our connection is toast. Clear it so we attempt a reconnect
+            self.con = None
+            self.logger.error(f"execute_single_dml_row(): postgres OperationalError- {conn_error}")
+            # Reraise error
+            raise conn_error
 
-            except InterfaceError as int_error:
-                # Our connection is toast. Clear it so we attempt a reconnect
-                self.con = None
-                self.logger.error(f"execute_single_dml_row(): postgres InterfaceError- {int_error}")
-                # Reraise error
-                raise int_error
+        except psycopg2.errors.InterfaceError as int_error:
+            # Our connection is toast. Clear it so we attempt a reconnect
+            self.con = None
+            self.logger.error(f"execute_single_dml_row(): postgres InterfaceError- {int_error}")
+            # Reraise error
+            raise int_error
 
-            except psycopg2.errors.ForeignKeyViolation as fk_error:
-                # Trying to insert or update but a value of a field violates the FK constraint-
-                # e.g. insert into data_files fails due to observation_num not existing in mwa_setting.starttime
-                # We need to reraise the error so our caller can handle in this "insert_data_file_row" case!
-                self.logger.error(f"execute_single_dml_row(): postgres ForeignKeyViolation- {fk_error}")
-                # Reraise error
-                raise fk_error
+        except psycopg2.errors.ForeignKeyViolation as fk_error:
+            # Trying to insert or update but a value of a field violates the FK constraint-
+            # e.g. insert into data_files fails due to observation_num not existing in mwa_setting.starttime
+            # We need to reraise the error so our caller can handle in this "insert_data_file_row" case!
+            self.logger.error(f"execute_single_dml_row(): postgres ForeignKeyViolation- {fk_error}")
+            # Reraise error
+            raise fk_error
 
-            except psycopg2.ProgrammingError as prog_error:
-                # A programming/SQL error - e.g. table does not exist. Don't
-                # reconnect connection
-                self.logger.error(f"execute_single_dml_row(): postgres ProgrammingError- {prog_error}")
-                # Reraise error
-                raise prog_error
+        except psycopg2.ProgrammingError as prog_error:
+            # A programming/SQL error - e.g. table does not exist. Don't
+            # reconnect connection
+            self.logger.error(f"execute_single_dml_row(): postgres ProgrammingError- {prog_error}")
+            # Reraise error
+            raise prog_error
 
-            except Exception as exception_info:
-                # Any other error- likely to be a database error rather than
-                # connection based
-                self.logger.error(f"execute_single_dml_row(): unknown Error- {exception_info}")
-                raise exception_info
+        except Exception as exception_info:
+            # Any other error- likely to be a database error rather than
+            # connection based
+            self.logger.error(f"execute_single_dml_row(): unknown Error- {exception_info}")
+            raise exception_info
 
 
 #
@@ -295,7 +299,7 @@ def insert_data_file_row(
 
     try:
         if db_handler_object.dummy:
-            db_handler_object.logger.warning(
+            db_handler_object.logger.debug(
                 f"{filename} insert_data_file_row() Using dummy database"
                 " connection. No data is really being inserted."
             )
@@ -349,9 +353,10 @@ def insert_data_file_row(
         return True
 
     except Exception as upsert_exception:  # pylint: disable=broad-except
-        db_handler_object.logger.error(
+        db_handler_object.logger.exception(
+            upsert_exception,
             f"{filename} insert_data_file_row() error inserting data_files"
-            f" record in data_files table. SQL was {sql}"
+            f" record in data_files table. SQL was {sql}",
         )
         return False
 
@@ -394,7 +399,7 @@ def update_data_file_row_as_archived(
         )
 
         if db_handler_object.dummy:
-            db_handler_object.logger.warning(
+            db_handler_object.logger.debug(
                 f"{filename} update_data_file_row_as_archived() Using"
                 " dummy database connection. No data is really being"
                 " updated."
@@ -447,11 +452,6 @@ def insert_calibration_fits_row(
 
     try:
         if db_handler_object.dummy:
-            db_handler_object.logger.warning(
-                "insert_calibration_fits_row(): Using dummy database"
-                " connection. No data is really being inserted. SQL="
-                f"'{sql}' Values: {sql_values}"
-            )
             time.sleep(1)  # simulate a slow transaction
             return (True, fit_id)
         else:
@@ -555,11 +555,6 @@ def insert_calibration_solutions_row(
 
     try:
         if db_handler_object.dummy:
-            db_handler_object.logger.warning(
-                "insert_calibration_fits_row(): Using dummy database"
-                " connection. No data is really being inserted. SQL="
-                f"'{sql}' Values: {sql_values}"
-            )
             time.sleep(1)  # simulate a slow transaction
             return True
         else:
@@ -583,12 +578,13 @@ def select_unattempted_calsolution_requests(db_handler_object):
     """Return all unattempted calibration_requests.
     NOTE: this could include duplicate obs_ids in theory"""
 
+    # status 0 = Not attempted
+    # status 2 = success
+    # status 1,-1,-2 = Error occurred
+    # obsid is the calibrator
+    # obsid_target is the obs to have the cal solution applied to
+
     sql = """
-    -- status 0 = Not attempted
-    -- status 2 = success
-    -- status 1,-1,-2 = Error occurred
-    -- obsid is the calibrator
-    -- obsid_target is the obs to have the cal solution applied to
     SELECT obsid, unixtime, status, error, obsid_target
     FROM public.calsolution_request
     WHERE status = 0 -- not attempted
@@ -598,13 +594,8 @@ def select_unattempted_calsolution_requests(db_handler_object):
 
     try:
         if db_handler_object.dummy:
-            db_handler_object.logger.warning(
-                "select_unattempted_calsolution_requests(): Using dummy database"
-                " connection. No data is really being selected. SQL="
-                f"'{sql}'"
-            )
             time.sleep(1)  # simulate a slow transaction
-            return 1
+            return None
         else:
             results = db_handler_object.select_many_rows_postgres(sql, None)
 
@@ -617,3 +608,39 @@ def select_unattempted_calsolution_requests(db_handler_object):
         raise Exception(
             f"select_unattempted_calsolution_requests(): error querying calsolution_request table. SQL was {sql}"
         ) from catch_all
+
+
+def update_calsolution_request(db_handler_object, obsid: int, success: bool, error: str) -> bool:
+    """Update a calsolution request with completion status info"""
+
+    # status 0 = Not attempted
+    # status 2 = success
+    # status 1,-1,-2 = Error occurred
+    # obsid is the calibrator
+    # obsid_target is the obs to have the cal solution applied to
+
+    sql = """
+    UPDATE
+    SET status = %s, error = %s
+    FROM public.calsolution_request
+    WHERE obsid = %s -- this obsid
+    AND status = 0 -- not attempted;"""
+
+    status_id: int = 2 if success else -1
+
+    try:
+        if db_handler_object.dummy:
+            time.sleep(1)  # simulate a transaction
+        else:
+            db_handler_object.execute_single_dml_row(sql, (str(status_id), error, str(obsid)))
+            db_handler_object.logger.debug(
+                "update_calsolution_request(): Successfully updated calsolution_request table."
+            )
+        return True
+
+    except Exception:  # pylint: disable=broad-except
+        db_handler_object.logger.exception(
+            "update_calsolution_request(): error updating calsolution_request record. SQL"
+            f" was {sql}, params were: {(str(status_id), error, str(obsid))}"
+        )
+        return False

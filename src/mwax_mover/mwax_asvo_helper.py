@@ -55,6 +55,8 @@ class MWAASVOJob:
         self.submitted_datetime = datetime.datetime.now()
         self.last_seen_datetime = self.submitted_datetime
         self.download_url = None
+        self.download_in_progress: bool = False
+        self.download_completed: bool = False
 
     def elapsed_time_seconds(self) -> int:
         """Returns the number of seconds between Now and the submitted datetime"""
@@ -67,6 +69,8 @@ class MWAASVOJob:
             "state": str(self.job_state.value),
             "submitted": (self.submitted_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.submitted_datetime else ""),
             "last_seen": (self.last_seen_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.last_seen_datetime else ""),
+            "download_in_progress": (self.download_in_progress),
+            "download_completed": (self.download_completed),
         }
 
 
@@ -275,21 +279,7 @@ class MWAASVOHelper:
                 error_code_str = regex_match.group(1)
                 error_code: int = int(error_code_str)
 
-                if error_code == 2 and subcommand == "submit-vis":
-                    # Special case if subcommand is submit-vis- check for existing job and raise different exception
-                    # In this case, we don't need to submit the job
-
-                    # Get job_id
-                    job_id = get_existing_job_id_from_giant_squid_stdout(stdout)
-
-                    if job_id:
-                        raise GiantSquidJobAlreadyExistsException("Job already exists", job_id)
-                    else:
-                        # hmm could not find the job id!
-                        raise GiantSquidException(
-                            f"_run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. " f"Error: {stdout}"
-                        )
-                elif error_code == 0 and "outage" in stdout:
+                if error_code == 0 and "outage" in stdout:
                     raise GiantSquidMWAASVOOutageException(
                         "Unable to communicate with MWA ASVO- an outage is in progress"
                     )
@@ -309,16 +299,28 @@ class MWAASVOHelper:
         and that the download path exists and raises exceptions
         on error"""
         if job.job_state == MWAASVOJobState.Ready:
-            if os.path.exists(self.download_path):
-                stdout = self._run_giant_squid(
-                    "download",
-                    f"--download-dir={self.download_path} {job.job_id}",
-                    self.giant_squid_download_timeout_seconds,
-                )
-                stdout = stdout.replace("\n", " ")
-                self.logger.debug(f"{job.obs_id} Successfully downloaded: {stdout}")
-            else:
-                raise Exception(f"{job.obs_id} Error: Download path {self.download_path} does not exist")
+            if not job.download_in_progress and not job.download_completed:
+                if os.path.exists(self.download_path):
+                    self.download_in_progress = True
+
+                    try:
+                        # no except block in this "try" because will want
+                        # to re-raise any exception to the caller
+                        stdout = self._run_giant_squid(
+                            "download",
+                            f"--download-dir={self.download_path} {job.job_id}",
+                            self.giant_squid_download_timeout_seconds,
+                        )
+
+                        stdout = stdout.replace("\n", " ")
+                        self.logger.debug(f"{job.obs_id} Successfully downloaded: {stdout}")
+
+                        job.download_completed = True
+                    finally:
+                        job.download_in_progress = False
+
+                else:
+                    raise Exception(f"{job.obs_id} Error: Download path {self.download_path} does not exist")
         else:
             raise Exception(f"{job.obs_id} Error: job {job.job_id} is not ready for download State={job.job_state}")
 
@@ -346,6 +348,15 @@ def get_job_id_from_giant_squid_stdout(stdout: str) -> int:
             job_id_str = regex_match.group(1)
 
             return int(job_id_str)
+
+    # Output of successful, but already existing job id is:
+    # 14:24:17 [WARN] Job already queued, processing or complete. Job Id: 10001610
+    regex_match = re.search(r"Job already queued, processing or complete. Job Id: (\d+)", stdout, re.M)
+
+    if regex_match:
+        job_id_str = regex_match.group(1)
+
+        return int(job_id_str)
 
     # No job_id was found, raise exception
     raise Exception(f"No job_id could be found in the output from giant-squid '{stdout}'")
@@ -400,23 +411,3 @@ def get_job_info_from_giant_squid_json(stdout_json, json_for_one_job) -> tuple[i
 
     # Nothing matched
     raise Exception(f"{job_id}: giant-squid unknown job status code {job_state}.")
-
-
-def get_existing_job_id_from_giant_squid_stdout(stdout: str) -> int | None:
-    """
-    If running giant-squid with 'submit-vis' check for
-    a specific error which corresponds to the job already existing
-    for that obs id.
-    Example stdout output in this case:
-    {"error": "Job already queued, processing or complete", "error_code": 2, "job_id": 10001610}
-    """
-    regex_match = re.search(
-        r'{"error": "Job already queued, processing or complete", "error_code": 2, "job_id": (\d+)}', stdout
-    )
-
-    if regex_match:
-        job_id_str = regex_match.group(1)
-
-        return int(job_id_str)
-    else:
-        return None

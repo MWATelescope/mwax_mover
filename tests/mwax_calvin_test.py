@@ -5,6 +5,7 @@ config correctly from a "mwacache_archiver" config file.
 
 import glob
 import threading
+import logging
 import os
 import shutil
 import signal
@@ -67,8 +68,10 @@ def setup_mwax_calvin_test(test_name: str) -> str:
     log_path = os.path.join(base_dir, "logs")
     check_and_make_dir(log_path)
 
-    # watch path
-    watch_path = os.path.join(base_dir, "watch")
+    # watch paths
+    watch_path = os.path.join(base_dir, "watch_realtime")
+    check_and_make_dir(watch_path)
+    watch_path = os.path.join(base_dir, "watch_asvo")
     check_and_make_dir(watch_path)
 
     # assemble path
@@ -119,6 +122,7 @@ def test_mwax_calvin_test01():
 
     # Start mwax_subfile_distributor using our test config
     mcal = MWAXCalvinProcessor()
+    mcal.produce_debug_plots = False
 
     # Override the hostname
     mcal.hostname = "test_server"
@@ -143,7 +147,9 @@ def test_mwax_calvin_test01():
     assert mcal.health_multicast_port == 8009
     assert mcal.health_multicast_hops == 1
 
-    assert mcal.incoming_watch_path == os.path.join(base_dir, "watch")
+    assert mcal.incoming_realtime_watch_path == os.path.join(base_dir, "watch_realtime")
+    assert mcal.remove_partial_files_check_seconds == 3600
+    assert mcal.incoming_asvo_watch_path == os.path.join(base_dir, "watch_asvo")
     assert mcal.assemble_path == os.path.join(base_dir, "assemble")
     assert mcal.assemble_check_seconds == 10
 
@@ -183,12 +189,12 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
 
     # Setup all the paths
     if picket_fence:
-        _base_dir = setup_mwax_calvin_test("test03")
         # Determine config file location
+        setup_mwax_calvin_test("test03")
         config_filename = "tests/mwax_calvin_test03.cfg"
     else:
-        _base_dir = setup_mwax_calvin_test("test02")
         # Determine config file location
+        setup_mwax_calvin_test("test02")
         config_filename = "tests/mwax_calvin_test02.cfg"
 
     # Start mwax_subfile_distributor using our test config
@@ -199,6 +205,8 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
 
     # Call to read config <-- this is what we're testing!
     mcal.initialise(config_filename)
+    mcal.produce_debug_plots = False
+    mcal.logger.level = logging.INFO
 
     # Start the pipeline
     # Create and start a thread for the processor
@@ -210,19 +218,19 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
     # allow things to start
     time.sleep(5)
 
-    # Now we simulate TEST_OBS files being delivered into the watch dir
+    # Now we simulate TEST_OBS files being delivered into the realtime watch dir
     incoming_files = glob.glob(os.path.join(test_obs_location, f"{test_obs_id}_*_ch*.fits"))
 
     for _file_number, filename in enumerate(incoming_files):
-        dest_filename = os.path.join(mcal.incoming_watch_path, os.path.basename(filename))
+        dest_filename = os.path.join(mcal.incoming_realtime_watch_path, os.path.basename(filename))
 
         shutil.copyfile(filename, dest_filename)
 
     # Wait for processing (very dependent on hardware!)
     if picket_fence:
-        time.sleep(110)
+        time.sleep(600)
     else:
-        time.sleep(90)
+        time.sleep(240)
 
     # Quit
     # Ok time's up! Stop the processor
@@ -321,8 +329,7 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
 def test_mwax_calvin_test04():
     """Tests that mwax_calvin does a normal
     simple pipeline run but hyperdrive gets interrupted by a SIGINT"""
-    # Setup all the paths
-    _base_path = setup_mwax_calvin_test("test04")
+    setup_mwax_calvin_test("test04")
 
     # Start mwax_subfile_distributor using our test config
     mcal = MWAXCalvinProcessor()
@@ -335,6 +342,7 @@ def test_mwax_calvin_test04():
 
     # Call to read config <-- this is what we're testing!
     mcal.initialise(config_filename)
+    mcal.produce_debug_plots = False
     mcal.hyperdrive_timeout = 5
 
     # Start the pipeline
@@ -347,11 +355,11 @@ def test_mwax_calvin_test04():
     # allow things to start
     time.sleep(5)
 
-    # Now we simulate TEST_OBS files being delivered into the watch dir
+    # Now we simulate TEST_OBS files being delivered into the realtime watch dir
     incoming_files = glob.glob(os.path.join(TEST_OBS_LOCATION, f"{TEST_OBS_ID}_*_ch*.fits"))
 
     for filename in incoming_files:
-        dest_filename = os.path.join(mcal.incoming_watch_path, os.path.basename(filename))
+        dest_filename = os.path.join(mcal.incoming_realtime_watch_path, os.path.basename(filename))
 
         shutil.copyfile(filename, dest_filename)
 

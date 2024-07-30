@@ -5,7 +5,6 @@ import pytest
 from mwax_mover.mwax_asvo_helper import (
     get_job_id_from_giant_squid_stdout,
     get_job_info_from_giant_squid_json,
-    get_existing_job_id_from_giant_squid_stdout,
     MWAASVOJobState,
     MWAASVOHelper,
 )
@@ -31,6 +30,11 @@ def test_get_jobid_from_giant_squid_stdout():
         )
         == 1234567
     )
+
+    stdout = """14:34:21 [WARN] Job already queued, processing or complete. Job Id: 10001903
+    14:34:21 [INFO] Submitted 0 obsids for visibility download.
+    """
+    assert get_job_id_from_giant_squid_stdout(stdout) == 10001903
 
 
 def test_get_job_info_from_giant_squid_json_valid():
@@ -85,24 +89,6 @@ def test_get_job_info_from_giant_squid_json_valid():
                 assert job_state == MWAASVOJobState.Error
                 assert url is None
         i += 1
-
-
-def test_get_existing_job_id_from_giant_squid_stdout():
-    stdout = """12:16:45 [WARN] Using 'acacia' for ASVO delivery
-Error: The server responded with status code 400 Bad Request, message:
-{"error": "Job already queued, processing or complete", "error_code": 2, "job_id": 10001509}"""
-
-    assert get_existing_job_id_from_giant_squid_stdout(stdout) == 10001509
-
-    stdout = """Error: The server responded with status code 400 Bad Request, message:
-{"error": "Job already queued, processing or complete", "error_code": 2, "job_id": 766638}"""
-    assert get_existing_job_id_from_giant_squid_stdout(stdout) == 766638
-
-    stdout = "Something else here we're not expecting"
-    assert get_existing_job_id_from_giant_squid_stdout(stdout) is None
-
-    stdout = '{"error": "Job already queued, processing or complete", "error_code": 2, "job_id": 766840}'
-    assert get_existing_job_id_from_giant_squid_stdout(stdout) == 766840
 
 
 def test_get_status_from_giant_squid_stdout_invalid():

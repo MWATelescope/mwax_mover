@@ -63,8 +63,10 @@ class ChanInfo(NamedTuple):
     fine_chans_per_coarse: int
     fine_chan_width_hz: float
 
+
 class TimeInfo(NamedTuple):
     """timestep info"""
+
     num_times: int
     int_time_s: float
 
@@ -92,6 +94,7 @@ def ensure_system_byte_order(arr):
     if arr.dtype.byteorder not in f"{system_byte_order}|=":
         return arr.newbyteorder(system_byte_order)
     return arr
+
 
 def parse_csv_header(value: str, dtype: type) -> ArrayLike:
     """
@@ -189,9 +192,7 @@ class Metafits:
             # coarse channel selection
             chansel = parse_csv_header(header["CHANSEL"], int)
             if len(chansel) != len(coarse_chans):
-                raise RuntimeError(
-                    f"channel selection is not tested. {chansel=}"
-                )
+                raise RuntimeError(f"channel selection is not tested. {chansel=}")
             # coarse_chans = np.sort(coarse_chans[chansel])
             coarse_chans = np.sort(coarse_chans)
 
@@ -205,8 +206,7 @@ class Metafits:
         # sanity checks
         if total_bandwidth_hz != fine_chan_width_hz * obs_num_fine_chans:
             raise ValueError(
-                f"{self.filename} - ({total_bandwidth_hz=})"
-                f" != ({fine_chan_width_hz=}) * ({obs_num_fine_chans=})"
+                f"{self.filename} - ({total_bandwidth_hz=})" f" != ({fine_chan_width_hz=}) * ({obs_num_fine_chans=})"
             )
 
         if obs_num_fine_chans % len(coarse_chans) != 0:
@@ -321,7 +321,7 @@ class HyperfitsSolution:
             time_data = hdus["TIMEBLOCKS"].data  # type: ignore
             return [time["Average"] for time in time_data]
 
-    def get_solutions(self) -> List[NDArray[np.complex_]]:
+    def get_solutions(self) -> List[NDArray[np.complex128]]:
         """Get solutions as a complex array for each pol: [time, tile, chan]"""
         with fits.open(self.filename) as hdus:
             solutions = hdus["SOLUTIONS"].data  # type: ignore
@@ -332,7 +332,7 @@ class HyperfitsSolution:
             solutions[:, :, :, 6] + 1j * solutions[:, :, :, 7],
         ]
 
-    def get_ref_solutions(self, ref_tile_idx=None) -> List[NDArray[np.complex_]]:
+    def get_ref_solutions(self, ref_tile_idx=None) -> List[NDArray[np.complex128]]:
         """Get solutions divided by reference tile as a complex array for each pol: [time, tile, chan]"""
         solutions = self.get_solutions()
         if ref_tile_idx is None:
@@ -341,8 +341,7 @@ class HyperfitsSolution:
         ref_solutions = [solution[:, ref_tile_idx, :] for solution in solutions]  # type: ignore
         # divide solutions jones matrix by reference jones matrix, via inverse determinant
         ref_inv_det = np.divide(
-            1 + 0j,
-            ref_solutions[0] * ref_solutions[3] - ref_solutions[1] * ref_solutions[2]  # type: ignore
+            1 + 0j, ref_solutions[0] * ref_solutions[3] - ref_solutions[1] * ref_solutions[2]  # type: ignore
         )
         return [  # type: ignore
             (solutions[0] * ref_solutions[3] - solutions[1] * ref_solutions[2]) * ref_inv_det,
@@ -352,7 +351,7 @@ class HyperfitsSolution:
         ]
 
     @property
-    def results(self) -> NDArray[np.float_]:
+    def results(self) -> NDArray[np.float64]:
         """Code adapted from Chris Jordan's scripts"""
         with fits.open(self.filename) as hdus:
             return hdus["RESULTS"].data.flatten()  # type: ignore
@@ -467,8 +466,7 @@ class HyperfitsSolutionGroup:
                     coarse_bandwidth_hz = coarse_chanblocks[-1] - coarse_chanblocks[0]
                     if coarse_bandwidth_hz > metafits_coarse_bandwidth_hz:
                         raise RuntimeError(
-                            f"{soln.filename} - solution {coarse_bandwidth_hz=}"
-                            f" > {metafits_coarse_bandwidth_hz=}"
+                            f"{soln.filename} - solution {coarse_bandwidth_hz=}" f" > {metafits_coarse_bandwidth_hz=}"
                         )
                     coarse_centroid_hz = np.mean(coarse_chanblocks + chanblock_width_hz / 2)
                 coarse_chan_idx = np.round(coarse_centroid_hz // metafits_coarse_bandwidth_hz)
@@ -547,7 +545,7 @@ class HyperfitsSolutionGroup:
         return [*obsids]  # type: ignore
 
     @property
-    def results(self) -> NDArray[np.float_]:
+    def results(self) -> NDArray[np.float64]:
         """
         Get the combined results array for all solutions
 
@@ -566,7 +564,7 @@ class HyperfitsSolutionGroup:
         return results
 
     @property
-    def weights(self) -> NDArray[np.float_]:
+    def weights(self) -> NDArray[np.float64]:
         """
         Generate an array of weights for each solution, based on results
         """
@@ -581,7 +579,7 @@ class HyperfitsSolutionGroup:
         except KeyError:
             return np.full(len(self.all_chanblocks_hz[0]), 1.0)
 
-    def get_solns(self, refant_name=None) -> Tuple[NDArray[np.int_], NDArray[np.complex_], NDArray[np.complex_]]:
+    def get_solns(self, refant_name=None) -> Tuple[NDArray[np.int_], NDArray[np.complex128], NDArray[np.complex128]]:
         """
         Get the tile ids in the order they appear in the solutions, as well as xx and yy solutions
         for the reference antenna
@@ -605,7 +603,7 @@ class HyperfitsSolutionGroup:
             soln_tiles["flag"] = np.logical_or(soln_tiles["flag_soln"], soln_tiles["flag_metafits"])
             soln_tiles.drop(columns=["flag_metafits", "flag_soln"], inplace=True)
             # self.logger.debug(f"{soln.filename} - tiles:\n{soln_tiles.to_string(max_rows=999)}")
-            if refant_name != None:
+            if refant_name is not None:
                 _ref_tiles = soln_tiles[soln_tiles["name"] == refant_name]
                 if not len(_ref_tiles):
                     raise RuntimeError(f"{soln.filename} - reference tile {refant_name}" f" not found in solution file")
@@ -626,8 +624,7 @@ class HyperfitsSolutionGroup:
                     # self.logger.debug(f"{soln.filename} - ref tile found at index {ref_tile_idx}")
                 elif ref_tile_idx != _ref_tile_idx:
                     raise RuntimeError(
-                        f"{soln.filename} - reference tile in solution file"
-                        f" does not match previous solution files"
+                        f"{soln.filename} - reference tile in solution file" f" does not match previous solution files"
                     )
 
             _tile_ids = soln_tiles["id"].to_numpy()
@@ -755,9 +752,9 @@ def wrap_angle(angle):
 
 
 def fit_phase_line(
-    freqs_hz: NDArray[np.float_],
-    solution: NDArray[np.complex_],
-    weights: NDArray[np.float_],
+    freqs_hz: NDArray[np.float64],
+    solution: NDArray[np.complex128],
+    weights: NDArray[np.float64],
     niter: int = 1,
     fit_iono: bool = False,
     # chanblocks_per_coarse: int,
@@ -925,12 +922,16 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse) -> GainFitInf
 
     # split chans, solns, weights into chunks of chanblocks_per_coarse
     for coarse_idx, (
-        coarse_hz, coarse_amps, coarse_weights,
-    ) in enumerate(zip(
-        np.split(chanblocks_hz, n_coarse),
-        np.split(amps, n_coarse),
-        np.split(weights, n_coarse),
-    )):
+        coarse_hz,
+        coarse_amps,
+        coarse_weights,
+    ) in enumerate(
+        zip(
+            np.split(chanblocks_hz, n_coarse),
+            np.split(amps, n_coarse),
+            np.split(weights, n_coarse),
+        )
+    ):
         # remove nans and zero weights
         coarse_mask = np.where(np.logical_and(np.isfinite(coarse_amps), coarse_weights > 0))[0]
         if len(coarse_mask) < 2:
@@ -941,12 +942,12 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse) -> GainFitInf
 
         gains[coarse_idx] = np.sum(coarse_amps * coarse_weights) / np.sum(coarse_weights)
         # TODO(Dev): finish this bit
-        pol0[coarse_idx] = 0.
-        pol1[coarse_idx] = 0.
-        sigma_resid[coarse_idx] = 0.
+        pol0[coarse_idx] = 0.0
+        pol1[coarse_idx] = 0.0
+        sigma_resid[coarse_idx] = 0.0
 
     # TODO(Dev): calculate quality
-    quality = 1.
+    quality = 1.0
 
     return GainFitInfo(
         quality=quality,
@@ -1003,10 +1004,10 @@ def textwrap(s, width=70):
 def debug_phase_fits(
     phase_fits: pd.DataFrame,
     tiles: pd.DataFrame,
-    freqs: NDArray[np.float_],
-    soln_xx: NDArray[np.complex_],
-    soln_yy: NDArray[np.complex_],
-    weights: NDArray[np.float_],
+    freqs: NDArray[np.float64],
+    soln_xx: NDArray[np.complex128],
+    soln_yy: NDArray[np.complex128],
+    weights: NDArray[np.float64],
     prefix: str = "./",
     show: bool = False,
     title: str = "",
@@ -1026,8 +1027,8 @@ def debug_phase_fits(
     if n_total == 0:
         return
 
-    phase_fits = reject_outliers(phase_fits, 'chi2dof')
-    phase_fits = reject_outliers(phase_fits, 'sigma_resid')
+    phase_fits = reject_outliers(phase_fits, "chi2dof")
+    phase_fits = reject_outliers(phase_fits, "sigma_resid")
 
     n_good = len(phase_fits[~phase_fits["outlier"]])
     if n_good == 0:
@@ -1037,7 +1038,7 @@ def debug_phase_fits(
     bad_fits = flavor_fits[flavor_fits["outlier"]]
     if len(bad_fits) > 0:
         print(f"flagged {len(bad_fits)} of {n_total} fits as outliers:")
-        print(bad_fits[['name', 'pol']].to_string(index=False))
+        print(bad_fits[["name", "pol"]].to_string(index=False))
 
     # make a new colormap for weighted data
     half_blues = LinearSegmentedColormap.from_list(
@@ -1061,9 +1062,7 @@ def debug_phase_fits(
     soln_yy = ensure_system_byte_order(soln_yy)
 
     if plot_residual:
-        plot_phase_residual(
-            freqs, soln_xx, soln_yy, weights, prefix, title, plot_residual, residual_vmax, flavor_fits
-        )
+        plot_phase_residual(freqs, soln_xx, soln_yy, weights, prefix, title, plot_residual, residual_vmax, flavor_fits)
     if len(flavor_fits):
         plot_phase_intercepts(prefix, show, title, flavor_fits)
 
@@ -1078,13 +1077,14 @@ def debug_phase_fits(
 
     return phase_fits_pivot
 
+
 def reject_outliers(data, quality_key, nstd=3.0):
     if nstd == 0:
         return data
-    if 'outlier' not in data.columns:
-        data['outlier'] = False
-    for pol in data['pol'].unique():
-        idx_pol_good = np.where(np.logical_and(data['pol'] == pol, ~data['outlier']))[0]
+    if "outlier" not in data.columns:
+        data["outlier"] = False
+    for pol in data["pol"].unique():
+        idx_pol_good = np.where(np.logical_and(data["pol"] == pol, ~data["outlier"]))[0]
         quality_thresh = data.loc[idx_pol_good, quality_key].mean() + nstd * data.loc[idx_pol_good, quality_key].std()
         if nstd >= 0:
             data.loc[data[quality_key] >= quality_thresh, "outlier"] = True
@@ -1097,10 +1097,10 @@ def reject_outliers(data, quality_key, nstd=3.0):
 def plot_rx_lengths(flavor_fits, prefix, show, title):
     good_fits = flavor_fits[~flavor_fits["outlier"]]
     rxs = sorted(good_fits["rx"].unique())
-    means = good_fits.groupby(['rx'])['length'].mean()
+    means = good_fits.groupby(["rx"])["length"].mean()
 
     plt.clf()
-    box_plot = sns.boxplot(data=good_fits, y="rx", x="length", hue="pol", orient='h', fliersize=0.5)
+    box_plot = sns.boxplot(data=good_fits, y="rx", x="length", hue="pol", orient="h", fliersize=0.5)
     # offset = good_fits['length'].median() * 0.05 # offset from median for display
     box_plot.grid(axis="x")
     x_text = np.max(box_plot.get_xlim())
@@ -1109,10 +1109,14 @@ def plot_rx_lengths(flavor_fits, prefix, show, title):
         rx = rxs[ytick]
         mean = means[rx]
         box_plot.text(
-            x_text, ytick, f"rx{rx:02} = {mean:+6.2f}m",
-            horizontalalignment='left', weight='semibold', fontfamily='monospace'
+            x_text,
+            ytick,
+            f"rx{rx:02} = {mean:+6.2f}m",
+            horizontalalignment="left",
+            weight="semibold",
+            fontfamily="monospace",
         )
-        box_plot.add_line(plt.Line2D([mean, mean], [ytick - 0.5, ytick + 0.5], color='red', linewidth=1))
+        box_plot.add_line(plt.Line2D([mean, mean], [ytick - 0.5, ytick + 0.5], color="red", linewidth=1))
 
     fig = plt.gcf()
     if title:
@@ -1126,14 +1130,12 @@ def plot_rx_lengths(flavor_fits, prefix, show, title):
 
     return means
 
+
 def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fits_pivot, weights2):
 
     rxs = np.sort(np.unique(phase_fits_pivot["rx"]))
     slots = np.sort(np.unique(phase_fits_pivot["slot"]))
-    figsize = (
-        np.clip(len(slots) * 2.5, 5, 20),
-        np.clip(len(rxs) * 3, 5, 30)
-    )
+    figsize = (np.clip(len(slots) * 2.5, 5, 20), np.clip(len(rxs) * 3, 5, 30))
 
     for pol, soln in zip(["xx", "yy"], [soln_xx, soln_yy]):
         plt.clf()
@@ -1166,27 +1168,33 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fi
             ax.scatter(model_freqs, wrap_angle(model), c="red", s=0.5)
             mask_weights: ArrayLike = weights2[mask]  # type: ignore
             ax.scatter(mask_freq, wrap_angle(angle[mask]), c=mask_weights, cmap=cmap, s=2)
-            outlier = fit[f'outlier_{pol}']
+            outlier = fit[f"outlier_{pol}"]
             color = "red" if outlier else "black"
             ax.set_title(
-                f"{fit['name']}|{fit['soln_idx']}", color=color,
-                weight='semibold', fontfamily='monospace'
+                f"{fit['name']}|{fit['soln_idx']}", color=color, weight="semibold", fontfamily="monospace"
             )  # |{fit['id']}
             x_text = np.mean(ax.get_xlim())
             y_text = np.mean(ax.get_ylim())
-            text = "\n".join([
-                f"L{fit[f'length_{pol}']:+6.2f}m",
-                f"X{fit[f'chi2dof_{pol}']:.4f}",
-                # f"S{fit[f'sigma_resid_{pol}']:.4f}",
-                # f"Q{fit[f'quality_{pol}']:.2f}",
-            ])
+            text = "\n".join(
+                [
+                    f"L{fit[f'length_{pol}']:+6.2f}m",
+                    f"X{fit[f'chi2dof_{pol}']:.4f}",
+                    # f"S{fit[f'sigma_resid_{pol}']:.4f}",
+                    # f"Q{fit[f'quality_{pol}']:.2f}",
+                ]
+            )
             ax.text(
-                x_text, y_text, text,
-                ha="center", va="center",
+                x_text,
+                y_text,
+                text,
+                ha="center",
+                va="center",
                 zorder=10,
-                horizontalalignment='left',
-                weight='semibold', fontfamily='monospace',
-                color=color, backgroundcolor=("white", 0.5)
+                horizontalalignment="left",
+                weight="semibold",
+                fontfamily="monospace",
+                color=color,
+                backgroundcolor=("white", 0.5),
             )
 
         fig.set_size_inches(*figsize)
@@ -1229,9 +1237,7 @@ def plot_phase_intercepts(prefix, show, title, flavor_fits):
         fig.savefig(f"{prefix}intercepts.png", dpi=300, bbox_inches="tight")
 
 
-def plot_phase_residual(
-    freqs, soln_xx, soln_yy, weights, prefix, title, plot_residual, residual_vmax, flavor_fits
-):
+def plot_phase_residual(freqs, soln_xx, soln_yy, weights, prefix, title, plot_residual, residual_vmax, flavor_fits):
     plt.clf()
     g = sns.FacetGrid(flavor_fits, row="flavor", col="pol", hue="flavor", sharex=True, sharey=False)
 
@@ -1396,7 +1402,8 @@ def write_stats(
         hyp_soln_plot_args = "--max-amp 2 --no-ref-tile"
         cmd = (
             f"{hyperdrive_binary_path} solutions-plot {hyp_soln_plot_args} "
-            f"-m" f" {metafits_filename} {hyperdrive_solution_filename}"
+            f"-m"
+            f" {metafits_filename} {hyperdrive_solution_filename}"
         )
 
         return_value, _ = run_command_ext(logger, cmd, -1, timeout=10, use_shell=False)
