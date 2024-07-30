@@ -75,7 +75,7 @@ class MWAXCalvinProcessor:
 
         # assembly
         self.incoming_realtime_watch_path = None
-        self.remove_partial_files_check_seconds = 60 * 60 * 4
+        self.remove_partial_files_check_seconds: int = 60 * 60 * 4
         self.incoming_asvo_watch_path = None
         self.assembly_realtime_watch_queue = queue.Queue()
         self.assembly_asvo_watch_queue = queue.Queue()
@@ -1082,8 +1082,8 @@ class MWAXCalvinProcessor:
             )
             sys.exit(1)
 
-        self.remove_partial_files_check_seconds = utils.read_config(
-            self.logger, config, "assembly", "remove_partial_files_check_seconds"
+        self.remove_partial_files_check_seconds = int(
+            utils.read_config(self.logger, config, "assembly", "remove_partial_files_check_seconds")
         )
 
         self.incoming_asvo_watch_path = utils.read_config(
