@@ -64,51 +64,53 @@ class MWAXCalvinDownloadProcessor:
         #    * Cal requests which are already under way- in ASVO
         #    * or already processing on calvin
         #    * or already processed and failed on calvin
+        if self.running:
+            # 1. Get the list of outstanding calibration_requests from the db
+            results = mwax_db.select_unattempted_calsolution_requests(self.db_handler_object)
 
-        # 1. Get the list of outstanding calibration_requests from the db
-        results = mwax_db.select_unattempted_calsolution_requests(self.db_handler_object)
+            if results:
+                for result in results:
+                    #
+                    # Each result is: (obsid, unix_timestamp, error_code, error_message, obsid_target)
+                    # obsid is the obsid we want to download
+                    # obsid_target is the one MWA ASVO is doing this for!
+                    #
+                    # Get the obs_id
+                    obs_id = int(result[0])
 
-        if results:
-            for result in results:
-                #
-                # Each result is: (obsid, unix_timestamp, error_code, error_message, obsid_target)
-                # obsid is the obsid we want to download
-                # obsid_target is the one MWA ASVO is doing this for!
-                #
-                # Get the obs_id
-                obs_id = int(result[0])
+                    # Check if we have this obs_id tracked
+                    asvo_job = None
 
-                # Check if we have this obs_id tracked
-                asvo_job = None
+                    for job in self.mwax_asvo_helper.current_asvo_jobs:
+                        if job.obs_id == obs_id:
+                            asvo_job = job
+                            break
 
-                for job in self.mwax_asvo_helper.current_asvo_jobs:
-                    if job.obs_id == obs_id:
-                        asvo_job = job
-                        break
-
-                if not asvo_job:
-                    # Submit job and add to the ones we are tracking
-                    self.mwax_asvo_helper.submit_download_job(obs_id)
+                    if not asvo_job:
+                        # Submit job and add to the ones we are tracking
+                        self.mwax_asvo_helper.submit_download_job(obs_id)
 
         # 2. Find out the status of all this user's jobs in MWA ASVO
         # Get the job list from giant-squid, populating current_asvo_jobs
         # If we find a job in giant-squid which we don't know about,
         # DON'T include it in the list we track
-        try:
-            self.mwax_asvo_helper.update_all_job_status(add_missing_jobs_to_current_jobs=False)
+        if self.running:
+            try:
+                self.mwax_asvo_helper.update_all_job_status(add_missing_jobs_to_current_jobs=False)
 
-        except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
-            # Handle me!
-            self.logger.info("MWA ASVO has an outage. Doing nothing this loop.")
-            return
-        except Exception:
-            # TODO - maybe some exceptions we should back off instead of exiting?
-            self.logger.exception("Fatal exception- exiting!")
-            self.running = False
-            self.stop()
+            except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
+                # Handle me!
+                self.logger.info("MWA ASVO has an outage. Doing nothing this loop.")
+                return
+            except Exception:
+                # TODO - maybe some exceptions we should back off instead of exiting?
+                self.logger.exception("Fatal exception- exiting!")
+                self.running = False
+                self.stop()
 
         # 3. See if any in the list need actioning
-        self.handle_mwa_asvo_jobs()
+        if self.running:
+            self.handle_mwa_asvo_jobs()
 
     def handle_mwa_asvo_jobs(self):
         """This code will check for any jobs which can be downloaded and start
@@ -160,9 +162,7 @@ class MWAXCalvinDownloadProcessor:
 
         # Close all database connections
         if not self.db_handler_object.dummy:
-            if self.db_handler_object.pool:
-                if not self.db_handler_object.pool.closed:
-                    self.db_handler_object.pool.closeall()
+            self.db_handler_object.pool = None
 
         self.ready_to_exit = True
 
