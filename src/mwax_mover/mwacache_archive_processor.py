@@ -99,6 +99,13 @@ class MWACacheArchiveProcessor:
         # Get this hosts hostname
         self.hostname = utils.get_hostname()
 
+        # creating database connection pool(s)
+        self.logger.info("Starting MRO database connection pool...")
+        self.mro_db_handler_object.start_database_pool()
+
+        self.logger.info("Starting remotedb database connection pool...")
+        self.remote_db_handler_object.start_database_pool()
+
         # create a health thread
         self.logger.info("Starting health_thread...")
         health_thread = threading.Thread(name="health_thread", target=self.health_handler, daemon=True)
@@ -464,6 +471,8 @@ class MWACacheArchiveProcessor:
         self.logger.info(f"astropy v{astropy.__version__}")
         self.logger.info(f"boto3 v{boto3.__version__}")
         self.logger.info(f"botocore v{botocore.__version__}")
+
+        self.logger.info(f"Reading config file: {config_filename}")
 
         i = 1
         self.watch_dirs = []

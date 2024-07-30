@@ -290,6 +290,8 @@ class MWAXSubfileDistributor:
         self.logger.addHandler(file_log)
 
         self.logger.info("Starting mwax_subfile_distributor" f" processor...v{version.get_mwax_mover_version_string()}")
+        self.logger.info(f"Reading config file: {config_filename}")
+
         self.cfg_webserver_port = utils.read_config(self.logger, self.config, "mwax mover", "webserver_port")
         self.cfg_voltdata_dont_archive_path = utils.read_config(
             self.logger,
@@ -840,6 +842,10 @@ class MWAXSubfileDistributor:
             self.logger.info("Correlator Enabled")
         else:
             self.logger.info("Correlator disabled")
+
+        # creating database connection pool(s)
+        self.logger.info("Starting database connection pool...")
+        self.db_handler.start_database_pool()
 
         self.logger.info("MWAX Subfile Distributor started successfully.")
 
