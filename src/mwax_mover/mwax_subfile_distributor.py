@@ -284,7 +284,7 @@ class MWAXSubfileDistributor:
         console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(console_log)
 
-        file_log = logging.FileHandler(filename=os.path.join(self.cfg_log_path, "main.log"))
+        file_log = logging.FileHandler(filename=os.path.join(self.cfg_log_path, "subfile_distributor_main.log"))
         file_log.setLevel(logging.DEBUG)
         file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(file_log)

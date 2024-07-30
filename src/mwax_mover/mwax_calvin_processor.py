@@ -1006,7 +1006,7 @@ class MWAXCalvinProcessor:
         if config.getboolean("mwax mover", "coloredlogs", fallback=False):
             coloredlogs.install(level="DEBUG", logger=self.logger)
 
-        file_log = logging.FileHandler(filename=os.path.join(self.log_path, "main.log"))
+        file_log = logging.FileHandler(filename=os.path.join(self.log_path, "calvin_processor_main.log"))
         file_log.setLevel(logging.DEBUG)
         file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(file_log)
