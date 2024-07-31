@@ -852,6 +852,11 @@ class MWAXCalvinProcessor:
                     transaction_cursor.connection.commit()
                     transaction_cursor.close()
 
+                #
+                # If this cal solution was a requested one, update it to completed
+                #
+                update_calsolution_request(self.db_handler_object, obs_id, True, "")
+
                 # now move the whole dir
                 # to the complete path
                 if not self.complete_path:
@@ -870,11 +875,6 @@ class MWAXCalvinProcessor:
                     uvfits_files = glob.glob(os.path.join(complete_path, f"{obs_id}_*.uvfits"))
                     for file_to_delete in uvfits_files:
                         os.remove(file_to_delete)
-
-                #
-                # If this cal solution was a requested one, update it to completed
-                #
-                update_calsolution_request(self.db_handler_object, obs_id, True, "")
 
                 return True
         except Exception:
