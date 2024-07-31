@@ -211,6 +211,49 @@ class MWAXDBHandler:
             self.logger.error(f"execute_single_dml_row(): unknown Error- {exception_info}")
             raise exception_info
 
+    def execute_dml_row_within_transaction(
+        self, sql: str, parm_list: list, transaction_cursor: psycopg2.extensions.cursor
+    ):
+        """This executes an INSERT, UPDATE or DELETE that should only affect
+        one row.
+
+        NOTES: it is up to the caller to supply a cursor which all of the operations
+        within the transaction share. Also it is up to the caller to call:
+        1. conn = self.pool.getconn() # get a connection
+        2. curs = conn.cursor()
+        3. Call this method (possibly multiple times), passing in "curs"
+        4. conn.rollback() # On exception or failure
+        5. conn.commit() # On success
+        6. self.pool.putconn(conn)
+        """
+
+        # Assuming we have a connection, try to do the database operation
+        # using our cursor
+        try:
+            # Run the sql
+            transaction_cursor.execute(sql, parm_list)
+
+            # Check how many rows we affected
+            rows_affected = transaction_cursor.rowcount
+
+            if rows_affected != 1:
+                # An exception in here will trigger a rollback
+                # which is good
+                self.logger.error(
+                    "execute_dml_row_within_transaction(): Error- query"
+                    f" affected {rows_affected} rows, expected 1."
+                    f" SQL={sql}"
+                )
+                raise Exception(
+                    "execute_dml_row_within_transaction(): Error- query"
+                    f" affected {rows_affected} rows, expected 1."
+                    f" SQL={sql}"
+                )
+
+        except Exception as sql_exception:
+            self.logger.exception("execute_single_dml_row_within_transaction()")
+            raise Exception from sql_exception
+
 
 #
 # High level functions to do what we want specifically
@@ -465,11 +508,12 @@ def insert_calibration_fits_row(
 
     except Exception:  # pylint: disable=broad-except
         db_handler_object.logger.exception(
-            f"{obs_id}: insert_data_file_row() error inserting"
+            f"{obs_id}: insert_calibration_fits_row() error inserting"
             f" calibration_fits record in table. SQL was"
             f" {sql} Values: {sql_values}"
         )
-        db_handler_object.con.rollback()
+        if transaction_cursor:
+            transaction_cursor.connection.rollback()
         return (False, None)
 
 
