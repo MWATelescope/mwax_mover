@@ -156,7 +156,7 @@ class MWAXDBHandler:
     def execute_single_dml_row(self, sql: str, parm_list: list):
         """This executes an INSERT, UPDATE or DELETE that should only affect
         one row. Since this is all in a with (context) block, rollback is
-        called on failure and commit on success."""
+        called on failure and commit on success. Exceptions are raised on error."""
 
         # Assuming we have a connection, try to do the database operation
         try:
@@ -663,8 +663,8 @@ def select_unattempted_calsolution_requests(db_handler_object):
         ) from catch_all
 
 
-def update_calsolution_request(db_handler_object, obsid: int, success: bool, error: str) -> bool:
-    """Update a calsolution request with completion status info"""
+def update_calsolution_request(db_handler_object, obsid: int, success: bool, error: str):
+    """Update a calsolution request with completion status info. On error raises exception"""
 
     # status 0 = Not attempted
     # status 2 = success
@@ -688,16 +688,18 @@ def update_calsolution_request(db_handler_object, obsid: int, success: bool, err
     try:
         if db_handler_object.dummy:
             time.sleep(1)  # simulate a transaction
+            return
         else:
             db_handler_object.execute_single_dml_row(sql, (int(status_id), error, int(obsid)))
             db_handler_object.logger.debug(
                 "update_calsolution_request(): Successfully updated calsolution_request table."
             )
-        return True
 
     except Exception:  # pylint: disable=broad-except
         db_handler_object.logger.exception(
             "update_calsolution_request(): error updating calsolution_request record. SQL"
             f" was {sql}, params were: {(str(status_id), error, str(obsid))}"
         )
-        return False
+
+        # Re-raise error
+        raise
