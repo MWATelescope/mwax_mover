@@ -42,6 +42,7 @@ from mwax_mover.mwax_calvin_utils import (
     fit_gain,
     PhaseFitInfo,
     GainFitInfo,
+    write_readme_file,
 )
 
 
@@ -95,6 +96,7 @@ class MWAXCalvinProcessor:
         # Upload
         self.produce_debug_plots = True  # default to true- for now only off if running via pytest
         self.upload_path = None
+        self.upload_error_path = None
         self.upload_queue = queue.Queue()
 
         # Complete
@@ -752,7 +754,7 @@ class MWAXCalvinProcessor:
                     conn.rollback()
                     # close the cursor
                     transaction_cursor.close()
-                return False
+                raise Exception(f"{item} - failed to insert calibration fit")
 
             for tile_id in soln_tile_ids:
                 some_fits = False
@@ -818,18 +820,18 @@ class MWAXCalvinProcessor:
                     self.logger.error(f"{item} - failed to insert calibration solution for tile {tile_id}")
                     if transaction_cursor:
                         # Rollback the calibration_fit row and any solutions rows already inserted
-                        conn.rollback()
+                        transaction_cursor.connection.rollback()
                         # close the cursor
                         transaction_cursor.close()
 
-                    return False
+                    raise Exception(f"{item} - failed to insert calibration solution for tile {tile_id}")
 
             # on success move to complete
             if success:
                 # The whole calibration solution was inserted ok. Commit the transation
                 # unless we are a dummy db_handler
                 if transaction_cursor:
-                    conn.commit()
+                    transaction_cursor.connection.commit()
                     transaction_cursor.close()
 
                 #
@@ -852,7 +854,24 @@ class MWAXCalvinProcessor:
 
                 return True
         except Exception:
-            self.logger.exception(f"{item} - Error in upload_handler:\n{traceback.format_exc()}")
+            error_text = f"{item} - Error in upload_handler:\n{traceback.format_exc()}"
+            self.logger.exception(error_text)
+
+            # Write an error readme
+            write_readme_file(
+                self.logger,
+                os.path.join(item, "readme_error.txt"),
+                f"upload_handler({item})",
+                -999,
+                "",
+                error_text,
+            )
+
+            # move all the files into upload_error directory
+            upload_error_path = os.path.join(self.upload_error_path, str(obs_id))
+            self.logger.info(f"{obs_id}: moving failed files to" f" {upload_error_path} for review.")
+            shutil.move(item, upload_error_path)
+
             return False
         finally:
             if not self.db_handler_object.dummy:
@@ -1234,6 +1253,20 @@ class MWAXCalvinProcessor:
 
         if not os.path.exists(self.upload_path):
             self.logger.error("processing_upload_path location " f" {self.upload_path} does not exist. Quitting.")
+            sys.exit(1)
+
+        # upload error path
+        self.upload_error_path = utils.read_config(
+            self.logger,
+            config,
+            "upload",
+            "upload_error_path",
+        )
+
+        if not os.path.exists(self.upload_error_path):
+            self.logger.error(
+                "processing_upload_error_path location " f" {self.upload_error_path} does not exist. Quitting."
+            )
             sys.exit(1)
 
         # complete path

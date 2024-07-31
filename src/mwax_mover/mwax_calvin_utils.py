@@ -1445,7 +1445,7 @@ def write_stats(
 def write_readme_file(logger, filename, cmd, exit_code, stdout, stderr):
     """This will create a small readme.txt file which will
     hopefully help whoever poor sap is checking why birli
-    or hyperdrive did or did not work!"""
+    or hyperdrive or the upload_handler did or did not work!"""
     try:
         with open(filename, "w", encoding="UTF-8") as readme:
             if exit_code == 0:
