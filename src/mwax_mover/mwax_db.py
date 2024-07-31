@@ -671,6 +671,10 @@ def update_calsolution_request(db_handler_object, obsid: int, success: bool, err
 
     status_id: int = 2 if success else -1
 
+    # On success, error should just be a fixed string
+    if success:
+        error = "Calsolutions added OK"
+
     try:
         if db_handler_object.dummy:
             time.sleep(1)  # simulate a transaction

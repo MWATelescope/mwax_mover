@@ -31,7 +31,7 @@ from pandas import DataFrame
 import traceback
 import coloredlogs
 
-from mwax_mover.mwax_db import insert_calibration_fits_row, insert_calibration_solutions_row
+from mwax_mover.mwax_db import insert_calibration_fits_row, insert_calibration_solutions_row, update_calsolution_request
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
 from mwax_mover.mwax_calvin_utils import (
     HyperfitsSolution,
@@ -834,10 +834,6 @@ class MWAXCalvinProcessor:
                     transaction_cursor.connection.commit()
                     transaction_cursor.close()
 
-                #
-                # If this cal solution was a requested one, update it to completed
-                #
-
                 # now move the whole dir
                 # to the complete path
                 if not self.complete_path:
@@ -851,6 +847,11 @@ class MWAXCalvinProcessor:
 
                     for file_to_delete in visibility_files:
                         os.remove(file_to_delete)
+
+                #
+                # If this cal solution was a requested one, update it to completed
+                #
+                update_calsolution_request(self.db_handler_object, obs_id, True, "")
 
                 return True
         except Exception:
@@ -871,6 +872,11 @@ class MWAXCalvinProcessor:
             upload_error_path = os.path.join(self.upload_error_path, str(obs_id))
             self.logger.info(f"{obs_id}: moving failed files to" f" {upload_error_path} for review.")
             shutil.move(item, upload_error_path)
+
+            #
+            # If this cal solution was a requested one, update it to failed
+            #
+            update_calsolution_request(self.db_handler_object, obs_id, False, error_text.replace("\n", ""))
 
             return False
         finally:
