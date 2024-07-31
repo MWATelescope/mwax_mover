@@ -140,6 +140,9 @@ class MWAXDBHandler:
             # connection based
             self.logger.error(f"select_one_row_postgres(): unknown Error- {exception_info}")
             raise exception_info
+        finally:
+            if conn:
+                self.pool.putconn(conn)
 
     @retry(
         stop=stop_after_attempt(3),
