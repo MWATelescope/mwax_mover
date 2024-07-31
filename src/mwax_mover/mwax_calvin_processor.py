@@ -166,7 +166,7 @@ class MWAXCalvinProcessor:
             name="incoming_asvo_watcher",
             path=self.incoming_asvo_watch_path,
             dest_queue=self.assembly_asvo_watch_queue,
-            pattern=".fits",
+            pattern=".*",
             log=self.logger,
             mode=MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
             recursive=False,
