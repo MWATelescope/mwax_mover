@@ -861,9 +861,14 @@ class MWAXCalvinProcessor:
                 shutil.move(item, complete_path)
 
                 if not self.keep_completed_visibility_files:
+                    # Remove visibilitiy files
                     visibility_files = glob.glob(os.path.join(complete_path, f"{obs_id}_*_*_*.fits"))
-
                     for file_to_delete in visibility_files:
+                        os.remove(file_to_delete)
+
+                    # Now remove uvfits too
+                    uvfits_files = glob.glob(os.path.join(complete_path, f"{obs_id}_*.uvfits"))
+                    for file_to_delete in uvfits_files:
                         os.remove(file_to_delete)
 
                 #
