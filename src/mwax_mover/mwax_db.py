@@ -689,7 +689,7 @@ def update_calsolution_request(db_handler_object, obsid: int, success: bool, err
         if db_handler_object.dummy:
             time.sleep(1)  # simulate a transaction
         else:
-            db_handler_object.execute_single_dml_row(sql, (str(status_id), error, str(obsid)))
+            db_handler_object.execute_single_dml_row(sql, (int(status_id), error, int(obsid)))
             db_handler_object.logger.debug(
                 "update_calsolution_request(): Successfully updated calsolution_request table."
             )
