@@ -321,10 +321,28 @@ class MWAXCalvinProcessor:
         return True
 
     def incoming_asvo_handler(self, item) -> bool:
-        """This is triggered each time a new fits file
+        """This is triggered each time a new file
         appears in the incoming_asvo_path
 
+        NOTE: when we download from MWA ASVO we will also get the following files which should be deleted:
+        * <OBSID>.metafits
+        * <OBSID>_metafits_ppds.fits
+        * MWA_ASVO_README.md
+
         MWA ASVO requests have lower priority than realtime"""
+
+        # Purge the files we don't care about!
+        if (
+            str(item).endswith(".metafits")
+            or str(item).endswith("_metafits_ppds.fits")
+            or str(item) == "MWA_ASVO_README.md"
+        ):
+            try:
+                os.remove(item)
+                return True
+            except FileNotFoundError:
+                # It was already removed?
+                pass
 
         # Only handle MWA ASVO if the incoming_realtime_queue is empty
         if self.assembly_realtime_watch_queue.qsize() == 0:
