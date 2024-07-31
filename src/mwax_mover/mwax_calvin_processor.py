@@ -335,7 +335,7 @@ class MWAXCalvinProcessor:
         if (
             str(item).endswith(".metafits")
             or str(item).endswith("_metafits_ppds.fits")
-            or str(item) == "MWA_ASVO_README.md"
+            or str(item).endswith("MWA_ASVO_README.md")
         ):
             try:
                 os.remove(item)
