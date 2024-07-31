@@ -119,15 +119,11 @@ class MWAXDBHandler:
                         return rows
 
         except psycopg2.errors.OperationalError as conn_error:
-            # Our connection is toast. Clear it so we attempt a reconnect
-            self.con = None
             self.logger.error("select_one_row_postgres(): postgres OperationalError-" f" {conn_error}")
             # Reraise error
             raise conn_error
 
         except psycopg2.errors.InterfaceError as int_error:
-            # Our connection is toast. Clear it so we attempt a reconnect
-            self.con = None
             self.logger.error(f"select_one_row_postgres(): postgres InterfaceError- {int_error}")
             # Reraise error
             raise int_error
@@ -154,8 +150,19 @@ class MWAXDBHandler:
         retry=retry_if_not_exception_type(psycopg2.errors.ForeignKeyViolation),
     )
     def execute_single_dml_row(self, sql: str, parm_list: list):
-        """This executes an INSERT, UPDATE or DELETE that should only affect
-        one row. Since this is all in a with (context) block, rollback is
+        """This executes an INSERT, UPDATE or DELETE that should affect 1
+        row only. Since this is all in a with (context) block, rollback is
+        called on failure and commit on success. Exceptions are raised on error."""
+        self.execute_dml(sql, parm_list, expected_rows=1)
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(30),
+        retry=retry_if_not_exception_type(psycopg2.errors.ForeignKeyViolation),
+    )
+    def execute_dml(self, sql: str, parm_list: list, expected_rows: None | int):
+        """This executes an INSERT, UPDATE or DELETE that should affect 0,1 or many
+        rows. Since this is all in a with (context) block, rollback is
         called on failure and commit on success. Exceptions are raised on error."""
 
         # Assuming we have a connection, try to do the database operation
@@ -169,31 +176,28 @@ class MWAXDBHandler:
                     # Check how many rows we affected
                     rows_affected = cursor.rowcount
 
-                    if rows_affected != 1:
-                        # An exception in here will trigger a rollback
-                        # which is good
-                        self.logger.error(
-                            "execute_single_dml_row(): Error- query"
-                            f" affected {rows_affected} rows, expected 1."
-                            f" SQL={sql}"
-                        )
-                        raise Exception(
-                            "execute_single_dml_row(): Error- query"
-                            f" affected {rows_affected} rows, expected 1."
-                            f" SQL={sql}"
-                        )
+                    if expected_rows:
+                        if rows_affected != expected_rows:
+                            # An exception in here will trigger a rollback
+                            # which is good
+                            self.logger.error(
+                                "execute_dml(): Error- query"
+                                f" affected {rows_affected} rows, expected {expected_rows}."
+                                f" SQL={sql}"
+                            )
+                            raise Exception(
+                                "execute_dml(): Error- query"
+                                f" affected {rows_affected} rows, expected {expected_rows}."
+                                f" SQL={sql}"
+                            )
 
         except psycopg2.errors.OperationalError as conn_error:
-            # Our connection is toast. Clear it so we attempt a reconnect
-            self.con = None
-            self.logger.error(f"execute_single_dml_row(): postgres OperationalError- {conn_error}")
+            self.logger.error(f"execute_dml(): postgres OperationalError- {conn_error}")
             # Reraise error
             raise conn_error
 
         except psycopg2.errors.InterfaceError as int_error:
-            # Our connection is toast. Clear it so we attempt a reconnect
-            self.con = None
-            self.logger.error(f"execute_single_dml_row(): postgres InterfaceError- {int_error}")
+            self.logger.error(f"execute_dml(): postgres InterfaceError- {int_error}")
             # Reraise error
             raise int_error
 
@@ -201,21 +205,21 @@ class MWAXDBHandler:
             # Trying to insert or update but a value of a field violates the FK constraint-
             # e.g. insert into data_files fails due to observation_num not existing in mwa_setting.starttime
             # We need to reraise the error so our caller can handle in this "insert_data_file_row" case!
-            self.logger.error(f"execute_single_dml_row(): postgres ForeignKeyViolation- {fk_error}")
+            self.logger.error(f"execute_dml(): postgres ForeignKeyViolation- {fk_error}")
             # Reraise error
             raise fk_error
 
         except psycopg2.ProgrammingError as prog_error:
             # A programming/SQL error - e.g. table does not exist. Don't
             # reconnect connection
-            self.logger.error(f"execute_single_dml_row(): postgres ProgrammingError- {prog_error}")
+            self.logger.error(f"execute_dml(): postgres ProgrammingError- {prog_error}")
             # Reraise error
             raise prog_error
 
         except Exception as exception_info:
             # Any other error- likely to be a database error rather than
             # connection based
-            self.logger.error(f"execute_single_dml_row(): unknown Error- {exception_info}")
+            self.logger.error(f"execute_dml(): unknown Error- {exception_info}")
             raise exception_info
         finally:
             if conn:
@@ -664,7 +668,11 @@ def select_unattempted_calsolution_requests(db_handler_object):
 
 
 def update_calsolution_request(db_handler_object, obsid: int, success: bool, error: str):
-    """Update a calsolution request with completion status info. On error raises exception"""
+    """Update a calsolution request with completion status info.
+    It is possible that Marcin's code has already updated the status in which case
+    this will do nothing. It is also possible for this same obsid to be in many requests
+    in which case all requests will be updated.
+    On error raises exception"""
 
     # status 0 = Not attempted
     # status 2 = success
@@ -673,9 +681,8 @@ def update_calsolution_request(db_handler_object, obsid: int, success: bool, err
     # obsid_target is the obs to have the cal solution applied to
 
     sql = """
-    UPDATE
+    UPDATE public.calsolution_request
     SET status = %s, error = %s
-    FROM public.calsolution_request
     WHERE obsid = %s -- this obsid
     AND status = 0 -- not attempted;"""
 
@@ -690,7 +697,7 @@ def update_calsolution_request(db_handler_object, obsid: int, success: bool, err
             time.sleep(1)  # simulate a transaction
             return
         else:
-            db_handler_object.execute_single_dml_row(sql, (int(status_id), error, int(obsid)))
+            db_handler_object.execute_dml(sql, (int(status_id), error, int(obsid)))
             db_handler_object.logger.debug(
                 "update_calsolution_request(): Successfully updated calsolution_request table."
             )
