@@ -65,10 +65,13 @@ class MWAXCalvinDownloadProcessor:
         #    * or already processing on calvin
         #    * or already processed and failed on calvin
         if self.running:
+            self.logger.debug("Querying database for unattempted calsolution_requests...")
             # 1. Get the list of outstanding calibration_requests from the db
             results = mwax_db.select_unattempted_calsolution_requests(self.db_handler_object)
 
             if results:
+                self.logger.debug(f"Found {len(results)} unattempted calsolution_requests to process.")
+
                 for result in results:
                     #
                     # Each result is: (obsid, unix_timestamp, error_code, error_message, obsid_target)
@@ -95,6 +98,7 @@ class MWAXCalvinDownloadProcessor:
         # If we find a job in giant-squid which we don't know about,
         # DON'T include it in the list we track
         if self.running:
+            self.logger.debug("Getting latest MWA ASVO job statuses...")
             try:
                 self.mwax_asvo_helper.update_all_job_status(add_missing_jobs_to_current_jobs=False)
 
@@ -110,6 +114,7 @@ class MWAXCalvinDownloadProcessor:
 
         # 3. See if any in the list need actioning
         if self.running:
+            self.logger.debug("Checking to see if any jobs are ready to download...")
             self.handle_mwa_asvo_jobs()
 
     def handle_mwa_asvo_jobs(self):

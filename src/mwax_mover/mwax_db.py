@@ -213,6 +213,9 @@ class MWAXDBHandler:
             # connection based
             self.logger.error(f"execute_single_dml_row(): unknown Error- {exception_info}")
             raise exception_info
+        finally:
+            if conn:
+                self.pool.putconn(conn)
 
     def execute_dml_row_within_transaction(
         self, sql: str, parm_list: list, transaction_cursor: psycopg2.extensions.cursor
