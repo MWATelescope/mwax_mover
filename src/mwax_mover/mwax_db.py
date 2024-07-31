@@ -101,6 +101,7 @@ class MWAXDBHandler:
                     rows_affected = len(rows)
 
                     if expected_rows:
+                        # if we passed in how many rows we were expecting, check it!
                         if expected_rows == rows_affected:
                             return rows
                         else:
@@ -113,6 +114,9 @@ class MWAXDBHandler:
                                 "select_one_row_postgres(): Error- queried"
                                 f" {rows_affected} rows, expected 1. SQL={sql}"
                             )
+                    else:
+                        # We don't know how many rows, so cool, return them
+                        return rows
 
         except psycopg2.errors.OperationalError as conn_error:
             # Our connection is toast. Clear it so we attempt a reconnect
