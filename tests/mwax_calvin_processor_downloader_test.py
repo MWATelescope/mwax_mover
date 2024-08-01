@@ -17,7 +17,7 @@ def test_calvin_downloader_test():
 
     processor: MWAXCalvinDownloadProcessor = MWAXCalvinDownloadProcessor()
 
-    processor.initialise("tests/calvin_download_processor.cfg")
+    processor.initialise("tests/mwax_calvin_downloader_test.cfg")
 
     # Start the pipeline
     # Create and start a thread for the processor
