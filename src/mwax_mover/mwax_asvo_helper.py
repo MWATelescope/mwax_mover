@@ -313,7 +313,7 @@ class MWAASVOHelper:
                         )
 
                         stdout = stdout.replace("\n", " ")
-                        self.logger.debug(f"{job.obs_id} Successfully downloaded: {stdout}")
+                        self.logger.debug(f"Job ID: {job.id} ObsID: {job.obs_id} Successfully downloaded: {stdout}")
 
                         job.download_completed = True
                     finally:

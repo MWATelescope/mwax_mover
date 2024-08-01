@@ -126,6 +126,12 @@ class MWAXCalvinDownloadProcessor:
             if job.job_state == mwax_asvo_helper.MWAASVOJobState.Ready:
                 # Download the data
                 self.mwax_asvo_helper.download_asvo_job(job)
+                # Remove it if the job if successful!
+                if job.download_completed:
+                    self.mwax_asvo_helper.current_asvo_jobs.remove(job)
+                    self.logger.info(
+                        f"Job {job.id} / ObsId {job.obs_id} downloaded successfully. Removing from current jobs."
+                    )
 
     def start(self):
         """Start the processor"""

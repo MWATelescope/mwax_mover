@@ -285,9 +285,11 @@ class MWAXCalvinProcessor:
             for worker_thread in self.worker_threads:
                 if worker_thread:
                     if worker_thread.is_alive():
-                        time.sleep(1)
+                        time.sleep(0.2)
                     else:
+                        self.logger.debug(f"Worker {worker_thread.name} has died unexpectedly! Exiting!")
                         self.running = False
+                        self.stop()
                         break
 
         #
