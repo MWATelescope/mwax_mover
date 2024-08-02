@@ -455,10 +455,11 @@ class MWACacheArchiveProcessor:
         console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(console_log)
 
-        file_log = logging.FileHandler(filename=os.path.join(self.log_path, "mwacache_archiver_main.log"))
-        file_log.setLevel(logging.DEBUG)
-        file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
-        self.logger.addHandler(file_log)
+        # Removing file logging for now
+        # file_log = logging.FileHandler(filename=os.path.join(self.log_path, "mwacache_archiver_main.log"))
+        # file_log.setLevel(logging.DEBUG)
+        # file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
+        # self.logger.addHandler(file_log)
 
         self.logger.info(
             "Starting mwacache_archive_processor" f" processor...v{version.get_mwax_mover_version_string()}"
