@@ -104,7 +104,8 @@ class MWAXCalvinDownloadProcessor:
 
             except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
                 # Handle me!
-                self.logger.info("MWA ASVO has an outage. Doing nothing this loop.")
+                self.logger.info("MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins.")
+                time.sleep(10 * 60 * 60)
                 return
             except Exception:
                 # TODO - maybe some exceptions we should back off instead of exiting?
@@ -120,18 +121,46 @@ class MWAXCalvinDownloadProcessor:
     def handle_mwa_asvo_jobs(self):
         """This code will check for any jobs which can be downloaded and start
         downloading them"""
+        DOWNLOAD_RETRIES: int = 3
 
         for job in self.mwax_asvo_helper.current_asvo_jobs:
             # Check job is in Ready state
             if job.job_state == mwax_asvo_helper.MWAASVOJobState.Ready:
-                # Download the data
-                self.mwax_asvo_helper.download_asvo_job(job)
+                try:
+                    self.logger.info(
+                        f"{job}: Attempting to download (attempt: {job.download_retries + 1}/{DOWNLOAD_RETRIES})"
+                    )
+
+                    # Download the data
+                    self.mwax_asvo_helper.download_asvo_job(job)
+
+                except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
+                    # Handle me!
+                    self.logger.info("MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins.")
+                    time.sleep(10 * 60 * 60)
+                    return
+
+                except Exception:
+                    # Something went wrong!
+                    self.logger.exception(f"{job}: Error downloading Job.")
+
                 # Remove it if the job if successful!
+                # If not, it should retry in the next "handle_mwa_asvo_jobs loop"
                 if job.download_completed:
                     self.mwax_asvo_helper.current_asvo_jobs.remove(job)
-                    self.logger.info(
-                        f"Job {job.id} / ObsId {job.obs_id} downloaded successfully. Removing from current jobs."
-                    )
+                    self.logger.info(f"{job}: downloaded successfully. Removing from current jobs.")
+                else:
+                    # Download failed, increment retries counter
+                    job.download_retries += 1
+
+                    # Check if we've had too many retries
+                    if job.download_retries > DOWNLOAD_RETRIES:
+                        self.logger.error(
+                            f"{job}: Fatal exception- too many retries {DOWNLOAD_RETRIES} when trying to download."
+                            "Exiting!"
+                        )
+                        self.running = False
+                        self.stop()
 
     def start(self):
         """Start the processor"""
@@ -152,8 +181,9 @@ class MWAXCalvinDownloadProcessor:
         while self.running:
             self.main_loop_handler()
 
-            self.logger.debug(f"Tracking Jobs  : {list(job.job_id for job in self.mwax_asvo_helper.current_asvo_jobs)}")
-            self.logger.debug(f"Tracking ObsIds: {list(job.obs_id for job in self.mwax_asvo_helper.current_asvo_jobs)}")
+            for job in self.mwax_asvo_helper.current_asvo_jobs:
+                self.logger.debug(f"{job} {job.job_state}")
+
             self.logger.debug(f"Sleeping for {self.check_interval_seconds} seconds")
             time.sleep(self.check_interval_seconds)
 

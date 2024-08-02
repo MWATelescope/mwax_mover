@@ -57,6 +57,13 @@ class MWAASVOJob:
         self.download_url = None
         self.download_in_progress: bool = False
         self.download_completed: bool = False
+        self.download_retries: int = 0
+
+    def __str__(self):
+        return f"JobID: {self.job_id}; ObsID: {self.obs_id}"
+
+    def __repr__(self):
+        return f"{self.get_status()}"
 
     def elapsed_time_seconds(self) -> int:
         """Returns the number of seconds between Now and the submitted datetime"""
@@ -71,6 +78,7 @@ class MWAASVOJob:
             "last_seen": (self.last_seen_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.last_seen_datetime else ""),
             "download_in_progress": (self.download_in_progress),
             "download_completed": (self.download_completed),
+            "download_retries": {self.download_retries},
         }
 
 
@@ -102,7 +110,7 @@ class MWAASVOHelper:
         self.download_path = None
 
         # List of Jobs and obs_ids the helper is keeping track of
-        self.current_asvo_jobs = None
+        self.current_asvo_jobs: List[MWAASVOJob] = []
 
     def initialise(
         self,
@@ -120,7 +128,6 @@ class MWAASVOHelper:
         self.giant_squid_submitvis_timeout_seconds = giant_squid_submitvis_timeout_seconds
         self.giant_squid_download_timeout_seconds = giant_squid_download_timeout_seconds
         self.download_path = download_path
-        self.current_asvo_jobs: List[MWAASVOJob] = []
 
     def get_first_job_for_obs_id(self, obs_id) -> MWAASVOJob | None:
         for job in self.current_asvo_jobs:
@@ -172,8 +179,6 @@ class MWAASVOHelper:
             Nothing: raises exceptions on error (from called functions)
 
         """
-        self.logger.info("Checking all jobs status")
-
         # Get list of jobs with status info
         stdout = self._run_giant_squid("list", "--json", self.giant_squid_list_timeout_seconds)
 
@@ -211,9 +216,7 @@ class MWAASVOHelper:
                     job.last_seen_datetime = update_datetime
 
                     if changed:
-                        self.logger.debug(
-                            f"{job.obs_id}: updated - {job.job_id} {job.job_state.value} {job.download_url}"
-                        )
+                        self.logger.debug(f"{job}: updated - {job.job_state.value} {job.download_url}")
                     break
 
             # Job was in the giant squid list but not in my in memory list
@@ -229,8 +232,7 @@ class MWAASVOHelper:
 
                 self.current_asvo_jobs.append(new_job)
                 self.logger.debug(
-                    f"{new_job.obs_id}: added job from giant-squid: {new_job.job_id} "
-                    f"{new_job.job_state.value} {new_job.download_url}"
+                    f"{new_job}: added job from giant-squid {new_job.job_state.value} {new_job.download_url}"
                 )
 
         # Finally, we need to check for any jobs in memory which were not seen anymore
@@ -240,7 +242,7 @@ class MWAASVOHelper:
                 # We didn't see this job
                 # We should log it and remove it
                 self.logger.debug(
-                    f"{job.obs_id}: removed - {job.job_id} {job.job_state.value} {job.download_url} as it was not "
+                    f"{job}: removed - {job.job_state.value} {job.download_url} as it was no longer "
                     f"seen by giant-squid-list. {update_datetime} vs {job.last_seen_datetime}"
                 )
                 self.current_asvo_jobs.remove(job)
@@ -249,7 +251,6 @@ class MWAASVOHelper:
         """Runs giant-squid and returns stdout output if successful or
         raises an exception if there was an error"""
         cmdline: str = f"{self.path_to_giant_squid_binary} {subcommand} {args}"
-        self.logger.debug(f"_run_giant_squid: Executing {cmdline}...")
 
         start_time = time.time()
 
@@ -259,8 +260,9 @@ class MWAASVOHelper:
 
         elapsed = time.time() - start_time
 
+        self.logger.debug(f"_run_giant_squid: completed in {elapsed:.3f} seconds [Success={success}]")
+
         if success:
-            self.logger.debug(f"_run_giant_squid: successful in {elapsed:.3f} seconds")
             return stdout
         else:
             # Bad return code, failure!
@@ -313,7 +315,7 @@ class MWAASVOHelper:
                         )
 
                         stdout = stdout.replace("\n", " ")
-                        self.logger.debug(f"Job ID: {job.id} ObsID: {job.obs_id} Successfully downloaded: {stdout}")
+                        self.logger.debug(f"{job} Successfully downloaded: {stdout}")
 
                         job.download_completed = True
                     finally:

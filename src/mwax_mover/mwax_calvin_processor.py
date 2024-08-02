@@ -469,14 +469,26 @@ class MWAXCalvinProcessor:
                     # in progress file.
                     min_partial_purge_age_secs = 60 * 60 * 4  # 4 hours
 
-                    if time.time() - os.path.getmtime(partial_file) > min_partial_purge_age_secs:
+                    # Get the last modified time of the partial file
+                    try:
+                        mod_time = os.path.getmtime(partial_file)
+                    except FileNotFoundError:
+                        # this file got renamed or removed, so ignore!
+                        continue
+
+                    if time.time() - mod_time > min_partial_purge_age_secs:
                         self.logger.warning(
                             f"Partial file {partial_file} is older than"
                             f" {min_partial_purge_age_secs} seconds and will be"
                             " removed..."
                         )
-                        os.remove(partial_file)
-                        self.logger.warning(f"Partial file {partial_file} deleted")
+
+                        try:
+                            os.remove(partial_file)
+                            self.logger.warning(f"Partial file {partial_file} deleted")
+                        except FileNotFoundError:
+                            # this file got renamed or removed, so ignore!
+                            continue
         return True
 
     def obsid_check_assembled_handler(self):
