@@ -460,7 +460,7 @@ class MWAXCalvinProcessor:
                 #
                 # Remove any partial files first if they are old
                 #
-                partial_files = glob(os.path.join(self.incoming_realtime_watch_path, "*.part*"))
+                partial_files = glob.glob(os.path.join(self.incoming_realtime_watch_path, "*.part*"))
                 for partial_file in partial_files:
                     # Ensure now minus the last mod time of the partial file
                     # is > 4 hours, it is definitely safe to delete
