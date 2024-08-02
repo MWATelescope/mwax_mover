@@ -64,6 +64,10 @@ class MWAXCalvinProcessor:
         self.health_multicast_ip = None
         self.health_multicast_port = None
         self.health_multicast_hops = None
+        self.processing_error_count: int = 0
+        self.upload_error_count: int = 0
+        self.completed_count: int = 0
+
         self.metadata_webservice_url = None
 
         self.running = False
@@ -541,7 +545,6 @@ class MWAXCalvinProcessor:
         have birli then hyperdrive run on it.
         item is the processing directory"""
         birli_success: bool = False
-        success: bool = False
 
         file_no_path = item.split("/")
         obs_id = file_no_path[-1][0:10]
@@ -583,7 +586,10 @@ class MWAXCalvinProcessor:
                 # Now add to queue
                 self.add_to_upload_queue(upload_path)
 
-        return success
+        if not (birli_success and hyperdrive_success):
+            self.processing_error_count += 1
+
+        return True
 
     def add_to_upload_queue(self, item):
         """Adds a dir containing all the files for an obsid
@@ -890,6 +896,8 @@ class MWAXCalvinProcessor:
                     for file_to_delete in uvfits_files:
                         os.remove(file_to_delete)
 
+                self.completed_count += 1
+
                 return True
         except Exception:
             error_text = f"{item} - Error in upload_handler:\n{traceback.format_exc()}"
@@ -914,6 +922,8 @@ class MWAXCalvinProcessor:
             # If this cal solution was a requested one, update it to failed
             #
             update_calsolution_request(self.db_handler_object, obs_id, False, error_text.replace("\n", ""))
+
+            self.upload_error_count += 1
 
             return False
         finally:
@@ -995,32 +1005,16 @@ class MWAXCalvinProcessor:
             "version": version.get_mwax_mover_version_string(),
             "host": self.hostname,
             "running": self.running,
+            "incoming_realtime_queue": self.assembly_realtime_watch_queue.qsize(),
+            "incoming_asvo_queue": self.assembly_asvo_watch_queue.qsize(),
+            "processing_queue": self.processing_queue.qsize(),
+            "processing_errors": self.processing_error_count,
+            "upload_queue": self.upload_queue.qsize(),
+            "upload_errors": self.upload_error_count,
+            "completed:": self.completed_count,
         }
 
-        watcher_list = []
-
-        for watcher in self.watchers:
-            status = dict({"name": "data_watcher"})
-            status.update(watcher.get_status())
-            watcher_list.append(status)
-
-        worker_list = []
-
-        if len(self.queue_workers) > 0:
-            for i, worker in enumerate(self.queue_workers):
-                status = dict({"name": f"archiver{i}"})
-                status.update(worker.get_status())
-                worker_list.append(status)
-
-        processor_status_list = []
-        processor = {
-            "type": type(self).__name__,
-            "watchers": watcher_list,
-            "workers": worker_list,
-        }
-        processor_status_list.append(processor)
-
-        status = {"main": main_status, "processors": processor_status_list}
+        status = {"main": main_status}
 
         return status
 
