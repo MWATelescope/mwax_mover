@@ -24,6 +24,26 @@ TEST_CONTIG_OBS_ID = 1184928224  # CenA
 TEST_PICKETFENCE_OBS_ID = 1119683928  # HydA, 24 pickets
 
 
+def check_test_data_exists(obs_id: int):
+    #
+    # Check if the data exists, if not user will need to download it or skip test!
+    #
+    test_obs_location = "tests/data"
+
+    data_location = os.path.join(test_obs_location, str(obs_id))
+
+    error_message = (
+        f"Missing test data! Please use MWA ASVO to download the visbilities of obs_id {obs_id} into {data_location}"
+    )
+    assert os.path.exists(data_location), error_message + f" Directory {data_location} does not exist."
+
+    # Check we have the right number of files
+    count_of_data_files = len(glob.glob(os.path.join(data_location, f"{obs_id}_*_gpubox*_00.fits")))
+    assert count_of_data_files == 24, (
+        error_message + f" Only found {count_of_data_files} gpubox files when there should have been 24."
+    )
+
+
 def get_base_path(test_name: str) -> str:
     """Utility function to get the base path for these tests"""
     return f"{TEST_BASE_PATH}_{test_name}"
@@ -43,7 +63,11 @@ def check_and_make_dir(path):
 
 def setup_mwax_calvin_test(test_name: str) -> str:
     """Gets the mwax_calvin tests ready and returns the test base path"""
-    # Setup dirs first!
+    # Check test data exists
+    check_test_data_exists(TEST_CONTIG_OBS_ID)
+    check_test_data_exists(TEST_PICKETFENCE_OBS_ID)
+
+    # Setup dirs
     # Make the base dir
     base_dir = get_base_path(test_name)
 
