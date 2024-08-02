@@ -45,6 +45,11 @@ from mwax_mover.mwax_calvin_utils import (
     write_readme_file,
 )
 
+CALIBRATION_REQUEST_ERROR_STATUS = -1
+CALIBRATION_REQUEST_NOT_STARTED = 0
+CALIBRATION_REQUEST_PROCESSING = 1
+CALIBRATION_REQUEST_SUCCESS = 2
+
 
 class MWAXCalvinProcessor:
     """The main class processing calibration solutions"""
@@ -875,7 +880,9 @@ class MWAXCalvinProcessor:
                 #
                 # If this cal solution was a requested one, update it to completed
                 #
-                update_calsolution_request(self.db_handler_object, obs_id, True, "")
+                update_calsolution_request(
+                    self.db_handler_object, obs_id, CALIBRATION_REQUEST_SUCCESS, "", self.hostname
+                )
 
                 # now move the whole dir
                 # to the complete path
@@ -921,7 +928,13 @@ class MWAXCalvinProcessor:
             #
             # If this cal solution was a requested one, update it to failed
             #
-            update_calsolution_request(self.db_handler_object, obs_id, False, error_text.replace("\n", ""))
+            update_calsolution_request(
+                self.db_handler_object,
+                obs_id,
+                CALIBRATION_REQUEST_ERROR_STATUS,
+                error_text.replace("\n", ""),
+                self.hostname,
+            )
 
             self.upload_error_count += 1
 
@@ -1062,10 +1075,11 @@ class MWAXCalvinProcessor:
         if config.getboolean("mwax mover", "coloredlogs", fallback=False):
             coloredlogs.install(level="DEBUG", logger=self.logger)
 
-        file_log = logging.FileHandler(filename=os.path.join(self.log_path, "calvin_processor_main.log"))
-        file_log.setLevel(logging.DEBUG)
-        file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
-        self.logger.addHandler(file_log)
+        # Removing file logging for now
+        # file_log = logging.FileHandler(filename=os.path.join(self.log_path, "calvin_processor_main.log"))
+        # file_log.setLevel(logging.DEBUG)
+        # file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
+        # self.logger.addHandler(file_log)
 
         self.logger.info("Starting mwax_calvin_processor" f" processor...v{version.get_mwax_mover_version_string()}")
         self.logger.info(f"Reading config file: {config_filename}")

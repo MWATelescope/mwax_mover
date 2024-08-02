@@ -1,5 +1,6 @@
 """Module for database operations"""
 
+import datetime
 import os
 import math
 import time
@@ -667,7 +668,7 @@ def select_unattempted_calsolution_requests(db_handler_object):
         ) from catch_all
 
 
-def update_calsolution_request(db_handler_object, obsid: int, success: bool, error: str):
+def update_calsolution_request(db_handler_object, obsid: int, status_id: int, error: str, hostname: str):
     """Update a calsolution request with completion status info.
     It is possible that Marcin's code has already updated the status in which case
     this will do nothing. It is also possible for this same obsid to be in many requests
@@ -675,8 +676,9 @@ def update_calsolution_request(db_handler_object, obsid: int, success: bool, err
     On error raises exception"""
 
     # status 0 = Not attempted
+    # status 1 = in progress
     # status 2 = success
-    # status 1,-1,-2 = Error occurred
+    # status -1,-2 = Error occurred
     # obsid is the calibrator
     # obsid_target is the obs to have the cal solution applied to
 
@@ -684,20 +686,20 @@ def update_calsolution_request(db_handler_object, obsid: int, success: bool, err
     UPDATE public.calsolution_request
     SET status = %s, error = %s
     WHERE obsid = %s -- this obsid
-    AND status = 0 -- not attempted;"""
-
-    status_id: int = 2 if success else -1
+    AND (status = 0 or status = 1) -- not attempted or in progress;"""
 
     # On success, error should just be a fixed string
-    if success:
-        error = "Calsolutions added OK"
+    if status_id == 2:
+        error = f"Calsolutions added OK by {hostname} at {datetime.datetime.now()}"
+    elif status_id == 1:
+        error = f"Processing on {hostname} at {datetime.datetime.now()}"
 
     try:
         if db_handler_object.dummy:
             time.sleep(1)  # simulate a transaction
             return
         else:
-            db_handler_object.execute_dml(sql, (int(status_id), error, int(obsid)), expected_rows=None)
+            db_handler_object.execute_dml(sql, (status_id, error, int(obsid)), expected_rows=None)
             db_handler_object.logger.debug(
                 "update_calsolution_request(): Successfully updated calsolution_request table."
             )

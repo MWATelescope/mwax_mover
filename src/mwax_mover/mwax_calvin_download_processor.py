@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 from mwax_mover import version, mwax_db, utils, mwax_asvo_helper
+from mwax_mover.mwax_calvin_processor import CALIBRATION_REQUEST_PROCESSING
 
 
 class MWAXCalvinDownloadProcessor:
@@ -87,11 +88,35 @@ class MWAXCalvinDownloadProcessor:
                     for job in self.mwax_asvo_helper.current_asvo_jobs:
                         if job.obs_id == obs_id:
                             asvo_job = job
+
+                            # There is already an MWA ASVO job for this obsid, still better
+                            # update the request table so we know we're on it!
+                            mwax_db.update_calsolution_request(
+                                self.db_handler_object, obs_id, CALIBRATION_REQUEST_PROCESSING, "", self.hostname
+                            )
                             break
 
                     if not asvo_job:
-                        # Submit job and add to the ones we are tracking
-                        self.mwax_asvo_helper.submit_download_job(obs_id)
+                        try:
+                            # Submit job and add to the ones we are tracking
+                            self.mwax_asvo_helper.submit_download_job(obs_id)
+                        except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
+                            # Handle me!
+                            self.logger.info(
+                                "MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins."
+                            )
+                            time.sleep(10 * 60 * 60)
+                            return
+                        except Exception:
+                            # TODO - maybe some exceptions we should back off instead of exiting?
+                            self.logger.exception("Fatal exception- exiting!")
+                            self.running = False
+                            self.stop()
+
+                        # We submmited a new MWA ASVO job, update the request table so we know we're on it!
+                        mwax_db.update_calsolution_request(
+                            self.db_handler_object, obs_id, CALIBRATION_REQUEST_PROCESSING, "", self.hostname
+                        )
 
         # 2. Find out the status of all this user's jobs in MWA ASVO
         # Get the job list from giant-squid, populating current_asvo_jobs
@@ -293,10 +318,11 @@ class MWAXCalvinDownloadProcessor:
         if config.getboolean("mwax mover", "coloredlogs", fallback=False):
             coloredlogs.install(level="DEBUG", logger=self.logger)
 
-        file_log = logging.FileHandler(filename=os.path.join(self.log_path, "calvin_download_processor_main.log"))
-        file_log.setLevel(logging.DEBUG)
-        file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
-        self.logger.addHandler(file_log)
+        # Removing file logging for now
+        # file_log = logging.FileHandler(filename=os.path.join(self.log_path, "calvin_download_processor_main.log"))
+        # file_log.setLevel(logging.DEBUG)
+        # file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
+        # self.logger.addHandler(file_log)
 
         self.logger.info("Starting mwax_calvin_download_processor" f" ...v{version.get_mwax_mover_version_string()}")
 
