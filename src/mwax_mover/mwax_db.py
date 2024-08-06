@@ -66,7 +66,6 @@ class MWAXDBHandler:
         else:
             return self.select_many_rows_postgres(sql, parm_list)
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(60))
     def select_one_row_postgres(self, sql: str, parm_list: list):
         """Returns a single row from postgres given SQL and params"""
         # Assuming we have a connection, try to do the database operation
@@ -75,7 +74,6 @@ class MWAXDBHandler:
         # Just return the first row
         return rows[0]
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(60))
     def select_many_rows_postgres(self, sql: str, parm_list: list):
         """Returns a single row from postgres given SQL and params"""
         # Assuming we have a connection, try to do the database operation
@@ -84,6 +82,7 @@ class MWAXDBHandler:
         # Just return all rows
         return rows
 
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(60))
     def select_postgres(self, sql: str, parm_list: list, expected_rows: None | int):
         """Returns rows from postgres given SQL and params. If expected rows is passed
         then it will check it returned the correct number of rows and riase exception
@@ -119,28 +118,9 @@ class MWAXDBHandler:
                         # We don't know how many rows, so cool, return them
                         return rows
 
-        except psycopg2.errors.OperationalError as conn_error:
-            self.logger.error("select_one_row_postgres(): postgres OperationalError-" f" {conn_error}")
-            # Reraise error
-            raise conn_error
-
-        except psycopg2.errors.InterfaceError as int_error:
-            self.logger.error(f"select_one_row_postgres(): postgres InterfaceError- {int_error}")
-            # Reraise error
-            raise int_error
-
-        except psycopg2.ProgrammingError as prog_error:
-            # A programming/SQL error - e.g. table does not exist. Don't
-            # reconnect connection
-            self.logger.error("select_one_row_postgres(): postgres ProgrammingError-" f" {prog_error}")
-            # Reraise error
-            raise prog_error
-
-        except Exception as exception_info:
-            # Any other error- likely to be a database error rather than
-            # connection based
-            self.logger.error(f"select_one_row_postgres(): unknown Error- {exception_info}")
-            raise exception_info
+        except Exception:
+            self.logger.exception("select_postgres(): postgres exception")
+            raise
         finally:
             if conn:
                 self.pool.putconn(conn)
@@ -192,40 +172,68 @@ class MWAXDBHandler:
                                 f" SQL={sql}"
                             )
 
-        except psycopg2.errors.OperationalError as conn_error:
-            self.logger.error(f"execute_dml(): postgres OperationalError- {conn_error}")
-            # Reraise error
-            raise conn_error
-
-        except psycopg2.errors.InterfaceError as int_error:
-            self.logger.error(f"execute_dml(): postgres InterfaceError- {int_error}")
-            # Reraise error
-            raise int_error
-
-        except psycopg2.errors.ForeignKeyViolation as fk_error:
+        except psycopg2.errors.ForeignKeyViolation:
             # Trying to insert or update but a value of a field violates the FK constraint-
             # e.g. insert into data_files fails due to observation_num not existing in mwa_setting.starttime
             # We need to reraise the error so our caller can handle in this "insert_data_file_row" case!
-            self.logger.error(f"execute_dml(): postgres ForeignKeyViolation- {fk_error}")
+            self.logger.exception("execute_dml(): postgres ForeignKeyViolation")
             # Reraise error
-            raise fk_error
+            raise
 
-        except psycopg2.ProgrammingError as prog_error:
-            # A programming/SQL error - e.g. table does not exist. Don't
-            # reconnect connection
-            self.logger.error(f"execute_dml(): postgres ProgrammingError- {prog_error}")
-            # Reraise error
-            raise prog_error
-
-        except Exception as exception_info:
+        except Exception:
             # Any other error- likely to be a database error rather than
             # connection based
-            self.logger.error(f"execute_dml(): unknown Error- {exception_info}")
-            raise exception_info
+            self.logger.exception("execute_dml(): postgres Exception")
+            raise
         finally:
             if conn:
                 self.pool.putconn(conn)
 
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(60))
+    def select_postgres_within_transaction(
+        self, sql: str, parm_list: list, expected_rows: None | int, transaction_cursor
+    ):
+        """Returns rows from postgres given SQL and params. If expected rows is passed
+        then it will check it returned the correct number of rows and riase exception
+        if not"""
+        # Assuming we have a connection, try to do the database operation
+        try:
+            # Run the sql
+            transaction_cursor.execute(sql, parm_list)
+
+            # Fetch results as a list of tuples
+            rows = transaction_cursor.fetchall()
+
+            # Check how many rows we affected
+            rows_affected = len(rows)
+
+            if expected_rows:
+                # if we passed in how many rows we were expecting, check it!
+                if expected_rows == rows_affected:
+                    return rows
+                else:
+                    # Something went wrong
+                    self.logger.error(
+                        "select_postgres_within_transaction(): Error- queried"
+                        f" {rows_affected} rows, expected 1. SQL={sql}"
+                    )
+                    raise Exception(
+                        "select_postgres_within_transaction(): Error- queried"
+                        f" {rows_affected} rows, expected 1. SQL={sql}"
+                    )
+            else:
+                # We don't know how many rows, so cool, return them
+                return rows
+
+        except Exception:
+            self.logger.exception("select_postgres_within_transaction(): postgres exception")
+            raise
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(30),
+        retry=retry_if_not_exception_type(psycopg2.errors.ForeignKeyViolation),
+    )
     def execute_dml_row_within_transaction(
         self, sql: str, parm_list: list, transaction_cursor: psycopg2.extensions.cursor
     ):
@@ -265,9 +273,9 @@ class MWAXDBHandler:
                     f" SQL={sql}"
                 )
 
-        except Exception as sql_exception:
-            self.logger.exception("execute_single_dml_row_within_transaction()")
-            raise Exception from sql_exception
+        except Exception:
+            self.logger.exception("execute_single_dml_row_within_transaction(): postgres Exception")
+            raise
 
 
 #
@@ -633,81 +641,350 @@ def insert_calibration_solutions_row(
         return False
 
 
-def select_unattempted_calsolution_requests(db_handler_object):
-    """Return all unattempted calibration_requests.
-    NOTE: this could include duplicate obs_ids in theory"""
+def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str):
+    """Assigns then returns the deatils of the next oldest unattempted calibration_request.
 
-    # status 0 = Not attempted
-    # status 2 = success
-    # status 1,-1,-2 = Error occurred
-    # obsid is the calibrator
-    # obsid_target is the obs to have the cal solution applied to
+    Parameters:
+            db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
+            hostname (str): The name of the current host so we can specify who is working on this request
 
-    sql = """
-    SELECT obsid, unixtime, status, error, obsid_target
+    Returns:
+            request_id, cal_id OR None if none found. Raises exceptions on error
+    """
+
+    sql_get = """
+    SELECT id, cal_id
     FROM public.calsolution_request
-    WHERE status = 0 -- not attempted
-    ORDER BY unixtime;"""
+    WHERE
+    assigned_hostname IS NULL -- not attempted at all
+    ORDER BY request_added_datetime LIMIT 1; -- oldest first"""
+
+    sql_update = """
+    UPDATE public.calsolution_request
+    SET
+        assigned_datetime = Now(),
+        assigned_hostname = %s
+    WHERE
+    id = %s"""
 
     try:
         if db_handler_object.dummy:
             time.sleep(1)  # simulate a slow transaction
             return None
         else:
-            results = db_handler_object.select_many_rows_postgres(sql, None)
+            # get the connection
+            conn = db_handler_object.pool.getconn()
 
-            if results:
-                db_handler_object.logger.debug(
-                    f"select_unattempted_calsolution_requests(): Successfully got {len(results)} requests."
-                )
-            return results
+            # Create a cursor
+            transaction_cursor = conn.cursor()
 
-    except Exception as catch_all:  # pylint: disable=broad-except
-        raise Exception(
-            f"select_unattempted_calsolution_requests(): error querying calsolution_request table. SQL was {sql}"
-        ) from catch_all
+            # Get the next request, if any
+            results = db_handler_object.select_postgres_within_transaction(
+                sql_get, parm_list=None, expected_rows=None, transaction_cursor=transaction_cursor
+            )
+
+            if not results:
+                db_handler_object.logger.debug("assign_next_unattempted_calsolution_request(): No requests to process.")
+                return None
+
+            # We got one!
+            request_id: int = int(results[0])
+            cal_id: int = int(results[1])
+
+            # Update the row, so no one else does!
+            db_handler_object.execute_dml_row_within_transaction(
+                sql_update,
+                parm_list=[request_id, hostname],
+                transaction_cursor=transaction_cursor,
+            )
+
+            return request_id, cal_id
+
+    except Exception:
+        db_handler_object.logger.exception("select_unattempted_calsolution_requests(): Exception")
+        raise
+
+    finally:
+        if not db_handler_object.dummy:
+            db_handler_object.pool.putconn(conn)
 
 
-def update_calsolution_request(db_handler_object, obsid: int, status_id: int, error: str, hostname: str):
-    """Update a calsolution request with completion status info.
-    It is possible that Marcin's code has already updated the status in which case
-    this will do nothing. It is also possible for this same obsid to be in many requests
-    in which case all requests will be updated.
-    On error raises exception"""
+def update_calsolution_request_submit_mwa_asvo_job(
+    db_handler_object: MWAXDBHandler,
+    request_id: int,
+    mwa_asvo_submitted_datetime: datetime.datetime,
+    mwa_asvo_job_id: int,
+):
+    """Update a calsolution request with status info regarding the MWA ASVO job submission.
 
-    # status 0 = Not attempted
-    # status 1 = in progress
-    # status 2 = success
-    # status -1,-2 = Error occurred
-    # obsid is the calibrator
-    # obsid_target is the obs to have the cal solution applied to
+    Parameters:
+            db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
+            request_id (int): The id of the calibration_solution_request to udpate
+            mwa_asvo_submitted_datetime (datetime): The date/time the MWA ASVO job was successfully submitted
+            mwa_asvo_job_id (int): The MWA ASVO Job ID which is handling the retrieval of this obsid
+
+    Returns:
+            Nothing. Raises exceptions on error"""
 
     sql = """
-    UPDATE public.calsolution_request
-    SET status = %s, error = %s
-    WHERE obsid = %s -- this obsid
-    AND (status = 0 or status = 1) -- not attempted or in progress;"""
+    UPDATE public.calibration_solution_request
+    SET
+        download_mwa_asvo_job_submitted_datetime = %s,
+        download_mwa_asvo_job_id = %s
+    WHERE
+    id = %s"""
 
-    # On success, error should just be a fixed string
-    if status_id == 2:
-        error = f"Calsolutions added OK by {hostname} at {datetime.datetime.now()}"
-    elif status_id == 1:
-        error = f"Processing on {hostname} at {datetime.datetime.now()}"
+    params = [mwa_asvo_submitted_datetime, mwa_asvo_job_id, request_id]
 
     try:
         if db_handler_object.dummy:
             time.sleep(1)  # simulate a transaction
             return
         else:
-            db_handler_object.execute_dml(sql, (status_id, error, int(obsid)), expected_rows=None)
+            db_handler_object.execute_dml_one_row(sql, params)
             db_handler_object.logger.debug(
-                "update_calsolution_request(): Successfully updated calsolution_request table."
+                "update_calsolution_request_submit_mwa_asvo_job(): Successfully updated "
+                "calibration_solution_request table."
             )
 
     except Exception:  # pylint: disable=broad-except
         db_handler_object.logger.exception(
-            "update_calsolution_request(): error updating calsolution_request record. SQL"
-            f" was {sql}, params were: {(str(status_id), error, str(obsid))}"
+            "update_calsolution_request_submit_mwa_asvo_job(): error updating calibration_solution_request record. SQL"
+            f" was {sql}, params were: {params}"
+        )
+
+        # Re-raise error
+        raise
+
+
+def update_calsolution_request_download_started_status(
+    db_handler_object: MWAXDBHandler,
+    request_id: int,
+    download_started_datetime: datetime.datetime,
+):
+    """Update a calsolution request with updated download start status info.
+
+    Parameters:
+            db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
+            request_id (int): The id of the calibration_solution_request to udpate
+            download_started_datetime (datetime): The date/time the download started
+
+    Returns:
+            Nothing. Raises exceptions on error"""
+
+    sql = """
+    UPDATE public.calibration_solution_request
+    SET
+        download_started_datetime = %s,
+        download_completed_datetime = NULL,
+        download_error_datetime = NULL,
+        download_error_message = NULL
+    WHERE
+    id = %s"""
+
+    params = [download_started_datetime, request_id]
+
+    try:
+        if db_handler_object.dummy:
+            time.sleep(1)  # simulate a transaction
+            return
+        else:
+            db_handler_object.execute_dml_one_row(sql, params)
+            db_handler_object.logger.debug(
+                "update_calsolution_request_download_started_status(): Successfully updated "
+                "calibration_solution_request table."
+            )
+
+    except Exception:  # pylint: disable=broad-except
+        db_handler_object.logger.exception(
+            "update_calsolution_request_download_started_status(): error updating calibration_solution_request "
+            f"record. SQL was {sql}, params were: {params}"
+        )
+
+        # Re-raise error
+        raise
+
+
+def update_calsolution_request_download_complete_status(
+    db_handler_object: MWAXDBHandler,
+    request_id: int,
+    download_completed_datetime: datetime.datetime | None,
+    download_error_datetime: datetime.datetime | None,
+    download_error_message: str | None,
+):
+    """Update a calsolution request with updated download completed status info.
+
+    Parameters:
+            db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
+            request_id (int): The id of the calibration_solution_request to udpate
+            download_completed_datetime (datetime): Date/time the download succeeded or None on error
+            download_error_datetime (datetime): Date/time the download failed with an error OR None if success
+            download_error_message (str): Error message if download_error_datetime is provided OR None if success
+
+    Returns:
+            Nothing. Raises exceptions on error"""
+
+    sql = """
+    UPDATE public.calibration_solution_request
+    SET
+        download_completed_datetime = %s,
+        download_error_datetime = %s,
+        download_error_message = %s
+    WHERE
+    id = %s"""
+
+    params = [download_completed_datetime, download_error_datetime, download_error_message, request_id]
+
+    # check for validity, raise exception if not valid
+    if (download_completed_datetime and download_error_datetime is None and download_error_message is None) ^ (
+        download_completed_datetime is None and download_error_datetime and download_error_message
+    ):
+        raise ValueError(
+            "download_completed_datetime is mutually exclusive with download_error_datetime and download_error_message"
+        )
+
+    try:
+        if db_handler_object.dummy:
+            time.sleep(1)  # simulate a transaction
+            return
+        else:
+            db_handler_object.execute_dml_one_row(sql, params)
+            db_handler_object.logger.debug(
+                "update_calsolution_request_download_started_status(): Successfully updated "
+                "calibration_solution_request table."
+            )
+
+    except Exception:  # pylint: disable=broad-except
+        db_handler_object.logger.exception(
+            "update_calsolution_request_download_started_status(): error updating calibration_solution_request "
+            f"record. SQL was {sql}, params were: {params}"
+        )
+
+        # Re-raise error
+        raise
+
+
+def update_calsolution_request_calibration_started_status(
+    db_handler_object: MWAXDBHandler,
+    request_id: int,
+    calibration_started_datetime: datetime.datetime,
+):
+    """Update a calsolution request with updated calibration start status info.
+
+    Parameters:
+            db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
+            request_id (int): The id of the calibration_solution_request to udpate
+            calibration_started_datetime (datetime): The date/time the calibration started
+
+    Returns:
+            Nothing. Raises exceptions on error"""
+
+    sql = """
+    UPDATE public.calibration_solution_request
+    SET
+        calibration_started_datetime = %s,
+        calibration_completed_datetime = NULL,
+        calibration_fit_id = NULL,
+        calibration_error_datetime = NULL,
+        calibration_error_message = NULL
+    WHERE
+    id = %s"""
+
+    params = [calibration_started_datetime, request_id]
+
+    try:
+        if db_handler_object.dummy:
+            time.sleep(1)  # simulate a transaction
+            return
+        else:
+            db_handler_object.execute_dml_one_row(sql, params)
+            db_handler_object.logger.debug(
+                "update_calsolution_request_calibration_started_status(): Successfully updated "
+                "calibration_solution_request table."
+            )
+
+    except Exception:  # pylint: disable=broad-except
+        db_handler_object.logger.exception(
+            "update_calsolution_request_calibration_started_status(): error updating calibration_solution_request "
+            f"record. SQL was {sql}, params were: {params}"
+        )
+
+        # Re-raise error
+        raise
+
+
+def update_calsolution_request_calibration_complete_status(
+    db_handler_object: MWAXDBHandler,
+    request_id: int,
+    calibration_completed_datetime: datetime.datetime | None,
+    calibration_fit_id: int | None,
+    calibration_error_datetime: datetime.datetime | None,
+    calibration_error_message: str | None,
+):
+    """Update a calsolution request with updated calibration completed status info.
+
+    Parameters:
+            db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
+            request_id (int): The id of the calibration_solution_request to udpate
+            calibration_completed_datetime (datetime): Date/time the calibration succeeded or None on error
+            calibration_fit_id (int): ID of the fit inserted or None on error
+            calibration_error_datetime (datetime): Date/time the calibration failed with an error OR None if success
+            calibration_error_message (str): Error message if calibration_error_datetime is provided OR None if success
+
+    Returns:
+            Nothing. Raises exceptions on error"""
+
+    sql = """
+    UPDATE public.calibration_solution_request
+    SET
+        calibration_completed_datetime = %s,
+        calibration_fit_id = %s,
+        calibration_error_datetime = %s,
+        calibration_error_message = %s
+    WHERE
+    id = %s"""
+
+    params = [
+        calibration_completed_datetime,
+        calibration_fit_id,
+        calibration_error_datetime,
+        calibration_error_message,
+        request_id,
+    ]
+
+    # check for validity, raise exception if not valid
+    # ^ is XOR if you were wondering!
+    if (
+        calibration_completed_datetime
+        and calibration_fit_id
+        and calibration_error_datetime is None
+        and calibration_error_message is None
+    ) ^ (
+        calibration_completed_datetime is None
+        and calibration_fit_id is None
+        and calibration_error_datetime
+        and calibration_error_message
+    ):
+        raise ValueError(
+            "calibration_completed_datetime and calibration_fit_id are mutually exclusive with "
+            "calibration_error_datetime and calibration_error_message"
+        )
+
+    try:
+        if db_handler_object.dummy:
+            time.sleep(1)  # simulate a transaction
+            return
+        else:
+            db_handler_object.execute_dml_one_row(sql, params)
+            db_handler_object.logger.debug(
+                "update_calsolution_request_calibration_started_status(): Successfully updated "
+                "calibration_solution_request table."
+            )
+
+    except Exception:  # pylint: disable=broad-except
+        db_handler_object.logger.exception(
+            "update_calsolution_request_calibration_started_status(): error updating "
+            f"calibration_solution_request record. SQL was {sql}, params were: {params}"
         )
 
         # Re-raise error
