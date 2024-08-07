@@ -674,6 +674,46 @@ def insert_calibration_solutions_row(
         return False
 
 
+def get_this_hosts_previously_started_download_requests(db_handler_object: MWAXDBHandler, hostname: str):
+    """Returns a list of any incomplete jobs assigned to this host (only up to the download step).
+    Maybe we crashed - so we need to pickup from where we left off!
+
+    Columns: id, cal_id, download_mwa_asvo_job_submitted_datetime, download_mwa_asvo_job_id
+    """
+
+    sql = """
+    SELECT c.id, c.cal_id, c.download_mwa_asvo_job_submitted_datetime, c.download_mwa_asvo_job_id
+    FROM public.calibration_request c
+    WHERE
+    (
+        c.assigned_hostname = %s AND
+        (
+            c.download_completed_datetime IS NULL
+            AND c.download_error_datetime IS NULL
+        )
+    )
+    ORDER BY c.request_added_datetime;
+    """
+
+    if db_handler_object.dummy:
+        time.sleep(1)  # simulate a slow transaction
+        return None
+
+    try:
+        return db_handler_object.select_many_rows_postgres(
+            sql,
+            [
+                hostname,
+            ],
+        )
+
+    except Exception:
+        db_handler_object.logger.exception(
+            f"get_this_hosts_previously_started_requests() error " f" . SQL was {sql} Values {hostname}"
+        )
+        raise
+
+
 def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str) -> Tuple[int, int] | None:
     """Assigns then returns the deatils of the next oldest unattempted calibration_request.
 
@@ -689,24 +729,29 @@ def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str
     SELECT c.id, c.cal_id
     FROM public.calibration_request c
     WHERE
-    c.assigned_hostname IS NULL -- not attempted at all
-    AND NOT EXISTS
-    -- Check if the SAME calid is in progress on another host if so ignore!
+    -- First check for unstarted jobs / and ensure that obsid is
+    -- not running on another host
     (
-     SELECT 1
-     FROM public.calibration_request q
-     WHERE
-     q.cal_id = c.cal_id
-     AND q.assigned_hostname <> %s
-     AND
-     ((q.download_completed_datetime IS NULL
-      AND q.download_error_datetime IS NULL)
-      OR
-      (q.calibration_completed_datetime IS NULL
-       AND q.calibration_error_datetime IS NULL)
-     )
+        c.assigned_hostname IS NULL -- not attempted at all
+        AND NOT EXISTS
+        -- Check if the SAME calid is in progress on another host if so ignore!
+        (
+            SELECT 1
+            FROM public.calibration_request q
+            WHERE
+            q.cal_id = c.cal_id
+            AND q.assigned_hostname <> %s
+            AND
+            (
+                (q.download_completed_datetime IS NULL
+                AND q.download_error_datetime IS NULL)
+                OR
+                (q.calibration_completed_datetime IS NULL
+                AND q.calibration_error_datetime IS NULL)
+            )
+        )
     )
-    ORDER BY request_added_datetime LIMIT 1; -- oldest first"""
+    ORDER BY c.request_added_datetime LIMIT 1"""
 
     sql_update = """
     UPDATE public.calibration_request
@@ -815,7 +860,7 @@ def update_calsolution_request_submit_mwa_asvo_job(
             time.sleep(1)  # simulate a transaction
             return
         else:
-            db_handler_object.execute_dml_one_row(sql, params)
+            db_handler_object.execute_dml(sql, params, None)
             db_handler_object.logger.debug(
                 "update_calsolution_request_submit_mwa_asvo_job(): Successfully updated " "calibration_request table."
             )
@@ -863,7 +908,7 @@ def update_calsolution_request_download_started_status(
             time.sleep(1)  # simulate a transaction
             return
         else:
-            db_handler_object.execute_dml_one_row(sql, params)
+            db_handler_object.execute_dml(sql, params, None)
             db_handler_object.logger.debug(
                 "update_calsolution_request_download_started_status(): Successfully updated "
                 "calibration_request table."
@@ -914,8 +959,11 @@ def update_calsolution_request_download_complete_status(
     if (download_completed_datetime and download_error_datetime is None and download_error_message is None) ^ (
         download_completed_datetime is None and download_error_datetime and download_error_message
     ):
+        pass
+    else:
         raise ValueError(
-            "download_completed_datetime is mutually exclusive with download_error_datetime and download_error_message"
+            "download_completed_datetime is mutually exclusive with download_error_datetime and download_error_message "
+            f"{download_completed_datetime, download_error_datetime, download_error_message}"
         )
 
     try:
@@ -923,15 +971,15 @@ def update_calsolution_request_download_complete_status(
             time.sleep(1)  # simulate a transaction
             return
         else:
-            db_handler_object.execute_dml_one_row(sql, params)
+            db_handler_object.execute_dml(sql, params, None)
             db_handler_object.logger.debug(
-                "update_calsolution_request_download_started_status(): Successfully updated "
+                "update_calsolution_request_download_complete_status(): Successfully updated "
                 "calibration_request table."
             )
 
     except Exception:  # pylint: disable=broad-except
         db_handler_object.logger.exception(
-            "update_calsolution_request_download_started_status(): error updating calibration_request "
+            "update_calsolution_request_download_complete_status(): error updating calibration_request "
             f"record. SQL was {sql}, params were: {params}"
         )
 
@@ -973,7 +1021,7 @@ def update_calsolution_request_calibration_started_status(
             time.sleep(1)  # simulate a transaction
             return
         else:
-            db_handler_object.execute_dml_one_row(sql, params)
+            db_handler_object.execute_dml(sql, params, None)
             db_handler_object.logger.debug(
                 "update_calsolution_request_calibration_started_status(): Successfully updated "
                 "calibration_request table."
@@ -1042,6 +1090,8 @@ def update_calsolution_request_calibration_complete_status(
         and calibration_error_datetime
         and calibration_error_message
     ):
+        pass
+    else:
         raise ValueError(
             "calibration_completed_datetime and calibration_fit_id are mutually exclusive with "
             "calibration_error_datetime and calibration_error_message"
@@ -1052,15 +1102,15 @@ def update_calsolution_request_calibration_complete_status(
             time.sleep(1)  # simulate a transaction
             return
         else:
-            db_handler_object.execute_dml_one_row(sql, params)
+            db_handler_object.execute_dml(sql, params, None)
             db_handler_object.logger.debug(
-                "update_calsolution_request_calibration_started_status(): Successfully updated "
+                "update_calsolution_request_calibration_complete_status(): Successfully updated "
                 "calibration_request table."
             )
 
     except Exception:  # pylint: disable=broad-except
         db_handler_object.logger.exception(
-            "update_calsolution_request_calibration_started_status(): error updating "
+            "update_calsolution_request_calibration_complete_status(): error updating "
             f"calibration_request record. SQL was {sql}, params were: {params}"
         )
 

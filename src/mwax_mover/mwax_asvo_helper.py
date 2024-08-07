@@ -38,6 +38,7 @@ class MWAASVOJobState(Enum):
     Ready = "Ready"
     Queued = "Queued"
     Processing = "Processing"
+    Unknown = "Uknown"  # not a real ASVO status but a good default
 
 
 """
@@ -54,7 +55,7 @@ class MWAASVOJob:
 
         self.obs_id = obs_id
         self.job_id = job_id
-        self.job_state = None
+        self.job_state = MWAASVOJobState.Unknown
         self.submitted_datetime = datetime.datetime.now()
         self.last_seen_datetime = self.submitted_datetime
         self.download_url = None
@@ -78,15 +79,15 @@ class MWAASVOJob:
             "job_id": str(self.job_id),
             "obs_id": str(self.obs_id),
             "state": str(self.job_state.value),
-            "submitted": (self.submitted_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.submitted_datetime else ""),
-            "last_seen": (self.last_seen_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.last_seen_datetime else ""),
+            "submitted": self.submitted_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.submitted_datetime else "",
+            "last_seen": self.last_seen_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.last_seen_datetime else "",
             "download_started": (
                 self.download_started_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.download_started_datetime else ""
             ),
-            "download_in_progress": (self.download_in_progress),
-            "download_completed": (self.download_completed),
-            "download_retries": {self.download_retries},
-            "request_ids": {self.request_ids},
+            "download_in_progress": self.download_in_progress,
+            "download_completed": self.download_completed,
+            "download_retries": self.download_retries,
+            "request_ids": " ,".join(str(r) for r in self.request_ids),
         }
 
 

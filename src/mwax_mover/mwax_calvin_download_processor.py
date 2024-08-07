@@ -53,6 +53,50 @@ class MWAXCalvinDownloadProcessor:
         self.running = False
         self.ready_to_exit = False
 
+    def add_new_job(self, request_id: int, obs_id: int):
+        # Check if we have this obs_id tracked
+        asvo_job = None
+
+        for job in self.mwax_asvo_helper.current_asvo_jobs:
+            if job.obs_id == obs_id:
+                asvo_job = job
+
+                asvo_job.request_ids.append(request_id)
+
+                # Update database
+                mwax_db.update_calsolution_request_submit_mwa_asvo_job(
+                    self.db_handler_object,
+                    asvo_job.request_ids,
+                    mwa_asvo_submitted_datetime=asvo_job.submitted_datetime,
+                    mwa_asvo_job_id=asvo_job.job_id,
+                )
+                break
+
+        if not asvo_job:
+            try:
+                # Submit job and add to the ones we are tracking
+                new_job = self.mwax_asvo_helper.submit_download_job(request_id, obs_id)
+            except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
+                # Handle me!
+                self.logger.info("MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins.")
+                time.sleep(10 * 60 * 60)
+                return
+            except Exception:
+                # TODO - maybe some exceptions we should back off instead of exiting?
+                self.logger.exception("Fatal exception- exiting!")
+                self.running = False
+                self.stop()
+                return
+
+            # We submmited a new MWA ASVO job, update the request table so we know we're on it!
+            # Update database
+            mwax_db.update_calsolution_request_submit_mwa_asvo_job(
+                self.db_handler_object,
+                new_job.request_ids,
+                mwa_asvo_submitted_datetime=new_job.submitted_datetime,
+                mwa_asvo_job_id=new_job.job_id,
+            )
+
     def main_loop_handler(self):
         """This is the main loop handler for this process.
         1. check and handle MWA ASVO jobs in progress
@@ -80,48 +124,7 @@ class MWAXCalvinDownloadProcessor:
                 # Get the obs_id
                 obs_id = int(result[1])
 
-                # Check if we have this obs_id tracked
-                asvo_job = None
-
-                for job in self.mwax_asvo_helper.current_asvo_jobs:
-                    if job.obs_id == obs_id:
-                        asvo_job = job
-
-                        asvo_job.request_ids.append(request_id)
-
-                        # Update database
-                        mwax_db.update_calsolution_request_submit_mwa_asvo_job(
-                            self.db_handler_object,
-                            asvo_job.request_ids,
-                            mwa_asvo_submitted_datetime=asvo_job.submitted_datetime,
-                            mwa_asvo_job_id=asvo_job.job_id,
-                        )
-                        break
-
-                if not asvo_job:
-                    try:
-                        # Submit job and add to the ones we are tracking
-                        new_job = self.mwax_asvo_helper.submit_download_job(request_id, obs_id)
-                    except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
-                        # Handle me!
-                        self.logger.info("MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins.")
-                        time.sleep(10 * 60 * 60)
-                        return
-                    except Exception:
-                        # TODO - maybe some exceptions we should back off instead of exiting?
-                        self.logger.exception("Fatal exception- exiting!")
-                        self.running = False
-                        self.stop()
-                        return
-
-                    # We submmited a new MWA ASVO job, update the request table so we know we're on it!
-                    # Update database
-                    mwax_db.update_calsolution_request_submit_mwa_asvo_job(
-                        self.db_handler_object,
-                        new_job.request_ids,
-                        mwa_asvo_submitted_datetime=new_job.submitted_datetime,
-                        mwa_asvo_job_id=new_job.job_id,
-                    )
+                self.add_new_job(request_id, obs_id)
 
         # 2. Find out the status of all this user's jobs in MWA ASVO
         # Get the job list from giant-squid, populating current_asvo_jobs
@@ -164,7 +167,7 @@ class MWAXCalvinDownloadProcessor:
                     job.download_started_datetime = datetime.datetime.now()
                     # Update database
                     mwax_db.update_calsolution_request_download_started_status(
-                        self.db_handler_object, job.request_ids, job.download_started
+                        self.db_handler_object, job.request_ids, job.download_started_datetime
                     )
 
                     # Download the data (blocks until data is downloaded or exception fired)
@@ -226,6 +229,30 @@ class MWAXCalvinDownloadProcessor:
         health_thread.start()
 
         self.logger.info("Started...")
+
+        self.logger.debug("Checking for any in progress jobs to resume...")
+        results = mwax_db.get_this_hosts_previously_started_download_requests(self.db_handler_object, self.hostname)
+
+        if len(results) > 0:
+            self.logger.debug(f"{len(results)} in progress jobs found. Adding them to internal queue...")
+            for row in results:
+                request_id = int(row[0])
+                obs_id = int(row[1])
+                job_submitted_datetime = row[2]
+                job_id = row[3]
+
+                # If the job has already been submitted to ASVO, try and carry on
+                if job_submitted_datetime:
+                    new_job = mwax_asvo_helper.MWAASVOJob(request_id, obs_id, int(job_id))
+                    new_job.submitted_datetime = job_submitted_datetime
+                    self.mwax_asvo_helper.current_asvo_jobs.append(new_job)
+                    self.logger.debug(f"Added {new_job}")
+                else:
+                    # if not submitted to ASVO, do that now!
+                    self.logger.debug(f"Adding and submitting Request ID {request_id} for ObsID {obs_id}")
+                    self.add_new_job(request_id, obs_id)
+        else:
+            self.logger.debug("No in progress jobs found.")
 
         # Main loop
         while self.running:
