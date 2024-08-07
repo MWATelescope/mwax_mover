@@ -31,7 +31,7 @@ from pandas import DataFrame
 import traceback
 import coloredlogs
 
-from mwax_mover.mwax_db import insert_calibration_fits_row, insert_calibration_solutions_row, update_calsolution_request
+from mwax_mover.mwax_db import insert_calibration_fits_row, insert_calibration_solutions_row
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
 from mwax_mover.mwax_calvin_utils import (
     HyperfitsSolution,
@@ -44,11 +44,6 @@ from mwax_mover.mwax_calvin_utils import (
     GainFitInfo,
     write_readme_file,
 )
-
-CALIBRATION_REQUEST_ERROR_STATUS = -1
-CALIBRATION_REQUEST_NOT_STARTED = 0
-CALIBRATION_REQUEST_PROCESSING = 1
-CALIBRATION_REQUEST_SUCCESS = 2
 
 
 class MWAXCalvinProcessor:
@@ -553,6 +548,12 @@ class MWAXCalvinProcessor:
 
         file_no_path = item.split("/")
         obs_id = file_no_path[-1][0:10]
+
+        # Update database that we are processing this obsid
+        mwax_db.update_calsolution_request_calibration_started_status(
+            self.db_handler_object, obs_id, None, datetime.datetime.now()
+        )
+
         metafits_filename = os.path.join(item, str(obs_id) + "_metafits.fits")
         uvfits_filename = os.path.join(item, str(obs_id) + ".uvfits")
 
@@ -880,8 +881,8 @@ class MWAXCalvinProcessor:
                 #
                 # If this cal solution was a requested one, update it to completed
                 #
-                update_calsolution_request(
-                    self.db_handler_object, obs_id, CALIBRATION_REQUEST_SUCCESS, "", self.hostname
+                mwax_db.update_calsolution_request_calibration_complete_status(
+                    self.db_handler_object, None, datetime.datetime.now(), int(fit_id), None, None
                 )
 
                 # now move the whole dir
@@ -928,12 +929,8 @@ class MWAXCalvinProcessor:
             #
             # If this cal solution was a requested one, update it to failed
             #
-            update_calsolution_request(
-                self.db_handler_object,
-                obs_id,
-                CALIBRATION_REQUEST_ERROR_STATUS,
-                error_text.replace("\n", ""),
-                self.hostname,
+            mwax_db.update_calsolution_request_calibration_complete_status(
+                self.db_handler_object, None, None, None, datetime.datetime.now(), error_text.replace("\n", " ")
             )
 
             self.upload_error_count += 1
