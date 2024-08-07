@@ -5,6 +5,7 @@ requests
 """
 
 import argparse
+import datetime
 import coloredlogs
 from configparser import ConfigParser
 import json
@@ -16,7 +17,6 @@ import sys
 import threading
 import time
 from mwax_mover import version, mwax_db, utils, mwax_asvo_helper
-from mwax_mover.mwax_calvin_processor import CALIBRATION_REQUEST_PROCESSING
 
 
 class MWAXCalvinDownloadProcessor:
@@ -29,7 +29,7 @@ class MWAXCalvinDownloadProcessor:
         self.logger = logging.getLogger(__name__)
         self.log_path = None
         self.hostname = None
-        self.db_handler_object = None
+        self.db_handler_object: mwax_db.MWAXDBHandler = None
 
         # health
         self.health_multicast_interface_ip = None
@@ -67,56 +67,61 @@ class MWAXCalvinDownloadProcessor:
         #    * or already processed and failed on calvin
         if self.running:
             self.logger.debug("Querying database for unattempted calsolution_requests...")
-            # 1. Get the list of outstanding calibration_requests from the db
-            results = mwax_db.select_unattempted_calsolution_requests(self.db_handler_object)
+            # 1. Get the an outstanding calibration_requests from the db
+            # returned fields: Tuple[id, calid] or None (the obsid we are calibrating)
+            result = mwax_db.assign_next_unattempted_calsolution_request(self.db_handler_object, self.hostname)
 
-            if results:
-                self.logger.debug(f"Found {len(results)} unattempted calsolution_requests to process.")
+            if result:
+                self.logger.debug(f"Found {len(result)} unattempted calsolution_requests to process.")
 
-                for result in results:
-                    #
-                    # Each result is: (obsid, unix_timestamp, error_code, error_message, obsid_target)
-                    # obsid is the obsid we want to download
-                    # obsid_target is the one MWA ASVO is doing this for!
-                    #
-                    # Get the obs_id
-                    obs_id = int(result[0])
+                # get the id of the request
+                request_id = int(result[0])
 
-                    # Check if we have this obs_id tracked
-                    asvo_job = None
+                # Get the obs_id
+                obs_id = int(result[1])
 
-                    for job in self.mwax_asvo_helper.current_asvo_jobs:
-                        if job.obs_id == obs_id:
-                            asvo_job = job
+                # Check if we have this obs_id tracked
+                asvo_job = None
 
-                            # There is already an MWA ASVO job for this obsid, still better
-                            # update the request table so we know we're on it!
-                            mwax_db.update_calsolution_request(
-                                self.db_handler_object, obs_id, CALIBRATION_REQUEST_PROCESSING, "", self.hostname
-                            )
-                            break
+                for job in self.mwax_asvo_helper.current_asvo_jobs:
+                    if job.obs_id == obs_id:
+                        asvo_job = job
 
-                    if not asvo_job:
-                        try:
-                            # Submit job and add to the ones we are tracking
-                            self.mwax_asvo_helper.submit_download_job(obs_id)
-                        except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
-                            # Handle me!
-                            self.logger.info(
-                                "MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins."
-                            )
-                            time.sleep(10 * 60 * 60)
-                            return
-                        except Exception:
-                            # TODO - maybe some exceptions we should back off instead of exiting?
-                            self.logger.exception("Fatal exception- exiting!")
-                            self.running = False
-                            self.stop()
+                        asvo_job.request_ids.append(request_id)
 
-                        # We submmited a new MWA ASVO job, update the request table so we know we're on it!
-                        mwax_db.update_calsolution_request(
-                            self.db_handler_object, obs_id, CALIBRATION_REQUEST_PROCESSING, "", self.hostname
+                        # Update database
+                        mwax_db.update_calsolution_request_submit_mwa_asvo_job(
+                            self.db_handler_object,
+                            asvo_job.request_ids,
+                            mwa_asvo_submitted_datetime=asvo_job.submitted_datetime,
+                            mwa_asvo_job_id=asvo_job.job_id,
                         )
+                        break
+
+                if not asvo_job:
+                    try:
+                        # Submit job and add to the ones we are tracking
+                        new_job = self.mwax_asvo_helper.submit_download_job(request_id, obs_id)
+                    except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
+                        # Handle me!
+                        self.logger.info("MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins.")
+                        time.sleep(10 * 60 * 60)
+                        return
+                    except Exception:
+                        # TODO - maybe some exceptions we should back off instead of exiting?
+                        self.logger.exception("Fatal exception- exiting!")
+                        self.running = False
+                        self.stop()
+                        return
+
+                    # We submmited a new MWA ASVO job, update the request table so we know we're on it!
+                    # Update database
+                    mwax_db.update_calsolution_request_submit_mwa_asvo_job(
+                        self.db_handler_object,
+                        new_job.request_ids,
+                        mwa_asvo_submitted_datetime=new_job.submitted_datetime,
+                        mwa_asvo_job_id=new_job.job_id,
+                    )
 
         # 2. Find out the status of all this user's jobs in MWA ASVO
         # Get the job list from giant-squid, populating current_asvo_jobs
@@ -125,7 +130,7 @@ class MWAXCalvinDownloadProcessor:
         if self.running:
             self.logger.debug("Getting latest MWA ASVO job statuses...")
             try:
-                self.mwax_asvo_helper.update_all_job_status(add_missing_jobs_to_current_jobs=False)
+                self.mwax_asvo_helper.update_all_job_status()
 
             except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
                 # Handle me!
@@ -156,8 +161,19 @@ class MWAXCalvinDownloadProcessor:
                         f"{job}: Attempting to download (attempt: {job.download_retries + 1}/{DOWNLOAD_RETRIES})"
                     )
 
-                    # Download the data
+                    job.download_started_datetime = datetime.datetime.now()
+                    # Update database
+                    mwax_db.update_calsolution_request_download_started_status(
+                        self.db_handler_object, job.request_ids, job.download_started
+                    )
+
+                    # Download the data (blocks until data is downloaded or exception fired)
                     self.mwax_asvo_helper.download_asvo_job(job)
+
+                    # Update database
+                    mwax_db.update_calsolution_request_download_complete_status(
+                        self.db_handler_object, job.request_ids, datetime.datetime.now(), None, None
+                    )
 
                 except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
                     # Handle me!
@@ -165,9 +181,10 @@ class MWAXCalvinDownloadProcessor:
                     time.sleep(10 * 60 * 60)
                     return
 
-                except Exception:
+                except Exception as e:
                     # Something went wrong!
                     self.logger.exception(f"{job}: Error downloading Job.")
+                    error_message = f"{job}: Error downloading Job: {str(e)}"
 
                 # Remove it if the job if successful!
                 # If not, it should retry in the next "handle_mwa_asvo_jobs loop"
@@ -184,8 +201,16 @@ class MWAXCalvinDownloadProcessor:
                             f"{job}: Fatal exception- too many retries {DOWNLOAD_RETRIES} when trying to download."
                             "Exiting!"
                         )
+
+                        # Update database
+                        error_message = error_message + f"-(too many retries {DOWNLOAD_RETRIES})"
+                        mwax_db.update_calsolution_request_download_complete_status(
+                            self.db_handler_object, job.request_ids, None, datetime.datetime.now(), error_message
+                        )
+
                         self.running = False
                         self.stop()
+                        return
 
     def start(self):
         """Start the processor"""

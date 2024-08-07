@@ -48,13 +48,17 @@ to track its progress from submission to completion
 
 class MWAASVOJob:
 
-    def __init__(self, obs_id: int, job_id: int):
+    def __init__(self, request_id: int, obs_id: int, job_id: int):
+        self.request_ids = []
+        self.request_ids.append(request_id)
+
         self.obs_id = obs_id
         self.job_id = job_id
         self.job_state = None
         self.submitted_datetime = datetime.datetime.now()
         self.last_seen_datetime = self.submitted_datetime
         self.download_url = None
+        self.download_started_datetime = None
         self.download_in_progress: bool = False
         self.download_completed: bool = False
         self.download_retries: int = 0
@@ -76,9 +80,13 @@ class MWAASVOJob:
             "state": str(self.job_state.value),
             "submitted": (self.submitted_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.submitted_datetime else ""),
             "last_seen": (self.last_seen_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.last_seen_datetime else ""),
+            "download_started": (
+                self.download_started_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.download_started_datetime else ""
+            ),
             "download_in_progress": (self.download_in_progress),
             "download_completed": (self.download_completed),
             "download_retries": {self.download_retries},
+            "request_ids": {self.request_ids},
         }
 
 
@@ -137,17 +145,18 @@ class MWAASVOHelper:
         # not found
         return None
 
-    def submit_download_job(self, obs_id: int):
+    def submit_download_job(self, request_id: int, obs_id: int) -> MWAASVOJob:
         """Submits an MWA ASVO Download Job by executing giant-squid
         and adds the details to our internal list
 
             Parameters:
+                request_id (int): The id of the calibration_solution_request row this is for
                 obs_id (int): the obs_id we want MWA ASVO to get us files
 
             Returns:
                 Nothing: raises exceptions on error (from called functions)
         """
-        self.logger.info(f"{obs_id}: Submitting MWA ASVO job to dowload")
+        self.logger.info(f"{obs_id}: Submitting MWA ASVO job to dowload for request {request_id}")
 
         try:
             stdout = self._run_giant_squid(
@@ -165,11 +174,23 @@ class MWAASVOHelper:
 
             self.logger.info(f"{obs_id}: MWA ASVO job {job_id} already exists.")
 
-        # create, populate and add the MWAASVOJob
-        self.current_asvo_jobs.append(MWAASVOJob(obs_id=obs_id, job_id=job_id))
-        self.logger.info(f"{obs_id}: Added job {job_id}. Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs")
+        # create, populate and add the MWAASVOJob if we don't already have it
+        found_job = self.get_first_job_for_obs_id(obs_id)
 
-    def update_all_job_status(self, add_missing_jobs_to_current_jobs: bool):
+        if found_job:
+            found_job.request_ids.append(request_id)
+            self.logger.info(
+                f"{obs_id}: Added request_id {request_id} to job {job_id} as this obs_id is already tracked."
+                f"Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs"
+            )
+        else:
+            # add a new job to be tracked
+            new_job = MWAASVOJob(request_id=request_id, obs_id=obs_id, job_id=job_id)
+            self.current_asvo_jobs.append(new_job)
+            self.logger.info(f"{obs_id}: Added job {job_id}. Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs")
+        return new_job
+
+    def update_all_job_status(self):
         """Updates the status of all our jobs using giant-squid list
 
         Parameters:
@@ -194,7 +215,6 @@ class MWAASVOHelper:
 
         # Iterate through each job
         for json_one_job in json_stdout:
-            job_found: bool = False
 
             # Extract the job_id, state and a download url (if status is Ready)
             obs_id, job_id, job_state, download_url = get_job_info_from_giant_squid_json(json_stdout, json_one_job)
@@ -202,7 +222,6 @@ class MWAASVOHelper:
             # Find the giant squid job in our in memory list
             for job in self.current_asvo_jobs:
                 if job.job_id == job_id:
-                    job_found = True
                     changed: bool = False
 
                     if job.job_state != job_state:
@@ -219,24 +238,11 @@ class MWAASVOHelper:
                         self.logger.debug(f"{job}: updated - {job.job_state.value} {job.download_url}")
                     break
 
-            # Job was in the giant squid list but not in my in memory list
-            # Maybe this code was run earlier, stopped and restarted?
-            # Better add the exitsing giant-squid jobs to my interal list
-            # if add_missing_jobs_to_current_jobs is True
-            if add_missing_jobs_to_current_jobs and not job_found:
-                new_job = MWAASVOJob(obs_id, job_id)
-                new_job.job_state = job_state
-                new_job.download_url = download_url
-                new_job.last_seen_datetime = update_datetime
-                new_job.submitted_datetime = new_job.last_seen_datetime
-
-                self.current_asvo_jobs.append(new_job)
-                self.logger.debug(
-                    f"{new_job}: added job from giant-squid {new_job.job_state.value} {new_job.download_url}"
-                )
-
         # Finally, we need to check for any jobs in memory which were not seen anymore
         # in giant squid
+        #
+        # TODO: hmm we may want to update the database to say it's failed?
+        #
         for job in self.current_asvo_jobs:
             if job.last_seen_datetime != update_datetime:
                 # We didn't see this job
