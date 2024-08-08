@@ -593,7 +593,20 @@ class MWAXCalvinProcessor:
                 self.add_to_upload_queue(upload_path)
 
         if not (birli_success and hyperdrive_success):
+            error_message = ""
+
+            if not birli_success:
+                error_message = "Birli run failed. See logs"
+
+            if not hyperdrive_success:
+                error_message = "Hyperdrive run failed. See logs"
+
             self.processing_error_count += 1
+
+            # Update database
+            mwax_db.update_calsolution_request_calibration_complete_status(
+                self.db_handler_object, obs_id, None, None, None, datetime.datetime.now(), error_message
+            )
 
         return True
 
@@ -878,13 +891,6 @@ class MWAXCalvinProcessor:
                     transaction_cursor.connection.commit()
                     transaction_cursor.close()
 
-                #
-                # If this cal solution was a requested one, update it to completed
-                #
-                mwax_db.update_calsolution_request_calibration_complete_status(
-                    self.db_handler_object, None, datetime.datetime.now(), int(fit_id), None, None
-                )
-
                 # now move the whole dir
                 # to the complete path
                 if not self.complete_path:
@@ -905,6 +911,13 @@ class MWAXCalvinProcessor:
                         os.remove(file_to_delete)
 
                 self.completed_count += 1
+
+                #
+                # If this cal solution was a requested one, update it to completed
+                #
+                mwax_db.update_calsolution_request_calibration_complete_status(
+                    self.db_handler_object, None, datetime.datetime.now(), int(fit_id), None, None
+                )
 
                 return True
         except Exception:
@@ -930,7 +943,7 @@ class MWAXCalvinProcessor:
             # If this cal solution was a requested one, update it to failed
             #
             mwax_db.update_calsolution_request_calibration_complete_status(
-                self.db_handler_object, None, None, None, datetime.datetime.now(), error_text.replace("\n", " ")
+                self.db_handler_object, obs_id, None, None, None, datetime.datetime.now(), error_text.replace("\n", " ")
             )
 
             self.upload_error_count += 1
