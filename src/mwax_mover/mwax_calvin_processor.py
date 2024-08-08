@@ -593,12 +593,9 @@ class MWAXCalvinProcessor:
                 self.add_to_upload_queue(upload_path)
 
         if not (birli_success and hyperdrive_success):
-            error_message = ""
-
             if not birli_success:
                 error_message = "Birli run failed. See logs"
-
-            if not hyperdrive_success:
+            elif not hyperdrive_success:
                 error_message = "Hyperdrive run failed. See logs"
 
             self.processing_error_count += 1
@@ -891,11 +888,16 @@ class MWAXCalvinProcessor:
                     transaction_cursor.connection.commit()
                     transaction_cursor.close()
 
-                # now move the whole dir
-                # to the complete path
-                if not self.complete_path:
-                    raise ValueError("No complete path specified")
-                complete_path = os.path.join(self.complete_path, str(obs_id))
+                #
+                # now move the whole dir to the complete path: obsid/datetime
+                #
+                complete_path_obs = os.path.join(self.complete_path, str(obs_id))
+
+                if not os.path.exists(complete_path_obs):
+                    # Create the dir
+                    os.mkdir(complete_path_obs)
+
+                complete_path = os.path.join(complete_path_obs, datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
                 self.logger.info(f"{obs_id}: moving successfull files to" f" {complete_path} for review.")
                 shutil.move(item, complete_path)
 
