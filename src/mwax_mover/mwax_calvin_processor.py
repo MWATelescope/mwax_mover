@@ -557,6 +557,8 @@ class MWAXCalvinProcessor:
         metafits_filename = os.path.join(item, str(obs_id) + "_metafits.fits")
         uvfits_filename = os.path.join(item, str(obs_id) + ".uvfits")
 
+        hyperdrive_success = False
+
         # Run Birli
         birli_success = mwax_calvin_utils.run_birli(
             self,
@@ -575,9 +577,7 @@ class MWAXCalvinProcessor:
             uvfits_files = glob.glob(os.path.join(item, "*.uvfits"))
 
             # Run hyperdrive
-            hyperdrive_success: bool = mwax_calvin_utils.run_hyperdrive(
-                self, uvfits_files, metafits_filename, obs_id, item
-            )
+            hyperdrive_success = mwax_calvin_utils.run_hyperdrive(self, uvfits_files, metafits_filename, obs_id, item)
 
             # Did we have N number of successful runs?
             if hyperdrive_success:
@@ -916,7 +916,7 @@ class MWAXCalvinProcessor:
                 # If this cal solution was a requested one, update it to completed
                 #
                 mwax_db.update_calsolution_request_calibration_complete_status(
-                    self.db_handler_object, None, datetime.datetime.now(), int(fit_id), None, None
+                    self.db_handler_object, obs_id, None, datetime.datetime.now(), int(fit_id), None, None
                 )
 
                 return True
