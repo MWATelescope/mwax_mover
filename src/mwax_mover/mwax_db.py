@@ -1112,15 +1112,15 @@ def update_calsolution_request_calibration_complete_status(
     # check for validity, raise exception if not valid
     # ^ is XOR if you were wondering!
     if (
-        calibration_completed_datetime
-        and calibration_fit_id
+        calibration_completed_datetime is not None
+        and calibration_fit_id is not None
         and calibration_error_datetime is None
         and calibration_error_message is None
     ) ^ (
         calibration_completed_datetime is None
         and calibration_fit_id is None
-        and calibration_error_datetime
-        and calibration_error_message
+        and calibration_error_datetime is not None
+        and calibration_error_message is not None
     ):
         pass
     else:
