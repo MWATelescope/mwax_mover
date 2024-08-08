@@ -361,7 +361,7 @@ class MWAXCalvinProcessor:
             obs_id: int = int(filename[0:10])
 
             # Check to see if we are already processing this observation
-            if obs_id in self.current_obsids:
+            if int(obs_id) in self.current_obsids:
                 # hmm so we just got a file for obsid xxx, yet xxx is already further along
                 # the pipeline... This could be due to calvin_downloaders somehow downloading
                 # the same obs in succession (it shouldn't do that!). Let's just delete the file.
@@ -432,9 +432,11 @@ class MWAXCalvinProcessor:
                 # put a basic UNIX pattern so we don't pick up the metafits
 
                 # for our housekeeping, add this obsid to our current list
-                # (unless it's there already)
-                if not (obs_id in self.current_obsids):
-                    self.current_obsids.append(obs_id)
+                # (unless it's there already- remember an obsid can be "started" from
+                # incoming / assemble / processing / upload - if the processor is stopped and
+                # restarted)
+                if not (int(obs_id) in self.current_obsids):
+                    self.current_obsids.append(int(obs_id))
 
                 # Check for gpubox files (mwax OR legacy)
                 glob_spec = "*.fits"
@@ -570,6 +572,13 @@ class MWAXCalvinProcessor:
         file_no_path = item.split("/")
         obs_id = file_no_path[-1][0:10]
 
+        # for our housekeeping, add this obsid to our current list
+        # (unless it's there already- remember an obsid can be "started" from
+        # incoming / assemble / processing / upload - if the processor is stopped and
+        # restarted)
+        if not (int(obs_id) in self.current_obsids):
+            self.current_obsids.append(int(obs_id))
+
         # Update database that we are processing this obsid
         mwax_db.update_calsolution_request_calibration_started_status(
             self.db_handler_object, obs_id, None, datetime.datetime.now()
@@ -622,7 +631,7 @@ class MWAXCalvinProcessor:
             self.processing_error_count += 1
 
             # Remove this obs_id from the list of ones we are currently working on
-            self.current_obsids.remove(obs_id)
+            self.current_obsids.remove(int(obs_id))
 
             # Update database
             mwax_db.update_calsolution_request_calibration_complete_status(
@@ -720,6 +729,13 @@ class MWAXCalvinProcessor:
             # get obs_id
             file_no_path = item.split("/")
             obs_id = int(file_no_path[-1][0:10])
+
+            # for our housekeeping, add this obsid to our current list
+            # (unless it's there already- remember an obsid can be "started" from
+            # incoming / assemble / processing / upload - if the processor is stopped and
+            # restarted)
+            if not (int(obs_id) in self.current_obsids):
+                self.current_obsids.append(int(obs_id))
 
             metafits_files = glob.glob(os.path.join(item, "*_metafits.fits"))
             # if len(metafits_files) > 1:
@@ -937,7 +953,7 @@ class MWAXCalvinProcessor:
                         os.remove(file_to_delete)
 
                 # Remove this obs_id from the list of ones we are currently working on
-                self.current_obsids.remove(obs_id)
+                self.current_obsids.remove(int(obs_id))
 
                 self.completed_count += 1
 
@@ -976,7 +992,7 @@ class MWAXCalvinProcessor:
             )
 
             # Remove this obs_id from the list of ones we are currently working on
-            self.current_obsids.remove(obs_id)
+            self.current_obsids.remove(int(obs_id))
 
             self.upload_error_count += 1
 
