@@ -67,6 +67,10 @@ class MWAXCalvinProcessor:
         self.processing_error_count: int = 0
         self.upload_error_count: int = 0
         self.completed_count: int = 0
+        # Keep a register of obsids which have been assembled
+        # This is so if for some reason we get the same obsid
+        # but some other part is still working on it, we can reject it
+        self.current_obsids = []
 
         self.metadata_webservice_url = None
 
@@ -356,17 +360,29 @@ class MWAXCalvinProcessor:
             filename = os.path.basename(item)
             obs_id: int = int(filename[0:10])
 
-            obsid_assembly_dir = os.path.join(self.assemble_path, str(obs_id))
-            if not os.path.exists(obsid_assembly_dir):
-                self.logger.info(f"{item} creating obs_id's assembly dir" f" {obsid_assembly_dir}...")
-                # This is the first file of this obs_id to be seen
-                os.mkdir(obsid_assembly_dir)
+            # Check to see if we are already processing this observation
+            if obs_id in self.current_obsids:
+                # hmm so we just got a file for obsid xxx, yet xxx is already further along
+                # the pipeline... This could be due to calvin_downloaders somehow downloading
+                # the same obs in succession (it shouldn't do that!). Let's just delete the file.
+                self.logger.warning(
+                    f"{item} - a new file came in for this obs_id, but the obs_id is already "
+                    "assembled/processing/uploading. It is likely an unwanted duplicate Removing file."
+                )
+                os.remove(item)
+                return True
+            else:
+                obsid_assembly_dir = os.path.join(self.assemble_path, str(obs_id))
+                if not os.path.exists(obsid_assembly_dir):
+                    self.logger.info(f"{item} creating obs_id's assembly dir" f" {obsid_assembly_dir}...")
+                    # This is the first file of this obs_id to be seen
+                    os.mkdir(obsid_assembly_dir)
 
-            # Relocate this file to the obs_id_work_dir
-            new_filename = os.path.join(obsid_assembly_dir, filename)
-            self.logger.info(f"{item} moving file into obs_id's assembly dir {new_filename}...")
-            shutil.move(item, new_filename)
-            return True
+                # Relocate this file to the obs_id_work_dir
+                new_filename = os.path.join(obsid_assembly_dir, filename)
+                self.logger.info(f"{item} moving file into obs_id's assembly dir {new_filename}...")
+                shutil.move(item, new_filename)
+                return True
         else:
             # Sleep this thread for a minute so we don't go into
             # a tight loop
@@ -414,6 +430,11 @@ class MWAXCalvinProcessor:
                 # we need a list of files from the work dir
                 # this first list has the full path
                 # put a basic UNIX pattern so we don't pick up the metafits
+
+                # for our housekeeping, add this obsid to our current list
+                # (unless it's there already)
+                if not (obs_id in self.current_obsids):
+                    self.current_obsids.append(obs_id)
 
                 # Check for gpubox files (mwax OR legacy)
                 glob_spec = "*.fits"
@@ -599,6 +620,9 @@ class MWAXCalvinProcessor:
                 error_message = "Hyperdrive run failed. See logs"
 
             self.processing_error_count += 1
+
+            # Remove this obs_id from the list of ones we are currently working on
+            self.current_obsids.remove(obs_id)
 
             # Update database
             mwax_db.update_calsolution_request_calibration_complete_status(
@@ -912,6 +936,9 @@ class MWAXCalvinProcessor:
                     for file_to_delete in uvfits_files:
                         os.remove(file_to_delete)
 
+                # Remove this obs_id from the list of ones we are currently working on
+                self.current_obsids.remove(obs_id)
+
                 self.completed_count += 1
 
                 #
@@ -947,6 +974,9 @@ class MWAXCalvinProcessor:
             mwax_db.update_calsolution_request_calibration_complete_status(
                 self.db_handler_object, obs_id, None, None, None, datetime.datetime.now(), error_text.replace("\n", " ")
             )
+
+            # Remove this obs_id from the list of ones we are currently working on
+            self.current_obsids.remove(obs_id)
 
             self.upload_error_count += 1
 
