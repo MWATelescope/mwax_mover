@@ -747,11 +747,10 @@ def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str
             AND q.assigned_hostname <> %s
             AND
             (
-                (q.download_completed_datetime IS NULL
-                AND q.download_error_datetime IS NULL)
-                OR
-                (q.calibration_completed_datetime IS NULL
-                AND q.calibration_error_datetime IS NULL)
+                    q.download_completed_datetime IS NULL
+                AND q.download_error_datetime IS NULL
+                AND q.calibration_completed_datetime IS NULL
+                AND q.calibration_error_datetime IS NULL
             )
         )
     )
