@@ -988,7 +988,7 @@ def update_calsolution_request_download_complete_status(
 def get_incomplete_request_ids_for_obsid(db_handler_object: MWAXDBHandler, obs_id: int):
     sql = """SELECT id
           FROM calibration_request
-          WHERE obs_id =  %s
+          WHERE cal_id =  %s
           AND calibration_completed_datetime IS NULL
           AND calibration_error_datetime IS NULL"""
 
