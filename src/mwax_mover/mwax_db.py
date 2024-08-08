@@ -480,7 +480,7 @@ def update_data_file_row_as_archived(
                 " dummy database connection. No data is really being"
                 " updated."
             )
-            time.sleep(10)  # simulate a slow transaction
+            time.sleep(1)  # simulate a slow transaction
             return True
         else:
             db_handler_object.logger.info(
@@ -536,18 +536,18 @@ def insert_calibration_fits_row(
         fit_limit,
     )
 
-    try:
-        if db_handler_object.dummy:
-            time.sleep(1)  # simulate a slow transaction
-            return (True, fit_id)
-        else:
-            db_handler_object.execute_dml_row_within_transaction(sql, sql_values, transaction_cursor)
+    if db_handler_object.dummy:
+        time.sleep(1)  # simulate a slow transaction
+        return (True, fit_id)
 
-            db_handler_object.logger.info(
-                f"{obs_id}: insert_calibration_fits_row() Successfully wrote "
-                f"into calibration_fits table. fit_id={fit_id}"
-            )
-            return (True, fit_id)
+    try:
+        db_handler_object.execute_dml_row_within_transaction(sql, sql_values, transaction_cursor)
+
+        db_handler_object.logger.info(
+            f"{obs_id}: insert_calibration_fits_row() Successfully wrote "
+            f"into calibration_fits table. fit_id={fit_id}"
+        )
+        return (True, fit_id)
 
     except psycopg2.errors.UniqueViolation:
         # We have a collision with fit_id- since it is the PK of the table and
@@ -607,6 +607,10 @@ def insert_calibration_solutions_row(
     the caller has to manage commiting or rolling back the fit, plus
     1..n calibration_solutions rows."""
 
+    if db_handler_object.dummy:
+        time.sleep(1)  # simulate a slow transaction
+        return True
+
     sql = """INSERT INTO calibration_solutions (fitid,obsid,tileid,
                                                 x_delay_m,x_intercept,x_gains,
                                                 y_delay_m,y_intercept,y_gains,
@@ -654,17 +658,13 @@ def insert_calibration_solutions_row(
     )
 
     try:
-        if db_handler_object.dummy:
-            time.sleep(1)  # simulate a slow transaction
-            return True
-        else:
-            db_handler_object.execute_dml_row_within_transaction(sql, sql_values, transaction_cursor)
+        db_handler_object.execute_dml_row_within_transaction(sql, sql_values, transaction_cursor)
 
-            db_handler_object.logger.info(
-                f"{obs_id} tile {tile_id}: insert_calibration_solutions_row()"
-                " Successfully wrote into insert_calibration_solutions table"
-            )
-            return True
+        db_handler_object.logger.info(
+            f"{obs_id} tile {tile_id}: insert_calibration_solutions_row()"
+            " Successfully wrote into insert_calibration_solutions table"
+        )
+        return True
 
     except Exception:  # pylint: disable=broad-except
         db_handler_object.logger.exception(
@@ -725,6 +725,10 @@ def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str
             Tuple(request_id, cal_id) OR None if none found. Raises exceptions on error
     """
 
+    if db_handler_object.dummy:
+        time.sleep(1)  # simulate a slow transaction
+        return None
+
     sql_get = """
     SELECT c.id, c.cal_id
     FROM public.calibration_request c
@@ -762,55 +766,51 @@ def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str
     id = %s"""
 
     try:
-        if db_handler_object.dummy:
-            time.sleep(1)  # simulate a slow transaction
+        # get the connection
+        conn = db_handler_object.pool.getconn()
+
+        # Create a cursor
+        transaction_cursor = conn.cursor()
+
+        # Get the next request, if any
+        results_rows = db_handler_object.select_postgres_within_transaction(
+            sql_get,
+            parm_list=[
+                hostname,
+            ],
+            expected_rows=None,
+            transaction_cursor=transaction_cursor,
+        )
+
+        if len(results_rows) == 0:
+            db_handler_object.logger.debug("assign_next_unattempted_calsolution_request(): No requests to process.")
             return None
-        else:
-            # get the connection
-            conn = db_handler_object.pool.getconn()
 
-            # Create a cursor
-            transaction_cursor = conn.cursor()
-
-            # Get the next request, if any
-            results_rows = db_handler_object.select_postgres_within_transaction(
-                sql_get,
-                parm_list=[
-                    hostname,
-                ],
-                expected_rows=None,
-                transaction_cursor=transaction_cursor,
+        if len(results_rows) > 1:
+            db_handler_object.logger.error(
+                "assign_next_unattempted_calsolution_request(): Error- expected 1 row, but "
+                f"retrieved {len(results_rows)} rows"
             )
+            return None
 
-            if len(results_rows) == 0:
-                db_handler_object.logger.debug("assign_next_unattempted_calsolution_request(): No requests to process.")
-                return None
+        # We got one!
+        request_id: int = int(results_rows[0][0])
+        cal_id: int = int(results_rows[0][1])
 
-            if len(results_rows) > 1:
-                db_handler_object.logger.error(
-                    "assign_next_unattempted_calsolution_request(): Error- expected 1 row, but "
-                    f"retrieved {len(results_rows)} rows"
-                )
-                return None
+        # Update the row, so no one else does!
+        db_handler_object.execute_dml_row_within_transaction(
+            sql_update,
+            parm_list=[hostname, request_id],
+            transaction_cursor=transaction_cursor,
+        )
 
-            # We got one!
-            request_id: int = int(results_rows[0][0])
-            cal_id: int = int(results_rows[0][1])
+        if transaction_cursor:
+            # commit the transaction
+            transaction_cursor.connection.commit()
+            # close the cursor
+            transaction_cursor.close()
 
-            # Update the row, so no one else does!
-            db_handler_object.execute_dml_row_within_transaction(
-                sql_update,
-                parm_list=[hostname, request_id],
-                transaction_cursor=transaction_cursor,
-            )
-
-            if transaction_cursor:
-                # commit the transaction
-                transaction_cursor.connection.commit()
-                # close the cursor
-                transaction_cursor.close()
-
-            return request_id, cal_id
+        return request_id, cal_id
 
     except Exception:
         db_handler_object.logger.exception("select_unattempted_calsolution_requests(): Exception")
@@ -838,7 +838,7 @@ def update_calsolution_request_submit_mwa_asvo_job(
     Parameters:
             db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
             request_ids (int): The request_id of the calibration_request to update
-                               (could be many including old!)
+                               (could be many including old!).
             mwa_asvo_submitted_datetime (datetime): The date/time the MWA ASVO job was successfully submitted
             mwa_asvo_job_id (int): The MWA ASVO Job ID which is handling the retrieval of this obsid
 
@@ -853,17 +853,17 @@ def update_calsolution_request_submit_mwa_asvo_job(
     WHERE
     id = ANY(%s)"""
 
-    params = [mwa_asvo_submitted_datetime, mwa_asvo_job_id, request_ids]
+    if db_handler_object.dummy:
+        time.sleep(1)  # simulate a transaction
+        return
 
     try:
-        if db_handler_object.dummy:
-            time.sleep(1)  # simulate a transaction
-            return
-        else:
-            db_handler_object.execute_dml(sql, params, None)
-            db_handler_object.logger.debug(
-                "update_calsolution_request_submit_mwa_asvo_job(): Successfully updated " "calibration_request table."
-            )
+        params = [mwa_asvo_submitted_datetime, mwa_asvo_job_id, request_ids]
+
+        db_handler_object.execute_dml(sql, params, None)
+        db_handler_object.logger.debug(
+            "update_calsolution_request_submit_mwa_asvo_job(): Successfully updated " "calibration_request table."
+        )
 
     except Exception:  # pylint: disable=broad-except
         db_handler_object.logger.exception(
@@ -901,18 +901,17 @@ def update_calsolution_request_download_started_status(
     WHERE
     id = ANY(%s)"""
 
-    params = [download_started_datetime, request_ids]
+    if db_handler_object.dummy:
+        time.sleep(1)  # simulate a transaction
+        return
 
     try:
-        if db_handler_object.dummy:
-            time.sleep(1)  # simulate a transaction
-            return
-        else:
-            db_handler_object.execute_dml(sql, params, None)
-            db_handler_object.logger.debug(
-                "update_calsolution_request_download_started_status(): Successfully updated "
-                "calibration_request table."
-            )
+        params = [download_started_datetime, request_ids]
+
+        db_handler_object.execute_dml(sql, params, None)
+        db_handler_object.logger.debug(
+            "update_calsolution_request_download_started_status(): Successfully updated " "calibration_request table."
+        )
 
     except Exception:  # pylint: disable=broad-except
         db_handler_object.logger.exception(
@@ -953,8 +952,6 @@ def update_calsolution_request_download_complete_status(
     WHERE
     id = ANY(%s)"""
 
-    params = [download_completed_datetime, download_error_datetime, download_error_message, request_ids]
-
     # check for validity, raise exception if not valid
     if (download_completed_datetime and download_error_datetime is None and download_error_message is None) ^ (
         download_completed_datetime is None and download_error_datetime and download_error_message
@@ -966,16 +963,17 @@ def update_calsolution_request_download_complete_status(
             f"{download_completed_datetime, download_error_datetime, download_error_message}"
         )
 
+    if db_handler_object.dummy:
+        time.sleep(1)  # simulate a transaction
+        return
+
     try:
-        if db_handler_object.dummy:
-            time.sleep(1)  # simulate a transaction
-            return
-        else:
-            db_handler_object.execute_dml(sql, params, None)
-            db_handler_object.logger.debug(
-                "update_calsolution_request_download_complete_status(): Successfully updated "
-                "calibration_request table."
-            )
+        params = [download_completed_datetime, download_error_datetime, download_error_message, request_ids]
+
+        db_handler_object.execute_dml(sql, params, None)
+        db_handler_object.logger.debug(
+            "update_calsolution_request_download_complete_status(): Successfully updated " "calibration_request table."
+        )
 
     except Exception:  # pylint: disable=broad-except
         db_handler_object.logger.exception(
@@ -987,17 +985,42 @@ def update_calsolution_request_download_complete_status(
         raise
 
 
+def get_incomplete_request_ids_for_obsid(db_handler_object: MWAXDBHandler, obs_id: int):
+    sql = """SELECT id
+          FROM calibration_request
+          WHERE obs_id =  %s
+          AND calibration_completed_datetime IS NULL
+          AND calibration_error_datetime IS NULL"""
+
+    # Run SQL
+    rows = db_handler_object.select_many_rows_postgres(
+        sql,
+        [
+            obs_id,
+        ],
+    )
+
+    # Return a list or None if no rows
+    if len(rows) > 0:
+        return [r[0] for r in rows]
+    else:
+        return None
+
+
 def update_calsolution_request_calibration_started_status(
     db_handler_object: MWAXDBHandler,
-    request_ids: list[int],
+    obs_id: int,
+    request_ids: list[int] | None,
     calibration_started_datetime: datetime.datetime,
 ):
     """Update a calsolution request with updated calibration start status info.
 
     Parameters:
             db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
-            request_ids (int): The request_id(s) of the calibration_request to update
-                               (could be many including old!)
+            obs_id (int): Obs ID this cal soltution is for
+            request_ids (int) | None: The request_id(s) of the calibration_request to update
+                               (could be many including old!). None is passed by calvin_processor
+                               as it has no idea about which request_ids this could be for (if any)
             calibration_started_datetime (datetime): The date/time the calibration started
 
     Returns:
@@ -1014,17 +1037,31 @@ def update_calsolution_request_calibration_started_status(
     WHERE
     id = ANY(%s)"""
 
-    params = [calibration_started_datetime, request_ids]
+    if db_handler_object.dummy:
+        time.sleep(1)  # simulate a transaction
+        return
+
+    # calvin_processor won't know the requestids so get them (if any!)
+    if request_ids is None:
+        # We need to get the request ids
+        request_ids = get_incomplete_request_ids_for_obsid(db_handler_object, obs_id)
 
     try:
-        if db_handler_object.dummy:
-            time.sleep(1)  # simulate a transaction
-            return
-        else:
+        params = [calibration_started_datetime, request_ids]
+
+        if request_ids is not None:
+            # update the params varible if the request_ids changed (above)
+            params = [calibration_started_datetime, request_ids]
+
             db_handler_object.execute_dml(sql, params, None)
             db_handler_object.logger.debug(
                 "update_calsolution_request_calibration_started_status(): Successfully updated "
                 "calibration_request table."
+            )
+        else:
+            db_handler_object.logger.debug(
+                "update_calsolution_request_calibration_started_status(): No requests to update "
+                "in the calibration_request table."
             )
 
     except Exception:  # pylint: disable=broad-except
@@ -1039,6 +1076,7 @@ def update_calsolution_request_calibration_started_status(
 
 def update_calsolution_request_calibration_complete_status(
     db_handler_object: MWAXDBHandler,
+    obs_id: int,
     request_ids: list[int],
     calibration_completed_datetime: datetime.datetime | None,
     calibration_fit_id: int | None,
@@ -1049,8 +1087,10 @@ def update_calsolution_request_calibration_complete_status(
 
     Parameters:
             db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
-            request_ids (int): The request_id(s) of the calibration_request to update
-                               (could be many including old!)
+            obs_id (int): Obs ID this cal soltution is for
+            request_ids (int) | None: The request_id(s) of the calibration_request to update
+                               (could be many including old!). None is passed by calvin_processor
+                               as it has no idea about which request_ids this could be for (if any)
             calibration_completed_datetime (datetime): Date/time the calibration succeeded or None on error
             calibration_fit_id (int): ID of the fit inserted or None on error
             calibration_error_datetime (datetime): Date/time the calibration failed with an error OR None if success
@@ -1068,14 +1108,6 @@ def update_calsolution_request_calibration_complete_status(
         calibration_error_message = %s
     WHERE
     id = ANY(%s)"""
-
-    params = [
-        calibration_completed_datetime,
-        calibration_fit_id,
-        calibration_error_datetime,
-        calibration_error_message,
-        request_ids,
-    ]
 
     # check for validity, raise exception if not valid
     # ^ is XOR if you were wondering!
@@ -1097,15 +1129,34 @@ def update_calsolution_request_calibration_complete_status(
             "calibration_error_datetime and calibration_error_message"
         )
 
+    if db_handler_object.dummy:
+        time.sleep(1)  # simulate a transaction
+        return
+
+    # calvin_processor won't know the requestids so get them (if any!)
+    if request_ids is None:
+        # We need to get the request ids
+        request_ids = get_incomplete_request_ids_for_obsid(db_handler_object, obs_id)
+
     try:
-        if db_handler_object.dummy:
-            time.sleep(1)  # simulate a transaction
-            return
-        else:
+        if request_ids is not None:
+            params = [
+                calibration_completed_datetime,
+                calibration_fit_id,
+                calibration_error_datetime,
+                calibration_error_message,
+                request_ids,
+            ]
+
             db_handler_object.execute_dml(sql, params, None)
             db_handler_object.logger.debug(
                 "update_calsolution_request_calibration_complete_status(): Successfully updated "
                 "calibration_request table."
+            )
+        else:
+            db_handler_object.logger.debug(
+                "update_calsolution_request_calibration_complete_status(): No requests to update "
+                "in the calibration_request table."
             )
 
     except Exception:  # pylint: disable=broad-except

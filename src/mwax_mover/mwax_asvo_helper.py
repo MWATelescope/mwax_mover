@@ -41,13 +41,11 @@ class MWAASVOJobState(Enum):
     Unknown = "Uknown"  # not a real ASVO status but a good default
 
 
-"""
-This class represents a single MWA ASVO job. We use this
-to track its progress from submission to completion
-"""
-
-
 class MWAASVOJob:
+    """
+    This class represents a single MWA ASVO job. We use this
+    to track its progress from submission to completion
+    """
 
     def __init__(self, request_id: int, obs_id: int, job_id: int):
         self.request_ids = []
@@ -56,12 +54,15 @@ class MWAASVOJob:
         self.obs_id = obs_id
         self.job_id = job_id
         self.job_state = MWAASVOJobState.Unknown
-        self.submitted_datetime = datetime.datetime.now()
+        self.submitted_datetime = None
         self.last_seen_datetime = self.submitted_datetime
         self.download_url = None
         self.download_started_datetime = None
         self.download_in_progress: bool = False
         self.download_completed: bool = False
+        self.download_completed_datetime = None
+        self.download_error_datetime = None
+        self.download_error_message = None
         self.download_retries: int = 0
 
     def __str__(self):
@@ -72,7 +73,10 @@ class MWAASVOJob:
 
     def elapsed_time_seconds(self) -> int:
         """Returns the number of seconds between Now and the submitted datetime"""
-        return (datetime.datetime.now() - self.submitted_datetime).total_seconds()
+        if self.submitted_datetime:
+            return (datetime.datetime.now() - self.submitted_datetime).total_seconds()
+        else:
+            return 0
 
     def get_status(self) -> dict:
         return {
@@ -86,18 +90,26 @@ class MWAASVOJob:
             ),
             "download_in_progress": self.download_in_progress,
             "download_completed": self.download_completed,
+            "download_completed_datetime": (
+                self.download_completed_datetime.strftime("%Y-%m-%d %H:%M:%S")
+                if self.download_completed_datetime
+                else ""
+            ),
+            "download_error_datetime": (
+                self.download_error_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.download_error_datetime else ""
+            ),
+            "download_error_message": self.download_error_message if self.download_error_message else "",
             "download_retries": self.download_retries,
             "request_ids": " ,".join(str(r) for r in self.request_ids),
         }
 
 
-"""
-This class is the main helper to allow the CalvinProcessor to interact with MWA ASVO
-via the giant-squid CLI
-"""
-
-
 class MWAASVOHelper:
+    """
+    This class is the main helper to allow the CalvinProcessor to interact with MWA ASVO
+    via the giant-squid CLI
+    """
+
     def __init__(self):
         # Logger object
         self.logger = None
@@ -139,6 +151,14 @@ class MWAASVOHelper:
         self.download_path = download_path
 
     def get_first_job_for_obs_id(self, obs_id) -> MWAASVOJob | None:
+        """Get the first MWAASVOJob object found in current_asvo_jobs, matching on obs_id.
+
+        Parameters:
+            obs_id (int): the obs_id we want to find the first job for
+
+        Returns:
+            The MWAASVOJob object found, or None if none are found
+        """
         for job in self.current_asvo_jobs:
             if job.obs_id == obs_id:
                 return job
@@ -176,20 +196,26 @@ class MWAASVOHelper:
             self.logger.info(f"{obs_id}: MWA ASVO job {job_id} already exists.")
 
         # create, populate and add the MWAASVOJob if we don't already have it
-        found_job = self.get_first_job_for_obs_id(obs_id)
+        job = self.get_first_job_for_obs_id(obs_id)
 
-        if found_job:
-            found_job.request_ids.append(request_id)
+        if job:
+            job.request_ids.append(request_id)
+
+            if job.submitted_datetime is None:
+                job.submitted_datetime = datetime.datetime.now()
+
             self.logger.info(
                 f"{obs_id}: Added request_id {request_id} to job {job_id} as this obs_id is already tracked."
-                f"Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs"
+                f"Tracking {len(self.current_asvo_jobs)} MWA ASVO jobs"
             )
         else:
             # add a new job to be tracked
-            new_job = MWAASVOJob(request_id=request_id, obs_id=obs_id, job_id=job_id)
-            self.current_asvo_jobs.append(new_job)
+            job = MWAASVOJob(request_id=request_id, obs_id=obs_id, job_id=job_id)
+            job.submitted_datetime = datetime.datetime.now()
+            self.current_asvo_jobs.append(job)
             self.logger.info(f"{obs_id}: Added job {job_id}. Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs")
-        return new_job
+
+        return job
 
     def update_all_job_status(self):
         """Updates the status of all our jobs using giant-squid list
@@ -325,6 +351,7 @@ class MWAASVOHelper:
                         self.logger.debug(f"{job} Successfully downloaded: {stdout}")
 
                         job.download_completed = True
+                        job.download_completed_datetime = datetime.datetime.now()
                     finally:
                         job.download_in_progress = False
 

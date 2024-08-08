@@ -54,25 +54,60 @@ class MWAXCalvinDownloadProcessor:
         self.ready_to_exit = False
 
     def add_new_job(self, request_id: int, obs_id: int):
+        """Starts tracking a new MWAASVOJob and, if not submitted already,
+        submits the job to MWA ASVO
+
+        Parameters:
+            request_id (int): the request_id for this job
+            obs_id (int): the obs_id for this job
+
+        Returns:
+            Nothing. Exceptions can be raised though
+        """
+
         # Check if we have this obs_id tracked
-        asvo_job = None
+        asvo_job = self.mwax_asvo_helper.get_first_job_for_obs_id(obs_id)
 
-        for job in self.mwax_asvo_helper.current_asvo_jobs:
-            if job.obs_id == obs_id:
-                asvo_job = job
+        if asvo_job:
+            # Found!
+            asvo_job.request_ids.append(request_id)
 
-                asvo_job.request_ids.append(request_id)
+            # Update database
+            #
+            # The point of this is:
+            # If we are already handling obsid X, then another bunch of requests come through
+            # we should "catch them up" to the current status in the database
+            mwax_db.update_calsolution_request_submit_mwa_asvo_job(
+                self.db_handler_object,
+                asvo_job.request_ids,
+                asvo_job.submitted_datetime,
+                asvo_job.job_id,
+            )
 
-                # Update database
-                mwax_db.update_calsolution_request_submit_mwa_asvo_job(
+            # has the download started?
+            if asvo_job.download_started_datetime:
+                mwax_db.update_calsolution_request_download_started_status(
                     self.db_handler_object,
-                    asvo_job.request_ids,
-                    mwa_asvo_submitted_datetime=asvo_job.submitted_datetime,
-                    mwa_asvo_job_id=asvo_job.job_id,
+                    [
+                        request_id,
+                    ],
+                    asvo_job.download_started_datetime,
                 )
-                break
 
-        if not asvo_job:
+            # Has the download completed yet?
+            if asvo_job.download_completed:
+                # Update the databse then (this job already completed, so just update this row)
+                mwax_db.update_calsolution_request_download_complete_status(
+                    self.db_handler_object,
+                    [
+                        request_id,
+                    ],
+                    asvo_job.download_completed_datetime,
+                    asvo_job.download_error_datetime,
+                    asvo_job.download_error_message,
+                )
+        else:
+            # Not found
             try:
                 # Submit job and add to the ones we are tracking
                 new_job = self.mwax_asvo_helper.submit_download_job(request_id, obs_id)
@@ -98,35 +133,39 @@ class MWAXCalvinDownloadProcessor:
             )
 
     def main_loop_handler(self):
-        """This is the main loop handler for this process.
-        1. check and handle MWA ASVO jobs in progress
-        2. check and handle new requests in the database"""
+        self.get_new_requests()
+        self.update_all_tracked_jobs()
+        self.download_ready_mwa_asvo_jobs()
+        pass
 
-        # Background- this code needs to handle the following cases:
-        # a) Normal operation. Process has been running and keeps running.
-        # b) Process stopped (for some reason). Then process restarts.
-        #    Need to deal with:
-        #    * Cal requests which are already under way- in ASVO
-        #    * or already processing on calvin
-        #    * or already processed and failed on calvin
+    def get_new_requests(self):
+        """This code checks for any unassigned requests and assigns them to this host,
+        adding them to our tracked jobs in self.mwa_asvo_helper.current_asvo_jobs"""
+
         if self.running:
             self.logger.debug("Querying database for unattempted calsolution_requests...")
-            # 1. Get the an outstanding calibration_requests from the db
-            # returned fields: Tuple[id, calid] or None (the obsid we are calibrating)
-            result = mwax_db.assign_next_unattempted_calsolution_request(self.db_handler_object, self.hostname)
 
-            if result:
-                self.logger.debug(f"Found {len(result)} unattempted calsolution_requests to process.")
+            while True and self.running:
+                # 1. Get the an outstanding calibration_requests from the db
+                # returned fields: Tuple[id, calid] or None (the obsid we are calibrating)
+                result = mwax_db.assign_next_unattempted_calsolution_request(self.db_handler_object, self.hostname)
 
-                # get the id of the request
-                request_id = int(result[0])
+                if result:
+                    # get the id of the request
+                    request_id = int(result[0])
 
-                # Get the obs_id
-                obs_id = int(result[1])
+                    # Get the obs_id
+                    obs_id = int(result[1])
 
-                self.add_new_job(request_id, obs_id)
+                    self.logger.debug(f"Resuming RequestID: {request_id} ObsID: {obs_id}")
 
-        # 2. Find out the status of all this user's jobs in MWA ASVO
+                    self.add_new_job(request_id, obs_id)
+                else:
+                    # no more results, break out of the while look
+                    break
+
+    def update_all_tracked_jobs(self):
+        # Find out the status of all this user's jobs in MWA ASVO
         # Get the job list from giant-squid, populating current_asvo_jobs
         # If we find a job in giant-squid which we don't know about,
         # DON'T include it in the list we track
@@ -139,97 +178,86 @@ class MWAXCalvinDownloadProcessor:
                 # Handle me!
                 self.logger.info("MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins.")
                 time.sleep(10 * 60 * 60)
-                return
+
             except Exception:
                 # TODO - maybe some exceptions we should back off instead of exiting?
                 self.logger.exception("Fatal exception- exiting!")
                 self.running = False
                 self.stop()
 
-        # 3. See if any in the list need actioning
-        if self.running:
-            self.logger.debug("Checking to see if any jobs are ready to download...")
-            self.handle_mwa_asvo_jobs()
-
-    def handle_mwa_asvo_jobs(self):
+    def download_ready_mwa_asvo_jobs(self):
         """This code will check for any jobs which can be downloaded and start
         downloading them"""
         DOWNLOAD_RETRIES: int = 3
 
-        for job in self.mwax_asvo_helper.current_asvo_jobs:
-            # Check job is in Ready state
-            if job.job_state == mwax_asvo_helper.MWAASVOJobState.Ready:
-                try:
-                    self.logger.info(
-                        f"{job}: Attempting to download (attempt: {job.download_retries + 1}/{DOWNLOAD_RETRIES})"
-                    )
-
-                    job.download_started_datetime = datetime.datetime.now()
-                    # Update database
-                    mwax_db.update_calsolution_request_download_started_status(
-                        self.db_handler_object, job.request_ids, job.download_started_datetime
-                    )
-
-                    # Download the data (blocks until data is downloaded or exception fired)
-                    self.mwax_asvo_helper.download_asvo_job(job)
-
-                    # Update database
-                    mwax_db.update_calsolution_request_download_complete_status(
-                        self.db_handler_object, job.request_ids, datetime.datetime.now(), None, None
-                    )
-
-                except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
-                    # Handle me!
-                    self.logger.info("MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins.")
-                    time.sleep(10 * 60 * 60)
-                    return
-
-                except Exception as e:
-                    # Something went wrong!
-                    self.logger.exception(f"{job}: Error downloading Job.")
-                    error_message = f"{job}: Error downloading Job: {str(e)}"
-
-                # Remove it if the job if successful!
-                # If not, it should retry in the next "handle_mwa_asvo_jobs loop"
-                if job.download_completed:
-                    self.mwax_asvo_helper.current_asvo_jobs.remove(job)
-                    self.logger.info(f"{job}: downloaded successfully. Removing from current jobs.")
-                else:
-                    # Download failed, increment retries counter
-                    job.download_retries += 1
-
-                    # Check if we've had too many retries
-                    if job.download_retries > DOWNLOAD_RETRIES:
-                        self.logger.error(
-                            f"{job}: Fatal exception- too many retries {DOWNLOAD_RETRIES} when trying to download."
-                            "Exiting!"
+        if self.running:
+            for job in self.mwax_asvo_helper.current_asvo_jobs:
+                # Check job is in Ready state and download is not already completed or in progress
+                if job.job_state == mwax_asvo_helper.MWAASVOJobState.Ready and not (
+                    job.download_completed or job.download_in_progress
+                ):
+                    try:
+                        self.logger.info(
+                            f"{job}: Attempting to download (attempt: {job.download_retries + 1}/{DOWNLOAD_RETRIES})"
                         )
+
+                        job.download_started_datetime = datetime.datetime.now()
+                        # Update database
+                        mwax_db.update_calsolution_request_download_started_status(
+                            self.db_handler_object, job.request_ids, job.download_started_datetime
+                        )
+
+                        # Download the data (blocks until data is downloaded or exception fired)
+                        self.mwax_asvo_helper.download_asvo_job(job)
+
+                        # Downloaded ok!
+                        self.logger.info(f"{job}: downloaded successfully.")
 
                         # Update database
-                        error_message = error_message + f"-(too many retries {DOWNLOAD_RETRIES})"
                         mwax_db.update_calsolution_request_download_complete_status(
-                            self.db_handler_object, job.request_ids, None, datetime.datetime.now(), error_message
+                            self.db_handler_object, job.request_ids, job.download_completed_datetime, None, None
                         )
 
-                        self.running = False
-                        self.stop()
+                    except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
+                        # Handle me!
+                        self.logger.info("MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins.")
+                        time.sleep(10 * 60 * 60)
                         return
 
-    def start(self):
-        """Start the processor"""
-        self.running = True
+                    except Exception as e:
+                        # Something went wrong!
+                        self.logger.exception(f"{job}: Error downloading Job.")
+                        error_message = f"{job}: Error downloading Job: {str(e)}"
 
-        # creating database connection pool(s)
-        self.logger.info("Starting database connection pool...")
-        self.db_handler_object.start_database_pool()
+                    # If not successful, it should retry in the next "handle_mwa_asvo_jobs loop"
+                    if not job.download_completed:
+                        # Download failed, increment retries counter
+                        job.download_retries += 1
 
-        # create a health thread
-        self.logger.info("Starting health_thread...")
-        health_thread = threading.Thread(name="health_thread", target=self.health_loop, daemon=True)
-        health_thread.start()
+                        # Check if we've had too many retries
+                        if job.download_retries > DOWNLOAD_RETRIES:
+                            self.logger.error(
+                                f"{job}: Fatal exception- too many retries {DOWNLOAD_RETRIES} when trying to download."
+                                "Exiting!"
+                            )
 
-        self.logger.info("Started...")
+                            # Update database
+                            job.download_error_datetime = datetime.datetime.now()
+                            job.download_error_message = error_message + f"-(too many retries {DOWNLOAD_RETRIES})"
 
+                            mwax_db.update_calsolution_request_download_complete_status(
+                                self.db_handler_object,
+                                job.request_ids,
+                                None,
+                                job.download_error_datetime,
+                                job.download_error_message,
+                            )
+
+                            self.running = False
+                            self.stop()
+                            return
+
+    def resume_in_progres_jobs(self):
         self.logger.debug("Checking for any in progress jobs to resume...")
         results = mwax_db.get_this_hosts_previously_started_download_requests(self.db_handler_object, self.hostname)
 
@@ -246,7 +274,7 @@ class MWAXCalvinDownloadProcessor:
                     new_job = mwax_asvo_helper.MWAASVOJob(request_id, obs_id, int(job_id))
                     new_job.submitted_datetime = job_submitted_datetime
                     self.mwax_asvo_helper.current_asvo_jobs.append(new_job)
-                    self.logger.debug(f"Added {new_job}")
+                    self.logger.debug(f"Added already submitted {new_job}")
                 else:
                     # if not submitted to ASVO, do that now!
                     self.logger.debug(f"Adding and submitting Request ID {request_id} for ObsID {obs_id}")
@@ -254,12 +282,44 @@ class MWAXCalvinDownloadProcessor:
         else:
             self.logger.debug("No in progress jobs found.")
 
+    def start(self):
+        """Start the processor"""
+        self.running = True
+
+        # creating database connection pool(s)
+        self.logger.info("Starting database connection pool...")
+        self.db_handler_object.start_database_pool()
+
+        # create a health thread
+        self.logger.info("Starting health_thread...")
+        health_thread = threading.Thread(name="health_thread", target=self.health_loop, daemon=True)
+        health_thread.start()
+
+        self.logger.info("Started...")
+
+        # Check for any in progress jobs and resume them
+        self.resume_in_progres_jobs()
+
         # Main loop
         while self.running:
             self.main_loop_handler()
 
+            self.logger.debug("Currently tracking jobs:")
             for job in self.mwax_asvo_helper.current_asvo_jobs:
-                self.logger.debug(f"{job} {job.job_state}")
+                if not job.download_completed:
+                    self.logger.debug(
+                        f"{job} {job.job_state}; "
+                        f"elapsed: {job.elapsed_time_seconds()} s; "
+                        f"last_seen={job.last_seen_datetime}"
+                    )
+
+            self.logger.debug("History of completed jobs:")
+            for job in self.mwax_asvo_helper.current_asvo_jobs:
+                if job.download_completed:
+                    if job.download_completed_datetime:
+                        self.logger.debug(f"{job} succeeded: {job.download_completed_datetime} ")
+                    else:
+                        self.logger.debug(f"{job} failed: {job.download_error_datetime} {job.download_error_message}")
 
             self.logger.debug(f"Sleeping for {self.check_interval_seconds} seconds")
             time.sleep(self.check_interval_seconds)
