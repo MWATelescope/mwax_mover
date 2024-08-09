@@ -952,8 +952,12 @@ def update_calsolution_request_download_complete_status(
     id = ANY(%s)"""
 
     # check for validity, raise exception if not valid
-    if (download_completed_datetime and download_error_datetime is None and download_error_message is None) ^ (
-        download_completed_datetime is None and download_error_datetime and download_error_message
+    if (
+        download_completed_datetime is not None and download_error_datetime is None and download_error_message is None
+    ) ^ (
+        download_completed_datetime is None
+        and download_error_datetime is not None
+        and download_error_message is not None
     ):
         pass
     else:
