@@ -18,6 +18,8 @@ import threading
 import time
 from mwax_mover import version, mwax_db, utils, mwax_asvo_helper
 
+SLEEP_MWA_ASVO_OUTAGE_SECS = 10 * 60
+
 
 class MWAXCalvinDownloadProcessor:
     """The main class processing calibration solution requests and downloading data"""
@@ -114,7 +116,7 @@ class MWAXCalvinDownloadProcessor:
             except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
                 # Handle me!
                 self.logger.info("MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins.")
-                time.sleep(10 * 60 * 60)
+                time.sleep(SLEEP_MWA_ASVO_OUTAGE_SECS)
                 return
             except Exception as e:
                 # Some other fatal error occurred, let's log it and update the db
@@ -186,7 +188,7 @@ class MWAXCalvinDownloadProcessor:
             except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
                 # Handle me!
                 self.logger.info("MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins.")
-                time.sleep(10 * 60 * 60)
+                time.sleep(SLEEP_MWA_ASVO_OUTAGE_SECS)
 
             except Exception:
                 # TODO - maybe some exceptions we should back off instead of exiting?
@@ -230,7 +232,7 @@ class MWAXCalvinDownloadProcessor:
                     except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
                         # Handle me!
                         self.logger.info("MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins.")
-                        time.sleep(10 * 60 * 60)
+                        time.sleep(SLEEP_MWA_ASVO_OUTAGE_SECS)
                         return
 
                     except Exception as e:
