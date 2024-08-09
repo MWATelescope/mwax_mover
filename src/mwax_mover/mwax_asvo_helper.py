@@ -205,7 +205,7 @@ class MWAASVOHelper:
                 job.submitted_datetime = datetime.datetime.now()
 
             self.logger.info(
-                f"{obs_id}: Added request_id {request_id} to job {job_id} as this obs_id is already tracked."
+                f"{obs_id}: Added RequestID {request_id} to JobID {job_id} as this ObsID is already tracked."
                 f"Tracking {len(self.current_asvo_jobs)} MWA ASVO jobs"
             )
         else:
@@ -213,7 +213,9 @@ class MWAASVOHelper:
             job = MWAASVOJob(request_id=request_id, obs_id=obs_id, job_id=job_id)
             job.submitted_datetime = datetime.datetime.now()
             self.current_asvo_jobs.append(job)
-            self.logger.info(f"{obs_id}: Added job {job_id}. Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs")
+            self.logger.info(
+                f"{obs_id}: Added JobID {job_id}. Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs"
+            )
 
         return job
 
@@ -358,7 +360,7 @@ class MWAASVOHelper:
                 else:
                     raise Exception(f"{job.obs_id} Error: Download path {self.download_path} does not exist")
         else:
-            raise Exception(f"{job.obs_id} Error: job {job.job_id} is not ready for download State={job.job_state}")
+            raise Exception(f"{job.obs_id} Error: JobID {job.job_id} is not ready for download State={job.job_state}")
 
 
 def get_job_id_from_giant_squid_stdout(stdout: str) -> int:
@@ -395,7 +397,7 @@ def get_job_id_from_giant_squid_stdout(stdout: str) -> int:
         return int(job_id_str)
 
     # No job_id was found, raise exception
-    raise Exception(f"No job_id could be found in the output from giant-squid '{stdout}'")
+    raise Exception(f"No 'Job Id' could be found in the output from giant-squid '{stdout}'")
 
 
 def get_job_info_from_giant_squid_json(stdout_json, json_for_one_job) -> tuple[int, int, MWAASVOJobState, str | None]:

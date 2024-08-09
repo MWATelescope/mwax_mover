@@ -119,7 +119,7 @@ class MWAXCalvinDownloadProcessor:
             except Exception as e:
                 # Some other fatal error occurred, let's log it and update the db
                 self.logger.exception("Fatal exception- exiting!")
-                error_message = f"Error submitting job for {new_job}. {str(e)}"
+                error_message = f"Error submitting job for ObsID {obs_id} RequestID {request_id}. {str(e)}"
                 mwax_db.update_calsolution_request_download_complete_status(
                     self.db_handler_object,
                     [
@@ -285,7 +285,7 @@ class MWAXCalvinDownloadProcessor:
                     self.logger.debug(f"Added already submitted {new_job}")
                 else:
                     # if not submitted to ASVO, do that now!
-                    self.logger.debug(f"Adding and submitting Request ID {request_id} for ObsID {obs_id}")
+                    self.logger.debug(f"Adding and submitting RequestID {request_id} for ObsID {obs_id}")
                     self.add_new_job(request_id, obs_id)
         else:
             self.logger.debug("No in progress jobs found.")
