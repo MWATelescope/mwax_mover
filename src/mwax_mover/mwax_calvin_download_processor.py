@@ -118,8 +118,9 @@ class MWAXCalvinDownloadProcessor:
                 return
             except Exception as e:
                 # Some other fatal error occurred, let's log it and update the db
-                self.logger.exception("Fatal exception- exiting!")
-                error_message = f"Error submitting job for ObsID {obs_id} RequestID {request_id}. {str(e)}"
+                error_message = f"Error submitting job for ObsID {obs_id} RequestID {request_id}."
+                self.logger.exception(error_message)
+                error_message = error_message + f" {str(e)}"
                 mwax_db.update_calsolution_request_download_complete_status(
                     self.db_handler_object,
                     [

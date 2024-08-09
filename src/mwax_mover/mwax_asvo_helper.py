@@ -314,16 +314,16 @@ class MWAASVOHelper:
             if regex_match:
                 # We found an error code in the stdout
                 error_code_str = regex_match.group(1)
-                error_code: int = int(error_code_str)
 
-                if error_code == 0 and "outage" in stdout:
-                    raise GiantSquidMWAASVOOutageException(
-                        "Unable to communicate with MWA ASVO- an outage is in progress"
-                    )
-                else:
-                    raise GiantSquidException(
-                        f"_run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. Error: {stdout}"
-                    )
+                raise GiantSquidException(
+                    f"_run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. "
+                    f"Error code: {error_code_str} {stdout}"
+                )
+            elif "outage" in stdout:
+                # Outage message looks like this:
+                # 'Error: The server responded with status code 0, message:
+                # Your job cannot be submitted as there is a full outage in progress.'"
+                raise GiantSquidMWAASVOOutageException("Unable to communicate with MWA ASVO- an outage is in progress")
             else:
                 # There was no "error_code" in stdout, so just report the whole stdout error message
                 raise GiantSquidException(
