@@ -116,11 +116,19 @@ class MWAXCalvinDownloadProcessor:
                 self.logger.info("MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins.")
                 time.sleep(10 * 60 * 60)
                 return
-            except Exception:
-                # TODO - maybe some exceptions we should back off instead of exiting?
+            except Exception as e:
+                # Some other fatal error occurred, let's log it and update the db
                 self.logger.exception("Fatal exception- exiting!")
-                self.running = False
-                self.stop()
+                error_message = f"Error submitting job for {new_job}. {str(e)}"
+                mwax_db.update_calsolution_request_download_complete_status(
+                    self.db_handler_object,
+                    [
+                        request_id,
+                    ],
+                    None,
+                    datetime.datetime.now(),
+                    error_message,
+                )
                 return
 
             # We submmited a new MWA ASVO job, update the request table so we know we're on it!
