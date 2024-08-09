@@ -777,7 +777,8 @@ class MWAXCalvinProcessor:
             all_chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz)
             self.logger.debug(f"{item} - {chanblocks_per_coarse=}, {all_chanblocks_hz=}")
 
-            soln_tile_ids, all_xx_solns, all_yy_solns = soln_group.get_solns(refant["name"])
+            soln_tile_ids, all_xx_solns_noref, all_yy_solns_noref = soln_group.get_solns()
+            _, all_xx_solns, all_yy_solns = soln_group.get_solns(refant["name"])
 
             weights = soln_group.weights
 
@@ -795,8 +796,8 @@ class MWAXCalvinProcessor:
                 item,
                 unflagged_tiles,
                 all_chanblocks_hz,
-                all_xx_solns,
-                all_yy_solns,
+                all_xx_solns_noref,
+                all_yy_solns_noref,
                 weights,
                 soln_tile_ids,
                 chanblocks_per_coarse,
@@ -815,7 +816,7 @@ class MWAXCalvinProcessor:
                     all_xx_solns[0],
                     all_yy_solns[0],
                     weights,
-                    prefix=f"{item}/",
+                    prefix=f"{item}/{obs_id}_",
                     plot_residual=True,
                 )
             # phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
@@ -888,10 +889,10 @@ class MWAXCalvinProcessor:
                     int(fit_id),
                     int(obs_id),
                     int(tile_id),
-                    x_phase.length,
+                    -1 * x_phase.length, # legacy calibration pipeline used inverse convention
                     x_phase.intercept,
                     x_gains.gains,
-                    y_phase.length,
+                    -1 * y_phase.length, # legacy calibration pipeline used inverse convention
                     y_phase.intercept,
                     y_gains.gains,
                     x_gains.pol1,

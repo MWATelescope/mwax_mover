@@ -158,8 +158,7 @@ echo "export LD_LIBRARY_PATH=\"\${LD_LIBRARY_PATH}:/usr/local/cuda/lib/\" >> ~/.
 # setup hyperdrive
 git clone https://github.com/MWATelescope/mwa_hyperdrive.git
 cd mwa_hyperdrive
-cargo install --path . --features=cuda-single
-# --features=gpu-single,cuda on hyperdrive >=0.3
+cargo install --path . --features=cuda,gpu-single
 cd ..
 
 # setup Birli
