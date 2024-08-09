@@ -188,7 +188,7 @@ class MWAXCalvinDownloadProcessor:
             except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
                 # Handle me!
                 self.logger.info("MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins.")
-                time.sleep(SLEEP_MWA_ASVO_OUTAGE_SECS)
+                self.sleep(SLEEP_MWA_ASVO_OUTAGE_SECS)
 
             except Exception:
                 # TODO - maybe some exceptions we should back off instead of exiting?
@@ -232,7 +232,7 @@ class MWAXCalvinDownloadProcessor:
                     except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
                         # Handle me!
                         self.logger.info("MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins.")
-                        time.sleep(SLEEP_MWA_ASVO_OUTAGE_SECS)
+                        self.sleep(SLEEP_MWA_ASVO_OUTAGE_SECS)
                         return
 
                     except Exception as e:
@@ -333,13 +333,13 @@ class MWAXCalvinDownloadProcessor:
                         self.logger.debug(f"{job} failed: {job.download_error_datetime} {job.download_error_message}")
 
             self.logger.debug(f"Sleeping for {self.check_interval_seconds} seconds")
-            time.sleep(self.check_interval_seconds)
+            self.sleep(self.check_interval_seconds)
 
         #
         # Finished- do some clean up
         #
         while not self.ready_to_exit:
-            time.sleep(1)
+            self.sleep(1)
 
         # Final log message
         self.logger.info("Completed Successfully")
@@ -379,7 +379,7 @@ class MWAXCalvinDownloadProcessor:
                 self.logger.warning("health_handler: Failed to send health information." f" {catch_all_exception}")
 
             # Sleep for a second
-            time.sleep(1)
+            self.sleep(1)
 
     def get_status(self) -> dict:
         """Returns status of process as a dictionary"""
@@ -578,6 +578,24 @@ class MWAXCalvinDownloadProcessor:
         config_filename = args["cfg"]
 
         self.initialise(config_filename)
+
+    def sleep(self, seconds: int):
+        """This sleep function keeps an eye on self.running so that if we are in a long wait
+        we will still respond to shutdown directives"""
+        SECS_PER_INTERVAL: int = 5
+
+        if self.running:
+            if seconds <= SECS_PER_INTERVAL:
+                time.sleep(seconds)
+            else:
+                integer_intervals, remainder_secs = divmod(seconds, SECS_PER_INTERVAL)
+
+                while self.running and integer_intervals > 0:
+                    time.sleep(SECS_PER_INTERVAL)
+                    integer_intervals -= 1
+
+                if self.running and remainder_secs > 0:
+                    time.sleep(remainder_secs)
 
 
 def main():
