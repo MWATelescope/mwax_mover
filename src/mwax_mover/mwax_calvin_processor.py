@@ -429,7 +429,9 @@ class MWAXCalvinProcessor:
         exp_time = int(utils.get_metafits_value(metafits_assembly_filename, "EXPOSURE"))
         current_gpstime = astrotime.Time(datetime.datetime.utcnow(), scale="utc").gps
 
-        if current_gpstime > (int(obs_id) + exp_time):
+        # We need to allow for some time for the observation to update the database,
+        # so add an additional 60 seconds before we check
+        if current_gpstime > (int(obs_id) + exp_time + 60):
             #
             # perform web service call to get list of data files from obsid
             #
