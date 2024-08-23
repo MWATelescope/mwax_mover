@@ -369,7 +369,9 @@ class MWAXCalvinProcessor:
             obs_id: int = int(filename[0:10])
 
             # Check to see if we are already processing this observation
-            found_obsid: CurrentObsID = self.current_obsids[int(obs_id)]
+            found_obsid: CurrentObsID = None
+            if int(obs_id) in self.current_obsids:
+                found_obsid: CurrentObsID = self.current_obsids[int(obs_id)]
 
             if found_obsid is not None and found_obsid.assembled:
                 # hmm so we just got a file for obsid xxx, yet xxx is already further along
