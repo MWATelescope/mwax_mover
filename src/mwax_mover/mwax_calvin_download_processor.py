@@ -116,7 +116,7 @@ class MWAXCalvinDownloadProcessor:
             except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
                 # Handle me!
                 self.logger.info("MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins.")
-                time.sleep(SLEEP_MWA_ASVO_OUTAGE_SECS)
+                self.sleep(SLEEP_MWA_ASVO_OUTAGE_SECS)
                 return
             except Exception as e:
                 # Some other fatal error occurred, let's log it and update the db
@@ -579,7 +579,7 @@ class MWAXCalvinDownloadProcessor:
 
         self.initialise(config_filename)
 
-    def sleep(self, seconds: int):
+    def sleep(self, seconds):
         """This sleep function keeps an eye on self.running so that if we are in a long wait
         we will still respond to shutdown directives"""
         SECS_PER_INTERVAL: int = 5

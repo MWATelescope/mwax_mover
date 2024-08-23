@@ -46,6 +46,14 @@ from mwax_mover.mwax_calvin_utils import (
 )
 
 
+class CurrentObsID:
+    """This class keeps info about current ObsIDs being processed by Calvin"""
+
+    def __init__(self, obs_id: int):
+        self.obs_id: int = obs_id
+        self.assembled: bool = False
+
+
 class MWAXCalvinProcessor:
     """The main class processing calibration solutions"""
 
@@ -70,7 +78,7 @@ class MWAXCalvinProcessor:
         # Keep a register of obsids which have been assembled
         # This is so if for some reason we get the same obsid
         # but some other part is still working on it, we can reject it
-        self.current_obsids = []
+        self.current_obsids = dict()
 
         self.metadata_webservice_url = None
 
@@ -249,7 +257,7 @@ class MWAXCalvinProcessor:
             self.watcher_threads.append(watcher_thread)
             watcher_thread.start()
             # Wait 2 seconds- this ensures the watchers start in the correct order
-            time.sleep(2)
+            self.sleep(2)
 
         self.logger.info("Waiting for all watchers to finish scanning....")
         count_of_watchers_still_scanning = len(self.watchers)
@@ -258,7 +266,7 @@ class MWAXCalvinProcessor:
             for watcher in self.watchers:
                 if not watcher.scan_completed:
                     count_of_watchers_still_scanning += 1
-            time.sleep(1)  # hold off for another second
+            self.sleep(1)  # hold off for another second
         self.logger.info("Watchers are finished scanning.")
 
         self.logger.info("Starting workers...")
@@ -293,7 +301,7 @@ class MWAXCalvinProcessor:
             for worker_thread in self.worker_threads:
                 if worker_thread:
                     if worker_thread.is_alive():
-                        time.sleep(0.2)
+                        self.sleep(0.2)
                     else:
                         self.logger.debug(f"Worker {worker_thread.name} has died unexpectedly! Exiting!")
                         self.running = False
@@ -304,7 +312,7 @@ class MWAXCalvinProcessor:
         # Finished- do some clean up
         #
         while not self.ready_to_exit:
-            time.sleep(1)
+            self.sleep(1)
 
         # Final log message
         self.logger.info("Completed Successfully")
@@ -361,7 +369,9 @@ class MWAXCalvinProcessor:
             obs_id: int = int(filename[0:10])
 
             # Check to see if we are already processing this observation
-            if int(obs_id) in self.current_obsids:
+            found_obsid: CurrentObsID = self.current_obsids[int(obs_id)]
+
+            if found_obsid is not None and found_obsid.assembled:
                 # hmm so we just got a file for obsid xxx, yet xxx is already further along
                 # the pipeline... This could be due to calvin_downloaders somehow downloading
                 # the same obs in succession (it shouldn't do that!). Let's just delete the file.
@@ -371,23 +381,24 @@ class MWAXCalvinProcessor:
                 )
                 os.remove(item)
                 return True
-            else:
-                obsid_assembly_dir = os.path.join(self.assemble_path, str(obs_id))
-                if not os.path.exists(obsid_assembly_dir):
-                    self.logger.info(f"{item} creating obs_id's assembly dir" f" {obsid_assembly_dir}...")
-                    # This is the first file of this obs_id to be seen
-                    os.mkdir(obsid_assembly_dir)
 
-                # Relocate this file to the obs_id_work_dir
-                new_filename = os.path.join(obsid_assembly_dir, filename)
-                self.logger.info(f"{item} moving file into obs_id's assembly dir {new_filename}...")
-                shutil.move(item, new_filename)
-                return True
+            # Go ahead and move it to the assembly area!
+            obsid_assembly_dir = os.path.join(self.assemble_path, str(obs_id))
+            if not os.path.exists(obsid_assembly_dir):
+                self.logger.info(f"{item} creating obs_id's assembly dir" f" {obsid_assembly_dir}...")
+                # This is the first file of this obs_id to be seen
+                os.mkdir(obsid_assembly_dir)
+
+            # Relocate this file to the obs_id_work_dir
+            new_filename = os.path.join(obsid_assembly_dir, filename)
+            self.logger.info(f"{item} moving file into obs_id's assembly dir {new_filename}...")
+            shutil.move(item, new_filename)
+            return True
         else:
             # Sleep this thread for a minute so we don't go into
             # a tight loop
             # Returning false will cause this item to just be put back on the queue
-            time.sleep(60)
+            self.sleep(60)
             return False
 
     def check_obs_is_ready_to_process(self, obs_id, obsid_assembly_dir) -> bool:
@@ -435,8 +446,8 @@ class MWAXCalvinProcessor:
                 # (unless it's there already- remember an obsid can be "started" from
                 # incoming / assemble / processing / upload - if the processor is stopped and
                 # restarted)
-                if not (int(obs_id) in self.current_obsids):
-                    self.current_obsids.append(int(obs_id))
+                if self.current_obsids[int(obs_id)] is None:
+                    self.current_obsids[int(obs_id)] = CurrentObsID(int(obs_id))
 
                 # Check for gpubox files (mwax OR legacy)
                 glob_spec = "*.fits"
@@ -479,7 +490,7 @@ class MWAXCalvinProcessor:
         boxes are interrupted when xrdcp'ing files to calvin"""
         while self.running:
             self.logger.debug(f"sleeping for {self.remove_partial_files_check_seconds} secs")
-            time.sleep(self.remove_partial_files_check_seconds)
+            self.sleep(self.remove_partial_files_check_seconds)
 
             if self.running:
                 self.logger.debug("Waking up and checking for and removing orphaned partial realtime files...")
@@ -524,7 +535,7 @@ class MWAXCalvinProcessor:
         gpubox files which we should process"""
         while self.running:
             self.logger.debug(f"sleeping for {self.assemble_check_seconds} secs")
-            time.sleep(self.assemble_check_seconds)
+            self.sleep(self.assemble_check_seconds)
 
             if self.running:
                 self.logger.debug("Waking up and checking un-assembled observations...")
@@ -544,6 +555,10 @@ class MWAXCalvinProcessor:
                 for obs_id in obs_id_list:
                     obs_assemble_path = os.path.join(self.assemble_path, obs_id)
                     if self.check_obs_is_ready_to_process(obs_id, obs_assemble_path):
+                        if self.current_obsids[int(obs_id)] is None:
+                            self.current_obsids[int(obs_id)] = CurrentObsID(int(obs_id))
+                        self.current_obsids[int(obs_id)].assembled = True
+
                         # do processing
                         obs_processing_path = os.path.join(self.processing_path, obs_id)
 
@@ -576,8 +591,9 @@ class MWAXCalvinProcessor:
         # (unless it's there already- remember an obsid can be "started" from
         # incoming / assemble / processing / upload - if the processor is stopped and
         # restarted)
-        if not (int(obs_id) in self.current_obsids):
-            self.current_obsids.append(int(obs_id))
+        if self.current_obsids[int(obs_id)] is None:
+            self.current_obsids[int(obs_id)] = CurrentObsID(int(obs_id))
+        self.current_obsids[int(obs_id)].assembled = True
 
         # Update database that we are processing this obsid
         mwax_db.update_calsolution_request_calibration_started_status(
@@ -630,8 +646,8 @@ class MWAXCalvinProcessor:
 
             self.processing_error_count += 1
 
-            # Remove this obs_id from the list of ones we are currently working on
-            self.current_obsids.remove(int(obs_id))
+            # Remove this obs_id from the dict of ones we are currently working on
+            del self.current_obsids[int(obs_id)]
 
             # Update database
             mwax_db.update_calsolution_request_calibration_complete_status(
@@ -734,8 +750,9 @@ class MWAXCalvinProcessor:
             # (unless it's there already- remember an obsid can be "started" from
             # incoming / assemble / processing / upload - if the processor is stopped and
             # restarted)
-            if not (int(obs_id) in self.current_obsids):
-                self.current_obsids.append(int(obs_id))
+            if self.current_obsids[obs_id] is None:
+                self.current_obsids[obs_id] = CurrentObsID(obs_id)
+            self.current_obsids[obs_id].assembled = True
 
             metafits_files = glob.glob(os.path.join(item, "*_metafits.fits"))
             # if len(metafits_files) > 1:
@@ -889,10 +906,10 @@ class MWAXCalvinProcessor:
                     int(fit_id),
                     int(obs_id),
                     int(tile_id),
-                    -1 * x_phase.length, # legacy calibration pipeline used inverse convention
+                    -1 * x_phase.length,  # legacy calibration pipeline used inverse convention
                     x_phase.intercept,
                     x_gains.gains,
-                    -1 * y_phase.length, # legacy calibration pipeline used inverse convention
+                    -1 * y_phase.length,  # legacy calibration pipeline used inverse convention
                     y_phase.intercept,
                     y_gains.gains,
                     x_gains.pol1,
@@ -953,8 +970,8 @@ class MWAXCalvinProcessor:
                     for file_to_delete in uvfits_files:
                         os.remove(file_to_delete)
 
-                # Remove this obs_id from the list of ones we are currently working on
-                self.current_obsids.remove(int(obs_id))
+                # Remove this obs_id from the dict of ones we are currently working on
+                del self.current_obsids[obs_id]
 
                 self.completed_count += 1
 
@@ -992,8 +1009,8 @@ class MWAXCalvinProcessor:
                 self.db_handler_object, obs_id, None, None, None, datetime.datetime.now(), error_text.replace("\n", " ")
             )
 
-            # Remove this obs_id from the list of ones we are currently working on
-            self.current_obsids.remove(int(obs_id))
+            # Remove this obs_id from the dict of ones we are currently working on
+            del self.current_obsids[obs_id]
 
             self.upload_error_count += 1
 
@@ -1068,7 +1085,7 @@ class MWAXCalvinProcessor:
                 self.logger.warning("health_handler: Failed to send health information." f" {catch_all_exception}")
 
             # Sleep for a second
-            time.sleep(1)
+            self.sleep(1)
 
     def get_status(self) -> dict:
         """Returns status of all process as a dictionary"""
@@ -1421,6 +1438,24 @@ class MWAXCalvinProcessor:
         config_filename = args["cfg"]
 
         self.initialise(config_filename)
+
+    def sleep(self, seconds):
+        """This sleep function keeps an eye on self.running so that if we are in a long wait
+        we will still respond to shutdown directives"""
+        SECS_PER_INTERVAL: int = 5
+
+        if self.running:
+            if seconds <= SECS_PER_INTERVAL:
+                time.sleep(seconds)
+            else:
+                integer_intervals, remainder_secs = divmod(seconds, SECS_PER_INTERVAL)
+
+                while self.running and integer_intervals > 0:
+                    time.sleep(SECS_PER_INTERVAL)
+                    integer_intervals -= 1
+
+                if self.running and remainder_secs > 0:
+                    time.sleep(remainder_secs)
 
 
 def main():
