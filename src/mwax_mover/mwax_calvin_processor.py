@@ -450,7 +450,7 @@ class MWAXCalvinProcessor:
                 # (unless it's there already- remember an obsid can be "started" from
                 # incoming / assemble / processing / upload - if the processor is stopped and
                 # restarted)
-                if self.current_obsids[int(obs_id)] is None:
+                if int(obs_id) not in self.current_obsids:
                     self.current_obsids[int(obs_id)] = CurrentObsID(int(obs_id))
 
                 # Check for gpubox files (mwax OR legacy)
@@ -559,7 +559,7 @@ class MWAXCalvinProcessor:
                 for obs_id in obs_id_list:
                     obs_assemble_path = os.path.join(self.assemble_path, obs_id)
                     if self.check_obs_is_ready_to_process(obs_id, obs_assemble_path):
-                        if self.current_obsids[int(obs_id)] is None:
+                        if int(obs_id) not in self.current_obsids:
                             self.current_obsids[int(obs_id)] = CurrentObsID(int(obs_id))
                         self.current_obsids[int(obs_id)].assembled = True
 
@@ -595,7 +595,7 @@ class MWAXCalvinProcessor:
         # (unless it's there already- remember an obsid can be "started" from
         # incoming / assemble / processing / upload - if the processor is stopped and
         # restarted)
-        if self.current_obsids[int(obs_id)] is None:
+        if int(obs_id) not in self.current_obsids:
             self.current_obsids[int(obs_id)] = CurrentObsID(int(obs_id))
         self.current_obsids[int(obs_id)].assembled = True
 
@@ -754,7 +754,7 @@ class MWAXCalvinProcessor:
             # (unless it's there already- remember an obsid can be "started" from
             # incoming / assemble / processing / upload - if the processor is stopped and
             # restarted)
-            if self.current_obsids[obs_id] is None:
+            if int(obs_id) not in self.current_obsids:
                 self.current_obsids[obs_id] = CurrentObsID(obs_id)
             self.current_obsids[obs_id].assembled = True
 
