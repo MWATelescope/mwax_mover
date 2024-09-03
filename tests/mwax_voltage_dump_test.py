@@ -2,6 +2,7 @@
 This is to test if MWAXSubfileDistributor correctly reads the tonnes of
 config correctly from a "correlator" config file.
 """
+
 import glob
 import os
 import shutil
@@ -13,7 +14,9 @@ from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
 from mwax_mover.utils import write_mock_subfile, read_subfile_trigger_value
 
 TEST_BASE_PATH = "tests/mock_mwax_dump"
-TEST_CONFIG_FILE = "tests/mwax_voltage_dump_test.cfg"
+TEST_CONFIG_FILE1 = "tests/mwax_voltage_dump_test1.cfg"
+TEST_CONFIG_FILE2 = "tests/mwax_voltage_dump_test2.cfg"
+TEST_CONFIG_FILE3 = "tests/mwax_voltage_dump_test3.cfg"
 
 
 def get_base_path() -> str:
@@ -155,7 +158,7 @@ def test_voltage_dump_test_params():
     msd.hostname = "test_server"
 
     # Call to read config
-    msd.initialise(TEST_CONFIG_FILE)
+    msd.initialise(TEST_CONFIG_FILE1)
 
     # Create and start a thread for the processor
     thrd = threading.Thread(name="msd_thread", target=msd.start, daemon=True)
@@ -170,9 +173,7 @@ def test_voltage_dump_test_params():
     start = 0
     end = 0
     trigger_id = 123
-    response = requests.get(
-        f"http://127.0.0.1:9997/dump_voltages?start={start}&end={end}&trigger_id={trigger_id}"
-    )
+    response = requests.get(f"http://127.0.0.1:9997/dump_voltages?start={start}&end={end}&trigger_id={trigger_id}")
 
     assert response.status_code == 200
     assert response.text == "OK"
@@ -197,7 +198,7 @@ def test_voltage_dump_in_the_past():
     msd.hostname = "test_server"
 
     # Call to read config
-    msd.initialise(TEST_CONFIG_FILE)
+    msd.initialise(TEST_CONFIG_FILE2)
 
     # Create and start a thread for the processor
     thrd = threading.Thread(name="msd_thread", target=msd.start, daemon=True)
@@ -210,23 +211,17 @@ def test_voltage_dump_in_the_past():
 
     # create mock subfiles
     # 1300000000 - 1300000024 are NO_CAPTURE
-    create_observation_subfiles(
-        1300000000, 4, "NO_CAPTURE", 169, 0, dev_shm_temp_dir, dev_shm_dir
-    )
+    create_observation_subfiles(1300000000, 4, "NO_CAPTURE", 169, 0, dev_shm_temp_dir, dev_shm_dir)
 
     # 1300000032 - is MWAX_VCS
-    create_observation_subfiles(
-        1300000032, 1, "MWAX_VCS", 169, 0, dev_shm_temp_dir, dev_shm_dir
-    )
+    create_observation_subfiles(1300000032, 1, "MWAX_VCS", 169, 0, dev_shm_temp_dir, dev_shm_dir)
 
     # Trigger a dump which ends in the past (i.e. does not encroach on new obs)
     start = 1300000000
     sub_obs_to_dump = 4
     end = start + (sub_obs_to_dump * 8)
     trigger_id = 123
-    response = requests.get(
-        f"http://127.0.0.1:9997/dump_voltages?start={start}&end={end}&trigger_id={trigger_id}"
-    )
+    response = requests.get(f"http://127.0.0.1:9998/dump_voltages?start={start}&end={end}&trigger_id={trigger_id}")
     msd.logger.debug(response.text)
 
     # Wait for processing
@@ -237,14 +232,10 @@ def test_voltage_dump_in_the_past():
     # When we hit the MWAX_VCS we do not do any archiving of free files
     # When we hit the NO_CAPTUREs we DO archive free files (oldest first)
     # 1300000040 - 1300000048 is MWAX_VCS
-    create_observation_subfiles(
-        1300000040, 2, "MWAX_VCS", 169, 0, dev_shm_temp_dir, dev_shm_dir
-    )
+    create_observation_subfiles(1300000040, 2, "MWAX_VCS", 169, 0, dev_shm_temp_dir, dev_shm_dir)
 
     # 1300000056 - 1300000080 is NO_CAPTURE
-    create_observation_subfiles(
-        1300000056, 4, "NO_CAPTURE", 169, 0, dev_shm_temp_dir, dev_shm_dir
-    )
+    create_observation_subfiles(1300000056, 4, "NO_CAPTURE", 169, 0, dev_shm_temp_dir, dev_shm_dir)
 
     # Ok time's up! Stop the processor
     msd.signal_handler(signal.SIGINT, 0)
@@ -272,21 +263,11 @@ def test_voltage_dump_in_the_past():
     destination_sub_files = glob.glob(os.path.join(destination_dir, "*.sub"))
     destination_free_files = glob.glob(os.path.join(destination_dir, "*.free"))
 
-    assert os.path.exists(
-        os.path.join(destination_dir, "1300000000_1300000016_169.sub")
-    )
-    assert os.path.exists(
-        os.path.join(destination_dir, "1300000000_1300000024_169.sub")
-    )
-    assert os.path.exists(
-        os.path.join(destination_dir, "1300000032_1300000032_169.sub")
-    )
-    assert os.path.exists(
-        os.path.join(destination_dir, "1300000040_1300000040_169.sub")
-    )
-    assert os.path.exists(
-        os.path.join(destination_dir, "1300000040_1300000048_169.sub")
-    )
+    assert os.path.exists(os.path.join(destination_dir, "1300000000_1300000016_169.sub"))
+    assert os.path.exists(os.path.join(destination_dir, "1300000000_1300000024_169.sub"))
+    assert os.path.exists(os.path.join(destination_dir, "1300000032_1300000032_169.sub"))
+    assert os.path.exists(os.path.join(destination_dir, "1300000040_1300000040_169.sub"))
+    assert os.path.exists(os.path.join(destination_dir, "1300000040_1300000048_169.sub"))
 
     assert len(destination_sub_files) == 2 + 1 + 2
     assert len(destination_free_files) == 0
@@ -343,7 +324,7 @@ def test_voltage_dump_past_and_future():
     msd.hostname = "test_server"
 
     # Call to read config
-    msd.initialise(TEST_CONFIG_FILE)
+    msd.initialise(TEST_CONFIG_FILE3)
 
     # Create and start a thread for the processor
     thrd = threading.Thread(name="msd_thread", target=msd.start, daemon=True)
@@ -356,23 +337,17 @@ def test_voltage_dump_past_and_future():
 
     # create mock subfiles
     # 1300000000 - 1300000024 are NO_CAPTURE
-    create_observation_subfiles(
-        1300000000, 4, "NO_CAPTURE", 169, 0, dev_shm_temp_dir, dev_shm_dir
-    )
+    create_observation_subfiles(1300000000, 4, "NO_CAPTURE", 169, 0, dev_shm_temp_dir, dev_shm_dir)
 
     # 1300000032 - is MWAX_VCS -  will not be dumped or assigned a trigger
-    create_observation_subfiles(
-        1300000032, 1, "MWAX_VCS", 169, 0, dev_shm_temp_dir, dev_shm_dir
-    )
+    create_observation_subfiles(1300000032, 1, "MWAX_VCS", 169, 0, dev_shm_temp_dir, dev_shm_dir)
 
     # Trigger a dump which ends 1 subobs in the future
     start = 1300000000
     sub_obs_to_dump = 6
     end = start + (sub_obs_to_dump * 8)
     trigger_id = 123
-    response = requests.get(
-        f"http://127.0.0.1:9997/dump_voltages?start={start}&end={end}&trigger_id={trigger_id}"
-    )
+    response = requests.get(f"http://127.0.0.1:9999/dump_voltages?start={start}&end={end}&trigger_id={trigger_id}")
     msd.logger.debug(response.text)
 
     # Wait for processing
@@ -383,14 +358,10 @@ def test_voltage_dump_past_and_future():
     # When we hit the MWAX_VCS we do not do any archiving of free files
     # When we hit the NO_CAPTUREs we DO archive free files (oldest first)
     # 1300000040 - 1300000048 is MWAX_VCS
-    create_observation_subfiles(
-        1300000040, 2, "MWAX_VCS", 169, 0, dev_shm_temp_dir, dev_shm_dir
-    )
+    create_observation_subfiles(1300000040, 2, "MWAX_VCS", 169, 0, dev_shm_temp_dir, dev_shm_dir)
 
     # 1300000056 - 1300000080 is NO_CAPTURE
-    create_observation_subfiles(
-        1300000056, 4, "NO_CAPTURE", 169, 0, dev_shm_temp_dir, dev_shm_dir
-    )
+    create_observation_subfiles(1300000056, 4, "NO_CAPTURE", 169, 0, dev_shm_temp_dir, dev_shm_dir)
 
     # Ok time's up! Stop the processor
     msd.signal_handler(signal.SIGINT, 0)
@@ -419,23 +390,13 @@ def test_voltage_dump_past_and_future():
     destination_free_files = glob.glob(os.path.join(destination_dir, "*.free"))
 
     # 2 Dumped files
-    assert os.path.exists(
-        os.path.join(destination_dir, "1300000000_1300000016_169.sub")
-    )
-    assert os.path.exists(
-        os.path.join(destination_dir, "1300000000_1300000024_169.sub")
-    )
+    assert os.path.exists(os.path.join(destination_dir, "1300000000_1300000016_169.sub"))
+    assert os.path.exists(os.path.join(destination_dir, "1300000000_1300000024_169.sub"))
 
     # 3 subsequent files
-    assert os.path.exists(
-        os.path.join(destination_dir, "1300000032_1300000032_169.sub")
-    )
-    assert os.path.exists(
-        os.path.join(destination_dir, "1300000040_1300000040_169.sub")
-    )
-    assert os.path.exists(
-        os.path.join(destination_dir, "1300000040_1300000048_169.sub")
-    )
+    assert os.path.exists(os.path.join(destination_dir, "1300000032_1300000032_169.sub"))
+    assert os.path.exists(os.path.join(destination_dir, "1300000040_1300000040_169.sub"))
+    assert os.path.exists(os.path.join(destination_dir, "1300000040_1300000048_169.sub"))
 
     assert len(destination_sub_files) == 2 + 1 + 2
     assert len(destination_free_files) == 0

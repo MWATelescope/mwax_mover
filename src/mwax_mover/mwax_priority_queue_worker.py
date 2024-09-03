@@ -174,7 +174,9 @@ class PriorityQueueWorker(object):
         filename_no_ext = os.path.splitext(filename)[0]
         command = command.replace(mwax_mover.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext)
 
-        return mwax_command.run_command_ext(self.logger, command, -1, 60, True)
+        return_value, _ = mwax_command.run_command_ext(self.logger, command, -1, 60, True)
+
+        return return_value
 
     def get_status(self) -> dict:
         """Return the status as a dictionary"""

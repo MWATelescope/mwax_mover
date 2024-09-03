@@ -79,15 +79,15 @@ def test_mwacache_archiver_config_file():
 
     assert mcap.remote_metadatadb_host == "localhost"
     assert mcap.remote_metadatadb_db == "mwa"
-    assert mcap.remote_metadatadb_port == "5432"
+    assert mcap.remote_metadatadb_port == 5432
     assert mcap.remote_metadatadb_user == "test"
     assert mcap.remote_metadatadb_pass == "test_pwd"
 
     assert mcap.mro_metadatadb_host == "dummy"
-    assert mcap.mro_metadatadb_db is None
-    assert mcap.mro_metadatadb_port is None
-    assert mcap.mro_metadatadb_user is None
-    assert mcap.mro_metadatadb_pass is None
+    assert mcap.mro_metadatadb_db == "dummy"
+    assert mcap.mro_metadatadb_port == 5432
+    assert mcap.mro_metadatadb_user == "dummy"
+    assert mcap.mro_metadatadb_pass == "dummy"
 
     assert len(mcap.watch_dirs) == 1
     assert mcap.watch_dirs[0] == "tests/data/mwacache_test01"

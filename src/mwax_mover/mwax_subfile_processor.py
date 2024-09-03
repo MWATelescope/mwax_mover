@@ -438,8 +438,11 @@ class SubfileProcessor:
 
     def stop(self):
         """Stop the processor"""
-        self.subfile_watcher.stop()
-        self.subfile_queue_worker.stop()
+        if self.subfile_watcher:
+            self.subfile_watcher.stop()
+
+        if self.subfile_queue_worker:
+            self.subfile_queue_worker.stop()
 
         # Wait for threads to finish
         for watcher_thread in self.watcher_threads:

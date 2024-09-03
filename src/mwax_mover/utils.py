@@ -329,7 +329,7 @@ def get_metafits_value(metafits_filename: str, key: str):
     try:
         with fits.open(metafits_filename) as hdul:
             # Read key from primary HDU
-            return hdul[0].header[key]  # pylint: disable=no-member
+            return hdul[0].header[key]  # type: ignore # pylint: disable=no-member
 
     except Exception as catch_all_exception:
         raise Exception(
@@ -345,8 +345,8 @@ def get_metafits_values(metafits_filename: str) -> Tuple[bool, str]:
     try:
         with fits.open(metafits_filename) as hdul:
             # Read key from primary HDU- it is bool
-            is_calibrator = hdul[0].header["CALIBRAT"]  # pylint: disable=no-member
-            project_id = hdul[0].header["PROJECT"]  # pylint: disable=no-member
+            is_calibrator = hdul[0].header["CALIBRAT"]  # type: ignore # pylint: disable=no-member
+            project_id = hdul[0].header["PROJECT"]  # type: ignore # pylint: disable=no-member
             return is_calibrator, project_id
     except Exception as catch_all_exception:
         raise Exception(
@@ -885,7 +885,7 @@ def get_data_files_for_obsid_from_webservice(
     logger,
     obsid: int,
     metadata_webservice_url: str,
-) -> list[str]:
+) -> list[str] | None:
     """Calls an MWA webservice, passing in an obsid and returning a list of filenames
     of all the data_files (MWAX_VISIBILITIES or HW_LFILES) of the given filetype or None if there was an error.
     metadata_webservice_url is the base url - e.g. http://ws.mwatelescope.org

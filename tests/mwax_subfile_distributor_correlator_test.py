@@ -107,7 +107,7 @@ def test_correlator_config_file():
 
     # mwax_mover section
     assert msd.cfg_log_path == os.path.join(base_dir, "logs")
-    assert msd.cfg_webserver_port == "9999"
+    assert msd.cfg_webserver_port == 9999
     assert msd.cfg_health_multicast_interface_name == "eth0"
     assert msd.cfg_health_multicast_ip == "224.234.0.0"
     assert msd.cfg_health_multicast_port == 8005
@@ -134,7 +134,7 @@ def test_correlator_config_file():
     assert msd.cfg_corr_mwax_stats_timeout_sec == 600
     assert msd.cfg_corr_calibrator_outgoing_path == os.path.join(base_dir, "visdata_cal_outgoing")
     assert msd.cfg_corr_calibrator_destination_host == "192.168.120.1://dest/path"
-    assert msd.cfg_corr_calibrator_destination_port == "1094"
+    assert msd.cfg_corr_calibrator_destination_port == 1094
     assert msd.cfg_corr_calibrator_destination_enabled == 1
     assert msd.cfg_corr_metafits_path == os.path.join(base_dir, "vulcan_metafits")
     assert not msd.cfg_corr_high_priority_correlator_projectids
@@ -142,14 +142,14 @@ def test_correlator_config_file():
 
     # metadata db section
     assert msd.cfg_metadatadb_host == "dummy"
-    assert msd.cfg_metadatadb_db is None
-    assert msd.cfg_metadatadb_port is None
-    assert msd.cfg_metadatadb_user is None
-    assert msd.cfg_metadatadb_pass is None
+    assert msd.cfg_metadatadb_db == "dummy"
+    assert msd.cfg_metadatadb_port == 5432
+    assert msd.cfg_metadatadb_user == "dummy"
+    assert msd.cfg_metadatadb_pass == "dummy"
 
     # test_server section
     assert msd.cfg_corr_archive_destination_host == "host2.destination.com://dest/path"
-    assert msd.cfg_corr_archive_destination_port == "1094"
+    assert msd.cfg_corr_archive_destination_port == 1094
     assert msd.cfg_corr_archive_destination_enabled is True
     assert msd.cfg_corr_diskdb_numa_node == -1
     assert msd.cfg_corr_archive_command_numa_node == -1

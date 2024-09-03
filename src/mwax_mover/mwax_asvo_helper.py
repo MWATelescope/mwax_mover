@@ -112,7 +112,7 @@ class MWAASVOHelper:
 
     def __init__(self):
         # Logger object
-        self.logger = None
+        self.logger: logging.Logger
 
         # Where is giant-squid binary?
         self.path_to_giant_squid_binary = None

@@ -155,9 +155,9 @@ def archive_file_ceph(
     full_filename: str,
     bucket_name: str,
     md5hash: str,
-    multipart_threshold_bytes: int = None,
-    chunk_size_bytes: int = None,
-    max_concurrency: int = None,
+    multipart_threshold_bytes: int | None = None,
+    chunk_size_bytes: int | None = None,
+    max_concurrency: int | None = None,
 ):
     """Archive file via ceph"""
     logger.debug(f"{full_filename} attempting archive_file_ceph...")
@@ -331,9 +331,9 @@ def ceph_upload_file(
     bucket_name: str,
     filename: str,
     md5hash: str,
-    multipart_threshold_bytes: int = None,
-    chunk_size_bytes: int = None,
-    max_concurrency: int = None,
+    multipart_threshold_bytes: int | None = None,
+    chunk_size_bytes: int | None = None,
+    max_concurrency: int | None = None,
 ) -> bool:
     """upload a file via ceph/s3"""
     # get key

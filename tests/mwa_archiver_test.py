@@ -1,4 +1,5 @@
 """Tests for the mwa archving primitives"""
+
 import logging
 import boto3
 from mwax_mover.mwa_archiver import ceph_get_s3_session, ceph_get_s3_resource
@@ -17,8 +18,6 @@ def test_ceph_get_s3_resource():
     logger = logging.getLogger("test")
 
     session: boto3.Session = ceph_get_s3_session("acacia_test")
-    resource: boto3.session.Session.resource = ceph_get_s3_resource(
-        logger, session, ["https://acacia.pawsey.org.au"]
-    )
+    resource: boto3.session.Session.resource = ceph_get_s3_resource(logger, session, ["https://projects.pawsey.org.au"])
 
     assert resource is not None

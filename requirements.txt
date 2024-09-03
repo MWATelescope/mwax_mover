@@ -1,5 +1,6 @@
 inotify
-psycopg2-binary
+psycopg[binary]
+psycopg[pool]
 requests
 tenacity
 boto3

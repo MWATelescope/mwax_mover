@@ -12,6 +12,7 @@ from astropy import units as u
 from astropy.constants import c
 from scipy.optimize import minimize
 import pandas as pd
+from pandas import DataFrame
 import seaborn as sns
 import matplotlib as mpl
 from matplotlib import pyplot as plt
@@ -1778,3 +1779,75 @@ def run_hyperdrive_stats(
     else:
         processor.logger.warning(f"{obs_id}: Not all hyperdrive stats runs were successful.")
         return False
+
+
+def process_phase_fits(
+    logger, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
+):
+    """
+    Fit a line to each tile phase solution, return a dataframe of phase fit parameters for each
+    tile and pol
+    """
+    fits = []
+    phase_diff_path = os.path.join(item, "phase_diff.txt")
+    # by default we don't want to apply any phase rotation.
+    phase_diff = np.full((len(chanblocks_hz),), 1.0, dtype=np.complex128)
+    if os.path.exists(phase_diff_path):
+        # phase_diff_raw is an array, first column is frequency, second column is phase difference
+        phase_diff_raw = np.loadtxt(phase_diff_path)
+        for i, chanblock_hz in enumerate(chanblocks_hz):
+            # find the closest frequency in phase_diff_raw
+            idx = np.abs(phase_diff_raw[:, 0] - chanblock_hz).argmin()
+            diff = phase_diff_raw[idx, 1]
+            phase_diff[i] = np.exp(-1j * diff)
+
+    for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
+        for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
+            id_matches = tiles[tiles.id == tile_id]
+            if len(id_matches) != 1:
+                continue
+            tile = id_matches.iloc[0]
+            if tile.flag:
+                continue
+            name = tile.name
+            if tile.flavor.endswith("-NI"):
+                solns *= phase_diff
+            # else:
+            #     continue
+            try:
+                fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)
+            except Exception as exc:
+                logger.error(f"{item} - {tile_id=:4} {pol} ({name}) {exc}")
+                continue
+            logger.debug(f"{item} - {tile_id=:4} {pol} ({name}) {fit=}")
+            fits.append([tile_id, soln_idx, pol, *fit])
+
+    return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])
+
+
+def process_gain_fits(
+    logger, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, chanblocks_per_coarse
+):
+    """
+    for each tile, pol, fit a GainFitInfo to the gains
+    """
+    fits = []
+    for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
+        for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
+            id_matches = tiles[tiles.id == tile_id]
+            if len(id_matches) != 1:
+                continue
+            tile = id_matches.iloc[0]
+            if tile.flag:
+                continue
+            name = tile.name
+            try:
+                fit = fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse)
+            except Exception as exc:
+                logger.error(f"{item} - {tile_id=:4} {pol} ({name}) {exc}")
+                continue
+            logger.debug(f"{item} - {tile_id=:4} {pol} ({name}) {fit=}")
+            fits.append([tile_id, soln_idx, pol, *fit])
+    logger.warning("TODO: fake gain fits!")
+
+    return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *GainFitInfo._fields])

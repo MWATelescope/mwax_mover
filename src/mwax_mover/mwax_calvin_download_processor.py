@@ -31,7 +31,7 @@ class MWAXCalvinDownloadProcessor:
         self.logger = logging.getLogger(__name__)
         self.log_path = None
         self.hostname = None
-        self.db_handler_object: mwax_db.MWAXDBHandler = None
+        self.db_handler_object: mwax_db.MWAXDBHandler
 
         # health
         self.health_multicast_interface_ip = None
@@ -350,10 +350,7 @@ class MWAXCalvinDownloadProcessor:
         self.logger.warning("Stopping...")
 
         # Close all database connections
-        if not self.db_handler_object.dummy:
-            if self.db_handler_object.pool:
-                if not self.db_handler_object.pool.closed:
-                    self.db_handler_object.pool.closeall()
+        self.db_handler_object.stop_database_pool()
 
         self.ready_to_exit = True
 
@@ -473,16 +470,10 @@ class MWAXCalvinDownloadProcessor:
         #
         self.mro_metadatadb_host = utils.read_config(self.logger, config, "mro metadata database", "host")
 
-        if self.mro_metadatadb_host != mwax_db.DUMMY_DB:
-            self.mro_metadatadb_db = utils.read_config(self.logger, config, "mro metadata database", "db")
-            self.mro_metadatadb_user = utils.read_config(self.logger, config, "mro metadata database", "user")
-            self.mro_metadatadb_pass = utils.read_config(self.logger, config, "mro metadata database", "pass", True)
-            self.mro_metadatadb_port = utils.read_config(self.logger, config, "mro metadata database", "port")
-        else:
-            self.mro_metadatadb_db = None
-            self.mro_metadatadb_user = None
-            self.mro_metadatadb_pass = None
-            self.mro_metadatadb_port = None
+        self.mro_metadatadb_db = utils.read_config(self.logger, config, "mro metadata database", "db")
+        self.mro_metadatadb_user = utils.read_config(self.logger, config, "mro metadata database", "user")
+        self.mro_metadatadb_pass = utils.read_config(self.logger, config, "mro metadata database", "pass", True)
+        self.mro_metadatadb_port = int(utils.read_config(self.logger, config, "mro metadata database", "port"))
 
         # Initiate database connection for rmo metadata db
         self.db_handler_object = mwax_db.MWAXDBHandler(

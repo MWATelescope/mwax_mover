@@ -293,7 +293,7 @@ class MWAXSubfileDistributor:
         self.logger.info("Starting mwax_subfile_distributor" f" processor...v{version.get_mwax_mover_version_string()}")
         self.logger.info(f"Reading config file: {config_filename}")
 
-        self.cfg_webserver_port = utils.read_config(self.logger, self.config, "mwax mover", "webserver_port")
+        self.cfg_webserver_port = int(utils.read_config(self.logger, self.config, "mwax mover", "webserver_port"))
         self.cfg_voltdata_dont_archive_path = utils.read_config(
             self.logger,
             self.config,
@@ -417,8 +417,8 @@ class MWAXSubfileDistributor:
             self.cfg_bf_archive_destination_host = utils.read_config(
                 self.logger, self.config, self.hostname, "fil_destination_host"
             )
-            self.cfg_bf_archive_destination_port = utils.read_config(
-                self.logger, self.config, self.hostname, "fil_destination_port"
+            self.cfg_bf_archive_destination_port = int(
+                utils.read_config(self.logger, self.config, self.hostname, "fil_destination_port")
             )
             self.cfg_bf_archive_destination_enabled = (
                 int(
@@ -503,11 +503,13 @@ class MWAXSubfileDistributor:
                 "correlator",
                 "calibrator_destination_host",
             )
-            self.cfg_corr_calibrator_destination_port = utils.read_config(
-                self.logger,
-                self.config,
-                "correlator",
-                "calibrator_destination_port",
+            self.cfg_corr_calibrator_destination_port = int(
+                utils.read_config(
+                    self.logger,
+                    self.config,
+                    "correlator",
+                    "calibrator_destination_port",
+                )
             )
             self.cfg_corr_calibrator_destination_enabled = int(
                 utils.read_config(
@@ -582,18 +584,16 @@ class MWAXSubfileDistributor:
                 sys.exit(1)
 
             self.cfg_metadatadb_host = utils.read_config(self.logger, self.config, "mwa metadata database", "host")
-
-            if self.cfg_metadatadb_host != mwax_db.DUMMY_DB:
-                self.cfg_metadatadb_db = utils.read_config(self.logger, self.config, "mwa metadata database", "db")
-                self.cfg_metadatadb_user = utils.read_config(self.logger, self.config, "mwa metadata database", "user")
-                self.cfg_metadatadb_pass = utils.read_config(
-                    self.logger,
-                    self.config,
-                    "mwa metadata database",
-                    "pass",
-                    True,
-                )
-                self.cfg_metadatadb_port = utils.read_config(self.logger, self.config, "mwa metadata database", "port")
+            self.cfg_metadatadb_db = utils.read_config(self.logger, self.config, "mwa metadata database", "db")
+            self.cfg_metadatadb_user = utils.read_config(self.logger, self.config, "mwa metadata database", "user")
+            self.cfg_metadatadb_pass = utils.read_config(
+                self.logger,
+                self.config,
+                "mwa metadata database",
+                "pass",
+                True,
+            )
+            self.cfg_metadatadb_port = int(utils.read_config(self.logger, self.config, "mwa metadata database", "port"))
 
             # Read config specific to this host
             self.cfg_corr_archive_destination_host = utils.read_config(
@@ -602,11 +602,13 @@ class MWAXSubfileDistributor:
                 self.hostname,
                 "mwax_destination_host",
             )
-            self.cfg_corr_archive_destination_port = utils.read_config(
-                self.logger,
-                self.config,
-                self.hostname,
-                "mwax_destination_port",
+            self.cfg_corr_archive_destination_port = int(
+                utils.read_config(
+                    self.logger,
+                    self.config,
+                    self.hostname,
+                    "mwax_destination_port",
+                )
             )
             self.cfg_corr_archive_destination_enabled = (
                 int(
@@ -846,7 +848,11 @@ class MWAXSubfileDistributor:
 
         # creating database connection pool(s)
         self.logger.info("Starting database connection pool...")
-        self.db_handler.start_database_pool()
+
+        if self.cfg_metadatadb_host != "dummy":
+            # Dont start it if we are "dummy"- we are probably doing
+            # a unit test which does not need a db
+            self.db_handler.start_database_pool()
 
         self.logger.info("MWAX Subfile Distributor started successfully.")
 

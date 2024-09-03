@@ -821,11 +821,6 @@ class MWAXArchiveProcessor:
                     worker_thread.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
-        # Close all database connections
-        if not self.db_handler_object.dummy:
-            if self.db_handler_object.pool:
-                self.db_handler_object.pool.closeall()
-
     def get_status(self) -> dict:
         """Returns a dictionary of status info from all processors"""
         watcher_list = []

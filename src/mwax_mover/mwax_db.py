@@ -5,8 +5,10 @@ import os
 import math
 import time
 from typing import Optional, Tuple
-import psycopg2
-import psycopg2.pool
+import psycopg
+import psycopg.errors
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -15,9 +17,6 @@ from tenacity import (
     retry_if_not_exception_type,
     retry_if_exception_type,
 )
-
-
-DUMMY_DB = "dummy"
 
 
 class MWAXDBHandler:
@@ -38,42 +37,26 @@ class MWAXDBHandler:
         self.db_name = db_name
         self.user = user
         self.password = password
-        self.dummy = self.host == DUMMY_DB
 
-        self.pool = None
+        self.pool = ConnectionPool(
+            min_size=1,
+            max_size=3,
+            open=False,
+            check=ConnectionPool.check_connection,
+            conninfo=f"postgresql://{user}:{password}@{host}:{port}/{db_name}",
+        )
 
     def start_database_pool(self):
-        # Check we're not a dummy db
-        if not self.dummy:
-            # Check we are not already started
-            if not self.pool:
-                self.pool = psycopg2.pool.ThreadedConnectionPool(
-                    1, 3, user=self.user, password=self.password, host=self.host, port=self.port, database=self.db_name
-                )
+        # Check we are not already started
+        if self.pool.closed:
+            self.pool.open(wait=True)
 
-    def select_one_row(self, sql: str, parm_list: list) -> int:
-        """
-        Returns a single row from SQL and params, handling
-        both the real and dummy database case.
-        """
-        if self.dummy:
-            return 1
-        else:
-            return self.select_one_row_postgres(sql, parm_list)
+    def stop_database_pool(self):
+        # Gracefully close the connections in the pool
+        if self.pool:
+            self.pool.close()
 
-    def select_many_rows(self, sql: str, parm_list: list) -> int:
-        """
-        Returns many rows from SQL and params, handling
-        both the real and dummy database case.
-        """
-        if self.dummy:
-            return [
-                1,
-            ]
-        else:
-            return self.select_many_rows_postgres(sql, parm_list)
-
-    def select_one_row_postgres(self, sql: str, parm_list: list):
+    def select_one_row_postgres(self, sql: str, parm_list: list | None):
         """Returns a single row from postgres given SQL and params"""
         # Assuming we have a connection, try to do the database operation
         rows = self.select_postgres(sql, parm_list, 1)
@@ -81,7 +64,7 @@ class MWAXDBHandler:
         # Just return the first row
         return rows[0]
 
-    def select_many_rows_postgres(self, sql: str, parm_list: list):
+    def select_many_rows_postgres(self, sql: str, parm_list: list | None):
         """Returns a single row from postgres given SQL and params"""
         # Assuming we have a connection, try to do the database operation
         rows = self.select_postgres(sql, parm_list, None)
@@ -90,14 +73,14 @@ class MWAXDBHandler:
         return rows
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(60))
-    def select_postgres(self, sql: str, parm_list: list, expected_rows: None | int):
+    def select_postgres(self, sql, parm_list: list | None, expected_rows: None | int):
         """Returns rows from postgres given SQL and params. If expected rows is passed
         then it will check it returned the correct number of rows and riase exception
         if not"""
         # Assuming we have a connection, try to do the database operation
         try:
             with self.pool.getconn() as conn:
-                with conn.cursor() as cursor:
+                with conn.cursor(row_factory=dict_row) as cursor:
                     # Run the sql
                     cursor.execute(sql, parm_list)
 
@@ -114,12 +97,10 @@ class MWAXDBHandler:
                         else:
                             # Something went wrong
                             self.logger.error(
-                                "select_one_row_postgres(): Error- queried"
-                                f" {rows_affected} rows, expected 1. SQL={sql}"
+                                "select_postgres(): Error- queried" f" {rows_affected} rows, expected 1. SQL={sql}"
                             )
                             raise Exception(
-                                "select_one_row_postgres(): Error- queried"
-                                f" {rows_affected} rows, expected 1. SQL={sql}"
+                                "select_postgres(): Error- queried" f" {rows_affected} rows, expected 1. SQL={sql}"
                             )
                     else:
                         # We don't know how many rows, so cool, return them
@@ -135,9 +116,9 @@ class MWAXDBHandler:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_fixed(30),
-        retry=retry_if_not_exception_type(psycopg2.errors.ForeignKeyViolation),
+        retry=retry_if_not_exception_type(psycopg.errors.ForeignKeyViolation),
     )
-    def execute_single_dml_row(self, sql: str, parm_list: list):
+    def execute_single_dml_row(self, sql: str, parm_list: list | None):
         """This executes an INSERT, UPDATE or DELETE that should affect 1
         row only. Since this is all in a with (context) block, rollback is
         called on failure and commit on success. Exceptions are raised on error."""
@@ -146,9 +127,9 @@ class MWAXDBHandler:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_fixed(30),
-        retry=retry_if_not_exception_type(psycopg2.errors.ForeignKeyViolation),
+        retry=retry_if_not_exception_type(psycopg.errors.ForeignKeyViolation),
     )
-    def execute_dml(self, sql: str, parm_list: list, expected_rows: None | int):
+    def execute_dml(self, sql, parm_list: list | None, expected_rows: None | int):
         """This executes an INSERT, UPDATE or DELETE that should affect 0,1 or many
         rows. Since this is all in a with (context) block, rollback is
         called on failure and commit on success. Exceptions are raised on error."""
@@ -179,7 +160,7 @@ class MWAXDBHandler:
                                 f" SQL={sql}"
                             )
 
-        except psycopg2.errors.ForeignKeyViolation:
+        except psycopg.errors.ForeignKeyViolation:
             # Trying to insert or update but a value of a field violates the FK constraint-
             # e.g. insert into data_files fails due to observation_num not existing in mwa_setting.starttime
             # We need to reraise the error so our caller can handle in this "insert_data_file_row" case!
@@ -239,12 +220,10 @@ class MWAXDBHandler:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_fixed(30),
-        retry=retry_if_not_exception_type(psycopg2.errors.ForeignKeyViolation)
-        | retry_if_not_exception_type(psycopg2.errors.UniqueViolation),
+        retry=retry_if_not_exception_type(psycopg.errors.ForeignKeyViolation)
+        | retry_if_not_exception_type(psycopg.errors.UniqueViolation),
     )
-    def execute_dml_row_within_transaction(
-        self, sql: str, parm_list: list, transaction_cursor: psycopg2.extensions.cursor
-    ):
+    def execute_dml_row_within_transaction(self, sql, parm_list: list, transaction_cursor: psycopg.Cursor):
         """This executes an INSERT, UPDATE or DELETE that should only affect
         one row.
 
@@ -295,7 +274,7 @@ class DataFileRow:
     """A class that abstracts the key fields of a MWA data_files row"""
 
     def __init__(self):
-        self.observation_num = ""
+        self.observation_num: int = 0
         self.size = -1
         self.checksum = ""
 
@@ -313,33 +292,24 @@ def get_data_file_row(db_handler_object, full_filename: str, obs_id: int) -> Dat
             FROM data_files
             WHERE filename = %s AND observation_num = %s"""
     try:
-        if db_handler_object.dummy:
-            db_handler_object.logger.warning(
-                f"{full_filename} get_data_file_row() Using dummy database"
-                " connection. No data is really being queried."
-            )
-            time.sleep(2)  # simulate a slow transaction
-            return None
-        else:
-            # Run query and get the data_files row info for this file
-            obsid, size, checksum = db_handler_object.select_one_row(
-                sql,
-                (
-                    filename,
-                    obs_id,
-                ),
-            )
+        # Run query and get the data_files row info for this file
+        obsid, size, checksum = db_handler_object.select_one_row_postgres(
+            sql,
+            (
+                filename,
+                obs_id,
+            ),
+        )
 
-            data_files_row = DataFileRow()
-            data_files_row.observation_num = int(obsid)
-            data_files_row.size = int(size)
-            data_files_row.checksum = checksum
+        data_files_row = DataFileRow()
+        data_files_row.observation_num = int(obsid)
+        data_files_row.size = int(size)
+        data_files_row.checksum = checksum
 
-            db_handler_object.logger.info(
-                f"{full_filename} get_data_file_row() Successfully read from"
-                f" data_files table {vars(data_files_row)}"
-            )
-            return data_files_row
+        db_handler_object.logger.info(
+            f"{full_filename} get_data_file_row() Successfully read from" f" data_files table {vars(data_files_row)}"
+        )
+        return data_files_row
 
     except Exception as select_exception:  # pylint: disable=broad-except
         db_handler_object.logger.error(
@@ -374,47 +344,37 @@ def insert_data_file_row(
     sql = ""
 
     try:
-        if db_handler_object.dummy:
-            db_handler_object.logger.debug(
-                f"{filename} insert_data_file_row() Using dummy database"
-                " connection. No data is really being inserted."
-            )
-            time.sleep(10)  # simulate a slow transaction
-            return True
-        else:
-            sql = """INSERT INTO data_files
-                (observation_num,
+        sql = """INSERT INTO data_files
+            (observation_num,
+            filetype,
+            size,
+            filename,
+            host,
+            remote_archived,
+            checksum_type,
+            checksum,
+            trigger_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+
+        db_handler_object.execute_single_dml_row(
+            sql,
+            (
+                str(obsid),
                 filetype,
-                size,
+                file_size,
                 filename,
-                host,
+                hostname,
                 remote_archived,
                 checksum_type,
                 checksum,
-                trigger_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                trigger_id,
+            ),
+        )
 
-            db_handler_object.execute_single_dml_row(
-                sql,
-                (
-                    str(obsid),
-                    filetype,
-                    file_size,
-                    filename,
-                    hostname,
-                    remote_archived,
-                    checksum_type,
-                    checksum,
-                    trigger_id,
-                ),
-            )
+        db_handler_object.logger.info(f"{filename} insert_data_file_row() Successfully wrote into" " data_files table")
+        return True
 
-            db_handler_object.logger.info(
-                f"{filename} insert_data_file_row() Successfully wrote into" " data_files table"
-            )
-            return True
-
-    except psycopg2.errors.ForeignKeyViolation:
+    except psycopg.errors.ForeignKeyViolation:
         # In this scenario it means M&C deleted the observation BUT the metafits was already generated
         # so mwax_u2s et al. thought it was still a real observation
         # we should just delete this file and move on
@@ -474,19 +434,10 @@ def update_data_file_row_as_archived(
             ),
         )
 
-        if db_handler_object.dummy:
-            db_handler_object.logger.debug(
-                f"{filename} update_data_file_row_as_archived() Using"
-                " dummy database connection. No data is really being"
-                " updated."
-            )
-            time.sleep(1)  # simulate a slow transaction
-            return True
-        else:
-            db_handler_object.logger.info(
-                f"{filename} update_data_file_row_as_archived() Successfully" " updated data_files table"
-            )
-            return True
+        db_handler_object.logger.info(
+            f"{filename} update_data_file_row_as_archived() Successfully" " updated data_files table"
+        )
+        return True
 
     except Exception:  # pylint: disable=broad-except
         db_handler_object.logger.exception(
@@ -500,11 +451,11 @@ def update_data_file_row_as_archived(
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_random(10, 60),
-    retry=retry_if_exception_type(psycopg2.errors.UniqueViolation),
+    retry=retry_if_exception_type(psycopg.errors.UniqueViolation),
 )
 def insert_calibration_fits_row(
     db_handler_object,
-    transaction_cursor: Optional[psycopg2.extensions.cursor],
+    transaction_cursor: Optional[psycopg.Cursor],
     obs_id: int,
     code_version: str,
     creator: str,
@@ -536,10 +487,6 @@ def insert_calibration_fits_row(
         fit_limit,
     )
 
-    if db_handler_object.dummy:
-        time.sleep(1)  # simulate a slow transaction
-        return (True, fit_id)
-
     try:
         db_handler_object.execute_dml_row_within_transaction(sql, sql_values, transaction_cursor)
 
@@ -549,7 +496,7 @@ def insert_calibration_fits_row(
         )
         return (True, fit_id)
 
-    except psycopg2.errors.UniqueViolation:
+    except psycopg.errors.UniqueViolation:
         # We have a collision with fit_id- since it is the PK of the table and
         # it is just the integer UNIX timestep (down to 1 second resolution) it
         # is unlikely, but POSSIBLE to have a conflict if another calvin is
@@ -575,7 +522,7 @@ def insert_calibration_fits_row(
 
 def insert_calibration_solutions_row(
     db_handler_object,
-    transaction_cursor: Optional[psycopg2.extensions.cursor],
+    transaction_cursor: Optional[psycopg.Cursor],
     fit_id: int,
     obs_id: int,
     tile_id: int,
@@ -602,14 +549,9 @@ def insert_calibration_solutions_row(
 ) -> bool:
     """Insert a  calibration_solutions row.
     This row represents the calibration solution for a tile/obsid.
-    Unless using a DUMMY db_handler object, we assume that caller is
-    passing in a valid transaction cursor (psycopg2.cursor) which means
+    We assume that caller is passing in a valid transaction cursor which means
     the caller has to manage commiting or rolling back the fit, plus
     1..n calibration_solutions rows."""
-
-    if db_handler_object.dummy:
-        time.sleep(1)  # simulate a slow transaction
-        return True
 
     sql = """INSERT INTO calibration_solutions (fitid,obsid,tileid,
                                                 x_delay_m,x_intercept,x_gains,
@@ -695,10 +637,6 @@ def get_this_hosts_previously_started_download_requests(db_handler_object: MWAXD
     ORDER BY c.request_added_datetime;
     """
 
-    if db_handler_object.dummy:
-        time.sleep(1)  # simulate a slow transaction
-        return None
-
     try:
         return db_handler_object.select_many_rows_postgres(
             sql,
@@ -724,10 +662,6 @@ def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str
     Returns:
             Tuple(request_id, cal_id) OR None if none found. Raises exceptions on error
     """
-
-    if db_handler_object.dummy:
-        time.sleep(1)  # simulate a slow transaction
-        return None
 
     sql_get = """
     SELECT c.id, c.cal_id
@@ -792,6 +726,8 @@ def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str
             )
             return None
 
+        transaction_cursor.row_factory = dict_row
+
         # We got one!
         request_id: int = int(results_rows[0][0])
         cal_id: int = int(results_rows[0][1])
@@ -821,9 +757,8 @@ def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str
         raise
 
     finally:
-        if not db_handler_object.dummy:
-            if db_handler_object.pool:
-                db_handler_object.pool.putconn(conn)
+        if db_handler_object.pool:
+            db_handler_object.pool.putconn(conn)
 
 
 def update_calsolution_request_submit_mwa_asvo_job(
@@ -851,10 +786,6 @@ def update_calsolution_request_submit_mwa_asvo_job(
         download_mwa_asvo_job_id = %s
     WHERE
     id = ANY(%s)"""
-
-    if db_handler_object.dummy:
-        time.sleep(1)  # simulate a transaction
-        return
 
     try:
         params = [mwa_asvo_submitted_datetime, mwa_asvo_job_id, request_ids]
@@ -899,10 +830,6 @@ def update_calsolution_request_download_started_status(
         download_error_message = NULL
     WHERE
     id = ANY(%s)"""
-
-    if db_handler_object.dummy:
-        time.sleep(1)  # simulate a transaction
-        return
 
     try:
         params = [download_started_datetime, request_ids]
@@ -966,10 +893,6 @@ def update_calsolution_request_download_complete_status(
             f"{download_completed_datetime, download_error_datetime, download_error_message}"
         )
 
-    if db_handler_object.dummy:
-        time.sleep(1)  # simulate a transaction
-        return
-
     try:
         params = [download_completed_datetime, download_error_datetime, download_error_message, request_ids]
 
@@ -1005,7 +928,7 @@ def get_incomplete_request_ids_for_obsid(db_handler_object: MWAXDBHandler, obs_i
 
     # Return a list or None if no rows
     if len(rows) > 0:
-        return [r[0] for r in rows]
+        return [r["id"] for r in rows]
     else:
         return None
 
@@ -1039,10 +962,6 @@ def update_calsolution_request_calibration_started_status(
         calibration_error_message = NULL
     WHERE
     id = ANY(%s)"""
-
-    if db_handler_object.dummy:
-        time.sleep(1)  # simulate a transaction
-        return
 
     # calvin_processor won't know the requestids so get them (if any!)
     if request_ids is None:
@@ -1131,10 +1050,6 @@ def update_calsolution_request_calibration_complete_status(
             "calibration_completed_datetime and calibration_fit_id are mutually exclusive with "
             "calibration_error_datetime and calibration_error_message"
         )
-
-    if db_handler_object.dummy:
-        time.sleep(1)  # simulate a transaction
-        return
 
     # calvin_processor won't know the requestids so get them (if any!)
     if request_ids is None:

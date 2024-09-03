@@ -37,7 +37,7 @@ class MWACacheArchiveProcessor:
     """
 
     def __init__(self):
-        self.logger = None
+        self.logger: logging.Logger
 
         self.hostname = None
         self.log_path = None
@@ -48,13 +48,13 @@ class MWACacheArchiveProcessor:
         self.recursive = None
 
         # database config
-        self.remote_metadatadb_db = None
+        self.remote_metadatadb_db: mwax_db.MWAXDBHandler
         self.remote_metadatadb_host = None
         self.remote_metadatadb_user = None
         self.remote_metadatadb_pass = None
         self.remote_metadatadb_port = None
 
-        self.mro_metadatadb_db = None
+        self.mro_metadatadb_db: mwax_db.MWAXDBHandler
         self.mro_metadatadb_host = None
         self.mro_metadatadb_user = None
         self.mro_metadatadb_pass = None
@@ -349,9 +349,8 @@ class MWACacheArchiveProcessor:
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
         # Close all database connections
-        if not self.db_handler_object.dummy:
-            if self.db_handler_object.pool:
-                self.db_handler_object.pool.closeall()
+        self.remote_db_handler_object.stop_database_pool()
+        self.mro_db_handler_object.stop_database_pool()
 
     def health_handler(self):
         """Send multicast health data"""
@@ -593,16 +592,10 @@ class MWACacheArchiveProcessor:
         #
         self.mro_metadatadb_host = utils.read_config(self.logger, config, "mro metadata database", "host")
 
-        if self.mro_metadatadb_host != mwax_db.DUMMY_DB:
-            self.mro_metadatadb_db = utils.read_config(self.logger, config, "mro metadata database", "db")
-            self.mro_metadatadb_user = utils.read_config(self.logger, config, "mro metadata database", "user")
-            self.mro_metadatadb_pass = utils.read_config(self.logger, config, "mro metadata database", "pass", True)
-            self.mro_metadatadb_port = utils.read_config(self.logger, config, "mro metadata database", "port")
-        else:
-            self.mro_metadatadb_db = None
-            self.mro_metadatadb_user = None
-            self.mro_metadatadb_pass = None
-            self.mro_metadatadb_port = None
+        self.mro_metadatadb_db = utils.read_config(self.logger, config, "mro metadata database", "db")
+        self.mro_metadatadb_user = utils.read_config(self.logger, config, "mro metadata database", "user")
+        self.mro_metadatadb_pass = utils.read_config(self.logger, config, "mro metadata database", "pass", True)
+        self.mro_metadatadb_port = int(utils.read_config(self.logger, config, "mro metadata database", "port"))
 
         # Initiate database connection for rmo metadata db
         self.mro_db_handler_object = mwax_db.MWAXDBHandler(
@@ -620,18 +613,10 @@ class MWACacheArchiveProcessor:
         #
         self.remote_metadatadb_host = utils.read_config(self.logger, config, "remote metadata database", "host")
 
-        if self.remote_metadatadb_host != mwax_db.DUMMY_DB:
-            self.remote_metadatadb_db = utils.read_config(self.logger, config, "remote metadata database", "db")
-            self.remote_metadatadb_user = utils.read_config(self.logger, config, "remote metadata database", "user")
-            self.remote_metadatadb_pass = utils.read_config(
-                self.logger, config, "remote metadata database", "pass", True
-            )
-            self.remote_metadatadb_port = utils.read_config(self.logger, config, "remote metadata database", "port")
-        else:
-            self.remote_metadatadb_db = None
-            self.remote_metadatadb_user = None
-            self.remote_metadatadb_pass = None
-            self.remote_metadatadb_port = None
+        self.remote_metadatadb_db = utils.read_config(self.logger, config, "remote metadata database", "db")
+        self.remote_metadatadb_user = utils.read_config(self.logger, config, "remote metadata database", "user")
+        self.remote_metadatadb_pass = utils.read_config(self.logger, config, "remote metadata database", "pass", True)
+        self.remote_metadatadb_port = int(utils.read_config(self.logger, config, "remote metadata database", "port"))
 
         # Initiate database connection for remote metadata db
         self.remote_db_handler_object = mwax_db.MWAXDBHandler(

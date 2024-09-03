@@ -2,6 +2,7 @@
 This is to test if MWAXSubfileDistributor correctly reads the tonnes of
 config correctly from a "beamformer" config file.
 """
+
 import os
 from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
 
@@ -46,9 +47,7 @@ def setup_test_dirs():
     check_and_make_dir(voltdata_outgoing_path)
 
     # voltdata_dont_archive_path
-    voltdata_dont_archive_path = os.path.join(
-        base_dir, "voltdata_dont_archive"
-    )
+    voltdata_dont_archive_path = os.path.join(base_dir, "voltdata_dont_archive")
     check_and_make_dir(voltdata_dont_archive_path)
 
     # fil_outgoing_path
@@ -80,21 +79,15 @@ def test_beamformer_config_file():
 
     # mwax_mover section
     assert msd.cfg_log_path == os.path.join(base_dir, "logs")
-    assert msd.cfg_webserver_port == "9998"
+    assert msd.cfg_webserver_port == 9998
     assert msd.cfg_health_multicast_interface_name == "eth0"
     assert msd.cfg_health_multicast_ip == "224.234.0.0"
     assert msd.cfg_health_multicast_port == 8666
     assert msd.cfg_health_multicast_hops == 1
     assert msd.cfg_subfile_incoming_path == os.path.join(base_dir, "dev_shm")
-    assert msd.cfg_voltdata_incoming_path == os.path.join(
-        base_dir, "voltdata_incoming"
-    )
-    assert msd.cfg_voltdata_outgoing_path == os.path.join(
-        base_dir, "voltdata_outgoing"
-    )
-    assert msd.cfg_voltdata_dont_archive_path == os.path.join(
-        base_dir, "voltdata_dont_archive"
-    )
+    assert msd.cfg_voltdata_incoming_path == os.path.join(base_dir, "voltdata_incoming")
+    assert msd.cfg_voltdata_outgoing_path == os.path.join(base_dir, "voltdata_outgoing")
+    assert msd.cfg_voltdata_dont_archive_path == os.path.join(base_dir, "voltdata_dont_archive")
     assert msd.cfg_always_keep_subfiles == 0
     assert msd.cfg_archive_command_timeout_sec == 300
     assert msd.cfg_psrdada_timeout_sec == 32
@@ -107,13 +100,8 @@ def test_beamformer_config_file():
     assert msd.cfg_bf_settings_path == TEST_BEAMFORMER_SETTINGS_FILE
 
     # test_server section
-    assert (
-        msd.cfg_bf_archive_destination_host
-        == "host2.destination.com://dest/path"
-    )
-    assert msd.cfg_bf_archive_destination_port == "1094"
-    assert (
-        msd.cfg_bf_archive_destination_enabled is False
-    )  # this is due to archiving enabled=0
+    assert msd.cfg_bf_archive_destination_host == "host2.destination.com://dest/path"
+    assert msd.cfg_bf_archive_destination_port == 1094
+    assert msd.cfg_bf_archive_destination_enabled is False  # this is due to archiving enabled=0
     assert msd.cfg_bf_numa_node == -1
     assert msd.cfg_bf_archive_command_numa_node == -1

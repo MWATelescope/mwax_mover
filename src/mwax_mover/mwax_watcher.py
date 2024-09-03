@@ -24,7 +24,7 @@ class Watcher(object):
     ):
         self.logger = log
         self.name = name
-        self.inotify_tree = None
+        self.inotify_tree: inotify.adapters.Inotify | inotify.adapters.InotifyTree
         self.recursive = recursive
         self.mode = mode
         self.path = path
@@ -68,9 +68,9 @@ class Watcher(object):
         self.watching = False
 
         if self.recursive:
-            self.inotify_tree = None
+            pass
         else:
-            self.inotify_tree.remove_watch(self.path)
+            self.inotify_tree.remove_watch(self.path)  # type: ignore
 
     def do_watch_loop(self):
         """ "Initiate watching"""
@@ -93,7 +93,7 @@ class Watcher(object):
 
         while self.watching:
             for event in self.inotify_tree.event_gen(timeout_s=0.1, yield_nones=False):
-                (header, _, path, filename) = event
+                (header, _, path, filename) = event  # type: ignore
 
                 # check event is one we care about
                 if header.mask | self.mask == self.mask:

@@ -27,7 +27,6 @@ from mwax_mover import (
     mwax_db,
 )
 import numpy as np
-from pandas import DataFrame
 import traceback
 import coloredlogs
 
@@ -38,8 +37,6 @@ from mwax_mover.mwax_calvin_utils import (
     HyperfitsSolutionGroup,
     Metafits,
     debug_phase_fits,
-    fit_phase_line,
-    fit_gain,
     PhaseFitInfo,
     GainFitInfo,
     write_readme_file,
@@ -64,7 +61,7 @@ class MWAXCalvinProcessor:
         self.logger = logging.getLogger(__name__)
         self.log_path = None
         self.hostname = None
-        self.db_handler_object = None
+        self.db_handler_object: mwax_db.MWAXDBHandler
 
         # health
         self.health_multicast_interface_ip = None
@@ -666,76 +663,6 @@ class MWAXCalvinProcessor:
         self.upload_queue.put(item)
         self.logger.info(f"{item} added to upload_queue." f" ({self.upload_queue.qsize()}) in queue.")
 
-    def process_phase_fits(
-        self, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
-    ):
-        """
-        Fit a line to each tile phase solution, return a dataframe of phase fit parameters for each
-        tile and pol
-        """
-        fits = []
-        phase_diff_path = os.path.join(item, "phase_diff.txt")
-        # by default we don't want to apply any phase rotation.
-        phase_diff = np.full((len(chanblocks_hz),), 1.0, dtype=np.complex128)
-        if os.path.exists(phase_diff_path):
-            # phase_diff_raw is an array, first column is frequency, second column is phase difference
-            phase_diff_raw = np.loadtxt(phase_diff_path)
-            for i, chanblock_hz in enumerate(chanblocks_hz):
-                # find the closest frequency in phase_diff_raw
-                idx = np.abs(phase_diff_raw[:, 0] - chanblock_hz).argmin()
-                diff = phase_diff_raw[idx, 1]
-                phase_diff[i] = np.exp(-1j * diff)
-
-        for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
-            for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
-                id_matches = tiles[tiles.id == tile_id]
-                if len(id_matches) != 1:
-                    continue
-                tile = id_matches.iloc[0]
-                if tile.flag:
-                    continue
-                name = tile.name
-                if tile.flavor.endswith("-NI"):
-                    solns *= phase_diff
-                # else:
-                #     continue
-                try:
-                    fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)
-                except Exception as exc:
-                    self.logger.error(f"{item} - {tile_id=:4} {pol} ({name}) {exc}")
-                    continue
-                self.logger.debug(f"{item} - {tile_id=:4} {pol} ({name}) {fit=}")
-                fits.append([tile_id, soln_idx, pol, *fit])
-
-        return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])
-
-    def process_gain_fits(
-        self, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, chanblocks_per_coarse
-    ):
-        """
-        for each tile, pol, fit a GainFitInfo to the gains
-        """
-        fits = []
-        for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
-            for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
-                id_matches = tiles[tiles.id == tile_id]
-                if len(id_matches) != 1:
-                    continue
-                tile = id_matches.iloc[0]
-                if tile.flag:
-                    continue
-                name = tile.name
-                try:
-                    fit = fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse)
-                except Exception as exc:
-                    self.logger.error(f"{item} - {tile_id=:4} {pol} ({name}) {exc}")
-                    continue
-                self.logger.debug(f"{item} - {tile_id=:4} {pol} ({name}) {fit=}")
-                fits.append([tile_id, soln_idx, pol, *fit])
-        self.logger.warning("TODO: fake gain fits!")
-
-        return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *GainFitInfo._fields])
-
     def upload_handler(self, item: str) -> bool:
         """Will deal with completed hyperdrive solutions
         by getting them into a format we can insert into
@@ -803,7 +730,8 @@ class MWAXCalvinProcessor:
 
             weights = soln_group.weights
 
-            phase_fits = self.process_phase_fits(
+            phase_fits = mwax_calvin_utils.process_phase_fits(
+                self.logger,
                 item,
                 unflagged_tiles,
                 all_chanblocks_hz,
@@ -813,7 +741,8 @@ class MWAXCalvinProcessor:
                 soln_tile_ids,
                 self.phase_fit_niter,
             )
-            gain_fits = self.process_gain_fits(
+            gain_fits = mwax_calvin_utils.process_gain_fits(
+                self.logger,
                 item,
                 unflagged_tiles,
                 all_chanblocks_hz,
@@ -846,11 +775,10 @@ class MWAXCalvinProcessor:
 
             # get a database connection, unless we are using dummy connection (for testing)
             transaction_cursor = None
-            if not self.db_handler_object.dummy:
-                conn = self.db_handler_object.pool.getconn()
+            conn = self.db_handler_object.pool.getconn()
 
-                # Create a cursor
-                transaction_cursor = conn.cursor()
+            # Create a cursor
+            transaction_cursor = conn.cursor()
 
             (success, fit_id) = insert_calibration_fits_row(
                 self.db_handler_object,
@@ -1020,9 +948,8 @@ class MWAXCalvinProcessor:
 
             return False
         finally:
-            if not self.db_handler_object.dummy:
-                if conn:
-                    self.db_handler_object.pool.putconn(conn)
+            if conn:
+                self.db_handler_object.pool.putconn(conn)
 
     def stop(self):
         """Shutsdown all processes"""
@@ -1060,10 +987,7 @@ class MWAXCalvinProcessor:
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
         # Close all database connections
-        if not self.db_handler_object.dummy:
-            if self.db_handler_object.pool:
-                if not self.db_handler_object.pool.closed:
-                    self.db_handler_object.pool.closeall()
+        self.db_handler_object.stop_database_pool()
 
         self.ready_to_exit = True
 
@@ -1184,17 +1108,10 @@ class MWAXCalvinProcessor:
         # MRO database
         #
         self.mro_metadatadb_host = utils.read_config(self.logger, config, "mro metadata database", "host")
-
-        if self.mro_metadatadb_host != mwax_db.DUMMY_DB:
-            self.mro_metadatadb_db = utils.read_config(self.logger, config, "mro metadata database", "db")
-            self.mro_metadatadb_user = utils.read_config(self.logger, config, "mro metadata database", "user")
-            self.mro_metadatadb_pass = utils.read_config(self.logger, config, "mro metadata database", "pass", True)
-            self.mro_metadatadb_port = utils.read_config(self.logger, config, "mro metadata database", "port")
-        else:
-            self.mro_metadatadb_db = None
-            self.mro_metadatadb_user = None
-            self.mro_metadatadb_pass = None
-            self.mro_metadatadb_port = None
+        self.mro_metadatadb_db = utils.read_config(self.logger, config, "mro metadata database", "db")
+        self.mro_metadatadb_user = utils.read_config(self.logger, config, "mro metadata database", "user")
+        self.mro_metadatadb_pass = utils.read_config(self.logger, config, "mro metadata database", "pass", True)
+        self.mro_metadatadb_port = utils.read_config(self.logger, config, "mro metadata database", "port")
 
         # Initiate database connection for rmo metadata db
         self.db_handler_object = mwax_db.MWAXDBHandler(
