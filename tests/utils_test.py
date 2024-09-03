@@ -299,11 +299,14 @@ def test_scan_directory():
     list_of_files = utils.scan_directory(logger, watch_dir, pattern, recursive, exclude_pattern=None)
 
     assert len(list_of_files) == 2
-    assert list_of_files[0] == os.path.join(
-        os.getcwd(),
-        os.path.join(watch_dir, "1244973688_20190619100110_ch114_000.fits"),
+    assert (
+        os.path.join(
+            os.getcwd(),
+            os.path.join(watch_dir, "1244973688_20190619100110_ch114_000.fits"),
+        )
+        in list_of_files
     )
-    assert list_of_files[1] == os.path.join(os.getcwd(), os.path.join(watch_dir, "1244973688_metafits.fits"))
+    assert os.path.join(os.getcwd(), os.path.join(watch_dir, "1244973688_metafits.fits")) in list_of_files
 
 
 def test_get_priority_correlator_calibrator():

@@ -114,7 +114,7 @@ def test_get_status_from_giant_squid_stdout_invalid():
 
 
 def test_mwax_asvo_helper():
-    asvo = MWAASVOHelper()
+    asvo: MWAASVOHelper = MWAASVOHelper()
     logger = logging.getLogger(__name__)
 
     asvo.initialise(
@@ -125,12 +125,12 @@ def test_mwax_asvo_helper():
         3600,
         "/tmp",
     )
-    asvo.submit_download_job(1354865168)
+    asvo.submit_download_job(0, 1354865168)
 
     running = True
 
     while running:
-        asvo.update_all_job_status(False)
+        asvo.update_all_job_status()
 
         for job in asvo.current_asvo_jobs:
             if job.obs_id == 1354865168 and job.job_state == MWAASVOJobState.Ready:
