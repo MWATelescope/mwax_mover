@@ -775,109 +775,100 @@ class MWAXCalvinProcessor:
 
             # get a database connection, unless we are using dummy connection (for testing)
             transaction_cursor = None
-            conn = self.db_handler_object.pool.getconn()
+            with self.db_handler_object.pool.getconn() as conn:
+                # Start a transaction
+                with conn.transaction():
+                    # Create a cursor
+                    transaction_cursor = conn.cursor()
 
-            # Create a cursor
-            transaction_cursor = conn.cursor()
+                    (success, fit_id) = insert_calibration_fits_row(
+                        self.db_handler_object,
+                        transaction_cursor,
+                        obs_id=obs_id,
+                        code_version=version.get_mwax_mover_version_string(),
+                        creator="calvin",
+                        fit_niter=self.phase_fit_niter,
+                        fit_limit=20,
+                    )
 
-            (success, fit_id) = insert_calibration_fits_row(
-                self.db_handler_object,
-                transaction_cursor,
-                obs_id=obs_id,
-                code_version=version.get_mwax_mover_version_string(),
-                creator="calvin",
-                fit_niter=self.phase_fit_niter,
-                fit_limit=20,
-            )
+                    if not success:
+                        self.logger.error(f"{item} - failed to insert calibration fit")
 
-            if not success:
-                self.logger.error(f"{item} - failed to insert calibration fit")
+                        # This will trigger a rollback of the calibration_fit row
+                        raise Exception(f"{item} - failed to insert calibration fit")
 
-                if transaction_cursor:
-                    # Rollback the calibration_fit row
-                    conn.rollback()
-                    # close the cursor
-                    transaction_cursor.close()
-                raise Exception(f"{item} - failed to insert calibration fit")
+                    for tile_id in soln_tile_ids:
+                        some_fits = False
+                        try:
+                            x_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "XX")].iloc[0]
+                            some_fits = True
+                        except IndexError:
+                            x_gains = GainFitInfo.nan()
 
-            for tile_id in soln_tile_ids:
-                some_fits = False
-                try:
-                    x_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "XX")].iloc[0]
-                    some_fits = True
-                except IndexError:
-                    x_gains = GainFitInfo.nan()
+                        try:
+                            y_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "YY")].iloc[0]
+                            some_fits = True
+                        except IndexError:
+                            y_gains = GainFitInfo.nan()
 
-                try:
-                    y_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "YY")].iloc[0]
-                    some_fits = True
-                except IndexError:
-                    y_gains = GainFitInfo.nan()
+                        try:
+                            x_phase = phase_fits[(phase_fits.tile_id == tile_id) & (phase_fits.pol == "XX")].iloc[0]
+                            some_fits = True
+                        except IndexError:
+                            x_phase = PhaseFitInfo.nan()
 
-                try:
-                    x_phase = phase_fits[(phase_fits.tile_id == tile_id) & (phase_fits.pol == "XX")].iloc[0]
-                    some_fits = True
-                except IndexError:
-                    x_phase = PhaseFitInfo.nan()
+                        try:
+                            y_phase = phase_fits[(phase_fits.tile_id == tile_id) & (phase_fits.pol == "YY")].iloc[0]
+                            some_fits = True
+                        except IndexError:
+                            y_phase = PhaseFitInfo.nan()
 
-                try:
-                    y_phase = phase_fits[(phase_fits.tile_id == tile_id) & (phase_fits.pol == "YY")].iloc[0]
-                    some_fits = True
-                except IndexError:
-                    y_phase = PhaseFitInfo.nan()
+                        if not some_fits:
+                            # we could `continue` here, which avoids inserting an empty row in the
+                            # database, however we want to stick to the old behaviour for now.
+                            # continue
+                            pass
 
-                if not some_fits:
-                    # we could `continue` here, which avoids inserting an empty row in the
-                    # database, however we want to stick to the old behaviour for now.
-                    # continue
-                    pass
+                        success = insert_calibration_solutions_row(
+                            self.db_handler_object,
+                            transaction_cursor,
+                            int(fit_id),
+                            int(obs_id),
+                            int(tile_id),
+                            -1 * x_phase.length,  # legacy calibration pipeline used inverse convention
+                            x_phase.intercept,
+                            x_gains.gains,
+                            -1 * y_phase.length,  # legacy calibration pipeline used inverse convention
+                            y_phase.intercept,
+                            y_gains.gains,
+                            x_gains.pol1,
+                            y_gains.pol1,
+                            x_phase.sigma_resid,
+                            x_phase.chi2dof,
+                            x_phase.quality,
+                            y_phase.sigma_resid,
+                            y_phase.chi2dof,
+                            y_phase.quality,
+                            x_gains.quality,
+                            y_gains.quality,
+                            x_gains.sigma_resid,
+                            y_gains.sigma_resid,
+                            x_gains.pol0,
+                            y_gains.pol0,
+                        )
 
-                success = insert_calibration_solutions_row(
-                    self.db_handler_object,
-                    transaction_cursor,
-                    int(fit_id),
-                    int(obs_id),
-                    int(tile_id),
-                    -1 * x_phase.length,  # legacy calibration pipeline used inverse convention
-                    x_phase.intercept,
-                    x_gains.gains,
-                    -1 * y_phase.length,  # legacy calibration pipeline used inverse convention
-                    y_phase.intercept,
-                    y_gains.gains,
-                    x_gains.pol1,
-                    y_gains.pol1,
-                    x_phase.sigma_resid,
-                    x_phase.chi2dof,
-                    x_phase.quality,
-                    y_phase.sigma_resid,
-                    y_phase.chi2dof,
-                    y_phase.quality,
-                    x_gains.quality,
-                    y_gains.quality,
-                    x_gains.sigma_resid,
-                    y_gains.sigma_resid,
-                    x_gains.pol0,
-                    y_gains.pol0,
-                )
+                        if not success:
+                            self.logger.error(f"{item} - failed to insert calibration solution for tile {tile_id}")
 
-                if not success:
-                    self.logger.error(f"{item} - failed to insert calibration solution for tile {tile_id}")
-                    if transaction_cursor:
-                        # Rollback the calibration_fit row and any solutions rows already inserted
-                        transaction_cursor.connection.rollback()
-                        # close the cursor
-                        transaction_cursor.close()
+                            # This will trigger a rollback of the calibration_fit row and any
+                            # calibration_solutions child rows
+                            raise Exception(f"{item} - failed to insert calibration solution for tile {tile_id}")
 
-                    raise Exception(f"{item} - failed to insert calibration solution for tile {tile_id}")
+            # if we get here, the whole calibration solution was inserted ok.
+            # The transaction context will commit the transation
 
             # on success move to complete
             if success:
-                # The whole calibration solution was inserted ok. Commit the transation
-                # unless we are a dummy db_handler
-                if transaction_cursor:
-                    transaction_cursor.connection.commit()
-                    transaction_cursor.close()
-
                 #
                 # now move the whole dir to the complete path: obsid/datetime
                 #

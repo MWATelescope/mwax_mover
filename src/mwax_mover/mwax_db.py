@@ -703,7 +703,7 @@ def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str
         with db_handler_object.pool.getconn() as conn:
             # Create a cursor
             with conn.cursor() as cursor:
-                with cursor.transaction():
+                with conn.transaction():
                     # Get the next request, if any
                     results_rows = db_handler_object.select_postgres_within_transaction(
                         sql_get,
