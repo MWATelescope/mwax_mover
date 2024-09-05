@@ -319,6 +319,11 @@ class MWAASVOHelper:
                     f"_run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. "
                     f"Error code: {error_code_str} {stdout}"
                 )
+            elif "Your job cannot be submitted as the archive location of the observation is down" in stdout:
+                raise GiantSquidMWAASVOOutageException(
+                    "Unable to communicate with MWA ASVO- the archive location is down"
+                )
+
             elif "outage" in stdout:
                 # Outage message looks like this:
                 # 'Error: The server responded with status code 0, message:
