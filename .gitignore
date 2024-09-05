@@ -14,6 +14,9 @@ tests/mock_mwax_calvin_test02
 tests/mock_mwax_calvin_test03
 tests/mock_mwax_calvin_test04
 tests/mock_mwax_dump
+tests/data/solution_handler_*
+tests/data/1119683928/
+tests/data/1184928224/
 logs
 .coverage
 .pylintrc
