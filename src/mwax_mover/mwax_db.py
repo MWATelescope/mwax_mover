@@ -700,65 +700,51 @@ def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str
 
     try:
         # get the connection
-        conn = db_handler_object.pool.getconn()
+        with db_handler_object.pool.getconn() as conn:
+            # Create a cursor
+            with conn.cursor() as cursor:
+                with cursor.transaction():
+                    # Get the next request, if any
+                    results_rows = db_handler_object.select_postgres_within_transaction(
+                        sql_get,
+                        parm_list=[
+                            hostname,
+                        ],
+                        expected_rows=None,
+                        transaction_cursor=cursor,
+                    )
 
-        # Create a cursor
-        transaction_cursor = conn.cursor()
+                    if len(results_rows) == 0:
+                        db_handler_object.logger.debug(
+                            "assign_next_unattempted_calsolution_request(): No requests to process."
+                        )
+                        return None
 
-        # Get the next request, if any
-        results_rows = db_handler_object.select_postgres_within_transaction(
-            sql_get,
-            parm_list=[
-                hostname,
-            ],
-            expected_rows=None,
-            transaction_cursor=transaction_cursor,
-        )
+                    if len(results_rows) > 1:
+                        db_handler_object.logger.error(
+                            "assign_next_unattempted_calsolution_request(): Error- expected 1 row, but "
+                            f"retrieved {len(results_rows)} rows"
+                        )
+                        return None
 
-        if len(results_rows) == 0:
-            db_handler_object.logger.debug("assign_next_unattempted_calsolution_request(): No requests to process.")
-            return None
+                    cursor.row_factory = dict_row
 
-        if len(results_rows) > 1:
-            db_handler_object.logger.error(
-                "assign_next_unattempted_calsolution_request(): Error- expected 1 row, but "
-                f"retrieved {len(results_rows)} rows"
-            )
-            return None
+                    # We got one!
+                    request_id: int = int(results_rows[0][0])
+                    cal_id: int = int(results_rows[0][1])
 
-        transaction_cursor.row_factory = dict_row
-
-        # We got one!
-        request_id: int = int(results_rows[0][0])
-        cal_id: int = int(results_rows[0][1])
-
-        # Update the row, so no one else does!
-        db_handler_object.execute_dml_row_within_transaction(
-            sql_update,
-            parm_list=[hostname, request_id],
-            transaction_cursor=transaction_cursor,
-        )
-
-        if transaction_cursor:
-            # commit the transaction
-            transaction_cursor.connection.commit()
-            # close the cursor
-            transaction_cursor.close()
+                    # Update the row, so no one else does!
+                    db_handler_object.execute_dml_row_within_transaction(
+                        sql_update,
+                        parm_list=[hostname, request_id],
+                        transaction_cursor=cursor,
+                    )
 
         return request_id, cal_id
 
     except Exception:
         db_handler_object.logger.exception("select_unattempted_calsolution_requests(): Exception")
-        if transaction_cursor:
-            # Rollback the transaction
-            transaction_cursor.connection.rollback()
-            # close the cursor
-            transaction_cursor.close()
         raise
-
-    finally:
-        if db_handler_object.pool:
-            db_handler_object.pool.putconn(conn)
 
 
 def update_calsolution_request_submit_mwa_asvo_job(
