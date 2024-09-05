@@ -938,9 +938,6 @@ class MWAXCalvinProcessor:
             self.upload_error_count += 1
 
             return False
-        finally:
-            if conn:
-                self.db_handler_object.pool.putconn(conn)
 
     def stop(self):
         """Shutsdown all processes"""

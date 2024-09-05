@@ -109,9 +109,6 @@ class MWAXDBHandler:
         except Exception:
             self.logger.exception("select_postgres(): postgres exception")
             raise
-        finally:
-            if conn:
-                self.pool.putconn(conn)
 
     @retry(
         stop=stop_after_attempt(3),
@@ -173,9 +170,6 @@ class MWAXDBHandler:
             # connection based
             self.logger.exception("execute_dml(): postgres Exception")
             raise
-        finally:
-            if conn:
-                self.pool.putconn(conn)
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(60))
     def select_postgres_within_transaction(
