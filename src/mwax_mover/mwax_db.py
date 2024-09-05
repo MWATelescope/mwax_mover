@@ -79,7 +79,7 @@ class MWAXDBHandler:
         if not"""
         # Assuming we have a connection, try to do the database operation
         try:
-            with self.pool.getconn() as conn:
+            with self.pool.connection() as conn:
                 with conn.cursor(row_factory=dict_row) as cursor:
                     # Run the sql
                     cursor.execute(sql, parm_list)
@@ -136,7 +136,7 @@ class MWAXDBHandler:
 
         # Assuming we have a connection, try to do the database operation
         try:
-            with self.pool.getconn() as conn:
+            with self.pool.connection() as conn:
                 with conn.cursor() as cursor:
                     # Run the sql
                     cursor.execute(sql, parm_list)
@@ -700,7 +700,7 @@ def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str
 
     try:
         # get the connection
-        with db_handler_object.pool.getconn() as conn:
+        with db_handler_object.pool.connection() as conn:
             # Create a cursor
             with conn.cursor() as cursor:
                 with conn.transaction():

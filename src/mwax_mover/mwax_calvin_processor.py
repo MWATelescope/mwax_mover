@@ -775,7 +775,7 @@ class MWAXCalvinProcessor:
 
             # get a database connection, unless we are using dummy connection (for testing)
             transaction_cursor = None
-            with self.db_handler_object.pool.getconn() as conn:
+            with self.db_handler_object.pool.connection() as conn:
                 # Start a transaction
                 with conn.transaction():
                     # Create a cursor
