@@ -268,17 +268,17 @@ class MWAXCalvinDownloadProcessor:
                             self.stop()
                             return
 
-    def resume_in_progres_jobs(self):
+    def resume_in_progress_jobs(self):
         self.logger.debug("Checking for any in progress jobs to resume...")
         results = mwax_db.get_this_hosts_previously_started_download_requests(self.db_handler_object, self.hostname)
 
         if len(results) > 0:
             self.logger.debug(f"{len(results)} in progress jobs found. Adding them to internal queue...")
             for row in results:
-                request_id = int(row[0])
-                obs_id = int(row[1])
-                job_submitted_datetime = row[2]
-                job_id = row[3]
+                request_id = int(row["id"])
+                obs_id = int(row["cal_id"])
+                job_submitted_datetime = row["download_mwa_asvo_job_submitted_datetime"]
+                job_id = row["download_mwa_asvo_job_id"]
 
                 # If the job has already been submitted to ASVO, try and carry on
                 if job_submitted_datetime:
@@ -309,7 +309,7 @@ class MWAXCalvinDownloadProcessor:
         self.logger.info("Started...")
 
         # Check for any in progress jobs and resume them
-        self.resume_in_progres_jobs()
+        self.resume_in_progress_jobs()
 
         # Main loop
         while self.running:
