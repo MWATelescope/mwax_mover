@@ -18,7 +18,7 @@ import threading
 import time
 from mwax_mover import version, mwax_db, utils, mwax_asvo_helper
 
-SLEEP_MWA_ASVO_OUTAGE_SECS = 10 * 60
+SLEEP_MWA_ASVO_OUTAGE_SECS = 2 * 60
 
 
 class MWAXCalvinDownloadProcessor:
@@ -115,7 +115,10 @@ class MWAXCalvinDownloadProcessor:
                 new_job = self.mwax_asvo_helper.submit_download_job(request_id, obs_id)
             except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
                 # Handle me!
-                self.logger.info("MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins.")
+                self.logger.info(
+                    "MWA ASVO has an outage. Doing nothing this loop, and sleeping "
+                    f"for {SLEEP_MWA_ASVO_OUTAGE_SECS} seconds."
+                )
                 self.sleep(SLEEP_MWA_ASVO_OUTAGE_SECS)
                 return
             except Exception as e:
