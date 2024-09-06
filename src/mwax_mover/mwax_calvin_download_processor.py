@@ -171,9 +171,11 @@ class MWAXCalvinDownloadProcessor:
                     # Get the obs_id
                     obs_id = int(result[1])
 
-                    self.logger.debug(f"Resuming RequestID: {request_id} ObsID: {obs_id}")
-
-                    self.add_new_job(request_id, obs_id)
+                    # If we are not already dealing with this obsid, add it!
+                    # This prevents us pulling in dupes
+                    if self.mwax_asvo_helper.get_first_job_for_obs_id(obs_id) is None:
+                        self.logger.debug(f"Resuming RequestID: {request_id} ObsID: {obs_id}")
+                        self.add_new_job(request_id, obs_id)
                 else:
                     # no more results, break out of the while look
                     break

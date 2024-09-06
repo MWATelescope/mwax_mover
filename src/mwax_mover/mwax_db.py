@@ -668,9 +668,10 @@ def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str
         )
         OR
         (
-            -- Assigned to me but not started yet
-            c.assigned_hostname = %s
-            AND c.download_started_datetime IS NULL
+            -- Assigned to me but not completed
+            -- Don't worry we check with our existing list (in code)
+            -- so we don't re-re try the job!
+            c.assigned_hostname = %s            
             AND c.download_completed_datetime IS NULL
             AND c.download_error_datetime IS NULL
         )
