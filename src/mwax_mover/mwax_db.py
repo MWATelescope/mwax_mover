@@ -661,28 +661,40 @@ def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str
     SELECT c.id, c.cal_id
     FROM public.calibration_request c
     WHERE
-    -- First check for unstarted jobs / and ensure that obsid is
-    -- not running on another host
     (
-        c.assigned_hostname IS NULL -- not attempted at all
-        AND NOT EXISTS
-        -- Check if the SAME calid is in progress on another host if so ignore!
         (
-            SELECT 1
-            FROM public.calibration_request q
-            WHERE
-            q.cal_id = c.cal_id
-            AND q.assigned_hostname <> %s
-            AND
-            (
-                    q.download_completed_datetime IS NULL
-                AND q.download_error_datetime IS NULL
-                AND q.calibration_completed_datetime IS NULL
-                AND q.calibration_error_datetime IS NULL
-            )
+            -- Anything unassigned
+            c.assigned_hostname IS NULL -- not attempted at all
+        )
+        OR
+        (
+            -- Assigned to me but not started yet
+            c.assigned_hostname = %s
+            AND c.download_started_datetime IS NULL
+            AND c.download_completed_datetime IS NULL
+            AND c.download_error_datetime IS NULL
         )
     )
-    ORDER BY c.request_added_datetime LIMIT 1"""
+    AND NOT EXISTS
+    -- Check if the SAME calid is in progress on another host if so ignore!
+    (
+        SELECT 1
+        FROM public.calibration_request q
+        WHERE
+        q.cal_id = c.cal_id
+        AND q.assigned_hostname <> %s
+        AND
+        (
+                q.download_completed_datetime IS NULL
+            AND q.download_error_datetime IS NULL
+            AND q.calibration_completed_datetime IS NULL
+            AND q.calibration_error_datetime IS NULL
+        )
+    )
+    -- The for update clause locks the selected rows
+    -- so we don't have a race condition where two or
+    -- more calvins grab the same job
+    ORDER BY c.request_added_datetime FOR UPDATE LIMIT 1"""
 
     sql_update = """
     UPDATE public.calibration_request
@@ -695,13 +707,14 @@ def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str
     try:
         # get the connection
         with db_handler_object.pool.connection() as conn:
-            # Create a cursor
-            with conn.cursor() as cursor:
-                with conn.transaction():
+            with conn.transaction():
+                # Create a cursor
+                with conn.cursor() as cursor:
                     # Get the next request, if any
                     results_rows = db_handler_object.select_postgres_within_transaction(
                         sql_get,
                         parm_list=[
+                            hostname,
                             hostname,
                         ],
                         expected_rows=None,
