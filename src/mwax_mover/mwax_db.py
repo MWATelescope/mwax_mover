@@ -671,7 +671,7 @@ def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str
             -- Assigned to me but not completed
             -- Don't worry we check with our existing list (in code)
             -- so we don't re-re try the job!
-            c.assigned_hostname = %s            
+            c.assigned_hostname = %s
             AND c.download_completed_datetime IS NULL
             AND c.download_error_datetime IS NULL
         )
@@ -695,7 +695,7 @@ def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str
     -- The for update clause locks the selected rows
     -- so we don't have a race condition where two or
     -- more calvins grab the same job
-    ORDER BY c.request_added_datetime FOR UPDATE LIMIT 1"""
+    ORDER BY c.request_added_datetime LIMIT 1"""
 
     sql_update = """
     UPDATE public.calibration_request
