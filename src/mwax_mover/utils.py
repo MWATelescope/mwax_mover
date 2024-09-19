@@ -327,10 +327,18 @@ def get_metafits_values(metafits_filename: str) -> Tuple[bool, str]:
     """
     try:
         with fits.open(metafits_filename) as hdul:
-            # Read key from primary HDU- it is bool
+            # Read calibrator info from primary HDU- it is bool
             is_calibrator = hdul[0].header["CALIBRAT"]  # pylint: disable=no-member
+            calibrator_target = hdul[0].header["CALIBSRC"]  # pylint: disable=no-member
+            if calibrator_target is None:  # should never be the case!
+                calibrator_target = ""
+            calibrator_target = calibrator_target.rstrip()
+
+            # Read project id
             project_id = hdul[0].header["PROJECT"]  # pylint: disable=no-member
-            return is_calibrator, project_id
+
+            return is_calibrator and len(calibrator_target) > 0, project_id
+
     except Exception as catch_all_exception:
         raise Exception(
             f"Error reading metafits file: {metafits_filename}: {catch_all_exception}"

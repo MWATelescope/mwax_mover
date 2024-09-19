@@ -48,6 +48,7 @@ class MWAXArchiveProcessor:
         calibrator_destination_host: str,
         calibrator_destination_port: int,
         calibrator_destination_enabled: int,
+        calibrator_transfer_command_timeout_sec: int,
         metafits_path: str,
         visdata_dont_archive_path: str,
         voltdata_dont_archive_path: str,
@@ -79,6 +80,7 @@ class MWAXArchiveProcessor:
         self.archive_destination_port = archive_port
         self.archive_command_numa_node: int = archive_command_numa_node
         self.archive_command_timeout_sec = archive_command_timeout_sec
+        self.calibrator_transfer_command_timeout_sec = calibrator_transfer_command_timeout_sec
 
         # Full path to executable for mwax_stats
         self.mwax_stats_executable = mwax_stats_executable
@@ -754,7 +756,7 @@ class MWAXArchiveProcessor:
                             item,
                             int(self.archive_command_numa_node),
                             self.calibrator_destination_host,
-                            1200,  # TODO: make this a config parameter
+                            self.calibrator_transfer_command_timeout_sec,
                         )
                         is not True
                     ):
