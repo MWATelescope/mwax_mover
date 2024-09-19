@@ -219,6 +219,17 @@ def test_get_metafits_values_correlator():
     #
     # Run test
     #
+    is_calibrator, project_id = utils.get_metafits_values("tests/data/correlator_calibrator/1347318488_metafits.fits")
+    assert is_calibrator is True
+    assert project_id == "G0080"
+
+
+def test_get_metafits_values_non_cal():
+    """
+    Test that we can find out project and cal info from a
+    metafits which is not a calibrator- i.e. it has
+    CALIBRAT=False and no CALIBSRC key
+    """
     is_calibrator, project_id = utils.get_metafits_values("tests/data/correlator_C001/1244973688_metafits.fits")
     assert is_calibrator is False
     assert project_id == "C001"
