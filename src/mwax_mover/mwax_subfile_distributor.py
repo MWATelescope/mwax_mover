@@ -520,7 +520,7 @@ class MWAXSubfileDistributor:
                 utils.read_config(
                     self.logger,
                     self.config,
-                    "mwax mover",
+                    "correlator",
                     "calibrator_transfer_command_timeout_sec",
                 )
             )
