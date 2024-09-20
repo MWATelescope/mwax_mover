@@ -159,26 +159,22 @@ class MWAXCalvinDownloadProcessor:
         if self.running:
             self.logger.debug("Querying database for unattempted calsolution_requests...")
 
-            while True and self.running:
-                # 1. Get the an outstanding calibration_requests from the db
-                # returned fields: Tuple[id, calid] or None (the obsid we are calibrating)
-                result = mwax_db.assign_next_unattempted_calsolution_request(self.db_handler_object, self.hostname)
+            # 1. Get the an outstanding calibration_requests from the db
+            # returned fields: Tuple[id, calid] or None (the obsid we are calibrating)
+            result = mwax_db.assign_next_unattempted_calsolution_request(self.db_handler_object, self.hostname)
 
-                if result:
-                    # get the id of the request
-                    request_id = int(result[0])
+            if result:
+                # get the id of the request
+                request_id = int(result[0])
 
-                    # Get the obs_id
-                    obs_id = int(result[1])
+                # Get the obs_id
+                obs_id = int(result[1])
 
-                    # If we are not already dealing with this obsid, add it!
-                    # This prevents us pulling in dupes
-                    if self.mwax_asvo_helper.get_first_job_for_obs_id(obs_id) is None:
-                        self.logger.debug(f"Resuming RequestID: {request_id} ObsID: {obs_id}")
-                        self.add_new_job(request_id, obs_id)
-                else:
-                    # no more results, break out of the while look
-                    break
+                # If we are not already dealing with this obsid, add it!
+                # This prevents us pulling in dupes
+                if self.mwax_asvo_helper.get_first_job_for_obs_id(obs_id) is None:
+                    self.logger.debug(f"Resuming RequestID: {request_id} ObsID: {obs_id}")
+                    self.add_new_job(request_id, obs_id)
 
     def update_all_tracked_jobs(self):
         # Find out the status of all this user's jobs in MWA ASVO
