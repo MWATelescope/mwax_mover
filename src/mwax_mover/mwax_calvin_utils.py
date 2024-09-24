@@ -1526,6 +1526,7 @@ def run_birli(
             " --no-draw-progress"
             f" --uvfits-out={uvfits_filename}"
             f" --flag-edge-width={int(edge_width_hz/1e3)}"
+            f" --max-memory={processor.birli_max_mem_gib}"
             f" {avg_arg} {data_file_arg}"
         )
 

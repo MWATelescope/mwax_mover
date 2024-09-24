@@ -119,6 +119,7 @@ class MWAXCalvinProcessor:
         # birli
         self.birli_timeout = None
         self.birli_binary_path = None
+        self.birli_max_mem_gib = 0
         self.birli_popen_process = None
 
         # hyperdrive
@@ -1265,6 +1266,16 @@ class MWAXCalvinProcessor:
                 config,
                 "processing",
                 "birli_timeout",
+            )
+        )
+
+        # Get Birli max mem        
+        self.birli_max_mem_gib = int(
+            utils.read_config(
+                self.logger,
+                config,
+                "processing",
+                "birli_max_mem_gib",
             )
         )
 
