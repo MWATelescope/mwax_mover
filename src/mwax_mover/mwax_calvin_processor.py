@@ -890,7 +890,7 @@ class MWAXCalvinProcessor:
                         os.remove(file_to_delete)
 
                     # Now remove uvfits too
-                    uvfits_files = glob.glob(os.path.join(complete_path, f"{obs_id}_*.uvfits"))
+                    uvfits_files = glob.glob(os.path.join(complete_path, "*.uvfits"))
                     for file_to_delete in uvfits_files:
                         os.remove(file_to_delete)
 
@@ -1269,7 +1269,7 @@ class MWAXCalvinProcessor:
             )
         )
 
-        # Get Birli max mem        
+        # Get Birli max mem
         self.birli_max_mem_gib = int(
             utils.read_config(
                 self.logger,
