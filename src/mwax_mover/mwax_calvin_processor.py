@@ -1018,7 +1018,7 @@ class MWAXCalvinProcessor:
             "processing_errors": self.processing_error_count,
             "upload_queue": self.upload_queue.qsize(),
             "upload_errors": self.upload_error_count,
-            "completed:": self.completed_count,
+            "completed": self.completed_count,
         }
 
         status = {"main": main_status}
