@@ -301,7 +301,7 @@ class MWAXCalvinProcessor:
                     if worker_thread.is_alive():
                         self.sleep(0.2)
                     else:
-                        self.logger.debug(f"Worker {worker_thread.name} has died unexpectedly! Exiting!")
+                        self.logger.error(f"Worker {worker_thread.name} has died unexpectedly! Exiting!")
                         self.running = False
                         self.stop()
                         break
@@ -479,7 +479,7 @@ class MWAXCalvinProcessor:
                 )
                 return False
         else:
-            self.logger.info(
+            self.logger.warning(
                 f"{obs_id} Observation is still in progress:"
                 f" {current_gpstime} < ({obs_id} - {int(obs_id)+exp_time})"
             )
@@ -517,7 +517,7 @@ class MWAXCalvinProcessor:
                         continue
 
                     if time.time() - mod_time > min_partial_purge_age_secs:
-                        self.logger.warning(
+                        self.logger.info(
                             f"Partial file {partial_file} is older than"
                             f" {min_partial_purge_age_secs} seconds and will be"
                             " removed..."
@@ -525,7 +525,7 @@ class MWAXCalvinProcessor:
 
                         try:
                             os.remove(partial_file)
-                            self.logger.warning(f"Partial file {partial_file} deleted")
+                            self.logger.info(f"Partial file {partial_file} deleted")
                         except FileNotFoundError:
                             # this file got renamed or removed, so ignore!
                             continue
@@ -949,31 +949,31 @@ class MWAXCalvinProcessor:
             queue_worker.stop()
 
         # check for a hyperdrive process and kill it
-        self.logger.debug("Checking for running hyperdrive process...")
+        self.logger.info("Checking for running hyperdrive process...")
         if self.hyperdrive_popen_process:
             if not self.hyperdrive_popen_process.poll():
-                self.logger.debug("Running hyperdrive process found. Sending it SIGINT...")
+                self.logger.info("Running hyperdrive process found. Sending it SIGINT...")
                 self.hyperdrive_popen_process.send_signal(signal.SIGINT)
-                self.logger.debug("SIGINT sent to Hyperdrive")
+                self.logger.info("SIGINT sent to Hyperdrive")
 
         # Wait for threads to finish
         for watcher_thread in self.watcher_threads:
             if watcher_thread:
                 thread_name = watcher_thread.name
-                self.logger.debug(f"Watcher {thread_name} Stopping...")
+                self.logger.info(f"Watcher {thread_name} Stopping...")
                 if watcher_thread.is_alive():
                     watcher_thread.join()
-                self.logger.debug(f"Watcher {thread_name} Stopped")
+                self.logger.info(f"Watcher {thread_name} Stopped")
 
         for worker_thread in self.worker_threads:
             if worker_thread:
                 thread_name = worker_thread.name
-                self.logger.debug(f"QueueWorker {thread_name} Stopping...")
+                self.logger.info(f"QueueWorker {thread_name} Stopping...")
                 if worker_thread.is_alive():
                     # Short timeout- everything other than a running hyperdrive
                     # instance should have joined by now.
                     worker_thread.join(timeout=10)
-                self.logger.debug(f"QueueWorker {thread_name} Stopped")
+                self.logger.info(f"QueueWorker {thread_name} Stopped")
 
         # Close all database connections
         self.db_handler_object.stop_database_pool()
@@ -1060,20 +1060,14 @@ class MWAXCalvinProcessor:
         # It's now safe to start logging
         # start logging
         self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)
+        self.logger.setLevel(logging.INFO)
         console_log = logging.StreamHandler()
-        console_log.setLevel(logging.DEBUG)
+        console_log.setLevel(logging.INFO)
         console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(console_log)
 
         if config.getboolean("mwax mover", "coloredlogs", fallback=False):
-            coloredlogs.install(level="DEBUG", logger=self.logger)
-
-        # Removing file logging for now
-        # file_log = logging.FileHandler(filename=os.path.join(self.log_path, "calvin_processor_main.log"))
-        # file_log.setLevel(logging.DEBUG)
-        # file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
-        # self.logger.addHandler(file_log)
+            coloredlogs.install(level="INFO", logger=self.logger)
 
         self.logger.info("Starting mwax_calvin_processor" f" processor...v{version.get_mwax_mover_version_string()}")
         self.logger.info(f"Reading config file: {config_filename}")

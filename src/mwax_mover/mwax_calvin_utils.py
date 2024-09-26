@@ -1409,7 +1409,7 @@ def write_stats(
 
         return_value, _ = run_command_ext(logger, cmd, -1, timeout=10, use_shell=False)
 
-        logger.debug(
+        logger.info(
             f"{obs_id} Finished running hyperdrive stats on" f" {hyperdrive_solution_filename}. Return={return_value}"
         )
     except Exception as catch_all_exception:
@@ -1432,11 +1432,11 @@ def write_stats(
                 os.path.join(os.getcwd(), phase_plot_filename),
                 os.path.join(stats_path, f"{phase_plot_filename}"),
             )
-            logger.debug(f"{obs_id} plots moved successfully to {stats_path}.")
+            logger.info(f"{obs_id} plots moved successfully to {stats_path}.")
 
             logger.info(f"{obs_id} write_stats() complete successfully")
         else:
-            logger.debug(f"{obs_id} write_stats() failed")
+            logger.error(f"{obs_id} write_stats() failed")
     except Exception as catch_all_exception:
         return False, str(catch_all_exception)
 

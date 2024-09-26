@@ -173,7 +173,7 @@ class MWAXCalvinDownloadProcessor:
                 # If we are not already dealing with this obsid, add it!
                 # This prevents us pulling in dupes
                 if self.mwax_asvo_helper.get_first_job_for_obs_id(obs_id) is None:
-                    self.logger.debug(f"Resuming RequestID: {request_id} ObsID: {obs_id}")
+                    self.logger.info(f"Resuming RequestID: {request_id} ObsID: {obs_id}")
                     self.add_new_job(request_id, obs_id)
 
     def update_all_tracked_jobs(self):
@@ -188,7 +188,10 @@ class MWAXCalvinDownloadProcessor:
 
             except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
                 # Handle me!
-                self.logger.info("MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins.")
+                self.logger.info(
+                    "MWA ASVO has an outage. Doing nothing this loop, and "
+                    f"sleeping for {SLEEP_MWA_ASVO_OUTAGE_SECS} seconds."
+                )
                 self.sleep(SLEEP_MWA_ASVO_OUTAGE_SECS)
 
             except Exception:
@@ -232,7 +235,10 @@ class MWAXCalvinDownloadProcessor:
 
                     except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
                         # Handle me!
-                        self.logger.info("MWA ASVO has an outage. Doing nothing this loop, and sleeping for 10 mins.")
+                        self.logger.info(
+                            "MWA ASVO has an outage. Doing nothing this loop, and "
+                            f"sleeping for {str(SLEEP_MWA_ASVO_OUTAGE_SECS)} seconds."
+                        )
                         self.sleep(SLEEP_MWA_ASVO_OUTAGE_SECS)
                         return
 
@@ -270,11 +276,11 @@ class MWAXCalvinDownloadProcessor:
                             return
 
     def resume_in_progress_jobs(self):
-        self.logger.debug("Checking for any in progress jobs to resume...")
+        self.logger.info("Checking for any in progress jobs to resume...")
         results = mwax_db.get_this_hosts_previously_started_download_requests(self.db_handler_object, self.hostname)
 
         if len(results) > 0:
-            self.logger.debug(f"{len(results)} in progress jobs found. Adding them to internal queue...")
+            self.logger.info(f"{len(results)} in progress jobs found. Adding them to internal queue...")
             for row in results:
                 request_id = int(row["id"])
                 obs_id = int(row["cal_id"])
@@ -286,13 +292,13 @@ class MWAXCalvinDownloadProcessor:
                     new_job = mwax_asvo_helper.MWAASVOJob(request_id, obs_id, int(job_id))
                     new_job.submitted_datetime = job_submitted_datetime
                     self.mwax_asvo_helper.current_asvo_jobs.append(new_job)
-                    self.logger.debug(f"Added already submitted {new_job}")
+                    self.logger.info(f"Added already submitted {new_job}")
                 else:
                     # if not submitted to ASVO, do that now!
-                    self.logger.debug(f"Adding and submitting RequestID {request_id} for ObsID {obs_id}")
+                    self.logger.info(f"Adding and submitting RequestID {request_id} for ObsID {obs_id}")
                     self.add_new_job(request_id, obs_id)
         else:
-            self.logger.debug("No in progress jobs found.")
+            self.logger.info("No in progress jobs found.")
 
     def start(self):
         """Start the processor"""
@@ -432,20 +438,14 @@ class MWAXCalvinDownloadProcessor:
         # It's now safe to start logging
         # start logging
         self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)
+        self.logger.setLevel(logging.INFO)
         console_log = logging.StreamHandler()
-        console_log.setLevel(logging.DEBUG)
+        console_log.setLevel(logging.INFO)
         console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(console_log)
 
         if config.getboolean("mwax mover", "coloredlogs", fallback=False):
-            coloredlogs.install(level="DEBUG", logger=self.logger)
-
-        # Removing file logging for now
-        # file_log = logging.FileHandler(filename=os.path.join(self.log_path, "calvin_download_processor_main.log"))
-        # file_log.setLevel(logging.DEBUG)
-        # file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
-        # self.logger.addHandler(file_log)
+            coloredlogs.install(level="INFO", logger=self.logger)
 
         self.logger.info("Starting mwax_calvin_download_processor" f" ...v{version.get_mwax_mover_version_string()}")
 

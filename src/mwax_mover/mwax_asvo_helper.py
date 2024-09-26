@@ -264,7 +264,7 @@ class MWAASVOHelper:
                     job.last_seen_datetime = update_datetime
 
                     if changed:
-                        self.logger.debug(f"{job}: updated - {job.job_state.value} {job.download_url}")
+                        self.logger.info(f"{job}: updated - {job.job_state.value} {job.download_url}")
                     break
 
         # Finally, we need to check for any jobs in memory which were not seen anymore
@@ -276,7 +276,7 @@ class MWAASVOHelper:
             if job.last_seen_datetime != update_datetime:
                 # We didn't see this job
                 # We should log it and remove it
-                self.logger.debug(
+                self.logger.warning(
                     f"{job}: removed - {job.job_state.value} {job.download_url} as it was no longer "
                     f"seen by giant-squid-list. {update_datetime} vs {job.last_seen_datetime}"
                 )
@@ -355,7 +355,7 @@ class MWAASVOHelper:
                         )
 
                         stdout = stdout.replace("\n", " ")
-                        self.logger.debug(f"{job} Successfully downloaded: {stdout}")
+                        self.logger.info(f"{job} Successfully downloaded: {stdout}")
 
                         job.download_completed = True
                         job.download_completed_datetime = datetime.datetime.now()
