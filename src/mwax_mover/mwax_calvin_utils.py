@@ -1380,7 +1380,6 @@ def get_convergence_summary(solutions_fits_file: str):
 def write_stats(
     logger,
     obs_id,
-    stats_path,
     stats_filename,
     hyperdrive_solution_filename,
     hyperdrive_binary_path,
@@ -1400,7 +1399,9 @@ def write_stats(
                 stats.write(f"{row[0]}: {row[1]}\n")
 
         # Now run hyperdrive again to do some plots
-        hyp_soln_plot_args = "--max-amp 2 --no-ref-tile"
+        hyp_soln_plot_args = (
+            f"--max-amp 2 --no-ref-tile --output-directory {os.path.dirname(hyperdrive_solution_filename)}"
+        )
         cmd = (
             f"{hyperdrive_binary_path} solutions-plot {hyp_soln_plot_args} "
             f"-m"
@@ -1415,30 +1416,30 @@ def write_stats(
     except Exception as catch_all_exception:
         return False, str(catch_all_exception)
 
-    try:
-        if return_value:
-            # Currently, hyperdrive writes the solution files to same dir as
-            # the current directory mwax_calvin_processor is run from
-            # Move them to the processing_complete dir
-            plot_filename_base = os.path.basename(f"{os.path.splitext(hyperdrive_solution_filename)[0]}")
+    # try:
+    #     if return_value:
+    #         # Currently, hyperdrive writes the solution files to same dir as
+    #         # the current directory mwax_calvin_processor is run from
+    #         # Move them to the processing_complete dir
+    #         plot_filename_base = os.path.basename(f"{os.path.splitext(hyperdrive_solution_filename)[0]}")
 
-            amps_plot_filename = f"{plot_filename_base}_amps.png"
-            phase_plot_filename = f"{plot_filename_base}_phases.png"
-            shutil.move(
-                os.path.join(os.getcwd(), amps_plot_filename),
-                os.path.join(stats_path, f"{amps_plot_filename}"),
-            )
-            shutil.move(
-                os.path.join(os.getcwd(), phase_plot_filename),
-                os.path.join(stats_path, f"{phase_plot_filename}"),
-            )
-            logger.info(f"{obs_id} plots moved successfully to {stats_path}.")
+    #         amps_plot_filename = f"{plot_filename_base}_amps.png"
+    #         phase_plot_filename = f"{plot_filename_base}_phases.png"
+    #         shutil.move(
+    #             os.path.join(os.getcwd(), amps_plot_filename),
+    #             os.path.join(stats_path, f"{amps_plot_filename}"),
+    #         )
+    #         shutil.move(
+    #             os.path.join(os.getcwd(), phase_plot_filename),
+    #             os.path.join(stats_path, f"{phase_plot_filename}"),
+    #         )
+    #         logger.info(f"{obs_id} plots moved successfully to {stats_path}.")
 
-            logger.info(f"{obs_id} write_stats() complete successfully")
-        else:
-            logger.error(f"{obs_id} write_stats() failed")
-    except Exception as catch_all_exception:
-        return False, str(catch_all_exception)
+    #         logger.info(f"{obs_id} write_stats() complete successfully")
+    #     else:
+    #         logger.error(f"{obs_id} write_stats() failed")
+    # except Exception as catch_all_exception:
+    #     return False, str(catch_all_exception)
 
     return True, ""
 
@@ -1758,7 +1759,6 @@ def run_hyperdrive_stats(
         ) = write_stats(
             processor.logger,
             obs_id,
-            processing_dir,
             stats_filename,
             hyperdrive_solution_filename,
             processor.hyperdrive_binary_path,
