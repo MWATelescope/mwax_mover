@@ -1642,6 +1642,7 @@ def run_hyperdrive(
             start_time = time.time()
 
             # run hyperdrive
+            processor.logger.info(f"{obs_id}: Running hyperdrive on {uvfits_file}...")
             processor.hyperdrive_popen_process = run_command_popen(processor.logger, cmdline, -1, False)
 
             exit_code, stdout, stderr = check_popen_finished(

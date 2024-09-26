@@ -608,6 +608,7 @@ class MWAXCalvinProcessor:
         hyperdrive_success = False
 
         # Run Birli
+        self.logger.info(f"{obs_id}: Running Birli...")
         birli_success = mwax_calvin_utils.run_birli(
             self,
             metafits_filename,
