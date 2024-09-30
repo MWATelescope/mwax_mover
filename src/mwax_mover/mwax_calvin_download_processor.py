@@ -208,72 +208,86 @@ class MWAXCalvinDownloadProcessor:
         if self.running:
             for job in self.mwax_asvo_helper.current_asvo_jobs:
                 # Check job is in Ready state and download is not already completed or in progress
-                if job.job_state == mwax_asvo_helper.MWAASVOJobState.Ready and not (
-                    job.download_completed or job.download_in_progress
-                ):
-                    try:
-                        self.logger.info(
-                            f"{job}: Attempting to download (attempt: {job.download_retries + 1}/{DOWNLOAD_RETRIES})"
-                        )
+                if not (job.download_completed or job.download_in_progress):
+                    if job.job_state == mwax_asvo_helper.MWAASVOJobState.Error:
+                        # MWA ASVO completed this job with error
+                        error_message = "MWA ASVO completed this job with an Error state"
+                        self.logger.warning(f"{job}: {error_message}")
 
-                        job.download_started_datetime = datetime.datetime.now()
-                        # Update database
-                        mwax_db.update_calsolution_request_download_started_status(
-                            self.db_handler_object, job.request_ids, job.download_started_datetime
-                        )
-
-                        # Download the data (blocks until data is downloaded or exception fired)
-                        self.mwax_asvo_helper.download_asvo_job(job)
-
-                        # Downloaded ok!
-                        self.logger.info(f"{job}: downloaded successfully.")
+                        job.download_completed = True
+                        job.download_error_datetime = datetime.datetime.now()
+                        job.download_error_message = error_message
 
                         # Update database
                         mwax_db.update_calsolution_request_download_complete_status(
-                            self.db_handler_object, job.request_ids, job.download_completed_datetime, None, None
+                            self.db_handler_object,
+                            job.request_ids,
+                            None,
+                            job.download_error_datetime,
+                            job.download_error_message,
                         )
 
-                    except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
-                        # Handle me!
-                        self.logger.info(
-                            "MWA ASVO has an outage. Doing nothing this loop, and "
-                            f"sleeping for {str(SLEEP_MWA_ASVO_OUTAGE_SECS)} seconds."
-                        )
-                        self.sleep(SLEEP_MWA_ASVO_OUTAGE_SECS)
-                        return
-
-                    except Exception as e:
-                        # Something went wrong!
-                        self.logger.exception(f"{job}: Error downloading Job.")
-                        error_message = f"{job}: Error downloading Job: {str(e)}"
-
-                    # If not successful, it should retry in the next "handle_mwa_asvo_jobs loop"
-                    if not job.download_completed:
-                        # Download failed, increment retries counter
-                        job.download_retries += 1
-
-                        # Check if we've had too many retries
-                        if job.download_retries > DOWNLOAD_RETRIES:
-                            self.logger.error(
-                                f"{job}: Fatal exception- too many retries {DOWNLOAD_RETRIES} when trying to download."
-                                "Exiting!"
+                    elif job.job_state == mwax_asvo_helper.MWAASVOJobState.Ready:
+                        try:
+                            self.logger.info(
+                                f"{job}: Attempting to download (attempt: "
+                                f"{job.download_retries + 1}/{DOWNLOAD_RETRIES})"
                             )
+
+                            job.download_started_datetime = datetime.datetime.now()
+                            # Update database
+                            mwax_db.update_calsolution_request_download_started_status(
+                                self.db_handler_object, job.request_ids, job.download_started_datetime
+                            )
+
+                            # Download the data (blocks until data is downloaded or exception fired)
+                            self.mwax_asvo_helper.download_asvo_job(job)
+
+                            # Downloaded ok!
+                            self.logger.info(f"{job}: downloaded successfully.")
 
                             # Update database
-                            job.download_error_datetime = datetime.datetime.now()
-                            job.download_error_message = error_message + f"-(too many retries {DOWNLOAD_RETRIES})"
-
                             mwax_db.update_calsolution_request_download_complete_status(
-                                self.db_handler_object,
-                                job.request_ids,
-                                None,
-                                job.download_error_datetime,
-                                job.download_error_message,
+                                self.db_handler_object, job.request_ids, job.download_completed_datetime, None, None
                             )
 
-                            self.running = False
-                            self.stop()
+                        except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
+                            # Handle me!
+                            self.logger.info(
+                                "MWA ASVO has an outage. Doing nothing this loop, and "
+                                f"sleeping for {str(SLEEP_MWA_ASVO_OUTAGE_SECS)} seconds."
+                            )
+                            self.sleep(SLEEP_MWA_ASVO_OUTAGE_SECS)
                             return
+
+                        except Exception as e:
+                            # Something went wrong!
+                            self.logger.exception(f"{job}: Error downloading Job.")
+                            error_message = f"{job}: Error downloading Job: {str(e)}"
+
+                        # If not successful, it should retry in the next "handle_mwa_asvo_jobs loop"
+                        if not job.download_completed:
+                            # Download failed, increment retries counter
+                            job.download_retries += 1
+
+                            # Check if we've had too many retries
+                            if job.download_retries > DOWNLOAD_RETRIES:
+                                self.logger.error(
+                                    f"{job}: Fatal exception- too many retries {DOWNLOAD_RETRIES} "
+                                    "when trying to download. Exiting!"
+                                )
+
+                                # Update database
+                                job.download_error_datetime = datetime.datetime.now()
+                                job.download_error_message = error_message + f"-(too many retries {DOWNLOAD_RETRIES})"
+
+                                mwax_db.update_calsolution_request_download_complete_status(
+                                    self.db_handler_object,
+                                    job.request_ids,
+                                    None,
+                                    job.download_error_datetime,
+                                    job.download_error_message,
+                                )
 
     def resume_in_progress_jobs(self):
         self.logger.info("Checking for any in progress jobs to resume...")
