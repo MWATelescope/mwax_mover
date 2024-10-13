@@ -113,19 +113,27 @@ def download_metafits_file(obs_id: int, metafits_path: str):
     """
     metafits_file_path = os.path.join(metafits_path, f"{obs_id}_metafits.fits")
 
-    url = f"http://ws.mwatelescope.org/metadata/fits?obs_id={obs_id}"
+    # Try the MRO one first
+    url = f"http://mro.mwa128t.org/metadata/fits?obs_id={obs_id}"
 
     try:
         response = requests.get(url, timeout=30)
     except Exception as catch_all_exception:
-        raise Exception(f"Unable to get metafits file. {catch_all_exception}") from catch_all_exception
+        # Now try from AWS
+        url = f"http://ws.mwatelescope.org/metadata/fits?obs_id={obs_id}"
+        try:
+            response = requests.get(url, timeout=30)
+        except Exception as catch_all_exception:
+            raise Exception(
+                f"Unable to get metafits file from MRO or AWS. {catch_all_exception}"
+            ) from catch_all_exception
 
     if response.status_code == 200:
         metafits = response.content
         with open(metafits_file_path, "wb") as handler:
             handler.write(metafits)
     else:
-        raise Exception("Unable to get metafits file. Response code" f" {response.status_code}")
+        raise Exception("Unable to get metafits file. Response code " f"from {url} was {response.status_code}")
 
     return
 
