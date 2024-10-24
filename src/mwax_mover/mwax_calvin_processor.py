@@ -64,11 +64,11 @@ class MWAXCalvinProcessor:
         self.db_handler_object: mwax_db.MWAXDBHandler
 
         # health
-        self.health_multicast_interface_ip = None
-        self.health_multicast_interface_name = None
-        self.health_multicast_ip = None
-        self.health_multicast_port = None
-        self.health_multicast_hops = None
+        self.health_multicast_interface_ip
+        self.health_multicast_interface_name
+        self.health_multicast_ip
+        self.health_multicast_port
+        self.health_multicast_hops
         self.processing_error_count: int = 0
         self.upload_error_count: int = 0
         self.completed_count: int = 0
@@ -76,8 +76,6 @@ class MWAXCalvinProcessor:
         # This is so if for some reason we get the same obsid
         # but some other part is still working on it, we can reject it
         self.current_obsids = dict()
-
-        self.metadata_webservice_url = None
 
         self.running = False
         self.ready_to_exit = False
@@ -88,43 +86,43 @@ class MWAXCalvinProcessor:
         self.worker_threads = []
 
         # assembly
-        self.incoming_realtime_watch_path = None
+        self.incoming_realtime_watch_path
         self.remove_partial_files_check_seconds: int = 60 * 60 * 4
-        self.incoming_asvo_watch_path = None
+        self.incoming_asvo_watch_path
         self.assembly_realtime_watch_queue = queue.Queue()
         self.assembly_asvo_watch_queue = queue.Queue()
-        self.assemble_path = None
-        self.assemble_check_seconds = None
-        self.obsid_check_assembled_thread = None
-        self.check_and_remove_partial_files_thread = None
+        self.assemble_path
+        self.assemble_check_seconds
+        self.obsid_check_assembled_thread
+        self.check_and_remove_partial_files_thread
 
         # processing
-        self.processing_path = None
-        self.processing_error_path = None
+        self.processing_path
+        self.processing_error_path
         self.processing_queue = queue.Queue()
-        self.source_list_filename = None
-        self.source_list_type = None
-        self.phase_fit_niter = None
+        self.source_list_filename
+        self.source_list_type
+        self.phase_fit_niter
 
         # Upload
         self.produce_debug_plots = True  # default to true- for now only off if running via pytest
-        self.upload_path = None
-        self.upload_error_path = None
+        self.upload_path
+        self.upload_error_path
         self.upload_queue = queue.Queue()
 
         # Complete
-        self.complete_path = None
-        self.keep_completed_visibility_files = None
+        self.complete_path
+        self.keep_completed_visibility_files
 
         # birli
-        self.birli_timeout = None
-        self.birli_binary_path = None
+        self.birli_timeout
+        self.birli_binary_path
         self.birli_max_mem_gib = 0
         self.birli_popen_process = None
 
         # hyperdrive
-        self.hyperdrive_timeout = None
-        self.hyperdrive_binary_path = None
+        self.hyperdrive_timeout
+        self.hyperdrive_binary_path
         self.hyperdrive_popen_process = None
 
     def start(self):
@@ -367,7 +365,7 @@ class MWAXCalvinProcessor:
             obs_id: int = int(filename[0:10])
 
             # Check to see if we are already processing this observation
-            found_obsid: CurrentObsID = None
+            found_obsid: CurrentObsID
             if int(obs_id) in self.current_obsids:
                 found_obsid: CurrentObsID = self.current_obsids[int(obs_id)]
 
@@ -414,7 +412,7 @@ class MWAXCalvinProcessor:
             # download the metafits file to the assembly dir for the obs
             try:
                 self.logger.info(f"{obs_id} Downloading metafits file...")
-                utils.download_metafits_file(obs_id, obsid_assembly_dir)
+                utils.download_metafits_file(self.logger, obs_id, obsid_assembly_dir)
                 self.logger.info(f"{obs_id} metafits downloaded successfully")
             except Exception as catch_all_exception:
                 self.logger.error(
@@ -427,7 +425,7 @@ class MWAXCalvinProcessor:
         # Get the duration of the obs from the metafits and only proceed
         # if the current gps time is > the obs_id + duration + a constant
         exp_time = int(utils.get_metafits_value(metafits_assembly_filename, "EXPOSURE"))
-        current_gpstime = astrotime.Time(datetime.datetime.utcnow(), scale="utc").gps
+        current_gpstime = astrotime.Time(datetime.datetime.now(datetime.timezone.utc), scale="utc").gps
 
         # We need to allow for some time for the observation to update the database,
         # so add an additional 60 seconds before we check
@@ -435,9 +433,12 @@ class MWAXCalvinProcessor:
             #
             # perform web service call to get list of data files from obsid
             #
-            web_service_filenames = utils.get_data_files_for_obsid_from_webservice(
-                self.logger, obs_id, self.metadata_webservice_url
-            )
+            try:
+                web_service_filenames = utils.get_data_files_for_obsid_from_webservice(self.logger, obs_id)
+            except Exception:
+                # The previous call would have already logged tonnes of errors so no need to log anything specific here
+                self.logger.warning(f"{obs_id} No webservice was able to provide list of data files- requeueing")
+                return False
 
             if web_service_filenames:
                 # we need a list of files from the work dir
@@ -474,8 +475,7 @@ class MWAXCalvinProcessor:
                 # This is usually because there ARE no files in the database
                 # Best to fail
                 self.logger.error(
-                    f"utils.get_data_files_for_obsid_from_webservice({obs_id}, "
-                    f"{self.metadata_webservice_url}) did not return any files."
+                    f"utils.get_data_files_for_obsid_from_webservice({obs_id} " f"did not return any files- requeueing."
                 )
                 return False
         else:
@@ -941,6 +941,9 @@ class MWAXCalvinProcessor:
 
             return False
 
+        # we should not get here
+        return False
+
     def stop(self):
         """Shutsdown all processes"""
         for watcher in self.watchers:
@@ -1095,7 +1098,7 @@ class MWAXCalvinProcessor:
         self.mro_metadatadb_db = utils.read_config(self.logger, config, "mro metadata database", "db")
         self.mro_metadatadb_user = utils.read_config(self.logger, config, "mro metadata database", "user")
         self.mro_metadatadb_pass = utils.read_config(self.logger, config, "mro metadata database", "pass", True)
-        self.mro_metadatadb_port = utils.read_config(self.logger, config, "mro metadata database", "port")
+        self.mro_metadatadb_port = int(utils.read_config(self.logger, config, "mro metadata database", "port"))
 
         # Initiate database connection for rmo metadata db
         self.db_handler_object = mwax_db.MWAXDBHandler(
@@ -1105,14 +1108,6 @@ class MWAXCalvinProcessor:
             db_name=self.mro_metadatadb_db,
             user=self.mro_metadatadb_user,
             password=self.mro_metadatadb_pass,
-        )
-
-        # metadata web service URL
-        self.metadata_webservice_url = utils.read_config(
-            self.logger,
-            config,
-            "mwax mover",
-            "metadata_webservice_url",
         )
 
         #

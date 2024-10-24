@@ -6,6 +6,7 @@ from enum import Enum
 import fcntl
 import glob
 import json
+import logging
 import os
 import queue
 import shutil
@@ -109,35 +110,24 @@ class ValidationData:
         self.validation_message = validation_message
 
 
-def download_metafits_file(obs_id: int, metafits_path: str):
+def download_metafits_file(logger: logging.Logger, obs_id: int, metafits_path: str):
     """
     For a given obs_id, get the metafits file from webservices
     """
     metafits_file_path = os.path.join(metafits_path, f"{obs_id}_metafits.fits")
 
     # Try the MRO one first
-    url = f"http://mro.mwa128t.org/metadata/fits?obs_id={obs_id}"
+    urls = [
+        f"http://mro.mwa128t.org/metadata/fits?obs_id={obs_id}",
+        f"http://ws.mwatelescope.org/metadata/fits?obs_id={obs_id}",
+    ]
 
-    try:
-        response = requests.get(url, timeout=30)
-    except Exception as catch_all_exception:
-        # Now try from AWS
-        url = f"http://ws.mwatelescope.org/metadata/fits?obs_id={obs_id}"
-        try:
-            response = requests.get(url, timeout=30)
-        except Exception as catch_all_exception:
-            raise Exception(
-                f"Unable to get metafits file from MRO or AWS. {catch_all_exception}"
-            ) from catch_all_exception
+    # On failure of all urls and retries it will raise an exception
+    response = call_webservice(logger, obs_id, urls, None)
 
-    if response.status_code == 200:
-        metafits = response.content
-        with open(metafits_file_path, "wb") as handler:
-            handler.write(metafits)
-    else:
-        raise Exception("Unable to get metafits file. Response code " f"from {url} was {response.status_code}")
-
-    return
+    metafits = response.content
+    with open(metafits_file_path, "wb") as handler:
+        handler.write(metafits)
 
 
 def validate_filename(
@@ -275,7 +265,7 @@ def validate_filename(
             if not os.path.exists(metafits_filename):
                 logger.info(f"Metafits file {metafits_filename} not found. Atempting" " to download it")
                 try:
-                    download_metafits_file(obs_id, metafits_path)
+                    download_metafits_file(logger, obs_id, metafits_path)
                 except Exception as catch_all_exception:  # pylint: disable=broad-except
                     valid = False
                     validation_error = (
@@ -889,32 +879,65 @@ def should_project_be_archived(project_id: str) -> bool:
         return True
 
 
+@retry(stop=stop_after_attempt(10), wait=wait_fixed(300))
+def call_webservice(logger: logging.Logger, obs_id: int, url_list: list[str], data) -> requests.Response:
+    """Call each url in the list until: a response of
+    200 (in which case return the response)
+    """
+    i = 0
+
+    while i < len(url_list):
+        url = url_list[i]
+
+        logger.debug(f"{obs_id}: call_webservice() trying with {url} with data ({'' if data is None else data})")
+
+        try:
+            response = requests.get(url, data, timeout=30)
+
+            if response.status_code == 200:
+                logger.debug(f"{obs_id}: call_webservice() returned 200 (success)")
+                return response
+            else:
+                # Non-200 status code- try next url
+                logger.warning(
+                    f"{obs_id}: call_webservice() returned {response.status_code} " f"{response.text} (failure)"
+                )
+
+        except Exception as e:
+            # Exception raised- try next url
+            logger.exception(f"{obs_id}: call_webservice() exception", e)
+
+        # try next url
+        i += 1
+
+    # We tried all urls without success- up to tenacity to retry X times now
+    logger.error(f"{obs_id}: call_webservice() - failed after trying {len(url_list)} urls.")
+    raise Exception(f"{obs_id}: call_webservice()- failed after trying {len(url_list)} urls.")
+
+
 def get_data_files_for_obsid_from_webservice(
     logger,
-    obsid: int,
-    metadata_webservice_url: str,
-) -> list[str] | None:
+    obs_id: int,
+) -> list[str]:
     """Calls an MWA webservice, passing in an obsid and returning a list of filenames
     of all the data_files (MWAX_VISIBILITIES or HW_LFILES) of the given filetype or None if there was an error.
     metadata_webservice_url is the base url - e.g. http://ws.mwatelescope.org
     - all_files: True means to get all files whether they are archived at Pawsey or not"""
-    result = requests.get(
-        f"{metadata_webservice_url}/metadata/data_files",
-        data={"obs_id": obsid, "terse": False, "all_files": True},
-    )
-    if result.text:
-        files = json.loads(result.text)
-        file_list = [
-            file
-            for file in files
-            if files[file]["filetype"] == MWADataFileType.MWAX_VISIBILITIES.value
-            or files[file]["filetype"] == MWADataFileType.HW_LFILES.value
-        ]
-        file_list.sort()
-        return file_list
-    else:
-        logger.error(f"Error getting data files for obsid {obsid}, status code {result.status_code}")
-        return None
+    urls = ["http://mro.mwa128t.org/metadata/data_files", "http://mro.mwa128t.org/metadata/data_files"]
+    data = {"obs_id": obs_id, "terse": False, "all_files": True}
+
+    # On failure of all urls and retries it will raise an exception
+    result = call_webservice(logger, obs_id, urls, data)
+
+    files = json.loads(result.text)
+    file_list = [
+        file
+        for file in files
+        if files[file]["filetype"] == MWADataFileType.MWAX_VISIBILITIES.value
+        or files[file]["filetype"] == MWADataFileType.HW_LFILES.value
+    ]
+    file_list.sort()
+    return file_list
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_fixed(10))
