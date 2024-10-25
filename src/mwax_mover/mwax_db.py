@@ -993,11 +993,11 @@ def update_calsolution_request_calibration_started_status(
 def update_calsolution_request_calibration_complete_status(
     db_handler_object: MWAXDBHandler,
     obs_id: int,
-    request_ids: list[int],
-    calibration_completed_datetime: datetime.datetime | None,
-    calibration_fit_id: int | None,
-    calibration_error_datetime: datetime.datetime | None,
-    calibration_error_message: str | None,
+    request_ids: Optional[list[int]],
+    calibration_completed_datetime: Optional[datetime.datetime],
+    calibration_fit_id: Optional[int],
+    calibration_error_datetime: Optional[datetime.datetime],
+    calibration_error_message: Optional[str],
 ):
     """Update a calsolution request with updated calibration completed status info.
 

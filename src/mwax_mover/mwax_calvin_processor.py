@@ -17,7 +17,6 @@ import signal
 import sys
 import threading
 import time
-from astropy import time as astrotime
 from mwax_mover import (
     utils,
     version,
@@ -59,71 +58,69 @@ class MWAXCalvinProcessor:
     ):
         # General
         self.logger = logging.getLogger(__name__)
-        self.log_path = None
-        self.hostname = None
+        self.log_path: str = ""
+        self.hostname: str = ""
         self.db_handler_object: mwax_db.MWAXDBHandler
 
         # health
-        self.health_multicast_interface_ip
-        self.health_multicast_interface_name
-        self.health_multicast_ip
-        self.health_multicast_port
-        self.health_multicast_hops
+        self.health_multicast_interface_ip: str = ""
+        self.health_multicast_interface_name: str = ""
+        self.health_multicast_ip: str = ""
+        self.health_multicast_port: int = 0
+        self.health_multicast_hops: int = 0
         self.processing_error_count: int = 0
         self.upload_error_count: int = 0
         self.completed_count: int = 0
         # Keep a register of obsids which have been assembled
         # This is so if for some reason we get the same obsid
         # but some other part is still working on it, we can reject it
-        self.current_obsids = dict()
+        self.current_obsids: dict = dict()
 
-        self.running = False
-        self.ready_to_exit = False
+        self.running: bool = False
+        self.ready_to_exit: bool = False
 
-        self.watchers = []
-        self.queue_workers = []
-        self.watcher_threads = []
-        self.worker_threads = []
+        self.watchers: list = []
+        self.queue_workers: list = []
+        self.watcher_threads: list = []
+        self.worker_threads: list = []
 
         # assembly
-        self.incoming_realtime_watch_path
+        self.incoming_realtime_watch_path: str = ""
         self.remove_partial_files_check_seconds: int = 60 * 60 * 4
-        self.incoming_asvo_watch_path
-        self.assembly_realtime_watch_queue = queue.Queue()
-        self.assembly_asvo_watch_queue = queue.Queue()
-        self.assemble_path
-        self.assemble_check_seconds
-        self.obsid_check_assembled_thread
-        self.check_and_remove_partial_files_thread
+        self.incoming_asvo_watch_path: str = ""
+        self.assembly_realtime_watch_queue: queue.Queue = queue.Queue()
+        self.assembly_asvo_watch_queue: queue.Queue = queue.Queue()
+        self.assemble_path: str = ""
+        self.assemble_check_seconds: int = 0
+        self.obsid_check_assembled_thread: threading.Thread = threading.Thread()
+        self.check_and_remove_partial_files_thread: threading.Thread = threading.Thread()
 
         # processing
-        self.processing_path
-        self.processing_error_path
+        self.processing_path: str = ""
+        self.processing_error_path: str = ""
         self.processing_queue = queue.Queue()
-        self.source_list_filename
-        self.source_list_type
-        self.phase_fit_niter
+        self.source_list_filename: str = ""
+        self.source_list_type: str = ""
+        self.phase_fit_niter: int = 0
 
         # Upload
-        self.produce_debug_plots = True  # default to true- for now only off if running via pytest
-        self.upload_path
-        self.upload_error_path
-        self.upload_queue = queue.Queue()
+        self.produce_debug_plots: bool = True  # default to true- for now only off if running via pytest
+        self.upload_path: str = ""
+        self.upload_error_path: str = ""
+        self.upload_queue: queue.Queue = queue.Queue()
 
         # Complete
-        self.complete_path
-        self.keep_completed_visibility_files
+        self.complete_path: str = ""
+        self.keep_completed_visibility_files: bool = False
 
         # birli
-        self.birli_timeout
-        self.birli_binary_path
-        self.birli_max_mem_gib = 0
-        self.birli_popen_process = None
+        self.birli_timeout: int = 0
+        self.birli_binary_path: str = ""
+        self.birli_max_mem_gib: int = 0
 
         # hyperdrive
-        self.hyperdrive_timeout
-        self.hyperdrive_binary_path
-        self.hyperdrive_popen_process = None
+        self.hyperdrive_timeout: int = 0
+        self.hyperdrive_binary_path: str = ""
 
     def start(self):
         """Start the processor"""
@@ -399,7 +396,7 @@ class MWAXCalvinProcessor:
             self.sleep(60)
             return False
 
-    def check_obs_is_ready_to_process(self, obs_id, obsid_assembly_dir) -> bool:
+    def check_obs_is_ready_to_process(self, obs_id: int, obsid_assembly_dir: str) -> bool:
         """This routine checks to see if an observation is ready to be processed
         by hyperdrive"""
         #
@@ -425,11 +422,11 @@ class MWAXCalvinProcessor:
         # Get the duration of the obs from the metafits and only proceed
         # if the current gps time is > the obs_id + duration + a constant
         exp_time = int(utils.get_metafits_value(metafits_assembly_filename, "EXPOSURE"))
-        current_gpstime = astrotime.Time(datetime.datetime.now(datetime.timezone.utc), scale="utc").gps
+        current_gpstime: int = utils.get_gpstime_of_now()
 
         # We need to allow for some time for the observation to update the database,
         # so add an additional 60 seconds before we check
-        if current_gpstime > (int(obs_id) + exp_time + 60):
+        if current_gpstime > (obs_id + exp_time + 60):
             #
             # perform web service call to get list of data files from obsid
             #
@@ -542,7 +539,7 @@ class MWAXCalvinProcessor:
             if self.running:
                 self.logger.debug("Waking up and checking un-assembled observations...")
 
-                obs_id_list = []
+                obs_id_list: list[str] = []
 
                 # make a list of all obs_ids in the work path
                 for filename in os.listdir(self.assemble_path):
@@ -556,7 +553,7 @@ class MWAXCalvinProcessor:
                 # Check each one
                 for obs_id in obs_id_list:
                     obs_assemble_path = os.path.join(self.assemble_path, obs_id)
-                    if self.check_obs_is_ready_to_process(obs_id, obs_assemble_path):
+                    if self.check_obs_is_ready_to_process(int(obs_id), obs_assemble_path):
                         if int(obs_id) not in self.current_obsids:
                             self.current_obsids[int(obs_id)] = CurrentObsID(int(obs_id))
                         self.current_obsids[int(obs_id)].assembled = True
@@ -793,7 +790,7 @@ class MWAXCalvinProcessor:
                         fit_limit=20,
                     )
 
-                    if not success:
+                    if fit_id is None or not success:
                         self.logger.error(f"{item} - failed to insert calibration fit")
 
                         # This will trigger a rollback of the calibration_fit row
@@ -951,14 +948,6 @@ class MWAXCalvinProcessor:
 
         for queue_worker in self.queue_workers:
             queue_worker.stop()
-
-        # check for a hyperdrive process and kill it
-        self.logger.info("Checking for running hyperdrive process...")
-        if self.hyperdrive_popen_process:
-            if not self.hyperdrive_popen_process.poll():
-                self.logger.info("Running hyperdrive process found. Sending it SIGINT...")
-                self.hyperdrive_popen_process.send_signal(signal.SIGINT)
-                self.logger.info("SIGINT sent to Hyperdrive")
 
         # Wait for threads to finish
         for watcher_thread in self.watcher_threads:

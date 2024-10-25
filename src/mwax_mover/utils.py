@@ -1,7 +1,9 @@
 """Various utility functions used throughout the package"""
 
 import base64
+from astropy import time as astrotime
 from configparser import ConfigParser
+import datetime
 from enum import Enum
 import fcntl
 import glob
@@ -955,3 +957,15 @@ def remove_file(logger, filename: str, raise_error: bool) -> bool:
         else:
             logger.warning(f"{filename}- Error deleting: {delete_exception}. File may" " have been moved or removed.")
             return True
+
+
+# For a given datetime, return the GPS seconds as an integer
+def get_gpstime_of_datetime(date_time: datetime.datetime) -> int:
+    utc_datetime: astrotime.Time = astrotime.Time(date_time, scale="utc")
+    current_gpstime = utc_datetime.gps
+    return int(current_gpstime)  # type: ignore
+
+
+# Return the GPS seconds as an integer of Now
+def get_gpstime_of_now() -> int:
+    return get_gpstime_of_datetime(datetime.datetime.now(datetime.timezone.utc))

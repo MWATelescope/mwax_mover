@@ -25,7 +25,7 @@ from mwax_mover.mwax_command import (
 
 import numpy.typing as npt  # noqa: F401
 from numpy.typing import ArrayLike, NDArray
-from typing import NamedTuple, List, Tuple, Dict  # noqa: F401
+from typing import NamedTuple, List, Tuple, Dict, Optional  # noqa: F401
 
 # from nptyping import NDArray, Shape
 import sys
@@ -1014,7 +1014,7 @@ def debug_phase_fits(
     title: str = "",
     plot_residual: bool = False,
     residual_vmax=None,
-) -> pd.DataFrame:
+) -> Optional[pd.DataFrame]:
     """
     Given a dataframe of [tile, pol, fit...]:
     - plot intercepts
@@ -1238,7 +1238,7 @@ def plot_phase_intercepts(prefix, show, title, flavor_fits):
         fig.savefig(f"{prefix}intercepts.png", dpi=300, bbox_inches="tight")
 
 
-def plot_phase_residual(freqs, soln_xx, soln_yy, weights, prefix, title, plot_residual, residual_vmax, flavor_fits):
+def plot_phase_residual(freqs, soln_xx, soln_yy, weights, prefix, title, plot_res, residual_vmax, flavor_fits):
     plt.clf()
     g = sns.FacetGrid(flavor_fits, row="flavor", col="pol", hue="flavor", sharex=True, sharey=False)
 
@@ -1580,7 +1580,7 @@ def run_birli(
         # reason to abandon processing. Leave it there to be picked up
         # next run (ie this will trigger the "else" which does nothing)
         if processor.running:
-            error_path = os.path.join(processor.processing_error_path, obs_id)
+            error_path = os.path.join(processor.processing_error_path, str(obs_id))
             processor.logger.info(
                 f"{obs_id}: moving failed files to {error_path} for manual" " analysis and writing readme_error.txt"
             )
@@ -1608,8 +1608,8 @@ def run_hyperdrive(
     metafits_filename: str,
     obs_id: int,
     processing_dir: str,
-) -> int:
-    """Runs hyperdrive N times and returns number of successful runs"""
+) -> bool:
+    """Runs hyperdrive N times and returns true on success or false if not all runs worked"""
     processor.logger.info(
         f"{obs_id}: {len(uvfits_files)} contiguous bands detected." f" Running hyperdrive {len(uvfits_files)} times...."
     )
@@ -1706,7 +1706,7 @@ def run_hyperdrive(
         # reason to abandon processing. Leave it there to be picked up
         # next run (ie this will trigger the "else" which does nothing)
         if processor.running:
-            error_path = os.path.join(processor.processing_error_path, obs_id)
+            error_path = os.path.join(processor.processing_error_path, str(obs_id))
             processor.logger.info(
                 f"{obs_id}: moving failed files to {error_path} for manual" " analysis and writing readme_error.txt"
             )
@@ -1724,6 +1724,7 @@ def run_hyperdrive(
                 stdout,
                 stderr,
             )
+        return False
     else:
         return True
 
