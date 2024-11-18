@@ -79,7 +79,7 @@ def test_beamformer_config_file():
 
     # mwax_mover section
     assert msd.cfg_log_path == os.path.join(base_dir, "logs")
-    assert msd.cfg_webserver_port == 9998
+    assert msd.cfg_webserver_port == 7998
     assert msd.cfg_health_multicast_interface_name == "eth0"
     assert msd.cfg_health_multicast_ip == "224.234.0.0"
     assert msd.cfg_health_multicast_port == 8666

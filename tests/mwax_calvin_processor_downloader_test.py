@@ -21,8 +21,8 @@ def test_calvin_downloader_test():
     processor.initialise("tests/mwax_calvin_downloader_test.cfg")
 
     # Setup a test database
+    create_test_database(processor.logger, "tests/mwax_calvin_download_processor_test.sql")
     processor.db_handler_object.start_database_pool()
-    create_test_database(processor.db_handler_object, "tests/mwax_calvin_download_processor_test.sql")
 
     # Start the pipeline
     # Create and start a thread for the processor

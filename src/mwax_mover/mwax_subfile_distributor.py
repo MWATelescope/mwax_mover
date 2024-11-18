@@ -222,6 +222,7 @@ class MWAXSubfileDistributor:
         self.cfg_corr_calibrator_destination_host = None
         self.cfg_corr_calibrator_destination_port = None
         self.cfg_corr_calibrator_destination_enabled = False
+        self.cfg_corr_calibrator_transfer_command_timeout_sec = None
         self.cfg_corr_metafits_path = None
 
         # Connection info for metadata db
@@ -520,6 +521,15 @@ class MWAXSubfileDistributor:
                 )
             )
 
+            self.cfg_corr_calibrator_transfer_command_timeout_sec = int(
+                utils.read_config(
+                    self.logger,
+                    self.config,
+                    "correlator",
+                    "calibrator_transfer_command_timeout_sec",
+                )
+            )
+
             self.cfg_corr_metafits_path = utils.read_config(self.logger, self.config, "correlator", "metafits_path")
 
             # Get list of projectids which are to be given
@@ -735,6 +745,7 @@ class MWAXSubfileDistributor:
                 self.cfg_corr_calibrator_destination_host,
                 self.cfg_corr_calibrator_destination_port,
                 self.cfg_corr_calibrator_destination_enabled,
+                self.cfg_corr_calibrator_transfer_command_timeout_sec,
                 self.cfg_corr_metafits_path,
                 self.cfg_corr_visdata_dont_archive_path,
                 self.cfg_voltdata_dont_archive_path,

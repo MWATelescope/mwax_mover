@@ -14,7 +14,7 @@ import queue
 import shutil
 import socket
 import struct
-from tenacity import retry, stop_after_attempt, wait_fixed
+from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_not_exception_type
 import threading
 import time
 import typing
@@ -881,7 +881,7 @@ def should_project_be_archived(project_id: str) -> bool:
         return True
 
 
-@retry(stop=stop_after_attempt(10), wait=wait_fixed(300))
+@retry(stop=stop_after_attempt(10), wait=wait_fixed(30), retry=retry_if_not_exception_type((ValueError)))
 def call_webservice(logger: logging.Logger, obs_id: int, url_list: list[str], data) -> requests.Response:
     """Call each url in the list until: a response of
     200 (in which case return the response)
@@ -899,11 +899,21 @@ def call_webservice(logger: logging.Logger, obs_id: int, url_list: list[str], da
             if response.status_code == 200:
                 logger.debug(f"{obs_id}: call_webservice() returned 200 (success)")
                 return response
+
+            elif response.status_code >= 400 and response.status_code < 500:
+                error_message = (
+                    f"{obs_id}: call_webservice() returned {response.status_code} " f"{response.text} (failure)"
+                )
+                logger.error(error_message)
+                raise ValueError(error_message)
+
             else:
                 # Non-200 status code- try next url
                 logger.warning(
                     f"{obs_id}: call_webservice() returned {response.status_code} " f"{response.text} (failure)"
                 )
+        except ValueError:
+            raise
 
         except Exception as e:
             # Exception raised- try next url

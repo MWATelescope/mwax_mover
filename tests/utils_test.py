@@ -9,6 +9,7 @@ tested is the filename and metafits file (which is included).
 from configparser import ConfigParser
 import logging
 import os
+import pytest
 import queue
 from mwax_mover import utils
 
@@ -219,6 +220,17 @@ def test_get_metafits_values_correlator():
     #
     # Run test
     #
+    is_calibrator, project_id = utils.get_metafits_values("tests/data/correlator_calibrator/1347318488_metafits.fits")
+    assert is_calibrator is True
+    assert project_id == "G0080"
+
+
+def test_get_metafits_values_non_cal():
+    """
+    Test that we can find out project and cal info from a
+    metafits which is not a calibrator- i.e. it has
+    CALIBRAT=False and no CALIBSRC key
+    """
     is_calibrator, project_id = utils.get_metafits_values("tests/data/correlator_C001/1244973688_metafits.fits")
     assert is_calibrator is False
     assert project_id == "C001"
@@ -581,11 +593,12 @@ def test_config_get_optional_value_spaces_not_empty_string():
 def test_download_metafits_file():
     """Test that we can download a metafits file by obsid
     from the web service"""
+    logger = logging.getLogger("test")
     obs_id = 1244973688
     metafits_path = "tests/data/"
     metafits_filename = os.path.join(metafits_path, f"{obs_id}_metafits.fits")
 
-    utils.download_metafits_file(obs_id, metafits_path)
+    utils.download_metafits_file(logger, obs_id, metafits_path)
 
     assert os.path.exists(metafits_filename)
 
@@ -755,14 +768,19 @@ def test_should_project_be_archived():
     assert utils.should_project_be_archived("c123") is False
 
 
-def test_get_data_files_for_obsid_from_webservice():
+def test_get_data_files_for_obsid_from_webservice_404():
     logger = logging.getLogger("test")
 
-    # Uknown obsid- returns None
-    assert utils.get_data_files_for_obsid_from_webservice(logger, 1234567890, "http://ws.mwatelescope.org") is None
+    # Uknown obsid- raises exception
+    with pytest.raises(Exception):
+        utils.get_data_files_for_obsid_from_webservice(logger, 1234567890)
+
+
+def test_get_data_files_for_obsid_from_webservice_200():
+    logger = logging.getLogger("test")
 
     # Good obsid with 24 gpubox files and 1 flags and 1 metafits. Only return the 24 gpubox files
-    file_list = utils.get_data_files_for_obsid_from_webservice(logger, 1157306584, "http://ws.mwatelescope.org")
+    file_list = utils.get_data_files_for_obsid_from_webservice(logger, 1157306584)
     assert len(file_list) == 24
 
     assert file_list == [
