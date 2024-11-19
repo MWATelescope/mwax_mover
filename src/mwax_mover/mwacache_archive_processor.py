@@ -97,9 +97,6 @@ class MWACacheArchiveProcessor:
         """This method is used to start the processor"""
         self.running = True
 
-        # Get this hosts hostname
-        self.hostname = utils.get_hostname()
-
         # creating database connection pool(s)
         self.logger.info("Starting MRO database connection pool...")
         self.mro_db_handler_object.start_database_pool()
@@ -466,6 +463,10 @@ class MWACacheArchiveProcessor:
         self.logger.info(
             "Starting mwacache_archive_processor" f" processor...v{version.get_mwax_mover_version_string()}"
         )
+
+        # Get this hosts hostname
+        self.hostname = utils.get_hostname()
+        self.logger.info(f"hostname: {self.hostname}")
 
         # Dump some diagnostic info
         py_version = sys.version  # contains a \n, so get rid of it
