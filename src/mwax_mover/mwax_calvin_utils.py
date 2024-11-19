@@ -1616,6 +1616,11 @@ def run_hyperdrive(
 
     # Keep track of the number of successful hyperdrive runs
     hyperdrive_runs_success: int = 0
+    stdout = ""
+    stderr = ""
+    elapsed = -1
+    cmdline = ""
+    exit_code = 0
 
     for hyperdrive_run, uvfits_file in enumerate(uvfits_files):
         # Take the filename which for picket fence will also have

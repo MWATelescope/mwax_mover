@@ -6,14 +6,16 @@ import random
 import time
 import uuid
 import boto3
-from typing import Tuple
+import logging
+
+import boto3.resources
 from mwax_mover.mwax_command import run_command_ext
 from boto3.s3.transfer import TransferConfig
 from botocore.client import Config
 
 
 def archive_file_rsync(
-    logger,
+    logger: logging.Logger,
     full_filename: str,
     archive_numa_node: int,
     archive_destination_host: str,
@@ -65,7 +67,7 @@ def archive_file_rsync(
 
 
 def archive_file_xrootd(
-    logger,
+    logger: logging.Logger,
     full_filename: str,
     archive_numa_node: int,
     archive_destination_host: str,
@@ -150,7 +152,7 @@ def archive_file_xrootd(
 
 def archive_file_ceph(
     logger,
-    ceph_session: boto3.Session,
+    ceph_session,
     ceph_endpoints: list,
     full_filename: str,
     bucket_name: str,
@@ -172,6 +174,7 @@ def archive_file_ceph(
 
     # Start fresh with a list of all possible endpoints (from the config file)
     endpoints = ceph_endpoints.copy()
+    start_time = time.time()
 
     while len(endpoints) > 0:
         # Get an s3 resource based on a random endpoint
@@ -294,14 +297,14 @@ def ceph_get_s3_md5_etag(filename: str, chunk_size_bytes: int) -> str:
     return new_etag
 
 
-def ceph_get_s3_session(profile: str) -> boto3.Session:
+def ceph_get_s3_session(profile: str):
     """Returns a boto3 session given the profile name"""
     session = boto3.Session(profile_name=profile)
     return session
 
 
-def ceph_get_s3_resource(logger, session: boto3.Session, endpoints: list) -> Tuple[boto3.resource, str]:
-    """Returns an S3 resource object"""
+def ceph_get_s3_resource(logger, session, endpoints: list):
+    """Returns a tuple of the S3 resource object and the endpoint used"""
     # This ensures the default boto retries and timeouts don't leave us
     # hanging too long
     config = Config(connect_timeout=5, retries={"mode": "standard"})
@@ -314,20 +317,20 @@ def ceph_get_s3_resource(logger, session: boto3.Session, endpoints: list) -> Tup
     return s3_resource, endpoint
 
 
-def ceph_create_bucket(s3_resource: boto3.resource, bucket_name: str):
+def ceph_create_bucket(s3_resource, bucket_name: str):
     """Create a bucket via S3"""
     bucket = s3_resource.Bucket(bucket_name)
     bucket.create()
 
 
-def ceph_list_bucket(s3_resource: boto3.resource, bucket_name: str) -> list:
+def ceph_list_bucket(s3_resource, bucket_name: str) -> list:
     """List contents of a bucket"""
     bucket = s3_resource.Bucket(bucket_name)
     return list(bucket.objects.all())
 
 
 def ceph_upload_file(
-    ceph_resource: boto3.resource,
+    ceph_resource,
     bucket_name: str,
     filename: str,
     md5hash: str,

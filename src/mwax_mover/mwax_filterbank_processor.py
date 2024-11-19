@@ -49,8 +49,8 @@ class FilterbankProcessor:
 
         self.watch_dir_fil = fildata_path
         self.queue_fil = queue.Queue()
-        self.watcher_fil = None
-        self.queue_worker_fil = None
+        self.watcher_fil: mwax_watcher.Watcher
+        self.queue_worker_fil: mwax_queue_worker.QueueWorker
 
         self.archive_destination_host = archive_host
         self.archive_destination_port = archive_port

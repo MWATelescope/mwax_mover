@@ -8,7 +8,7 @@ import logging
 import os
 import re
 import time
-from typing import List
+from typing import List, Optional
 from mwax_mover.mwax_command import run_command_ext
 
 
@@ -28,7 +28,7 @@ class GiantSquidJobAlreadyExistsException(Exception):
         # Call the base class constructor with the parameters it needs, but add job id
         # for us to use!
         super().__init__(message)
-        self.job_id = job_id
+        self.job_id: int = job_id
 
 
 class MWAASVOJobState(Enum):
@@ -48,21 +48,21 @@ class MWAASVOJob:
     """
 
     def __init__(self, request_id: int, obs_id: int, job_id: int):
-        self.request_ids = []
+        self.request_ids: list[int] = []
         self.request_ids.append(request_id)
 
         self.obs_id = obs_id
         self.job_id = job_id
         self.job_state = MWAASVOJobState.Unknown
-        self.submitted_datetime = None
-        self.last_seen_datetime = self.submitted_datetime
-        self.download_url = None
-        self.download_started_datetime = None
+        self.submitted_datetime: datetime.datetime
+        self.last_seen_datetime: Optional[datetime.datetime] = None
+        self.download_url: Optional[str] = None
+        self.download_started_datetime: Optional[datetime.datetime] = None
         self.download_in_progress: bool = False
         self.download_completed: bool = False
-        self.download_completed_datetime = None
-        self.download_error_datetime = None
-        self.download_error_message = None
+        self.download_completed_datetime: Optional[datetime.datetime] = None
+        self.download_error_datetime: Optional[datetime.datetime] = None
+        self.download_error_message: Optional[str] = None
         self.download_retries: int = 0
 
     def __str__(self):
@@ -73,8 +73,8 @@ class MWAASVOJob:
 
     def elapsed_time_seconds(self) -> int:
         """Returns the number of seconds between Now and the submitted datetime"""
-        if self.submitted_datetime:
-            return (datetime.datetime.now() - self.submitted_datetime).total_seconds()
+        if self.submitted_datetime is not None:
+            return int((datetime.datetime.now() - self.submitted_datetime).total_seconds())
         else:
             return 0
 
@@ -115,20 +115,20 @@ class MWAASVOHelper:
         self.logger: logging.Logger
 
         # Where is giant-squid binary?
-        self.path_to_giant_squid_binary = None
+        self.path_to_giant_squid_binary: str = ""
 
         # How many seconds do we wait when executing giant-squid list
-        self.giant_squid_list_timeout_seconds = None
+        self.giant_squid_list_timeout_seconds: int = 0
 
         # How many seconds do we wait when executing giant-squid submit-vis
-        self.giant_squid_submitvis_timeout_seconds = None
+        self.giant_squid_submitvis_timeout_seconds: int = 0
 
         # How many seconds do we wait when executing giant-squid download
-        self.giant_squid_download_timeout_seconds = None
+        self.giant_squid_download_timeout_seconds: int = 0
 
         # Where do we tell giant-squid to download data to?
         # Probably the incoming directory of the calvin_processor
-        self.download_path = None
+        self.download_path: str = ""
 
         # List of Jobs and obs_ids the helper is keeping track of
         self.current_asvo_jobs: List[MWAASVOJob] = []
@@ -150,7 +150,7 @@ class MWAASVOHelper:
         self.giant_squid_download_timeout_seconds = giant_squid_download_timeout_seconds
         self.download_path = download_path
 
-    def get_first_job_for_obs_id(self, obs_id) -> MWAASVOJob | None:
+    def get_first_job_for_obs_id(self, obs_id: int) -> MWAASVOJob | None:
         """Get the first MWAASVOJob object found in current_asvo_jobs, matching on obs_id.
 
         Parameters:
@@ -257,9 +257,10 @@ class MWAASVOHelper:
                         job.job_state = job_state
                         changed = True
 
-                    if job.download_url != download_url:
-                        job.download_url = download_url
-                        changed = True
+                    if download_url is not None:
+                        if job.download_url != download_url:
+                            job.download_url = download_url
+                            changed = True
 
                     job.last_seen_datetime = update_datetime
 
@@ -428,6 +429,7 @@ def get_job_info_from_giant_squid_json(stdout_json, json_for_one_job) -> tuple[i
 
     job_id: int = int(json_for_one_job)
     obs_id: int = int(stdout_json[json_for_one_job]["obsid"])
+    job_state: str = "Unknown"
     job_state_json = stdout_json[json_for_one_job]["jobState"]
 
     # Some job_state_json values are just strings, others are dicts!

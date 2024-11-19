@@ -150,12 +150,12 @@ class MWAXSubfileDistributor:
         self.logger = logging.getLogger("mwax_mover")
 
         # Config parser
-        self.config = None
+        self.config: ConfigParser
 
         # init vars
-        self.hostname = utils.get_hostname()
-        self.running = False
-        self.processors = []
+        self.hostname: str = utils.get_hostname()
+        self.running: bool = False
+        self.processors: list = []
         self.archive_processor = None
         self.filterbank_processor = None
         self.subfile_processor = None
@@ -169,71 +169,71 @@ class MWAXSubfileDistributor:
         #
 
         # Common
-        self.cfg_log_path = None
-        self.cfg_webserver_port = None
-        self.cfg_voltdata_dont_archive_path = None
-        self.cfg_subfile_incoming_path = None
-        self.cfg_voltdata_incoming_path = None
-        self.cfg_voltdata_outgoing_path = None
-        self.cfg_always_keep_subfiles = False
-        self.cfg_archive_command_timeout_sec = None
-        self.cfg_psrdada_timeout_sec = None
-        self.cfg_copy_subfile_to_disk_timeout_sec = None
+        self.cfg_log_path: str = ""
+        self.cfg_webserver_port: int = 0
+        self.cfg_voltdata_dont_archive_path: str = ""
+        self.cfg_subfile_incoming_path: str = ""
+        self.cfg_voltdata_incoming_path: str = ""
+        self.cfg_voltdata_outgoing_path: str = ""
+        self.cfg_always_keep_subfiles: bool = False
+        self.cfg_archive_command_timeout_sec: int = 0
+        self.cfg_psrdada_timeout_sec: int = 0
+        self.cfg_copy_subfile_to_disk_timeout_sec: int = 0
         self.cfg_archiving_enabled: bool = False
-        self.cfg_health_multicast_interface_ip = None
-        self.cfg_health_multicast_interface_name = None
-        self.cfg_health_multicast_ip = None
-        self.cfg_health_multicast_port = None
-        self.cfg_health_multicast_hops = None
+        self.cfg_health_multicast_interface_ip: str = ""
+        self.cfg_health_multicast_interface_name: str = ""
+        self.cfg_health_multicast_ip: str = ""
+        self.cfg_health_multicast_port: int = 0
+        self.cfg_health_multicast_hops: int = 1
 
         # Beamformer
-        self.cfg_bf_enabled = False
-        self.cfg_bf_ringbuffer_key = None
-        self.cfg_bf_numa_node = None
-        self.cfg_bf_fildata_path = None
-        self.cfg_bf_settings_path = None
-        self.cfg_bf_archive_command_numa_node = None
+        self.cfg_bf_enabled: bool = False
+        self.cfg_bf_ringbuffer_key: str = ""
+        self.cfg_bf_numa_node: int = -1
+        self.cfg_bf_fildata_path: str = ""
+        self.cfg_bf_settings_path: str = ""
+        self.cfg_bf_archive_command_numa_node: int = -1
         # Archiving settings for beamformer
-        self.cfg_bf_archive_destination_host = None
-        self.cfg_bf_archive_destination_port = None
-        self.cfg_bf_archive_destination_enabled = False
+        self.cfg_bf_archive_destination_host: str = ""
+        self.cfg_bf_archive_destination_port: int = 0
+        self.cfg_bf_archive_destination_enabled: bool = False
 
         # Correlator
-        self.cfg_corr_enabled = False
-        self.cfg_corr_input_ringbuffer_key = None
-        self.cfg_corr_diskdb_numa_node = None
-        self.cfg_corr_archive_command_numa_node = None
-        self.cfg_corr_visdata_dont_archive_path = None
-        self.cfg_corr_visdata_incoming_path = None
-        self.cfg_corr_visdata_outgoing_path = None
-        self.cfg_corr_high_priority_correlator_projectids = None
-        self.cfg_corr_high_priority_vcs_projectids = None
+        self.cfg_corr_enabled: bool = False
+        self.cfg_corr_input_ringbuffer_key: str = ""
+        self.cfg_corr_diskdb_numa_node: int = -1
+        self.cfg_corr_archive_command_numa_node: int = -1
+        self.cfg_corr_visdata_dont_archive_path: str = ""
+        self.cfg_corr_visdata_incoming_path: str = ""
+        self.cfg_corr_visdata_outgoing_path: str = ""
+        self.cfg_corr_high_priority_correlator_projectids: list[str] = []
+        self.cfg_corr_high_priority_vcs_projectids: list[str] = []
         # Archiving settings for correlator
-        self.cfg_corr_archive_destination_host = None
-        self.cfg_corr_archive_destination_port = None
-        self.cfg_corr_archive_destination_enabled = False
+        self.cfg_corr_archive_destination_host: str = ""
+        self.cfg_corr_archive_destination_port: int = 0
+        self.cfg_corr_archive_destination_enabled: int = 0
         # processing_stats config
-        self.cfg_corr_mwax_stats_timeout_sec = None
-        self.cfg_corr_mwax_stats_dump_dir = None
-        self.cfg_corr_mwax_stats_executable = None
-        self.cfg_corr_visdata_processing_stats_path = None
+        self.cfg_corr_mwax_stats_timeout_sec: int = 0
+        self.cfg_corr_mwax_stats_dump_dir: str = ""
+        self.cfg_corr_mwax_stats_executable: str = ""
+        self.cfg_corr_visdata_processing_stats_path: str = ""
         # calibration config
-        self.cfg_corr_calibrator_outgoing_path = None
-        self.cfg_corr_calibrator_destination_host = None
-        self.cfg_corr_calibrator_destination_port = None
-        self.cfg_corr_calibrator_destination_enabled = False
-        self.cfg_corr_calibrator_transfer_command_timeout_sec = None
-        self.cfg_corr_metafits_path = None
+        self.cfg_corr_calibrator_outgoing_path: str = ""
+        self.cfg_corr_calibrator_destination_host: str = ""
+        self.cfg_corr_calibrator_destination_port: int = 0
+        self.cfg_corr_calibrator_destination_enabled: int = 0
+        self.cfg_corr_calibrator_transfer_command_timeout_sec: int = 0
+        self.cfg_corr_metafits_path: str = ""
 
         # Connection info for metadata db
-        self.cfg_metadatadb_host = None
-        self.cfg_metadatadb_db = None
-        self.cfg_metadatadb_user = None
-        self.cfg_metadatadb_pass = None
-        self.cfg_metadatadb_port = None
+        self.cfg_metadatadb_host: str = ""
+        self.cfg_metadatadb_db: str = ""
+        self.cfg_metadatadb_user: str = ""
+        self.cfg_metadatadb_pass: str = ""
+        self.cfg_metadatadb_port: int = 5432
 
         # Database handler for metadata db
-        self.db_handler = None
+        self.db_handler: mwax_db.MWAXDBHandler
 
     def initialise_from_command_line(self):
         """Called if run from command line"""

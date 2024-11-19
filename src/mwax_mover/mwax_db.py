@@ -17,6 +17,7 @@ from tenacity import (
     retry_if_not_exception_type,
     retry_if_exception_type,
 )
+from mwax_mover.utils import ArchiveLocation
 
 
 class MWAXDBHandler:
@@ -395,7 +396,7 @@ def update_data_file_row_as_archived(
     db_handler_object,
     obsid: int,
     archive_filename: str,
-    location: int,
+    location: ArchiveLocation,
     bucket: str,
     folder: Optional[str],
 ) -> bool:
@@ -422,7 +423,7 @@ def update_data_file_row_as_archived(
             (
                 bucket,
                 folder,
-                location,
+                location.value,
                 str(obsid),
                 filename,
             ),
@@ -781,9 +782,9 @@ def update_calsolution_request_submit_mwa_asvo_job(
     WHERE
     id = ANY(%s)"""
 
-    try:
-        params = [mwa_asvo_submitted_datetime, mwa_asvo_job_id, request_ids]
+    params = [mwa_asvo_submitted_datetime, mwa_asvo_job_id, request_ids]
 
+    try:
         db_handler_object.execute_dml(sql, params, None)
         db_handler_object.logger.debug(
             "update_calsolution_request_submit_mwa_asvo_job(): Successfully updated " "calibration_request table."
@@ -825,9 +826,9 @@ def update_calsolution_request_download_started_status(
     WHERE
     id = ANY(%s)"""
 
-    try:
-        params = [download_started_datetime, request_ids]
+    params = [download_started_datetime, request_ids]
 
+    try:
         db_handler_object.execute_dml(sql, params, None)
         db_handler_object.logger.debug(
             "update_calsolution_request_download_started_status(): Successfully updated " "calibration_request table."
@@ -887,9 +888,9 @@ def update_calsolution_request_download_complete_status(
             f"{download_completed_datetime, download_error_datetime, download_error_message}"
         )
 
-    try:
-        params = [download_completed_datetime, download_error_datetime, download_error_message, request_ids]
+    params = [download_completed_datetime, download_error_datetime, download_error_message, request_ids]
 
+    try:
         db_handler_object.execute_dml(sql, params, None)
         db_handler_object.logger.debug(
             "update_calsolution_request_download_complete_status(): Successfully updated " "calibration_request table."
@@ -956,6 +957,8 @@ def update_calsolution_request_calibration_started_status(
         calibration_error_message = NULL
     WHERE
     id = ANY(%s)"""
+
+    params = []
 
     # calvin_processor won't know the requestids so get them (if any!)
     if request_ids is None:
@@ -1024,6 +1027,7 @@ def update_calsolution_request_calibration_complete_status(
         calibration_error_message = %s
     WHERE
     id = ANY(%s)"""
+    params = ""
 
     # check for validity, raise exception if not valid
     # ^ is XOR if you were wondering!

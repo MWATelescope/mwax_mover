@@ -5,6 +5,7 @@ config correctly from a "mwacache_archiver" config file.
 
 import os
 from mwax_mover.mwacache_archive_processor import MWACacheArchiveProcessor
+from mwax_mover.utils import ArchiveLocation
 
 TEST_BASE_PATH = "tests/mock_mwacache_archiver"
 
@@ -61,7 +62,7 @@ def test_mwacache_archiver_config_file():
     # mwax_mover section
     assert mcap.log_path == os.path.join(base_dir, "logs")
     assert mcap.metafits_path == "tests/data/mwacache_vulcan_metafits"
-    assert mcap.archive_to_location == 2
+    assert mcap.archive_to_location == ArchiveLocation.Acacia
 
     assert mcap.health_multicast_interface_name == "eth0"
     assert mcap.health_multicast_ip == "224.250.0.0"

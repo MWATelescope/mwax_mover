@@ -9,13 +9,8 @@ import shutil
 import sys
 import threading
 import time
-from mwax_mover import (
-    mwax_mover,
-    utils,
-    mwax_queue_worker,
-    mwax_watcher,
-    mwax_command,
-)
+from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
+from mwax_mover import utils, mwax_queue_worker, mwax_watcher, mwax_command
 from mwax_mover.utils import CorrelatorMode
 
 COMMAND_DADA_DISKDB = "dada_diskdb"
@@ -59,7 +54,7 @@ class SubfileProcessor:
         self.logger.addHandler(file_log)
 
         self.ext_sub_file = ".sub"
-        self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_RENAME
+        self.mwax_mover_mode = MODE_WATCH_DIR_FOR_RENAME
         self.subfile_incoming_path = subfile_incoming_path
         self.voltdata_incoming_path = voltdata_incoming_path
         self.always_keep_subfiles = always_keep_subfiles
@@ -202,6 +197,8 @@ class SubfileProcessor:
 
         try:
             subfile_mode = utils.read_subfile_value(item, utils.PSRDADA_MODE)
+            if subfile_mode is None:
+                raise ValueError(f"Keyword {utils.PSRDADA_MODE} not found in {item}")
 
             if self.corr_enabled:
                 #
@@ -210,7 +207,11 @@ class SubfileProcessor:
                 # like a VCS observation
                 #
                 # Read the SUBOBSID from the subfile
-                subobs_id = int(utils.read_subfile_value(item, utils.PSRDADA_SUBOBS_ID))
+                subobs_id_str = utils.read_subfile_value(item, utils.PSRDADA_SUBOBS_ID)
+                if subobs_id_str is None:
+                    raise ValueError(f"Keyword {utils.PSRDADA_MODE} not found in {item}")
+
+                subobs_id = int(subobs_id_str)
 
                 if (
                     (self.dump_start_gps is not None and self.dump_end_gps is not None)

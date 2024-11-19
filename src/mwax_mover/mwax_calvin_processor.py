@@ -583,6 +583,7 @@ class MWAXCalvinProcessor:
         have birli then hyperdrive run on it.
         item is the processing directory"""
         birli_success: bool = False
+        error_message: str = ""
 
         file_no_path = item.split("/")
         obs_id = file_no_path[-1][0:10]
@@ -671,12 +672,12 @@ class MWAXCalvinProcessor:
         item is a fully qualified directory which MUST
         end in the obsid"""
 
+        # get obs_id
+        file_no_path = item.split("/")
+        obs_id = int(file_no_path[-1][0:10])
+
         conn = None
         try:
-            # get obs_id
-            file_no_path = item.split("/")
-            obs_id = int(file_no_path[-1][0:10])
-
             # for our housekeeping, add this obsid to our current list
             # (unless it's there already- remember an obsid can be "started" from
             # incoming / assemble / processing / upload - if the processor is stopped and
@@ -759,7 +760,10 @@ class MWAXCalvinProcessor:
             # Matplotlib stuff seems to break pytest so we will
             # pass false in for pytest stuff (or if we don't want debug)
             if self.produce_debug_plots:
-                phase_fits_pivot = debug_phase_fits(
+                # This line was:
+                # phase_fits_pivot = debug_phase_fits(...
+                # But the phase_fits_pivot return value is not used
+                debug_phase_fits(
                     phase_fits,
                     tiles,
                     all_chanblocks_hz,

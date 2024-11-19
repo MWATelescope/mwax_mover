@@ -12,6 +12,7 @@ import signal
 import sys
 import threading
 import time
+from typing import Optional
 import astropy
 import boto3
 import botocore
@@ -19,13 +20,13 @@ from boto3 import Session
 from mwax_mover import (
     mwax_mover,
     mwax_db,
-    mwax_ceph_priority_queue_worker,
-    mwax_priority_watcher,
     mwa_archiver,
     utils,
     version,
 )
-from mwax_mover.utils import ValidationData
+from mwax_mover.mwax_priority_watcher import PriorityWatcher
+from mwax_mover.mwax_ceph_priority_queue_worker import CephPriorityQueueWorker
+from mwax_mover.utils import ValidationData, ArchiveLocation
 from mwax_mover.mwax_db import DataFileRow
 
 
@@ -39,58 +40,58 @@ class MWACacheArchiveProcessor:
     def __init__(self):
         self.logger: logging.Logger
 
-        self.hostname = None
-        self.log_path = None
-        self.metafits_path = None
-        self.archive_to_location = None
-        self.concurrent_archive_workers = None
-        self.archive_command_timeout_sec = None
-        self.recursive = None
+        self.hostname: str = ""
+        self.log_path: str = ""
+        self.metafits_path: str = ""
+        self.archive_to_location: ArchiveLocation = ArchiveLocation.Unknown
+        self.concurrent_archive_workers: int = 0
+        self.archive_command_timeout_sec: int = 0
+        self.recursive: bool = False
 
         # database config
-        self.remote_metadatadb_db: mwax_db.MWAXDBHandler
-        self.remote_metadatadb_host = None
-        self.remote_metadatadb_user = None
-        self.remote_metadatadb_pass = None
-        self.remote_metadatadb_port = None
+        self.remote_metadatadb_db: str = ""
+        self.remote_metadatadb_host: str = ""
+        self.remote_metadatadb_user: str = ""
+        self.remote_metadatadb_pass: str = ""
+        self.remote_metadatadb_port: int = 5432
 
-        self.mro_metadatadb_db: mwax_db.MWAXDBHandler
-        self.mro_metadatadb_host = None
-        self.mro_metadatadb_user = None
-        self.mro_metadatadb_pass = None
-        self.mro_metadatadb_port = None
+        self.mro_metadatadb_db: str = ""
+        self.mro_metadatadb_host: str = ""
+        self.mro_metadatadb_user: str = ""
+        self.mro_metadatadb_pass: str = ""
+        self.mro_metadatadb_port: int = 5432
 
         # s3 config
-        self.s3_profile = None
-        self.s3_ceph_endpoints = None
-        self.s3_multipart_threshold_bytes = None
-        self.s3_chunk_size_bytes = None
-        self.s3_max_concurrency = None
+        self.s3_profile: str = ""
+        self.s3_ceph_endpoints: list[str] = []
+        self.s3_multipart_threshold_bytes: Optional[int] = None
+        self.s3_chunk_size_bytes: Optional[int] = None
+        self.s3_max_concurrency: Optional[int] = None
 
-        self.health_multicast_interface_ip = None
-        self.health_multicast_ip = None
-        self.health_multicast_port = None
-        self.health_multicast_hops = None
-        self.health_multicast_interface_name = None
+        self.health_multicast_interface_ip: str = ""
+        self.health_multicast_ip: str = ""
+        self.health_multicast_port: int = 0
+        self.health_multicast_hops: int = 1
+        self.health_multicast_interface_name: str = ""
 
-        self.high_priority_correlator_projectids = None
-        self.high_priority_vcs_projectids = None
+        self.high_priority_correlator_projectids: list[str] = []
+        self.high_priority_vcs_projectids: list[str] = []
 
         # MWAX servers will copy in a temp file, then rename once it is good
-        self.mwax_mover_mode = mwax_mover.MODE_WATCH_DIR_FOR_RENAME
-        self.archiving_paused = False
-        self.running = False
+        self.mwax_mover_mode: str = mwax_mover.MODE_WATCH_DIR_FOR_RENAME
+        self.archiving_paused: bool = False
+        self.running: bool = False
 
-        self.mro_db_handler_object = None
-        self.remote_db_handler_object = None
+        self.mro_db_handler_object: mwax_db.MWAXDBHandler
+        self.remote_db_handler_object: mwax_db.MWAXDBHandler
 
-        self.watcher_threads = []
-        self.worker_threads = []
+        self.watcher_threads: list[threading.Thread] = []
+        self.worker_threads: list[threading.Thread] = []
 
-        self.watch_dirs = None
-        self.queue = queue.PriorityQueue()
-        self.watchers = []
-        self.queue_workers = []
+        self.watch_dirs: list[str] = []
+        self.queue: queue.PriorityQueue = queue.PriorityQueue()
+        self.watchers: list[PriorityWatcher] = []
+        self.queue_workers: list[CephPriorityQueueWorker] = []
 
     def start(self):
         """This method is used to start the processor"""
@@ -141,7 +142,7 @@ class MWACacheArchiveProcessor:
                     )
 
             # Create watcher for each data path queue
-            new_watcher = mwax_priority_watcher.PriorityWatcher(
+            new_watcher = PriorityWatcher(
                 name=f"incoming_watcher{watcher_no}",
                 path=watch_dir,
                 dest_queue=self.queue,
@@ -160,7 +161,7 @@ class MWACacheArchiveProcessor:
         self.logger.info("Creating workers...")
 
         for archive_worker in range(0, self.concurrent_archive_workers):
-            new_worker = mwax_ceph_priority_queue_worker.CephPriorityQueueWorker(
+            new_worker = CephPriorityQueueWorker(
                 name=f"Archiver{archive_worker}",
                 source_queue=self.queue,
                 executable_path=None,
@@ -258,15 +259,17 @@ class MWACacheArchiveProcessor:
             self.logger.debug(f"{item}- archive_handler() File size matches metadata" " database")
 
             # Determine where to archive it
-            bucket, _ = utils.determine_bucket_and_folder(
+            bucket = utils.determine_bucket(
                 item,
                 self.archive_to_location,
             )
 
-        if val.valid:
             archive_success = False
 
-            if self.archive_to_location == 2 or self.archive_to_location == 3:  # Acacia or Banksia
+            if (
+                self.archive_to_location == ArchiveLocation.Acacia
+                or self.archive_to_location == ArchiveLocation.Banksia
+            ):  # Acacia or Banksia
                 archive_success = mwa_archiver.archive_file_ceph(
                     self.logger,
                     ceph_session,
@@ -279,7 +282,7 @@ class MWACacheArchiveProcessor:
                     self.s3_max_concurrency,
                 )
             else:
-                raise NotImplementedError(f"Location {self.archive_to_location} not implemented")
+                raise NotImplementedError(f"Location {self.archive_to_location.value} not implemented")
 
             if archive_success:
                 # Update record in metadata database
@@ -484,7 +487,9 @@ class MWACacheArchiveProcessor:
             self.logger.error("Metafits file location " f" {self.metafits_path} does not exist. Quitting.")
             sys.exit(1)
 
-        self.archive_to_location = int(utils.read_config(self.logger, config, "mwax mover", "archive_to_location"))
+        self.archive_to_location = ArchiveLocation(
+            int(utils.read_config(self.logger, config, "mwax mover", "archive_to_location"))
+        )
         self.concurrent_archive_workers = int(
             utils.read_config(self.logger, config, "mwax mover", "concurrent_archive_workers")
         )
@@ -529,9 +534,9 @@ class MWACacheArchiveProcessor:
         # We set different s3 options based on the location
         # 2 == Acacia
         # 3 == Banksia
-        if self.archive_to_location == 2:
+        if self.archive_to_location == ArchiveLocation.Acacia:
             s3_section = "acacia"
-        elif self.archive_to_location == 3:
+        elif self.archive_to_location == ArchiveLocation.Banksia:
             s3_section = "banksia"
         else:
             raise NotImplementedError("archive to location should be 2 (Acacia) or 3 (Banksia")
@@ -546,19 +551,19 @@ class MWACacheArchiveProcessor:
             "ceph_endpoints",
         )
 
-        self.s3_multipart_threshold_bytes = utils.read_optional_config(
+        s3_multipart_threshold_bytes = utils.read_optional_config(
             self.logger, config, s3_section, "multipart_threshold_bytes"
         )
-        if self.s3_multipart_threshold_bytes is not None:
-            self.s3_multipart_threshold_bytes = int(self.s3_multipart_threshold_bytes)
+        if s3_multipart_threshold_bytes is not None:
+            self.s3_multipart_threshold_bytes = int(s3_multipart_threshold_bytes)
 
-        self.s3_chunk_size_bytes = utils.read_optional_config(self.logger, config, s3_section, "chunk_size_bytes")
-        if self.s3_chunk_size_bytes is not None:
-            self.s3_chunk_size_bytes = int(self.s3_chunk_size_bytes)
+        s3_chunk_size_bytes = utils.read_optional_config(self.logger, config, s3_section, "chunk_size_bytes")
+        if s3_chunk_size_bytes is not None:
+            self.s3_chunk_size_bytes = int(s3_chunk_size_bytes)
 
-        self.s3_max_concurrency = utils.read_optional_config(self.logger, config, s3_section, "max_concurrency")
-        if self.s3_max_concurrency is not None:
-            self.s3_max_concurrency = int(self.s3_max_concurrency)
+        s3_max_concurrency = utils.read_optional_config(self.logger, config, s3_section, "max_concurrency")
+        if s3_max_concurrency is not None:
+            self.s3_max_concurrency = int(s3_max_concurrency)
 
         #
         # Options specified per host

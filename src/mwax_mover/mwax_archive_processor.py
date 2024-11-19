@@ -17,6 +17,10 @@ from mwax_mover import (
     mwa_archiver,
     utils,
 )
+from mwax_mover.mwax_watcher import Watcher
+from mwax_mover.mwax_queue_worker import QueueWorker
+from mwax_mover.mwax_priority_watcher import PriorityWatcher
+from mwax_mover.mwax_priority_queue_worker import PriorityQueueWorker
 from mwax_mover.utils import MWADataFileType, ValidationData
 
 
@@ -33,12 +37,12 @@ class MWAXArchiveProcessor:
         archive_destination_enabled: int,
         archive_command_numa_node: int,
         archive_host: str,
-        archive_port: str,
+        archive_port: int,
         archive_command_timeout_sec: int,
         mwax_stats_executable: str,
         mwax_stats_dump_dir: str,
         mwax_stats_timeout_sec: int,
-        db_handler_object,
+        db_handler_object: mwax_db.MWAXDBHandler,
         voltdata_incoming_path: str,
         voltdata_outgoing_path: str,
         visdata_incoming_path: str,
@@ -58,7 +62,7 @@ class MWAXArchiveProcessor:
         self.sd_ctx = context
 
         # Setup logging
-        self.logger = logging.getLogger(__name__)
+        self.logger: logging.Logger = logging.getLogger(__name__)
         # pass all logged events to the parent (subfile distributor/main log)
         self.logger.propagate = True
         self.logger.setLevel(logging.DEBUG)
@@ -72,59 +76,58 @@ class MWAXArchiveProcessor:
         file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(file_log)
 
-        self.db_handler_object = db_handler_object
+        self.db_handler_object: mwax_db.MWAXDBHandler = db_handler_object
 
-        self.hostname = hostname
-        self.archive_destination_enabled = archive_destination_enabled
-        self.archive_destination_host = archive_host
-        self.archive_destination_port = archive_port
+        self.hostname: str = hostname
+        self.archive_destination_enabled: int = archive_destination_enabled
+        self.archive_destination_host: str = archive_host
+        self.archive_destination_port: int = archive_port
         self.archive_command_numa_node: int = archive_command_numa_node
-        self.archive_command_timeout_sec = archive_command_timeout_sec
-        self.calibrator_transfer_command_timeout_sec = calibrator_transfer_command_timeout_sec
+        self.archive_command_timeout_sec: int = archive_command_timeout_sec
+        self.calibrator_transfer_command_timeout_sec: int = calibrator_transfer_command_timeout_sec
 
         # Full path to executable for mwax_stats
-        self.mwax_stats_executable = mwax_stats_executable
+        self.mwax_stats_executable: str = mwax_stats_executable
         # Directory where to dump the stats files
-        self.mwax_stats_dump_dir = mwax_stats_dump_dir
-        self.mwax_stats_timeout_sec = mwax_stats_timeout_sec
+        self.mwax_stats_dump_dir: str = mwax_stats_dump_dir
+        self.mwax_stats_timeout_sec: int = mwax_stats_timeout_sec
 
-        self.archiving_paused = False
+        self.archiving_paused: bool = False
 
-        self.watchers = []
-        self.watcher_threads = []
+        self.watchers: list[PriorityWatcher | Watcher] = []
+        self.watcher_threads: list[threading.Thread] = []
 
-        self.workers = []
-        self.worker_threads = []
+        self.workers: list[PriorityQueueWorker | QueueWorker] = []
+        self.worker_threads: list[threading.Thread] = []
 
-        self.dont_archive_path_vis = visdata_dont_archive_path
-        self.queue_dont_archive_vis = queue.Queue()
+        self.dont_archive_path_vis: str = visdata_dont_archive_path
+        self.queue_dont_archive_vis: queue.Queue = queue.Queue()
 
-        self.dont_archive_path_volt = voltdata_dont_archive_path
-        self.queue_dont_archive_volt = queue.Queue()
+        self.dont_archive_path_volt: str = voltdata_dont_archive_path
+        self.queue_dont_archive_volt: queue.Queue = queue.Queue()
 
-        self.queue_checksum_and_db = queue.PriorityQueue()
+        self.queue_checksum_and_db: queue.PriorityQueue = queue.PriorityQueue()
 
-        self.watch_dir_incoming_volt = voltdata_incoming_path
-        self.watch_dir_incoming_vis = visdata_incoming_path
+        self.watch_dir_incoming_volt: str = voltdata_incoming_path
+        self.watch_dir_incoming_vis: str = visdata_incoming_path
 
-        self.watch_dir_processing_stats_vis = visdata_processing_stats_path
-        self.queue_processing_stats_vis = queue.Queue()
+        self.watch_dir_processing_stats_vis: str = visdata_processing_stats_path
+        self.queue_processing_stats_vis: queue.Queue = queue.Queue()
 
-        self.watch_dir_outgoing_volt = voltdata_outgoing_path
-        self.watch_dir_outgoing_vis = visdata_outgoing_path
-        self.queue_outgoing = queue.PriorityQueue()
+        self.watch_dir_outgoing_volt: str = voltdata_outgoing_path
+        self.watch_dir_outgoing_vis: str = visdata_outgoing_path
+        self.queue_outgoing: queue.PriorityQueue = queue.PriorityQueue()
 
-        self.watch_dir_outgoing_cal = visdata_cal_outgoing_path
-        self.queue_outgoing_cal = queue.Queue()
+        self.watch_dir_outgoing_cal: str = visdata_cal_outgoing_path
+        self.queue_outgoing_cal: queue.Queue = queue.Queue()
 
-        self.calibrator_destination_enabled = calibrator_destination_enabled
-        self.calibrator_destination_host = calibrator_destination_host
-        self.calibrator_destination_port = calibrator_destination_port
+        self.calibrator_destination_enabled: int = calibrator_destination_enabled
+        self.calibrator_destination_host: str = calibrator_destination_host
+        self.calibrator_destination_port: int = calibrator_destination_port
 
-        self.metafits_path = metafits_path
-        self.list_of_correlator_high_priority_projects = high_priority_correlator_projectids
-
-        self.list_of_vcs_high_priority_projects = high_priority_vcs_projectids
+        self.metafits_path: str = metafits_path
+        self.list_of_correlator_high_priority_projects: list[str] = high_priority_correlator_projectids
+        self.list_of_vcs_high_priority_projects: list[str] = high_priority_vcs_projectids
 
     def start(self):
         """This method is used to start the processor"""

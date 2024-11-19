@@ -8,6 +8,7 @@ import queue
 import time
 import inotify.constants
 import inotify.adapters
+from typing import Optional
 from mwax_mover import mwax_mover, utils
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
 
@@ -26,12 +27,12 @@ class PriorityWatcher(object):
         recursive,
         metafits_path,
         list_of_correlator_high_priority_projects: list[str],
-        list_of_vcs_high_priority_projects: list,
-        exclude_pattern=None,
+        list_of_vcs_high_priority_projects: list[str],
+        exclude_pattern: Optional[str] = None,
     ):
         self.logger = log
         self.name = name
-        self.inotify_tree = None
+        self.inotify_tree: Optional[inotify.adapters.InotifyTree | inotify.adapters.Inotify] = None
         self.recursive = recursive
         self.mode = mode
         self.path = path
@@ -86,7 +87,8 @@ class PriorityWatcher(object):
         if self.recursive:
             self.inotify_tree = None
         else:
-            self.inotify_tree.remove_watch(self.path)
+            if isinstance(self.inotify_tree, inotify.adapters.Inotify):
+                self.inotify_tree.remove_watch(self.path)
 
     def do_watch_loop(self):
         """ "Initiate watching"""

@@ -446,34 +446,32 @@ def test_do_checksum_md5():
     assert md5sum == "c1024dd2184887bc293cffe07406046f"
 
 
-def test_determine_bucket_and_folder_acacia():
+def test_determine_bucket_acacia():
     """Tests we get the correct bucket and folder given a filename and location"""
     full_filename = os.path.join(
         os.getcwd(),
         "tests/data/correlator_C001/1244973688_20190619100110_ch114_000.fits",
     )
-    location = 2
+    location = utils.ArchiveLocation.Acacia
     #
     # Run test
     #
-    bucket, folder = utils.determine_bucket_and_folder(full_filename, location)
+    bucket = utils.determine_bucket(full_filename, location)
     assert bucket == "mwaingest-12449"
-    assert folder is None
 
 
-def test_determine_bucket_and_folder_banksia():
+def test_determine_bucket_banksia():
     """Tests we get the correct bucket and folder given a filename and location"""
     full_filename = os.path.join(
         os.getcwd(),
         "tests/data/correlator_C001/1244973688_20190619100110_ch114_000.fits",
     )
-    location = 3
+    location = utils.ArchiveLocation.Banksia
     #
     # Run test
     #
-    bucket, folder = utils.determine_bucket_and_folder(full_filename, location)
+    bucket = utils.determine_bucket(full_filename, location)
     assert bucket == "mwaingest-12449"
-    assert folder is None
 
 
 def test_get_bucket_name_from_filename():

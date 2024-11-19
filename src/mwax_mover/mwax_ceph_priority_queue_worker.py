@@ -3,7 +3,6 @@
 import os
 import queue
 import time
-from boto3 import Session
 from mwax_mover.mwax_priority_queue_worker import PriorityQueueWorker
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
 from mwax_mover.mwa_archiver import ceph_get_s3_session
@@ -16,7 +15,7 @@ class CephPriorityQueueWorker(PriorityQueueWorker):
     def __init__(
         self,
         name: str,
-        source_queue: queue.Queue,
+        source_queue: queue.PriorityQueue,
         executable_path,
         log,
         event_handler,
@@ -43,7 +42,7 @@ class CephPriorityQueueWorker(PriorityQueueWorker):
         )
 
         self.ceph_profile = ceph_profile
-        self.ceph_session: Session = None
+        self.ceph_session = None
 
     def start(self):
         """Overrride this method from QueueWorker so we can initiate a boto3

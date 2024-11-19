@@ -54,16 +54,16 @@ def check_pawsey_lts(
 
 
 def ceph_remove_file(logger, bucket, filename, profile_name, endpoint):
-    session: boto3.Session = ceph_get_s3_session(profile_name)
+    session = ceph_get_s3_session(profile_name)
 
-    resource: boto3.session.Session.resource = ceph_get_s3_resource(logger, session, [endpoint])
+    s3_resource, endpoint = ceph_get_s3_resource(logger, session, [endpoint])
 
     key = os.path.basename(filename)
     logger.info(f"About to delete {endpoint}/{bucket}/{key}")
 
     # Delete file
     try:
-        s3_object = resource.Object(bucket, key)
+        s3_object = s3_resource.Object(bucket, key)  # type: ignore
         s3_object.delete()
     except Exception:
         logger.exception(f"Failed to delete {bucket}/{key} from {profile_name}")
@@ -104,13 +104,13 @@ def ceph_download_from_pawsey(
     profile_name: str,
     endpoint: str,
 ):
-    session: boto3.Session = ceph_get_s3_session(profile_name)
+    session = ceph_get_s3_session(profile_name)
 
-    resource: boto3.session.Session.resource = ceph_get_s3_resource(logger, session, [endpoint])
+    s3_resource, endpoint = ceph_get_s3_resource(logger, session, [endpoint])
 
     # Download file
     key = os.path.basename(filename)
-    s3_object = resource.Object(bucket, key)
+    s3_object = s3_resource.Object(bucket, key)  # type: ignore
     s3_object.download_file(output_filename)
 
     if not os.path.exists(output_filename):

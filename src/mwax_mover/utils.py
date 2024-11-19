@@ -18,7 +18,7 @@ from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_not_excepti
 import threading
 import time
 import typing
-from typing import Tuple
+from typing import Tuple, Optional
 import astropy.io.fits as fits
 import requests
 from mwax_mover import mwax_command
@@ -110,6 +110,13 @@ class ValidationData:
         self.file_ext = file_ext
         self.calibrator = calibrator
         self.validation_message = validation_message
+
+
+class ArchiveLocation(Enum):
+    Unknown = 0
+    DMF = 1
+    Acacia = 2
+    Banksia = 3
 
 
 def download_metafits_file(logger: logging.Logger, obs_id: int, metafits_path: str):
@@ -250,19 +257,18 @@ def validate_filename(
                     " Format should be obsid_flags.zip)- ignoring"
                 )
 
-    # 5. Get project id and calibtator info
-    if valid and filetype_id != MWADataFileType.MWA_PPD_FILE.value:
+    # 5. Get project id and calibrator info
+    if valid:
         # Now check that the observation is a calibrator by
         # looking at the associated metafits file
-        metafits_filename = os.path.join(metafits_path, f"{obs_id}_metafits.fits")
+        if filetype_id == MWADataFileType.MWA_PPD_FILE.value:
+            # this file IS a metafits! So check it
+            metafits_filename = filename
+        else:
+            metafits_filename = os.path.join(metafits_path, f"{obs_id}_metafits.fits")
 
-    elif valid and filetype_id == MWADataFileType.MWA_PPD_FILE.value:
-        # this file IS a metafits! So check it
-        metafits_filename = filename
-
-    # Does the metafits file exist??
-    # Obtain a lock so we can only do this inside one thread
-    if valid:
+        # Does the metafits file exist??
+        # Obtain a lock so we can only do this inside one thread
         with metafits_file_lock:
             if not os.path.exists(metafits_filename):
                 logger.info(f"Metafits file {metafits_filename} not found. Atempting" " to download it")
@@ -290,17 +296,16 @@ def validate_filename(
     )
 
 
-def determine_bucket_and_folder(full_filename, location):
+def determine_bucket(full_filename: str, location: ArchiveLocation) -> str:
     """Return the bucket and folder of the file to be archived,
     based on location."""
     filename = os.path.basename(full_filename)
 
     # acacia and banksia
-    if location == 2 or location == 3:
+    if location == ArchiveLocation.Acacia or location == ArchiveLocation.Banksia:
         # determine bucket name
         bucket = get_bucket_name_from_filename(filename)
-        folder = None
-        return bucket, folder
+        return bucket
 
     else:
         # DMF and Versity not yet implemented
@@ -369,8 +374,8 @@ def read_config(logger, config: ConfigParser, section: str, key: str, b64encoded
     return value
 
 
-def read_optional_config(logger, config: ConfigParser, section: str, key: str, b64encoded=False):
-    """Reads an optional value from a config file"""
+def read_optional_config(logger, config: ConfigParser, section: str, key: str, b64encoded=False) -> Optional[str]:
+    """Reads an optional value from a config file as Optional[str]"""
     raw_value = config.get(section, key)
     value = None
     value_to_log = ""

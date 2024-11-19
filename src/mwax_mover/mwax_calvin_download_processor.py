@@ -29,31 +29,31 @@ class MWAXCalvinDownloadProcessor:
     ):
         # General
         self.logger = logging.getLogger(__name__)
-        self.log_path = None
-        self.hostname = None
+        self.log_path: str = ""
+        self.hostname: str = ""
         self.db_handler_object: mwax_db.MWAXDBHandler
 
         # health
-        self.health_multicast_interface_ip = None
-        self.health_multicast_interface_name = None
-        self.health_multicast_ip = None
-        self.health_multicast_port = None
-        self.health_multicast_hops = None
+        self.health_multicast_interface_ip: str = ""
+        self.health_multicast_interface_name: str = ""
+        self.health_multicast_ip: str = ""
+        self.health_multicast_port: int = 0
+        self.health_multicast_hops: int = 1
 
         # mwa asvo
-        self.download_path = None
-        self.check_interval_seconds = None
-        self.mwa_asvo_longest_wait_time_seconds = None
-        self.giant_squid_binary_path = None
-        self.giant_squid_list_timeout_seconds = None
-        self.giant_squid_submitvis_timeout_seconds = None
-        self.giant_squid_download_timeout_seconds = None
+        self.download_path: str = ""
+        self.check_interval_seconds: int = 0
+        self.mwa_asvo_longest_wait_time_seconds: int = 0
+        self.giant_squid_binary_path: str = ""
+        self.giant_squid_list_timeout_seconds: int = 0
+        self.giant_squid_submitvis_timeout_seconds: int = 0
+        self.giant_squid_download_timeout_seconds: int = 0
 
         # Helper for MWA ASVO interactions and job record keeping
         self.mwax_asvo_helper: mwax_asvo_helper.MWAASVOHelper = mwax_asvo_helper.MWAASVOHelper()
 
-        self.running = False
-        self.ready_to_exit = False
+        self.running: bool = False
+        self.ready_to_exit: bool = False
 
     def add_new_job(self, request_id: int, obs_id: int):
         """Starts tracking a new MWAASVOJob and, if not submitted already,
@@ -204,6 +204,8 @@ class MWAXCalvinDownloadProcessor:
         """This code will check for any jobs which can be downloaded and start
         downloading them"""
         DOWNLOAD_RETRIES: int = 3
+
+        error_message: str = ""
 
         if self.running:
             for job in self.mwax_asvo_helper.current_asvo_jobs:
