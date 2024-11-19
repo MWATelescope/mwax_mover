@@ -343,11 +343,12 @@ def insert_data_file_row(
             size,
             filename,
             host,
+            deleted,
             remote_archived,
             checksum_type,
             checksum,
             trigger_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
 
         db_handler_object.execute_single_dml_row(
             sql,
@@ -357,6 +358,7 @@ def insert_data_file_row(
                 file_size,
                 filename,
                 hostname,
+                False,
                 remote_archived,
                 checksum_type,
                 checksum,
