@@ -4,7 +4,7 @@ import signal
 import threading
 import time
 from mwax_mover.mwax_calvin_download_processor import MWAXCalvinDownloadProcessor
-from tests_common import create_test_database
+from tests_common import run_create_test_db_object_script
 
 
 def test_calvin_downloader_test():
@@ -21,7 +21,7 @@ def test_calvin_downloader_test():
     processor.initialise("tests/mwax_calvin_downloader_test.cfg")
 
     # Setup a test database
-    create_test_database(processor.logger, "tests/mwax_calvin_download_processor_test.sql")
+    run_create_test_db_object_script(processor.logger, "tests/mwax_calvin_download_processor_test.sql")
     processor.db_handler_object.start_database_pool()
 
     # Start the pipeline

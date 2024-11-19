@@ -22,8 +22,8 @@ def get_test_db_handler(logger: logging.Logger):
     return MWAXDBHandler(logger, host, port, db_name, user, password)
 
 
-def create_test_database(logger: logging.Logger, creation_sql_filename):
-    # Connect to test db, drop and then recreate the database
+def run_create_test_db_object_script(logger: logging.Logger, creation_sql_filename):
+    # Connect to test db, drop and then recreate the database objects
     # expects:
     # * db mwax_mover_test must already exist
     # * Database name should NOT be "mwa" - just in case we accidently run this in prod!
@@ -32,7 +32,7 @@ def create_test_database(logger: logging.Logger, creation_sql_filename):
     test_db_handler = get_test_db_handler(logger)
     test_db_handler.start_database_pool()
 
-    assert test_db_handler.db_name != "mwa"
+    assert test_db_handler.db_name == "mwax_mover_test"
     assert test_db_handler.host == "localhost"
 
     # Read script

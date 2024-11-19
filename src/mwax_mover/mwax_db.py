@@ -57,7 +57,7 @@ class MWAXDBHandler:
         if self.pool:
             self.pool.close()
 
-    def select_one_row_postgres(self, sql: str, parm_list: list | None):
+    def select_one_row_postgres(self, sql: str, parm_list):
         """Returns a single row from postgres given SQL and params"""
         # Assuming we have a connection, try to do the database operation
         rows = self.select_postgres(sql, parm_list, 1)
@@ -65,7 +65,7 @@ class MWAXDBHandler:
         # Just return the first row
         return rows[0]
 
-    def select_many_rows_postgres(self, sql: str, parm_list: list | None):
+    def select_many_rows_postgres(self, sql: str, parm_list):
         """Returns a single row from postgres given SQL and params"""
         # Assuming we have a connection, try to do the database operation
         rows = self.select_postgres(sql, parm_list, None)
@@ -74,7 +74,7 @@ class MWAXDBHandler:
         return rows
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(60))
-    def select_postgres(self, sql, parm_list: list | None, expected_rows: None | int):
+    def select_postgres(self, sql, parm_list, expected_rows: None | int):
         """Returns rows from postgres given SQL and params. If expected rows is passed
         then it will check it returned the correct number of rows and riase exception
         if not"""
@@ -116,7 +116,7 @@ class MWAXDBHandler:
         wait=wait_fixed(30),
         retry=retry_if_not_exception_type(psycopg.errors.ForeignKeyViolation),
     )
-    def execute_single_dml_row(self, sql: str, parm_list: list | None):
+    def execute_single_dml_row(self, sql: str, parm_list):
         """This executes an INSERT, UPDATE or DELETE that should affect 1
         row only. Since this is all in a with (context) block, rollback is
         called on failure and commit on success. Exceptions are raised on error."""
@@ -127,7 +127,7 @@ class MWAXDBHandler:
         wait=wait_fixed(30),
         retry=retry_if_not_exception_type(psycopg.errors.ForeignKeyViolation),
     )
-    def execute_dml(self, sql, parm_list: list | None, expected_rows: None | int):
+    def execute_dml(self, sql, parm_list, expected_rows: None | int):
         """This executes an INSERT, UPDATE or DELETE that should affect 0,1 or many
         rows. Since this is all in a with (context) block, rollback is
         called on failure and commit on success. Exceptions are raised on error."""
@@ -173,9 +173,7 @@ class MWAXDBHandler:
             raise
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(60))
-    def select_postgres_within_transaction(
-        self, sql: str, parm_list: list, expected_rows: None | int, transaction_cursor
-    ):
+    def select_postgres_within_transaction(self, sql: str, parm_list, expected_rows: None | int, transaction_cursor):
         """Returns rows from postgres given SQL and params. If expected rows is passed
         then it will check it returned the correct number of rows and riase exception
         if not. If no rows result from the query, then an empty list is returned (by fetchall)"""
@@ -218,7 +216,7 @@ class MWAXDBHandler:
         retry=retry_if_not_exception_type(psycopg.errors.ForeignKeyViolation)
         | retry_if_not_exception_type(psycopg.errors.UniqueViolation),
     )
-    def execute_dml_row_within_transaction(self, sql, parm_list: list, transaction_cursor: psycopg.Cursor):
+    def execute_dml_row_within_transaction(self, sql, parm_list, transaction_cursor: psycopg.Cursor):
         """This executes an INSERT, UPDATE or DELETE that should only affect
         one row.
 
@@ -274,7 +272,7 @@ class DataFileRow:
         self.checksum = ""
 
 
-def get_data_file_row(db_handler_object, full_filename: str, obs_id: int) -> DataFileRow:
+def get_data_file_row(db_handler_object: MWAXDBHandler, full_filename: str, obs_id: int) -> DataFileRow:
     """Return a data file row instance on success or None on Failure"""
     # Prepare the fields
     # immediately add this file to the db so we insert a record into metadata
@@ -288,7 +286,7 @@ def get_data_file_row(db_handler_object, full_filename: str, obs_id: int) -> Dat
             WHERE filename = %s AND observation_num = %s"""
     try:
         # Run query and get the data_files row info for this file
-        obsid, size, checksum = db_handler_object.select_one_row_postgres(
+        row = db_handler_object.select_one_row_postgres(
             sql,
             (
                 filename,
@@ -297,9 +295,9 @@ def get_data_file_row(db_handler_object, full_filename: str, obs_id: int) -> Dat
         )
 
         data_files_row = DataFileRow()
-        data_files_row.observation_num = int(obsid)
-        data_files_row.size = int(size)
-        data_files_row.checksum = checksum
+        data_files_row.observation_num = row["observation_num"]
+        data_files_row.size = row["size"]
+        data_files_row.checksum = row["checksum"]
 
         db_handler_object.logger.info(
             f"{full_filename} get_data_file_row() Successfully read from" f" data_files table {vars(data_files_row)}"
