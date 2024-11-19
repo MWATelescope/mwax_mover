@@ -347,7 +347,7 @@ def insert_data_file_row(
             checksum_type,
             checksum,
             trigger_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"""
 
         db_handler_object.execute_single_dml_row(
             sql,
