@@ -166,8 +166,3 @@ INSERT INTO mwa_setting
 (starttime, stoptime, obsname, creator, modtime, mode, unpowered_tile_name, mode_params, dec_phase_center, ra_phase_center, projectid, dataquality, dataqualitycomment, int_time, freq_res, processed, deleted, groupid, deleted_timestamp, delaymode_name, deripple)
 VALUES 
 (1234567890, 1234567898, 'mwax_db_test1', 'gsleap', '2024-11-18', 'MWAX_CORRELATOR', 'default', NULL, -17.02, 333.6, 'C001', 1, NULL, 2, 40, NULL, NULL, 1234567890, NULL, 'FULLTRACK', false);
-
-INSERT INTO data_files
-(observation_num, filetype, size, filename, modtime, host, remote_archived, deleted, location, deleted_timestamp, checksum_type, checksum, folder, bucket, trigger_id)
-VALUES
-(1234567890, 18, 1024, '1234567890_202411191234_ch123_000.fits', '2024-11-18', 'test_host', false, false, 2, NULL, 1, '1a2b3c4d5e6f', NULL, NULL, NULL);
