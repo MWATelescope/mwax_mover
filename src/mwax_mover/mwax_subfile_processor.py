@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import numpy as np
+from typing import Optional
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
 from mwax_mover import utils, mwax_queue_worker, mwax_watcher, mwax_command
 from mwax_mover.utils import CorrelatorMode
@@ -200,8 +201,14 @@ class SubfileProcessor:
         packet_map = utils.get_subfile_packet_map_data(self.logger, item)
 
         if packet_map is not None:
-            # Summarise the packet map
-            packet_occupancy_array = utils.summarise_packet_map(self.logger, item, packet_map)
+            # Get number of RF inputs from subfile header
+            ninputs_str: Optional[str] = utils.read_subfile_value(item, utils.PSRDADA_NINPUTS)
+            if ninputs_str is None:
+                raise ValueError(f"Keyword {utils.PSRDADA_NINPUTS} not found in {item}")
+            num_rf_inputs: int = int(ninputs_str)
+
+            # Summarise the packet map into a 1d array of floats by rfinput
+            packet_occupancy_array = utils.summarise_packet_map(num_rf_inputs, packet_map)
 
             if packet_occupancy_array is not None:
                 # log packet array out

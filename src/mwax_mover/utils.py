@@ -32,6 +32,7 @@ PSRDADA_HEADER_BYTES = 4096
 PSRDADA_MODE = "MODE"
 PSRDADA_SUBOBS_ID = "SUBOBS_ID"
 PSRDADA_TRIGGER_ID = "TRIGGER_ID"
+PSRDADA_NINPUTS = "NINPUTS"
 
 # This is global mutex so we don't try to create the same metafits
 # file with multiple threads
@@ -1064,10 +1065,8 @@ def get_subfile_packet_map_data(logger: logging.Logger, filename: str) -> Option
 # a new array where each element in the array is a 1 or 0 for each bit
 # ie: input:  01111011
 #     output: [0,1,1,1,1,0,1,1]
-def convert_occupany_bitmap_to_array(bitmap: bytes) -> np.ndarray:
-    new_array = np.unpackbits(np.frombuffer(bitmap, dtype=np.uint8))
-
-    assert len(new_array) == 8 * len(bitmap)
+def convert_occupany_bitmap_to_array(bitmap: np.ndarray) -> np.ndarray:
+    new_array = np.unpackbits(bitmap)
 
     return new_array
 
@@ -1085,29 +1084,7 @@ def get_mean_occupancy(bit_array: np.ndarray) -> float:
 # an array of floats of since N, where N is number of rf_inputs
 # and each float is 0..1 0 meaning no packets and 1 meaning all packets
 #
-def summarise_packet_map(logger: logging.Logger, filename: str, packet_map_bytes: bytes) -> Optional[np.ndarray]:
-    KEY_NINPUTS = "NINPUTS"
-
-    base_filename = os.path.basename(filename)
-
-    obs_id: int = int(base_filename[0:10])
-
-    # Get number of RF inputs from subfile header
-    ninputs_str: Optional[str] = read_subfile_value(filename, KEY_NINPUTS)
-
-    if ninputs_str is None:
-        logger.warning(f"{obs_id}: {filename} subfile keyword {KEY_NINPUTS} was not found in the header.")
-        return None
-
-    try:
-        num_rf_inputs: int = int(ninputs_str)
-    except ValueError:
-        logger.warning(
-            f"{obs_id}: {base_filename} {KEY_NINPUTS} keyword value {ninputs_str} "
-            f"was not able to be cast to int. Ignoring packet stats for this subobservation."
-        )
-        return None
-
+def summarise_packet_map(num_rf_inputs: int, packet_map_bytes: bytes) -> np.ndarray:
     # Determine number of packets. There might be 625 (critically sampled)
     # or 800 (oversampled)
     num_packets_per_sec: int = int(len(packet_map_bytes) / num_rf_inputs)
@@ -1136,15 +1113,12 @@ def summarise_packet_map(logger: logging.Logger, filename: str, packet_map_bytes
     # Define output array
     output_occupany = np.empty(shape=(num_rf_inputs), dtype=np.float32)
 
+    # Reshape the packet map to 2d (rfinputs, packets)
+    packet_map_np = np.frombuffer(packet_map_bytes, dtype=np.uint8)
+    packet_map_np = np.reshape(packet_map_np, (num_rf_inputs, num_packet_map_bytes_per_subobs))
+
     for rf_input_index in range(0, num_rf_inputs):
-        offset = rf_input_index * num_packet_map_bytes_per_subobs
-
-        # Take the bytes for this rf_input and create an array where each value is the bit value
-        # So this new array should have: 8 * 625 elements (5000)
-        bit_array = convert_occupany_bitmap_to_array(packet_map_bytes[offset:num_packet_map_bytes_per_subobs])
-
-        mean_packet_occupancy: float = get_mean_occupancy(bit_array)
-
-        output_occupany[rf_input_index] = mean_packet_occupancy
+        bit_array = convert_occupany_bitmap_to_array(packet_map_np[rf_input_index])
+        output_occupany[rf_input_index] = get_mean_occupancy(bit_array)
 
     return output_occupany

@@ -828,9 +828,8 @@ def test_convert_occupany_bitmap_to_array():
     assert input[1] == 0
     assert input[2] == 255
 
-    arr = np.frombuffer(input, dtype=np.uint8)
-
-    assert arr.shape == (3,)
+    input = np.frombuffer(input, dtype=np.uint8)
+    assert input.shape == (3,)
 
     assert np.array_equal(
         utils.convert_occupany_bitmap_to_array(input),
@@ -865,6 +864,28 @@ def test_convert_occupany_bitmap_to_array():
 
 def test_get_mean_occupancy():
     input = bytes([255, 0, 255, 255])
+    input = np.frombuffer(input)
     bit_array = utils.convert_occupany_bitmap_to_array(input)
     occupancy = utils.get_mean_occupancy(bit_array)
     assert occupancy == 0.75
+
+
+def test_summarise_packet_map():
+    num_rf_inputs = 2
+
+    # This should look like:
+    # 01111111 for each of the packets in the first rfinput
+    # and
+    # 00000001 for each of the packets in the second rfinput
+    input = bytes([127] * 625) + bytes([1] * 625)
+    assert len(input) == 625 * 2
+
+    occupancy = utils.summarise_packet_map(num_rf_inputs, input)
+
+    assert occupancy.shape == (2,)
+
+    # 0.875
+    assert occupancy[0] == (7 * 625) / (8 * 625)
+
+    # 0.125
+    assert occupancy[1] == (1 * 625) / (8 * 625)
