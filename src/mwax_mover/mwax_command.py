@@ -11,7 +11,7 @@ import typing
 def run_command_ext(
     logger,
     command: str,
-    numa_node: int,
+    numa_node: typing.Optional[int],
     timeout: int = 60,
     use_shell: bool = False,
 ) -> typing.Tuple[bool, str]:

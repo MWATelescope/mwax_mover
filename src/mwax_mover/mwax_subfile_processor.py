@@ -9,6 +9,7 @@ import shutil
 import sys
 import threading
 import time
+import numpy as np
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
 from mwax_mover import utils, mwax_queue_worker, mwax_watcher, mwax_command
 from mwax_mover.utils import CorrelatorMode
@@ -194,6 +195,20 @@ class SubfileProcessor:
         # will be ignored.
         #
         keep_subfiles_path = None
+
+        # For all subfiles we need to extract the packet stats:
+        packet_map = utils.get_subfile_packet_map_data(self.logger, item)
+
+        if packet_map is not None:
+            # Summarise the packet map
+            packet_occupancy_array = utils.summarise_packet_map(self.logger, item, packet_map)
+
+            if packet_occupancy_array is not None:
+                # log packet array out
+                self.logger.info(
+                    f"{item}- packet occupancy: "
+                    f"{np.array2string(packet_occupancy_array, threshold=9999, max_line_width=9999, separator=',')}"
+                )
 
         try:
             subfile_mode = utils.read_subfile_value(item, utils.PSRDADA_MODE)

@@ -21,6 +21,7 @@ import typing
 from typing import Tuple, Optional
 import astropy.io.fits as fits
 import requests
+import numpy as np
 from mwax_mover import mwax_command
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
 
@@ -628,7 +629,7 @@ def get_disk_space_bytes(path: str) -> typing.Tuple[int, int, int]:
     return shutil.disk_usage(path)
 
 
-def do_checksum_md5(logger, full_filename: str, numa_node: int, timeout: int) -> str:
+def do_checksum_md5(logger, full_filename: str, numa_node: Optional[int], timeout: int) -> str:
     """Return an md5 checksum of a file"""
 
     # default output of md5 hash command is:
@@ -984,3 +985,166 @@ def get_gpstime_of_datetime(date_time: datetime.datetime) -> int:
 # Return the GPS seconds as an integer of Now
 def get_gpstime_of_now() -> int:
     return get_gpstime_of_datetime(datetime.datetime.now(datetime.timezone.utc))
+
+
+# Given a subfile filename, retrieve the packet map data (raw)
+def get_subfile_packet_map_data(logger: logging.Logger, filename: str) -> Optional[bytes]:
+    KEY_IDX_PACKET_MAP = "IDX_PACKET_MAP"
+
+    base_filename = os.path.basename(filename)
+    obs_id: int = int(base_filename[0:10])
+
+    # Get the keys from the subfile header:
+    # (info from:
+    # https://mwatelescope.atlassian.net/wiki/spaces/MP/pages/24970579/MWAX+PSRDADA+header#Block-0%3A-UDP-Packet-Map)
+    # IDX_PACKET_MAP
+    # Value read will be in the form of: XXX+YYY
+    # Where:
+    # XXX is the number of bytes into block 0 to start
+    # and YYY is the number of bytes to read
+    idx_packet_map_string: Optional[str] = read_subfile_value(filename, KEY_IDX_PACKET_MAP)
+
+    if idx_packet_map_string is None:
+        logger.warning(
+            f"{obs_id}: {base_filename} does not have the {KEY_IDX_PACKET_MAP} keyword. "
+            f"Ignoring packet stats for this subobservation."
+        )
+        return None
+
+    # Now split the string by the "+" sign
+    split_idx = idx_packet_map_string.split("+")
+
+    if len(split_idx) != 2:
+        logger.warning(
+            f"{obs_id}: {base_filename} {KEY_IDX_PACKET_MAP} keyword value {idx_packet_map_string} did not "
+            f"split by the + sign correctly. Ignoring packet stats for this subobservation."
+        )
+        return None
+
+    # Ensure the two parts can be cast to int
+    packet_map_start: int = 0
+    packet_map_length: int = 0
+
+    try:
+        packet_map_start = int(split_idx[0])
+        packet_map_length = int(split_idx[1])
+    except ValueError:
+        logger.warning(
+            f"{obs_id}: {base_filename} {KEY_IDX_PACKET_MAP} keyword value {idx_packet_map_string} "
+            f"components were not able to be cast to int. Ignoring packet stats for this subobservation."
+        )
+        return None
+
+    # Now get the data
+    block0_start = PSRDADA_HEADER_BYTES
+    block0_packet_map_start = block0_start + packet_map_start
+    return_data: bytes
+
+    try:
+        with open(filename, mode="rb") as subfile:
+            subfile.seek(block0_packet_map_start)
+            return_data = subfile.read(packet_map_length)
+
+            # Ensure we read the right number of bytes!
+            if len(return_data) != packet_map_length:
+                raise Exception(
+                    f"{obs_id}: {base_filename} read of packet map data failed- "
+                    f"read {len(return_data)} bytes (should have been {packet_map_length} bytes)"
+                )
+    except FileNotFoundError:
+        logger.exception(f"{obs_id}: {filename} not found when reading packet map.")
+        return None
+    except Exception:
+        raise
+
+    return return_data
+
+
+# Take an array of bytes representing a bitmap, and return
+# a new array where each element in the array is a 1 or 0 for each bit
+# ie: input:  01111011
+#     output: [0,1,1,1,1,0,1,1]
+def convert_occupany_bitmap_to_array(bitmap: bytes) -> np.ndarray:
+    new_array = np.unpackbits(np.frombuffer(bitmap, dtype=np.uint8))
+
+    assert len(new_array) == 8 * len(bitmap)
+
+    return new_array
+
+
+# Return the mean of the bit array
+# bit_array: will be an array of unit8s e.g.
+#            [0,1,1,1,0,1,1,1]
+# Output will be (0+1+1+1+0+1+1+1) / 8 == 0.75
+def get_mean_occupancy(bit_array: np.ndarray) -> float:
+    return bit_array.mean(dtype=np.float32)
+
+
+# Gets the packet map and gets the mean occupancy of each rfinput
+# for a subobservation and returns
+# an array of floats of since N, where N is number of rf_inputs
+# and each float is 0..1 0 meaning no packets and 1 meaning all packets
+#
+def summarise_packet_map(logger: logging.Logger, filename: str, packet_map_bytes: bytes) -> Optional[np.ndarray]:
+    KEY_NINPUTS = "NINPUTS"
+
+    base_filename = os.path.basename(filename)
+
+    obs_id: int = int(base_filename[0:10])
+
+    # Get number of RF inputs from subfile header
+    ninputs_str: Optional[str] = read_subfile_value(filename, KEY_NINPUTS)
+
+    if ninputs_str is None:
+        logger.warning(f"{obs_id}: {filename} subfile keyword {KEY_NINPUTS} was not found in the header.")
+        return None
+
+    try:
+        num_rf_inputs: int = int(ninputs_str)
+    except ValueError:
+        logger.warning(
+            f"{obs_id}: {base_filename} {KEY_NINPUTS} keyword value {ninputs_str} "
+            f"was not able to be cast to int. Ignoring packet stats for this subobservation."
+        )
+        return None
+
+    # Determine number of packets. There might be 625 (critically sampled)
+    # or 800 (oversampled)
+    num_packets_per_sec: int = int(len(packet_map_bytes) / num_rf_inputs)
+    assert num_packets_per_sec == 625 or num_packets_per_sec == 800
+
+    # 8 Seconds per subobs
+    num_seconds_per_subobs: int = 8
+    num_packets_per_subobs: int = num_packets_per_sec * num_seconds_per_subobs
+    num_packet_map_bytes_per_subobs: int = int(num_packets_per_subobs / 8)
+
+    # Example Structure of packet_map is:
+    #                   Time (packet number)
+    #              |<----------- 8 seconds ------------>|
+    #              00000000 00000000 00000000 ...66666666
+    #              00000000 00111111 11112222 ...11222222
+    #              01234567 89012345 67890123 ...89012345
+    #              ========================== ...========
+    # rf_input 0   11111111 11111111 11111111    10110111
+    # rf_input 1   01011111 00111111 11111111    11111011
+    # ...
+    # rf_input N   01111111 00111111 11111111    11111011
+
+    # We want to output a float which represents the average of 8 seconds of packet stats
+    # per rf_input.
+
+    # Define output array
+    output_occupany = np.empty(shape=(num_rf_inputs), dtype=np.float32)
+
+    for rf_input_index in range(0, num_rf_inputs):
+        offset = rf_input_index * num_packet_map_bytes_per_subobs
+
+        # Take the bytes for this rf_input and create an array where each value is the bit value
+        # So this new array should have: 8 * 625 elements (5000)
+        bit_array = convert_occupany_bitmap_to_array(packet_map_bytes[offset:num_packet_map_bytes_per_subobs])
+
+        mean_packet_occupancy: float = get_mean_occupancy(bit_array)
+
+        output_occupany[rf_input_index] = mean_packet_occupancy
+
+    return output_occupany

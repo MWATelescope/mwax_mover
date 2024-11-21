@@ -11,37 +11,30 @@ import logging
 import os
 import pytest
 import queue
+import numpy as np
 from mwax_mover import utils
 
 
 def test_correlator_mode_class():
-    test_mode: utils.CorrelatorMode = "NO_CAPTURE"
+    assert utils.CorrelatorMode.is_no_capture("NO_CAPTURE")
+    assert not utils.CorrelatorMode.is_correlator("NO_CAPTURE")
+    assert not utils.CorrelatorMode.is_vcs("NO_CAPTURE")
+    assert not utils.CorrelatorMode.is_voltage_buffer("NO_CAPTURE")
 
-    assert utils.CorrelatorMode.is_no_capture(test_mode)
-    assert not utils.CorrelatorMode.is_correlator(test_mode)
-    assert not utils.CorrelatorMode.is_vcs(test_mode)
-    assert not utils.CorrelatorMode.is_voltage_buffer(test_mode)
+    assert not utils.CorrelatorMode.is_no_capture("MWAX_CORRELATOR")
+    assert utils.CorrelatorMode.is_correlator("MWAX_CORRELATOR")
+    assert not utils.CorrelatorMode.is_vcs("MWAX_CORRELATOR")
+    assert not utils.CorrelatorMode.is_voltage_buffer("MWAX_CORRELATOR")
 
-    test_mode: utils.CorrelatorMode = "MWAX_CORRELATOR"
+    assert not utils.CorrelatorMode.is_no_capture("MWAX_VCS")
+    assert not utils.CorrelatorMode.is_correlator("MWAX_VCS")
+    assert utils.CorrelatorMode.is_vcs("MWAX_VCS")
+    assert not utils.CorrelatorMode.is_voltage_buffer("MWAX_VCS")
 
-    assert not utils.CorrelatorMode.is_no_capture(test_mode)
-    assert utils.CorrelatorMode.is_correlator(test_mode)
-    assert not utils.CorrelatorMode.is_vcs(test_mode)
-    assert not utils.CorrelatorMode.is_voltage_buffer(test_mode)
-
-    test_mode: utils.CorrelatorMode = "MWAX_VCS"
-
-    assert not utils.CorrelatorMode.is_no_capture(test_mode)
-    assert not utils.CorrelatorMode.is_correlator(test_mode)
-    assert utils.CorrelatorMode.is_vcs(test_mode)
-    assert not utils.CorrelatorMode.is_voltage_buffer(test_mode)
-
-    test_mode: utils.CorrelatorMode = "MWAX_BUFFER"
-
-    assert not utils.CorrelatorMode.is_no_capture(test_mode)
-    assert not utils.CorrelatorMode.is_correlator(test_mode)
-    assert not utils.CorrelatorMode.is_vcs(test_mode)
-    assert utils.CorrelatorMode.is_voltage_buffer(test_mode)
+    assert not utils.CorrelatorMode.is_no_capture("MWAX_BUFFER")
+    assert not utils.CorrelatorMode.is_correlator("MWAX_BUFFER")
+    assert not utils.CorrelatorMode.is_vcs("MWAX_BUFFER")
+    assert utils.CorrelatorMode.is_voltage_buffer("MWAX_BUFFER")
 
 
 def test_validate_filename_valid1():
@@ -807,3 +800,71 @@ def test_get_data_files_for_obsid_from_webservice_200():
         "1157306584_20160907180249_gpubox23_00.fits",
         "1157306584_20160907180249_gpubox24_00.fits",
     ]
+
+
+def test_get_packet_map():
+    # For this test, the IDX_PACKET_MAP is:
+    # IDX_PACKET_MAP 1859328+180000
+    #
+    #
+    logger = logging.getLogger("test")
+    filename = "tests/data/1416028864_1416028872_109.sub"
+
+    # Check test file exists firstly!
+    assert os.path.exists(filename), f"Test file {filename} doesn't exist."
+
+    packet_map_data = utils.get_subfile_packet_map_data(logger, filename)
+
+    assert packet_map_data is not None
+
+    # Check length of bytes
+    assert len(packet_map_data) == 180000
+
+
+def test_convert_occupany_bitmap_to_array():
+    input = bytes([255, 0, 255])
+
+    assert input[0] == 255
+    assert input[1] == 0
+    assert input[2] == 255
+
+    arr = np.frombuffer(input, dtype=np.uint8)
+
+    assert arr.shape == (3,)
+
+    assert np.array_equal(
+        utils.convert_occupany_bitmap_to_array(input),
+        [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+        ],
+    )
+
+
+def test_get_mean_occupancy():
+    input = bytes([255, 0, 255, 255])
+    bit_array = utils.convert_occupany_bitmap_to_array(input)
+    occupancy = utils.get_mean_occupancy(bit_array)
+    assert occupancy == 0.75
