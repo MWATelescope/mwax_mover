@@ -207,14 +207,14 @@ class SubfileProcessor:
                 raise ValueError(f"Keyword {utils.PSRDADA_NINPUTS} not found in {item}")
             num_rf_inputs: int = int(ninputs_str)
 
-            # Summarise the packet map into a 1d array of floats by rfinput
-            packet_occupancy_array = utils.summarise_packet_map(num_rf_inputs, packet_map)
+            # Summarise the packet map into a 1d array of ints (of packets lost) by rfinput
+            packets_lost_array = utils.summarise_packet_map(num_rf_inputs, packet_map)
 
-            if packet_occupancy_array is not None:
+            if packets_lost_array is not None:
                 # log packet array out
                 self.logger.info(
                     f"{item}- packet occupancy: "
-                    f"{np.array2string(packet_occupancy_array, threshold=9999, max_line_width=9999, separator=',')}"
+                    f"{np.array2string(packets_lost_array, threshold=9999, max_line_width=9999, separator=',')}"
                 )
 
         try:

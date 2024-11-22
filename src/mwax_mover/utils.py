@@ -1071,14 +1071,6 @@ def convert_occupany_bitmap_to_array(bitmap: np.ndarray) -> np.ndarray:
     return new_array
 
 
-# Return the mean of the bit array
-# bit_array: will be an array of unit8s e.g.
-#            [0,1,1,1,0,1,1,1]
-# Output will be (0+1+1+1+0+1+1+1) / 8 == 0.75
-def get_mean_occupancy(bit_array: np.ndarray) -> float:
-    return bit_array.mean(dtype=np.float32)
-
-
 # Gets the packet map and gets the mean occupancy of each rfinput
 # for a subobservation and returns
 # an array of floats of since N, where N is number of rf_inputs
@@ -1111,14 +1103,17 @@ def summarise_packet_map(num_rf_inputs: int, packet_map_bytes: bytes) -> np.ndar
     # per rf_input.
 
     # Define output array
-    output_occupany = np.empty(shape=(num_rf_inputs), dtype=np.float32)
+    packets_lost = np.empty(shape=(num_rf_inputs), dtype=np.int16)
+
+    # Convert the input bytes into a numpy array of bytes
+    packet_map_np = np.frombuffer(packet_map_bytes, dtype=np.uint8)
 
     # Reshape the packet map to 2d (rfinputs, packets)
-    packet_map_np = np.frombuffer(packet_map_bytes, dtype=np.uint8)
     packet_map_np = np.reshape(packet_map_np, (num_rf_inputs, num_packet_map_bytes_per_subobs))
 
     for rf_input_index in range(0, num_rf_inputs):
         bit_array = convert_occupany_bitmap_to_array(packet_map_np[rf_input_index])
-        output_occupany[rf_input_index] = get_mean_occupancy(bit_array)
+        # we subtract total packets from the bnit array as we want lost packets (0's)
+        packets_lost[rf_input_index] = num_packets_per_subobs - bit_array.sum()
 
-    return output_occupany
+    return packets_lost
