@@ -185,6 +185,7 @@ class MWAXSubfileDistributor:
         self.cfg_health_multicast_ip: str = ""
         self.cfg_health_multicast_port: int = 0
         self.cfg_health_multicast_hops: int = 1
+        self.cfg_packet_stats_dump_dir: str = ""
 
         # Beamformer
         self.cfg_bf_enabled: bool = False
@@ -388,6 +389,10 @@ class MWAXSubfileDistributor:
                 " be for DEBUG only as it will be slow and may not keep"
                 " up! **"
             )
+
+        self.cfg_packet_stats_dump_dir = utils.read_config(
+            self.logger, self.config, "mwax mover", "packet_stats_dump_dir"
+        )
 
         # Check to see if we have a beamformer section
         if self.config.has_section("beamformer"):
@@ -712,6 +717,8 @@ class MWAXSubfileDistributor:
             self.cfg_corr_diskdb_numa_node,
             self.cfg_psrdada_timeout_sec,
             self.cfg_copy_subfile_to_disk_timeout_sec,
+            self.cfg_packet_stats_dump_dir,
+            self.hostname,
         )
 
         # Add this processor to list of processors we manage

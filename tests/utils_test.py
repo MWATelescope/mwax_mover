@@ -445,7 +445,7 @@ def test_determine_bucket_acacia():
         os.getcwd(),
         "tests/data/correlator_C001/1244973688_20190619100110_ch114_000.fits",
     )
-    location = utils.ArchiveLocation.Acacia
+    location = utils.ArchiveLocation.AcaciaIngest
     #
     # Run test
     #
@@ -559,7 +559,7 @@ def test_config_get_optional_value():
 
     empty_return_val = utils.read_optional_config(logger, config, "banksia", "max_concurrency")
 
-    non_empty_return_val = utils.read_optional_config(logger, config, "acacia", "max_concurrency")
+    non_empty_return_val = utils.read_optional_config(logger, config, "acacia_ingest", "max_concurrency")
 
     assert empty_return_val is None
     assert non_empty_return_val is not None
@@ -575,7 +575,7 @@ def test_config_get_optional_value_spaces_not_empty_string():
 
     empty_return_val = utils.read_optional_config(logger, config, "banksia", "chunk_size_bytes")
 
-    non_empty_return_val = utils.read_optional_config(logger, config, "acacia", "chunk_size_bytes")
+    non_empty_return_val = utils.read_optional_config(logger, config, "acacia_ingest", "chunk_size_bytes")
 
     assert empty_return_val is None
     assert non_empty_return_val is not None
@@ -874,10 +874,46 @@ def test_summarise_packet_map():
 
     packets_lost = utils.summarise_packet_map(num_rf_inputs, input)
 
-    assert packets_lost.shape == (2,)
+    # Array should have 1 element per rfinput
+    assert packets_lost.shape == (num_rf_inputs,)
 
-    # 0.875
     assert packets_lost[0] == 1 * 625
 
-    # 0.125
     assert packets_lost[1] == 7 * 625
+
+
+def test_write_packet_stats():
+    num_rf_inputs = 2
+
+    # This should look like:
+    # 01111111 for each of the packets in the first rfinput
+    # and
+    # 00000001 for each of the packets in the second rfinput
+    input = bytes([127] * 625) + bytes([1] * 625)
+    assert len(input) == 625 * 2
+
+    packets_lost = utils.summarise_packet_map(num_rf_inputs, input)
+    subobs_id: int = 1234567890
+    receiver_channel: int = 124
+    hostname = "test"
+    num_tiles: int = 144
+    packet_stats_dump_dir = "/tmp"
+
+    # Run test
+    utils.write_packet_stats(subobs_id, receiver_channel, hostname, num_tiles, packet_stats_dump_dir, packets_lost)
+
+    # Filename should be
+    expected_filename = "/tmp/packetstats_1234567890_144T_ch124_test.dat"
+
+    # Check file exists
+    assert os.path.exists(expected_filename)
+
+    # Check the data
+    with open(expected_filename, "rb"):
+        read_array: np.ndarray = np.fromfile(expected_filename, dtype=np.uint16)
+
+    assert read_array.shape == (num_rf_inputs,)
+
+    assert read_array[0] == 1 * 625
+
+    assert read_array[1] == 7 * 625

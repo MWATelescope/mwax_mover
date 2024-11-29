@@ -264,8 +264,9 @@ class MWACacheArchiveProcessor:
             archive_success = False
 
             if (
-                self.archive_to_location == ArchiveLocation.Acacia
+                self.archive_to_location == ArchiveLocation.AcaciaIngest
                 or self.archive_to_location == ArchiveLocation.Banksia
+                or self.archive_to_location == ArchiveLocation.AcaciaMWA
             ):  # Acacia or Banksia
                 archive_success = mwa_archiver.archive_file_ceph(
                     self.logger,
@@ -465,7 +466,8 @@ class MWACacheArchiveProcessor:
         )
 
         # Get this hosts hostname
-        self.hostname = utils.get_hostname()
+        if self.hostname == "":
+            self.hostname = utils.get_hostname()
         self.logger.info(f"hostname: {self.hostname}")
 
         # Dump some diagnostic info
@@ -533,14 +535,19 @@ class MWACacheArchiveProcessor:
         self.logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
 
         # We set different s3 options based on the location
-        # 2 == Acacia
+        # 2 == Acacia Ingest
         # 3 == Banksia
-        if self.archive_to_location == ArchiveLocation.Acacia:
-            s3_section = "acacia"
+        # 4 == Acacia MWA
+        if self.archive_to_location == ArchiveLocation.AcaciaIngest:
+            s3_section = "acacia_ingest"
         elif self.archive_to_location == ArchiveLocation.Banksia:
             s3_section = "banksia"
+        elif self.archive_to_location == ArchiveLocation.AcaciaMWA:
+            s3_section = "acacia_mwa"
         else:
-            raise NotImplementedError("archive to location should be 2 (Acacia) or 3 (Banksia")
+            raise NotImplementedError(
+                "archive to location should be 2 (acacia ingest) or 3 (banksia) or 4 (acacia_mwa)"
+            )
 
         # s3 options
         self.s3_profile = utils.read_config(self.logger, config, s3_section, "profile")

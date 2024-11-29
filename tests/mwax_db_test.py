@@ -72,7 +72,7 @@ def test_dbhandler_insert_get_and_update_data_file_row():
     #
     # Test update_data_file_row_as_archived
     #
-    location = mwax_mover.utils.ArchiveLocation.Acacia
+    location = mwax_mover.utils.ArchiveLocation.AcaciaIngest
     bucket = "mwaingest-12345"
 
     update_success = update_data_file_row_as_archived(

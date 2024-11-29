@@ -82,6 +82,9 @@ def setup_test_dirs():
     metafits_path = os.path.join(base_dir, "vulcan_metafits")
     check_and_make_dir(metafits_path)
 
+    packet_stats_dump_dir = os.path.join("packet_stats_dump_dir")
+    check_and_make_dir(packet_stats_dump_dir)
+
 
 def test_correlator_config_file():
     """Tests that SubfileDistributor reads a correlator config file ok"""

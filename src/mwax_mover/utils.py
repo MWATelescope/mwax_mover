@@ -33,6 +33,7 @@ PSRDADA_MODE = "MODE"
 PSRDADA_SUBOBS_ID = "SUBOBS_ID"
 PSRDADA_TRIGGER_ID = "TRIGGER_ID"
 PSRDADA_NINPUTS = "NINPUTS"
+PSRDADA_COARSE_CHANNEL = "COARSE_CHANNEL"
 
 # This is global mutex so we don't try to create the same metafits
 # file with multiple threads
@@ -117,8 +118,9 @@ class ValidationData:
 class ArchiveLocation(Enum):
     Unknown = 0
     DMF = 1
-    Acacia = 2
+    AcaciaIngest = 2
     Banksia = 3
+    AcaciaMWA = 4
 
 
 def download_metafits_file(logger: logging.Logger, obs_id: int, metafits_path: str):
@@ -304,7 +306,11 @@ def determine_bucket(full_filename: str, location: ArchiveLocation) -> str:
     filename = os.path.basename(full_filename)
 
     # acacia and banksia
-    if location == ArchiveLocation.Acacia or location == ArchiveLocation.Banksia:
+    if (
+        location == ArchiveLocation.AcaciaIngest
+        or location == ArchiveLocation.Banksia
+        or location == ArchiveLocation.AcaciaMWA
+    ):
         # determine bucket name
         bucket = get_bucket_name_from_filename(filename)
         return bucket
@@ -1073,8 +1079,8 @@ def convert_occupany_bitmap_to_array(bitmap: np.ndarray) -> np.ndarray:
 
 # Gets the packet map and gets the mean occupancy of each rfinput
 # for a subobservation and returns
-# an array of floats of since N, where N is number of rf_inputs
-# and each float is 0..1 0 meaning no packets and 1 meaning all packets
+# an array of ints of since N, where N is number of rf_inputs
+# and each int is a count of lost packets
 #
 def summarise_packet_map(num_rf_inputs: int, packet_map_bytes: bytes) -> np.ndarray:
     # Determine number of packets. There might be 625 (critically sampled)
@@ -1099,8 +1105,8 @@ def summarise_packet_map(num_rf_inputs: int, packet_map_bytes: bytes) -> np.ndar
     # ...
     # rf_input N   01111111 00111111 11111111    11111011
 
-    # We want to output a float which represents the average of 8 seconds of packet stats
-    # per rf_input.
+    # We want to output a int which represents the count of
+    # packets lost per rf_input for those 8 seconds.
 
     # Define output array
     packets_lost = np.empty(shape=(num_rf_inputs), dtype=np.int16)
@@ -1117,3 +1123,27 @@ def summarise_packet_map(num_rf_inputs: int, packet_map_bytes: bytes) -> np.ndar
         packets_lost[rf_input_index] = num_packets_per_subobs - bit_array.sum()
 
     return packets_lost
+
+
+def write_packet_stats(
+    subobs_id: int,
+    receiver_channel: int,
+    hostname: str,
+    num_tiles: int,
+    packet_stats_dump_dir: str,
+    packets_lost_array: np.ndarray,
+):
+    # Filename format is: packetstats_SSSSSSSSSS_tttT_chNNN_mwaxHH.dat
+    # Where:
+    # SSSSSSSSSS = subobsid
+    # ttt=number of tiles (this helps you read the data as you know TTTx2 is the number of uint16 values to read)
+    # NNN=zero padded receiver channel number
+    # mwaxHH=the host that generated it
+    filename = f"packetstats_{subobs_id}_{num_tiles}T_ch{receiver_channel:3}_{hostname}.dat"
+
+    # Assemble full filename
+    full_filename = os.path.join(packet_stats_dump_dir, filename)
+
+    # Write the data
+    # Having sep & format as "" it should write the data as binary in "C" order
+    packets_lost_array.tofile(full_filename, sep="", format="")
