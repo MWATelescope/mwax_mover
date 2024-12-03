@@ -208,44 +208,51 @@ class SubfileProcessor:
 
         subobs_id = int(subobs_id_str)
 
-        # For all subfiles we need to extract the packet stats:
-        packet_map = utils.get_subfile_packet_map_data(self.logger, item)
+        # Only do packet stats is packet_stats_dump_dir is not an empty string
+        if self.packet_stats_dump_dir != "":
+            # For all subfiles we need to extract the packet stats:
+            packet_map = utils.get_subfile_packet_map_data(self.logger, item)
 
-        if packet_map is not None:
-            # Get number of RF inputs from subfile header
-            ninputs_str: Optional[str] = utils.read_subfile_value(item, utils.PSRDADA_NINPUTS)
-            if ninputs_str is None:
-                raise ValueError(f"Keyword {utils.PSRDADA_NINPUTS} not found in {item}")
-            num_rf_inputs: int = int(ninputs_str)
-            num_tiles: int = int(num_rf_inputs / 2)
+            if packet_map is not None:
+                # Get number of RF inputs from subfile header
+                ninputs_str: Optional[str] = utils.read_subfile_value(item, utils.PSRDADA_NINPUTS)
+                if ninputs_str is None:
+                    raise ValueError(f"Keyword {utils.PSRDADA_NINPUTS} not found in {item}")
+                num_rf_inputs: int = int(ninputs_str)
+                num_tiles: int = int(num_rf_inputs / 2)
 
-            # Get receiver channel number
-            rec_channel_str: Optional[str] = utils.read_subfile_value(item, utils.PSRDADA_COARSE_CHANNEL)
-            if rec_channel_str is None:
-                raise ValueError(f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {item}")
-            rec_channel: int = int(rec_channel_str)
+                # Get receiver channel number
+                rec_channel_str: Optional[str] = utils.read_subfile_value(item, utils.PSRDADA_COARSE_CHANNEL)
+                if rec_channel_str is None:
+                    raise ValueError(f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {item}")
+                rec_channel: int = int(rec_channel_str)
 
-            # Summarise the packet map into a 1d array of ints (of packets lost) by rfinput
-            packets_lost_array = utils.summarise_packet_map(num_rf_inputs, packet_map)
+                # Summarise the packet map into a 1d array of ints (of packets lost) by rfinput
+                packets_lost_array = utils.summarise_packet_map(num_rf_inputs, packet_map)
 
-            if packets_lost_array is not None:
-                # Uncomment for debug
-                # self.logger.info(
-                #    f"{item}- packet occupancy: "
-                #    f"{np.array2string(packets_lost_array, threshold=9999, max_line_width=9999, separator=',')}"
-                # )
+                if packets_lost_array is not None:
+                    # Uncomment for debug
+                    # self.logger.info(
+                    #    f"{item}- packet occupancy: "
+                    #    f"{np.array2string(packets_lost_array, threshold=9999, max_line_width=9999, separator=',')}"
+                    # )
 
-                # write packet array out
-                try:
-                    utils.write_packet_stats(
-                        subobs_id, rec_channel, self.hostname, num_tiles, self.packet_stats_dump_dir, packets_lost_array
-                    )
-                except Exception:
-                    # Errors writing out packet stats should not impact operations.
-                    # Just log it
-                    self.logger.exception(
-                        f"{item}: unhandled exception when calling write_packet_stats()- continuing..."
-                    )
+                    # write packet array out
+                    try:
+                        utils.write_packet_stats(
+                            subobs_id,
+                            rec_channel,
+                            self.hostname,
+                            num_tiles,
+                            self.packet_stats_dump_dir,
+                            packets_lost_array,
+                        )
+                    except Exception:
+                        # Errors writing out packet stats should not impact operations.
+                        # Just log it
+                        self.logger.exception(
+                            f"{item}: unhandled exception when calling write_packet_stats()- continuing..."
+                        )
 
         try:
             subfile_mode = utils.read_subfile_value(item, utils.PSRDADA_MODE)

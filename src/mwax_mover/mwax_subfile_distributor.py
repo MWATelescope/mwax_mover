@@ -393,6 +393,8 @@ class MWAXSubfileDistributor:
         self.cfg_packet_stats_dump_dir = utils.read_config(
             self.logger, self.config, "mwax mover", "packet_stats_dump_dir"
         )
+        if self.cfg_packet_stats_dump_dir == "":
+            self.logger.warning("packet_stats_dump_dir is blank, so no packet stats will be written.")
 
         # Check to see if we have a beamformer section
         if self.config.has_section("beamformer"):

@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.20.4 29-Nov-2024
+## 0.20.5 04-Dec-2024
+
+* If packet_stats_dump_dir config value is blank, then do not write packet stats
+
+## 0.20.4 04-Dec-2024
 
 * Fixed bug where packet stats filename incorrectly included a space
 
