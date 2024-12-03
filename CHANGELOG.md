@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.20.4 29-Nov-2024
+
+* Fixed bug where packet stats filename incorrectly included a space
+
 ## 0.20.0 29-Nov-2024
 
 * Added packet map extraction for M&C to mwax_subfile_processor

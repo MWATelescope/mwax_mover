@@ -1137,9 +1137,9 @@ def write_packet_stats(
     # Where:
     # SSSSSSSSSS = subobsid
     # ttt=number of tiles (this helps you read the data as you know TTTx2 is the number of uint16 values to read)
-    # NNN=zero padded receiver channel number
+    # N|NN|NNN=receiver channel number
     # mwaxHH=the host that generated it
-    filename = f"packetstats_{subobs_id}_{num_tiles}T_ch{receiver_channel:3}_{hostname}.dat"
+    filename = f"packetstats_{subobs_id}_{num_tiles}T_ch{receiver_channel}_{hostname}.dat"
 
     # Assemble full filename
     full_filename = os.path.join(packet_stats_dump_dir, filename)
