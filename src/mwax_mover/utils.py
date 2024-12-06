@@ -287,7 +287,11 @@ def validate_filename(
                     )
 
             if valid:
-                calibrator, project_id = get_metafits_values(metafits_filename)
+                calibrator, project_id, calib_source = get_metafits_values(metafits_filename)
+
+                # if calib_source is SUN then ignore
+                if calib_source.upper() == "SUN":
+                    calibrator = False
 
     return ValidationData(
         valid,
@@ -350,17 +354,23 @@ def get_metafits_value(metafits_filename: str, key: str):
         ) from catch_all_exception
 
 
-def get_metafits_values(metafits_filename: str) -> Tuple[bool, str]:
+def get_metafits_values(metafits_filename: str) -> Tuple[bool, str, str]:
     """
-    Returns a tuple of is_calibrator (bool) and
-    the project_id (string) from a metafits file.
+    Returns a tuple of
+    is_calibrator (bool) and
+    project_id (string) and
+    calib_source (string) from a metafits file.
     """
     try:
         with fits.open(metafits_filename) as hdul:
             # Read key from primary HDU- it is bool
             is_calibrator = hdul[0].header["CALIBRAT"]  # type: ignore # pylint: disable=no-member
+            if is_calibrator:
+                calib_source = hdul[0].header["CALIBSRC"]  # type: ignore # pylint: disable=no-member
+            else:
+                calib_source = ""
             project_id = hdul[0].header["PROJECT"]  # type: ignore # pylint: disable=no-member
-            return is_calibrator, project_id
+            return is_calibrator, project_id, calib_source
     except Exception as catch_all_exception:
         raise Exception(
             f"Error reading metafits file: {metafits_filename}: {catch_all_exception}"

@@ -213,9 +213,12 @@ def test_get_metafits_values_correlator():
     #
     # Run test
     #
-    is_calibrator, project_id = utils.get_metafits_values("tests/data/correlator_calibrator/1347318488_metafits.fits")
+    is_calibrator, project_id, calib_src = utils.get_metafits_values(
+        "tests/data/correlator_calibrator/1347318488_metafits.fits"
+    )
     assert is_calibrator is True
     assert project_id == "G0080"
+    assert calib_src == "J063633-204225"
 
 
 def test_get_metafits_values_non_cal():
@@ -224,9 +227,12 @@ def test_get_metafits_values_non_cal():
     metafits which is not a calibrator- i.e. it has
     CALIBRAT=False and no CALIBSRC key
     """
-    is_calibrator, project_id = utils.get_metafits_values("tests/data/correlator_C001/1244973688_metafits.fits")
+    is_calibrator, project_id, calib_src = utils.get_metafits_values(
+        "tests/data/correlator_C001/1244973688_metafits.fits"
+    )
     assert is_calibrator is False
     assert project_id == "C001"
+    assert calib_src == ""
 
 
 def test_scan_for_existing_files_and_add_to_queue():

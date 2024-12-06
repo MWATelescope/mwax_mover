@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.20.6 05-Dec-2024
+
+* For mwax_subfile_distributor, if a calibrator has "SUN" as the calibrator source, do not treat it as a calibrator.
+
 ## 0.20.5 04-Dec-2024
 
 * If packet_stats_dump_dir config value is blank, then do not write packet stats
