@@ -189,6 +189,8 @@ class SubfileProcessor:
 
         self.logger.info(f"{item}- SubfileProcessor.subfile_handler is handling {item}...")
 
+        handler_starttime = time.time()
+
         # `keep_subfiles_path` is used after doing the main work. If we are
         # running in with `always_keep_subfiles`=1,
         # then we will always keep the voltages and not delete them.
@@ -208,12 +210,22 @@ class SubfileProcessor:
 
         subobs_id = int(subobs_id_str)
 
-        # Only do packet stats is packet_stats_dump_dir is not an empty string
+        # Only do packet stats if packet_stats_dump_dir is not an empty string
         if self.packet_stats_dump_dir != "":
+            gspmd_starttime = time.time()
+            self.logger.info(f"{item}: Starting subfile_handler.get_subfile_packet_map_data()...")
+
             # For all subfiles we need to extract the packet stats:
             packet_map = utils.get_subfile_packet_map_data(self.logger, item)
 
+            gspmd_elapsed = time.time() - gspmd_starttime
+
+            self.logger.info(f"{item}: subfile_handler.get_subfile_packet_map_data() took {gspmd_elapsed:.3f} secs")
+
             if packet_map is not None:
+                rsv_starttime = time.time()
+                self.logger.info(f"{item}: Starting subfile_handler (reading subfile header values)...")
+
                 # Get number of RF inputs from subfile header
                 ninputs_str: Optional[str] = utils.read_subfile_value(item, utils.PSRDADA_NINPUTS)
                 if ninputs_str is None:
@@ -227,8 +239,15 @@ class SubfileProcessor:
                     raise ValueError(f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {item}")
                 rec_channel: int = int(rec_channel_str)
 
+                rsv_elapsed = time.time() - rsv_starttime
+                self.logger.info(f"{item}: subfile_handler (reading subfile header values) took {rsv_elapsed:.3f} secs")
+
                 # Summarise the packet map into a 1d array of ints (of packets lost) by rfinput
+                spm_starttime = time.time()
+                self.logger.info(f"{item}: Starting subfile_handler.summarise_packet_map()...")
                 packets_lost_array = utils.summarise_packet_map(num_rf_inputs, packet_map)
+                spm_elapsed = time.time() - spm_starttime
+                self.logger.info(f"{item}: subfile_handler.summarise_packet_map() took {spm_elapsed:.3f} secs")
 
                 if packets_lost_array is not None:
                     # Uncomment for debug
@@ -239,6 +258,9 @@ class SubfileProcessor:
 
                     # write packet array out
                     try:
+                        wps_starttime = time.time()
+                        self.logger.info(f"{item}: Starting subfile_handler.write_packet_stats()...")
+
                         utils.write_packet_stats(
                             subobs_id,
                             rec_channel,
@@ -247,6 +269,9 @@ class SubfileProcessor:
                             self.packet_stats_dump_dir,
                             packets_lost_array,
                         )
+
+                        wps_elapsed = time.time() - wps_starttime
+                        self.logger.info(f"{item}: subfile_handler.write_packet_stats() took {wps_elapsed:.3f} secs")
                     except Exception:
                         # Errors writing out packet stats should not impact operations.
                         # Just log it
@@ -255,9 +280,13 @@ class SubfileProcessor:
                         )
 
         try:
+            rsv2_starttime = time.time()
+            self.logger.info(f"{item}: subfile_handler (reading MODE)...")
             subfile_mode = utils.read_subfile_value(item, utils.PSRDADA_MODE)
             if subfile_mode is None:
                 raise ValueError(f"Keyword {utils.PSRDADA_MODE} not found in {item}")
+            rsv2_elapsed = time.time() - rsv2_starttime
+            self.logger.info(f"{item}: subfile_handler (reading MODE {subfile_mode}) took {rsv2_elapsed:.3f} secs")
 
             if self.corr_enabled:
                 #
@@ -485,7 +514,11 @@ class SubfileProcessor:
                     )
                     sys.exit(2)
 
-            self.logger.info(f"{item}- SubfileProcessor.subfile_handler finished handling.")
+            handler_elapsed = time.time() - handler_starttime
+
+            self.logger.info(
+                f"{item}- SubfileProcessor.subfile_handler finished handling in {handler_elapsed:.3f} secs."
+            )
 
         return success
 

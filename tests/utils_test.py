@@ -12,6 +12,8 @@ import os
 import pytest
 import queue
 import numpy as np
+import time
+from typing import Optional
 from mwax_mover import utils
 
 
@@ -917,3 +919,73 @@ def test_write_packet_stats():
     assert read_array[0] == 1 * 625
 
     assert read_array[1] == 7 * 625
+
+
+def test_full_packet_stats():
+    logger = logging.getLogger("test")
+    logger.setLevel(logging.DEBUG)
+    console_log = logging.StreamHandler()
+    console_log.setLevel(logging.DEBUG)
+    console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
+    logger.addHandler(console_log)
+    filename = "/data/1419789248_1419789248_91.sub"
+
+    full_start_time = time.time()
+
+    if os.path.exists(filename):
+        logger.info("get_subfile_packet_map_data()...")
+        # For all subfiles we need to extract the packet stats:
+        packet_map = utils.get_subfile_packet_map_data(logger, filename)
+        logger.info(f"..elapsed {time.time() - full_start_time} seconds")
+
+        if packet_map is not None:
+            # Get number of RF inputs from subfile header
+            ninputs_str: Optional[str] = utils.read_subfile_value(filename, utils.PSRDADA_NINPUTS)
+            if ninputs_str is None:
+                raise ValueError(f"Keyword {utils.PSRDADA_NINPUTS} not found in {filename}")
+            num_rf_inputs: int = int(ninputs_str)
+            num_tiles: int = int(num_rf_inputs / 2)
+
+            # Get receiver channel number
+            rec_channel_str: Optional[str] = utils.read_subfile_value(filename, utils.PSRDADA_COARSE_CHANNEL)
+            if rec_channel_str is None:
+                raise ValueError(f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {filename}")
+            rec_channel: int = int(rec_channel_str)
+
+            # Summarise the packet map into a 1d array of ints (of packets lost) by rfinput
+            logger.info("summarise_packet_map()...")
+            spm_start_time = time.time()
+            packets_lost_array = utils.summarise_packet_map(num_rf_inputs, packet_map)
+            logger.info(f"..elapsed {time.time() - spm_start_time} seconds")
+
+            if packets_lost_array is not None:
+                # Uncomment for debug
+                # self.logger.info(
+                #    f"{item}- packet occupancy: "
+                #    f"{np.array2string(packets_lost_array, threshold=9999, max_line_width=9999, separator=',')}"
+                # )
+
+                # write packet array out
+                wps_start_time = time.time()
+                logger.info("write_packet_stats()...")
+                try:
+                    utils.write_packet_stats(
+                        1416028872,
+                        rec_channel,
+                        "test",
+                        num_tiles,
+                        os.path.dirname(filename),
+                        packets_lost_array,
+                    )
+                    logger.info(f"..elapsed {time.time() - wps_start_time} seconds")
+
+                    logger.info(f"Total elapsed time {time.time() - full_start_time} seconds")
+                except Exception:
+                    # Errors writing out packet stats should not impact operations.
+                    # Just log it
+                    logger.exception(
+                        f"{filename}: unhandled exception when calling write_packet_stats()- continuing..."
+                    )
+    else:
+        pytest.skip(f"Local MWAX VCS data file {filename} not found on your system")
+        return
