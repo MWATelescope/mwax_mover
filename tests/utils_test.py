@@ -865,6 +865,13 @@ def test_convert_occupany_bitmap_to_array():
 
 
 def test_summarise_packet_map():
+    logger = logging.getLogger("test")
+    logger.setLevel(logging.DEBUG)
+    console_log = logging.StreamHandler()
+    console_log.setLevel(logging.DEBUG)
+    console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
+    logger.addHandler(console_log)
+
     num_rf_inputs = 2
 
     # This should look like:
@@ -874,7 +881,7 @@ def test_summarise_packet_map():
     input = bytes([127] * 625) + bytes([1] * 625)
     assert len(input) == 625 * 2
 
-    packets_lost = utils.summarise_packet_map(num_rf_inputs, input)
+    packets_lost = utils.summarise_packet_map(logger, num_rf_inputs, input)
 
     # Array should have 1 element per rfinput
     assert packets_lost.shape == (num_rf_inputs,)
@@ -885,6 +892,13 @@ def test_summarise_packet_map():
 
 
 def test_write_packet_stats():
+    logger = logging.getLogger("test")
+    logger.setLevel(logging.DEBUG)
+    console_log = logging.StreamHandler()
+    console_log.setLevel(logging.DEBUG)
+    console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
+    logger.addHandler(console_log)
+
     num_rf_inputs = 2
 
     # This should look like:
@@ -894,7 +908,7 @@ def test_write_packet_stats():
     input = bytes([127] * 625) + bytes([1] * 625)
     assert len(input) == 625 * 2
 
-    packets_lost = utils.summarise_packet_map(num_rf_inputs, input)
+    packets_lost = utils.summarise_packet_map(logger, num_rf_inputs, input)
     subobs_id: int = 1234567890
     receiver_channel: int = 124
     hostname = "test"
@@ -930,9 +944,9 @@ def test_full_packet_stats():
     logger.addHandler(console_log)
     filename = "/data/1419789248_1419789248_91.sub"
 
-    full_start_time = time.time()
-
     if os.path.exists(filename):
+        full_start_time = time.time()
+
         logger.info("get_subfile_packet_map_data()...")
         # For all subfiles we need to extract the packet stats:
         packet_map = utils.get_subfile_packet_map_data(logger, filename)
@@ -955,7 +969,7 @@ def test_full_packet_stats():
             # Summarise the packet map into a 1d array of ints (of packets lost) by rfinput
             logger.info("summarise_packet_map()...")
             spm_start_time = time.time()
-            packets_lost_array = utils.summarise_packet_map(num_rf_inputs, packet_map)
+            packets_lost_array = utils.summarise_packet_map(logger, num_rf_inputs, packet_map)
             logger.info(f"..elapsed {time.time() - spm_start_time} seconds")
 
             if packets_lost_array is not None:

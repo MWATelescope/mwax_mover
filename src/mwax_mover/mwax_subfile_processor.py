@@ -212,19 +212,16 @@ class SubfileProcessor:
 
         # Only do packet stats if packet_stats_dump_dir is not an empty string
         if self.packet_stats_dump_dir != "":
-            gspmd_starttime = time.time()
-            self.logger.info(f"{item}: Starting subfile_handler.get_subfile_packet_map_data()...")
-
             # For all subfiles we need to extract the packet stats:
+            self.logger.info(f"{item}- Starting subfile_handler.get_subfile_packet_map_data()...")
+            gspmd_starttime = time.time()
             packet_map = utils.get_subfile_packet_map_data(self.logger, item)
-
             gspmd_elapsed = time.time() - gspmd_starttime
-
-            self.logger.info(f"{item}: subfile_handler.get_subfile_packet_map_data() took {gspmd_elapsed:.3f} secs")
+            self.logger.info(f"{item}- subfile_handler.get_subfile_packet_map_data() took {gspmd_elapsed:.3f} secs")
 
             if packet_map is not None:
+                self.logger.info(f"{item}- Starting subfile_handler (reading subfile header values)...")
                 rsv_starttime = time.time()
-                self.logger.info(f"{item}: Starting subfile_handler (reading subfile header values)...")
 
                 # Get number of RF inputs from subfile header
                 ninputs_str: Optional[str] = utils.read_subfile_value(item, utils.PSRDADA_NINPUTS)
@@ -240,14 +237,14 @@ class SubfileProcessor:
                 rec_channel: int = int(rec_channel_str)
 
                 rsv_elapsed = time.time() - rsv_starttime
-                self.logger.info(f"{item}: subfile_handler (reading subfile header values) took {rsv_elapsed:.3f} secs")
+                self.logger.info(f"{item}- subfile_handler (reading subfile header values) took {rsv_elapsed:.3f} secs")
 
                 # Summarise the packet map into a 1d array of ints (of packets lost) by rfinput
+                self.logger.info(f"{item}- Starting subfile_handler.summarise_packet_map()...")
                 spm_starttime = time.time()
-                self.logger.info(f"{item}: Starting subfile_handler.summarise_packet_map()...")
-                packets_lost_array = utils.summarise_packet_map(num_rf_inputs, packet_map)
+                packets_lost_array = utils.summarise_packet_map(self.logger, num_rf_inputs, packet_map)
                 spm_elapsed = time.time() - spm_starttime
-                self.logger.info(f"{item}: subfile_handler.summarise_packet_map() took {spm_elapsed:.3f} secs")
+                self.logger.info(f"{item}- subfile_handler.summarise_packet_map() took {spm_elapsed:.3f} secs")
 
                 if packets_lost_array is not None:
                     # Uncomment for debug
@@ -258,9 +255,8 @@ class SubfileProcessor:
 
                     # write packet array out
                     try:
+                        self.logger.info(f"{item}- Starting subfile_handler.write_packet_stats()...")
                         wps_starttime = time.time()
-                        self.logger.info(f"{item}: Starting subfile_handler.write_packet_stats()...")
-
                         utils.write_packet_stats(
                             subobs_id,
                             rec_channel,
@@ -269,24 +265,23 @@ class SubfileProcessor:
                             self.packet_stats_dump_dir,
                             packets_lost_array,
                         )
-
                         wps_elapsed = time.time() - wps_starttime
-                        self.logger.info(f"{item}: subfile_handler.write_packet_stats() took {wps_elapsed:.3f} secs")
+                        self.logger.info(f"{item}- subfile_handler.write_packet_stats() took {wps_elapsed:.3f} secs")
                     except Exception:
                         # Errors writing out packet stats should not impact operations.
                         # Just log it
                         self.logger.exception(
-                            f"{item}: unhandled exception when calling write_packet_stats()- continuing..."
+                            f"{item}- unhandled exception when calling write_packet_stats()- continuing..."
                         )
 
         try:
             rsv2_starttime = time.time()
-            self.logger.info(f"{item}: subfile_handler (reading MODE)...")
+            self.logger.info(f"{item}- subfile_handler (reading MODE)...")
             subfile_mode = utils.read_subfile_value(item, utils.PSRDADA_MODE)
             if subfile_mode is None:
                 raise ValueError(f"Keyword {utils.PSRDADA_MODE} not found in {item}")
             rsv2_elapsed = time.time() - rsv2_starttime
-            self.logger.info(f"{item}: subfile_handler (reading MODE {subfile_mode}) took {rsv2_elapsed:.3f} secs")
+            self.logger.info(f"{item}- subfile_handler (reading MODE {subfile_mode}) took {rsv2_elapsed:.3f} secs")
 
             if self.corr_enabled:
                 #

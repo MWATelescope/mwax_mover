@@ -1082,7 +1082,7 @@ def convert_occupany_bitmap_to_array(bitmap: np.ndarray) -> np.ndarray:
 # an array of ints of since N, where N is number of rf_inputs
 # and each int is a count of lost packets
 #
-def summarise_packet_map(num_rf_inputs: int, packet_map_bytes: bytes) -> np.ndarray:
+def summarise_packet_map(logger, num_rf_inputs: int, packet_map_bytes: bytes) -> np.ndarray:
     # Determine number of packets. There might be 625 (critically sampled)
     # or 800 (oversampled)
     num_packets_per_sec: int = int(len(packet_map_bytes) / num_rf_inputs)
@@ -1109,18 +1109,36 @@ def summarise_packet_map(num_rf_inputs: int, packet_map_bytes: bytes) -> np.ndar
     # packets lost per rf_input for those 8 seconds.
 
     # Define output array
+    logger.info("...summarise_packet_map(): np.empty")
+    starttime = time.time()
     packets_lost = np.empty(shape=(num_rf_inputs), dtype=np.int16)
+    elapsed = time.time() - starttime
+    logger.info(f"...summarise_packet_map(): np.empty took {elapsed:.3f} secs")
 
     # Convert the input bytes into a numpy array of bytes
+    logger.info("...summarise_packet_map(): np.frombuffer")
+    starttime = time.time()
     packet_map_np = np.frombuffer(packet_map_bytes, dtype=np.uint8)
+    elapsed = time.time() - starttime
+    logger.info(f"...summarise_packet_map(): np.frombuffer took {elapsed:.3f} secs")
 
     # Reshape the packet map to 2d (rfinputs, packets)
+    logger.info("...summarise_packet_map(): np.reshape")
+    starttime = time.time()
     packet_map_np = np.reshape(packet_map_np, (num_rf_inputs, num_packet_map_bytes_per_subobs))
+    elapsed = time.time() - starttime
+    logger.info(f"...summarise_packet_map(): np.reshape took {elapsed:.3f} secs")
 
+    logger.info("...summarise_packet_map(): convert_occupany_bitmap_to_array x {num_rf_inputs} times")
+    starttime = time.time()
     for rf_input_index in range(0, num_rf_inputs):
         bit_array = convert_occupany_bitmap_to_array(packet_map_np[rf_input_index])
         # we subtract total packets from the bnit array as we want lost packets (0's)
         packets_lost[rf_input_index] = num_packets_per_subobs - bit_array.sum()
+    elapsed = time.time() - starttime
+    logger.info(
+        f"...summarise_packet_map(): convert_occupany_bitmap_to_array x {num_rf_inputs} times took {elapsed:.3f} secs"
+    )
 
     return packets_lost
 
@@ -1147,3 +1165,5 @@ def write_packet_stats(
     # Write the data
     # Having sep & format as "" it should write the data as binary in "C" order
     packets_lost_array.tofile(full_filename, sep="", format="")
+    with open(full_filename, "wb") as write_file:
+        write_file.write(packets_lost_array.tobytes())
