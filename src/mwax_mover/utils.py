@@ -1129,16 +1129,26 @@ def summarise_packet_map(logger, num_rf_inputs: int, packet_map_bytes: bytes) ->
     elapsed = time.time() - starttime
     logger.info(f"...summarise_packet_map(): np.reshape took {elapsed:.3f} secs")
 
-    logger.info("...summarise_packet_map(): convert_occupany_bitmap_to_array x {num_rf_inputs} times")
+    # Convert the binary values into array elements of bits
+    logger.info("...summarise_packet_map(): np.unpackbits")
     starttime = time.time()
-    for rf_input_index in range(0, num_rf_inputs):
-        bit_array = convert_occupany_bitmap_to_array(packet_map_np[rf_input_index])
-        # we subtract total packets from the bnit array as we want lost packets (0's)
-        packets_lost[rf_input_index] = num_packets_per_subobs - bit_array.sum()
+    bit_array = np.unpackbits(packet_map_np, 1)
     elapsed = time.time() - starttime
-    logger.info(
-        f"...summarise_packet_map(): convert_occupany_bitmap_to_array x {num_rf_inputs} times took {elapsed:.3f} secs"
-    )
+    logger.info(f"...summarise_packet_map(): np.unpackbits took {elapsed:.3f} secs")
+
+    logger.info(f"...summarise_packet_map(): calculate missed packets x {num_rf_inputs} times")
+    starttime = time.time()
+    # This will for each row (rfinput) sum the bits (of received packets)
+    # and subtract it from the expected total number of packets so that
+    # packet_lost[rf_input] = num_packets_per_subobs - bit_array[rf_input_index].sum()
+    # But this does it in a proper numpy way
+    packets_lost[:] = num_packets_per_subobs - bit_array.sum(axis=1)
+    # for rf_input_index in range(0, num_rf_inputs):
+    #    # bit_array = convert_occupany_bitmap_to_array(packet_map_np[rf_input_index])
+    #    # we subtract total packets from the bnit array as we want lost packets (0's)
+    #    packets_lost[rf_input_index] = num_packets_per_subobs - bit_array[rf_input_index].sum()
+    elapsed = time.time() - starttime
+    logger.info(f"...summarise_packet_map(): calculate missed packets x {num_rf_inputs} times took {elapsed:.3f} secs")
 
     return packets_lost
 
@@ -1167,3 +1177,68 @@ def write_packet_stats(
     packets_lost_array.tofile(full_filename, sep="", format="")
     with open(full_filename, "wb") as write_file:
         write_file.write(packets_lost_array.tobytes())
+
+
+def greg(logger):
+
+    filename = "/data/1419789248_1419789248_91.sub"
+
+    if os.path.exists(filename):
+        full_start_time = time.time()
+
+        logger.info("get_subfile_packet_map_data()...")
+        # For all subfiles we need to extract the packet stats:
+        packet_map = get_subfile_packet_map_data(logger, filename)
+        logger.info(f"..elapsed {time.time() - full_start_time} seconds")
+
+        if packet_map is not None:
+            # Get number of RF inputs from subfile header
+            ninputs_str: Optional[str] = read_subfile_value(filename, PSRDADA_NINPUTS)
+            if ninputs_str is None:
+                raise ValueError(f"Keyword {PSRDADA_NINPUTS} not found in {filename}")
+            num_rf_inputs: int = int(ninputs_str)
+            num_tiles: int = int(num_rf_inputs / 2)
+
+            # Get receiver channel number
+            rec_channel_str: Optional[str] = read_subfile_value(filename, PSRDADA_COARSE_CHANNEL)
+            if rec_channel_str is None:
+                raise ValueError(f"Keyword {PSRDADA_COARSE_CHANNEL} not found in {filename}")
+            rec_channel: int = int(rec_channel_str)
+
+            # Summarise the packet map into a 1d array of ints (of packets lost) by rfinput
+            logger.info("summarise_packet_map()...")
+            spm_start_time = time.time()
+            packets_lost_array = summarise_packet_map(logger, num_rf_inputs, packet_map)
+            logger.info(f"..elapsed {time.time() - spm_start_time} seconds")
+
+            if packets_lost_array is not None:
+                # Uncomment for debug
+                # self.logger.info(
+                #    f"{item}- packet occupancy: "
+                #    f"{np.array2string(packets_lost_array, threshold=9999, max_line_width=9999, separator=',')}"
+                # )
+
+                # write packet array out
+                wps_start_time = time.time()
+                logger.info("write_packet_stats()...")
+                try:
+                    write_packet_stats(
+                        1416028872,
+                        rec_channel,
+                        "test",
+                        num_tiles,
+                        os.path.dirname(filename),
+                        packets_lost_array,
+                    )
+                    logger.info(f"..elapsed {time.time() - wps_start_time} seconds")
+
+                    logger.info(f"Total elapsed time {time.time() - full_start_time} seconds")
+                except Exception:
+                    # Errors writing out packet stats should not impact operations.
+                    # Just log it
+                    logger.exception(
+                        f"{filename}: unhandled exception when calling write_packet_stats()- continuing..."
+                    )
+    else:
+        logger.info("Skipping as data file doesn't exist!")
+        return
