@@ -149,14 +149,25 @@ class SubfileProcessor:
 
         self.logger.info("SubfileProcessor.handle_next_keep_file is handling" f" {keep_filename}...")
 
+        # Read TRANSFER_SIZE from subfile header
+        # We only use this when writing a subfile to disk in case the subfile is
+        # bigger than the data
+        transfer_size_str = utils.read_subfile_value(keep_filename, utils.PSRDADA_TRANSFER_SIZE)
+        if transfer_size_str is None:
+            raise ValueError(f"Keyword {utils.PSRDADA_TRANSFER_SIZE} not found in {keep_filename}")
+
+        transfer_size = int(transfer_size_str)
+        subfile_bytes_to_write = transfer_size + 4096  # We add the header to the transfer size
+
         # Copy the .keep file to the voltdata incoming dir
         # and ensure it is named as a ".sub" file
-        copy_success = self.copy_subfile_to_disk(
+        copy_success = self.copy_subfile_to_disk_dd(
             keep_filename,
             self.corr_diskdb_numa_node,
             self.voltdata_incoming_path,
             self.copy_subfile_to_disk_timeout_sec,
             os.path.basename(keep_filename).replace(self.ext_keep_file, self.ext_sub_file),
+            subfile_bytes_to_write,
         )
 
         if copy_success:
@@ -210,6 +221,16 @@ class SubfileProcessor:
 
         subobs_id = int(subobs_id_str)
 
+        # Read TRANSFER_SIZE from subfile header
+        # We only use this when writing a subfile to disk in case the subfile is
+        # bigger than the data
+        transfer_size_str = utils.read_subfile_value(item, utils.PSRDADA_TRANSFER_SIZE)
+        if transfer_size_str is None:
+            raise ValueError(f"Keyword {utils.PSRDADA_TRANSFER_SIZE} not found in {item}")
+
+        transfer_size = int(transfer_size_str)
+        subfile_bytes_to_write = transfer_size + 4096  # We add the header to the transfer size
+
         # Only do packet stats if packet_stats_dump_dir is not an empty string
         if self.packet_stats_dump_dir != "":
             # For all subfiles we need to extract the packet stats:
@@ -247,12 +268,6 @@ class SubfileProcessor:
                 self.logger.info(f"{item}- subfile_handler.summarise_packet_map() took {spm_elapsed:.3f} secs")
 
                 if packets_lost_array is not None:
-                    # Uncomment for debug
-                    # self.logger.info(
-                    #    f"{item}- packet occupancy: "
-                    #    f"{np.array2string(packets_lost_array, threshold=9999, max_line_width=9999, separator=',')}"
-                    # )
-
                     # write packet array out
                     try:
                         self.logger.info(f"{item}- Starting subfile_handler.write_packet_stats()...")
@@ -316,11 +331,13 @@ class SubfileProcessor:
                         )
                         utils.inject_subfile_header(item, f"{utils.PSRDADA_TRIGGER_ID} {self.dump_trigger_id}\n")
 
-                    success = self.copy_subfile_to_disk(
+                    success = self.copy_subfile_to_disk_dd(
                         item,
                         self.corr_diskdb_numa_node,
                         self.voltdata_incoming_path,
                         self.copy_subfile_to_disk_timeout_sec,
+                        ".",
+                        subfile_bytes_to_write,
                     )
                 else:
                     # 1. Read header of subfile.
@@ -354,11 +371,13 @@ class SubfileProcessor:
                         if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
                             self.sd_ctx.archive_processor.pause_archiving(True)  # pylint: disable=line-too-long
 
-                        success = self.copy_subfile_to_disk(
+                        success = self.copy_subfile_to_disk_dd(
                             item,
                             self.corr_diskdb_numa_node,
                             self.voltdata_incoming_path,
                             self.copy_subfile_to_disk_timeout_sec,
+                            ".",
+                            subfile_bytes_to_write,
                         )
 
                     elif CorrelatorMode.is_no_capture(subfile_mode) or CorrelatorMode.is_voltage_buffer(subfile_mode):
@@ -487,11 +506,8 @@ class SubfileProcessor:
                 if keep_subfiles_path:
                     # we use -1 for numa node for now as this is really for
                     # debug so it does not matter
-                    self.copy_subfile_to_disk(
-                        item,
-                        -1,
-                        keep_subfiles_path,
-                        self.copy_subfile_to_disk_timeout_sec,
+                    self.copy_subfile_to_disk_dd(
+                        item, -1, keep_subfiles_path, self.copy_subfile_to_disk_timeout_sec, ".", subfile_bytes_to_write
                     )
 
                 # Rename subfile so that udpgrab can reuse it
@@ -542,7 +558,7 @@ class SubfileProcessor:
                     worker_thread.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
-    def copy_subfile_to_disk(
+    def copy_subfile_to_disk_cp(
         self,
         filename: str,
         numa_node: int,
@@ -550,7 +566,8 @@ class SubfileProcessor:
         timeout: int,
         destination_filename: str = ".",
     ) -> bool:
-        """Copies the given filename to the destination path"""
+        """Copies the given filename to the destination path
+        DEPRECATED FOR NOW- replaced with copy_subfile_to_disk_dd()"""
         self.logger.info(f"{filename}- Copying file into {destination_path}")
 
         command = f"cp {filename} {destination_path}/{destination_filename}"
@@ -568,6 +585,50 @@ class SubfileProcessor:
         else:
             self.logger.error(
                 f"{filename}- Copying file into"
+                f" {destination_path}/{destination_filename} failed with error"
+                f" {stdout}"
+            )
+
+        return retval
+
+    def copy_subfile_to_disk_dd(
+        self,
+        filename: str,
+        numa_node: int,
+        destination_path: str,
+        timeout: int,
+        destination_filename: str,
+        bytes_to_write: int,
+    ) -> bool:
+        """Copies the given filename to the destination path, trimming X bytes off the end of the file
+        This is for the case where the subfiles are sized for e.g. 144T but the observation is only
+        128T. When copied, dd will only copy the 128T worth of data (u2s would have already ensured
+        that the data written is only 128T worth and that the remaining space is 'empty')
+
+        filename: Abs or relative path and filename
+        destination_path: Just the destination directory
+        destination_filename: Just the destination filename (no path)
+        bytes_to_write: only write the first N bytes"""
+        self.logger.info(f"{filename}- Copying first {bytes_to_write} bytes of file into {destination_path}")
+
+        command = f"dd if={filename} of={destination_path}/{destination_filename} bs=4M oflag=direct "
+        f"iflag=count_bytes count={bytes_to_write}"
+
+        start_time = time.time()
+        retval, stdout = mwax_command.run_command_ext(self.logger, command, numa_node, timeout, False)
+
+        if retval:
+            elapsed = time.time() - start_time
+            speed = (bytes_to_write / elapsed) / (1000.0 * 1000.0 * 1000.0)
+
+            self.logger.info(
+                f"{filename}- Copying first {bytes_to_write} bytes of file into"
+                f" {destination_path}/{destination_filename} was successful"
+                f" (took {elapsed:.3f} secs at {speed:.3f} GB/sec)."
+            )
+        else:
+            self.logger.error(
+                f"{filename}- Copying first {bytes_to_write} bytes of file into"
                 f" {destination_path}/{destination_filename} failed with error"
                 f" {stdout}"
             )
