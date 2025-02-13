@@ -20,7 +20,7 @@ def run_command_ext(
     if numa_node is None:
         cmdline = f"{command}"
     else:
-        if int(numa_node) > 0:
+        if int(numa_node) >= 0:
             cmdline = "numactl" f" --cpunodebind={str(numa_node)} --membind={str(numa_node)} " f"{command}"
         else:
             cmdline = f"{command}"
