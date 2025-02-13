@@ -336,7 +336,7 @@ class SubfileProcessor:
                         self.corr_diskdb_numa_node,
                         self.voltdata_incoming_path,
                         self.copy_subfile_to_disk_timeout_sec,
-                        ".",
+                        os.path.split(item)[1],
                         subfile_bytes_to_write,
                     )
                 else:
@@ -376,7 +376,7 @@ class SubfileProcessor:
                             self.corr_diskdb_numa_node,
                             self.voltdata_incoming_path,
                             self.copy_subfile_to_disk_timeout_sec,
-                            ".",
+                            os.path.split(item)[1],
                             subfile_bytes_to_write,
                         )
 
@@ -507,7 +507,12 @@ class SubfileProcessor:
                     # we use -1 for numa node for now as this is really for
                     # debug so it does not matter
                     self.copy_subfile_to_disk_dd(
-                        item, -1, keep_subfiles_path, self.copy_subfile_to_disk_timeout_sec, ".", subfile_bytes_to_write
+                        item,
+                        -1,
+                        keep_subfiles_path,
+                        self.copy_subfile_to_disk_timeout_sec,
+                        os.path.split(item)[1],
+                        subfile_bytes_to_write,
                     )
 
                 # Rename subfile so that udpgrab can reuse it
@@ -607,7 +612,8 @@ class SubfileProcessor:
 
         filename: Abs or relative path and filename
         destination_path: Just the destination directory
-        destination_filename: Just the destination filename (no path)
+        destination_filename: Just the destination filename (no path)- note- unlike with cp it cannot
+                            be just a "."! dd doesn't like that - it has to be a real filename.
         bytes_to_write: only write the first N bytes"""
         self.logger.info(f"{filename}- Copying first {bytes_to_write} bytes of file into {destination_path}")
 
