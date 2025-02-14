@@ -793,6 +793,38 @@ def read_subfile_value(filename: str, key: str) -> typing.Union[str, None]:
     return subfile_value
 
 
+def read_subfile_values(filename: str, keys: list[str]) -> dict:
+    """Returns values of keys as a list of strings (or none) from a subfile header"""
+    subfile_values = dict()
+    found = 0
+
+    # Create the dict with None values for all keys
+    for key in keys:
+        subfile_values[key] = None
+
+    with open(filename, "rb") as subfile:
+        subfile_text = subfile.read(PSRDADA_HEADER_BYTES).decode()
+        subfile_text_lines = subfile_text.splitlines()
+
+        for line in subfile_text_lines:
+            split_line = line.split()
+
+            # We should have 2 items, keyword and value
+            if len(split_line) == 2:
+                keyword = split_line[0].strip()
+                value = split_line[1].strip()
+
+                if keyword in keys:
+                    subfile_values[keyword] = value
+                    found += 1
+
+                    if found == len(keys):
+                        # Exit loop early if we have all the values
+                        break
+
+    return subfile_values
+
+
 def read_subfile_trigger_value(subfile_filename: str):
     """Reads the TRIGGER_ID values from a subfile header
     Returns trigger_id as an INT or None if not found"""

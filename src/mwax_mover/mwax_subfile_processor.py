@@ -9,7 +9,6 @@ import shutil
 import sys
 import threading
 import time
-from typing import Optional
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
 from mwax_mover import utils, mwax_queue_worker, mwax_watcher, mwax_command
 from mwax_mover.utils import CorrelatorMode
@@ -216,22 +215,47 @@ class SubfileProcessor:
         #
         keep_subfiles_path = None
 
-        # Read the SUBOBSID from the subfile
-        subobs_id_str = utils.read_subfile_value(item, utils.PSRDADA_SUBOBS_ID)
-        if subobs_id_str is None:
+        # Read all the things from the subfile header here!
+        subfile_header_values = utils.read_subfile_values(
+            item,
+            [
+                utils.PSRDADA_SUBOBS_ID,
+                utils.PSRDADA_TRANSFER_SIZE,
+                utils.PSRDADA_NINPUTS,
+                utils.PSRDADA_COARSE_CHANNEL,
+                utils.PSRDADA_MODE,
+            ],
+        )
+
+        # Validate each one
+        if subfile_header_values[utils.PSRDADA_SUBOBS_ID] is None:
             raise ValueError(f"Keyword {utils.PSRDADA_MODE} not found in {item}")
 
-        subobs_id = int(subobs_id_str)
+        subobs_id = int(subfile_header_values[utils.PSRDADA_SUBOBS_ID])
 
         # Read TRANSFER_SIZE from subfile header
         # We only use this when writing a subfile to disk in case the subfile is
         # bigger than the data
-        transfer_size_str = utils.read_subfile_value(item, utils.PSRDADA_TRANSFER_SIZE)
-        if transfer_size_str is None:
+        # transfer_size_str = utils.read_subfile_value(item, utils.PSRDADA_TRANSFER_SIZE)
+        if subfile_header_values[utils.PSRDADA_TRANSFER_SIZE] is None:
             raise ValueError(f"Keyword {utils.PSRDADA_TRANSFER_SIZE} not found in {item}")
-
-        transfer_size = int(transfer_size_str)
+        transfer_size = int(subfile_header_values[utils.PSRDADA_TRANSFER_SIZE])
         subfile_bytes_to_write = transfer_size + 4096  # We add the header to the transfer size
+
+        # Get NINPUTS
+        if subfile_header_values[utils.PSRDADA_NINPUTS] is None:
+            raise ValueError(f"Keyword {utils.PSRDADA_NINPUTS} not found in {item}")
+        num_rf_inputs: int = int(subfile_header_values[utils.PSRDADA_NINPUTS])
+
+        # Get receiver channel number
+        if subfile_header_values[utils.PSRDADA_COARSE_CHANNEL] is None:
+            raise ValueError(f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {item}")
+        rec_channel: int = int(subfile_header_values[utils.PSRDADA_COARSE_CHANNEL])
+
+        # Get Mode
+        if subfile_header_values[utils.PSRDADA_MODE] is None:
+            raise ValueError(f"Keyword {utils.PSRDADA_MODE} not found in {item}")
+        subfile_mode = subfile_header_values[utils.PSRDADA_MODE]
 
         # Only do packet stats if packet_stats_dump_dir is not an empty string
         if self.packet_stats_dump_dir != "":
@@ -247,17 +271,7 @@ class SubfileProcessor:
                 rsv_starttime = time.time()
 
                 # Get number of RF inputs from subfile header
-                ninputs_str: Optional[str] = utils.read_subfile_value(item, utils.PSRDADA_NINPUTS)
-                if ninputs_str is None:
-                    raise ValueError(f"Keyword {utils.PSRDADA_NINPUTS} not found in {item}")
-                num_rf_inputs: int = int(ninputs_str)
                 num_tiles: int = int(num_rf_inputs / 2)
-
-                # Get receiver channel number
-                rec_channel_str: Optional[str] = utils.read_subfile_value(item, utils.PSRDADA_COARSE_CHANNEL)
-                if rec_channel_str is None:
-                    raise ValueError(f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {item}")
-                rec_channel: int = int(rec_channel_str)
 
                 rsv_elapsed = time.time() - rsv_starttime
                 self.logger.info(f"{item}- subfile_handler (reading subfile header values) took {rsv_elapsed:.3f} secs")
@@ -292,14 +306,6 @@ class SubfileProcessor:
                         )
 
         try:
-            rsv2_starttime = time.time()
-            self.logger.info(f"{item}- subfile_handler (reading MODE)...")
-            subfile_mode = utils.read_subfile_value(item, utils.PSRDADA_MODE)
-            if subfile_mode is None:
-                raise ValueError(f"Keyword {utils.PSRDADA_MODE} not found in {item}")
-            rsv2_elapsed = time.time() - rsv2_starttime
-            self.logger.info(f"{item}- subfile_handler (reading MODE {subfile_mode}) took {rsv2_elapsed:.3f} secs")
-
             if self.corr_enabled:
                 #
                 # We need to check we are not in a voltage dump. If so, whatever
@@ -523,8 +529,10 @@ class SubfileProcessor:
                 try:
                     # Check it exists first- the dump process
                     # may have renamed it already to .keep
-                    if os.path.exists(item):
+                    try:
                         shutil.move(item, free_filename)
+                    except FileNotFoundError:
+                        pass
 
                 except Exception as move_exception:  # pylint: disable=broad-except
                     self.logger.error(
