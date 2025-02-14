@@ -1,16 +1,42 @@
 # Changelog
 
+## 0.21.5 - 0.21.9  14-Feb-2025
+
+* Merged in ensuring CALIBSRC="SUN" are not treated as calibrators (and not sent to calvins)
+* Fixes to numactl usage
+* Fixes to display of seconds to round off to 3dp
+
+## 0.21.4  12-Feb-2025
+
+* Implemented copy_subfile_to_disk_dd function.
+
+## 0.21.3  07-Feb-2025
+
+* Fixed Calvin timezone issue.
+
+## 0.21.2 07-Jan-2025
+
+* More logging, plus optimisation to summarise_packet_stats to remove loop and looped function call.
+
+## 0.21.1 07-Jan-2025
+
+* Added more debug to summarise_packet_stats.
+
+## 0.21.0 07-Jan-2025
+
+* Added logging to debug slow VCS when enabling packet stats.
+
 ## 0.20.6 05-Dec-2024
 
 * For mwax_subfile_distributor, if a calibrator has "SUN" as the calibrator source, do not treat it as a calibrator.
 
 ## 0.20.5 04-Dec-2024
 
-* If packet_stats_dump_dir config value is blank, then do not write packet stats
+* If packet_stats_dump_dir config value is blank, then do not write packet stats.
 
 ## 0.20.4 04-Dec-2024
 
-* Fixed bug where packet stats filename incorrectly included a space
+* Fixed bug where packet stats filename incorrectly included a space.
 
 ## 0.20.0 29-Nov-2024
 

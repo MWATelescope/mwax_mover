@@ -12,6 +12,8 @@ import os
 import pytest
 import queue
 import numpy as np
+import time
+from typing import Optional
 from mwax_mover import utils
 
 
@@ -758,6 +760,62 @@ def test_inject_beamformer_headers():
     assert utils.read_subfile_value(subfile_name, "MISSING_KEY123") is None
 
 
+def test_read_subfile_values():
+    # Generate a test header
+    test_header = (
+        "HDR_SIZE 4096\n"
+        "POPULATED 1\n"
+        "OBS_ID 1357616008\n"
+        "SUBOBS_ID 1357623888\n"
+        "MODE NO_CAPTURE\n"
+        "UTC_START 2023-01-13-03:33:10\n"
+        "OBS_OFFSET 7880\n"
+        "NBIT 8\n"
+        "NPOL 2\n"
+        "NTIMESAMPLES 64000\n"
+        "NINPUTS 256\n"
+        "NINPUTS_XGPU 256\n"
+        "APPLY_PATH_WEIGHTS 0\n"
+        "APPLY_PATH_DELAYS 1\n"
+        "APPLY_PATH_PHASE_OFFSETS 1\n"
+        "INT_TIME_MSEC 500\n"
+        "FSCRUNCH_FACTOR 200\n"
+        "APPLY_VIS_WEIGHTS 0\n"
+        "TRANSFER_SIZE 5275648000\n"
+        "PROJ_ID G0060\n"
+        "EXPOSURE_SECS 200\n"
+        "COARSE_CHANNEL 169\n"
+        "CORR_COARSE_CHANNEL 12\n"
+        "SECS_PER_SUBOBS 8\n"
+        "UNIXTIME 1673580790\n"
+        "UNIXTIME_MSEC 0\n"
+        "FINE_CHAN_WIDTH_HZ 40000\n"
+        "NFINE_CHAN 32\n"
+        "BANDWIDTH_HZ 1280000\n"
+        "SAMPLE_RATE 1280000\n"
+        "MC_IP 0.0.0.0\n"
+        "MC_PORT 0\n"
+        "MC_SRC_IP 0.0.0.0\n"
+        "MWAX_U2S_VER 2.09-87\n"
+        "IDX_PACKET_MAP 0+200860892\n"
+        "IDX_METAFITS 32+1\n"
+        "IDX_DELAY_TABLE 16383744+0\n"
+        "IDX_MARGIN_DATA 256+0\n"
+        "MWAX_SUB_VER 2\n"
+    )
+    # Write the subfile
+    subfile_name = "tests/data/beamformer/test_subfile_2.sub"
+    utils.write_mock_subfile_from_header(subfile_name, test_header)
+
+    keys = ["OBS_ID", "MODE", "EXPOSURE_SECS"]
+
+    results = utils.read_subfile_values(subfile_name, keys)
+
+    assert results["OBS_ID"] == "1357616008"
+    assert results["MODE"] == "NO_CAPTURE"
+    assert results["EXPOSURE_SECS"] == "200"
+
+
 def test_should_project_be_archived():
     assert utils.should_project_be_archived("C001") is True
     assert utils.should_project_be_archived("c001") is True
@@ -869,6 +927,13 @@ def test_convert_occupany_bitmap_to_array():
 
 
 def test_summarise_packet_map():
+    logger = logging.getLogger("test")
+    logger.setLevel(logging.DEBUG)
+    console_log = logging.StreamHandler()
+    console_log.setLevel(logging.DEBUG)
+    console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
+    logger.addHandler(console_log)
+
     num_rf_inputs = 2
 
     # This should look like:
@@ -878,7 +943,7 @@ def test_summarise_packet_map():
     input = bytes([127] * 625) + bytes([1] * 625)
     assert len(input) == 625 * 2
 
-    packets_lost = utils.summarise_packet_map(num_rf_inputs, input)
+    packets_lost = utils.summarise_packet_map(logger, num_rf_inputs, input)
 
     # Array should have 1 element per rfinput
     assert packets_lost.shape == (num_rf_inputs,)
@@ -889,6 +954,13 @@ def test_summarise_packet_map():
 
 
 def test_write_packet_stats():
+    logger = logging.getLogger("test")
+    logger.setLevel(logging.DEBUG)
+    console_log = logging.StreamHandler()
+    console_log.setLevel(logging.DEBUG)
+    console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
+    logger.addHandler(console_log)
+
     num_rf_inputs = 2
 
     # This should look like:
@@ -898,7 +970,7 @@ def test_write_packet_stats():
     input = bytes([127] * 625) + bytes([1] * 625)
     assert len(input) == 625 * 2
 
-    packets_lost = utils.summarise_packet_map(num_rf_inputs, input)
+    packets_lost = utils.summarise_packet_map(logger, num_rf_inputs, input)
     subobs_id: int = 1234567890
     receiver_channel: int = 124
     hostname = "test"
@@ -923,3 +995,73 @@ def test_write_packet_stats():
     assert read_array[0] == 1 * 625
 
     assert read_array[1] == 7 * 625
+
+
+def test_full_packet_stats():
+    logger = logging.getLogger("test")
+    logger.setLevel(logging.DEBUG)
+    console_log = logging.StreamHandler()
+    console_log.setLevel(logging.DEBUG)
+    console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
+    logger.addHandler(console_log)
+    filename = "/data/1419789248_1419789248_91.sub"
+
+    if os.path.exists(filename):
+        full_start_time = time.time()
+
+        logger.info("get_subfile_packet_map_data()...")
+        # For all subfiles we need to extract the packet stats:
+        packet_map = utils.get_subfile_packet_map_data(logger, filename)
+        logger.info(f"..elapsed {time.time() - full_start_time} seconds")
+
+        if packet_map is not None:
+            # Get number of RF inputs from subfile header
+            ninputs_str: Optional[str] = utils.read_subfile_value(filename, utils.PSRDADA_NINPUTS)
+            if ninputs_str is None:
+                raise ValueError(f"Keyword {utils.PSRDADA_NINPUTS} not found in {filename}")
+            num_rf_inputs: int = int(ninputs_str)
+            num_tiles: int = int(num_rf_inputs / 2)
+
+            # Get receiver channel number
+            rec_channel_str: Optional[str] = utils.read_subfile_value(filename, utils.PSRDADA_COARSE_CHANNEL)
+            if rec_channel_str is None:
+                raise ValueError(f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {filename}")
+            rec_channel: int = int(rec_channel_str)
+
+            # Summarise the packet map into a 1d array of ints (of packets lost) by rfinput
+            logger.info("summarise_packet_map()...")
+            spm_start_time = time.time()
+            packets_lost_array = utils.summarise_packet_map(logger, num_rf_inputs, packet_map)
+            logger.info(f"..elapsed {time.time() - spm_start_time} seconds")
+
+            if packets_lost_array is not None:
+                # Uncomment for debug
+                # self.logger.info(
+                #    f"{item}- packet occupancy: "
+                #    f"{np.array2string(packets_lost_array, threshold=9999, max_line_width=9999, separator=',')}"
+                # )
+
+                # write packet array out
+                wps_start_time = time.time()
+                logger.info("write_packet_stats()...")
+                try:
+                    utils.write_packet_stats(
+                        1416028872,
+                        rec_channel,
+                        "test",
+                        num_tiles,
+                        os.path.dirname(filename),
+                        packets_lost_array,
+                    )
+                    logger.info(f"..elapsed {time.time() - wps_start_time} seconds")
+
+                    logger.info(f"Total elapsed time {time.time() - full_start_time} seconds")
+                except Exception:
+                    # Errors writing out packet stats should not impact operations.
+                    # Just log it
+                    logger.exception(
+                        f"{filename}: unhandled exception when calling write_packet_stats()- continuing..."
+                    )
+    else:
+        pytest.skip(f"Local MWAX VCS data file {filename} not found on your system")
+        return

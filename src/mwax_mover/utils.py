@@ -30,6 +30,7 @@ PSRDADA_HEADER_BYTES = 4096
 
 # PSRDADA keywords
 PSRDADA_MODE = "MODE"
+PSRDADA_TRANSFER_SIZE = "TRANSFER_SIZE"
 PSRDADA_SUBOBS_ID = "SUBOBS_ID"
 PSRDADA_TRIGGER_ID = "TRIGGER_ID"
 PSRDADA_NINPUTS = "NINPUTS"
@@ -498,7 +499,7 @@ def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, num
     if return_value:
         logger.info(
             f"{full_filename} load_psrdada_ringbuffer success"
-            f" ({size_gigabytes:.3f}GB in {elapsed} sec at"
+            f" ({size_gigabytes:.3f}GB in {elapsed:.3f} sec at"
             f" {gbps_per_sec:.3f} Gbps)"
         )
     else:
@@ -802,6 +803,38 @@ def read_subfile_value(filename: str, key: str) -> typing.Union[str, None]:
     return subfile_value
 
 
+def read_subfile_values(filename: str, keys: list[str]) -> dict:
+    """Returns values of keys as a list of strings (or none) from a subfile header"""
+    subfile_values = dict()
+    found = 0
+
+    # Create the dict with None values for all keys
+    for key in keys:
+        subfile_values[key] = None
+
+    with open(filename, "rb") as subfile:
+        subfile_text = subfile.read(PSRDADA_HEADER_BYTES).decode()
+        subfile_text_lines = subfile_text.splitlines()
+
+        for line in subfile_text_lines:
+            split_line = line.split()
+
+            # We should have 2 items, keyword and value
+            if len(split_line) == 2:
+                keyword = split_line[0].strip()
+                value = split_line[1].strip()
+
+                if keyword in keys:
+                    subfile_values[keyword] = value
+                    found += 1
+
+                    if found == len(keys):
+                        # Exit loop early if we have all the values
+                        break
+
+    return subfile_values
+
+
 def read_subfile_trigger_value(subfile_filename: str):
     """Reads the TRIGGER_ID values from a subfile header
     Returns trigger_id as an INT or None if not found"""
@@ -1092,7 +1125,7 @@ def convert_occupany_bitmap_to_array(bitmap: np.ndarray) -> np.ndarray:
 # an array of ints of since N, where N is number of rf_inputs
 # and each int is a count of lost packets
 #
-def summarise_packet_map(num_rf_inputs: int, packet_map_bytes: bytes) -> np.ndarray:
+def summarise_packet_map(logger, num_rf_inputs: int, packet_map_bytes: bytes) -> np.ndarray:
     # Determine number of packets. There might be 625 (critically sampled)
     # or 800 (oversampled)
     num_packets_per_sec: int = int(len(packet_map_bytes) / num_rf_inputs)
@@ -1119,18 +1152,46 @@ def summarise_packet_map(num_rf_inputs: int, packet_map_bytes: bytes) -> np.ndar
     # packets lost per rf_input for those 8 seconds.
 
     # Define output array
+    logger.info("...summarise_packet_map(): np.empty")
+    starttime = time.time()
     packets_lost = np.empty(shape=(num_rf_inputs), dtype=np.int16)
+    elapsed = time.time() - starttime
+    logger.info(f"...summarise_packet_map(): np.empty took {elapsed:.3f} secs")
 
     # Convert the input bytes into a numpy array of bytes
+    logger.info("...summarise_packet_map(): np.frombuffer")
+    starttime = time.time()
     packet_map_np = np.frombuffer(packet_map_bytes, dtype=np.uint8)
+    elapsed = time.time() - starttime
+    logger.info(f"...summarise_packet_map(): np.frombuffer took {elapsed:.3f} secs")
 
     # Reshape the packet map to 2d (rfinputs, packets)
+    logger.info("...summarise_packet_map(): np.reshape")
+    starttime = time.time()
     packet_map_np = np.reshape(packet_map_np, (num_rf_inputs, num_packet_map_bytes_per_subobs))
+    elapsed = time.time() - starttime
+    logger.info(f"...summarise_packet_map(): np.reshape took {elapsed:.3f} secs")
 
-    for rf_input_index in range(0, num_rf_inputs):
-        bit_array = convert_occupany_bitmap_to_array(packet_map_np[rf_input_index])
-        # we subtract total packets from the bnit array as we want lost packets (0's)
-        packets_lost[rf_input_index] = num_packets_per_subobs - bit_array.sum()
+    # Convert the binary values into array elements of bits
+    logger.info("...summarise_packet_map(): np.unpackbits")
+    starttime = time.time()
+    bit_array = np.unpackbits(packet_map_np, 1)
+    elapsed = time.time() - starttime
+    logger.info(f"...summarise_packet_map(): np.unpackbits took {elapsed:.3f} secs")
+
+    logger.info(f"...summarise_packet_map(): calculate missed packets x {num_rf_inputs} times")
+    starttime = time.time()
+    # This will for each row (rfinput) sum the bits (of received packets)
+    # and subtract it from the expected total number of packets so that
+    # packet_lost[rf_input] = num_packets_per_subobs - bit_array[rf_input_index].sum()
+    # But this does it in a proper numpy way
+    packets_lost[:] = num_packets_per_subobs - bit_array.sum(axis=1)
+    # for rf_input_index in range(0, num_rf_inputs):
+    #     bit_array = convert_occupany_bitmap_to_array(packet_map_np[rf_input_index])
+    #     # we subtract total packets from the bnit array as we want lost packets (0's)
+    #     packets_lost[rf_input_index] = num_packets_per_subobs - bit_array[rf_input_index].sum()
+    elapsed = time.time() - starttime
+    logger.info(f"...summarise_packet_map(): calculate missed packets x {num_rf_inputs} times took {elapsed:.3f} secs")
 
     return packets_lost
 
@@ -1156,4 +1217,6 @@ def write_packet_stats(
 
     # Write the data
     # Having sep & format as "" it should write the data as binary in "C" order
-    packets_lost_array.tofile(full_filename, sep="", format="")
+    # packets_lost_array.tofile(full_filename, sep="", format="")
+    with open(full_filename, "wb") as write_file:
+        write_file.write(packets_lost_array.tobytes())

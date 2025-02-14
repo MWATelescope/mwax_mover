@@ -9,7 +9,6 @@ import shutil
 import sys
 import threading
 import time
-from typing import Optional
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
 from mwax_mover import utils, mwax_queue_worker, mwax_watcher, mwax_command
 from mwax_mover.utils import CorrelatorMode
@@ -94,8 +93,10 @@ class SubfileProcessor:
         self.corr_enabled = corr_enabled
         # PSRDADA ringbuffer key for INPUT into correlator or beamformer
         self.corr_ringbuffer_key = corr_ringbuffer_key
-        # Numa node to use to do a file copy
+        # Numa node for ringbuffers
         self.corr_diskdb_numa_node = corr_diskdb_numa_node
+        # Numa node for /dev/shm/mwax/*.free files (opposite of ringbuffers)
+        self.corr_devshm_numa_node = 1 if corr_diskdb_numa_node == 0 else 0
 
         self.psrdada_timeout_sec = psrdada_timeout_sec
         self.copy_subfile_to_disk_timeout_sec = copy_subfile_to_disk_timeout_sec
@@ -149,14 +150,25 @@ class SubfileProcessor:
 
         self.logger.info("SubfileProcessor.handle_next_keep_file is handling" f" {keep_filename}...")
 
+        # Read TRANSFER_SIZE from subfile header
+        # We only use this when writing a subfile to disk in case the subfile is
+        # bigger than the data
+        transfer_size_str = utils.read_subfile_value(keep_filename, utils.PSRDADA_TRANSFER_SIZE)
+        if transfer_size_str is None:
+            raise ValueError(f"Keyword {utils.PSRDADA_TRANSFER_SIZE} not found in {keep_filename}")
+
+        transfer_size = int(transfer_size_str)
+        subfile_bytes_to_write = transfer_size + 4096  # We add the header to the transfer size
+
         # Copy the .keep file to the voltdata incoming dir
         # and ensure it is named as a ".sub" file
-        copy_success = self.copy_subfile_to_disk(
+        copy_success = self.copy_subfile_to_disk_dd(
             keep_filename,
             self.corr_diskdb_numa_node,
             self.voltdata_incoming_path,
             self.copy_subfile_to_disk_timeout_sec,
             os.path.basename(keep_filename).replace(self.ext_keep_file, self.ext_sub_file),
+            subfile_bytes_to_write,
         )
 
         if copy_success:
@@ -189,6 +201,8 @@ class SubfileProcessor:
 
         self.logger.info(f"{item}- SubfileProcessor.subfile_handler is handling {item}...")
 
+        handler_starttime = time.time()
+
         # `keep_subfiles_path` is used after doing the main work. If we are
         # running in with `always_keep_subfiles`=1,
         # then we will always keep the voltages and not delete them.
@@ -201,44 +215,78 @@ class SubfileProcessor:
         #
         keep_subfiles_path = None
 
-        # Read the SUBOBSID from the subfile
-        subobs_id_str = utils.read_subfile_value(item, utils.PSRDADA_SUBOBS_ID)
-        if subobs_id_str is None:
+        # Read all the things from the subfile header here!
+        subfile_header_values = utils.read_subfile_values(
+            item,
+            [
+                utils.PSRDADA_SUBOBS_ID,
+                utils.PSRDADA_TRANSFER_SIZE,
+                utils.PSRDADA_NINPUTS,
+                utils.PSRDADA_COARSE_CHANNEL,
+                utils.PSRDADA_MODE,
+            ],
+        )
+
+        # Validate each one
+        if subfile_header_values[utils.PSRDADA_SUBOBS_ID] is None:
+            raise ValueError(f"Keyword {utils.PSRDADA_SUBOBS_ID} not found in {item}")
+        subobs_id = int(subfile_header_values[utils.PSRDADA_SUBOBS_ID])
+
+        # Read TRANSFER_SIZE from subfile header
+        # We only use this when writing a subfile to disk in case the subfile is
+        # bigger than the data
+        # transfer_size_str = utils.read_subfile_value(item, utils.PSRDADA_TRANSFER_SIZE)
+        if subfile_header_values[utils.PSRDADA_TRANSFER_SIZE] is None:
+            raise ValueError(f"Keyword {utils.PSRDADA_TRANSFER_SIZE} not found in {item}")
+        transfer_size = int(subfile_header_values[utils.PSRDADA_TRANSFER_SIZE])
+        subfile_bytes_to_write = transfer_size + 4096  # We add the header to the transfer size
+
+        # Get NINPUTS
+        if subfile_header_values[utils.PSRDADA_NINPUTS] is None:
+            raise ValueError(f"Keyword {utils.PSRDADA_NINPUTS} not found in {item}")
+        num_rf_inputs: int = int(subfile_header_values[utils.PSRDADA_NINPUTS])
+
+        # Get receiver channel number
+        if subfile_header_values[utils.PSRDADA_COARSE_CHANNEL] is None:
+            raise ValueError(f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {item}")
+        rec_channel: int = int(subfile_header_values[utils.PSRDADA_COARSE_CHANNEL])
+
+        # Get Mode
+        if subfile_header_values[utils.PSRDADA_MODE] is None:
             raise ValueError(f"Keyword {utils.PSRDADA_MODE} not found in {item}")
+        subfile_mode = subfile_header_values[utils.PSRDADA_MODE]
 
-        subobs_id = int(subobs_id_str)
-
-        # Only do packet stats is packet_stats_dump_dir is not an empty string
+        # Only do packet stats if packet_stats_dump_dir is not an empty string
         if self.packet_stats_dump_dir != "":
             # For all subfiles we need to extract the packet stats:
+            self.logger.info(f"{item}- Starting subfile_handler.get_subfile_packet_map_data()...")
+            gspmd_starttime = time.time()
             packet_map = utils.get_subfile_packet_map_data(self.logger, item)
+            gspmd_elapsed = time.time() - gspmd_starttime
+            self.logger.info(f"{item}- subfile_handler.get_subfile_packet_map_data() took {gspmd_elapsed:.3f} secs")
 
             if packet_map is not None:
+                self.logger.info(f"{item}- Starting subfile_handler (reading subfile header values)...")
+                rsv_starttime = time.time()
+
                 # Get number of RF inputs from subfile header
-                ninputs_str: Optional[str] = utils.read_subfile_value(item, utils.PSRDADA_NINPUTS)
-                if ninputs_str is None:
-                    raise ValueError(f"Keyword {utils.PSRDADA_NINPUTS} not found in {item}")
-                num_rf_inputs: int = int(ninputs_str)
                 num_tiles: int = int(num_rf_inputs / 2)
 
-                # Get receiver channel number
-                rec_channel_str: Optional[str] = utils.read_subfile_value(item, utils.PSRDADA_COARSE_CHANNEL)
-                if rec_channel_str is None:
-                    raise ValueError(f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {item}")
-                rec_channel: int = int(rec_channel_str)
+                rsv_elapsed = time.time() - rsv_starttime
+                self.logger.info(f"{item}- subfile_handler (reading subfile header values) took {rsv_elapsed:.3f} secs")
 
                 # Summarise the packet map into a 1d array of ints (of packets lost) by rfinput
-                packets_lost_array = utils.summarise_packet_map(num_rf_inputs, packet_map)
+                self.logger.info(f"{item}- Starting subfile_handler.summarise_packet_map()...")
+                spm_starttime = time.time()
+                packets_lost_array = utils.summarise_packet_map(self.logger, num_rf_inputs, packet_map)
+                spm_elapsed = time.time() - spm_starttime
+                self.logger.info(f"{item}- subfile_handler.summarise_packet_map() took {spm_elapsed:.3f} secs")
 
                 if packets_lost_array is not None:
-                    # Uncomment for debug
-                    # self.logger.info(
-                    #    f"{item}- packet occupancy: "
-                    #    f"{np.array2string(packets_lost_array, threshold=9999, max_line_width=9999, separator=',')}"
-                    # )
-
                     # write packet array out
                     try:
+                        self.logger.info(f"{item}- Starting subfile_handler.write_packet_stats()...")
+                        wps_starttime = time.time()
                         utils.write_packet_stats(
                             subobs_id,
                             rec_channel,
@@ -247,18 +295,16 @@ class SubfileProcessor:
                             self.packet_stats_dump_dir,
                             packets_lost_array,
                         )
+                        wps_elapsed = time.time() - wps_starttime
+                        self.logger.info(f"{item}- subfile_handler.write_packet_stats() took {wps_elapsed:.3f} secs")
                     except Exception:
                         # Errors writing out packet stats should not impact operations.
                         # Just log it
                         self.logger.exception(
-                            f"{item}: unhandled exception when calling write_packet_stats()- continuing..."
+                            f"{item}- unhandled exception when calling write_packet_stats()- continuing..."
                         )
 
         try:
-            subfile_mode = utils.read_subfile_value(item, utils.PSRDADA_MODE)
-            if subfile_mode is None:
-                raise ValueError(f"Keyword {utils.PSRDADA_MODE} not found in {item}")
-
             if self.corr_enabled:
                 #
                 # We need to check we are not in a voltage dump. If so, whatever
@@ -292,11 +338,13 @@ class SubfileProcessor:
                         )
                         utils.inject_subfile_header(item, f"{utils.PSRDADA_TRIGGER_ID} {self.dump_trigger_id}\n")
 
-                    success = self.copy_subfile_to_disk(
+                    success = self.copy_subfile_to_disk_dd(
                         item,
-                        self.corr_diskdb_numa_node,
+                        self.corr_devshm_numa_node,
                         self.voltdata_incoming_path,
                         self.copy_subfile_to_disk_timeout_sec,
+                        os.path.split(item)[1],
+                        subfile_bytes_to_write,
                     )
                 else:
                     # 1. Read header of subfile.
@@ -318,7 +366,7 @@ class SubfileProcessor:
                             self.logger,
                             item,
                             self.corr_ringbuffer_key,
-                            self.corr_diskdb_numa_node,
+                            -1,
                             self.psrdada_timeout_sec,
                         )
 
@@ -330,11 +378,13 @@ class SubfileProcessor:
                         if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
                             self.sd_ctx.archive_processor.pause_archiving(True)  # pylint: disable=line-too-long
 
-                        success = self.copy_subfile_to_disk(
+                        success = self.copy_subfile_to_disk_dd(
                             item,
-                            self.corr_diskdb_numa_node,
+                            self.corr_devshm_numa_node,
                             self.voltdata_incoming_path,
                             self.copy_subfile_to_disk_timeout_sec,
+                            os.path.split(item)[1],
+                            subfile_bytes_to_write,
                         )
 
                     elif CorrelatorMode.is_no_capture(subfile_mode) or CorrelatorMode.is_voltage_buffer(subfile_mode):
@@ -437,7 +487,7 @@ class SubfileProcessor:
                             self.logger,
                             item,
                             self.bf_ringbuffer_key,
-                            self.bf_numa_node,
+                            -1,
                             self.psrdada_timeout_sec,
                         )
 
@@ -463,11 +513,13 @@ class SubfileProcessor:
                 if keep_subfiles_path:
                     # we use -1 for numa node for now as this is really for
                     # debug so it does not matter
-                    self.copy_subfile_to_disk(
+                    self.copy_subfile_to_disk_dd(
                         item,
-                        -1,
+                        self.corr_devshm_numa_node,
                         keep_subfiles_path,
                         self.copy_subfile_to_disk_timeout_sec,
+                        os.path.split(item)[1],
+                        subfile_bytes_to_write,
                     )
 
                 # Rename subfile so that udpgrab can reuse it
@@ -476,8 +528,10 @@ class SubfileProcessor:
                 try:
                     # Check it exists first- the dump process
                     # may have renamed it already to .keep
-                    if os.path.exists(item):
+                    try:
                         shutil.move(item, free_filename)
+                    except FileNotFoundError:
+                        pass
 
                 except Exception as move_exception:  # pylint: disable=broad-except
                     self.logger.error(
@@ -485,7 +539,11 @@ class SubfileProcessor:
                     )
                     sys.exit(2)
 
-            self.logger.info(f"{item}- SubfileProcessor.subfile_handler finished handling.")
+            handler_elapsed = time.time() - handler_starttime
+
+            self.logger.info(
+                f"{item}- SubfileProcessor.subfile_handler finished handling in {handler_elapsed:.3f} secs."
+            )
 
         return success
 
@@ -514,7 +572,7 @@ class SubfileProcessor:
                     worker_thread.join()
                 self.logger.debug(f"QueueWorker {thread_name} Stopped")
 
-    def copy_subfile_to_disk(
+    def copy_subfile_to_disk_cp(
         self,
         filename: str,
         numa_node: int,
@@ -522,7 +580,8 @@ class SubfileProcessor:
         timeout: int,
         destination_filename: str = ".",
     ) -> bool:
-        """Copies the given filename to the destination path"""
+        """Copies the given filename to the destination path
+        DEPRECATED FOR NOW- replaced with copy_subfile_to_disk_dd()"""
         self.logger.info(f"{filename}- Copying file into {destination_path}")
 
         command = f"cp {filename} {destination_path}/{destination_filename}"
@@ -540,6 +599,51 @@ class SubfileProcessor:
         else:
             self.logger.error(
                 f"{filename}- Copying file into"
+                f" {destination_path}/{destination_filename} failed with error"
+                f" {stdout}"
+            )
+
+        return retval
+
+    def copy_subfile_to_disk_dd(
+        self,
+        filename: str,
+        numa_node: int,
+        destination_path: str,
+        timeout: int,
+        destination_filename: str,
+        bytes_to_write: int,
+    ) -> bool:
+        """Copies the given filename to the destination path, trimming X bytes off the end of the file
+        This is for the case where the subfiles are sized for e.g. 144T but the observation is only
+        128T. When copied, dd will only copy the 128T worth of data (u2s would have already ensured
+        that the data written is only 128T worth and that the remaining space is 'empty')
+
+        filename: Abs or relative path and filename
+        destination_path: Just the destination directory
+        destination_filename: Just the destination filename (no path)- note- unlike with cp it cannot
+                            be just a "."! dd doesn't like that - it has to be a real filename.
+        bytes_to_write: only write the first N bytes"""
+        self.logger.info(f"{filename}- Copying first {bytes_to_write} bytes of file into {destination_path}")
+
+        command = f"dd if={filename} of={destination_path}/{destination_filename} bs=4M oflag=direct "
+        f"iflag=count_bytes count={bytes_to_write}"
+
+        start_time = time.time()
+        retval, stdout = mwax_command.run_command_ext(self.logger, command, numa_node, timeout, False)
+
+        if retval:
+            elapsed = time.time() - start_time
+            speed = (bytes_to_write / elapsed) / (1000.0 * 1000.0 * 1000.0)
+
+            self.logger.info(
+                f"{filename}- Copying first {bytes_to_write} bytes of file into"
+                f" {destination_path}/{destination_filename} was successful"
+                f" (took {elapsed:.3f} secs at {speed:.3f} GB/sec)."
+            )
+        else:
+            self.logger.error(
+                f"{filename}- Copying first {bytes_to_write} bytes of file into"
                 f" {destination_path}/{destination_filename} failed with error"
                 f" {stdout}"
             )

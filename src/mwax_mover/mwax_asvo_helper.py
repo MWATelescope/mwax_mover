@@ -74,7 +74,7 @@ class MWAASVOJob:
     def elapsed_time_seconds(self) -> int:
         """Returns the number of seconds between Now and the submitted datetime"""
         if self.submitted_datetime is not None:
-            return int((datetime.datetime.now() - self.submitted_datetime).total_seconds())
+            return int((datetime.datetime.now(datetime.timezone.utc) - self.submitted_datetime).total_seconds())
         else:
             return 0
 
@@ -202,7 +202,7 @@ class MWAASVOHelper:
             job.request_ids.append(request_id)
 
             if job.submitted_datetime is None:
-                job.submitted_datetime = datetime.datetime.now()
+                job.submitted_datetime = datetime.datetime.now(datetime.timezone.utc)
 
             self.logger.info(
                 f"{obs_id}: Added RequestID {request_id} to JobID {job_id} as this ObsID is already tracked."
@@ -211,7 +211,7 @@ class MWAASVOHelper:
         else:
             # add a new job to be tracked
             job = MWAASVOJob(request_id=request_id, obs_id=obs_id, job_id=job_id)
-            job.submitted_datetime = datetime.datetime.now()
+            job.submitted_datetime = datetime.datetime.now(datetime.timezone.utc)
             self.current_asvo_jobs.append(job)
             self.logger.info(
                 f"{obs_id}: Added JobID {job_id}. Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs"
@@ -240,7 +240,7 @@ class MWAASVOHelper:
         # We'll set all the jobs we see to this exact datetime so
         # we can figure out if one of our in memory jobs is no longer
         # reported by giant-squid
-        update_datetime = datetime.datetime.now()
+        update_datetime = datetime.datetime.now(datetime.timezone.utc)
 
         # Iterate through each job
         for json_one_job in json_stdout:
@@ -359,7 +359,7 @@ class MWAASVOHelper:
                         self.logger.info(f"{job} Successfully downloaded: {stdout}")
 
                         job.download_completed = True
-                        job.download_completed_datetime = datetime.datetime.now()
+                        job.download_completed_datetime = datetime.datetime.now(datetime.timezone.utc)
                     finally:
                         job.download_in_progress = False
 
