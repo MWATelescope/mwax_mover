@@ -489,7 +489,7 @@ def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, num
     if return_value:
         logger.info(
             f"{full_filename} load_psrdada_ringbuffer success"
-            f" ({size_gigabytes:.3f}GB in {elapsed} sec at"
+            f" ({size_gigabytes:.3f}GB in {elapsed:.3f} sec at"
             f" {gbps_per_sec:.3f} Gbps)"
         )
     else:

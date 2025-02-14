@@ -94,8 +94,10 @@ class SubfileProcessor:
         self.corr_enabled = corr_enabled
         # PSRDADA ringbuffer key for INPUT into correlator or beamformer
         self.corr_ringbuffer_key = corr_ringbuffer_key
-        # Numa node to use to do a file copy
+        # Numa node for ringbuffers
         self.corr_diskdb_numa_node = corr_diskdb_numa_node
+        # Numa node for /dev/shm/mwax/*.free files (opposite of ringbuffers)
+        self.corr_devshm_numa_node = 1 if corr_diskdb_numa_node == 0 else 0
 
         self.psrdada_timeout_sec = psrdada_timeout_sec
         self.copy_subfile_to_disk_timeout_sec = copy_subfile_to_disk_timeout_sec
@@ -333,7 +335,7 @@ class SubfileProcessor:
 
                     success = self.copy_subfile_to_disk_dd(
                         item,
-                        self.corr_diskdb_numa_node,
+                        self.corr_devshm_numa_node,
                         self.voltdata_incoming_path,
                         self.copy_subfile_to_disk_timeout_sec,
                         os.path.split(item)[1],
@@ -359,7 +361,7 @@ class SubfileProcessor:
                             self.logger,
                             item,
                             self.corr_ringbuffer_key,
-                            self.corr_diskdb_numa_node,
+                            -1,
                             self.psrdada_timeout_sec,
                         )
 
@@ -373,7 +375,7 @@ class SubfileProcessor:
 
                         success = self.copy_subfile_to_disk_dd(
                             item,
-                            self.corr_diskdb_numa_node,
+                            self.corr_devshm_numa_node,
                             self.voltdata_incoming_path,
                             self.copy_subfile_to_disk_timeout_sec,
                             os.path.split(item)[1],
@@ -480,7 +482,7 @@ class SubfileProcessor:
                             self.logger,
                             item,
                             self.bf_ringbuffer_key,
-                            self.bf_numa_node,
+                            -1,
                             self.psrdada_timeout_sec,
                         )
 
@@ -508,7 +510,7 @@ class SubfileProcessor:
                     # debug so it does not matter
                     self.copy_subfile_to_disk_dd(
                         item,
-                        -1,
+                        self.corr_devshm_numa_node,
                         keep_subfiles_path,
                         self.copy_subfile_to_disk_timeout_sec,
                         os.path.split(item)[1],
