@@ -229,8 +229,7 @@ class SubfileProcessor:
 
         # Validate each one
         if subfile_header_values[utils.PSRDADA_SUBOBS_ID] is None:
-            raise ValueError(f"Keyword {utils.PSRDADA_MODE} not found in {item}")
-
+            raise ValueError(f"Keyword {utils.PSRDADA_SUBOBS_ID} not found in {item}")
         subobs_id = int(subfile_header_values[utils.PSRDADA_SUBOBS_ID])
 
         # Read TRANSFER_SIZE from subfile header
