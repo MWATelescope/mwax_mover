@@ -307,7 +307,12 @@ def ceph_get_s3_resource(logger, session, endpoints: list):
     """Returns a tuple of the S3 resource object and the endpoint used"""
     # This ensures the default boto retries and timeouts don't leave us
     # hanging too long
-    config = Config(connect_timeout=5, retries={"mode": "standard"})
+    config = Config(
+        connect_timeout=5,
+        retries={"mode": "standard"},
+        request_checksum_calculation="when_required",
+        response_checksum_validation="when_required",
+    )
 
     # Get an enpoint at random from what is left on the list
     endpoint = random.choice(endpoints)
