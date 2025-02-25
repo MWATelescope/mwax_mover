@@ -5,3 +5,6 @@ dist/*
 tests/*
 .git/*
 .venv/*
+*.uvfits
+*.fits
+*.png
