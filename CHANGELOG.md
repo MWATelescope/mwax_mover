@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.22.0 07-Mar-2025
+
+* Upgraded calvin_downloader to use giant-squid 2.x
+
+## 0.21.10 26-Feb-2025
+
+* Added request_checksum_calculation and response_checksum_validation to resolve upload error in versions of Boto3 gt 1.36
+
 ## 0.21.5 - 0.21.9  14-Feb-2025
 
 * Merged in ensuring CALIBSRC="SUN" are not treated as calibrators (and not sent to calvins)

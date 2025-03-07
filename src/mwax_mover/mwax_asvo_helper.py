@@ -13,7 +13,7 @@ from mwax_mover.mwax_command import run_command_ext
 
 
 class GiantSquidException(Exception):
-    """Raised when an unknow exception is thrown when running giant-squid"""
+    """Raised when an unknown exception is thrown when running giant-squid"""
 
 
 class GiantSquidMWAASVOOutageException(Exception):
@@ -32,13 +32,19 @@ class GiantSquidJobAlreadyExistsException(Exception):
 
 
 class MWAASVOJobState(Enum):
-    Cancelled = "Cancelled"
+    Queued = "Queued"
+    Waitcal = "WaitCal"
+    Staging = "Staging"
+    Staged = "Staged"
+    Downloading = "Downloading"
+    Preprocessing = "Processing"
+    Imaging = "Imaging"
+    Delivering = "Delivering"
+    Ready = "Ready"
     Error = "Error"
     Expired = "Expired"
-    Ready = "Ready"
-    Queued = "Queued"
-    Processing = "Processing"
-    Unknown = "Uknown"  # not a real ASVO status but a good default
+    Cancelled = "Cancelled"
+    Unknown = "Unknown"  # not a real ASVO status but a good default
 
 
 class MWAASVOJob:
