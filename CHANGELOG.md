@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.23.0 11-Mar-2025
+## 0.23.0-0.23.1 11-Mar-2025
 
 * Upgraded to use Python 3.12.9
 * Added new watcher, queue and worker to handle 2 stage writing of packet stats. Packet stats will get written locally and then in a seperate thread will be moved to vulcan NFS share.

@@ -9,7 +9,7 @@ import shutil
 import sys
 import threading
 import time
-from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
+from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME, MODE_WATCH_DIR_FOR_NEW
 from mwax_mover import utils, mwax_queue_worker, mwax_watcher, mwax_command
 from mwax_mover.utils import CorrelatorMode
 
@@ -59,6 +59,7 @@ class SubfileProcessor:
 
         self.ext_sub_file = ".sub"
         self.mwax_mover_mode = MODE_WATCH_DIR_FOR_RENAME
+        self.packet_stats_mode = MODE_WATCH_DIR_FOR_NEW
         self.subfile_incoming_path = subfile_incoming_path
         self.voltdata_incoming_path = voltdata_incoming_path
         self.always_keep_subfiles = always_keep_subfiles
@@ -159,7 +160,7 @@ class SubfileProcessor:
                 dest_queue=self.packet_stats_destination_queue,
                 pattern=f"{self.ext_packet_stats_file}",
                 log=self.logger,
-                mode=self.mwax_mover_mode,
+                mode=self.packet_stats_mode,
                 recursive=False,
             )
 
