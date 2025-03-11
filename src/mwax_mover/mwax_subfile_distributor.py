@@ -12,6 +12,7 @@ import sys
 import time
 import threading
 import typing
+from typing import Optional
 from urllib.parse import urlparse, parse_qs
 from mwax_mover import mwax_archive_processor
 from mwax_mover import mwax_db
@@ -148,6 +149,7 @@ class MWAXSubfileDistributor:
     def __init__(self):
         # init the logging subsystem
         self.logger = logging.getLogger("mwax_mover")
+        self.cfg_log_level: str = ""
 
         # Config parser
         self.config: ConfigParser
@@ -186,6 +188,7 @@ class MWAXSubfileDistributor:
         self.cfg_health_multicast_port: int = 0
         self.cfg_health_multicast_hops: int = 1
         self.cfg_packet_stats_dump_dir: str = ""
+        self.cfg_packet_stats_destination_dir: str = ""
 
         # Beamformer
         self.cfg_bf_enabled: bool = False
@@ -278,19 +281,23 @@ class MWAXSubfileDistributor:
             self.logger.error(f"log_path {self.cfg_log_path} does not exist. Quiting.")
             sys.exit(1)
 
+        # Read log level
+        config_file_log_level: Optional[str] = utils.read_optional_config(
+            self.logger, self.config, "mwax mover", "log_level"
+        )
+        if config_file_log_level is None:
+            self.cfg_log_level = "DEBUG"
+            self.logger.warning(f"log_level not set in config file. Defaulting to {self.cfg_log_level} level logging.")
+        else:
+            self.cfg_log_level = config_file_log_level
+
         # It's now safe to start logging
         # start logging
-        self.logger.setLevel(logging.DEBUG)
+        self.logger.setLevel(self.cfg_log_level)
         console_log = logging.StreamHandler()
-        console_log.setLevel(logging.DEBUG)
+        console_log.setLevel(self.cfg_log_level)
         console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(console_log)
-
-        # Removing file logging for now
-        # file_log = logging.FileHandler(filename=os.path.join(self.cfg_log_path, "subfile_distributor_main.log"))
-        # file_log.setLevel(logging.DEBUG)
-        # file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
-        # self.logger.addHandler(file_log)
 
         self.logger.info("Starting mwax_subfile_distributor" f" processor...v{version.get_mwax_mover_version_string()}")
         self.logger.info(f"Reading config file: {config_filename}")
@@ -395,6 +402,29 @@ class MWAXSubfileDistributor:
         )
         if self.cfg_packet_stats_dump_dir == "":
             self.logger.warning("packet_stats_dump_dir is blank, so no packet stats will be written.")
+        else:
+            if not os.path.exists(self.cfg_packet_stats_dump_dir):
+                self.logger.error(f"packet_stats_dump_dir {self.cfg_packet_stats_dump_dir} does not exist. Quitting.")
+                sys.exit(1)
+
+        self.cfg_packet_stats_destination_dir = utils.read_config(
+            self.logger, self.config, "mwax mover", "packet_stats_destination_dir"
+        )
+
+        if self.cfg_packet_stats_destination_dir == "" and self.cfg_packet_stats_dump_dir != "":
+            self.logger.warning(
+                "packet_stats_destination_dir is blank, so no packet stats will be moved from dump_dir "
+                f"{self.cfg_packet_stats_dump_dir} to destination (e.g. vulcan)."
+            )
+        elif self.cfg_packet_stats_destination_dir == "" and self.cfg_packet_stats_dump_dir == "":
+            pass
+        else:
+            # We have a destination dir, so ensure it exists
+            if not os.path.exists(self.cfg_packet_stats_destination_dir):
+                self.logger.error(
+                    f"packet_stats_destination_dir {self.cfg_packet_stats_destination_dir} does not exist. Quitting."
+                )
+                sys.exit(1)
 
         # Check to see if we have a beamformer section
         if self.config.has_section("beamformer"):
@@ -720,6 +750,7 @@ class MWAXSubfileDistributor:
             self.cfg_psrdada_timeout_sec,
             self.cfg_copy_subfile_to_disk_timeout_sec,
             self.cfg_packet_stats_dump_dir,
+            self.cfg_packet_stats_destination_dir,
             self.hostname,
         )
 

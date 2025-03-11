@@ -60,6 +60,7 @@ class MWAXCalvinProcessor:
         # General
         self.logger = logging.getLogger(__name__)
         self.log_path: str = ""
+        self.log_level: str = ""
         self.hostname: str = ""
         self.db_handler_object: mwax_db.MWAXDBHandler
 
@@ -1055,12 +1056,22 @@ class MWAXCalvinProcessor:
             print(f"log_path {self.log_path} does not exist. Quiting.")
             sys.exit(1)
 
+        # Read log level
+        config_file_log_level: Optional[str] = utils.read_optional_config(
+            self.logger, config, "mwax mover", "log_level"
+        )
+        if config_file_log_level is None:
+            self.log_level = "DEBUG"
+            self.logger.warning(f"log_level not set in config file. Defaulting to {self.log_level} level logging.")
+        else:
+            self.log_level = config_file_log_level
+
         # It's now safe to start logging
         # start logging
         self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.INFO)
+        self.logger.setLevel(self.log_level)
         console_log = logging.StreamHandler()
-        console_log.setLevel(logging.INFO)
+        console_log.setLevel(self.log_level)
         console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(console_log)
 

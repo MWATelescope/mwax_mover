@@ -569,8 +569,15 @@ def test_config_get_optional_value():
 
     non_empty_return_val = utils.read_optional_config(logger, config, "acacia_ingest", "max_concurrency")
 
+    non_existing_key = utils.read_optional_config(logger, config, "acacia_ingest", "non_existant_key")
+
     assert empty_return_val is None
     assert non_empty_return_val is not None
+    assert non_existing_key is None
+
+    # Section that doesn't exist raises error
+    with pytest.raises(KeyError):
+        non_existing_key = utils.read_optional_config(logger, config, "non_existant_section", "non_existant_key")
 
 
 def test_config_get_optional_value_spaces_not_empty_string():

@@ -147,6 +147,9 @@ def setup_test_dirs():
     packet_stats_dump_dir = os.path.join(base_dir, "packet_stats_dump_dir")
     check_and_make_dir(packet_stats_dump_dir)
 
+    packet_stats_destination_dir = os.path.join(base_dir, "packet_stats_destination_dir")
+    check_and_make_dir(packet_stats_destination_dir)
+
 
 def test_voltage_dump_test_params():
     """This tests that sending 0 and 0 for the start and end

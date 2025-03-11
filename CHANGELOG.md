@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.0 11-Mar-2025
+
+* Upgraded to use Python 3.12.9
+* Added new watcher, queue and worker to handle 2 stage writing of packet stats. Packet stats will get written locally and then in a seperate thread will be moved to vulcan NFS share.
+* Added new config file option `log_level` to set logging level. Values are Python logging constants. E.g. DEBUG, INFO, WARNING, ERROR. If not specified, defaults to DEBUG.
+
 ## 0.22.0 07-Mar-2025
 
 * Upgraded calvin_downloader to use giant-squid 2.x

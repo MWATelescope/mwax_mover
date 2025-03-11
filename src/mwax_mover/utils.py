@@ -394,10 +394,20 @@ def read_config(logger, config: ConfigParser, section: str, key: str, b64encoded
 
 
 def read_optional_config(logger, config: ConfigParser, section: str, key: str, b64encoded=False) -> Optional[str]:
-    """Reads an optional value from a config file as Optional[str]"""
-    raw_value = config.get(section, key)
+    """Reads an optional value from a config file as Optional[str]
+    Optional can mean:
+    1. Key does not exist
+    2. Key exists but has empty value"""
     value = None
     value_to_log = ""
+
+    if config.has_section(section):
+        if config.has_option(section, key):
+            raw_value = config.get(section, key)
+        else:
+            raw_value = ""
+    else:
+        raise KeyError(f"Section {section} not found in config file")
 
     if raw_value == "":
         value = None

@@ -36,6 +36,7 @@ class SubfileProcessor:
         psrdada_timeout_sec: int,
         copy_subfile_to_disk_timeout_sec: int,
         packet_stats_dump_dir: str,
+        packet_stats_destination_dir: str,
         hostname: str,
     ):
         self.sd_ctx = context
@@ -63,6 +64,7 @@ class SubfileProcessor:
         self.always_keep_subfiles = always_keep_subfiles
         self.ext_free_file = ".free"
         self.ext_keep_file = ".keep"
+        self.ext_packet_stats_file = ".dat"
 
         # Voltage buffer dump vars
         self.dump_start_gps = None
@@ -102,6 +104,10 @@ class SubfileProcessor:
         self.copy_subfile_to_disk_timeout_sec = copy_subfile_to_disk_timeout_sec
 
         self.packet_stats_dump_dir = packet_stats_dump_dir
+        self.packet_stats_destination_dir = packet_stats_destination_dir
+        self.packet_stats_destination_queue = queue.Queue()
+        self.packet_stats_watcher = None
+        self.packet_stats_queue_worker = None
 
     def start(self):
         """Start the processor"""
@@ -140,6 +146,74 @@ class SubfileProcessor:
         )
         self.worker_threads.append(queue_worker_thread)
         queue_worker_thread.start()
+
+        #
+        # Setup watcher, queue, worker for transferring packet stats to destination (e.g vulcan)
+        # But only if we have specified the destination in the config file
+        #
+        if self.packet_stats_destination_dir != "":
+            # Create watcher for the packet stats files
+            self.packet_stats_watcher = mwax_watcher.Watcher(
+                name="packet_stats_watcher",
+                path=self.packet_stats_dump_dir,
+                dest_queue=self.packet_stats_destination_queue,
+                pattern=f"{self.ext_packet_stats_file}",
+                log=self.logger,
+                mode=self.mwax_mover_mode,
+                recursive=False,
+            )
+
+            # Create subfile queueworker
+            self.packet_stats_destination_queue_worker = mwax_queue_worker.QueueWorker(
+                name="Packet stats destination Queue",
+                source_queue=self.packet_stats_destination_queue,
+                executable_path=None,
+                event_handler=self.packet_stats_destination_handler,
+                log=self.logger,
+                requeue_to_eoq_on_failure=False,
+                exit_once_queue_empty=False,
+            )
+
+            # Setup thread for watching filesystem
+            watcher_thread = threading.Thread(
+                name="watch_packet_stats", target=self.packet_stats_watcher.start, daemon=True
+            )
+            self.watcher_threads.append(watcher_thread)
+            watcher_thread.start()
+
+            # Setup thread for processing subfile items
+            queue_worker_thread = threading.Thread(
+                name="work_packet_stats",
+                target=self.packet_stats_destination_queue_worker.start,
+                daemon=True,
+            )
+            self.worker_threads.append(queue_worker_thread)
+            queue_worker_thread.start()
+
+    def packet_stats_destination_handler(self, item: str) -> bool:
+        # This gets called by the queueworker who had put an "item"
+        # on the queue from a watcher of the filesystem.
+        # The "item" is the full path and filename of a packet stats data file
+        # which now needs to be copied to the destination path (e.g. vulcan)
+        # and the deleted once successful
+        destination_filename: str = os.path.join(self.packet_stats_destination_dir, os.path.basename(item))
+
+        try:
+            self.logger.debug(f"{item}: Attempting to copy local packet stats file {item} to" f"{destination_filename}")
+            shutil.copy2(item, destination_filename)
+
+            self.logger.debug(f"{item}: Copy success. Deleting local packet stats file {item}")
+
+            # Success- now delete the file
+            os.remove(item)
+
+            self.logger.debug(f"{item}: Deleted local packet stats file {item}")
+
+            return True
+        except Exception:
+            # Something went wrong- log it and requeue
+            self.logger.exception(f"Unable to copy/delete {item} to {destination_filename}")
+            return False
 
     def handle_next_keep_file(self) -> bool:
         """When we need to offload a keep file, this handles it"""
@@ -259,33 +333,35 @@ class SubfileProcessor:
         # Only do packet stats if packet_stats_dump_dir is not an empty string
         if self.packet_stats_dump_dir != "":
             # For all subfiles we need to extract the packet stats:
-            self.logger.info(f"{item}- Starting subfile_handler.get_subfile_packet_map_data()...")
+            self.logger.debug(f"{item}- Starting subfile_handler.get_subfile_packet_map_data()...")
             gspmd_starttime = time.time()
             packet_map = utils.get_subfile_packet_map_data(self.logger, item)
             gspmd_elapsed = time.time() - gspmd_starttime
-            self.logger.info(f"{item}- subfile_handler.get_subfile_packet_map_data() took {gspmd_elapsed:.3f} secs")
+            self.logger.debug(f"{item}- subfile_handler.get_subfile_packet_map_data() took {gspmd_elapsed:.3f} secs")
 
             if packet_map is not None:
-                self.logger.info(f"{item}- Starting subfile_handler (reading subfile header values)...")
+                self.logger.debug(f"{item}- Starting subfile_handler (reading subfile header values)...")
                 rsv_starttime = time.time()
 
                 # Get number of RF inputs from subfile header
                 num_tiles: int = int(num_rf_inputs / 2)
 
                 rsv_elapsed = time.time() - rsv_starttime
-                self.logger.info(f"{item}- subfile_handler (reading subfile header values) took {rsv_elapsed:.3f} secs")
+                self.logger.debug(
+                    f"{item}- subfile_handler (reading subfile header values) took {rsv_elapsed:.3f} secs"
+                )
 
                 # Summarise the packet map into a 1d array of ints (of packets lost) by rfinput
-                self.logger.info(f"{item}- Starting subfile_handler.summarise_packet_map()...")
+                self.logger.debug(f"{item}- Starting subfile_handler.summarise_packet_map()...")
                 spm_starttime = time.time()
                 packets_lost_array = utils.summarise_packet_map(self.logger, num_rf_inputs, packet_map)
                 spm_elapsed = time.time() - spm_starttime
-                self.logger.info(f"{item}- subfile_handler.summarise_packet_map() took {spm_elapsed:.3f} secs")
+                self.logger.debug(f"{item}- subfile_handler.summarise_packet_map() took {spm_elapsed:.3f} secs")
 
                 if packets_lost_array is not None:
                     # write packet array out
                     try:
-                        self.logger.info(f"{item}- Starting subfile_handler.write_packet_stats()...")
+                        self.logger.debug(f"{item}- Starting subfile_handler.write_packet_stats()...")
                         wps_starttime = time.time()
                         utils.write_packet_stats(
                             subobs_id,
@@ -296,7 +372,7 @@ class SubfileProcessor:
                             packets_lost_array,
                         )
                         wps_elapsed = time.time() - wps_starttime
-                        self.logger.info(f"{item}- subfile_handler.write_packet_stats() took {wps_elapsed:.3f} secs")
+                        self.logger.debug(f"{item}- subfile_handler.write_packet_stats() took {wps_elapsed:.3f} secs")
                     except Exception:
                         # Errors writing out packet stats should not impact operations.
                         # Just log it

@@ -58,6 +58,9 @@ def setup_test_dirs():
     packet_stats_path = os.path.join(base_dir, "packet_stats_dump_dir")
     check_and_make_dir(packet_stats_path)
 
+    packet_stats_destination_dir = os.path.join(base_dir, "packet_stats_destination_dir")
+    check_and_make_dir(packet_stats_destination_dir)
+
 
 def test_beamformer_config_file():
     """Tests that SubfileDistributor reads a beamformer config file ok"""
