@@ -150,9 +150,9 @@ class SubfileProcessor:
 
         #
         # Setup watcher, queue, worker for transferring packet stats to destination (e.g vulcan)
-        # But only if we have specified the destination in the config file
+        # But only if we have specified the destination in the config file (and the dump dir)
         #
-        if self.packet_stats_destination_dir != "":
+        if self.packet_stats_destination_dir != "" and self.packet_stats_dump_dir != "":
             # Create watcher for the packet stats files
             self.packet_stats_watcher = mwax_watcher.Watcher(
                 name="packet_stats_watcher",

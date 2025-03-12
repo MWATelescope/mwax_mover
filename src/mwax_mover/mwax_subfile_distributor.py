@@ -921,11 +921,11 @@ class MWAXSubfileDistributor:
             for processor in self.processors:
                 for worker_threads in processor.worker_threads:
                     if worker_threads:
-                        if worker_threads.is_alive():
-                            time.sleep(0.2)
-                        else:
+                        if not worker_threads.is_alive():
                             self.running = False
                             break
+
+            time.sleep(0.001)
 
         #
         # Finished- do some clean up
