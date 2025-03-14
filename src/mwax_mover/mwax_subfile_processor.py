@@ -316,16 +316,6 @@ class SubfileProcessor:
         transfer_size = int(subfile_header_values[utils.PSRDADA_TRANSFER_SIZE])
         subfile_bytes_to_write = transfer_size + 4096  # We add the header to the transfer size
 
-        # Get NINPUTS
-        if subfile_header_values[utils.PSRDADA_NINPUTS] is None:
-            raise ValueError(f"Keyword {utils.PSRDADA_NINPUTS} not found in {item}")
-        num_rf_inputs: int = int(subfile_header_values[utils.PSRDADA_NINPUTS])
-
-        # Get receiver channel number
-        if subfile_header_values[utils.PSRDADA_COARSE_CHANNEL] is None:
-            raise ValueError(f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {item}")
-        rec_channel: int = int(subfile_header_values[utils.PSRDADA_COARSE_CHANNEL])
-
         # Get Mode
         if subfile_header_values[utils.PSRDADA_MODE] is None:
             raise ValueError(f"Keyword {utils.PSRDADA_MODE} not found in {item}")
@@ -334,52 +324,8 @@ class SubfileProcessor:
         # Only do packet stats if packet_stats_dump_dir is not an empty string
         if self.packet_stats_dump_dir != "":
             # For all subfiles we need to extract the packet stats:
-            self.logger.debug(f"{item}- Starting subfile_handler.get_subfile_packet_map_data()...")
-            gspmd_starttime = time.time()
-            packet_map = utils.get_subfile_packet_map_data(self.logger, item)
-            gspmd_elapsed = time.time() - gspmd_starttime
-            self.logger.debug(f"{item}- subfile_handler.get_subfile_packet_map_data() took {gspmd_elapsed:.3f} secs")
-
-            if packet_map is not None:
-                self.logger.debug(f"{item}- Starting subfile_handler (reading subfile header values)...")
-                rsv_starttime = time.time()
-
-                # Get number of RF inputs from subfile header
-                num_tiles: int = int(num_rf_inputs / 2)
-
-                rsv_elapsed = time.time() - rsv_starttime
-                self.logger.debug(
-                    f"{item}- subfile_handler (reading subfile header values) took {rsv_elapsed:.3f} secs"
-                )
-
-                # Summarise the packet map into a 1d array of ints (of packets lost) by rfinput
-                self.logger.debug(f"{item}- Starting subfile_handler.summarise_packet_map()...")
-                spm_starttime = time.time()
-                packets_lost_array = utils.summarise_packet_map(self.logger, num_rf_inputs, packet_map)
-                spm_elapsed = time.time() - spm_starttime
-                self.logger.debug(f"{item}- subfile_handler.summarise_packet_map() took {spm_elapsed:.3f} secs")
-
-                if packets_lost_array is not None:
-                    # write packet array out
-                    try:
-                        self.logger.debug(f"{item}- Starting subfile_handler.write_packet_stats()...")
-                        wps_starttime = time.time()
-                        utils.write_packet_stats(
-                            subobs_id,
-                            rec_channel,
-                            self.hostname,
-                            num_tiles,
-                            self.packet_stats_dump_dir,
-                            packets_lost_array,
-                        )
-                        wps_elapsed = time.time() - wps_starttime
-                        self.logger.debug(f"{item}- subfile_handler.write_packet_stats() took {wps_elapsed:.3f} secs")
-                    except Exception:
-                        # Errors writing out packet stats should not impact operations.
-                        # Just log it
-                        self.logger.exception(
-                            f"{item}- unhandled exception when calling write_packet_stats()- continuing..."
-                        )
+            # Ignore failures
+            utils.run_mwax_packet_stats(self.logger, item, self.packet_stats_dump_dir, -1, 3)
 
         try:
             if self.corr_enabled:

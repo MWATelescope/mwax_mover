@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.23.0-0.23.3 14-Mar-2025
+
+* Replaced Python packet_stats code with calling rust binary.
+
 ## 0.23.0-0.23.2 11-Mar-2025
 
 * Upgraded to use Python 3.12.9
