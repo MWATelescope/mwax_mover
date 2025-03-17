@@ -39,7 +39,7 @@ class MWAXArchiveProcessor:
         archive_host: str,
         archive_port: int,
         archive_command_timeout_sec: int,
-        mwax_stats_executable: str,
+        mwax_stats_binary_dir: str,
         mwax_stats_dump_dir: str,
         mwax_stats_timeout_sec: int,
         db_handler_object: mwax_db.MWAXDBHandler,
@@ -87,7 +87,7 @@ class MWAXArchiveProcessor:
         self.calibrator_transfer_command_timeout_sec: int = calibrator_transfer_command_timeout_sec
 
         # Full path to executable for mwax_stats
-        self.mwax_stats_executable: str = mwax_stats_executable
+        self.mwax_stats_binary_dir: str = mwax_stats_binary_dir
         # Directory where to dump the stats files
         self.mwax_stats_dump_dir: str = mwax_stats_dump_dir
         self.mwax_stats_timeout_sec: int = mwax_stats_timeout_sec
@@ -492,7 +492,7 @@ class MWAXArchiveProcessor:
 
     def dont_archive_handler_vis(self, item: str) -> bool:
         """This handles the visibility case where we have disabled archiving"""
-        self.logger.info(f"{item}- dont_archive_handler_vis() Started")
+        self.logger.debug(f"{item}- dont_archive_handler_vis() Started")
 
         outgoing_filename = os.path.join(self.dont_archive_path_vis, os.path.basename(item))
 
@@ -505,12 +505,12 @@ class MWAXArchiveProcessor:
             f" {self.queue_dont_archive_vis.qsize()}"
         )
 
-        self.logger.info(f"{item}- dont_archive_handler_vis() Finished")
+        self.logger.debug(f"{item}- dont_archive_handler_vis() Finished")
         return True
 
     def dont_archive_handler_volt(self, item: str) -> bool:
         """This handles the voltage case where we have disabled archiving"""
-        self.logger.info(f"{item}- dont_archive_handler_volt() Started")
+        self.logger.debug(f"{item}- dont_archive_handler_volt() Started")
 
         outgoing_filename = os.path.join(self.dont_archive_path_volt, os.path.basename(item))
 
@@ -523,7 +523,7 @@ class MWAXArchiveProcessor:
             f" {self.queue_dont_archive_volt.qsize()}"
         )
 
-        self.logger.info(f"{item}- dont_archive_handler_volt() Finished")
+        self.logger.debug(f"{item}- dont_archive_handler_volt() Finished")
         return True
 
     def checksum_and_db_handler(self, item: str) -> bool:
@@ -678,7 +678,7 @@ class MWAXArchiveProcessor:
         if (
             utils.process_mwax_stats(
                 self.logger,
-                self.mwax_stats_executable,
+                self.mwax_stats_binary_dir,
                 item,
                 int(self.archive_command_numa_node),
                 self.mwax_stats_timeout_sec,

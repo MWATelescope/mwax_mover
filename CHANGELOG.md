@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.23.4 17-Mar-2025
+
+* Changed config of mwax_stats_executable to mwax_stats_dir - now that 2 binaries live in that dir.
+
 ## 0.23.0-0.23.3 14-Mar-2025
 
 * Replaced Python packet_stats code with calling rust binary.

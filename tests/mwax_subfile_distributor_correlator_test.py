@@ -134,7 +134,7 @@ def test_correlator_config_file():
     assert msd.cfg_corr_visdata_dont_archive_path == os.path.join(base_dir, "dont_archive")
     assert msd.cfg_corr_visdata_processing_stats_path == os.path.join(base_dir, "visdata_processing_stats")
     assert msd.cfg_corr_visdata_outgoing_path == os.path.join(base_dir, "visdata_outgoing")
-    assert msd.cfg_corr_mwax_stats_executable == "../mwax_stats/target/release/mwax_stats"
+    assert msd.cfg_corr_mwax_stats_binary_dir == "../mwax_stats/target/release"
 
     assert msd.cfg_corr_mwax_stats_dump_dir == os.path.join(base_dir, "mwax_stats_dump")
     assert msd.cfg_corr_mwax_stats_timeout_sec == 600

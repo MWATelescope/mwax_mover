@@ -35,6 +35,7 @@ class SubfileProcessor:
         corr_diskdb_numa_node,
         psrdada_timeout_sec: int,
         copy_subfile_to_disk_timeout_sec: int,
+        mwax_stats_binary_dir: str,
         packet_stats_dump_dir: str,
         packet_stats_destination_dir: str,
         hostname: str,
@@ -104,6 +105,7 @@ class SubfileProcessor:
         self.psrdada_timeout_sec = psrdada_timeout_sec
         self.copy_subfile_to_disk_timeout_sec = copy_subfile_to_disk_timeout_sec
 
+        self.mwax_stats_binary_dir = mwax_stats_binary_dir
         self.packet_stats_dump_dir = packet_stats_dump_dir
         self.packet_stats_destination_dir = packet_stats_destination_dir
         self.packet_stats_destination_queue = queue.Queue()
@@ -296,8 +298,6 @@ class SubfileProcessor:
             [
                 utils.PSRDADA_SUBOBS_ID,
                 utils.PSRDADA_TRANSFER_SIZE,
-                utils.PSRDADA_NINPUTS,
-                utils.PSRDADA_COARSE_CHANNEL,
                 utils.PSRDADA_MODE,
             ],
         )
@@ -325,7 +325,9 @@ class SubfileProcessor:
         if self.packet_stats_dump_dir != "":
             # For all subfiles we need to extract the packet stats:
             # Ignore failures
-            utils.run_mwax_packet_stats(self.logger, item, self.packet_stats_dump_dir, -1, 3)
+            utils.run_mwax_packet_stats(
+                self.logger, self.mwax_stats_binary_dir, item, self.packet_stats_dump_dir, -1, 3
+            )
 
         try:
             if self.corr_enabled:
@@ -647,7 +649,7 @@ class SubfileProcessor:
         destination_filename: Just the destination filename (no path)- note- unlike with cp it cannot
                             be just a "."! dd doesn't like that - it has to be a real filename.
         bytes_to_write: only write the first N bytes"""
-        self.logger.info(f"{filename}- Copying first {bytes_to_write} bytes of file into {destination_path}")
+        self.logger.debug(f"{filename}- Copying first {bytes_to_write} bytes of file into {destination_path}")
 
         command = f"dd if={filename} of={destination_path}/{destination_filename} bs=4M oflag=direct "
         f"iflag=count_bytes count={bytes_to_write}"

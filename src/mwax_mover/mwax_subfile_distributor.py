@@ -219,7 +219,7 @@ class MWAXSubfileDistributor:
         # processing_stats config
         self.cfg_corr_mwax_stats_timeout_sec: int = 0
         self.cfg_corr_mwax_stats_dump_dir: str = ""
-        self.cfg_corr_mwax_stats_executable: str = ""
+        self.cfg_corr_mwax_stats_binary_dir: str = ""
         self.cfg_corr_visdata_processing_stats_path: str = ""
         # calibration config
         self.cfg_corr_calibrator_outgoing_path: str = ""
@@ -513,8 +513,8 @@ class MWAXSubfileDistributor:
             self.cfg_corr_visdata_outgoing_path = utils.read_config(
                 self.logger, self.config, "correlator", "visdata_outgoing_path"
             )
-            self.cfg_corr_mwax_stats_executable = utils.read_config(
-                self.logger, self.config, "correlator", "mwax_stats_executable"
+            self.cfg_corr_mwax_stats_binary_dir = utils.read_config(
+                self.logger, self.config, "correlator", "mwax_stats_binary_dir"
             )
             self.cfg_corr_mwax_stats_dump_dir = utils.read_config(
                 self.logger, self.config, "correlator", "mwax_stats_dump_dir"
@@ -612,9 +612,9 @@ class MWAXSubfileDistributor:
                 )
                 sys.exit(1)
 
-            if not os.path.exists(self.cfg_corr_mwax_stats_executable):
+            if not os.path.exists(self.cfg_corr_mwax_stats_binary_dir):
                 self.logger.error(
-                    "mwax_stats executable" f" {self.cfg_corr_mwax_stats_executable} does not exist." " Quitting."
+                    "mwax_stats binary dir" f" {self.cfg_corr_mwax_stats_binary_dir} does not exist." " Quitting."
                 )
                 sys.exit(1)
 
@@ -749,6 +749,7 @@ class MWAXSubfileDistributor:
             self.cfg_corr_diskdb_numa_node,
             self.cfg_psrdada_timeout_sec,
             self.cfg_copy_subfile_to_disk_timeout_sec,
+            self.cfg_corr_mwax_stats_binary_dir,
             self.cfg_packet_stats_dump_dir,
             self.cfg_packet_stats_destination_dir,
             self.hostname,
@@ -772,7 +773,7 @@ class MWAXSubfileDistributor:
                 self.cfg_corr_archive_destination_host,
                 self.cfg_corr_archive_destination_port,
                 self.cfg_archive_command_timeout_sec,
-                self.cfg_corr_mwax_stats_executable,
+                self.cfg_corr_mwax_stats_binary_dir,
                 self.cfg_corr_mwax_stats_dump_dir,
                 self.cfg_corr_mwax_stats_timeout_sec,
                 self.db_handler,

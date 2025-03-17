@@ -461,7 +461,7 @@ def get_hostname() -> str:
 
 def process_mwax_stats(
     logger,
-    mwax_stats_executable: str,
+    mwax_stats_dir: str,
     full_filename: str,
     numa_node: int,
     timeout: int,
@@ -474,25 +474,25 @@ def process_mwax_stats(
 
     metafits_filename = os.path.join(metafits_path, f"{obs_id}_metafits.fits")
 
-    cmd = f"{mwax_stats_executable} -t {full_filename} -m" f" {metafits_filename} -o {stats_dump_dir}"
+    cmd = f"{mwax_stats_dir}/mwax_stats -t {full_filename} -m" f" {metafits_filename} -o {stats_dump_dir}"
 
-    logger.info(f"{full_filename}- attempting to run stats: {cmd}")
+    logger.debug(f"{full_filename}- attempting to run stats: {cmd}")
 
     start_time = time.time()
     return_value, stdout = mwax_command.run_command_ext(logger, cmd, numa_node, timeout)
     elapsed = time.time() - start_time
 
     if return_value:
-        logger.info(f"{full_filename} stats success in {elapsed:.3f} seconds")
+        logger.info(f"{full_filename} mwax_stats success in {elapsed:.3f} seconds")
     else:
-        logger.error(f"{full_filename} stats failed with error {stdout}")
+        logger.error(f"{full_filename} mwax_stats failed with error {stdout}")
 
     return return_value
 
 
 def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, numa_node, timeout: int) -> bool:
     """Loads a subfile into a PSRDADA ringbuffer"""
-    logger.info(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
+    logger.debug(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
 
     cmd = f"dada_diskdb -k {ringbuffer_key} -f {full_filename}"
 
@@ -517,11 +517,13 @@ def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, num
     return return_value
 
 
-def run_mwax_packet_stats(logger, full_filename: str, output_dir: str, numa_node, timeout: int) -> bool:
+def run_mwax_packet_stats(
+    logger, mwax_stats_dir: str, full_filename: str, output_dir: str, numa_node, timeout: int
+) -> bool:
     """Runs the rust mwax_packet_stats binary against the subfile to generate packet stats"""
-    logger.info(f"{full_filename}- attempting to execute mwax_packet_stats")
+    logger.debug(f"{full_filename}- attempting to execute mwax_packet_stats")
 
-    cmd = f"/home/mwa/mwax_stats/target/release/mwax_packet_stats -o {output_dir} -s {full_filename}"
+    cmd = f"{mwax_stats_dir}/mwax_packet_stats -o {output_dir} -s {full_filename}"
 
     start_time = time.time()
     return_value, stdout = mwax_command.run_command_ext(logger, cmd, numa_node, timeout)
@@ -683,7 +685,7 @@ def do_checksum_md5(logger, full_filename: str, numa_node: Optional[int], timeou
     md5output = ""
     checksum = ""
 
-    logger.info(f"{full_filename}- running md5sum...")
+    logger.debug(f"{full_filename}- running md5sum...")
 
     cmdline = f"md5sum {full_filename}"
 
@@ -1062,178 +1064,3 @@ def get_gpstime_of_datetime(date_time: datetime.datetime) -> int:
 # Return the GPS seconds as an integer of Now
 def get_gpstime_of_now() -> int:
     return get_gpstime_of_datetime(datetime.datetime.now(datetime.timezone.utc))
-
-
-# # Given a subfile filename, retrieve the packet map data (raw)
-# def get_subfile_packet_map_data(logger: logging.Logger, filename: str, packet_map_data) -> bool:
-#     KEY_IDX_PACKET_MAP = "IDX_PACKET_MAP"
-
-#     base_filename = os.path.basename(filename)
-#     obs_id: int = int(base_filename[0:10])
-
-#     # Get the keys from the subfile header:
-#     # (info from:
-#     # https://mwatelescope.atlassian.net/wiki/spaces/MP/pages/24970579/MWAX+PSRDADA+header#Block-0%3A-UDP-Packet-Map)
-#     # IDX_PACKET_MAP
-#     # Value read will be in the form of: XXX+YYY
-#     # Where:
-#     # XXX is the number of bytes into block 0 to start
-#     # and YYY is the number of bytes to read
-#     idx_packet_map_string: Optional[str] = read_subfile_value(filename, KEY_IDX_PACKET_MAP)
-
-#     if idx_packet_map_string is None:
-#         logger.warning(
-#             f"{obs_id}: {base_filename} does not have the {KEY_IDX_PACKET_MAP} keyword. "
-#             f"Ignoring packet stats for this subobservation."
-#         )
-#         return False
-
-#     # Now split the string by the "+" sign
-#     split_idx = idx_packet_map_string.split("+")
-
-#     if len(split_idx) != 2:
-#         logger.warning(
-#             f"{obs_id}: {base_filename} {KEY_IDX_PACKET_MAP} keyword value {idx_packet_map_string} did not "
-#             f"split by the + sign correctly. Ignoring packet stats for this subobservation."
-#         )
-#         return False
-
-#     # Ensure the two parts can be cast to int
-#     packet_map_start: int = 0
-#     packet_map_length: int = 0
-
-#     try:
-#         packet_map_start = int(split_idx[0])
-#         packet_map_length = int(split_idx[1])
-#     except ValueError:
-#         logger.warning(
-#             f"{obs_id}: {base_filename} {KEY_IDX_PACKET_MAP} keyword value {idx_packet_map_string} "
-#             f"components were not able to be cast to int. Ignoring packet stats for this subobservation."
-#         )
-#         return False
-
-#     # Now get the data
-#     block0_start = PSRDADA_HEADER_BYTES
-#     block0_packet_map_start = block0_start + packet_map_start
-
-#     try:
-#         packet_map_data = np.fromfile(
-#             filename, np.dtypes.ByteDType, count=packet_map_length, offset=block0_packet_map_start
-#         )
-
-#         # Ensure we read the right number of bytes!
-#         if len(packet_map_data) != packet_map_length:
-#             raise Exception(
-#                 f"{obs_id}: {base_filename} read of packet map data failed- "
-#                 f"read {len(packet_map_data)} bytes (should have been {packet_map_length} bytes)"
-#             )
-#     except FileNotFoundError:
-#         logger.exception(f"{obs_id}: {filename} not found when reading packet map.")
-#         return False
-
-#     except Exception:
-#         raise
-
-#     return True
-
-
-# # Gets the packet map and gets the mean occupancy of each rfinput
-# # for a subobservation and returns
-# # an array of ints of since N, where N is number of rf_inputs
-# # and each int is a count of lost packets
-# #
-# def summarise_packet_map(logger, num_rf_inputs: int, packet_map_bytes: bytes) -> np.ndarray:
-#     # Determine number of packets. There might be 625 (critically sampled)
-#     # or 800 (oversampled)
-#     num_packets_per_sec: int = int(len(packet_map_bytes) / num_rf_inputs)
-#     assert num_packets_per_sec == 625 or num_packets_per_sec == 800
-
-#     # 8 Seconds per subobs
-#     num_seconds_per_subobs: int = 8
-#     num_packets_per_subobs: int = num_packets_per_sec * num_seconds_per_subobs
-#     num_packet_map_bytes_per_subobs: int = int(num_packets_per_subobs / 8)
-
-#     # Example Structure of packet_map is:
-#     #                   Time (packet number)
-#     #              |<----------- 8 seconds ------------>|
-#     #              00000000 00000000 00000000 ...66666666
-#     #              00000000 00111111 11112222 ...11222222
-#     #              01234567 89012345 67890123 ...89012345
-#     #              ========================== ...========
-#     # rf_input 0   11111111 11111111 11111111    10110111
-#     # rf_input 1   01011111 00111111 11111111    11111011
-#     # ...
-#     # rf_input N   01111111 00111111 11111111    11111011
-
-#     # We want to output a int which represents the count of
-#     # packets lost per rf_input for those 8 seconds.
-
-#     # Define output array
-#     logger.info("...summarise_packet_map(): np.empty")
-#     starttime = time.time()
-#     packets_lost = np.empty(shape=(num_rf_inputs), dtype=np.int16)
-#     elapsed = time.time() - starttime
-#     logger.info(f"...summarise_packet_map(): np.empty took {elapsed:.3f} secs")
-
-#     # Convert the input bytes into a numpy array of bytes
-#     logger.info("...summarise_packet_map(): np.frombuffer")
-#     starttime = time.time()
-#     packet_map_np = np.frombuffer(packet_map_bytes, dtype=np.uint8)
-#     elapsed = time.time() - starttime
-#     logger.info(f"...summarise_packet_map(): np.frombuffer took {elapsed:.3f} secs")
-
-#     # Reshape the packet map to 2d (rfinputs, packets)
-#     logger.info("...summarise_packet_map(): np.reshape")
-#     starttime = time.time()
-#     packet_map_np = np.reshape(packet_map_np, (num_rf_inputs, num_packet_map_bytes_per_subobs))
-#     elapsed = time.time() - starttime
-#     logger.info(f"...summarise_packet_map(): np.reshape took {elapsed:.3f} secs")
-
-#     # Convert the binary values into array elements of bits
-#     logger.info("...summarise_packet_map(): np.unpackbits")
-#     starttime = time.time()
-#     bit_array = np.unpackbits(packet_map_np, 1)
-#     elapsed = time.time() - starttime
-#     logger.info(f"...summarise_packet_map(): np.unpackbits took {elapsed:.3f} secs")
-
-#     logger.info(f"...summarise_packet_map(): calculate missed packets x {num_rf_inputs} times")
-#     starttime = time.time()
-#     # This will for each row (rfinput) sum the bits (of received packets)
-#     # and subtract it from the expected total number of packets so that
-#     # packet_lost[rf_input] = num_packets_per_subobs - bit_array[rf_input_index].sum()
-#     # But this does it in a proper numpy way
-#     packets_lost[:] = num_packets_per_subobs - bit_array.sum(axis=1)
-#     # for rf_input_index in range(0, num_rf_inputs):
-#     #     bit_array = convert_occupany_bitmap_to_array(packet_map_np[rf_input_index])
-#     #     # we subtract total packets from the bnit array as we want lost packets (0's)
-#     #     packets_lost[rf_input_index] = num_packets_per_subobs - bit_array[rf_input_index].sum()
-#     elapsed = time.time() - starttime
-#     logger.info(f"...summarise_packet_map(): calculate missed packets x {num_rf_inputs} times took {elapsed:.3f} secs")
-
-#     return packets_lost
-
-
-# def write_packet_stats(
-#     subobs_id: int,
-#     receiver_channel: int,
-#     hostname: str,
-#     num_tiles: int,
-#     packet_stats_dump_dir: str,
-#     packets_lost_array: np.ndarray,
-# ):
-#     # Filename format is: packetstats_SSSSSSSSSS_tttT_chNNN_mwaxHH.dat
-#     # Where:
-#     # SSSSSSSSSS = subobsid
-#     # ttt=number of tiles (this helps you read the data as you know TTTx2 is the number of uint16 values to read)
-#     # N|NN|NNN=receiver channel number
-#     # mwaxHH=the host that generated it
-#     filename = f"packetstats_{subobs_id}_{num_tiles}T_ch{receiver_channel}_{hostname}.dat"
-
-#     # Assemble full filename
-#     full_filename = os.path.join(packet_stats_dump_dir, filename)
-
-#     # Write the data
-#     # Having sep & format as "" it should write the data as binary in "C" order
-#     # packets_lost_array.tofile(full_filename, sep="", format="")
-#     with open(full_filename, "wb") as write_file:
-#         write_file.write(packets_lost_array.tobytes())
