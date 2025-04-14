@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.23.6 14-Apr-2025
+
+* Calvin: fix for critically sampled observations (which don't have the OVERSAMP keyword in metafits).
+
 ## 0.23.5 14-Apr-2025
 
 * Calvin: If obs is oversampled, ensure Birli doesn't flag edge with and does not correct passband.

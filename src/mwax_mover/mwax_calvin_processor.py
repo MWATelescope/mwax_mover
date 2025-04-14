@@ -606,8 +606,12 @@ class MWAXCalvinProcessor:
         uvfits_filename = os.path.join(item, str(obs_id) + ".uvfits")
 
         # Determine if the obs is oversampled
-        with fits.open(metafits_filename) as hdus:
-            oversampled: bool = int(hdus["PRIMARY"].header["OVERSAMP"]) == 1
+        try:
+            with fits.open(metafits_filename) as hdus:
+                oversampled: bool = int(hdus["PRIMARY"].header["OVERSAMP"]) == 1
+        except KeyError:
+            # No OVERSAMP key? Then it is not oversampled!
+            oversampled: bool = False
 
         hyperdrive_success = False
 
