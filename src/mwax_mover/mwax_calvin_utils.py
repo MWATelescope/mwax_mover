@@ -1467,11 +1467,7 @@ def write_readme_file(logger, filename, cmd, exit_code, stdout, stderr):
 
 
 def run_birli(
-    processor,
-    metafits_filename: str,
-    uvfits_filename: str,
-    obs_id: int,
-    processing_dir: str,
+    processor, metafits_filename: str, uvfits_filename: str, obs_id: int, processing_dir: str, oversampled: bool
 ) -> bool:
     """Execute Birli, returning true on success, false on failure"""
     birli_success: bool = False
@@ -1504,10 +1500,16 @@ def run_birli(
         time_time_s = metafits.time_info.int_time_s
 
         # TODO: set default edge_width res from config
-        edge_width_hz = 80e3  # default
-        edge_width_hz = np.max([fine_chan_width_hz, edge_width_hz])
-        assert edge_width_hz >= fine_chan_width_hz, f"{edge_width_hz=} must be >= {fine_chan_width_hz=}"
-        assert edge_width_hz % fine_chan_width_hz == 0, f"{edge_width_hz=} must multiple of {fine_chan_width_hz=}"
+        if oversampled:
+            # For oversampled obs we don't flag edges and we don't correct passband
+            edge_width_hz = 0
+            passband_arg = "--no-passband"
+        else:
+            edge_width_hz = 80e3  # default
+            edge_width_hz = np.max([fine_chan_width_hz, edge_width_hz])
+            assert edge_width_hz >= fine_chan_width_hz, f"{edge_width_hz=} must be >= {fine_chan_width_hz=}"
+            assert edge_width_hz % fine_chan_width_hz == 0, f"{edge_width_hz=} must multiple of {fine_chan_width_hz=}"
+            passband_arg = "--passband-gains none"
 
         # TODO: set minimum freq res from config
         min_freq_res = 40e3
@@ -1528,7 +1530,7 @@ def run_birli(
             f" --uvfits-out={uvfits_filename}"
             f" --flag-edge-width={int(edge_width_hz/1e3)}"
             f" --max-memory={processor.birli_max_mem_gib}"
-            f" {avg_arg} {data_file_arg}"
+            f" {avg_arg} {passband_arg} {data_file_arg}"
         )
 
         processor.birli_popen_process = run_command_popen(processor.logger, cmdline, -1, False)

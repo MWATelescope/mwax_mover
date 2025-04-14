@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.23.5 14-Apr-2025
+
+* Calvin: If obs is oversampled, ensure Birli doesn't flag edge with and does not correct passband.
+
 ## 0.23.4 17-Mar-2025
 
 * Changed config of mwax_stats_executable to mwax_stats_dir - now that 2 binaries live in that dir.

@@ -29,7 +29,7 @@ from mwax_mover import (
 import numpy as np
 import traceback
 import coloredlogs
-
+from astropy.io import fits
 from mwax_mover.mwax_db import insert_calibration_fits_row, insert_calibration_solutions_row
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
 from mwax_mover.mwax_calvin_utils import (
@@ -605,17 +605,15 @@ class MWAXCalvinProcessor:
         metafits_filename = os.path.join(item, str(obs_id) + "_metafits.fits")
         uvfits_filename = os.path.join(item, str(obs_id) + ".uvfits")
 
+        # Determine if the obs is oversampled
+        with fits.open(metafits_filename) as hdus:
+            oversampled: bool = int(hdus["PRIMARY"].header["OVERSAMP"]) == 1
+
         hyperdrive_success = False
 
         # Run Birli
         self.logger.info(f"{obs_id}: Running Birli...")
-        birli_success = mwax_calvin_utils.run_birli(
-            self,
-            metafits_filename,
-            uvfits_filename,
-            obs_id,
-            item,
-        )
+        birli_success = mwax_calvin_utils.run_birli(self, metafits_filename, uvfits_filename, obs_id, item, oversampled)
 
         if birli_success:
             # If all good run hyperdrive- once per uvfits file created
