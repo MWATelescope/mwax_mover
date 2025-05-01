@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.23.7 1-May-2025
+
+* Calvin: fixed passing correct passband option to Birli
+
 ## 0.23.6 14-Apr-2025
 
 * Calvin: fix for critically sampled observations (which don't have the OVERSAMP keyword in metafits).

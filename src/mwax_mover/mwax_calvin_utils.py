@@ -1503,13 +1503,13 @@ def run_birli(
         if oversampled:
             # For oversampled obs we don't flag edges and we don't correct passband
             edge_width_hz = 0
-            passband_arg = "--no-passband"
+            passband_arg = "--passband-gains none"
         else:
             edge_width_hz = 80e3  # default
             edge_width_hz = np.max([fine_chan_width_hz, edge_width_hz])
             assert edge_width_hz >= fine_chan_width_hz, f"{edge_width_hz=} must be >= {fine_chan_width_hz=}"
             assert edge_width_hz % fine_chan_width_hz == 0, f"{edge_width_hz=} must multiple of {fine_chan_width_hz=}"
-            passband_arg = "--passband-gains none"
+            passband_arg = ""  # leave as default
 
         # TODO: set minimum freq res from config
         min_freq_res = 40e3
