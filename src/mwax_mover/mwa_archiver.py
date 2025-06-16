@@ -5,13 +5,15 @@ import hashlib
 import random
 import time
 import uuid
-import boto3
+
+# import boto3
 import logging
 
-import boto3.resources
+# import boto3.resources
 from mwax_mover.mwax_command import run_command_ext
-from boto3.s3.transfer import TransferConfig
-from botocore.client import Config
+
+# from boto3.s3.transfer import TransferConfig
+# from botocore.client import Config
 
 
 def archive_file_rsync(
@@ -150,79 +152,65 @@ def archive_file_xrootd(
         return False
 
 
-def archive_file_ceph(
+def archive_file_rclone(
     logger,
-    ceph_session,
-    ceph_endpoints: list,
+    rclone_profile: str,
+    endpoints: list,
     full_filename: str,
     bucket_name: str,
     md5hash: str,
-    multipart_threshold_bytes: int | None = None,
-    chunk_size_bytes: int | None = None,
-    max_concurrency: int | None = None,
 ):
-    """Archive file via ceph"""
-    logger.debug(f"{full_filename} attempting archive_file_ceph...")
+    """Archive file via rclone"""
+    logger.debug(f"{full_filename} attempting archive_file_rclone...")
 
     # get file size
     logger.debug(f"{full_filename} attempting to get file size...")
     try:
         file_size = os.path.getsize(full_filename)
-    except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
-        logger.error(f"{full_filename}: Error determining file size. Error" f" {catch_all_exceptiion}")
+    except Exception:
+        logger.exception(f"{full_filename}: Error determining file size.")
         return False
 
     # Start fresh with a list of all possible endpoints (from the config file)
-    endpoints = ceph_endpoints.copy()
+    endpoints = endpoints.copy()
     start_time = time.time()
 
     while len(endpoints) > 0:
-        # Get an s3 resource based on a random endpoint
-        ceph_resource, endpoint_url = ceph_get_s3_resource(logger, ceph_session, endpoints)
+        # Get a random endpoint
+        endpoint_url = random.choice(endpoints)
 
-        # create bucket if required
-        logger.debug(f"{full_filename} creating S3 bucket {bucket_name} using {endpoint_url} (if required)...")
-        try:
-            ceph_create_bucket(ceph_resource, bucket_name)
-        except Exception as bucket_check_error:  # pylint: disable=broad-except
-            logger.error(
-                f"{full_filename}: Error creating/checking existence of S3 {endpoint_url} bucket {bucket_name}."
-                f"Endpoint: {1 + len(ceph_endpoints) - len(endpoints)} of {len(ceph_endpoints)}."
-                f"Detail: {bucket_check_error}"
-            )
-            # Remove this endpoint from the list for this file and try again if there are more
-            # endpoints left.
-            # It is possible the error is nothing to do with THIS endpoint but it's very difficult
-            # to go down to that level. If we blow through all endpoints (e.g. Banksia has 6) and
-            # We still hit the exception, then either all endpoints are down or it's some other
-            # error in which case we return False which will put us in a retry/backoff cycle
-            endpoints.remove(endpoint_url)
-            continue
-
-        logger.debug(f"{full_filename} attempting upload to S3 {endpoint_url} bucket {bucket_name}...")
-
-        # start timer
-        start_time = time.time()
+        # rclone will create bucket if required
+        logger.debug(f"{full_filename} attempting upload to {rclone_profile} {endpoint_url} bucket {bucket_name}...")
 
         # Do upload
+        #
+        # rclone copyto -M --metadata-set "md5=123abc" --s3-endpoint=https://vss-1.pawsey.org.au:9000
+        #  test.txt banksia:/mwaingest-14322/test.txt
+        #
         try:
-            ceph_upload_file(
-                ceph_resource,
-                bucket_name,
-                full_filename,
-                md5hash,
-                multipart_threshold_bytes,
-                chunk_size_bytes,
-                max_concurrency,
-            )
-            # We've done the upload- get out of the loop
-            break
+            cmdline = f'/usr/bin/rclone copyto -M --metadata-set "md5={md5hash}" --s3-endpoint={endpoint_url} '
+            f"{full_filename} {rclone_profile}:/{bucket_name}/{os.path.basename(full_filename)}"
 
-        except Exception as upload_error:  # pylint: disable=broad-except
-            logger.error(
+            # run rclone
+            return_val, stdout = run_command_ext(logger, cmdline, -1, 600, False)
+
+            if return_val:
+                elapsed = time.time() - start_time
+
+                size_gigabytes = float(file_size) / (1000.0 * 1000.0 * 1000.0)
+                gbps_per_sec = (size_gigabytes * 8) / elapsed
+
+                logger.info(
+                    f"{full_filename} archive_file_rclone success"
+                    f" ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at"
+                    f" {gbps_per_sec:.3f} Gbps)"
+                )
+            else:
+                raise Exception(stdout)
+        except Exception:
+            logger.exception(
                 f"{full_filename}: Error uploading to S3 {endpoint_url} bucket {bucket_name}."
-                f"Endpoint: {1 + len(ceph_endpoints) - len(endpoints)} of {len(ceph_endpoints)}."
-                f"Detail: {upload_error}"
+                f"Endpoint: {1 + len(endpoints) - len(endpoints)} of {len(endpoints)}."
             )
             # Remove this endpoint from the list for this file and try again if there are more
             # endpoints left.
@@ -235,20 +223,12 @@ def archive_file_ceph(
 
     if len(endpoints) > 0:
         # Upload succeeded
-        # end timer
-        elapsed = time.time() - start_time
-
-        size_gigabytes = float(file_size) / (1000.0 * 1000.0 * 1000.0)
-        gbps_per_sec = (size_gigabytes * 8) / elapsed
-
-        logger.info(
-            f"{full_filename} archive_file_ceph success. ({size_gigabytes:.3f}GB"
-            f" in {elapsed:.3f} seconds at {gbps_per_sec:.3f} Gbps)"
-        )
         return True
     else:
         # We tried with all available endpoints but still did not succeed
-        logger.warning(f"{full_filename} could not be archived after trying all {len(ceph_endpoints)} endpoint(s).")
+        logger.warning(
+            f"{full_filename} could not be archived via rclone after trying all {len(endpoints)} endpoint(s)."
+        )
         return False
 
 
@@ -295,83 +275,3 @@ def ceph_get_s3_md5_etag(filename: str, chunk_size_bytes: int) -> str:
         new_etag = '""'
 
     return new_etag
-
-
-def ceph_get_s3_session(profile: str):
-    """Returns a boto3 session given the profile name"""
-    session = boto3.Session(profile_name=profile)
-    return session
-
-
-def ceph_get_s3_resource(logger, session, endpoints: list):
-    """Returns a tuple of the S3 resource object and the endpoint used"""
-    # This ensures the default boto retries and timeouts don't leave us
-    # hanging too long
-    config = Config(
-        connect_timeout=5,
-        retries={"mode": "standard"},
-        request_checksum_calculation="when_required",
-        response_checksum_validation="when_required",
-    )
-
-    # Get an enpoint at random from what is left on the list
-    endpoint = random.choice(endpoints)
-
-    s3_resource = session.resource("s3", endpoint_url=endpoint, config=config)
-    logger.debug(f"Using endpoint {endpoint}")
-    return s3_resource, endpoint
-
-
-def ceph_create_bucket(s3_resource, bucket_name: str):
-    """Create a bucket via S3"""
-    bucket = s3_resource.Bucket(bucket_name)
-    bucket.create()
-
-
-def ceph_list_bucket(s3_resource, bucket_name: str) -> list:
-    """List contents of a bucket"""
-    bucket = s3_resource.Bucket(bucket_name)
-    return list(bucket.objects.all())
-
-
-def ceph_upload_file(
-    ceph_resource,
-    bucket_name: str,
-    filename: str,
-    md5hash: str,
-    multipart_threshold_bytes: int | None = None,
-    chunk_size_bytes: int | None = None,
-    max_concurrency: int | None = None,
-) -> bool:
-    """upload a file via ceph/s3"""
-    # get key
-    key = os.path.split(filename)[1]
-
-    # get reference to bucket
-    bucket = ceph_resource.Bucket(bucket_name)
-
-    # configure the xfer to use multiparts if specified
-    if multipart_threshold_bytes is not None and chunk_size_bytes is not None and max_concurrency is not None:
-        # 5GB is the limit Ceph has for parts, so only split if >= 2GB
-        config = TransferConfig(
-            multipart_threshold=multipart_threshold_bytes,
-            multipart_chunksize=chunk_size_bytes,
-            use_threads=True,
-            max_concurrency=max_concurrency,
-        )
-
-        # Upload the file and include the md5sum as metadata
-        bucket.upload_file(
-            Filename=filename,
-            Key=key,
-            Config=config,
-            ExtraArgs={"Metadata": {"md5": md5hash}},
-        )
-    else:
-        # Upload the file without a transferconfig
-        bucket.upload_file(
-            Filename=filename,
-            Key=key,
-            ExtraArgs={"Metadata": {"md5": md5hash}},
-        )
-    return True

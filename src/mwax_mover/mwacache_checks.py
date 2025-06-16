@@ -8,7 +8,7 @@ import boto3
 from mwax_mover.mwa_archiver import (
     ceph_get_s3_session,
     ceph_get_s3_resource,
-    archive_file_ceph,
+    archive_file_boto3,
 )
 from mwax_mover.utils import do_checksum_md5
 
@@ -80,7 +80,7 @@ def ceph_upload_to_pawsey(
     session: boto3.Session = ceph_get_s3_session(profile_name)
 
     # Test archive
-    archive_success = archive_file_ceph(
+    archive_success = archive_file_boto3(
         logger,
         session,
         [endpoint],

@@ -3,7 +3,6 @@ psycopg[binary]
 psycopg[pool]
 requests
 tenacity
-boto3
 astropy
 scipy
 importlib_metadata

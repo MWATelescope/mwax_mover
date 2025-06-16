@@ -14,9 +14,11 @@ import threading
 import time
 from typing import Optional
 import astropy
-import boto3
-import botocore
-from boto3 import Session
+
+# import boto3
+# import botocore
+
+# from boto3 import Session
 from mwax_mover import (
     mwax_mover,
     mwax_db,
@@ -214,7 +216,7 @@ class MWACacheArchiveProcessor:
         # Final log message
         self.logger.info("Completed Successfully")
 
-    def archive_handler(self, item: str, ceph_session: Session) -> bool:
+    def archive_handler(self, item: str) -> bool:
         """Handles sending files to Pawsey"""
         self.logger.info(f"{item}- archive_handler() Started...")
 
@@ -269,16 +271,13 @@ class MWACacheArchiveProcessor:
                 or self.archive_to_location == ArchiveLocation.Banksia
                 or self.archive_to_location == ArchiveLocation.AcaciaMWA
             ):  # Acacia or Banksia
-                archive_success = mwa_archiver.archive_file_ceph(
+                archive_success = mwa_archiver.archive_file_rclone(
                     self.logger,
-                    ceph_session,
+                    self.s3_profile,
                     self.s3_ceph_endpoints,
                     item,
                     bucket,
                     data_files_row.checksum,
-                    self.s3_multipart_threshold_bytes,
-                    self.s3_chunk_size_bytes,
-                    self.s3_max_concurrency,
                 )
             else:
                 raise NotImplementedError(f"Location {self.archive_to_location.value} not implemented")
@@ -479,8 +478,6 @@ class MWACacheArchiveProcessor:
         py_version = py_version.replace("\n", " ")
         self.logger.info(f"Python v{py_version}")
         self.logger.info(f"astropy v{astropy.__version__}")
-        self.logger.info(f"boto3 v{boto3.__version__}")
-        self.logger.info(f"botocore v{botocore.__version__}")
 
         self.logger.info(f"Reading config file: {config_filename}")
 
