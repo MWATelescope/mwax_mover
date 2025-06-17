@@ -178,32 +178,46 @@ def archive_file_rclone(
         # Do upload
         #
         # rclone copyto -M --metadata-set "md5=123abc" --s3-endpoint=https://vss-1.pawsey.org.au:9000
-        #  test.txt banksia:/mwaingest-14322/test.txt
+        #  test.txt banksia:/mwaingest-14322
         #
         try:
             cmdline = f'/usr/bin/rclone copyto -M --metadata-set "md5={md5hash}" --s3-endpoint={endpoint_url} '
-            f"{full_filename} {rclone_profile}:/{bucket_name}/{os.path.basename(full_filename)}"
+            f"{full_filename} {rclone_profile}:/{bucket_name}"
 
-            # run rclone
-            return_val, stdout = run_command_ext(logger, cmdline, -1, 600, False)
+            # run rclone copyto
+            return_val, stdout = run_command_ext(logger, cmdline, None, 600, False)
 
             if return_val:
                 elapsed = time.time() - start_time
                 size_gigabytes = float(file_size) / (1000.0 * 1000.0 * 1000.0)
                 gbps_per_sec = (size_gigabytes * 8) / elapsed
 
-                # Success - now verify the file exists at the remote
-
-                logger.info(
-                    f"{full_filename} archive_file_rclone success"
-                    f" ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at"
-                    f" {gbps_per_sec:.3f} Gbps)"
+                # Success - now verify the file at the remote
+                logger.debug(
+                    f"{full_filename} attempting check against {rclone_profile} {endpoint_url} bucket {bucket_name}..."
                 )
+                cmdline = f"/usr/bin/rclone check --s3-endpoint={endpoint_url} {full_filename}"
+                f"{rclone_profile}:/{bucket_name}"
+
+                # run rclone check
+                return_val, stdout = run_command_ext(logger, cmdline, None, 600, False)
+
+                if return_val:
+                    check_elapsed = time.time() - start_time
+
+                    logger.info(
+                        f"{full_filename} archive_file_rclone success."
+                        f"Copied ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at"
+                        f" {gbps_per_sec:.3f} Gbps). Check took {check_elapsed:.3f} seconds."
+                    )
+                    return True
+                else:
+                    raise Exception(stdout)
             else:
                 raise Exception(stdout)
         except Exception:
             logger.exception(
-                f"{full_filename}: Error uploading to S3 {endpoint_url} bucket {bucket_name}."
+                f"{full_filename}: Error uploading to {endpoint_url} bucket {bucket_name} via rclone."
                 f"Endpoint: {1 + len(endpoints) - len(endpoints)} of {len(endpoints)}."
             )
             # Remove this endpoint from the list for this file and try again if there are more
@@ -216,8 +230,7 @@ def archive_file_rclone(
             continue
 
     if len(endpoints) > 0:
-        # Upload succeeded
-        return True
+        raise Exception(f"Transfer failed but some endpoints ({len(endpoints)}) are unused. This should not happen!")
     else:
         # We tried with all available endpoints but still did not succeed
         logger.warning(

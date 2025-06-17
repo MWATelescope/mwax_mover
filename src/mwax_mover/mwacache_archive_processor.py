@@ -22,8 +22,8 @@ from mwax_mover import (
     utils,
     version,
 )
+from mwax_mover.mwax_priority_queue_worker import PriorityQueueWorker
 from mwax_mover.mwax_priority_watcher import PriorityWatcher
-from mwax_mover.mwax_ceph_priority_queue_worker import CephPriorityQueueWorker
 from mwax_mover.utils import ValidationData, ArchiveLocation
 from mwax_mover.mwax_db import DataFileRow
 
@@ -87,7 +87,7 @@ class MWACacheArchiveProcessor:
         self.watch_dirs: list[str] = []
         self.queue: queue.PriorityQueue = queue.PriorityQueue()
         self.watchers: list[PriorityWatcher] = []
-        self.queue_workers: list[CephPriorityQueueWorker] = []
+        self.queue_workers: list[PriorityQueueWorker] = []
 
     def start(self):
         """This method is used to start the processor"""
@@ -154,14 +154,13 @@ class MWACacheArchiveProcessor:
         self.logger.info("Creating workers...")
 
         for archive_worker in range(0, self.concurrent_archive_workers):
-            new_worker = CephPriorityQueueWorker(
+            new_worker = PriorityQueueWorker(
                 name=f"Archiver{archive_worker}",
                 source_queue=self.queue,
                 executable_path=None,
                 event_handler=self.archive_handler,
                 log=self.logger,
                 requeue_to_eoq_on_failure=True,
-                ceph_profile=self.s3_profile,
                 exit_once_queue_empty=False,
             )
             self.queue_workers.append(new_worker)
@@ -260,6 +259,8 @@ class MWACacheArchiveProcessor:
                     f" {actual_checksum} does not match {data_files_row.checksum}."
                 )
                 return False
+
+            self.logger.debug(f"{item}- archive_handler() md5 checksum matches")
 
             # Determine where to archive it
             bucket = utils.determine_bucket(
