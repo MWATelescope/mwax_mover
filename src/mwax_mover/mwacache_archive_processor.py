@@ -15,10 +15,6 @@ import time
 from typing import Optional
 import astropy
 
-# import boto3
-# import botocore
-
-# from boto3 import Session
 from mwax_mover import (
     mwax_mover,
     mwax_db,
@@ -67,9 +63,6 @@ class MWACacheArchiveProcessor:
         # s3 config
         self.s3_profile: str = ""
         self.s3_ceph_endpoints: list[str] = []
-        self.s3_multipart_threshold_bytes: Optional[int] = None
-        self.s3_chunk_size_bytes: Optional[int] = None
-        self.s3_max_concurrency: Optional[int] = None
 
         self.health_multicast_interface_ip: str = ""
         self.health_multicast_ip: str = ""
@@ -231,7 +224,6 @@ class MWACacheArchiveProcessor:
 
             # Lookup file from db
             data_files_row: DataFileRow = mwax_db.get_data_file_row(self.remote_db_handler_object, item, val.obs_id)
-
             database_file_size = data_files_row.size
 
             # Check for 0 size
@@ -256,7 +248,18 @@ class MWACacheArchiveProcessor:
                 # with the item and it should not be requeued
                 return True
 
-            self.logger.debug(f"{item}- archive_handler() File size matches metadata" " database")
+            self.logger.debug(f"{item}- archive_handler() File size matches metadata. Checking md5sum..." " database")
+
+            # Check md5sum
+            actual_checksum = utils.do_checksum_md5(self.logger, item, None, 600)
+
+            # Compare
+            if actual_checksum != data_files_row.checksum:
+                self.logger.warning(
+                    f"{item}- archive_handler() checksum"
+                    f" {actual_checksum} does not match {data_files_row.checksum}."
+                )
+                return False
 
             # Determine where to archive it
             bucket = utils.determine_bucket(
@@ -559,20 +562,6 @@ class MWACacheArchiveProcessor:
             s3_section,
             "ceph_endpoints",
         )
-
-        s3_multipart_threshold_bytes = utils.read_optional_config(
-            self.logger, config, s3_section, "multipart_threshold_bytes"
-        )
-        if s3_multipart_threshold_bytes is not None:
-            self.s3_multipart_threshold_bytes = int(s3_multipart_threshold_bytes)
-
-        s3_chunk_size_bytes = utils.read_optional_config(self.logger, config, s3_section, "chunk_size_bytes")
-        if s3_chunk_size_bytes is not None:
-            self.s3_chunk_size_bytes = int(s3_chunk_size_bytes)
-
-        s3_max_concurrency = utils.read_optional_config(self.logger, config, s3_section, "max_concurrency")
-        if s3_max_concurrency is not None:
-            self.s3_max_concurrency = int(s3_max_concurrency)
 
         #
         # Options specified per host

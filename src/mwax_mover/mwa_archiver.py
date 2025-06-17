@@ -5,15 +5,9 @@ import hashlib
 import random
 import time
 import uuid
-
-# import boto3
 import logging
 
-# import boto3.resources
 from mwax_mover.mwax_command import run_command_ext
-
-# from boto3.s3.transfer import TransferConfig
-# from botocore.client import Config
 
 
 def archive_file_rsync(
@@ -164,7 +158,6 @@ def archive_file_rclone(
     logger.debug(f"{full_filename} attempting archive_file_rclone...")
 
     # get file size
-    logger.debug(f"{full_filename} attempting to get file size...")
     try:
         file_size = os.path.getsize(full_filename)
     except Exception:
@@ -196,9 +189,10 @@ def archive_file_rclone(
 
             if return_val:
                 elapsed = time.time() - start_time
-
                 size_gigabytes = float(file_size) / (1000.0 * 1000.0 * 1000.0)
                 gbps_per_sec = (size_gigabytes * 8) / elapsed
+
+                # Success - now verify the file exists at the remote
 
                 logger.info(
                     f"{full_filename} archive_file_rclone success"
