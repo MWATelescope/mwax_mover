@@ -10,22 +10,20 @@ import logging
 from mwax_mover.mwax_command import run_command_ext
 
 
-def archive_file_rsync(
+def copy_file_rsync(
     logger: logging.Logger,
-    full_filename: str,
-    archive_numa_node: int,
-    archive_destination_host: str,
-    archive_destination_path: str,
+    source: str,
+    destination: str,
     timeout: int,
 ):
-    """Archives a file via rsync"""
-    logger.debug(f"{full_filename} attempting archive_file_rsync...")
+    """Copies a file via rsync"""
+    logger.debug(f"{source} attempting copy_file_rsync...")
 
     # get file size
     try:
-        file_size = os.path.getsize(full_filename)
+        file_size = os.path.getsize(source)
     except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
-        logger.error(f"{full_filename}: Error determining file size. Error" f" {catch_all_exceptiion}")
+        logger.error(f"{source}: Error determining file size. Error" f" {catch_all_exceptiion}")
         return False
 
     # Build final command line
@@ -36,14 +34,13 @@ def archive_file_rsync(
     cmdline = (
         "rsync --no-compress -e 'ssh -T -c aes128-cbc -o"
         " StrictHostKeyChecking=no -o Compression=no -x ' "
-        f"-r {full_filename} {archive_destination_host}:"
-        f"{archive_destination_path}"
+        f"-r {source} {destination}"
     )
 
     start_time = time.time()
 
-    # run xrdcp
-    return_val, stdout = run_command_ext(logger, cmdline, archive_numa_node, timeout, False)
+    # run rsync
+    return_val, stdout = run_command_ext(logger, cmdline, None, timeout, False)
 
     if return_val:
         elapsed = time.time() - start_time
@@ -52,13 +49,13 @@ def archive_file_rsync(
         gbps_per_sec = (size_gigabytes * 8) / elapsed
 
         logger.info(
-            f"{full_filename} archive_file_rsync success"
+            f"{source} copy_file_rsync success"
             f" ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at"
             f" {gbps_per_sec:.3f} Gbps)"
         )
         return True
     else:
-        logger.error(f"{full_filename} archive_file_rsync failed. Error {stdout}")
+        logger.error(f"{source} copy_file_rsync failed. Error {stdout}")
         return False
 
 

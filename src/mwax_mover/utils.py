@@ -1020,7 +1020,7 @@ def get_data_files_for_obsid_from_webservice(
     of all the data_files (MWAX_VISIBILITIES or HW_LFILES) of the given filetype or None if there was an error.
     metadata_webservice_url is the base url - e.g. http://ws.mwatelescope.org
     - all_files: True means to get all files whether they are archived at Pawsey or not"""
-    urls = ["http://mro.mwa128t.org/metadata/data_files", "http://mro.mwa128t.org/metadata/data_files"]
+    urls = ["http://mro.mwa128t.org/metadata/data_files", "http://ws.mwatelescope.org/metadata/data_files"]
     data = {"obs_id": obs_id, "terse": False, "all_files": True}
 
     # On failure of all urls and retries it will raise an exception
@@ -1029,6 +1029,33 @@ def get_data_files_for_obsid_from_webservice(
     files = json.loads(result.text)
     file_list = [
         file
+        for file in files
+        if files[file]["filetype"] == MWADataFileType.MWAX_VISIBILITIES.value
+        or files[file]["filetype"] == MWADataFileType.HW_LFILES.value
+    ]
+    file_list.sort()
+    return file_list
+
+
+def get_data_files_with_hostname_for_obsid_from_webservice(
+    logger,
+    obs_id: int,
+) -> list[tuple[str, str]]:
+    """Calls an MWA webservice, passing in an obsid and returning a list of tuples of filenames and hostnames
+    of all the data_files (MWAX_VISIBILITIES or HW_LFILES) of the given filetype or None if there was an error.
+    metadata_webservice_url is the base url - e.g. http://ws.mwatelescope.org
+    - all_files: True means to get all files whether they are archived at Pawsey or not
+
+    each tuple is [filename, hostname]"""
+    urls = ["http://mro.mwa128t.org/metadata/data_files", "http://ws.mwatelescope.org/metadata/data_files"]
+    data = {"obs_id": obs_id, "terse": False, "all_files": True}
+
+    # On failure of all urls and retries it will raise an exception
+    result = call_webservice(logger, obs_id, urls, data)
+
+    files = json.loads(result.text)
+    file_list = [
+        (file, files[file]["host"])
         for file in files
         if files[file]["filetype"] == MWADataFileType.MWAX_VISIBILITIES.value
         or files[file]["filetype"] == MWADataFileType.HW_LFILES.value
@@ -1064,3 +1091,12 @@ def get_gpstime_of_datetime(date_time: datetime.datetime) -> int:
 # Return the GPS seconds as an integer of Now
 def get_gpstime_of_now() -> int:
     return get_gpstime_of_datetime(datetime.datetime.now(datetime.timezone.utc))
+
+
+def is_int(value) -> bool:
+    try:
+        int(value)
+    except ValueError:
+        return False
+    else:
+        return True

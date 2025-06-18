@@ -21,7 +21,6 @@ calibration form the calvin HPC cluster
 
 import argparse
 from configparser import ConfigParser
-from datetime import datetime
 import json
 import logging
 import os
@@ -37,7 +36,7 @@ from mwax_mover import (
     mwax_queue_worker,
     mwax_db,
 )
-from mwax_mover.mwax_command import run_command_ext
+from mwax_mover.mwax_calvin_utils import submit_sbatch, create_sbatch_script, CalvinJobType
 
 
 class MWAXCalvinController:
@@ -69,7 +68,6 @@ class MWAXCalvinController:
 
         # Queues
         self.realtime_queue: queue.Queue = queue.Queue()
-        self.asvo_queue: queue.Queue = queue.Queue()
 
         # SBatch stuff
         self.script_path = ""
@@ -94,25 +92,12 @@ class MWAXCalvinController:
         # Create queueworker for the realtime queue
         self.logger.info("Creating workers...")
         new_worker = mwax_queue_worker.QueueWorker(
-            name="incoming_realtime_worker",
+            name="realtime_worker",
             source_queue=self.realtime_queue,
             executable_path=None,
             event_handler=self.realtime_handler,
             log=self.logger,
             requeue_to_eoq_on_failure=True,
-            exit_once_queue_empty=False,
-            requeue_on_error=True,
-        )
-        self.queue_workers.append(new_worker)
-
-        # Create a queueworker for the MWA ASVO queue
-        new_worker = mwax_queue_worker.QueueWorker(
-            name="asvo_worker",
-            source_queue=self.asvo_queue,
-            executable_path=None,
-            event_handler=self.asvo_handler,
-            log=self.logger,
-            requeue_to_eoq_on_failure=False,
             exit_once_queue_empty=False,
             requeue_on_error=True,
         )
@@ -154,88 +139,14 @@ class MWAXCalvinController:
         # Has to return True/False as it is a handler
 
         # Takes an item off the queue and actions it
-        script = self.create_realtime_calvin_sbatch_script(obs_id)
+        script = create_sbatch_script(obs_id, CalvinJobType.realtime, self.log_path, "")
 
         # submit sbatch script
         try:
-            self.submit_sbatch(self.script_path, script, obs_id)
+            submit_sbatch(self.logger, self.script_path, script, obs_id)
             return True
-        except:
+        except Exception:
             self.logger.exception(f"{item}: Unable to submit a realtime calibration sbatch job")
-            return False
-
-    def asvo_handler(self, item) -> bool:
-        # item is an obsid
-        obs_id: int = int(item)
-
-        # Has to return True/False as it is a handler
-
-        # Takes an item off the queue and actions it
-        script = self.create_asvo_calvin_sbatch_script(obs_id)
-
-        # submit sbatch script
-        try:
-            self.submit_sbatch(self.script_path, script, obs_id)
-            return True
-        except:
-            self.logger.exception(f"{item}: Unable to submit an MWA ASVO calibration sbatch job")
-            return False
-
-    def create_realtime_calvin_sbatch_script(self, obs_id: int) -> str:
-        return self.create_sbatch_script(obs_id, "realtime")
-
-    def create_asvo_calvin_sbatch_script(self, obs_id: int) -> str:
-        return self.create_sbatch_script(obs_id, "asvo")
-
-    def create_sbatch_script(self, obs_id: int, jobtype: str) -> str:
-        job_script = f"""
-            #!/bin/bash
-            #SBATCH --partition=gpu
-            #SBATCH --nodes=1
-            #SBATCH --cpus-per-task=90
-            #SBATCH --ntasks=1
-            #SBATCH --gpus-per-task=1
-            #SBATCH --exclusive # use all cpus
-            #SBATCH --mem=900G
-            #SBATCH --time=02:00:00
-            #SBATCH --account=mwa
-            #SBATCH --job-name=rt-{obs_id}
-            #SBATCH --signal=TERM@60
-            #SBATCH --output={self.log_path}/$SLURM_JOB_ID.out
-            #SBATCH --output={self.log_path}/$SLURM_JOB_ID.err
-            #SBATCH --open-mode=append
-            #SBATCH --parsable
-            echo "Starting Calvin {jobtype} Job: $SLURM_JOB_ID";
-
-            # Make a data directory
-            mkdir /data/$SLURM_JOB_ID
-
-            # Process
-            srun --nodes=1 --ntasks=1 --cpus-per-task=90 /home/mwa/.pyenv/versions/mwax_mover/calvin_processor {jobtype} --obs-id={obs_id} --slurm-id=$SLURM_JOB_ID
-
-            exit $?
-            """
-
-        return job_script
-
-    def submit_sbatch(self, script_path: str, script: str, obs_id: int):
-        # Submits the provided sbatch script to SLURM
-        # Raises exceptions on error
-        script_filename: str = os.path.join(script_path, datetime.now().strftime(f"%Y%m%d-%H%M%S-{obs_id}.sh"))
-        cmdline = f"sbatch {script_filename}"
-
-        # Create an sbatch file
-        with open(script_filename, "w") as job_script:
-            job_script.write(script)
-
-        # Submit the job
-        return_val, stdout = run_command_ext(self.logger, cmdline, None, 60, False)
-
-        if return_val:
-            self.logger.info(f"{script_filename} successfully submitted to Slurm. Stdout: {stdout}")
-            return True
-        else:
-            self.logger.error(f"{script_filename} failed to be submitted to SLURM. Error" f" {stdout}")
             return False
 
     def stop(self):
@@ -291,7 +202,6 @@ class MWAXCalvinController:
             "host": self.hostname,
             "running": self.running,
             "realtime_queue": self.realtime_queue.qsize(),
-            "asvo_queue": self.asvo_queue.qsize(),
         }
 
         status = {"main": main_status}
@@ -401,7 +311,7 @@ class MWAXCalvinController:
         parser.description = (
             "mwax_calvin_controller: a command line tool which is part of the "
             "MWA correlator for the MWA. It will submit SBATCH jobs as needed "
-            "to process real time and MWA ASVO calibration jobs."
+            "to process real time calibration jobs."
             f"(mwax_mover v{version.get_mwax_mover_version_string()})\n"
         )
 

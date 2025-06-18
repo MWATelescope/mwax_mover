@@ -1,6 +1,6 @@
 """
 Module hosting the MWAXCalvinDownloadProcessor to
-download any unprocessed MWA calibration solution
+handle any unprocessed MWA calibration solution
 requests
 """
 
@@ -10,7 +10,6 @@ import coloredlogs
 from configparser import ConfigParser
 import json
 import logging
-import logging.handlers
 import os
 import signal
 import sys
@@ -18,12 +17,16 @@ import threading
 from typing import Optional
 import time
 from mwax_mover import version, mwax_db, utils, mwax_asvo_helper
+from mwax_mover.mwax_calvin_utils import submit_sbatch, create_sbatch_script, CalvinJobType
 
 SLEEP_MWA_ASVO_OUTAGE_SECS = 2 * 60
 
 
 class MWAXCalvinDownloadProcessor:
-    """The main class processing calibration solution requests and downloading data"""
+    """The main class handling calibration solution requests and
+    submitting MWA ASVO jobs to downloading data. NOTE: no downloading
+    is done in this code. It is handled by CalvinProcessor as it will
+    be running on HPC nodes"""
 
     def __init__(
         self,
@@ -43,13 +46,14 @@ class MWAXCalvinDownloadProcessor:
         self.health_multicast_hops: int = 1
 
         # mwa asvo
-        self.download_path: str = ""
         self.check_interval_seconds: int = 0
         self.mwa_asvo_longest_wait_time_seconds: int = 0
         self.giant_squid_binary_path: str = ""
         self.giant_squid_list_timeout_seconds: int = 0
         self.giant_squid_submitvis_timeout_seconds: int = 0
-        self.giant_squid_download_timeout_seconds: int = 0
+
+        # SBatch stuff
+        self.script_path = ""
 
         # Helper for MWA ASVO interactions and job record keeping
         self.mwax_asvo_helper: mwax_asvo_helper.MWAASVOHelper = mwax_asvo_helper.MWAASVOHelper()
@@ -72,7 +76,9 @@ class MWAXCalvinDownloadProcessor:
         # Check if we have this obs_id tracked
         asvo_job = self.mwax_asvo_helper.get_first_job_for_obs_id(obs_id)
 
-        if asvo_job:
+        # If this obs exists in another job AND we have not yet submitted it to slurm
+        # Then just add this request onto the existing job
+        if asvo_job and not asvo_job.download_slurm_job_submitted:
             # Found!
             asvo_job.request_ids.append(request_id)
 
@@ -87,29 +93,6 @@ class MWAXCalvinDownloadProcessor:
                 asvo_job.submitted_datetime,
                 asvo_job.job_id,
             )
-
-            # has the download started?
-            if asvo_job.download_started_datetime:
-                mwax_db.update_calsolution_request_download_started_status(
-                    self.db_handler_object,
-                    [
-                        request_id,
-                    ],
-                    asvo_job.download_started_datetime,
-                )
-
-            # Has the download completed yet?
-            if asvo_job.download_completed:
-                # Update the databse then (this job already completed, so just update this row)
-                mwax_db.update_calsolution_request_download_complete_status(
-                    self.db_handler_object,
-                    [
-                        request_id,
-                    ],
-                    asvo_job.download_completed_datetime,
-                    asvo_job.download_error_datetime,
-                    asvo_job.download_error_message,
-                )
         else:
             # Not found
             try:
@@ -151,7 +134,7 @@ class MWAXCalvinDownloadProcessor:
     def main_loop_handler(self):
         self.get_new_requests()
         self.update_all_tracked_jobs()
-        self.download_ready_mwa_asvo_jobs()
+        self.submit_slurm_for_ready_mwa_asvo_jobs()
         pass
 
     def get_new_requests(self):
@@ -202,23 +185,20 @@ class MWAXCalvinDownloadProcessor:
                 self.running = False
                 self.stop()
 
-    def download_ready_mwa_asvo_jobs(self):
-        """This code will check for any jobs which can be downloaded and start
-        downloading them"""
-        DOWNLOAD_RETRIES: int = 3
-
+    def submit_slurm_for_ready_mwa_asvo_jobs(self):
+        """This code will check for any jobs which can be downloaded and submit
+        sbatch script to SLURM for them to be handled/downloaded/processed by
+        the calvin processor"""
         error_message: str = ""
 
         if self.running:
             for job in self.mwax_asvo_helper.current_asvo_jobs:
-                # Check job is in Ready state and download is not already completed or in progress
-                if not (job.download_completed or job.download_in_progress):
+                if not job.download_slurm_job_submitted:
                     if job.job_state == mwax_asvo_helper.MWAASVOJobState.Error:
                         # MWA ASVO completed this job with error
                         error_message = "MWA ASVO completed this job with an Error state"
                         self.logger.warning(f"{job}: {error_message}")
 
-                        job.download_completed = True
                         job.download_error_datetime = datetime.datetime.now()
                         job.download_error_message = error_message
 
@@ -233,90 +213,26 @@ class MWAXCalvinDownloadProcessor:
 
                     elif job.job_state == mwax_asvo_helper.MWAASVOJobState.Ready:
                         try:
-                            self.logger.info(
-                                f"{job}: Attempting to download (attempt: "
-                                f"{job.download_retries + 1}/{DOWNLOAD_RETRIES})"
+                            self.logger.info(f"{job}: Submitting slurm job")
+
+                            script = create_sbatch_script(
+                                self.config_filename,
+                                job.obs_id,
+                                CalvinJobType.mwa_asvo,
+                                self.log_path,
+                                f"--mwa-asvo-download-url={job.download_url}",
                             )
 
-                            job.download_started_datetime = datetime.datetime.now()
-                            # Update database
-                            mwax_db.update_calsolution_request_download_started_status(
-                                self.db_handler_object, job.request_ids, job.download_started_datetime
-                            )
+                            # submit sbatch script
+                            submit_sbatch(self.logger, self.script_path, script, job.obs_id)
 
-                            # Download the data (blocks until data is downloaded or exception fired)
-                            self.mwax_asvo_helper.download_asvo_job(job)
+                            # all is good- remove job from current jobs to be checked
+                            job.download_slurm_job_submitted = True
+                            job.download_slurm_job_submitted_datetime = datetime.datetime.now()
 
-                            # Downloaded ok!
-                            self.logger.info(f"{job}: downloaded successfully.")
-
-                            # Update database
-                            mwax_db.update_calsolution_request_download_complete_status(
-                                self.db_handler_object, job.request_ids, job.download_completed_datetime, None, None
-                            )
-
-                        except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
-                            # Handle me!
-                            self.logger.info(
-                                "MWA ASVO has an outage. Doing nothing this loop, and "
-                                f"sleeping for {str(SLEEP_MWA_ASVO_OUTAGE_SECS)} seconds."
-                            )
-                            self.sleep(SLEEP_MWA_ASVO_OUTAGE_SECS)
-                            return
-
-                        except Exception as e:
+                        except Exception:
                             # Something went wrong!
-                            self.logger.exception(f"{job}: Error downloading Job.")
-                            error_message = f"{job}: Error downloading Job: {str(e)}"
-
-                        # If not successful, it should retry in the next "handle_mwa_asvo_jobs loop"
-                        if not job.download_completed:
-                            # Download failed, increment retries counter
-                            job.download_retries += 1
-
-                            # Check if we've had too many retries
-                            if job.download_retries > DOWNLOAD_RETRIES:
-                                self.logger.error(
-                                    f"{job}: Fatal exception- too many retries {DOWNLOAD_RETRIES} "
-                                    "when trying to download. Exiting!"
-                                )
-
-                                # Update database
-                                job.download_error_datetime = datetime.datetime.now()
-                                job.download_error_message = error_message + f"-(too many retries {DOWNLOAD_RETRIES})"
-
-                                mwax_db.update_calsolution_request_download_complete_status(
-                                    self.db_handler_object,
-                                    job.request_ids,
-                                    None,
-                                    job.download_error_datetime,
-                                    job.download_error_message,
-                                )
-
-    def resume_in_progress_jobs(self):
-        self.logger.info("Checking for any in progress jobs to resume...")
-        results = mwax_db.get_this_hosts_previously_started_download_requests(self.db_handler_object, self.hostname)
-
-        if len(results) > 0:
-            self.logger.info(f"{len(results)} in progress jobs found. Adding them to internal queue...")
-            for row in results:
-                request_id = int(row["id"])
-                obs_id = int(row["cal_id"])
-                job_submitted_datetime = row["download_mwa_asvo_job_submitted_datetime"]
-                job_id = row["download_mwa_asvo_job_id"]
-
-                # If the job has already been submitted to ASVO, try and carry on
-                if job_submitted_datetime:
-                    new_job = mwax_asvo_helper.MWAASVOJob(request_id, obs_id, int(job_id))
-                    new_job.submitted_datetime = job_submitted_datetime
-                    self.mwax_asvo_helper.current_asvo_jobs.append(new_job)
-                    self.logger.info(f"Added already submitted {new_job}")
-                else:
-                    # if not submitted to ASVO, do that now!
-                    self.logger.info(f"Adding and submitting RequestID {request_id} for ObsID {obs_id}")
-                    self.add_new_job(request_id, obs_id)
-        else:
-            self.logger.info("No in progress jobs found.")
+                            self.logger.exception(f"{job}: Error submitting sbtach to SLURM.")
 
     def start(self):
         """Start the processor"""
@@ -333,16 +249,13 @@ class MWAXCalvinDownloadProcessor:
 
         self.logger.info("Started...")
 
-        # Check for any in progress jobs and resume them
-        self.resume_in_progress_jobs()
-
         # Main loop
         while self.running:
             self.main_loop_handler()
 
             self.logger.debug("Currently tracking jobs:")
             for job in self.mwax_asvo_helper.current_asvo_jobs:
-                if not job.download_completed:
+                if not (job.download_slurm_job_submitted or job.download_error_datetime):
                     self.logger.debug(
                         f"{job} {job.job_state}; "
                         f"elapsed: {job.elapsed_time_seconds()} s; "
@@ -351,11 +264,10 @@ class MWAXCalvinDownloadProcessor:
 
             self.logger.debug("History of completed jobs:")
             for job in self.mwax_asvo_helper.current_asvo_jobs:
-                if job.download_completed:
-                    if job.download_completed_datetime:
-                        self.logger.debug(f"{job} succeeded: {job.download_completed_datetime} ")
-                    else:
-                        self.logger.debug(f"{job} failed: {job.download_error_datetime} {job.download_error_message}")
+                if job.download_slurm_job_submitted:
+                    self.logger.debug(f"{job} succeeded: {job.download_slurm_job_submitted_datetime} ")
+                elif job.download_error_datetime:
+                    self.logger.debug(f"{job} failed: {job.download_error_datetime} {job.download_error_message}")
 
             self.logger.debug(f"Sleeping for {self.check_interval_seconds} seconds")
             self.sleep(self.check_interval_seconds)
@@ -429,8 +341,10 @@ class MWAXCalvinDownloadProcessor:
         # Stop any Processors
         self.stop()
 
-    def initialise(self, config_filename):
+    def initialise(self, config_filename: str):
         """Initialise the processor from the command line"""
+        self.config_filename = config_filename
+
         # Get this hosts hostname
         self.hostname = utils.get_hostname()
 
@@ -518,18 +432,6 @@ class MWAXCalvinDownloadProcessor:
         # MWA ASVO config
         #
 
-        # Get the incoming dir
-        self.download_path = utils.read_config(
-            self.logger,
-            config,
-            "mwa_asvo",
-            "download_path",
-        )
-
-        if not os.path.exists(self.download_path):
-            self.logger.error("download_path location " f" {self.download_path} does not exist. Quitting.")
-            sys.exit(1)
-
         # How long between iterations of the main loop (in seconds)
         self.check_interval_seconds = int(utils.read_config(self.logger, config, "mwa_asvo", "check_interval_seconds"))
 
@@ -562,19 +464,21 @@ class MWAXCalvinDownloadProcessor:
             utils.read_config(self.logger, config, "mwa_asvo", "giant_squid_submitvis_timeout_seconds")
         )
 
-        # How long do we wait for giant-squid to execute a download subcommand
-        self.giant_squid_download_timeout_seconds = int(
-            utils.read_config(self.logger, config, "mwa_asvo", "giant_squid_download_timeout_seconds")
-        )
+        # script path (path for keeping all sbatch scripts)
+        self.script_path = config.get("mwax mover", "script_path")
+
+        if not os.path.exists(self.script_path):
+            print(f"script_path {self.script_path} does not exist. Quiting.")
+            sys.exit(1)
 
         # Setup the MWA ASVO Helper
+        # Note dummy values for download timeout and download path as in this
+        # use of the helper, we don't do any downloading!
         self.mwax_asvo_helper.initialise(
             self.logger,
             self.giant_squid_binary_path,
             self.giant_squid_list_timeout_seconds,
             self.giant_squid_submitvis_timeout_seconds,
-            self.giant_squid_download_timeout_seconds,
-            self.download_path,
         )
 
     def initialise_from_command_line(self):
@@ -586,7 +490,8 @@ class MWAXCalvinDownloadProcessor:
             "mwax_calvin_download_processor: a command line tool which is part of the"
             " MWA calvin calibration service for the MWA. It checks for unprocessed records in"
             " the calibration_requests table, submits and manages an MWA ASVO job for"
-            " each, then once ready, downloads the data for the calvin_processor to"
+            " each, then once ready, submits a slurm job for the data to be downloaded and "
+            "processed by the calvin_processor on a hpc node"
             f" calibrate. (mwax_mover v{version.get_mwax_mover_version_string()})\n"
         )
 

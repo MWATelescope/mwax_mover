@@ -2,11 +2,13 @@
 
 import datetime
 import glob
+import logging
 import os
 import shutil
 import time
 import traceback
 import numpy as np
+from enum import Enum
 from astropy.io import fits
 from astropy import units as u
 from astropy.constants import c
@@ -29,6 +31,13 @@ from typing import NamedTuple, List, Tuple, Dict, Optional  # noqa: F401
 
 # from nptyping import NDArray, Shape
 import sys
+
+
+class CalvinJobType(Enum):
+    """Calvin Job Type"""
+
+    realtime = "realtime"
+    mwa_asvo = "mwa_asvo"
 
 
 class Tile(NamedTuple):
@@ -1861,3 +1870,73 @@ def process_gain_fits(
     logger.warning("TODO: fake gain fits!")
 
     return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *GainFitInfo._fields])
+
+
+def create_sbatch_script(
+    config_file_path: str, obs_id: int, jobtype: CalvinJobType, log_path: str, processor_args: str
+) -> str:
+    # log_path is the global log path e.g. /home/mwa/logs
+    # processor_args is to allow the caller to add extra processor cmd line args.
+    # E.g. MWA ASVO requires --mwa-asvo-download-url=URL
+    #
+    if jobtype == CalvinJobType.realtime:
+        job_name = f"real{obs_id}"
+    else:
+        job_name = f"asvo{obs_id}"
+
+    job_script = f"""
+        #!/bin/bash
+        #SBATCH --partition=gpu
+        #SBATCH --nodes=1
+        #SBATCH --cpus-per-task=90
+        #SBATCH --ntasks=1
+        #SBATCH --gpus-per-task=1
+        #SBATCH --exclusive # use all cpus
+        #SBATCH --mem=900G
+        #SBATCH --time=03:00:00
+        #SBATCH --account=mwa
+        #SBATCH --job-name={job_name}
+        #SBATCH --signal=TERM@60
+        #SBATCH --output={log_path}/$SLURM_JOB_ID.out
+        #SBATCH --error={log_path}/$SLURM_JOB_ID.err
+        #SBATCH --open-mode=append
+        #SBATCH --parsable
+        echo "Starting Calvin {jobtype} Job: $SLURM_JOB_ID";
+
+        # Make a data directory
+        mkdir -p /data/$SLURM_JOB_ID
+
+        # Process
+        srun --nodes=1 --ntasks=1 --cpus-per-task=90 \
+            /home/mwa/.pyenv/versions/mwax_mover/calvin_processor \
+            --cfg={config_file_path}
+            --job-type={jobtype.value} \
+            --obs-id={obs_id} \
+            --slurm-job-id=$SLURM_JOB_ID \
+            {processor_args}
+
+        exit $?
+        """
+
+    return job_script
+
+
+def submit_sbatch(logger: logging.Logger, script_path: str, script: str, obs_id: int):
+    # Submits the provided sbatch script to SLURM
+    # Raises exceptions on error
+    script_filename: str = os.path.join(script_path, datetime.datetime.now().strftime(f"%Y%m%d-%H%M%S-{obs_id}.sh"))
+    cmdline = f"sbatch {script_filename}"
+
+    # Create an sbatch file
+    with open(script_filename, "w") as job_script:
+        job_script.write(script)
+
+    # Submit the job
+    return_val, stdout = run_command_ext(logger, cmdline, None, 60, False)
+
+    if return_val:
+        logger.info(f"{script_filename} successfully submitted to Slurm. Stdout: {stdout}")
+        return True
+    else:
+        logger.error(f"{script_filename} failed to be submitted to SLURM. Error" f" {stdout}")
+        return False

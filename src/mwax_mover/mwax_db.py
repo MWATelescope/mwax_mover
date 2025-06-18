@@ -611,42 +611,6 @@ def insert_calibration_solutions_row(
         return False
 
 
-def get_this_hosts_previously_started_download_requests(db_handler_object: MWAXDBHandler, hostname: str):
-    """Returns a list of any incomplete jobs assigned to this host (only up to the download step).
-    Maybe we crashed - so we need to pickup from where we left off!
-
-    Columns: id, cal_id, download_mwa_asvo_job_submitted_datetime, download_mwa_asvo_job_id
-    """
-
-    sql = """
-    SELECT c.id, c.cal_id, c.download_mwa_asvo_job_submitted_datetime, c.download_mwa_asvo_job_id
-    FROM public.calibration_request c
-    WHERE
-    (
-        c.assigned_hostname = %s AND
-        (
-            c.download_completed_datetime IS NULL
-            AND c.download_error_datetime IS NULL
-        )
-    )
-    ORDER BY c.request_added_datetime;
-    """
-
-    try:
-        return db_handler_object.select_many_rows_postgres(
-            sql,
-            [
-                hostname,
-            ],
-        )
-
-    except Exception:
-        db_handler_object.logger.exception(
-            f"get_this_hosts_previously_started_requests() error " f" . SQL was {sql} Values {hostname}"
-        )
-        raise
-
-
 def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str) -> Tuple[int, int] | None:
     """Assigns then returns the deatils of the next oldest unattempted calibration_request.
 
@@ -663,39 +627,8 @@ def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str
     FROM public.calibration_request c
     WHERE
     (
-        (
-            -- Anything unassigned
-            c.assigned_hostname IS NULL -- not attempted at all
-        )
-        OR
-        (
-            -- Assigned to me but not completed
-            -- Don't worry we check with our existing list (in code)
-            -- so we don't re-re try the job!
-            c.assigned_hostname = %s
-            AND c.download_completed_datetime IS NULL
-            AND c.download_error_datetime IS NULL
-        )
+        c.download_mwa_asvo_job_submitted_datetime IS NULL
     )
-    AND NOT EXISTS
-    -- Check if the SAME calid is in progress on another host if so ignore!
-    (
-        SELECT 1
-        FROM public.calibration_request q
-        WHERE
-        q.cal_id = c.cal_id
-        AND q.assigned_hostname <> %s
-        AND
-        (
-                q.download_completed_datetime IS NULL
-            AND q.download_error_datetime IS NULL
-            AND q.calibration_completed_datetime IS NULL
-            AND q.calibration_error_datetime IS NULL
-        )
-    )
-    -- The for update clause locks the selected rows
-    -- so we don't have a race condition where two or
-    -- more calvins grab the same job
     ORDER BY c.request_added_datetime LIMIT 1"""
 
     sql_update = """
@@ -715,10 +648,7 @@ def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str
                     # Get the next request, if any
                     results_rows = db_handler_object.select_postgres_within_transaction(
                         sql_get,
-                        parm_list=[
-                            hostname,
-                            hostname,
-                        ],
+                        parm_list=[],
                         expected_rows=None,
                         transaction_cursor=cursor,
                     )

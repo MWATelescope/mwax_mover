@@ -5,7 +5,6 @@ import datetime
 from enum import Enum
 import json
 import logging
-import os
 import re
 import time
 from typing import List, Optional
@@ -61,15 +60,12 @@ class MWAASVOJob:
         self.job_id = job_id
         self.job_state = MWAASVOJobState.Unknown
         self.submitted_datetime: datetime.datetime
-        self.last_seen_datetime: Optional[datetime.datetime] = None
-        self.download_url: Optional[str] = None
-        self.download_started_datetime: Optional[datetime.datetime] = None
-        self.download_in_progress: bool = False
-        self.download_completed: bool = False
-        self.download_completed_datetime: Optional[datetime.datetime] = None
         self.download_error_datetime: Optional[datetime.datetime] = None
         self.download_error_message: Optional[str] = None
-        self.download_retries: int = 0
+        self.last_seen_datetime: Optional[datetime.datetime] = None
+        self.download_url: Optional[str] = None
+        self.download_slurm_job_submitted: bool = False
+        self.download_slurm_job_submitted_datetime: Optional[datetime.datetime] = None
 
     def __str__(self):
         return f"JobID: {self.job_id}; ObsID: {self.obs_id}"
@@ -89,23 +85,15 @@ class MWAASVOJob:
             "job_id": str(self.job_id),
             "obs_id": str(self.obs_id),
             "state": str(self.job_state.value),
-            "submitted": self.submitted_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.submitted_datetime else "",
+            "MWA ASVO Job submitted": (
+                self.submitted_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.submitted_datetime else ""
+            ),
             "last_seen": self.last_seen_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.last_seen_datetime else "",
-            "download_started": (
-                self.download_started_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.download_started_datetime else ""
+            "download_slurm_job_submitted_datetime": (
+                self.download_slurm_job_submitted_datetime if self.download_slurm_job_submitted else ""
             ),
-            "download_in_progress": self.download_in_progress,
-            "download_completed": self.download_completed,
-            "download_completed_datetime": (
-                self.download_completed_datetime.strftime("%Y-%m-%d %H:%M:%S")
-                if self.download_completed_datetime
-                else ""
-            ),
-            "download_error_datetime": (
-                self.download_error_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.download_error_datetime else ""
-            ),
-            "download_error_message": self.download_error_message if self.download_error_message else "",
-            "download_retries": self.download_retries,
+            "download_error_datetime": (self.download_error_datetime if self.download_error_datetime else ""),
+            "download_error_message": (self.download_error_message if self.download_error_message else ""),
             "request_ids": " ,".join(str(r) for r in self.request_ids),
         }
 
@@ -129,13 +117,6 @@ class MWAASVOHelper:
         # How many seconds do we wait when executing giant-squid submit-vis
         self.giant_squid_submitvis_timeout_seconds: int = 0
 
-        # How many seconds do we wait when executing giant-squid download
-        self.giant_squid_download_timeout_seconds: int = 0
-
-        # Where do we tell giant-squid to download data to?
-        # Probably the incoming directory of the calvin_processor
-        self.download_path: str = ""
-
         # List of Jobs and obs_ids the helper is keeping track of
         self.current_asvo_jobs: List[MWAASVOJob] = []
 
@@ -145,16 +126,12 @@ class MWAASVOHelper:
         path_to_giant_squid_binary: str,
         giant_squid_list_timeout_seconds: int,
         giant_squid_submitvis_timeout_seconds: int,
-        giant_squid_download_timeout_seconds: int,
-        download_path: str,
     ):
         # Set class variables
         self.logger = logger
         self.path_to_giant_squid_binary = path_to_giant_squid_binary
         self.giant_squid_list_timeout_seconds = giant_squid_list_timeout_seconds
         self.giant_squid_submitvis_timeout_seconds = giant_squid_submitvis_timeout_seconds
-        self.giant_squid_download_timeout_seconds = giant_squid_download_timeout_seconds
-        self.download_path = download_path
 
     def get_first_job_for_obs_id(self, obs_id: int) -> MWAASVOJob | None:
         """Get the first MWAASVOJob object found in current_asvo_jobs, matching on obs_id.
@@ -341,38 +318,6 @@ class MWAASVOHelper:
                 raise GiantSquidException(
                     f"_run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. Error: {stdout}"
                 )
-
-    def download_asvo_job(self, job: MWAASVOJob):
-        """Download the data product for the given job.
-        This method checks the job is in the right state
-        and that the download path exists and raises exceptions
-        on error"""
-        if job.job_state == MWAASVOJobState.Ready:
-            if not job.download_in_progress and not job.download_completed:
-                if os.path.exists(self.download_path):
-                    self.download_in_progress = True
-
-                    try:
-                        # no except block in this "try" because will want
-                        # to re-raise any exception to the caller
-                        stdout = self._run_giant_squid(
-                            "download",
-                            f"--download-dir={self.download_path} {job.job_id}",
-                            self.giant_squid_download_timeout_seconds,
-                        )
-
-                        stdout = stdout.replace("\n", " ")
-                        self.logger.info(f"{job} Successfully downloaded: {stdout}")
-
-                        job.download_completed = True
-                        job.download_completed_datetime = datetime.datetime.now(datetime.timezone.utc)
-                    finally:
-                        job.download_in_progress = False
-
-                else:
-                    raise Exception(f"{job.obs_id} Error: Download path {self.download_path} does not exist")
-        else:
-            raise Exception(f"{job.obs_id} Error: JobID {job.job_id} is not ready for download State={job.job_state}")
 
 
 def get_job_id_from_giant_squid_stdout(stdout: str) -> int:
