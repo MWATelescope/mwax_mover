@@ -611,79 +611,126 @@ def insert_calibration_solutions_row(
         return False
 
 
-def assign_next_unattempted_calsolution_request(db_handler_object, hostname: str) -> Tuple[int, int] | None:
-    """Assigns then returns the deatils of the next oldest unattempted calibration_request.
+def get_unattempted_calsolution_requests(db_handler_object: MWAXDBHandler) -> list[Tuple[int, int, bool]] | None:
+    """Returns the deatils of the next oldest unattempted calibration_requests.
 
     Parameters:
             db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
             hostname (str): The name of the current host so we can specify who is working on this request
 
     Returns:
-            Tuple(request_id, cal_id) OR None if none found. Raises exceptions on error
+            list of Tuple(request_id, cal_id, realtime) OR None if none found. Raises exceptions on error
     """
 
+    # How this works!
+    # For realtime jobs:
+    # * M&C will insert a row (with realtime=TRUE)
+    # * calvin_controller calls this function from the main loop to get new unattempted requests
+    # * The below SELECT will grab the new realtime calibration request row
+    # * calvin_controller will:
+    #   * try to submit slurm job
+    #     * on success, update row with slurm_job_id, slurm_hostname and slurm_job_submitted_datetime
+    #       * from that point the job is in the hands of the calvin_processor.
+    #     * on failure (e.g. slurm down), do nothing, but try again, it will be picked up in the next loop
+    #
+    # For mwa_asvo jobs:
+    # * M&C will insert a row (with realtime=FALSE) based on an ASVO calibration request
+    # * calvin_controller calls this function from the main loop to get new unattempted requests
+    # * The below SELECT will grab the new mwa_asvo calibration request row
+    # * calvin_controller will:
+    #   * try to submit mwa_asvo job via Giant squid
+    #     * on success, update row with download_mwa_asvo_job_submitted_datetime, download_mwa_asvo_job_id
+    #     * on failure, e.g. MWA ASVO in maintenance, do nothing, but try again, it will be picked up in the next loop
+    #   * keep checking via giant-squid the job status
+    #     * on "ready/complete", go to next step (submit slurm job passing the download URL)
+    #     * on "error" update request with download_error_datetime and download_error_message
+    #   * try to submit slurm job
+    #     * on success, update row with slurm_job_id, slurm_hostname and slurm_job_submitted_datetime
+    #       * from that point the job is in the hands of the calvin_processor.
+    #     * on failure, do nothing, but try again in the next loop
+
     sql_get = """
-    SELECT c.id, c.cal_id
+    SELECT c.id as request_id, c.cal_id as obs_id, c.realtime
     FROM public.calibration_request c
     WHERE
+    -- Not yet submitted to slurm
+    c.slurm_job_id IS NULL AND
     (
-        c.download_mwa_asvo_job_submitted_datetime IS NULL
+        (
+            -- MWA ASVO case
+            c.realtime IS FALSE
+            -- Next 2 clauses prevent old calvin2 rows from being picked up!
+            AND c.download_completed_datetime IS NULL
+            AND c.download_error_datetime IS NULL
+        )
+        OR
+        (
+            -- realtime case
+            c.realtime IS TRUE
+        )
     )
-    ORDER BY c.request_added_datetime LIMIT 1"""
+    ORDER BY c.request_added_datetime"""
 
-    sql_update = """
-    UPDATE public.calibration_request
-    SET
-        assigned_datetime = Now(),
-        assigned_hostname = %s
-    WHERE
-    id = %s"""
+    return_list: list[Tuple[int, int, bool]] = []
 
     try:
         # get the connection
         with db_handler_object.pool.connection() as conn:
-            with conn.transaction():
-                # Create a cursor
-                with conn.cursor() as cursor:
-                    # Get the next request, if any
-                    results_rows = db_handler_object.select_postgres_within_transaction(
-                        sql_get,
-                        parm_list=[],
-                        expected_rows=None,
-                        transaction_cursor=cursor,
-                    )
+            # Create a cursor
+            with conn.cursor() as cursor:
+                # Get the next request, if any
+                results_rows = db_handler_object.select_many_rows_postgres(
+                    sql_get,
+                    parm_list=[],
+                )
 
-                    if len(results_rows) == 0:
-                        db_handler_object.logger.debug(
-                            "assign_next_unattempted_calsolution_request(): No requests to process."
-                        )
-                        return None
+                if len(results_rows) == 0:
+                    db_handler_object.logger.debug("get_unattempted_calsolution_requests(): No requests to process.")
+                    return None
 
-                    if len(results_rows) > 1:
-                        db_handler_object.logger.error(
-                            "assign_next_unattempted_calsolution_request(): Error- expected 1 row, but "
-                            f"retrieved {len(results_rows)} rows"
-                        )
-                        return None
+                cursor.row_factory = dict_row
 
-                    cursor.row_factory = dict_row
-
+                for row in results_rows:
                     # We got one!
-                    request_id: int = int(results_rows[0][0])
-                    cal_id: int = int(results_rows[0][1])
+                    request_id: int = int(row["request_id"])
+                    cal_id: int = int(row["cal_id"])
+                    realtime: bool = bool(row["realtime"])
 
-                    # Update the row, so no one else does!
-                    db_handler_object.execute_dml_row_within_transaction(
-                        sql_update,
-                        parm_list=[hostname, request_id],
-                        transaction_cursor=cursor,
-                    )
+                    return_list.append((request_id, cal_id, realtime))
 
-        return request_id, cal_id
+        return return_list
 
     except Exception:
-        db_handler_object.logger.exception("select_unattempted_calsolution_requests(): Exception")
+        db_handler_object.logger.exception("get_unattempted_calsolution_requests(): Exception")
         raise
+
+
+def update_calibration_request_slurm_info(db_handler_object: MWAXDBHandler, request_ids: list[int], slurm_job_id: int):
+    sql_update = """
+    UPDATE public.calibration_request
+    SET
+        assigned_datetime = Now(),
+        slurm_job_id = %s
+    WHERE
+    id IN ANY (%s)"""
+
+    # Update the row
+    db_handler_object.execute_dml(sql_update, [slurm_job_id, request_ids], len(request_ids))
+
+
+def update_calibration_request_assigned_hostname(
+    db_handler_object: MWAXDBHandler, slurm_job_id: int, slurm_hostname: str
+):
+    sql_update = """
+    UPDATE public.calibration_request
+    SET
+        assigned_hostname = %s
+    WHERE
+    slurm_job_id = %s
+    AND assigned_hostname IS NULL"""
+
+    # Update the row
+    db_handler_object.execute_dml(sql_update, [slurm_hostname, slurm_job_id], None)
 
 
 def update_calsolution_request_submit_mwa_asvo_job(
@@ -692,7 +739,7 @@ def update_calsolution_request_submit_mwa_asvo_job(
     mwa_asvo_submitted_datetime: datetime.datetime,
     mwa_asvo_job_id: int,
 ):
-    """Update a calsolution request with status info regarding the MWA ASVO job submission.
+    """Update a calibration_request request with status info regarding the MWA ASVO job submission.
 
     Parameters:
             db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)

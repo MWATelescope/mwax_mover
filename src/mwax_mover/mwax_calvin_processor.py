@@ -59,6 +59,7 @@ class MWAXCalvinProcessor:
         self.mwa_asvo_download_url: str = ""
         self.obs_id: int = 0
         self.slurm_job_id: int = 0
+        self.request_id_list: list[int] = []
         self.metafits_name: str = ""
         self.metafits_filename: str = ""
         self.uvfits_filename: str = ""
@@ -92,6 +93,9 @@ class MWAXCalvinProcessor:
         self.db_handler_object.start_database_pool()
 
         self.logger.info("Started...")
+
+        # Update this request with the slurm job_id
+        mwax_db.update_calibration_request_assigned_hostname(self.db_handler_object, self.slurm_job_id, self.hostname)
 
         # Set the data path and metadata
         # will be something like: /data/calvin/jobs/OBSID/SLURM_JOB_ID
@@ -613,7 +617,13 @@ class MWAXCalvinProcessor:
         self.stop()
 
     def initialise(
-        self, config_filename, obs_id: int, slurm_job_id: int, job_type: CalvinJobType, mwa_asvo_download_url: str
+        self,
+        config_filename,
+        obs_id: int,
+        slurm_job_id: int,
+        job_type: CalvinJobType,
+        mwa_asvo_download_url: str,
+        request_ids: list[int],
     ):
         """Initialise the processor from the command line"""
         # Get this hosts hostname
@@ -622,6 +632,7 @@ class MWAXCalvinProcessor:
         self.mwa_asvo_download_url = mwa_asvo_download_url
         self.obs_id = obs_id
         self.slurm_job_id = slurm_job_id
+        self.request_id_list = request_ids
 
         if not os.path.exists(config_filename):
             print(f"Configuration file location {config_filename} does not" " exist. Quitting.")
@@ -815,6 +826,9 @@ class MWAXCalvinProcessor:
         parser.add_argument("-o", "--obs-id", required=True, type=int, help="ObservationID.\n")
         parser.add_argument("-s", "--slurm-job-id", required=True, type=int, help="This Slurm Job ID.\n")
         parser.add_argument(
+            "-r", "--request-ids", required=True, type=str, help="A comma separated list of one or more request ids.\n"
+        )
+        parser.add_argument(
             "-j",
             "--job-type",
             required=True,
@@ -864,7 +878,27 @@ class MWAXCalvinProcessor:
             )
             exit(-1)
 
-        self.initialise(config_filename, int(obs_id), int(slurm_job_id), job_type, mwa_asvo_download_url)
+        # Get a list of request ids
+        request_ids: list[int] = []
+        request_ids_string: str = args["request-ids"]
+        request_ids_string_list: list[str] = request_ids_string.split(",")
+
+        for request_id_str in request_ids_string_list:
+            request_id_str = request_id_str.strip()
+            if utils.is_int(request_id_str):
+                request_ids.append(int())
+            else:
+                print(
+                    f"ERROR: request-ids param '{request_ids_string}' must be one or more positive integers"
+                    " separated by commas. Aborting."
+                )
+                exit(-1)
+        # Check we got at least one
+        if len(request_ids) == 0:
+            print(f"ERROR: request-ids param '{request_ids_string}' must contain at least one request-id. Aborting.")
+            exit(-1)
+
+        self.initialise(config_filename, int(obs_id), int(slurm_job_id), job_type, mwa_asvo_download_url, request_ids)
 
     def sleep(self, seconds):
         """This sleep function keeps an eye on self.running so that if we are in a long wait

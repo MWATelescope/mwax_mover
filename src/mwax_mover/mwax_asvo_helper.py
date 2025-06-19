@@ -1,7 +1,7 @@
 """This class and functions automates the downloading of data
 from MWA ASVO. It calls the MWATelescope/giant-squid CLI"""
 
-import datetime
+from datetime import datetime, timezone
 from enum import Enum
 import json
 import logging
@@ -59,13 +59,14 @@ class MWAASVOJob:
         self.obs_id = obs_id
         self.job_id = job_id
         self.job_state = MWAASVOJobState.Unknown
-        self.submitted_datetime: datetime.datetime
-        self.download_error_datetime: Optional[datetime.datetime] = None
+        self.submitted_datetime: datetime
+        self.download_error_datetime: Optional[datetime] = None
         self.download_error_message: Optional[str] = None
-        self.last_seen_datetime: Optional[datetime.datetime] = None
+        self.last_seen_datetime: Optional[datetime] = None
         self.download_url: Optional[str] = None
         self.download_slurm_job_submitted: bool = False
-        self.download_slurm_job_submitted_datetime: Optional[datetime.datetime] = None
+        self.download_slurm_job_id: Optional[int] = None
+        self.download_slurm_job_submitted_datetime: Optional[datetime] = None
 
     def __str__(self):
         return f"JobID: {self.job_id}; ObsID: {self.obs_id}"
@@ -76,7 +77,7 @@ class MWAASVOJob:
     def elapsed_time_seconds(self) -> int:
         """Returns the number of seconds between Now and the submitted datetime"""
         if self.submitted_datetime is not None:
-            return int((datetime.datetime.now(datetime.timezone.utc) - self.submitted_datetime).total_seconds())
+            return int((datetime.now(timezone.utc) - self.submitted_datetime).total_seconds())
         else:
             return 0
 
@@ -120,6 +121,8 @@ class MWAASVOHelper:
         # List of Jobs and obs_ids the helper is keeping track of
         self.current_asvo_jobs: List[MWAASVOJob] = []
 
+        self.mwa_asvo_outage_datetime: Optional[datetime] = None
+
     def initialise(
         self,
         logger: logging.Logger,
@@ -158,7 +161,7 @@ class MWAASVOHelper:
                 obs_id (int): the obs_id we want MWA ASVO to get us files
 
             Returns:
-                Nothing: raises exceptions on error (from called functions)
+                New populated MWAASVO job class: raises exceptions on error (from called functions)
         """
         self.logger.info(f"{obs_id}: Submitting MWA ASVO job to dowload for request {request_id}")
 
@@ -178,6 +181,11 @@ class MWAASVOHelper:
 
             self.logger.info(f"{obs_id}: MWA ASVO job {job_id} already exists.")
 
+        except GiantSquidMWAASVOOutageException:
+            self.mwa_asvo_outage_datetime = datetime.now()
+            # Re-raise this error
+            raise
+
         # create, populate and add the MWAASVOJob if we don't already have it
         job = self.get_first_job_for_obs_id(obs_id)
 
@@ -185,7 +193,7 @@ class MWAASVOHelper:
             job.request_ids.append(request_id)
 
             if job.submitted_datetime is None:
-                job.submitted_datetime = datetime.datetime.now(datetime.timezone.utc)
+                job.submitted_datetime = datetime.now(timezone.utc)
 
             self.logger.info(
                 f"{obs_id}: Added RequestID {request_id} to JobID {job_id} as this ObsID is already tracked."
@@ -194,7 +202,7 @@ class MWAASVOHelper:
         else:
             # add a new job to be tracked
             job = MWAASVOJob(request_id=request_id, obs_id=obs_id, job_id=job_id)
-            job.submitted_datetime = datetime.datetime.now(datetime.timezone.utc)
+            job.submitted_datetime = datetime.now(timezone.utc)
             self.current_asvo_jobs.append(job)
             self.logger.info(
                 f"{obs_id}: Added JobID {job_id}. Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs"
@@ -213,7 +221,12 @@ class MWAASVOHelper:
 
         """
         # Get list of jobs with status info
-        stdout = self._run_giant_squid("list", "--json", self.giant_squid_list_timeout_seconds)
+        try:
+            stdout = self._run_giant_squid("list", "--json", self.giant_squid_list_timeout_seconds)
+        except GiantSquidMWAASVOOutageException:
+            self.mwa_asvo_outage_datetime = datetime.now()
+            # Re-raise this error
+            raise
 
         # Convert stdout into json
         json_stdout = json.loads(stdout)
@@ -223,7 +236,7 @@ class MWAASVOHelper:
         # We'll set all the jobs we see to this exact datetime so
         # we can figure out if one of our in memory jobs is no longer
         # reported by giant-squid
-        update_datetime = datetime.datetime.now(datetime.timezone.utc)
+        update_datetime = datetime.now(timezone.utc)
 
         # Iterate through each job
         for json_one_job in json_stdout:

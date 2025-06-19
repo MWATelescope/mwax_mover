@@ -24,10 +24,10 @@ from mwax_mover.mwax_command import (
     run_command_popen,
     check_popen_finished,
 )
-
+from mwax_mover.utils import is_int
 import numpy.typing as npt  # noqa: F401
 from numpy.typing import ArrayLike, NDArray
-from typing import NamedTuple, List, Tuple, Dict, Optional  # noqa: F401
+from typing import NamedTuple, List, Tuple, Optional  # noqa: F401
 
 # from nptyping import NDArray, Shape
 import sys
@@ -1921,22 +1921,45 @@ def create_sbatch_script(
     return job_script
 
 
-def submit_sbatch(logger: logging.Logger, script_path: str, script: str, obs_id: int):
+def submit_sbatch(logger: logging.Logger, script_path: str, script: str, obs_id: int) -> Tuple[bool, Optional[int]]:
     # Submits the provided sbatch script to SLURM
-    # Raises exceptions on error
-    script_filename: str = os.path.join(script_path, datetime.datetime.now().strftime(f"%Y%m%d-%H%M%S-{obs_id}.sh"))
-    cmdline = f"sbatch {script_filename}"
+    # Returns (success, jobid or None if failed)
+    try:
+        script_filename: str = os.path.join(script_path, datetime.datetime.now().strftime(f"%Y%m%d-%H%M%S-{obs_id}.sh"))
+        cmdline = f"sbatch {script_filename}"
 
-    # Create an sbatch file
-    with open(script_filename, "w") as job_script:
-        job_script.write(script)
+        # Create an sbatch file
+        with open(script_filename, "w") as job_script:
+            job_script.write(script)
+    except Exception:
+        logger.exception(f"{str(obs_id)} failure creating temp sbatch script.")
+        return (False, None)
 
     # Submit the job
-    return_val, stdout = run_command_ext(logger, cmdline, None, 60, False)
+    return_val: bool = False
+    stdout = ""
+    try:
+        return_val, stdout = run_command_ext(logger, cmdline, None, 60, False)
 
-    if return_val:
-        logger.info(f"{script_filename} successfully submitted to Slurm. Stdout: {stdout}")
-        return True
-    else:
-        logger.error(f"{script_filename} failed to be submitted to SLURM. Error" f" {stdout}")
-        return False
+        # Success- get the new job id
+        # sbatch should send this to std out:
+        # "Submitted batch job 34987"
+        if return_val:
+            logger.info(f"{script_filename} successfully submitted to Slurm. Stdout: {stdout}")
+            slurm_job_id_string = stdout.replace("Submitted batch job ", "")
+            if is_int(slurm_job_id_string):
+                return (True, int(slurm_job_id_string))
+            else:
+                # This deserves to be a massive failure, as if SBATCH returned true it should always give
+                # us the SLURM job id!
+                logger.error(f"Slurm job submitted OK, but could not get slurm_job_id from: {stdout}. Aborting")
+                exit(-10)
+        else:
+            logger.error(f"{script_filename} failed to be submitted to SLURM. Error" f" {stdout}")
+
+    except Exception:
+        logger.exception(f"{script_filename} failure running sbatch.")
+        return_val = False
+
+    if not return_val:
+        return (False, None)
