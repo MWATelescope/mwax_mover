@@ -860,11 +860,7 @@ class MWAXCalvinProcessor:
             print(f"ERROR: cmd line argument slurm-job-id {slurm_job_id} is not a number. Aborting.")
             exit(-1)
 
-        try:
-            job_type = CalvinJobType[args["job_type"]]
-        except ValueError:
-            print(f"ERROR: cmd line argument job-type {args["job_type"]} is not a valid job type. Aborting.")
-            exit(-1)
+        job_type = args["job_type"]
 
         if not args["mwa_asvo_download_url"]:
             mwa_asvo_download_url = ""
@@ -880,7 +876,7 @@ class MWAXCalvinProcessor:
 
         # Get a list of request ids
         request_ids: list[int] = []
-        request_ids_string: str = args["request-ids"]
+        request_ids_string: str = args["request_ids"]
         request_ids_string_list: list[str] = request_ids_string.split(",")
 
         for request_id_str in request_ids_string_list:

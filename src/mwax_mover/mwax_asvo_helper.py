@@ -288,7 +288,7 @@ class MWAASVOHelper:
 
         # run giant-squid. We don't care about running on a specific numa
         # node so we pass -1 for that
-        success, stdout = run_command_ext(self.logger, cmdline, -1, timeout_seconds, True)
+        success, stdout = run_command_ext(self.logger, cmdline, None, timeout_seconds, True)
 
         elapsed = time.time() - start_time
 

@@ -560,6 +560,14 @@ class MWAXCalvinController:
             utils.read_config(self.logger, config, "giant squid", "giant_squid_submitvis_timeout_seconds")
         )
 
+        # Setup the MWA ASVO Helper
+        self.mwax_asvo_helper.initialise(
+            self.logger,
+            self.giant_squid_binary_path,
+            self.giant_squid_list_timeout_seconds,
+            self.giant_squid_submitvis_timeout_seconds,
+        )
+
     def initialise_from_command_line(self):
         """Initialise if initiated from command line"""
 
