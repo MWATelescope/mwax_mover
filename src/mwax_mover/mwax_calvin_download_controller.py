@@ -45,7 +45,7 @@ class MWAXCalvinDownloadProcessor:
         self.health_multicast_port: int = 0
         self.health_multicast_hops: int = 1
 
-        # mwa asvo
+        # giant-squid
         self.check_interval_seconds: int = 0
         self.mwa_asvo_longest_wait_time_seconds: int = 0
         self.giant_squid_binary_path: str = ""
@@ -60,6 +60,118 @@ class MWAXCalvinDownloadProcessor:
 
         self.running: bool = False
         self.ready_to_exit: bool = False
+
+    def start(self):
+        """Start the processor"""
+        self.running = True
+
+        # creating database connection pool(s)
+        self.logger.info("Starting database connection pool...")
+        self.db_handler_object.start_database_pool()
+
+        # create a health thread
+        self.logger.info("Starting health_thread...")
+        health_thread = threading.Thread(name="health_thread", target=self.health_loop, daemon=True)
+        health_thread.start()
+
+        self.logger.info("Started...")
+
+        # Main loop
+        while self.running:
+            self.main_loop_handler()
+
+            self.logger.debug("Currently tracking jobs:")
+            for job in self.mwax_asvo_helper.current_asvo_jobs:
+                if not (job.download_slurm_job_submitted or job.download_error_datetime):
+                    self.logger.debug(
+                        f"{job} {job.job_state}; "
+                        f"elapsed: {job.elapsed_time_seconds()} s; "
+                        f"last_seen={job.last_seen_datetime}"
+                    )
+
+            self.logger.debug("History of completed jobs:")
+            for job in self.mwax_asvo_helper.current_asvo_jobs:
+                if job.download_slurm_job_submitted:
+                    self.logger.debug(f"{job} succeeded: {job.download_slurm_job_submitted_datetime} ")
+                elif job.download_error_datetime:
+                    self.logger.debug(f"{job} failed: {job.download_error_datetime} {job.download_error_message}")
+
+            self.logger.debug(f"Sleeping for {self.check_interval_seconds} seconds")
+            self.sleep(self.check_interval_seconds)
+
+        #
+        # Finished- do some clean up
+        #
+        while not self.ready_to_exit:
+            self.sleep(1)
+
+        # Final log message
+        self.logger.info("Completed Successfully")
+
+    def main_loop_handler(self):
+        self.get_new_requests()
+        self.update_all_tracked_jobs()
+        self.submit_slurm_for_ready_mwa_asvo_jobs()
+
+    def stop(self):
+        """Shutsdown all processes"""
+
+        self.logger.warning("Stopping...")
+
+        # Close all database connections
+        self.db_handler_object.stop_database_pool()
+
+        self.ready_to_exit = True
+
+    def health_loop(self):
+        """Send health information via UDP multicast"""
+        while self.running:
+            # Code to run by the health thread
+            status_dict = self.get_status()
+
+            # Convert the status to bytes
+            status_bytes = json.dumps(status_dict).encode("utf-8")
+
+            # Send the bytes
+            try:
+                utils.send_multicast(
+                    self.health_multicast_interface_ip,
+                    self.health_multicast_ip,
+                    self.health_multicast_port,
+                    status_bytes,
+                    self.health_multicast_hops,
+                )
+            except Exception as catch_all_exception:  # pylint: disable=broad-except
+                self.logger.warning("health_handler: Failed to send health information." f" {catch_all_exception}")
+
+            # Sleep for a second
+            self.sleep(1)
+
+    def get_status(self) -> dict:
+        """Returns status of process as a dictionary"""
+        main_status = {
+            "Unix timestamp": time.time(),
+            "process": type(self).__name__,
+            "version": version.get_mwax_mover_version_string(),
+            "host": self.hostname,
+            "running": self.running,
+        }
+
+        job_status_list = []
+        for job in self.mwax_asvo_helper.current_asvo_jobs:
+            job_status_list.append(job.get_status())
+
+        status = {"main": main_status, "jobs": job_status_list}
+
+        return status
+
+    def signal_handler(self, _signum, _frame):
+        """Handles SIGINT and SIGTERM"""
+        self.logger.warning("Interrupted. Shutting down processor...")
+        self.running = False
+
+        # Stop any Processors
+        self.stop()
 
     def add_new_job(self, request_id: int, obs_id: int):
         """Starts tracking a new MWAASVOJob and, if not submitted already,
@@ -131,12 +243,6 @@ class MWAXCalvinDownloadProcessor:
                 mwa_asvo_job_id=new_job.job_id,
             )
 
-    def main_loop_handler(self):
-        self.get_new_requests()
-        self.update_all_tracked_jobs()
-        self.submit_slurm_for_ready_mwa_asvo_jobs()
-        pass
-
     def get_new_requests(self):
         """This code checks for any unassigned requests and assigns them to this host,
         adding them to our tracked jobs in self.mwa_asvo_helper.current_asvo_jobs"""
@@ -146,7 +252,7 @@ class MWAXCalvinDownloadProcessor:
 
             # 1. Get the an outstanding calibration_requests from the db
             # returned fields: Tuple[id, calid] or None (the obsid we are calibrating)
-            result = mwax_db.assign_next_unattempted_calsolution_request(self.db_handler_object, self.hostname)
+            result = mwax_db.get_unattempted_calsolution_requests(self.db_handler_object, self.hostname)
 
             if result:
                 # get the id of the request
@@ -233,113 +339,6 @@ class MWAXCalvinDownloadProcessor:
                         except Exception:
                             # Something went wrong!
                             self.logger.exception(f"{job}: Error submitting sbtach to SLURM.")
-
-    def start(self):
-        """Start the processor"""
-        self.running = True
-
-        # creating database connection pool(s)
-        self.logger.info("Starting database connection pool...")
-        self.db_handler_object.start_database_pool()
-
-        # create a health thread
-        self.logger.info("Starting health_thread...")
-        health_thread = threading.Thread(name="health_thread", target=self.health_loop, daemon=True)
-        health_thread.start()
-
-        self.logger.info("Started...")
-
-        # Main loop
-        while self.running:
-            self.main_loop_handler()
-
-            self.logger.debug("Currently tracking jobs:")
-            for job in self.mwax_asvo_helper.current_asvo_jobs:
-                if not (job.download_slurm_job_submitted or job.download_error_datetime):
-                    self.logger.debug(
-                        f"{job} {job.job_state}; "
-                        f"elapsed: {job.elapsed_time_seconds()} s; "
-                        f"last_seen={job.last_seen_datetime}"
-                    )
-
-            self.logger.debug("History of completed jobs:")
-            for job in self.mwax_asvo_helper.current_asvo_jobs:
-                if job.download_slurm_job_submitted:
-                    self.logger.debug(f"{job} succeeded: {job.download_slurm_job_submitted_datetime} ")
-                elif job.download_error_datetime:
-                    self.logger.debug(f"{job} failed: {job.download_error_datetime} {job.download_error_message}")
-
-            self.logger.debug(f"Sleeping for {self.check_interval_seconds} seconds")
-            self.sleep(self.check_interval_seconds)
-
-        #
-        # Finished- do some clean up
-        #
-        while not self.ready_to_exit:
-            self.sleep(1)
-
-        # Final log message
-        self.logger.info("Completed Successfully")
-
-    def stop(self):
-        """Shutsdown all processes"""
-
-        self.logger.warning("Stopping...")
-
-        # Close all database connections
-        self.db_handler_object.stop_database_pool()
-
-        self.ready_to_exit = True
-
-    def health_loop(self):
-        """Send health information via UDP multicast"""
-        while self.running:
-            # Code to run by the health thread
-            status_dict = self.get_status()
-
-            # Convert the status to bytes
-            status_bytes = json.dumps(status_dict).encode("utf-8")
-
-            # Send the bytes
-            try:
-                utils.send_multicast(
-                    self.health_multicast_interface_ip,
-                    self.health_multicast_ip,
-                    self.health_multicast_port,
-                    status_bytes,
-                    self.health_multicast_hops,
-                )
-            except Exception as catch_all_exception:  # pylint: disable=broad-except
-                self.logger.warning("health_handler: Failed to send health information." f" {catch_all_exception}")
-
-            # Sleep for a second
-            self.sleep(1)
-
-    def get_status(self) -> dict:
-        """Returns status of process as a dictionary"""
-        main_status = {
-            "Unix timestamp": time.time(),
-            "process": type(self).__name__,
-            "version": version.get_mwax_mover_version_string(),
-            "host": self.hostname,
-            "running": self.running,
-        }
-
-        job_status_list = []
-        for job in self.mwax_asvo_helper.current_asvo_jobs:
-            job_status_list.append(job.get_status())
-
-        status = {"main": main_status, "jobs": job_status_list}
-
-        return status
-
-    def signal_handler(self, _signum, _frame):
-        """Handles SIGINT and SIGTERM"""
-        self.logger.warning("Interrupted. Shutting down processor...")
-        self.running = False
-
-        # Stop any Processors
-        self.stop()
 
     def initialise(self, config_filename: str):
         """Initialise the processor from the command line"""
