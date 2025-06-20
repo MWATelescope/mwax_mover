@@ -14,7 +14,6 @@ from tenacity import (
     stop_after_attempt,
     wait_fixed,
     wait_random,
-    retry_if_not_exception_type,
     retry_if_exception_type,
 )
 from mwax_mover.utils import ArchiveLocation
@@ -73,7 +72,18 @@ class MWAXDBHandler:
         # Just return all rows
         return rows
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(60))
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(60),
+        retry=retry_if_exception_type(
+            (
+                psycopg.errors.ConnectionFailure,
+                psycopg.errors.ConnectionException,
+                psycopg.errors.ConnectionTimeout,
+                psycopg.errors.OperationalError,
+            )
+        ),
+    )
     def select_postgres(self, sql, parm_list, expected_rows: None | int):
         """Returns rows from postgres given SQL and params. If expected rows is passed
         then it will check it returned the correct number of rows and riase exception
@@ -114,7 +124,14 @@ class MWAXDBHandler:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_fixed(30),
-        retry=retry_if_not_exception_type(psycopg.errors.ForeignKeyViolation),
+        retry=retry_if_exception_type(
+            (
+                psycopg.errors.ConnectionFailure,
+                psycopg.errors.ConnectionException,
+                psycopg.errors.ConnectionTimeout,
+                psycopg.errors.OperationalError,
+            )
+        ),
     )
     def execute_single_dml_row(self, sql: str, parm_list):
         """This executes an INSERT, UPDATE or DELETE that should affect 1
@@ -125,7 +142,14 @@ class MWAXDBHandler:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_fixed(30),
-        retry=retry_if_not_exception_type(psycopg.errors.ForeignKeyViolation),
+        retry=retry_if_exception_type(
+            (
+                psycopg.errors.ConnectionFailure,
+                psycopg.errors.ConnectionException,
+                psycopg.errors.ConnectionTimeout,
+                psycopg.errors.OperationalError,
+            )
+        ),
     )
     def execute_dml(self, sql, parm_list, expected_rows: None | int):
         """This executes an INSERT, UPDATE or DELETE that should affect 0,1 or many
@@ -172,7 +196,18 @@ class MWAXDBHandler:
             self.logger.exception("execute_dml(): postgres Exception")
             raise
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(60))
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(60),
+        retry=retry_if_exception_type(
+            (
+                psycopg.errors.ConnectionFailure,
+                psycopg.errors.ConnectionException,
+                psycopg.errors.ConnectionTimeout,
+                psycopg.errors.OperationalError,
+            )
+        ),
+    )
     def select_postgres_within_transaction(self, sql: str, parm_list, expected_rows: None | int, transaction_cursor):
         """Returns rows from postgres given SQL and params. If expected rows is passed
         then it will check it returned the correct number of rows and riase exception
@@ -213,8 +248,14 @@ class MWAXDBHandler:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_fixed(30),
-        retry=retry_if_not_exception_type(psycopg.errors.ForeignKeyViolation)
-        | retry_if_not_exception_type(psycopg.errors.UniqueViolation),
+        retry=retry_if_exception_type(
+            (
+                psycopg.errors.ConnectionFailure,
+                psycopg.errors.ConnectionException,
+                psycopg.errors.ConnectionTimeout,
+                psycopg.errors.OperationalError,
+            )
+        ),
     )
     def execute_dml_row_within_transaction(self, sql, parm_list, transaction_cursor: psycopg.Cursor):
         """This executes an INSERT, UPDATE or DELETE that should only affect

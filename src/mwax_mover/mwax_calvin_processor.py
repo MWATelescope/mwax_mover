@@ -13,8 +13,6 @@ import signal
 import sys
 import time
 from typing import Optional
-import numpy as np
-import traceback
 import coloredlogs
 from itertools import repeat
 from multiprocessing import Pool
@@ -28,17 +26,8 @@ from mwax_mover import (
     mwax_db,
 )
 from mwax_mover.mwa_archiver import copy_file_rsync
-from mwax_mover.mwax_db import insert_calibration_fits_row, insert_calibration_solutions_row
-from mwax_mover.mwax_calvin_utils import (
-    CalvinJobType,
-    HyperfitsSolution,
-    HyperfitsSolutionGroup,
-    Metafits,
-    debug_phase_fits,
-    PhaseFitInfo,
-    GainFitInfo,
-    write_readme_file,
-)
+from mwax_mover.mwax_calvin_utils import CalvinJobType
+from mwax_mover.mwax_calvin_solutions import process_solutions
 
 
 class MWAXCalvinProcessor:
@@ -108,27 +97,64 @@ class MWAXCalvinProcessor:
         os.makedirs(name=self.data_path, exist_ok=True)
 
         # First step depends on jobtype
-        if self.job_type == CalvinJobType.realtime:
-            # Download from MWAX boxes
-            self.download_realtime_data()
-        elif self.job_type == CalvinJobType.mwa_asvo:
-            # Download from MWA ASVO URL
-            self.download_mwa_asvo_data()
-        else:
-            self.logger.error(f"Error- unknown job_type {self.job_type}. Aborting")
-            exit(-2)
+        data_downloaded: bool = False
+        data_download_attempt: int = 1
+
+        DOWNLOAD_RETRY_ATTEMPTS = 3
+        DOWNLOAD_RETRY_WAIT_SECONDS = 240
+
+        while not data_downloaded and data_download_attempt < DOWNLOAD_RETRY_ATTEMPTS:
+            if self.job_type == CalvinJobType.realtime:
+                # Download from MWAX boxes
+                data_downloaded = self.download_realtime_data()
+            elif self.job_type == CalvinJobType.mwa_asvo:
+                # Download from MWA ASVO URL
+                data_downloaded = self.download_mwa_asvo_data()
+            else:
+                self.logger.error(f"Error- unknown job_type {self.job_type}. Aborting")
+                exit(-2)
+
+            data_download_attempt += 1
+
+            # Wait before trying again
+            self.sleep(DOWNLOAD_RETRY_WAIT_SECONDS)
 
         # All files we could get are now in the processing_path
         if not self.check_obs_is_ready_to_process():
             exit(-3)
 
-        # We have all the files, so run birli and hyperdrive!
-        if not self.process_observation():
+        # We have all the files, so run birli
+        if not self.run_birli():
             exit(-4)
 
-        # If that worked, process the solutions and insert into db
-        if not self.process_solutions():
+        # Birli was successful so run hyperdrive!
+        if not self.run_hyperdrive():
             exit(-5)
+
+        # If that worked, process the solutions and insert into db
+        if not process_solutions(
+            self.logger,
+            self.db_handler_object,
+            self.obs_id,
+            self.data_path,
+            self.phase_fit_niter,
+            self.produce_debug_plots,
+        ):
+            exit(-6)
+
+        # clean up
+        # if we get here, the whole calibration solution was inserted ok.
+        # The transaction context will commit the transation
+        if not self.keep_completed_visibility_files:
+            # Remove visibilitiy files
+            visibility_files = glob.glob(os.path.join(self.data_path, f"{self.obs_id}_*_*_*.fits"))
+            for file_to_delete in visibility_files:
+                os.remove(file_to_delete)
+
+            # Now remove uvfits too
+            uvfits_files = glob.glob(os.path.join(self.data_path, "*.uvfits"))
+            for file_to_delete in uvfits_files:
+                os.remove(file_to_delete)
 
         # Stop!
         self.stop()
@@ -163,8 +189,7 @@ class MWAXCalvinProcessor:
                             )
                             return True
                         else:
-                            error_message = f"{str(self.obs_id)} failed to be submitted to SLURM. Error" f" {stdout}"
-                            self.logger.error(error_message)
+                            error_message = f"{str(self.obs_id)} failed when running {cmdline} Error" f" {stdout}"
                             raise Exception(error_message)
 
                     except Exception:
@@ -209,13 +234,14 @@ class MWAXCalvinProcessor:
         # We need to allow for some time for the observation to update the database,
         # so add an additional 120 seconds before we check
         OBS_FINISH_DELAY_SECONDS = 120
+        OBS_FINISH_WAIT_SECONDS = 4
         while current_gpstime < (self.obs_id + exp_time + OBS_FINISH_DELAY_SECONDS):
             self.logger.warning(
                 f"{self.obs_id} Observation is still in progress:"
                 f" {current_gpstime} < ({self.obs_id} - {int(self.obs_id) + exp_time + OBS_FINISH_DELAY_SECONDS})"
-                ". Sleeping for 10 seconds..."
+                f". Sleeping for {OBS_FINISH_WAIT_SECONDS} seconds..."
             )
-            self.sleep(10)
+            self.sleep(OBS_FINISH_WAIT_SECONDS)
             current_gpstime: int = utils.get_gpstime_of_now()
 
         # Ok, should be safe to get the list of files and hosts
@@ -238,9 +264,9 @@ class MWAXCalvinProcessor:
 
         # Now download the files
         RSYNC_TIMEOUT_SECONDS = 600
-        max_workers = 24
+        COPY_WORKERS = 24
 
-        with Pool(processes=max_workers) as pool:
+        with Pool(processes=COPY_WORKERS) as pool:
             results = pool.starmap(
                 copy_file_rsync,
                 zip(repeat(self.logger), download_filenames, repeat(self.data_path), repeat(RSYNC_TIMEOUT_SECONDS)),
@@ -300,8 +326,8 @@ class MWAXCalvinProcessor:
             self.logger.error(f"utils.get_data_files_for_obsid_from_webservice({self.obs_id} did not return any files.")
             return False
 
-    def process_observation(self) -> bool:
-        """Have birli then hyperdrive run on it"""
+    def run_birli(self) -> bool:
+        """Run birli to produce uvfits file(s)"""
         birli_success: bool = False
         error_message: str = ""
 
@@ -318,39 +344,14 @@ class MWAXCalvinProcessor:
             # No OVERSAMP key? Then it is not oversampled!
             oversampled: bool = False
 
-        hyperdrive_success = False
-
         # Run Birli
         self.logger.info(f"{self.obs_id}: Running Birli...")
         birli_success = mwax_calvin_utils.run_birli(
             self, self.metafits_filename, self.uvfits_filename, self.obs_id, self.data_path, oversampled
         )
 
-        if birli_success:
-            # If all good run hyperdrive- once per uvfits file created
-            # N (where N>1) uvfits are generated if Birli sees the obs is picket fence
-            # Therefore we need to run hyperdrive N times too
-            #
-            # get a list of the uvfits files
-            uvfits_files = glob.glob(os.path.join(self.data_path, "*.uvfits"))
-
-            # Run hyperdrive
-            hyperdrive_success = mwax_calvin_utils.run_hyperdrive(
-                self, uvfits_files, self.metafits_filename, self.obs_id, self.data_path
-            )
-
-            # Did we have N number of successful runs?
-            if hyperdrive_success:
-                # Run hyperdrive and get plots and stats
-                mwax_calvin_utils.run_hyperdrive_stats(
-                    self, uvfits_files, self.metafits_filename, self.obs_id, self.data_path
-                )
-
-        if not (birli_success and hyperdrive_success):
-            if not birli_success:
-                error_message = "Birli run failed. See logs"
-            elif not hyperdrive_success:
-                error_message = "Hyperdrive run failed. See logs"
+        if not birli_success:
+            error_message = "Birli run failed. See logs"
 
             # Update database
             mwax_db.update_calsolution_request_calibration_complete_status(
@@ -360,258 +361,50 @@ class MWAXCalvinProcessor:
         else:
             return True
 
-    def process_solutions(self) -> bool:
-        """Will deal with completed hyperdrive solutions
-        by getting them into a format we can insert into
-        the calibration database"""
+    def run_hyperdrive(self) -> bool:
+        """Run hyperdrive to produce solutions"""
+        error_message: str = ""
+        hyperdrive_success = False
 
-        conn = None
-        try:
-            metafits_files = glob.glob(os.path.join(self.data_path, "*_metafits.fits"))
-            # if len(metafits_files) > 1:
-            #     self.logger.warning(f"{item} - more than one metafits file found.")
+        # If all good run hyperdrive- once per uvfits file created
+        # N (where N>1) uvfits are generated if Birli sees the obs is picket fence
+        # Therefore we need to run hyperdrive N times too
+        #
+        # get a list of the uvfits files
+        uvfits_files = glob.glob(os.path.join(self.data_path, "*.uvfits"))
 
-            self.logger.debug(f"{self.data_path} - {metafits_files=}")
-            fits_solution_files = sorted(glob.glob(os.path.join(self.data_path, "*_solutions.fits")))
-            # _bin_solution_files = glob.glob(os.path.join(item, "*_solutions.bin"))
-            self.logger.debug(f"{self.data_path} - uploading {fits_solution_files=}")
+        # Run hyperdrive
+        hyperdrive_success = mwax_calvin_utils.run_hyperdrive(
+            self, uvfits_files, self.metafits_filename, self.obs_id, self.data_path
+        )
 
-            soln_group = HyperfitsSolutionGroup(
-                [Metafits(f) for f in metafits_files], [HyperfitsSolution(f) for f in fits_solution_files]
+        # Did we have N number of successful runs?
+        if hyperdrive_success:
+            # Run hyperdrive and get plots and stats
+            mwax_calvin_utils.run_hyperdrive_stats(
+                self, uvfits_files, self.metafits_filename, self.obs_id, self.data_path
             )
 
-            # get tiles
-            tiles = soln_group.metafits_tiles_df
-            self.logger.debug(f"{self.data_path} - metafits tiles:\n{tiles.to_string(max_rows=999)}")
+        if not hyperdrive_success:
+            error_message = "Hyperdrive run failed. See logs"
 
-            # determine refant
-            unflagged_tiles = tiles[tiles.flag == 0]
-            if not len(unflagged_tiles):
-                raise ValueError("No unflagged tiles found")
-            refant = unflagged_tiles.sort_values(by=["id"]).iloc[0]
-            self.logger.debug(f"{self.data_path} - {refant['name']=} ({refant['id']})")
-
-            # get channel info
-            chaninfo = soln_group.metafits_chan_info
-            self.logger.debug(f"{self.data_path} - {chaninfo=}")
-            all_coarse_chan_ranges = chaninfo.coarse_chan_ranges
-
-            if len(fits_solution_files) != len(all_coarse_chan_ranges):
-                raise RuntimeError(
-                    f"{self.data_path} - number of solution files ({len(fits_solution_files)})"
-                    f" does not match number of coarse chan ranges in metafits {len(all_coarse_chan_ranges)}"
-                )
-
-            chanblocks_per_coarse = soln_group.chanblocks_per_coarse
-            # all_chanblocks_hz = soln_group.all_chanblocks_hz
-            all_chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz)
-            self.logger.debug(f"{self.data_path} - {chanblocks_per_coarse=}, {all_chanblocks_hz=}")
-
-            soln_tile_ids, all_xx_solns_noref, all_yy_solns_noref = soln_group.get_solns()
-            _, all_xx_solns, all_yy_solns = soln_group.get_solns(refant["name"])
-
-            weights = soln_group.weights
-
-            phase_fits = mwax_calvin_utils.process_phase_fits(
-                self.logger,
-                self.data_path,
-                unflagged_tiles,
-                all_chanblocks_hz,
-                all_xx_solns,
-                all_yy_solns,
-                weights,
-                soln_tile_ids,
-                self.phase_fit_niter,
-            )
-            gain_fits = mwax_calvin_utils.process_gain_fits(
-                self.logger,
-                self.data_path,
-                unflagged_tiles,
-                all_chanblocks_hz,
-                all_xx_solns_noref,
-                all_yy_solns_noref,
-                weights,
-                soln_tile_ids,
-                chanblocks_per_coarse,
-            )
-
-            # if ~np.any(np.isfinite(phase_fits["length"])):
-            #     self.logger.warning(f"{item} - no valid phase fits found, continuing anyway")
-
-            # Matplotlib stuff seems to break pytest so we will
-            # pass false in for pytest stuff (or if we don't want debug)
-            if self.produce_debug_plots:
-                # This line was:
-                # phase_fits_pivot = debug_phase_fits(...
-                # But the phase_fits_pivot return value is not used
-                debug_phase_fits(
-                    phase_fits,
-                    tiles,
-                    all_chanblocks_hz,
-                    all_xx_solns[0],
-                    all_yy_solns[0],
-                    weights,
-                    prefix=f"{self.data_path}/{self.obs_id}_",
-                    plot_residual=True,
-                )
-            # phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
-            # self.logger.debug(f"{item} - fits:\n{phase_fits_pivot.to_string(max_rows=512)}")
-            success = True
-
-            # get a database connection, unless we are using dummy connection (for testing)
-            transaction_cursor = None
-            with self.db_handler_object.pool.connection() as conn:
-                # Start a transaction
-                with conn.transaction():
-                    # Create a cursor
-                    transaction_cursor = conn.cursor()
-
-                    (success, fit_id) = insert_calibration_fits_row(
-                        self.db_handler_object,
-                        transaction_cursor,
-                        obs_id=self.obs_id,
-                        code_version=version.get_mwax_mover_version_string(),
-                        creator="calvin",
-                        fit_niter=self.phase_fit_niter,
-                        fit_limit=20,
-                    )
-
-                    if fit_id is None or not success:
-                        self.logger.error(f"{self.data_path} - failed to insert calibration fit")
-
-                        # This will trigger a rollback of the calibration_fit row
-                        raise Exception(f"{self.data_path} - failed to insert calibration fit")
-
-                    for tile_id in soln_tile_ids:
-                        some_fits = False
-                        try:
-                            x_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "XX")].iloc[0]
-                            some_fits = True
-                        except IndexError:
-                            x_gains = GainFitInfo.nan()
-
-                        try:
-                            y_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "YY")].iloc[0]
-                            some_fits = True
-                        except IndexError:
-                            y_gains = GainFitInfo.nan()
-
-                        try:
-                            x_phase = phase_fits[(phase_fits.tile_id == tile_id) & (phase_fits.pol == "XX")].iloc[0]
-                            some_fits = True
-                        except IndexError:
-                            x_phase = PhaseFitInfo.nan()
-
-                        try:
-                            y_phase = phase_fits[(phase_fits.tile_id == tile_id) & (phase_fits.pol == "YY")].iloc[0]
-                            some_fits = True
-                        except IndexError:
-                            y_phase = PhaseFitInfo.nan()
-
-                        if not some_fits:
-                            # we could `continue` here, which avoids inserting an empty row in the
-                            # database, however we want to stick to the old behaviour for now.
-                            # continue
-                            pass
-
-                        success = insert_calibration_solutions_row(
-                            self.db_handler_object,
-                            transaction_cursor,
-                            int(fit_id),
-                            int(self.obs_id),
-                            int(tile_id),
-                            -1 * x_phase.length,  # legacy calibration pipeline used inverse convention
-                            x_phase.intercept,
-                            x_gains.gains,
-                            -1 * y_phase.length,  # legacy calibration pipeline used inverse convention
-                            y_phase.intercept,
-                            y_gains.gains,
-                            x_gains.pol1,
-                            y_gains.pol1,
-                            x_phase.sigma_resid,
-                            x_phase.chi2dof,
-                            x_phase.quality,
-                            y_phase.sigma_resid,
-                            y_phase.chi2dof,
-                            y_phase.quality,
-                            x_gains.quality,
-                            y_gains.quality,
-                            x_gains.sigma_resid,
-                            y_gains.sigma_resid,
-                            x_gains.pol0,
-                            y_gains.pol0,
-                        )
-
-                        if not success:
-                            self.logger.error(
-                                f"{self.data_path} - failed to insert calibration solution for tile {tile_id}"
-                            )
-
-                            # This will trigger a rollback of the calibration_fit row and any
-                            # calibration_solutions child rows
-                            raise Exception(
-                                f"{self.data_path} - failed to insert calibration solution for tile {tile_id}"
-                            )
-
-            # if we get here, the whole calibration solution was inserted ok.
-            # The transaction context will commit the transation
-            if not self.keep_completed_visibility_files:
-                # Remove visibilitiy files
-                visibility_files = glob.glob(os.path.join(self.data_path, f"{self.obs_id}_*_*_*.fits"))
-                for file_to_delete in visibility_files:
-                    os.remove(file_to_delete)
-
-                # Now remove uvfits too
-                uvfits_files = glob.glob(os.path.join(self.data_path, "*.uvfits"))
-                for file_to_delete in uvfits_files:
-                    os.remove(file_to_delete)
-
-            #
-            # If this cal solution was a requested one, update it to completed
-            #
+            # Update database
             mwax_db.update_calsolution_request_calibration_complete_status(
-                self.db_handler_object, self.obs_id, None, datetime.datetime.now(), int(fit_id), None, None
+                self.db_handler_object, self.obs_id, None, None, None, datetime.datetime.now(), error_message
             )
-
-            return True
-        except Exception:
-            error_text = f"{self.data_path} - Error in upload_handler:\n{traceback.format_exc()}"
-            self.logger.exception(error_text)
-
-            # Write an error readme
-            write_readme_file(
-                self.logger,
-                os.path.join(self.data_path, "readme_error.txt"),
-                f"upload_handler({self.data_path})",
-                -999,
-                "",
-                error_text,
-            )
-
-            #
-            # If this cal solution was a requested one, update it to failed
-            #
-            mwax_db.update_calsolution_request_calibration_complete_status(
-                self.db_handler_object,
-                self.obs_id,
-                None,
-                None,
-                None,
-                datetime.datetime.now(),
-                error_text.replace("\n", " "),
-            )
-
             return False
+        else:
+            return True
 
     def stop(self):
         """Shutdown all processes"""
         # Close all database connections
         self.db_handler_object.stop_database_pool()
+        self.running = False
 
     def signal_handler(self, _signum, _frame):
         """Handles SIGINT and SIGTERM"""
         self.logger.warning("Interrupted. Shutting down processor...")
-        self.running = False
 
         # Stop any Processors
         self.stop()

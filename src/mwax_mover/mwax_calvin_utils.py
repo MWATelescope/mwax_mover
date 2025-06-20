@@ -32,6 +32,8 @@ from typing import NamedTuple, List, Tuple, Optional  # noqa: F401
 # from nptyping import NDArray, Shape
 import sys
 
+V_LIGHT_M_S = 299792458.0
+
 
 class CalvinJobType(Enum):
     """Calvin Job Type"""
@@ -79,38 +81,6 @@ class TimeInfo(NamedTuple):
 
     num_times: int
     int_time_s: float
-
-
-# class Config(Enum):
-#     """Array configuration"""
-#     COMPACT = 0
-#     EXTENDED = 1
-
-#     @staticmethod
-#     def from_tiles(tiles: List[Tile]) -> 'Config':
-#         """Determine array config from tiles"""
-#         nhex = len([tile for tile in tiles if tile.tile_name.startswith("Hex")])
-#         nlb = len([tile for tile in tiles if tile.tile_name.startswith("LB")])
-#         if nhex > nlb:
-#             return Config.COMPACT
-#         elif nlb > nhex:
-#             return Config.EXTENDED
-#         else:
-#             raise ValueError(f"Unknown array config with {nlb=} and {nhex=}")
-
-
-def ensure_system_byte_order(arr):
-    system_byte_order = ">" if sys.byteorder == "big" else "<"
-    if arr.dtype.byteorder not in f"{system_byte_order}|=":
-        return arr.newbyteorder(system_byte_order)
-    return arr
-
-
-def parse_csv_header(value: str, dtype: type) -> ArrayLike:
-    """
-    parse comma separated values (in metafits header)
-    """
-    return np.array(value.split(","), dtype=dtype)
 
 
 class Metafits:
@@ -700,9 +670,6 @@ class HyperfitsSolutionGroup:
         return soln_tile_ids, all_xx_solns, all_yy_solns
 
 
-v_light_m_s = 299792458.0
-
-
 class PhaseFitInfo(NamedTuple):
     length: float
     intercept: float
@@ -755,6 +722,20 @@ class GainFitInfo(NamedTuple):
             pol1=[np.nan] * 24,
             sigma_resid=[np.nan] * 24,
         )
+
+
+def ensure_system_byte_order(arr):
+    system_byte_order = ">" if sys.byteorder == "big" else "<"
+    if arr.dtype.byteorder not in f"{system_byte_order}|=":
+        return arr.newbyteorder(system_byte_order)
+    return arr
+
+
+def parse_csv_header(value: str, dtype: type) -> ArrayLike:
+    """
+    parse comma separated values (in metafits header)
+    """
+    return np.array(value.split(","), dtype=dtype)
 
 
 def wrap_angle(angle):
@@ -824,7 +805,7 @@ def fit_phase_line(
     # This is set by the resolution I want in delay space (Nyquist rate)
     # type: ignore
     dm = 0.01 * u.m  # type: ignore
-    dt = dm / c  # The target time resolution
+    dt = dm / c  # type: ignore The target time resolution
     νmax = 0.5 / dt  # The Nyquist rate
     N = 2 * int(np.round(νmax / dν))  # The number of bins to use during the FFTs
 

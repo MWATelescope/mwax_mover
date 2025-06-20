@@ -254,6 +254,8 @@ class MWAXCalvinController:
     def stop(self):
         """Shutsdown all processes"""
 
+        self.running = False
+
         # Close all database connections
         self.db_handler_object.stop_database_pool()
 
@@ -300,7 +302,6 @@ class MWAXCalvinController:
     def signal_handler(self, _signum, _frame):
         """Handles SIGINT and SIGTERM"""
         self.logger.warning("Interrupted. Shutting down processor...")
-        self.running = False
 
         # Stop any Processors
         self.stop()
