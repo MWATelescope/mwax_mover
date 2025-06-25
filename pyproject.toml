@@ -1,6 +1,6 @@
 [project]
 name = "mwax_mover"
-version = "1.0.2"
+version = "1.0.3"
 description = "A module to manage input, archiving and calibration for the MWAX correlator"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -54,7 +54,7 @@ repository = "https://github.com/MWATelescope/mwax_mover"
 changelog = "https://github.com/MWATelescope/mwax_mover/CHANGELOG.md"
 
 [project.scripts]
-mwax_calvin_processor = "mwax_calvin_processor:main"
+mwax_calvin_processor = "mwax_mover.mwax_calvin_processor:main"
 mwax_calvin_controller = "mwax_mover.mwax_calvin_controller:main"
 mwax_subfile_distributor = "mwax_mover.mwax_subfile_distributor:main"
 mwacache_archiver = "mwax_mover.mwacache_archive_processor:main"
