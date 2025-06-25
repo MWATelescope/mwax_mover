@@ -217,7 +217,7 @@ class MWAXCalvinProcessor:
 
                     try:
                         # Submit the job
-                        return_val, stdout = mwax_command.run_command_ext(self.logger, cmdline, None, 3600, False)
+                        return_val, stdout = mwax_command.run_command_ext(self.logger, cmdline, None, 3600, True)
 
                         if return_val:
                             self.logger.info(

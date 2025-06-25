@@ -1,6 +1,6 @@
 [project]
 name = "mwax_mover"
-version = "1.0.6"
+version = "1.0.7"
 description = "A module to manage input, archiving and calibration for the MWAX correlator"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -13,9 +13,7 @@ authors = [
 ]
 maintainers = [
     {email = "greg.sleap@curtin.edu.au"},
-    {name = "Greg Sleap"}, 
-    {email = "dev.null@curtin.edu.au"},
-    {name = "Dev Null"}
+    {name = "Greg Sleap"}
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
