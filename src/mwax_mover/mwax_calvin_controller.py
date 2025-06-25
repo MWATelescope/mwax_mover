@@ -473,7 +473,7 @@ class MWAXCalvinController:
         console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(console_log)
 
-        self.logger.info("Starting mwax_calvin_controller...v{version.get_mwax_mover_version_string()}")
+        self.logger.info(f"Starting mwax_calvin_controller...v{version.get_mwax_mover_version_string()}")
         self.logger.info(f"Reading config file: {config_filename}")
 
         # health
