@@ -247,7 +247,7 @@ def test_mwax_calvin_test01(setup_calvin_processor_tables):
     assert mcal.assemble_path == os.path.join(base_dir, "assemble")
     assert mcal.assemble_check_seconds == 10
 
-    assert mcal.processing_path == os.path.join(base_dir, "processing")
+    assert mcal.job_output_path == os.path.join(base_dir, "processing")
     assert mcal.processing_error_path == os.path.join(base_dir, "processing_errors")
     assert mcal.source_list_filename == "../srclists/srclist_pumav3_EoR0aegean_fixedEoR1pietro+ForA_phase1+2.txt"
     assert mcal.source_list_type == "rts"
@@ -337,7 +337,7 @@ def mwax_calvin_normal_pipeline_run(picket_fence: bool):
     assert len(assemble_files) == 0, "number of assembled files is 0"
 
     # processing path should have been removed
-    assert os.path.exists(os.path.join(mcal.processing_path, f"{test_obs_id}")) is False, "processing path still exists"
+    assert os.path.exists(os.path.join(mcal.job_output_path, f"{test_obs_id}")) is False, "processing path still exists"
 
     # processing complete
 
@@ -483,7 +483,7 @@ def test_mwax_calvin_test04(setup_calvin_processor_tables):
     # we interrupted the processing, so the obs should stay in the "processing" dir
     processing_files = glob.glob(
         os.path.join(
-            mcal.processing_path,
+            mcal.job_output_path,
             f"{TEST_CONTIG_OBS_ID}/{TEST_CONTIG_OBS_ID}*.fits",
         )
     )

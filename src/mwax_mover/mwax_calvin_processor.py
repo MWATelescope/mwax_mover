@@ -26,7 +26,7 @@ from mwax_mover import (
     mwax_db,
 )
 from mwax_mover.mwa_archiver import copy_file_rsync
-from mwax_mover.mwax_calvin_utils import CalvinJobType
+from mwax_mover.mwax_calvin_utils import CalvinJobType, estimate_birli_output_GB
 from mwax_mover.mwax_calvin_solutions import process_solutions
 
 
@@ -55,8 +55,13 @@ class MWAXCalvinProcessor:
         self.ws_filenames: list[str] = []
 
         # processing
-        self.processing_path: str = ""  # e.g. /data/calvin/jobs
-        self.data_path: str = ""  # this is just /data/calvin/jobs/OBSID/SLURM_JOB_ID
+        self.input_data_path: str = (
+            ""  # this is just /data/calvin/jobs/OBSID/SLURM_JOB_ID - where the visibility files are stored
+        )
+        self.working_path: str = (
+            ""  # where does Birli write to? /data/calvin/jobs/JOBID or /tmp if the obs is small enough
+        )
+        self.job_output_path: str = ""  # e.g. /data/calvin/jobs/JOBID
         self.processing_error_path: str = ""
         self.source_list_filename: str = ""
         self.source_list_type: str = ""
@@ -68,6 +73,9 @@ class MWAXCalvinProcessor:
         self.birli_timeout: int = 0
         self.birli_binary_path: str = ""
         self.birli_max_mem_gib: int = 0
+        self.birli_freq_res_khz: int = 0
+        self.birli_int_time_res_sec: float = 0.0
+        self.estimated_uvfits_GB: int = 0
 
         # hyperdrive
         self.hyperdrive_timeout: int = 0
@@ -88,13 +96,42 @@ class MWAXCalvinProcessor:
 
         # Set the data path and metadata
         # will be something like: /data/calvin/jobs/OBSID/SLURM_JOB_ID
-        self.data_path = os.path.join(os.path.join(self.processing_path, str(self.obs_id)), str(self.slurm_job_id))
-        self.metafits_name = f"{self.obs_id}_metafits.fits"
-        self.metafits_filename = os.path.join(self.data_path, self.metafits_name)
-        self.uvfits_filename = os.path.join(self.data_path, str(self.obs_id) + ".uvfits")
+        self.input_data_path = os.path.join(
+            os.path.join(self.job_output_path, str(self.obs_id)), str(self.slurm_job_id)
+        )
+        self.metafits_filename = os.path.join(self.input_data_path, f"{self.obs_id}_metafits.fits")
+        # Ensure input data path exists
+        os.makedirs(name=self.input_data_path, exist_ok=True)
 
-        # Ensure data path exists
-        os.makedirs(name=self.data_path, exist_ok=True)
+        # Working path for Birli / uvfits output is determined by calculating the size of the output visibilites:
+        self.estimated_uvfits_GB = estimate_birli_output_GB(
+            self.metafits_filename, self.birli_freq_res_khz, self.birli_int_time_res_sec
+        )
+
+        if self.estimated_uvfits_GB < 500:
+            # Use temp_working_dir
+            self.working_path = os.path.join(
+                os.path.join(self.temp_working_path, str(self.obs_id)), str(self.slurm_job_id)
+            )
+            # Ensure input data path exists
+            os.makedirs(name=self.working_path, exist_ok=True)
+
+            # Override the birli allowed memory
+            self.birli_max_mem_gib -= self.estimated_uvfits_GB
+            self.logger.info(
+                f"Using tempory work dir {self.temp_working_path} for Birli output. Reduced "
+                f"allowed Birli memory to: {self.birli_max_mem_gib} GiB"
+            )
+        else:
+            # Use output_dir
+            self.working_path = self.job_output_path
+
+        # Output dirs
+        self.job_output_path = os.path.join(
+            os.path.join(self.job_output_path, str(self.obs_id)), str(self.slurm_job_id)
+        )
+        # Ensure output path exists
+        os.makedirs(name=self.working_path, exist_ok=True)
 
         # First step depends on jobtype
         data_downloaded: bool = False
@@ -136,7 +173,7 @@ class MWAXCalvinProcessor:
             self.logger,
             self.db_handler_object,
             self.obs_id,
-            self.data_path,
+            self.input_data_path,
             self.phase_fit_niter,
             self.produce_debug_plots,
         ):
@@ -147,12 +184,12 @@ class MWAXCalvinProcessor:
         # The transaction context will commit the transation
         if not self.keep_completed_visibility_files:
             # Remove visibilitiy files
-            visibility_files = glob.glob(os.path.join(self.data_path, f"{self.obs_id}_*_*_*.fits"))
+            visibility_files = glob.glob(os.path.join(self.input_data_path, f"{self.obs_id}_*_*_*.fits"))
             for file_to_delete in visibility_files:
                 os.remove(file_to_delete)
 
             # Now remove uvfits too
-            uvfits_files = glob.glob(os.path.join(self.data_path, "*.uvfits"))
+            uvfits_files = glob.glob(os.path.join(self.input_data_path, "*.uvfits"))
             for file_to_delete in uvfits_files:
                 os.remove(file_to_delete)
 
@@ -173,10 +210,10 @@ class MWAXCalvinProcessor:
                     stdout = ""
                     self.logger.info(
                         f"{self.obs_id}: Attempting to download MWA ASVO data ({iteration} of {max_iterations})"
-                        f"{self.mwa_asvo_download_url} to {self.data_path}..."
+                        f"{self.mwa_asvo_download_url} to {self.input_data_path}..."
                     )
 
-                    cmdline = f'wget -q -O - "{self.mwa_asvo_download_url}" | tar -x -C {self.data_path}'
+                    cmdline = f'wget -q -O - "{self.mwa_asvo_download_url}" | tar -x -C {self.input_data_path}'
 
                     try:
                         # Submit the job
@@ -185,7 +222,7 @@ class MWAXCalvinProcessor:
                         if return_val:
                             self.logger.info(
                                 f"{str(self.obs_id)} successfully downloaded "
-                                f"from {self.mwa_asvo_download_url} into  {self.data_path}"
+                                f"from {self.mwa_asvo_download_url} into  {self.input_data_path}"
                             )
                             return True
                         else:
@@ -216,7 +253,7 @@ class MWAXCalvinProcessor:
             # download the metafits file to the data dir for the obs
             try:
                 self.logger.info(f"{self.obs_id} Downloading metafits file...")
-                utils.download_metafits_file(self.logger, self.obs_id, self.data_path)
+                utils.download_metafits_file(self.logger, self.obs_id, self.input_data_path)
                 self.logger.info(f"{self.obs_id} metafits downloaded successfully")
             except Exception as catch_all_exception:
                 self.logger.error(
@@ -269,7 +306,9 @@ class MWAXCalvinProcessor:
         with Pool(processes=COPY_WORKERS) as pool:
             results = pool.starmap(
                 copy_file_rsync,
-                zip(repeat(self.logger), download_filenames, repeat(self.data_path), repeat(RSYNC_TIMEOUT_SECONDS)),
+                zip(
+                    repeat(self.logger), download_filenames, repeat(self.input_data_path), repeat(RSYNC_TIMEOUT_SECONDS)
+                ),
             )
 
         all_errors = ""
@@ -284,47 +323,31 @@ class MWAXCalvinProcessor:
         return True
 
     def check_obs_is_ready_to_process(self) -> bool:
-        """This routine checks to see if an observation is ready to be processed"""
-        #
-        # perform web service call to get list of data files from obsid
-        #
-        if not self.ws_filenames:
-            try:
-                self.ws_filenames = utils.get_data_files_for_obsid_from_webservice(self.logger, self.obs_id)
-            except Exception:
-                # The previous call would have already logged tonnes of errors so no need to log anything specific here
-                self.logger.warning(f"{self.obs_id} No webservice was able to provide list of data files- requeueing")
-                return False
+        """This routine checks to see if an observation is ready to be processed and
+        also sums up the total size and determines if there is enough RAM to write
+        the uvfits file to RAM or not"""
+        # we need a list of files from the work dir
+        # this first list has the full path
+        # put a basic UNIX pattern so we don't pick up the metafits
 
-        if self.ws_filenames:
-            # we need a list of files from the work dir
-            # this first list has the full path
-            # put a basic UNIX pattern so we don't pick up the metafits
+        # Check for gpubox files (mwax OR legacy)
+        glob_spec = "*.fits"
+        data_dir_full_path_files = glob.glob(os.path.join(self.input_data_path, glob_spec))
+        data_dir_filenames = [os.path.basename(i) for i in data_dir_full_path_files]
+        data_dir_filenames.sort()
+        # Remove the metafits file
+        if self.metafits_name in data_dir_filenames:
+            data_dir_filenames.remove(self.metafits_name)
 
-            # Check for gpubox files (mwax OR legacy)
-            glob_spec = "*.fits"
-            data_dir_full_path_files = glob.glob(os.path.join(self.data_path, glob_spec))
-            data_dir_filenames = [os.path.basename(i) for i in data_dir_full_path_files]
-            data_dir_filenames.sort()
-            # Remove the metafits file
-            if self.metafits_name in data_dir_filenames:
-                data_dir_filenames.remove(self.metafits_name)
+        # How does what we need compare to what we have?
+        return_value = set(data_dir_filenames).issuperset(self.ws_filenames)
 
-            # How does what we need compare to what we have?
-            return_value = set(data_dir_filenames).issuperset(self.ws_filenames)
-
-            self.logger.debug(
-                f"{self.obs_id} check_obs_is_ready_to_process() =="
-                f" {return_value} (WS: {len(self.ws_filenames)},"
-                f" data_dir: {len(data_dir_filenames)})"
-            )
-            return return_value
-        else:
-            # Web service didn't return any files
-            # This is usually because there ARE no files in the database
-            # Best to fail
-            self.logger.error(f"utils.get_data_files_for_obsid_from_webservice({self.obs_id} did not return any files.")
-            return False
+        self.logger.debug(
+            f"{self.obs_id} check_obs_is_ready_to_process() =="
+            f" {return_value} (WS: {len(self.ws_filenames)},"
+            f" data_dir: {len(data_dir_filenames)})"
+        )
+        return return_value
 
     def run_birli(self) -> bool:
         """Run birli to produce uvfits file(s)"""
@@ -338,7 +361,7 @@ class MWAXCalvinProcessor:
 
         # Determine if the obs is oversampled
         try:
-            with fits.open(self.metafits_filename) as hdus:
+            with fits.open(self.metafits_filename) as hdus:  # type: ignore
                 oversampled: bool = int(hdus["PRIMARY"].header["OVERSAMP"]) == 1
         except KeyError:
             # No OVERSAMP key? Then it is not oversampled!
@@ -347,7 +370,19 @@ class MWAXCalvinProcessor:
         # Run Birli
         self.logger.info(f"{self.obs_id}: Running Birli...")
         birli_success = mwax_calvin_utils.run_birli(
-            self, self.metafits_filename, self.uvfits_filename, self.obs_id, self.data_path, oversampled
+            self.logger,
+            self.input_data_path,
+            self.metafits_filename,
+            self.uvfits_filename,
+            self.job_output_path,
+            self.obs_id,
+            oversampled,
+            self.birli_binary_path,
+            self.birli_max_mem_gib,
+            self.birli_timeout,
+            self.birli_freq_res_khz * 1000,
+            self.birli_int_time_res_sec,
+            self.birli_edge_width_khz * 1000,
         )
 
         if not birli_success:
@@ -371,18 +406,26 @@ class MWAXCalvinProcessor:
         # Therefore we need to run hyperdrive N times too
         #
         # get a list of the uvfits files
-        uvfits_files = glob.glob(os.path.join(self.data_path, "*.uvfits"))
+        uvfits_files = glob.glob(os.path.join(self.working_path, "*.uvfits"))
 
         # Run hyperdrive
         hyperdrive_success = mwax_calvin_utils.run_hyperdrive(
-            self, uvfits_files, self.metafits_filename, self.obs_id, self.data_path
+            self.logger,
+            uvfits_files,
+            self.metafits_filename,
+            self.job_output_path,
+            self.obs_id,
+            self.hyperdrive_binary_path,
+            self.source_list_filename,
+            self.source_list_type,
+            self.hyperdrive_timeout,
         )
 
         # Did we have N number of successful runs?
         if hyperdrive_success:
             # Run hyperdrive and get plots and stats
             mwax_calvin_utils.run_hyperdrive_stats(
-                self, uvfits_files, self.metafits_filename, self.obs_id, self.data_path
+                self.logger, uvfits_files, self.metafits_filename, self.obs_id, self.hyperdrive_binary_path
             )
 
         if not hyperdrive_success:
@@ -491,37 +534,87 @@ class MWAXCalvinProcessor:
         )
 
         #
-        # processing config
+        # Birli
         #
 
-        # Get the processing dir
-        self.processing_path = utils.read_config(
-            self.logger,
-            config,
-            "processing",
-            "processing_path",
-        )
-
-        if not os.path.exists(self.processing_path):
-            self.logger.error("processing_path location " f" {self.processing_path} does not exist. Quitting.")
-            sys.exit(1)
-
-        self.phase_fit_niter = int(
+        # Birli timeout
+        self.birli_timeout = int(
             utils.read_config(
                 self.logger,
                 config,
-                "processing",
-                "phase_fit_niter",
+                "birli",
+                "timeout",
+            )
+        )
+
+        # Get Birli max mem
+        self.birli_max_mem_gib = int(
+            utils.read_config(
+                self.logger,
+                config,
+                "birli",
+                "max_mem_gib",
+            )
+        )
+
+        # Get the Birli binary
+        self.birli_binary_path = utils.read_config(
+            self.logger,
+            config,
+            "birli",
+            "binary_path",
+        )
+
+        if not os.path.exists(self.birli_binary_path):
+            self.logger.error("birli_binary_path location " f" {self.birli_binary_path} does not exist. Quitting.")
+            sys.exit(1)
+
+        # Get Birli freq res
+        self.birli_freq_res_khz = int(
+            utils.read_config(
+                self.logger,
+                config,
+                "birli",
+                "freq_res_khz",
+            )
+        )
+
+        # Get Birli time res
+        self.birli_int_time_res_sec = float(
+            utils.read_config(
+                self.logger,
+                config,
+                "birli",
+                "int_time_res_sec",
+            )
+        )
+
+        # Get Birli edge width
+        self.birli_edge_width_khz = int(
+            utils.read_config(
+                self.logger,
+                config,
+                "birli",
+                "edge_width_khz",
             )
         )
 
         #
         # Hyperdrive config
         #
+        self.phase_fit_niter = int(
+            utils.read_config(
+                self.logger,
+                config,
+                "hyperdrive",
+                "phase_fit_niter",
+            )
+        )
+
         self.source_list_filename = utils.read_config(
             self.logger,
             config,
-            "processing",
+            "hyperdrive",
             "source_list_filename",
         )
 
@@ -534,7 +627,7 @@ class MWAXCalvinProcessor:
         self.source_list_type = utils.read_config(
             self.logger,
             config,
-            "processing",
+            "hyperdrive",
             "source_list_type",
         )
 
@@ -543,8 +636,8 @@ class MWAXCalvinProcessor:
             utils.read_config(
                 self.logger,
                 config,
-                "processing",
-                "hyperdrive_timeout",
+                "hyperdrive",
+                "timeout",
             )
         )
 
@@ -552,8 +645,8 @@ class MWAXCalvinProcessor:
         self.hyperdrive_binary_path = utils.read_config(
             self.logger,
             config,
-            "processing",
-            "hyperdrive_binary_path",
+            "hyperdrive",
+            "binary_path",
         )
 
         if not os.path.exists(self.hyperdrive_binary_path):
@@ -562,37 +655,39 @@ class MWAXCalvinProcessor:
             )
             sys.exit(1)
 
-        # Birli timeout
-        self.birli_timeout = int(
-            utils.read_config(
-                self.logger,
-                config,
-                "processing",
-                "birli_timeout",
-            )
-        )
+        #
+        # processing config
+        #
 
-        # Get Birli max mem
-        self.birli_max_mem_gib = int(
-            utils.read_config(
-                self.logger,
-                config,
-                "processing",
-                "birli_max_mem_gib",
-            )
-        )
-
-        # Get the Birli binary
-        self.birli_binary_path = utils.read_config(
+        # Get the job_output_path dir
+        self.job_output_path = utils.read_config(
             self.logger,
             config,
             "processing",
-            "birli_binary_path",
+            "job_output_path",
         )
 
-        if not os.path.exists(self.birli_binary_path):
-            self.logger.error("birli_binary_path location " f" {self.birli_binary_path} does not exist. Quitting.")
+        if not os.path.exists(self.job_output_path):
+            self.logger.error("job_output_path location " f" {self.job_output_path} does not exist. Quitting.")
             sys.exit(1)
+
+        # Get the temp working dir
+        self.temp_working_path = utils.read_config(
+            self.logger,
+            config,
+            "processing",
+            "temp_working_path",
+        )
+
+        if not os.path.exists(self.temp_working_path):
+            if self.temp_working_path.startswith("/tmp"):
+                # Create it (if it does not start with /tmp assume it is a permanent path in
+                # which case user has to create it
+                self.logger.debug(f"temp_working_path location {self.temp_working_path} does not exist, creating it.")
+                os.makedirs(self.temp_working_path)
+            else:
+                self.logger.error("temp_working_path location " f" {self.temp_working_path} does not exist. Quitting.")
+                sys.exit(1)
 
         self.keep_completed_visibility_files = utils.read_config_bool(
             self.logger,
@@ -687,7 +782,14 @@ class MWAXCalvinProcessor:
             print(f"ERROR: request-ids param '{request_ids_string}' must contain at least one request-id. Aborting.")
             exit(-1)
 
-        self.initialise(config_filename, int(obs_id), int(slurm_job_id), job_type, mwa_asvo_download_url, request_ids)
+        self.initialise(
+            config_filename,
+            int(obs_id),
+            int(slurm_job_id),
+            job_type,
+            mwa_asvo_download_url,
+            request_ids,
+        )
 
     def sleep(self, seconds):
         """This sleep function keeps an eye on self.running so that if we are in a long wait

@@ -25,6 +25,7 @@ from mwax_mover.mwax_command import (
     check_popen_finished,
 )
 from mwax_mover.utils import is_int
+from mwalib import MetafitsContext
 import numpy.typing as npt  # noqa: F401
 from numpy.typing import ArrayLike, NDArray
 from typing import NamedTuple, List, Tuple, Optional  # noqa: F401
@@ -1457,7 +1458,19 @@ def write_readme_file(logger, filename, cmd, exit_code, stdout, stderr):
 
 
 def run_birli(
-    processor, metafits_filename: str, uvfits_filename: str, obs_id: int, processing_dir: str, oversampled: bool
+    logger: logging.Logger,
+    input_data_path: str,
+    metafits_filename: str,
+    uvfits_filename: str,
+    job_output_path: str,
+    obs_id: int,
+    oversampled: bool,
+    birli_binary_path: str,
+    birli_max_mem_gib: int,
+    birli_timeout: int,
+    birli_freq_res_hz: int,
+    birli_int_time_res_sec: float,
+    birli_edge_width_hz: int,
 ) -> bool:
     """Execute Birli, returning true on success, false on failure"""
     birli_success: bool = False
@@ -1469,7 +1482,7 @@ def run_birli(
     stdout = None
     try:
         # Get only data files
-        data_files = glob.glob(os.path.join(processing_dir, "*.fits"))
+        data_files = glob.glob(os.path.join(input_data_path, "*.fits"))
         # Remove the metafits (we specify it seperately)
         try:
             data_files.remove(metafits_filename)
@@ -1489,46 +1502,46 @@ def run_birli(
         fine_chan_width_hz = metafits.chan_info.fine_chan_width_hz
         time_time_s = metafits.time_info.int_time_s
 
-        # TODO: set default edge_width res from config
+        # set default edge_width res from config
         if oversampled:
             # For oversampled obs we don't flag edges and we don't correct passband
             edge_width_hz = 0
             passband_arg = "--passband-gains none"
         else:
-            edge_width_hz = 80e3  # default
+            edge_width_hz = birli_edge_width_hz  # default
             edge_width_hz = np.max([fine_chan_width_hz, edge_width_hz])
             assert edge_width_hz >= fine_chan_width_hz, f"{edge_width_hz=} must be >= {fine_chan_width_hz=}"
             assert edge_width_hz % fine_chan_width_hz == 0, f"{edge_width_hz=} must multiple of {fine_chan_width_hz=}"
             passband_arg = ""  # leave as default
 
-        # TODO: set minimum freq res from config
-        min_freq_res = 40e3
+        # set minimum freq res from config
+        min_freq_res = birli_freq_res_hz
         avg_arg = ""
         if fine_chan_width_hz < min_freq_res:
             avg_arg += f" --avg-freq-res={int(min_freq_res/1e3)}"
 
-        # TODO: set minimum time res from config
-        min_time_res = 2
+        # set minimum time res from config
+        min_time_res = birli_int_time_res_sec
         if time_time_s < min_time_res:
             avg_arg += f" --avg-time-res={min_time_res}"
 
         # Run birli
         cmdline = (
-            f"{processor.birli_binary_path}"
+            f"{birli_binary_path}"
             f" --metafits {metafits_filename}"
             " --no-draw-progress"
             f" --uvfits-out={uvfits_filename}"
             f" --flag-edge-width={int(edge_width_hz/1e3)}"
-            f" --max-memory={processor.birli_max_mem_gib}"
+            f" --max-memory={birli_max_mem_gib}"
             f" {avg_arg} {passband_arg} {data_file_arg}"
         )
 
-        processor.birli_popen_process = run_command_popen(processor.logger, cmdline, -1, False)
+        birli_popen_process = run_command_popen(logger, cmdline, -1, False)
 
         exit_code, stdout, stderr = check_popen_finished(
-            processor.logger,
-            processor.birli_popen_process,
-            processor.birli_timeout,
+            logger,
+            birli_popen_process,
+            birli_timeout,
         )
 
         # return_val, stdout = run_command_ext(logger, cmdline, -1, timeout, False)
@@ -1536,15 +1549,14 @@ def run_birli(
 
         if exit_code == 0:
             # Success!
-            processor.logger.info(f"{obs_id}: Birli run successful in {elapsed:.3f} seconds")
+            logger.info(f"{obs_id}: Birli run successful in {elapsed:.3f} seconds")
             birli_success = True
-            processor.birli_popen_process = None
 
             # Success!
             # Write out a useful file of command line info
-            readme_filename = os.path.join(processing_dir, f"{obs_id}_birli_readme.txt")
+            readme_filename = os.path.join(job_output_path, f"{obs_id}_birli_readme.txt")
             write_readme_file(
-                processor.logger,
+                logger,
                 readme_filename,
                 cmdline,
                 exit_code,
@@ -1552,12 +1564,10 @@ def run_birli(
                 stderr,
             )
         else:
-            processor.logger.error(
-                f"{obs_id}: Birli run FAILED: Exit code of {exit_code} in" f" {elapsed:.3f} seconds: {stderr}"
-            )
+            logger.error(f"{obs_id}: Birli run FAILED: Exit code of {exit_code} in" f" {elapsed:.3f} seconds: {stderr}")
     except Exception as birli_run_exception:
         elapsed = time.time() - start_time
-        processor.logger.error(
+        logger.error(
             f"{obs_id}: birli run FAILED: Unhandled exception"
             f" {birli_run_exception} in {elapsed:.3f} seconds:"
             f" {stderr}"
@@ -1566,44 +1576,42 @@ def run_birli(
     if not birli_success:
         # If we are not shutting down,
         # Move the files to an error dir
-        #
-        # If we are shutting down, then this error is because
-        # we have effectively sent it a SIGINT. This should not be a
-        # reason to abandon processing. Leave it there to be picked up
-        # next run (ie this will trigger the "else" which does nothing)
-        if processor.running:
-            error_path = os.path.join(processor.processing_error_path, str(obs_id))
-            processor.logger.info(
-                f"{obs_id}: moving failed files to {error_path} for manual" " analysis and writing readme_error.txt"
-            )
+        logger.info(
+            f"{obs_id}: moving failed files to {job_output_path} for manual" " analysis and writing readme_error.txt"
+        )
 
-            # Move the processing dir
-            shutil.move(processing_dir, error_path)
+        # Move the processing dir
+        shutil.move(input_data_path, job_output_path)
 
-            # Write out a useful file of error and command line info
-            readme_filename = os.path.join(error_path, "readme_error.txt")
-            write_readme_file(
-                processor.logger,
-                readme_filename,
-                cmdline,
-                exit_code,
-                stdout,
-                stderr,
-            )
+        # Write out a useful file of error and command line info
+        readme_filename = os.path.join(job_output_path, "readme_error.txt")
+        write_readme_file(
+            logger,
+            readme_filename,
+            cmdline,
+            exit_code,
+            stdout,
+            stderr,
+        )
 
     return birli_success
 
 
 def run_hyperdrive(
-    processor,
-    uvfits_files,
+    logger: logging.Logger,
+    input_uvfits_files: List[str],
     metafits_filename: str,
+    job_output_path: str,
     obs_id: int,
-    processing_dir: str,
+    hyperdrive_binary_path: str,
+    source_list_filename: str,
+    source_list_type: str,
+    hyperdrive_timeout: int,
 ) -> bool:
     """Runs hyperdrive N times and returns true on success or false if not all runs worked"""
-    processor.logger.info(
-        f"{obs_id}: {len(uvfits_files)} contiguous bands detected." f" Running hyperdrive {len(uvfits_files)} times...."
+    logger.info(
+        f"{obs_id}: {len(input_uvfits_files)} contiguous bands detected."
+        f" Running hyperdrive {len(input_uvfits_files)} times...."
     )
 
     # Keep track of the number of successful hyperdrive runs
@@ -1614,7 +1622,7 @@ def run_hyperdrive(
     cmdline = ""
     exit_code = 0
 
-    for hyperdrive_run, uvfits_file in enumerate(uvfits_files):
+    for hyperdrive_run, uvfits_file in enumerate(input_uvfits_files):
         # Take the filename which for picket fence will also have
         # the band info and in all cases the obsid. We will use
         # this as a base for other files we work with
@@ -1627,44 +1635,43 @@ def run_hyperdrive(
             # Run hyperdrive
             # Output to hyperdrive format and old aocal format (bin)
             cmdline = (
-                f"{processor.hyperdrive_binary_path} di-calibrate"
+                f"{hyperdrive_binary_path} di-calibrate"
                 " --no-progress-bars --data"
                 f" {uvfits_file} {metafits_filename} --num-sources 99"
                 " --source-list"
-                f" {processor.source_list_filename} --source-list-type"
-                f" {processor.source_list_type} --outputs"
+                f" {source_list_filename} --source-list-type"
+                f" {source_list_type} --outputs"
                 f" {hyperdrive_solution_filename} {bin_solution_filename}"
             )
 
             start_time = time.time()
 
             # run hyperdrive
-            processor.logger.info(f"{obs_id}: Running hyperdrive on {uvfits_file}...")
-            processor.hyperdrive_popen_process = run_command_popen(processor.logger, cmdline, -1, False)
+            logger.info(f"{obs_id}: Running hyperdrive on {uvfits_file}...")
+            hyperdrive_popen_process = run_command_popen(logger, cmdline, -1, False)
 
             exit_code, stdout, stderr = check_popen_finished(
-                processor.logger,
-                processor.hyperdrive_popen_process,
-                processor.hyperdrive_timeout,
+                logger,
+                hyperdrive_popen_process,
+                hyperdrive_timeout,
             )
 
             # return_val, stdout = run_command_ext(logger, cmdline, -1, timeout, False)
             elapsed = time.time() - start_time
 
             if exit_code == 0:
-                processor.logger.info(
+                logger.info(
                     f"{obs_id}: hyperdrive run"
-                    f" {hyperdrive_run + 1}/{len(uvfits_files)} successful"
+                    f" {hyperdrive_run + 1}/{len(input_uvfits_files)} successful"
                     f" in {elapsed:.3f} seconds"
                 )
-                processor.hyperdrive_popen_process = None
 
                 # Success!
                 # Write out a useful file of command line info
                 readme_filename = f"{obsid_and_band}_hyperdrive_readme.txt"
 
                 write_readme_file(
-                    processor.logger,
+                    logger,
                     readme_filename,
                     cmdline,
                     exit_code,
@@ -1674,18 +1681,18 @@ def run_hyperdrive(
 
                 hyperdrive_runs_success += 1
             else:
-                processor.logger.error(
+                logger.error(
                     f"{obs_id}: hyperdrive run"
-                    f" {hyperdrive_run + 1}/{len(uvfits_files)} FAILED:"
+                    f" {hyperdrive_run + 1}/{len(input_uvfits_files)} FAILED:"
                     f" Exit code of {exit_code} in"
                     f" {elapsed:.3f} seconds. StdErr: {stderr}"
                 )
                 # exit for loop- since run failed
                 break
         except Exception as hyperdrive_run_exception:
-            processor.logger.error(
+            logger.error(
                 f"{obs_id}: hyperdrive run"
-                f" {hyperdrive_run + 1}/{len(uvfits_files)} FAILED:"
+                f" {hyperdrive_run + 1}/{len(input_uvfits_files)} FAILED:"
                 " Unhandled exception"
                 f" {hyperdrive_run_exception} in"
                 f" {elapsed:.3f} seconds. StdErr: {stderr}"
@@ -1693,57 +1700,50 @@ def run_hyperdrive(
             # exit for loop since run failed
             break
 
-    if hyperdrive_runs_success != len(uvfits_files):
+    if hyperdrive_runs_success != len(input_uvfits_files):
         # We did not run successfully on one or all hyperdrive calls.
-        # If we are not shutting down,
-        # Move the files to an error dir
-        #
-        # If we are shutting down, then this error is because
-        # we have effectively sent it a SIGINT. This should not be a
-        # reason to abandon processing. Leave it there to be picked up
-        # next run (ie this will trigger the "else" which does nothing)
-        if processor.running:
-            error_path = os.path.join(processor.processing_error_path, str(obs_id))
-            processor.logger.info(
-                f"{obs_id}: moving failed files to {error_path} for manual" " analysis and writing readme_error.txt"
-            )
+        # Move the files to a the job output dir
+        logger.info(
+            f"{obs_id}: moving failed files to {job_output_path} for manual" " analysis and writing readme_error.txt"
+        )
 
-            # Move the processing dir
-            shutil.move(processing_dir, error_path)
+        # Move the input uvfits files to the job path
+        for uvfits_file in input_uvfits_files:
+            shutil.move(uvfits_file, job_output_path)
 
-            # Write out a useful file of error and command line info
-            readme_filename = os.path.join(error_path, "readme_error.txt")
-            write_readme_file(
-                processor.logger,
-                readme_filename,
-                cmdline,
-                exit_code,
-                stdout,
-                stderr,
-            )
+        # Write out a useful file of error and command line info
+        readme_filename = os.path.join(job_output_path, "readme_error.txt")
+        write_readme_file(
+            logger,
+            readme_filename,
+            cmdline,
+            exit_code,
+            stdout,
+            stderr,
+        )
         return False
-    else:
-        return True
+
+    return True
 
 
 def run_hyperdrive_stats(
-    processor,
-    uvfits_files,
+    logger: logging.Logger,
+    input_uvfits_files,
     metafits_filename: str,
     obs_id: int,
-    processing_dir: str,
+    hyperdrive_binary_path: str,
 ) -> bool:
     """Call hyperdrive again but just to produce plots and stats"""
 
     # produce stats/plots
     stats_successful: int = 0
 
-    processor.logger.info(
-        f"{obs_id}: {len(uvfits_files)} contiguous bands detected."
-        f" Running hyperdrive stats {len(uvfits_files)} times...."
+    logger.info(
+        f"{obs_id}: {len(input_uvfits_files)} contiguous bands detected."
+        f" Running hyperdrive stats {len(input_uvfits_files)} times...."
     )
 
-    for hyperdrive_stats_run, uvfits_file in enumerate(uvfits_files):
+    for hyperdrive_stats_run, uvfits_file in enumerate(input_uvfits_files):
         # Take the filename which for picket fence will also have
         # the band info and in all cases the obsid. We will use
         # this as a base for other files we work with
@@ -1756,28 +1756,28 @@ def run_hyperdrive_stats(
             stats_success,
             stats_error,
         ) = write_stats(
-            processor.logger,
+            logger,
             obs_id,
             stats_filename,
             hyperdrive_solution_filename,
-            processor.hyperdrive_binary_path,
+            hyperdrive_binary_path,
             metafits_filename,
         )
 
         if stats_success:
             stats_successful += 1
         else:
-            processor.logger.warning(
+            logger.warning(
                 f"{obs_id}: hyperdrive stats run"
-                f" {hyperdrive_stats_run + 1}/{len(uvfits_files)} FAILED:"
+                f" {hyperdrive_stats_run + 1}/{len(input_uvfits_files)} FAILED:"
                 f" {stats_error}."
             )
 
-    if stats_successful == len(uvfits_files):
-        processor.logger.info(f"{obs_id}: All {stats_successful} hyperdrive stats" " runs successful")
+    if stats_successful == len(input_uvfits_files):
+        logger.info(f"{obs_id}: All {stats_successful} hyperdrive stats" " runs successful")
         return True
     else:
-        processor.logger.warning(f"{obs_id}: Not all hyperdrive stats runs were successful.")
+        logger.warning(f"{obs_id}: Not all hyperdrive stats runs were successful.")
         return False
 
 
@@ -1944,3 +1944,26 @@ def submit_sbatch(logger: logging.Logger, script_path: str, script: str, obs_id:
 
     if not return_val:
         return (False, None)
+
+
+def estimate_birli_output_GB(metafits_filename: str, birli_freq_res_khz: int, birli_int_time_res_sec: float) -> int:
+    # baselines = (tiles * tiles + 1)
+    # timesteps = duration / birli_int_time_res_sec
+    # fine_channels = 30.72 MHz / birli_freq_res_khz
+    # pols = 4 (XX,XY,YX,YY)
+    # values = 2 (real, imag)
+    # bytes_per_value = 4 (f32)
+    # Total bytes = (baselines * fine_channels * pols * values * bytes_per_value * timesteps)
+    # Total GB = bytes / 1000.^3
+    mctx = MetafitsContext(metafits_filename)
+
+    baselines: int = mctx.num_baselines
+    timesteps: int = int(mctx.sched_duration_ms / (birli_int_time_res_sec * 1000.0))
+    fine_channels: int = int(mctx.obs_bandwidth_hz / (birli_freq_res_khz * 1000.0))
+    pols: int = mctx.num_visibility_pols  # (XX,XY,YX,YY)
+    values: int = 2  # (real, imag)
+    bytes_per_value: int = 4  # f32
+    total_bytes: int = baselines * fine_channels * pols * values * bytes_per_value * timesteps
+    total_GB: int = int(total_bytes / (1000 ^ 3))
+
+    return total_GB
