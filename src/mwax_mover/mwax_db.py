@@ -734,10 +734,10 @@ def get_unattempted_calsolution_requests(db_handler_object: MWAXDBHandler) -> li
                 for row in results_rows:
                     # We got one!
                     request_id: int = int(row["request_id"])
-                    cal_id: int = int(row["cal_id"])
+                    obs_id: int = int(row["obs_id"])
                     realtime: bool = bool(row["realtime"])
 
-                    return_list.append((request_id, cal_id, realtime))
+                    return_list.append((request_id, obs_id, realtime))
 
         return return_list
 
