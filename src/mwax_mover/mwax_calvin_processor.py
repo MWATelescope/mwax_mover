@@ -97,7 +97,7 @@ class MWAXCalvinProcessor:
         # Set the data path and metadata
         # will be something like: /data/calvin/jobs/OBSID/SLURM_JOB_ID
         self.input_data_path = os.path.join(
-            os.path.join(self.job_output_path, str(self.obs_id)), str(self.slurm_job_id)
+            os.path.join(self.input_data_path, str(self.obs_id)), str(self.slurm_job_id)
         )
         self.metafits_filename = os.path.join(self.input_data_path, f"{self.obs_id}_metafits.fits")
         # Ensure input data path exists
@@ -108,7 +108,7 @@ class MWAXCalvinProcessor:
             os.path.join(self.job_output_path, str(self.obs_id)), str(self.slurm_job_id)
         )
         # Ensure output path exists
-        os.makedirs(name=self.working_path, exist_ok=True)
+        os.makedirs(name=self.job_output_path, exist_ok=True)
 
         # First step depends on jobtype
         data_downloaded: bool = False
