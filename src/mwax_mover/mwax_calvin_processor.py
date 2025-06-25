@@ -103,29 +103,6 @@ class MWAXCalvinProcessor:
         # Ensure input data path exists
         os.makedirs(name=self.input_data_path, exist_ok=True)
 
-        # Working path for Birli / uvfits output is determined by calculating the size of the output visibilites:
-        self.estimated_uvfits_GB = estimate_birli_output_GB(
-            self.metafits_filename, self.birli_freq_res_khz, self.birli_int_time_res_sec
-        )
-
-        if self.estimated_uvfits_GB < 500:
-            # Use temp_working_dir
-            self.working_path = os.path.join(
-                os.path.join(self.temp_working_path, str(self.obs_id)), str(self.slurm_job_id)
-            )
-            # Ensure input data path exists
-            os.makedirs(name=self.working_path, exist_ok=True)
-
-            # Override the birli allowed memory
-            self.birli_max_mem_gib -= self.estimated_uvfits_GB
-            self.logger.info(
-                f"Using tempory work dir {self.temp_working_path} for Birli output. Reduced "
-                f"allowed Birli memory to: {self.birli_max_mem_gib} GiB"
-            )
-        else:
-            # Use output_dir
-            self.working_path = self.job_output_path
-
         # Output dirs
         self.job_output_path = os.path.join(
             os.path.join(self.job_output_path, str(self.obs_id)), str(self.slurm_job_id)
@@ -155,6 +132,29 @@ class MWAXCalvinProcessor:
 
             # Wait before trying again
             self.sleep(DOWNLOAD_RETRY_WAIT_SECONDS)
+
+        # Working path for Birli / uvfits output is determined by calculating the size of the output visibilites:
+        self.estimated_uvfits_GB = estimate_birli_output_GB(
+            self.metafits_filename, self.birli_freq_res_khz, self.birli_int_time_res_sec
+        )
+
+        if self.estimated_uvfits_GB < 500:
+            # Use temp_working_dir
+            self.working_path = os.path.join(
+                os.path.join(self.temp_working_path, str(self.obs_id)), str(self.slurm_job_id)
+            )
+            # Ensure input data path exists
+            os.makedirs(name=self.working_path, exist_ok=True)
+
+            # Override the birli allowed memory
+            self.birli_max_mem_gib -= self.estimated_uvfits_GB
+            self.logger.info(
+                f"Using tempory work dir {self.temp_working_path} for Birli output. Reduced "
+                f"allowed Birli memory to: {self.birli_max_mem_gib} GiB"
+            )
+        else:
+            # Use output_dir
+            self.working_path = self.job_output_path
 
         # All files we could get are now in the processing_path
         if not self.check_obs_is_ready_to_process():
