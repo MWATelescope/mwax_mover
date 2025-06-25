@@ -4,13 +4,13 @@ import logging
 import os
 import traceback
 import numpy as np
-from mwax_db import (
+from mwax_mover.mwax_db import (
     MWAXDBHandler,
     insert_calibration_fits_row,
     insert_calibration_solutions_row,
     update_calsolution_request_calibration_complete_status,
 )
-from mwax_calvin_utils import (
+from mwax_mover.mwax_calvin_utils import (
     GainFitInfo,
     Metafits,
     HyperfitsSolution,
@@ -22,7 +22,7 @@ from mwax_calvin_utils import (
     write_readme_file,
 )
 from mwax_mover import mwax_db
-from version import get_mwax_mover_version_string
+from mwax_mover.version import get_mwax_mover_version_string
 
 
 def process_solutions(
