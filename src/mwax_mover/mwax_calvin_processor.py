@@ -115,10 +115,6 @@ class MWAXCalvinProcessor:
         os.makedirs(name=self.job_output_path, exist_ok=True)
         self.logger.info(f"Job Output Data will be downloaded to: {self.job_output_path}")
 
-        # Set uvfits filename
-        self.uvfits_filename = os.path.join(self.working_path, f"{self.obs_id}.uvfits")
-        self.logger.info(f"Job Output UVFITS file(s) will be created as: {self.uvfits_filename}")
-
         # First step depends on jobtype
         data_downloaded: bool = False
         data_download_attempt: int = 1
@@ -190,6 +186,10 @@ class MWAXCalvinProcessor:
             # Use output_dir
             self.working_path = self.job_output_path
             self.logger.info(f"Using work dir {self.working_path} for Birli output.")
+
+        # Set uvfits filename
+        self.uvfits_filename = os.path.join(self.working_path, f"{self.obs_id}.uvfits")
+        self.logger.info(f"Job Output UVFITS file(s) will be created as: {self.uvfits_filename}")
 
         # All files we could get are now in the processing_path
         self.logger.info("Ensuring all data is ready for processing...")
