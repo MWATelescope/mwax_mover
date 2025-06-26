@@ -62,6 +62,7 @@ class MWAXCalvinController:
         self.hostname: str = ""
         self.db_handler_object: mwax_db.MWAXDBHandler
         self.config_filename: str = ""
+        self.worker_config_filename: str = ""
         self.running: bool = False
         self.ready_to_exit: bool = False
 
@@ -160,7 +161,7 @@ class MWAXCalvinController:
     def realtime_submit_to_slurm(self, realtime_request: CalibrationRequest):
         # Create a sbatch script
         script = create_sbatch_script(
-            self.config_filename,
+            self.worker_config_filename,
             realtime_request.obs_id,
             CalvinJobType.realtime,
             self.log_path,
@@ -227,7 +228,7 @@ class MWAXCalvinController:
                         self.logger.info(f"{job}: Submitting slurm job")
 
                         script = create_sbatch_script(
-                            self.config_filename,
+                            self.worker_config_filename,
                             job.obs_id,
                             CalvinJobType.mwa_asvo,
                             self.log_path,
@@ -434,9 +435,10 @@ class MWAXCalvinController:
             except Exception:
                 self.logger.exception("Error in update_all_job_status. Will retry next loop")
 
-    def initialise(self, config_filename):
+    def initialise(self, config_filename: str):
         """Initialise the processor from the command line"""
         self.config_filename = config_filename
+        self.worker_config_filename = config_filename.replace("calvin_controller", "calvin_processor")
 
         # Get this hosts hostname
         self.hostname = utils.get_hostname()
