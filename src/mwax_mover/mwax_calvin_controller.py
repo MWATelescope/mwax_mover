@@ -232,7 +232,7 @@ class MWAXCalvinController:
                             CalvinJobType.mwa_asvo,
                             self.log_path,
                             [str(r) for r in job.request_ids],
-                            f"--mwa-asvo-download-url={job.download_url}",
+                            f'--mwa-asvo-download-url="{job.download_url}"',
                         )
 
                         # submit sbatch script
