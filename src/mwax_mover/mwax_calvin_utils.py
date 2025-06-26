@@ -1894,7 +1894,7 @@ source .venv/bin/activate
 
 # Process
 srun --nodes=1 --ntasks=1 --cpus-per-task=90 \
-calvin_processor \
+mwax_calvin_processor \
 --cfg={config_file_path} \
 --job-type={jobtype.value} \
 --obs-id={obs_id} \
