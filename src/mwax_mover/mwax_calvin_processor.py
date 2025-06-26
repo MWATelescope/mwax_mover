@@ -141,10 +141,10 @@ class MWAXCalvinProcessor:
 
         self.logger.info(
             f"Observation UVFITS output is estimated to be : {self.estimated_uvfits_GB} GB "
-            f"({utils.gigabyte_to_gibibyte(self.estimated_uvfits_GB)} GiB)"
+            f"({int(utils.gigabyte_to_gibibyte(self.estimated_uvfits_GB))} GiB)"
         )
 
-        if self.estimated_uvfits_GB > 500:
+        if self.estimated_uvfits_GB < 500:
             # Use temp_working_dir
             self.working_path = os.path.join(self.temp_working_path, f"{str(self.obs_id)}_{str(self.slurm_job_id)}")
             # Ensure input data path exists
