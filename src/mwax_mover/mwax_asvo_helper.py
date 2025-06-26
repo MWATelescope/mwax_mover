@@ -346,11 +346,11 @@ def get_job_id_from_giant_squid_stdout(stdout: str) -> int:
     """
 
     # Output of successful submission is:
-    # 17:19:03 [INFO] Submitted obs_id as ASVO job ID job_id
+    # 17:19:03 [INFO] Submitted obs_id as MWA ASVO job ID job_id
     # 17:19:03 [INFO] Submitted 1 obs_ids for visibility download.
     lines = stdout.splitlines()
     for line in lines:
-        regex_match = re.search(r"as ASVO job ID (\d+)", line)
+        regex_match = re.search(r"as MWA ASVO job ID (\d+)", line)
 
         if regex_match:
             job_id_str = regex_match.group(1)
@@ -360,6 +360,15 @@ def get_job_id_from_giant_squid_stdout(stdout: str) -> int:
     # Output of successful, but already existing job id is:
     # 14:24:17 [WARN] Job already queued, processing or complete. Job Id: 10001610
     regex_match = re.search(r"Job already queued, processing or complete. Job Id: (\d+)", stdout, re.M)
+
+    if regex_match:
+        job_id_str = regex_match.group(1)
+
+        return int(job_id_str)
+
+    # Try this too
+    # 12:08:08 [WARN] Job already running or complete. Job Id: 878060 ObsID: 1427464352
+    regex_match = re.search(r"Job already running or complete. Job Id: (\d+) ObsID:", stdout, re.M)
 
     if regex_match:
         job_id_str = regex_match.group(1)
