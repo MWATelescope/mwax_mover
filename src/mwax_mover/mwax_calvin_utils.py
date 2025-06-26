@@ -1854,7 +1854,12 @@ def process_gain_fits(
 
 
 def create_sbatch_script(
-    config_file_path: str, obs_id: int, jobtype: CalvinJobType, log_path: str, processor_args: str
+    config_file_path: str,
+    obs_id: int,
+    jobtype: CalvinJobType,
+    log_path: str,
+    request_ids: list[str],
+    processor_args: str,
 ) -> str:
     # log_path is the global log path e.g. /home/mwa/logs
     # processor_args is to allow the caller to add extra processor cmd line args.
@@ -1865,39 +1870,35 @@ def create_sbatch_script(
     else:
         job_name = f"asvo{obs_id}"
 
-    job_script = f"""
-        #!/bin/bash
-        #SBATCH --partition=gpu
-        #SBATCH --nodes=1
-        #SBATCH --cpus-per-task=90
-        #SBATCH --ntasks=1
-        #SBATCH --gpus-per-task=1
-        #SBATCH --exclusive # use all cpus
-        #SBATCH --mem=900G
-        #SBATCH --time=03:00:00
-        #SBATCH --account=mwa
-        #SBATCH --job-name={job_name}
-        #SBATCH --signal=TERM@60
-        #SBATCH --output={log_path}/$SLURM_JOB_ID.out
-        #SBATCH --error={log_path}/$SLURM_JOB_ID.err
-        #SBATCH --open-mode=append
-        #SBATCH --parsable
-        echo "Starting Calvin {jobtype} Job: $SLURM_JOB_ID";
+    job_script = f"""#!/bin/bash"
+#SBATCH --partition=gpu
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=90
+#SBATCH --ntasks=1
+#SBATCH --gpus-per-task=1
+#SBATCH --exclusive # use all cpus
+#SBATCH --mem=900G
+#SBATCH --time=03:00:00
+#SBATCH --account=mwa
+#SBATCH --job-name={job_name}
+#SBATCH --signal=TERM@60
+#SBATCH --output={log_path}/$SLURM_JOB_ID.out
+#SBATCH --error={log_path}/$SLURM_JOB_ID.err
+#SBATCH --open-mode=append
+#SBATCH --parsable
+echo "Starting Calvin {jobtype} Job: $SLURM_JOB_ID";
 
-        # Make a data directory
-        mkdir -p /data/$SLURM_JOB_ID
+# Process
+srun --nodes=1 --ntasks=1 --cpus-per-task=90 \
+/home/mwa/.pyenv/versions/mwax_mover/calvin_processor \
+--cfg={config_file_path}
+--job-type={jobtype.value} \
+--obs-id={obs_id} \
+--slurm-job-id=$SLURM_JOB_ID {processor_args}
+--request-ids={", ".join(request_ids)}
 
-        # Process
-        srun --nodes=1 --ntasks=1 --cpus-per-task=90 \
-            /home/mwa/.pyenv/versions/mwax_mover/calvin_processor \
-            --cfg={config_file_path}
-            --job-type={jobtype.value} \
-            --obs-id={obs_id} \
-            --slurm-job-id=$SLURM_JOB_ID \
-            {processor_args}
-
-        exit $?
-        """
+exit $?
+"""
 
     return job_script
 

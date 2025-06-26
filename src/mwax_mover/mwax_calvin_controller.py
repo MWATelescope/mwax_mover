@@ -160,7 +160,12 @@ class MWAXCalvinController:
     def realtime_submit_to_slurm(self, realtime_request: CalibrationRequest):
         # Create a sbatch script
         script = create_sbatch_script(
-            self.config_filename, realtime_request.obs_id, CalvinJobType.realtime, self.log_path, ""
+            self.config_filename,
+            realtime_request.obs_id,
+            CalvinJobType.realtime,
+            self.log_path,
+            [str(realtime_request.request_id)],
+            "",
         )
 
         success: bool = False
@@ -226,6 +231,7 @@ class MWAXCalvinController:
                             job.obs_id,
                             CalvinJobType.mwa_asvo,
                             self.log_path,
+                            [str(r) for r in job.request_ids],
                             f"--mwa-asvo-download-url={job.download_url}",
                         )
 
