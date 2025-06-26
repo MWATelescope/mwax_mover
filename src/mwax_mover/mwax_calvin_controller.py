@@ -370,19 +370,23 @@ class MWAXCalvinController:
         # Then just add this request onto the existing job
         if asvo_job and not asvo_job.download_slurm_job_submitted:
             # Found!
-            asvo_job.request_ids.append(request_id)
+            if request_id not in asvo_job.request_ids:
+                asvo_job.request_ids.append(request_id)
 
-            # Update database
-            #
-            # The point of this is:
-            # If we are already handling obsid X, then another bunch of requests come through
-            # we should "catch them up" to the current status in the database
-            mwax_db.update_calsolution_request_submit_mwa_asvo_job(
-                self.db_handler_object,
-                asvo_job.request_ids,
-                asvo_job.submitted_datetime,
-                asvo_job.job_id,
-            )
+                # Update database
+                #
+                # The point of this is:
+                # If we are already handling obsid X, then another bunch of requests come through
+                # we should "catch them up" to the current status in the database
+                mwax_db.update_calsolution_request_submit_mwa_asvo_job(
+                    self.db_handler_object,
+                    asvo_job.request_ids,
+                    asvo_job.submitted_datetime,
+                    asvo_job.job_id,
+                )
+            else:
+                # We already are tracking this request- nothing to do
+                pass
         else:
             # Not found
             try:
