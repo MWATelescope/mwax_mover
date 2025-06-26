@@ -55,6 +55,7 @@ class MWAXCalvinProcessor:
         self.metafits_filename: str = ""
         self.uvfits_filename: str = ""
         self.ws_filenames: list[str] = []
+        self.mwax_download_filenames: list[str] = []  # Only applicable for realtime
 
         # processing
         self.job_input_path: str = (
@@ -165,7 +166,10 @@ class MWAXCalvinProcessor:
         self.uvfits_filename = os.path.join(self.working_path, f"{self.obs_id}.uvfits")
         self.logger.info(f"Job Output UVFITS file(s) will be created as: {self.uvfits_filename}")
 
-        # First step depends on jobtype
+        # Get list of expected files from web service- wait if obs is still in progress!
+        self.get_observation_file_list()
+
+        # next step depends on jobtype
         data_downloaded: bool = False
         data_download_attempt: int = 1
 
@@ -243,6 +247,43 @@ class MWAXCalvinProcessor:
         # Final log message
         self.logger.info("Completed Successfully")
 
+    def get_observation_file_list(self):
+        # Get the duration of the obs from the metafits and only proceed
+        # if the current gps time is > the obs_id + duration + a constant
+        exp_time = int(utils.get_metafits_value(self.metafits_filename, "EXPOSURE"))
+        current_gpstime: int = utils.get_gpstime_of_now()
+
+        # We need to allow for some time for the observation to update the database,
+        # so add an additional 120 seconds before we check
+        OBS_FINISH_DELAY_SECONDS = 120
+        OBS_FINISH_WAIT_SECONDS = 4
+        while current_gpstime < (self.obs_id + exp_time + OBS_FINISH_DELAY_SECONDS) and self.running:
+            self.logger.warning(
+                f"{self.obs_id} Observation is still in progress:"
+                f" {current_gpstime} < ({self.obs_id} - {int(self.obs_id) + exp_time + OBS_FINISH_DELAY_SECONDS})"
+                f". Sleeping for {OBS_FINISH_WAIT_SECONDS} seconds..."
+            )
+            self.sleep(OBS_FINISH_WAIT_SECONDS)
+            current_gpstime: int = utils.get_gpstime_of_now()
+
+        # Ok, should be safe to get the list of files and hosts
+        try:
+            ws_filenames_and_hosts: list[tuple[str, str]] = (
+                utils.get_data_files_with_hostname_for_obsid_from_webservice(self.logger, self.obs_id)
+            )
+        except Exception:
+            # The previous call would have already logged tonnes of errors so no need to log anything specific here
+            self.logger.error(f"{self.obs_id} No webservice was able to provide list of data files.")
+            return False
+
+        # Assemble the filenames
+        self.ws_filenames = []  # this is just filename
+        self.mwax_download_filenames = []  # this is the full rsync user@host:/path/filename
+
+        for filename, hostname in ws_filenames_and_hosts:
+            self.mwax_download_filenames.append(f"mwa@{hostname}:/{os.path.join("visdata/cal_outgoing/", filename)}")
+            self.ws_filenames.append(filename)
+
     def download_mwa_asvo_data(self) -> bool:
         # Given the URL from command line args, download and untar the MWA ASVO data
         iteration = 0
@@ -293,60 +334,7 @@ class MWAXCalvinProcessor:
         return False
 
     def download_realtime_data(self) -> bool:
-        # Get the list of files we need from the web service
         # In parallel download all the files
-        #
-        # Check we have a metafits
-        #
-        if not os.path.exists(self.metafits_filename):
-            # download the metafits file to the data dir for the obs
-            try:
-                self.logger.info(f"{self.obs_id} Downloading metafits file...")
-                utils.download_metafits_file(self.logger, self.obs_id, self.job_input_path)
-                self.logger.info(f"{self.obs_id} metafits downloaded successfully")
-            except Exception as catch_all_exception:
-                self.logger.error(
-                    f"Metafits file {self.metafits_filename} did not exist"
-                    " and could not download one from web"
-                    f" service. {catch_all_exception}"
-                )
-                return False
-
-        # Get the duration of the obs from the metafits and only proceed
-        # if the current gps time is > the obs_id + duration + a constant
-        exp_time = int(utils.get_metafits_value(self.metafits_filename, "EXPOSURE"))
-        current_gpstime: int = utils.get_gpstime_of_now()
-
-        # We need to allow for some time for the observation to update the database,
-        # so add an additional 120 seconds before we check
-        OBS_FINISH_DELAY_SECONDS = 120
-        OBS_FINISH_WAIT_SECONDS = 4
-        while current_gpstime < (self.obs_id + exp_time + OBS_FINISH_DELAY_SECONDS) and self.running:
-            self.logger.warning(
-                f"{self.obs_id} Observation is still in progress:"
-                f" {current_gpstime} < ({self.obs_id} - {int(self.obs_id) + exp_time + OBS_FINISH_DELAY_SECONDS})"
-                f". Sleeping for {OBS_FINISH_WAIT_SECONDS} seconds..."
-            )
-            self.sleep(OBS_FINISH_WAIT_SECONDS)
-            current_gpstime: int = utils.get_gpstime_of_now()
-
-        # Ok, should be safe to get the list of files and hosts
-        try:
-            ws_filenames_and_hosts: list[tuple[str, str]] = (
-                utils.get_data_files_with_hostname_for_obsid_from_webservice(self.logger, self.obs_id)
-            )
-        except Exception:
-            # The previous call would have already logged tonnes of errors so no need to log anything specific here
-            self.logger.error(f"{self.obs_id} No webservice was able to provide list of data files.")
-            return False
-
-        # Assemble the filenames
-        self.ws_filenames = []  # this is just filename
-        download_filenames = []  # this is the full rsync user@host:/path/filename
-
-        for filename, hostname in ws_filenames_and_hosts:
-            download_filenames.append(f"mwa@{hostname}:/{os.path.join("visdata/cal_outgoing/", filename)}")
-            self.ws_filenames.append(filename)
 
         # Now download the files
         RSYNC_TIMEOUT_SECONDS = 600
@@ -356,7 +344,10 @@ class MWAXCalvinProcessor:
             results = pool.starmap(
                 copy_file_rsync,
                 zip(
-                    repeat(self.logger), download_filenames, repeat(self.job_input_path), repeat(RSYNC_TIMEOUT_SECONDS)
+                    repeat(self.logger),
+                    self.mwax_download_filenames,
+                    repeat(self.job_input_path),
+                    repeat(RSYNC_TIMEOUT_SECONDS),
                 ),
             )
 
@@ -389,7 +380,7 @@ class MWAXCalvinProcessor:
             data_dir_filenames.remove(self.metafits_name)
 
         # How does what we need compare to what we have?
-        return_value = set(data_dir_filenames).issuperset(self.ws_filenames)
+        return_value = len(data_dir_filenames) == len(self.ws_filenames)
 
         self.logger.info(
             f"{self.obs_id} check_obs_is_ready_to_process() =="
