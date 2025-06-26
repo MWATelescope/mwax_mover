@@ -55,13 +55,13 @@ class MWAXCalvinProcessor:
         self.ws_filenames: list[str] = []
 
         # processing
-        self.input_data_path: str = (
-            ""  # this is just /data/calvin/jobs/OBSID/SLURM_JOB_ID - where the visibility files are stored
+        self.job_input_path: str = (
+            ""  # this is just /data/calvin/jobs/SLURM_JOB_ID_OBSID - where the visibility files are stored
         )
         self.working_path: str = (
-            ""  # where does Birli write to? /data/calvin/jobs/JOBID or /tmp if the obs is small enough
+            ""  # where does Birli write to? /data/calvin/jobs/SLURM_JOB_ID_OBSID or /tmp if the obs is small enough
         )
-        self.job_output_path: str = ""  # e.g. /data/calvin/jobs/JOBID
+        self.job_output_path: str = ""  # e.g. /data/calvin/jobs/SLURM_JOB_ID_OBSID
         self.processing_error_path: str = ""
         self.source_list_filename: str = ""
         self.source_list_type: str = ""
@@ -95,18 +95,14 @@ class MWAXCalvinProcessor:
         mwax_db.update_calibration_request_assigned_hostname(self.db_handler_object, self.slurm_job_id, self.hostname)
 
         # Set the data path and metadata
-        # will be something like: /data/calvin/jobs/OBSID/SLURM_JOB_ID
-        self.input_data_path = os.path.join(
-            os.path.join(self.input_data_path, str(self.obs_id)), str(self.slurm_job_id)
-        )
-        self.metafits_filename = os.path.join(self.input_data_path, f"{self.obs_id}_metafits.fits")
+        # will be something like: /data/calvin/jobs/SLURM_JOB_ID_OBSID
+        self.job_input_path = os.path.join(self.job_input_path, f"{str(self.slurm_job_id)}_{str(self.obs_id)}")
+        self.metafits_filename = os.path.join(self.job_input_path, f"{self.obs_id}_metafits.fits")
         # Ensure input data path exists
-        os.makedirs(name=self.input_data_path, exist_ok=True)
+        os.makedirs(name=self.job_input_path, exist_ok=True)
 
         # Output dirs
-        self.job_output_path = os.path.join(
-            os.path.join(self.job_output_path, str(self.obs_id)), str(self.slurm_job_id)
-        )
+        self.job_output_path = os.path.join(self.job_output_path, f"{str(self.slurm_job_id)}_{str(self.obs_id)}")
         # Ensure output path exists
         os.makedirs(name=self.job_output_path, exist_ok=True)
 
@@ -173,7 +169,7 @@ class MWAXCalvinProcessor:
             self.logger,
             self.db_handler_object,
             self.obs_id,
-            self.input_data_path,
+            self.job_input_path,
             self.phase_fit_niter,
             self.produce_debug_plots,
         ):
@@ -184,12 +180,12 @@ class MWAXCalvinProcessor:
         # The transaction context will commit the transation
         if not self.keep_completed_visibility_files:
             # Remove visibilitiy files
-            visibility_files = glob.glob(os.path.join(self.input_data_path, f"{self.obs_id}_*_*_*.fits"))
+            visibility_files = glob.glob(os.path.join(self.job_input_path, f"{self.obs_id}_*_*_*.fits"))
             for file_to_delete in visibility_files:
                 os.remove(file_to_delete)
 
             # Now remove uvfits too
-            uvfits_files = glob.glob(os.path.join(self.input_data_path, "*.uvfits"))
+            uvfits_files = glob.glob(os.path.join(self.job_input_path, "*.uvfits"))
             for file_to_delete in uvfits_files:
                 os.remove(file_to_delete)
 
@@ -205,36 +201,38 @@ class MWAXCalvinProcessor:
         max_iterations = 3
         try:
             for attempt in Retrying(stop=stop_after_attempt(max_iterations), wait=wait_fixed(60)):
-                iteration += 1
-                with attempt:
-                    stdout = ""
-                    self.logger.info(
-                        f"{self.obs_id}: Attempting to download MWA ASVO data ({iteration} of {max_iterations})"
-                        f"{self.mwa_asvo_download_url} to {self.input_data_path}..."
-                    )
-
-                    cmdline = f'wget -q -O - "{self.mwa_asvo_download_url}" | tar -x -C {self.input_data_path}'
-
-                    try:
-                        # Submit the job
-                        return_val, stdout = mwax_command.run_command_ext(self.logger, cmdline, None, 3600, True)
-
-                        if return_val:
-                            self.logger.info(
-                                f"{str(self.obs_id)} successfully downloaded "
-                                f"from {self.mwa_asvo_download_url} into  {self.input_data_path}"
-                            )
-                            return True
-                        else:
-                            error_message = f"{str(self.obs_id)} failed when running {cmdline} Error" f" {stdout}"
-                            raise Exception(error_message)
-
-                    except Exception:
-                        self.logger.exception(
-                            f"Failed to download and untar observation {self.obs_id} from {self.mwa_asvo_download_url}"
-                            f" {stdout}"
+                if self.running:
+                    iteration += 1
+                    with attempt:
+                        stdout = ""
+                        self.logger.info(
+                            f"{self.obs_id}: Attempting to download MWA ASVO data ({iteration} of {max_iterations})"
+                            f"{self.mwa_asvo_download_url} to {self.job_input_path}..."
                         )
-                        raise
+
+                        cmdline = f'wget -q -O - "{self.mwa_asvo_download_url}" | tar -x -C {self.job_input_path}'
+
+                        try:
+                            # Submit the job
+                            return_val, stdout = mwax_command.run_command_ext(self.logger, cmdline, None, 3600, True)
+
+                            if return_val:
+                                self.logger.info(
+                                    f"{str(self.obs_id)} successfully downloaded "
+                                    f"from {self.mwa_asvo_download_url} into  {self.job_input_path}"
+                                )
+                                return True
+                            else:
+                                error_message = f"{str(self.obs_id)} failed when running {cmdline} Error" f" {stdout}"
+                                raise Exception(error_message)
+
+                        except Exception:
+                            self.logger.exception(
+                                f"Failed to download and untar observation {self.obs_id} from "
+                                f"{self.mwa_asvo_download_url}"
+                                f" {stdout}"
+                            )
+                            raise
         except RetryError:
             self.logger.error(
                 f"Failed to download and untar observation {self.obs_id} from {self.mwa_asvo_download_url} "
@@ -253,7 +251,7 @@ class MWAXCalvinProcessor:
             # download the metafits file to the data dir for the obs
             try:
                 self.logger.info(f"{self.obs_id} Downloading metafits file...")
-                utils.download_metafits_file(self.logger, self.obs_id, self.input_data_path)
+                utils.download_metafits_file(self.logger, self.obs_id, self.job_input_path)
                 self.logger.info(f"{self.obs_id} metafits downloaded successfully")
             except Exception as catch_all_exception:
                 self.logger.error(
@@ -272,7 +270,7 @@ class MWAXCalvinProcessor:
         # so add an additional 120 seconds before we check
         OBS_FINISH_DELAY_SECONDS = 120
         OBS_FINISH_WAIT_SECONDS = 4
-        while current_gpstime < (self.obs_id + exp_time + OBS_FINISH_DELAY_SECONDS):
+        while current_gpstime < (self.obs_id + exp_time + OBS_FINISH_DELAY_SECONDS) and self.running:
             self.logger.warning(
                 f"{self.obs_id} Observation is still in progress:"
                 f" {current_gpstime} < ({self.obs_id} - {int(self.obs_id) + exp_time + OBS_FINISH_DELAY_SECONDS})"
@@ -307,7 +305,7 @@ class MWAXCalvinProcessor:
             results = pool.starmap(
                 copy_file_rsync,
                 zip(
-                    repeat(self.logger), download_filenames, repeat(self.input_data_path), repeat(RSYNC_TIMEOUT_SECONDS)
+                    repeat(self.logger), download_filenames, repeat(self.job_input_path), repeat(RSYNC_TIMEOUT_SECONDS)
                 ),
             )
 
@@ -332,7 +330,7 @@ class MWAXCalvinProcessor:
 
         # Check for gpubox files (mwax OR legacy)
         glob_spec = "*.fits"
-        data_dir_full_path_files = glob.glob(os.path.join(self.input_data_path, glob_spec))
+        data_dir_full_path_files = glob.glob(os.path.join(self.job_input_path, glob_spec))
         data_dir_filenames = [os.path.basename(i) for i in data_dir_full_path_files]
         data_dir_filenames.sort()
         # Remove the metafits file
@@ -371,7 +369,7 @@ class MWAXCalvinProcessor:
         self.logger.info(f"{self.obs_id}: Running Birli...")
         birli_success = mwax_calvin_utils.run_birli(
             self.logger,
-            self.input_data_path,
+            self.job_input_path,
             self.metafits_filename,
             self.uvfits_filename,
             self.job_output_path,
@@ -658,6 +656,17 @@ class MWAXCalvinProcessor:
         #
         # processing config
         #
+        # Get the job_input_path dir
+        self.job_input_path = utils.read_config(
+            self.logger,
+            config,
+            "processing",
+            "job_input_path",
+        )
+
+        if not os.path.exists(self.job_input_path):
+            self.logger.error("job_input_path location " f" {self.job_input_path} does not exist. Quitting.")
+            sys.exit(1)
 
         # Get the job_output_path dir
         self.job_output_path = utils.read_config(
