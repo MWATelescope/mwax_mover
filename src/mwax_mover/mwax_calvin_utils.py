@@ -1886,6 +1886,7 @@ def create_sbatch_script(
 #SBATCH --error={log_path}/%J.err
 #SBATCH --open-mode=append
 #SBATCH --parsable
+#SBATCH --export=ALL
 echo "Starting Calvin {jobtype.value} Job: $SLURM_JOBID";
 
 # Source the python environment
