@@ -201,8 +201,9 @@ class MWAXCalvinProcessor:
         max_iterations = 3
         try:
             for attempt in Retrying(stop=stop_after_attempt(max_iterations), wait=wait_fixed(60)):
+                iteration += 1
+
                 if self.running:
-                    iteration += 1
                     with attempt:
                         stdout = ""
                         self.logger.info(
