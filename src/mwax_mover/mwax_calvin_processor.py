@@ -92,19 +92,27 @@ class MWAXCalvinProcessor:
         self.logger.info("Started...")
 
         # Update this request with the slurm job_id
+        self.logger.info(f"Assigning request to this host {self.hostname}")
         mwax_db.update_calibration_request_assigned_hostname(self.db_handler_object, self.slurm_job_id, self.hostname)
 
         # Set the data path and metadata
         # will be something like: /data/calvin/jobs/SLURM_JOB_ID_OBSID
         self.job_input_path = os.path.join(self.job_input_path, f"{str(self.slurm_job_id)}_{str(self.obs_id)}")
-        self.metafits_filename = os.path.join(self.job_input_path, f"{self.obs_id}_metafits.fits")
+
         # Ensure input data path exists
         os.makedirs(name=self.job_input_path, exist_ok=True)
 
+        self.logger.info(f"Job Input Data will be downloaded to: {self.job_input_path}")
+
+        self.metafits_filename = os.path.join(self.job_input_path, f"{self.obs_id}_metafits.fits")
+
         # Output dirs
         self.job_output_path = os.path.join(self.job_output_path, f"{str(self.slurm_job_id)}_{str(self.obs_id)}")
+
         # Ensure output path exists
         os.makedirs(name=self.job_output_path, exist_ok=True)
+
+        self.logger.info(f"Job Output Data will be downloaded to: {self.job_output_path}")
 
         # First step depends on jobtype
         data_downloaded: bool = False
@@ -129,9 +137,27 @@ class MWAXCalvinProcessor:
             # Wait before trying again
             self.sleep(DOWNLOAD_RETRY_WAIT_SECONDS)
 
+        if not data_downloaded:
+            self.logger.error("Unabled to download data after all attempts. Exiting")
+            self.stop()
+            exit(-1)
+
+        # Download the metafits file from the webservice (it's the latest)
+        self.logger.info(f"Downloading metafits file: {self.metafits_filename}")
+        if not utils.download_metafits_file(self.logger, self.obs_id, self.job_input_path):
+            self.logger.error("Unabled to download metafits file after all attempts. Exiting")
+            self.stop()
+            exit(-2)
+
         # Working path for Birli / uvfits output is determined by calculating the size of the output visibilites:
+        self.logger.info("Calculating observation output size...")
         self.estimated_uvfits_GB = estimate_birli_output_GB(
             self.metafits_filename, self.birli_freq_res_khz, self.birli_int_time_res_sec
+        )
+
+        self.logger.info(
+            f"Observation UVFITS output is estimated to be : {self.estimated_uvfits_GB} GB "
+            f"({utils.gigabyte_to_gibibyte(self.estimated_uvfits_GB)} GiB)"
         )
 
         if self.estimated_uvfits_GB < 500:
@@ -143,16 +169,18 @@ class MWAXCalvinProcessor:
             os.makedirs(name=self.working_path, exist_ok=True)
 
             # Override the birli allowed memory
-            self.birli_max_mem_gib -= self.estimated_uvfits_GB
+            self.birli_max_mem_gib -= int(utils.gigabyte_to_gibibyte(self.estimated_uvfits_GB))
             self.logger.info(
-                f"Using tempory work dir {self.temp_working_path} for Birli output. Reduced "
+                f"Using temporary work dir {self.temp_working_path} for Birli output. Reduced "
                 f"allowed Birli memory to: {self.birli_max_mem_gib} GiB"
             )
         else:
             # Use output_dir
             self.working_path = self.job_output_path
+            self.logger.info(f"Using work dir {self.working_path} for Birli output.")
 
         # All files we could get are now in the processing_path
+        self.logger.info("Ensuring all data is ready for processing...")
         if not self.check_obs_is_ready_to_process():
             exit(-3)
 
@@ -208,7 +236,7 @@ class MWAXCalvinProcessor:
                         stdout = ""
                         self.logger.info(
                             f"{self.obs_id}: Attempting to download MWA ASVO data ({iteration} of {max_iterations})"
-                            f"{self.mwa_asvo_download_url} to {self.job_input_path}..."
+                            f" {self.mwa_asvo_download_url} to {self.job_input_path}..."
                         )
 
                         cmdline = f'wget -q -O - "{self.mwa_asvo_download_url}" | tar -x -C {self.job_input_path}'
@@ -220,7 +248,7 @@ class MWAXCalvinProcessor:
                             if return_val:
                                 self.logger.info(
                                     f"{str(self.obs_id)} successfully downloaded "
-                                    f"from {self.mwa_asvo_download_url} into  {self.job_input_path}"
+                                    f"from {self.mwa_asvo_download_url} into {self.job_input_path}"
                                 )
                                 return True
                             else:
@@ -234,6 +262,8 @@ class MWAXCalvinProcessor:
                                 f" {stdout}"
                             )
                             raise
+                else:
+                    break
         except RetryError:
             self.logger.error(
                 f"Failed to download and untar observation {self.obs_id} from {self.mwa_asvo_download_url} "
@@ -341,7 +371,7 @@ class MWAXCalvinProcessor:
         # How does what we need compare to what we have?
         return_value = set(data_dir_filenames).issuperset(self.ws_filenames)
 
-        self.logger.debug(
+        self.logger.info(
             f"{self.obs_id} check_obs_is_ready_to_process() =="
             f" {return_value} (WS: {len(self.ws_filenames)},"
             f" data_dir: {len(data_dir_filenames)})"

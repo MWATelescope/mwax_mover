@@ -1100,3 +1100,7 @@ def is_int(value) -> bool:
         return False
     else:
         return True
+
+
+def gigabyte_to_gibibyte(gigabytes: float) -> float:
+    return gigabytes * 1.07374
