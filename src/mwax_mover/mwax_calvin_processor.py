@@ -146,8 +146,14 @@ class MWAXCalvinProcessor:
 
         # Download the metafits file from the webservice (it's the latest)
         self.logger.info(f"Downloading metafits file: {self.metafits_filename}")
-        if not utils.download_metafits_file(self.logger, self.obs_id, self.job_input_path):
-            self.logger.error("Unabled to download metafits file after all attempts. Exiting")
+        try:
+            utils.download_metafits_file(self.logger, self.obs_id, self.job_input_path)
+        except Exception as catch_all_exception:  # pylint: disable=broad-except
+            self.logger.exception(
+                f"Metafits file {self.metafits_filename} did not exist and"
+                " could not download one from web service. Exiting."
+                f" {catch_all_exception}"
+            )
             self.stop()
             exit(-2)
 
