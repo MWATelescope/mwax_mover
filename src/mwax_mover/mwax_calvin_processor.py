@@ -10,7 +10,7 @@ import glob
 import logging
 import os
 
-# import shutil
+import shutil
 import signal
 import sys
 import time
@@ -87,6 +87,11 @@ class MWAXCalvinProcessor:
         """Start the processor"""
         self.running = True
 
+        # Cleaning up /tmp in case there is a left over failed job that wasn't cleaned up
+        if os.path.exists(self.temp_working_path):
+            self.logger.info(f"Cleaning old working path ({self.temp_working_path}/)")
+            shutil.rmtree(f"{self.temp_working_path}/")
+
         # creating database connection pool(s)
         self.logger.info("Starting database connection pool...")
         self.db_handler_object.start_database_pool()
@@ -113,7 +118,52 @@ class MWAXCalvinProcessor:
 
         # Ensure output path exists
         os.makedirs(name=self.job_output_path, exist_ok=True)
-        self.logger.info(f"Job Output Data will be downloaded to: {self.job_output_path}")
+        self.logger.info(f"Job Output Data will be written to: {self.job_output_path}")
+
+        # Download the metafits file from the webservice (it's the latest)
+        self.logger.info(f"Downloading metafits file: {self.metafits_filename}")
+        try:
+            utils.download_metafits_file(self.logger, self.obs_id, self.job_input_path)
+        except Exception as catch_all_exception:  # pylint: disable=broad-except
+            self.logger.exception(
+                f"Metafits file {self.metafits_filename} did not exist and"
+                " could not download one from web service. Exiting."
+                f" {catch_all_exception}"
+            )
+            self.stop()
+            exit(-2)
+
+        # Working path for Birli / uvfits output is determined by calculating the size of the output visibilites:
+        self.logger.info("Calculating observation output size...")
+        self.estimated_uvfits_GB = estimate_birli_output_GB(
+            self.metafits_filename, self.birli_freq_res_khz, self.birli_int_time_res_sec
+        )
+
+        self.logger.info(
+            f"Observation UVFITS output is estimated to be : {self.estimated_uvfits_GB} GB "
+            f"({utils.gigabyte_to_gibibyte(self.estimated_uvfits_GB)} GiB)"
+        )
+
+        if self.estimated_uvfits_GB > 500:
+            # Use temp_working_dir
+            self.working_path = os.path.join(self.temp_working_path, f"{str(self.obs_id)}_{str(self.slurm_job_id)}")
+            # Ensure input data path exists
+            os.makedirs(name=self.working_path, exist_ok=True)
+
+            # Override the birli allowed memory
+            self.birli_max_mem_gib -= int(utils.gigabyte_to_gibibyte(self.estimated_uvfits_GB))
+            self.logger.info(
+                f"Using temporary work dir {self.temp_working_path} for Birli output. Reduced "
+                f"allowed Birli memory to: {self.birli_max_mem_gib} GiB"
+            )
+        else:
+            # Use output_dir
+            self.working_path = self.job_output_path
+            self.logger.info(f"Using work dir {self.working_path} for Birli output.")
+
+        # Set uvfits filename
+        self.uvfits_filename = os.path.join(self.working_path, f"{self.obs_id}.uvfits")
+        self.logger.info(f"Job Output UVFITS file(s) will be created as: {self.uvfits_filename}")
 
         # First step depends on jobtype
         data_downloaded: bool = False
@@ -144,53 +194,6 @@ class MWAXCalvinProcessor:
             self.stop()
             exit(-1)
 
-        # Download the metafits file from the webservice (it's the latest)
-        self.logger.info(f"Downloading metafits file: {self.metafits_filename}")
-        try:
-            utils.download_metafits_file(self.logger, self.obs_id, self.job_input_path)
-        except Exception as catch_all_exception:  # pylint: disable=broad-except
-            self.logger.exception(
-                f"Metafits file {self.metafits_filename} did not exist and"
-                " could not download one from web service. Exiting."
-                f" {catch_all_exception}"
-            )
-            self.stop()
-            exit(-2)
-
-        # Working path for Birli / uvfits output is determined by calculating the size of the output visibilites:
-        self.logger.info("Calculating observation output size...")
-        self.estimated_uvfits_GB = estimate_birli_output_GB(
-            self.metafits_filename, self.birli_freq_res_khz, self.birli_int_time_res_sec
-        )
-
-        self.logger.info(
-            f"Observation UVFITS output is estimated to be : {self.estimated_uvfits_GB} GB "
-            f"({utils.gigabyte_to_gibibyte(self.estimated_uvfits_GB)} GiB)"
-        )
-
-        if self.estimated_uvfits_GB < 500:
-            # Use temp_working_dir
-            self.working_path = os.path.join(
-                os.path.join(self.temp_working_path, str(self.obs_id)), str(self.slurm_job_id)
-            )
-            # Ensure input data path exists
-            os.makedirs(name=self.working_path, exist_ok=True)
-
-            # Override the birli allowed memory
-            self.birli_max_mem_gib -= int(utils.gigabyte_to_gibibyte(self.estimated_uvfits_GB))
-            self.logger.info(
-                f"Using temporary work dir {self.temp_working_path} for Birli output. Reduced "
-                f"allowed Birli memory to: {self.birli_max_mem_gib} GiB"
-            )
-        else:
-            # Use output_dir
-            self.working_path = self.job_output_path
-            self.logger.info(f"Using work dir {self.working_path} for Birli output.")
-
-        # Set uvfits filename
-        self.uvfits_filename = os.path.join(self.working_path, f"{self.obs_id}.uvfits")
-        self.logger.info(f"Job Output UVFITS file(s) will be created as: {self.uvfits_filename}")
-
         # All files we could get are now in the processing_path
         self.logger.info("Ensuring all data is ready for processing...")
         if not self.check_obs_is_ready_to_process():
@@ -208,11 +211,12 @@ class MWAXCalvinProcessor:
             exit(-5)
 
         # If that worked, process the solutions and insert into db
+        self.logger.info("Processing solutions...")
         if not process_solutions(
             self.logger,
             self.db_handler_object,
             self.obs_id,
-            self.job_input_path,
+            self.working_path,
             self.phase_fit_niter,
             self.produce_debug_plots,
         ):
