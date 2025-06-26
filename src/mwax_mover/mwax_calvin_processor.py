@@ -135,8 +135,9 @@ class MWAXCalvinProcessor:
 
             data_download_attempt += 1
 
-            # Wait before trying again
-            self.sleep(DOWNLOAD_RETRY_WAIT_SECONDS)
+            # Wait before trying again if we failed
+            if not data_downloaded:
+                self.sleep(DOWNLOAD_RETRY_WAIT_SECONDS)
 
         if not data_downloaded:
             self.logger.error("Unabled to download data after all attempts. Exiting")
