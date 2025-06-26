@@ -1870,7 +1870,7 @@ def create_sbatch_script(
     else:
         job_name = f"asvo{obs_id}"
 
-    job_script = f"""#!/bin/bash"
+    job_script = f"""#!/bin/bash
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=90
@@ -1891,11 +1891,11 @@ echo "Starting Calvin {jobtype} Job: $SLURM_JOB_ID";
 # Process
 srun --nodes=1 --ntasks=1 --cpus-per-task=90 \
 /home/mwa/.pyenv/versions/mwax_mover/calvin_processor \
---cfg={config_file_path}
+--cfg={config_file_path} \
 --job-type={jobtype.value} \
 --obs-id={obs_id} \
+--request-ids={", ".join(request_ids)} \
 --slurm-job-id=$SLURM_JOB_ID {processor_args}
---request-ids={", ".join(request_ids)}
 
 exit $?
 """

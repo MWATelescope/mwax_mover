@@ -753,7 +753,7 @@ def update_calibration_request_slurm_info(db_handler_object: MWAXDBHandler, requ
         assigned_datetime = Now(),
         slurm_job_id = %s
     WHERE
-    id IN ANY (%s)"""
+    id = ANY(%s)"""
 
     # Update the row
     db_handler_object.execute_dml(sql_update, [slurm_job_id, request_ids], len(request_ids))
