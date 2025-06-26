@@ -19,12 +19,16 @@ def copy_file_rsync(
     """Copies a file via rsync"""
     logger.debug(f"{source} attempting copy_file_rsync...")
 
-    # get file size
-    try:
-        file_size = os.path.getsize(source)
-    except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
-        logger.error(f"{source}: Error determining file size. Error" f" {catch_all_exceptiion}")
-        return False
+    # get file size if file is not remote!
+    # a remote source will include user@host:path
+    if ":/" not in source:
+        try:
+            file_size = os.path.getsize(source)
+        except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
+            logger.error(f"{source}: Error determining source file size. Error" f" {catch_all_exceptiion}")
+            return False
+    else:
+        file_size = -1
 
     # Build final command line
     # --no-compress ensures we don't try to compress (it's going to be quite
@@ -43,6 +47,14 @@ def copy_file_rsync(
     return_val, stdout = run_command_ext(logger, cmdline, None, timeout, False)
 
     if return_val:
+        # if source was remote, then we can now check the file size
+        if file_size == -1:
+            try:
+                file_size = os.path.getsize(destination)
+            except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
+                logger.error(f"{source}: Error determining destination file size. Error" f" {catch_all_exceptiion}")
+                return False
+
         elapsed = time.time() - start_time
 
         size_gigabytes = float(file_size) / (1000.0 * 1000.0 * 1000.0)

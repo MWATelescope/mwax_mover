@@ -116,7 +116,7 @@ class MWAXCalvinController:
                         f"last_seen={job.last_seen_datetime}"
                     )
             if current_job_count > 0:
-                self.logger.debug(f"Currently tracking the {current_job_count} MWA ASVO jobs.")
+                self.logger.debug(f"Currently tracking {current_job_count} MWA ASVO jobs.")
             else:
                 self.logger.debug("Not tracking any MWA ASVO jobs.")
 

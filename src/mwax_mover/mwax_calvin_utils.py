@@ -1886,7 +1886,6 @@ def create_sbatch_script(
 #SBATCH --error={log_path}/%J.err
 #SBATCH --open-mode=append
 #SBATCH --parsable
-#SBATCH --export=ALL
 echo "Starting Calvin {jobtype.value} Job: $SLURM_JOBID";
 
 # Source the python environment
@@ -1894,7 +1893,7 @@ cd /home/mwa/mwax_mover
 source .venv/bin/activate
 
 # Process
-srun --nodes=1 --ntasks=1 --cpus-per-task=90 \
+srun --nodes=1 --ntasks=1 --cpus-per-task=90 --export=ALL \
 mwax_calvin_processor \
 --cfg={config_file_path} \
 --job-type={jobtype.value} \
@@ -1913,7 +1912,7 @@ def submit_sbatch(logger: logging.Logger, script_path: str, script: str, obs_id:
     # Returns (success, jobid or None if failed)
     try:
         script_filename: str = os.path.join(script_path, datetime.datetime.now().strftime(f"%Y%m%d-%H%M%S-{obs_id}.sh"))
-        cmdline = f"sbatch {script_filename}"
+        cmdline = f"sbatch --export=ALL {script_filename}"
 
         # Create an sbatch file
         with open(script_filename, "w") as job_script:
