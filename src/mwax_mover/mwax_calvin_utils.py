@@ -1893,7 +1893,7 @@ cd /home/mwa/mwax_mover
 source .venv/bin/activate
 
 # Process
-srun --nodes=1 --ntasks=1 --cpus-per-task=90 --export=ALL \
+srun --nodes=1 --ntasks=1 --cpus-per-task=90 \
 mwax_calvin_processor \
 --cfg={config_file_path} \
 --job-type={jobtype.value} \
@@ -1912,7 +1912,7 @@ def submit_sbatch(logger: logging.Logger, script_path: str, script: str, obs_id:
     # Returns (success, jobid or None if failed)
     try:
         script_filename: str = os.path.join(script_path, datetime.datetime.now().strftime(f"%Y%m%d-%H%M%S-{obs_id}.sh"))
-        cmdline = f"sbatch --export=ALL {script_filename}"
+        cmdline = f"sbatch {script_filename}"
 
         # Create an sbatch file
         with open(script_filename, "w") as job_script:
@@ -1925,7 +1925,7 @@ def submit_sbatch(logger: logging.Logger, script_path: str, script: str, obs_id:
     return_val: bool = False
     stdout = ""
     try:
-        return_val, stdout = run_command_ext(logger, cmdline, None, 60, False)
+        return_val, stdout = run_command_ext(logger, cmdline, None, 60, True)
 
         # Success- get the new job id
         # sbatch should send this to std out:
