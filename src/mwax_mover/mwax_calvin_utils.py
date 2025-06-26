@@ -1882,11 +1882,11 @@ def create_sbatch_script(
 #SBATCH --account=mwa
 #SBATCH --job-name={job_name}
 #SBATCH --signal=TERM@60
-#SBATCH --output={log_path}/$SLURM_JOB_ID.out
-#SBATCH --error={log_path}/$SLURM_JOB_ID.err
+#SBATCH --output={log_path}/%J.out
+#SBATCH --error={log_path}/%J.err
 #SBATCH --open-mode=append
 #SBATCH --parsable
-echo "Starting Calvin {jobtype} Job: $SLURM_JOB_ID";
+echo "Starting Calvin {jobtype.value} Job: $SLURM_JOBID";
 
 # Process
 srun --nodes=1 --ntasks=1 --cpus-per-task=90 \
@@ -1894,8 +1894,8 @@ srun --nodes=1 --ntasks=1 --cpus-per-task=90 \
 --cfg={config_file_path} \
 --job-type={jobtype.value} \
 --obs-id={obs_id} \
---request-ids={", ".join(request_ids)} \
---slurm-job-id=$SLURM_JOB_ID {processor_args}
+--request-ids={",".join(request_ids)} \
+--slurm-job-id=$SLURM_JOBID {processor_args}
 
 exit $?
 """
