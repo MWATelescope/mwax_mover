@@ -1888,9 +1888,13 @@ def create_sbatch_script(
 #SBATCH --parsable
 echo "Starting Calvin {jobtype.value} Job: $SLURM_JOBID";
 
+# Source the python environment
+cd /home/mwa/mwax_mover
+source .venv/bin/activate
+
 # Process
 srun --nodes=1 --ntasks=1 --cpus-per-task=90 \
-/home/mwa/.pyenv/versions/mwax_mover/calvin_processor \
+calvin_processor \
 --cfg={config_file_path} \
 --job-type={jobtype.value} \
 --obs-id={obs_id} \
