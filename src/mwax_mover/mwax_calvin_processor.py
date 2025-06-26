@@ -9,6 +9,7 @@ import datetime
 import glob
 import logging
 import os
+import shutil
 import signal
 import sys
 import time
@@ -182,14 +183,17 @@ class MWAXCalvinProcessor:
         # All files we could get are now in the processing_path
         self.logger.info("Ensuring all data is ready for processing...")
         if not self.check_obs_is_ready_to_process():
+            self.stop()
             exit(-3)
 
         # We have all the files, so run birli
         if not self.run_birli():
+            self.stop()
             exit(-4)
 
         # Birli was successful so run hyperdrive!
         if not self.run_hyperdrive():
+            self.stop()
             exit(-5)
 
         # If that worked, process the solutions and insert into db
@@ -201,6 +205,7 @@ class MWAXCalvinProcessor:
             self.phase_fit_niter,
             self.produce_debug_plots,
         ):
+            self.stop()
             exit(-6)
 
         # clean up
@@ -473,6 +478,13 @@ class MWAXCalvinProcessor:
         # Close all database connections
         self.db_handler_object.stop_database_pool()
         self.running = False
+
+        # Clean up input, working dirs
+        if os.path.exists(self.job_input_path):
+            shutil.rmtree(self.job_input_path)
+
+        if os.path.exists(self.working_path):
+            shutil.rmtree(self.working_path)
 
     def signal_handler(self, _signum, _frame):
         """Handles SIGINT and SIGTERM"""
