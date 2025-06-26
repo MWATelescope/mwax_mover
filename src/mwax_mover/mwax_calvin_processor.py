@@ -9,7 +9,8 @@ import datetime
 import glob
 import logging
 import os
-import shutil
+
+# import shutil
 import signal
 import sys
 import time
@@ -102,18 +103,21 @@ class MWAXCalvinProcessor:
 
         # Ensure input data path exists
         os.makedirs(name=self.job_input_path, exist_ok=True)
-
         self.logger.info(f"Job Input Data will be downloaded to: {self.job_input_path}")
 
         self.metafits_filename = os.path.join(self.job_input_path, f"{self.obs_id}_metafits.fits")
+        self.logger.info(f"Job metafits filename will be: {self.metafits_filename}")
 
         # Output dirs
         self.job_output_path = os.path.join(self.job_output_path, f"{str(self.slurm_job_id)}_{str(self.obs_id)}")
 
         # Ensure output path exists
         os.makedirs(name=self.job_output_path, exist_ok=True)
-
         self.logger.info(f"Job Output Data will be downloaded to: {self.job_output_path}")
+
+        # Set uvfits filename
+        self.uvfits_filename = os.path.join(self.working_path, f"{self.obs_id}.uvfits")
+        self.logger.info(f"Job Output UVFITS file(s) will be created as: {self.uvfits_filename}")
 
         # First step depends on jobtype
         data_downloaded: bool = False
@@ -485,13 +489,6 @@ class MWAXCalvinProcessor:
         # Close all database connections
         self.db_handler_object.stop_database_pool()
         self.running = False
-
-        # Clean up input, working dirs
-        if os.path.exists(self.job_input_path):
-            shutil.rmtree(self.job_input_path)
-
-        if os.path.exists(self.working_path):
-            shutil.rmtree(self.working_path)
 
     def signal_handler(self, _signum, _frame):
         """Handles SIGINT and SIGTERM"""

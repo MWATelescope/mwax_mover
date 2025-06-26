@@ -1957,13 +1957,13 @@ def estimate_birli_output_GB(metafits_filename: str, birli_freq_res_khz: int, bi
     # Total GB = bytes / 1000.^3
     mctx = MetafitsContext(metafits_filename)
 
-    baselines: int = mctx.num_baselines
-    timesteps: int = int(mctx.sched_duration_ms / (birli_int_time_res_sec * 1000.0))
-    fine_channels: int = int(mctx.obs_bandwidth_hz / (birli_freq_res_khz * 1000.0))
-    pols: int = mctx.num_visibility_pols  # (XX,XY,YX,YY)
+    baselines: int = mctx.num_baselines  # 144T (10440)
+    timesteps: int = int(mctx.sched_duration_ms / (birli_int_time_res_sec * 1000.0))  # 60
+    fine_channels: int = int(mctx.obs_bandwidth_hz / (birli_freq_res_khz * 1000.0))  # 30720000 / 80000 == 384
+    pols: int = mctx.num_visibility_pols  # (XX,XY,YX,YY) # 4
     values: int = 2  # (real, imag)
     bytes_per_value: int = 4  # f32
     total_bytes: int = baselines * fine_channels * pols * values * bytes_per_value * timesteps
-    total_GB: int = int(total_bytes / (1000 ^ 3))
+    total_GB: int = int(total_bytes / (1000**3))
 
     return total_GB
