@@ -495,9 +495,8 @@ class MWAXCalvinProcessor:
             # How does what we need compare to what we have?
             return_value = len(data_dir_filenames) == len(self.ws_filenames)
 
-            message = f"{self.obs_id} check_obs_is_ready_to_process() =="
-            f" {return_value} (WS: {len(self.ws_filenames)},"
-            f" data_dir: {len(data_dir_filenames)})"
+            message = f"{self.obs_id} check_obs_is_ready_to_process() == {return_value} (WS: {len(self.ws_filenames)}"
+            f",data_dir: {len(data_dir_filenames)})"
 
             self.logger.info(message)
             return return_value, message
