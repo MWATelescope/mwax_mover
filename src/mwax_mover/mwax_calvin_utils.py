@@ -1620,11 +1620,13 @@ def run_hyperdrive(
         # Take the filename which for picket fence will also have
         # the band info and in all cases the obsid. We will use
         # this as a base for other files we work with
-        obsid_and_band = uvfits_file.replace(".uvfits", "")
+
+        # Remove the path to the uvfits file, leave the filename then remove the ".uvfits"
+        obsid_and_band = os.path.basename(uvfits_file.replace(".uvfits", ""))
 
         try:
-            hyperdrive_solution_filename = f"{obsid_and_band}_solutions.fits"
-            bin_solution_filename = f"{obsid_and_band}_solutions.bin"
+            hyperdrive_solution_filename = os.path.join(job_output_path, f"{obsid_and_band}_solutions.fits")
+            bin_solution_filename = os.path.join(job_output_path, f"{obsid_and_band}_solutions.bin")
 
             # Run hyperdrive
             # Output to hyperdrive format and old aocal format (bin)
@@ -1776,14 +1778,14 @@ def run_hyperdrive_stats(
 
 
 def process_phase_fits(
-    logger, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
+    logger, output_path, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
 ):
     """
     Fit a line to each tile phase solution, return a dataframe of phase fit parameters for each
     tile and pol
     """
     fits = []
-    phase_diff_path = os.path.join(item, "phase_diff.txt")
+    phase_diff_path = os.path.join(output_path, "phase_diff.txt")
     # by default we don't want to apply any phase rotation.
     phase_diff = np.full((len(chanblocks_hz),), 1.0, dtype=np.complex128)
     if os.path.exists(phase_diff_path):
@@ -1811,16 +1813,16 @@ def process_phase_fits(
             try:
                 fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)
             except Exception as exc:
-                logger.error(f"{item} - {tile_id=:4} {pol} ({name}) {exc}")
+                logger.error(f"{tile_id=:4} {pol} ({name}) {exc}")
                 continue
-            logger.debug(f"{item} - {tile_id=:4} {pol} ({name}) {fit=}")
+            logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
             fits.append([tile_id, soln_idx, pol, *fit])
 
     return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])
 
 
 def process_gain_fits(
-    logger, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, chanblocks_per_coarse
+    logger, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, chanblocks_per_coarse
 ):
     """
     for each tile, pol, fit a GainFitInfo to the gains
@@ -1838,9 +1840,9 @@ def process_gain_fits(
             try:
                 fit = fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse)
             except Exception as exc:
-                logger.error(f"{item} - {tile_id=:4} {pol} ({name}) {exc}")
+                logger.error(f"{tile_id=:4} {pol} ({name}) {exc}")
                 continue
-            logger.debug(f"{item} - {tile_id=:4} {pol} ({name}) {fit=}")
+            logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
             fits.append([tile_id, soln_idx, pol, *fit])
     logger.warning("TODO: fake gain fits!")
 

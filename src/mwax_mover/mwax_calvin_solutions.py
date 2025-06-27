@@ -29,7 +29,9 @@ def process_solutions(
     logger: logging.Logger,
     db_handler_object: MWAXDBHandler,
     obs_id: int,
-    data_path: str,
+    input_data_path: str,
+    uvfits_path: str,
+    output_data_path: str,
     phase_fit_niter: int,
     produce_debug_plots: bool,
 ) -> tuple[bool, str, Optional[int]]:
@@ -41,14 +43,14 @@ def process_solutions(
 
     conn = None
     try:
-        metafits_files = glob.glob(os.path.join(data_path, "*_metafits.fits"))
+        metafits_files = glob.glob(os.path.join(input_data_path, "*_metafits.fits"))
         # if len(metafits_files) > 1:
         #     logger.warning(f"{item} - more than one metafits file found.")
 
-        logger.debug(f"{data_path} - {metafits_files=}")
-        fits_solution_files = sorted(glob.glob(os.path.join(data_path, "*_solutions.fits")))
+        logger.debug(f"{input_data_path} - {metafits_files=}")
+        fits_solution_files = sorted(glob.glob(os.path.join(output_data_path, "*_solutions.fits")))
         # _bin_solution_files = glob.glob(os.path.join(item, "*_solutions.bin"))
-        logger.debug(f"{data_path} - uploading {fits_solution_files=}")
+        logger.debug(f"{output_data_path} - uploading {fits_solution_files=}")
 
         soln_group = HyperfitsSolutionGroup(
             [Metafits(f) for f in metafits_files], [HyperfitsSolution(f) for f in fits_solution_files]
@@ -56,30 +58,30 @@ def process_solutions(
 
         # get tiles
         tiles = soln_group.metafits_tiles_df
-        logger.debug(f"{data_path} - metafits tiles:\n{tiles.to_string(max_rows=999)}")
+        logger.debug(f"metafits tiles:\n{tiles.to_string(max_rows=999)}")
 
         # determine refant
         unflagged_tiles = tiles[tiles.flag == 0]
         if not len(unflagged_tiles):
             raise ValueError("No unflagged tiles found")
         refant = unflagged_tiles.sort_values(by=["id"]).iloc[0]
-        logger.debug(f"{data_path} - {refant['name']=} ({refant['id']})")
+        logger.debug(f"{refant['name']=} ({refant['id']})")
 
         # get channel info
         chaninfo = soln_group.metafits_chan_info
-        logger.debug(f"{data_path} - {chaninfo=}")
+        logger.debug(f"{chaninfo=}")
         all_coarse_chan_ranges = chaninfo.coarse_chan_ranges
 
         if len(fits_solution_files) != len(all_coarse_chan_ranges):
             raise RuntimeError(
-                f"{data_path} - number of solution files ({len(fits_solution_files)})"
+                f"number of solution files ({len(fits_solution_files)})"
                 f" does not match number of coarse chan ranges in metafits {len(all_coarse_chan_ranges)}"
             )
 
         chanblocks_per_coarse = soln_group.chanblocks_per_coarse
         # all_chanblocks_hz = soln_group.all_chanblocks_hz
         all_chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz)
-        logger.debug(f"{data_path} - {chanblocks_per_coarse=}, {all_chanblocks_hz=}")
+        logger.debug(f"{chanblocks_per_coarse=}, {all_chanblocks_hz=}")
 
         soln_tile_ids, all_xx_solns_noref, all_yy_solns_noref = soln_group.get_solns()
         _, all_xx_solns, all_yy_solns = soln_group.get_solns(refant["name"])
@@ -88,7 +90,7 @@ def process_solutions(
 
         phase_fits = process_phase_fits(
             logger,
-            data_path,
+            output_data_path,
             unflagged_tiles,
             all_chanblocks_hz,
             all_xx_solns,
@@ -99,7 +101,6 @@ def process_solutions(
         )
         gain_fits = process_gain_fits(
             logger,
-            data_path,
             unflagged_tiles,
             all_chanblocks_hz,
             all_xx_solns_noref,
@@ -125,7 +126,7 @@ def process_solutions(
                 all_xx_solns[0],
                 all_yy_solns[0],
                 weights,
-                prefix=f"{data_path}/{obs_id}_",
+                prefix=f"{uvfits_path}/{obs_id}_",
                 plot_residual=True,
             )
         # phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
@@ -151,10 +152,10 @@ def process_solutions(
                 )
 
                 if fit_id is None or not success:
-                    logger.error(f"{data_path} - failed to insert calibration fit")
+                    logger.error("failed to insert calibration fit")
 
                     # This will trigger a rollback of the calibration_fit row
-                    raise Exception(f"{data_path} - failed to insert calibration fit")
+                    raise Exception("failed to insert calibration fit")
 
                 for tile_id in soln_tile_ids:
                     some_fits = False
@@ -217,30 +218,30 @@ def process_solutions(
                     )
 
                     if not success:
-                        logger.error(f"{data_path} - failed to insert calibration solution for tile {tile_id}")
+                        logger.error(f"failed to insert calibration solution for tile {tile_id}")
 
                         # This will trigger a rollback of the calibration_fit row and any
                         # calibration_solutions child rows
-                        raise Exception(f"{data_path} - failed to insert calibration solution for tile {tile_id}")
+                        raise Exception(f"failed to insert calibration solution for tile {tile_id}")
 
         #
         # If this cal solution was a requested one, update it to completed
         #
         mwax_db.update_calsolution_request_calibration_complete_status(
-            db_handler_object, obs_id, None, datetime.now(), int(fit_id), None, None
+            db_handler_object, obs_id, datetime.now(), int(fit_id), None, None
         )
 
         return True, "", int(fit_id)
 
     except Exception:
-        error_text = f"{data_path} - Error in upload_handler:\n{traceback.format_exc()}"
+        error_text = f"Error in upload_handler:\n{traceback.format_exc()}"
         logger.exception(error_text)
 
         # Write an error readme
         write_readme_file(
             logger,
-            os.path.join(data_path, "readme_error.txt"),
-            f"upload_handler({data_path})",
+            os.path.join(output_data_path, "readme_error.txt"),
+            "upload_handler()",
             -999,
             "",
             error_text,
