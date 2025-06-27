@@ -993,7 +993,7 @@ def update_calsolution_request_calibration_started_status(
             # update the params varible if the request_ids changed (above)
             params = [calibration_started_datetime, request_ids]
 
-            db_handler_object.execute_dml(sql, params, None)
+            db_handler_object.execute_dml(sql, params, len(request_ids))
             db_handler_object.logger.debug(
                 "update_calsolution_request_calibration_started_status(): Successfully updated "
                 "calibration_request table."

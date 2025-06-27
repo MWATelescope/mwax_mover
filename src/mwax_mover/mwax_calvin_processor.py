@@ -294,7 +294,11 @@ class MWAXCalvinProcessor:
             )
         except Exception as e:
             if self.logger:
-                self.logger.info(f"Failed to update_calsolution_request_download_complete_status {str(e)}")
+                self.logger.info(
+                    "Failed to update_calsolution_request_download_complete_status. "
+                    f"Params: {self.request_id_list}, None, datetime.datetime.now(), {error_message}. "
+                    f"Error: {str(e)}"
+                )
 
         try:
             self.stop()
@@ -313,7 +317,11 @@ class MWAXCalvinProcessor:
             )
         except Exception as e:
             if self.logger:
-                self.logger.info(f"Failed to update_calsolution_request_calibration_complete_status {str(e)}")
+                self.logger.info(
+                    "Failed to update_calsolution_request_calibration_complete_status. "
+                    f"Params: {self.obs_id}, None,  None, None, datetime.datetime.now(), {error_message}. "
+                    f"Error: {str(e)}"
+                )
 
         try:
             self.stop()
@@ -871,24 +879,31 @@ class MWAXCalvinProcessor:
 
         # Check that config file exists
         config_filename = args["cfg"]
+        print(f"Command line argument 'cfg' == {config_filename}")
+
         obs_id = args["obs_id"]
+        print(f"Command line argument 'obs-id' == {obs_id}")
 
         if not utils.is_int(obs_id):
             print(f"ERROR: cmd line argument obs-id {obs_id} is not a number. Aborting.")
             exit(-1)
 
         slurm_job_id = args["slurm_job_id"]
+        print(f"Command line argument 'slurm-job-id' == {slurm_job_id}")
 
         if not utils.is_int(slurm_job_id):
             print(f"ERROR: cmd line argument slurm-job-id {slurm_job_id} is not a number. Aborting.")
             exit(-1)
 
         job_type = args["job_type"]
+        print(f"Command line argument 'job-type' == {job_type}")
 
         if not args["mwa_asvo_download_url"]:
             mwa_asvo_download_url = ""
+            print("Command line argument 'mwa-asvo-download-url' == not passed")
         else:
             mwa_asvo_download_url = args["mwa_asvo_download_url"]
+            print(f"Command line argument 'mwa-asvo-download-url' == {mwa_asvo_download_url}")
 
         if job_type == CalvinJobType.mwa_asvo and mwa_asvo_download_url == "":
             print(
@@ -900,6 +915,7 @@ class MWAXCalvinProcessor:
         # Get a list of request ids
         request_ids: list[int] = []
         request_ids_string: str = args["request_ids"]
+        print(f"Command line argument 'request-ids' == {request_ids_string}")
         request_ids_string_list: list[str] = request_ids_string.split(",")
 
         for request_id_str in request_ids_string_list:
@@ -916,6 +932,7 @@ class MWAXCalvinProcessor:
         if len(request_ids) == 0:
             print(f"ERROR: request-ids param '{request_ids_string}' must contain at least one request-id. Aborting.")
             exit(-1)
+        print(f"request_ids parsed as: {request_ids}")
 
         self.initialise(
             config_filename,
