@@ -952,11 +952,12 @@ def update_calibration_request_assign_hostname_start_download(
     UPDATE public.calibration_request
     SET
         assigned_hostname = %s,
+        assigned_datimetime = %s,
         download_started_datetime = %s
     WHERE
     slurm_job_id = %s"""
 
-    params = [slurm_hostname, download_started_datetime, slurm_job_id]
+    params = [slurm_hostname, download_started_datetime, download_started_datetime, slurm_job_id]
 
     try:
         # Update the row

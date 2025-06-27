@@ -490,16 +490,18 @@ class MWAXCalvinProcessor:
             # Remove any metafits files from the list
             for file in data_dir_filenames:
                 if "metafits" in file:
+                    self.logger.debug(f"Removing {file} from data_dir_filenames")
                     data_dir_filenames.remove(file)
 
             # How does what we need compare to what we have?
             return_value = len(data_dir_filenames) == len(self.ws_filenames)
 
-            message = f"{self.obs_id} check_obs_is_ready_to_process() == {return_value} (WS: {len(self.ws_filenames)}"
-            f",data_dir: {len(data_dir_filenames)})"
+            message = f"{self.obs_id} check_obs_is_ready_to_process() == {return_value} (WS: {len(self.ws_filenames)}, data_dir: {len(data_dir_filenames)})"
 
             self.logger.info(message)
+
             return return_value, message
+
         except Exception as e:
             return False, f"Exception in check_obs_is_ready_to_process: {str(e)}"
 
@@ -931,7 +933,7 @@ class MWAXCalvinProcessor:
         for request_id_str in request_ids_string_list:
             request_id_str = request_id_str.strip()
             if utils.is_int(request_id_str):
-                request_ids.append(int())
+                request_ids.append(int(request_id_str))
             else:
                 print(
                     f"ERROR: request-ids param '{request_ids_string}' must be one or more positive integers"
