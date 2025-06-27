@@ -131,6 +131,7 @@ class MWAXCalvinProcessor:
             self.logger.info(f"Job Output Data will be written to: {self.job_output_path}")
 
             # Get list of expected files from web service- wait if obs is still in progress!
+            self.logger.info("Getting observation file list from web service...")
             result, error_message = self.get_observation_file_list()
             if not result:
                 self.fail_job_downloading(error_message)
@@ -140,6 +141,7 @@ class MWAXCalvinProcessor:
             data_download_attempt: int = 1
 
             while not self.data_downloaded and data_download_attempt <= self.download_retries:
+                self.logger.info(f"Download attempt {data_download_attempt} of {self.download_retries}...")
                 if self.job_type == CalvinJobType.realtime:
                     # Download from MWAX boxes
                     self.data_downloaded, error_message = self.download_realtime_data()
@@ -179,6 +181,7 @@ class MWAXCalvinProcessor:
                     exit(-1)
 
             # Create metafits context
+            self.logger.info(f"Reading metafits file {self.metafits_filename} with mwalib...")
             self.metafits_context = MetafitsContext(self.metafits_filename, None)
 
             # Working path for Birli / uvfits output is determined by calculating the size of the output visibilites:

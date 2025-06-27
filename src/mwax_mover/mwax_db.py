@@ -912,7 +912,7 @@ def update_calsolution_request_download_complete_status(
     params = [download_completed_datetime, download_error_datetime, download_error_message, request_ids]
 
     try:
-        db_handler_object.execute_dml(sql, params, None)
+        db_handler_object.execute_dml(sql, params, len(request_ids))
         db_handler_object.logger.debug(
             "update_calsolution_request_download_complete_status(): Successfully updated " "calibration_request table."
         )
