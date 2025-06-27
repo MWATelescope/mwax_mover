@@ -22,11 +22,17 @@ from mwax_mover import (
     version,
     mwax_calvin_utils,
     mwax_command,
-    mwax_db,
 )
 from mwax_mover.mwa_archiver import copy_file_rsync
 from mwax_mover.mwax_calvin_utils import CalvinJobType, estimate_birli_output_GB
 from mwax_mover.mwax_calvin_solutions import process_solutions
+from mwax_mover.mwax_db import (
+    MWAXDBHandler,
+    update_calibration_request_assign_hostname_start_download,
+    update_calsolution_request_download_complete_status,
+    update_calsolution_request_calibration_started_status,
+    update_calsolution_request_calibration_complete_status,
+)
 from mwalib import MetafitsContext
 
 
@@ -41,7 +47,7 @@ class MWAXCalvinProcessor:
         self.log_path: str = ""
         self.log_level: str = ""
         self.hostname: str = ""
-        self.db_handler_object: mwax_db.MWAXDBHandler
+        self.db_handler_object: MWAXDBHandler
 
         # Metadata
         self.job_type: CalvinJobType
@@ -108,8 +114,8 @@ class MWAXCalvinProcessor:
 
             # Update this request with the slurm job_id
             self.logger.info(f"Assigning request to this host {self.hostname}")
-            mwax_db.update_calibration_request_assigned_hostname(
-                self.db_handler_object, self.slurm_job_id, self.hostname
+            update_calibration_request_assign_hostname_start_download(
+                self.db_handler_object, self.slurm_job_id, self.hostname, datetime.datetime.now()
             )
 
             # Set the data path and metadata
@@ -218,10 +224,10 @@ class MWAXCalvinProcessor:
             self.logger.info("Ensuring all data is ready for processing...")
             result, error_message = self.check_obs_is_ready_to_process()
 
-            # Update database that we are processing this obsid
+            # Update database that we are processing this obsid and we finished the download
             if result:
-                mwax_db.update_calsolution_request_calibration_started_status(
-                    self.db_handler_object, self.obs_id, None, datetime.datetime.now()
+                update_calsolution_request_calibration_started_status(
+                    self.db_handler_object, self.slurm_job_id, datetime.datetime.now()
                 )
             else:
                 self.fail_job_downloading(error_message)
@@ -289,8 +295,13 @@ class MWAXCalvinProcessor:
     def fail_job_downloading(self, error_message: str):
         # Update database
         try:
-            mwax_db.update_calsolution_request_download_complete_status(
-                self.db_handler_object, self.request_id_list, None, datetime.datetime.now(), error_message
+            update_calsolution_request_download_complete_status(
+                self.db_handler_object,
+                self.slurm_job_id,
+                self.request_id_list,
+                None,
+                datetime.datetime.now(),
+                error_message,
             )
         except Exception as e:
             if self.logger:
@@ -312,8 +323,8 @@ class MWAXCalvinProcessor:
     def fail_job_processing(self, error_message: str):
         # Update database
         try:
-            mwax_db.update_calsolution_request_calibration_complete_status(
-                self.db_handler_object, self.obs_id, None, None, None, datetime.datetime.now(), error_message
+            update_calsolution_request_calibration_complete_status(
+                self.db_handler_object, self.slurm_job_id, None, None, datetime.datetime.now(), error_message
             )
         except Exception as e:
             if self.logger:
@@ -334,8 +345,8 @@ class MWAXCalvinProcessor:
 
     def succeed_job_processing(self, fit_id: int):
         # Update database
-        mwax_db.update_calsolution_request_calibration_complete_status(
-            self.db_handler_object, self.obs_id, None, datetime.datetime.now(), fit_id, None, None
+        update_calsolution_request_calibration_complete_status(
+            self.db_handler_object, self.slurm_job_id, datetime.datetime.now(), fit_id, None, None
         )
         self.stop()
 
@@ -644,7 +655,7 @@ class MWAXCalvinProcessor:
         self.mro_metadatadb_port = int(utils.read_config(self.logger, config, "mro metadata database", "port"))
 
         # Initiate database connection for rmo metadata db
-        self.db_handler_object = mwax_db.MWAXDBHandler(
+        self.db_handler_object = MWAXDBHandler(
             logger=self.logger,
             host=self.mro_metadatadb_host,
             port=self.mro_metadatadb_port,

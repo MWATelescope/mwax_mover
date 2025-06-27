@@ -1962,10 +1962,12 @@ def estimate_birli_output_GB(
     # bytes_per_value = 4 (f32)
     # Total bytes = (baselines * fine_channels * pols * values * bytes_per_value * timesteps)
     # Total GB = bytes / 1000.^3
-    baselines: int = mctx.num_baselines  # 144T (10440)
-    timesteps: int = int(mctx.sched_duration_ms / (birli_int_time_res_sec * 1000.0))  # 60
-    fine_channels: int = int(mctx.obs_bandwidth_hz / (birli_freq_res_khz * 1000.0))  # 30720000 / 80000 == 384
-    pols: int = mctx.num_visibility_pols  # (XX,XY,YX,YY) # 4
+    baselines: int = metafits_context.num_baselines  # 144T (10440)
+    timesteps: int = int(metafits_context.sched_duration_ms / (birli_int_time_res_sec * 1000.0))  # 60
+    fine_channels: int = int(
+        metafits_context.obs_bandwidth_hz / (birli_freq_res_khz * 1000.0)
+    )  # 30720000 / 80000 == 384
+    pols: int = metafits_context.num_visibility_pols  # (XX,XY,YX,YY) # 4
     values: int = 2  # (real, imag)
     bytes_per_value: int = 4  # f32
     total_bytes: int = baselines * fine_channels * pols * values * bytes_per_value * timesteps

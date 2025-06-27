@@ -230,7 +230,8 @@ def process_solutions(
             db_handler_object, obs_id, None, datetime.now(), int(fit_id), None, None
         )
 
-        return True, ""
+        return True, "", int(fit_id)
+
     except Exception:
         error_text = f"{data_path} - Error in upload_handler:\n{traceback.format_exc()}"
         logger.exception(error_text)
@@ -245,4 +246,4 @@ def process_solutions(
             error_text,
         )
 
-        return False, error_text.replace("\n", "")
+        return False, error_text.replace("\n", ""), None

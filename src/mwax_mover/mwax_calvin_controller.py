@@ -30,7 +30,13 @@ import sys
 import threading
 import time
 from typing import Optional
-from mwax_mover import utils, version, mwax_db, mwax_asvo_helper
+from mwax_mover import utils, version, mwax_asvo_helper
+from mwax_mover.mwax_db import (
+    MWAXDBHandler,
+    get_unattempted_calsolution_requests,
+    update_calsolution_request_submit_mwa_asvo_job_status,
+    update_calibration_request_slurm_status,
+)
 from mwax_mover.mwax_calvin_utils import submit_sbatch, create_sbatch_script, CalvinJobType
 
 
@@ -60,7 +66,7 @@ class MWAXCalvinController:
         self.log_path: str = ""
         self.log_level: str = ""
         self.hostname: str = ""
-        self.db_handler_object: mwax_db.MWAXDBHandler
+        self.db_handler_object: MWAXDBHandler
         self.config_filename: str = ""
         self.worker_config_filename: str = ""
         self.running: bool = False
@@ -185,12 +191,15 @@ class MWAXCalvinController:
         if success and slurm_job_id is not None:
             # Success- update request to ensure it does not get picked up next loop
             # i.e. we have already submitted it, so don't do it again!
-            mwax_db.update_calibration_request_slurm_info(
+            update_calibration_request_slurm_status(
                 self.db_handler_object,
                 [
                     realtime_request.request_id,
                 ],
                 slurm_job_id,
+                datetime.now(),
+                None,
+                None,
             )
         else:
             error_message = (
@@ -215,9 +224,10 @@ class MWAXCalvinController:
                     job.download_error_message = error_message
 
                     # Update database
-                    mwax_db.update_calsolution_request_download_complete_status(
+                    update_calsolution_request_submit_mwa_asvo_job_status(
                         self.db_handler_object,
                         job.request_ids,
+                        job.job_id,
                         None,
                         job.download_error_datetime,
                         job.download_error_message,
@@ -246,8 +256,13 @@ class MWAXCalvinController:
                             job.download_slurm_job_submitted_datetime = datetime.now()
 
                             # Now update the database with the jobid
-                            mwax_db.update_calibration_request_slurm_info(
-                                self.db_handler_object, job.request_ids, slurm_job_id
+                            update_calibration_request_slurm_status(
+                                self.db_handler_object,
+                                job.request_ids,
+                                slurm_job_id,
+                                job.download_slurm_job_submitted_datetime,
+                                None,
+                                None,
                             )
                         else:
                             self.logger.error(f"{job} Unable to submit job to SLURM, will try again in next loop")
@@ -328,7 +343,7 @@ class MWAXCalvinController:
             # request(s)
             #
             # returned fields: list[Tuple[id, calid, realtime]] or None (the obsid we are calibrating)
-            results = mwax_db.get_unattempted_calsolution_requests(self.db_handler_object)
+            results = get_unattempted_calsolution_requests(self.db_handler_object)
 
             if results:
                 for result in results:
@@ -378,11 +393,13 @@ class MWAXCalvinController:
                 # The point of this is:
                 # If we are already handling obsid X, then another bunch of requests come through
                 # we should "catch them up" to the current status in the database
-                mwax_db.update_calsolution_request_submit_mwa_asvo_job(
+                update_calsolution_request_submit_mwa_asvo_job_status(
                     self.db_handler_object,
                     asvo_job.request_ids,
-                    asvo_job.submitted_datetime,
                     asvo_job.job_id,
+                    asvo_job.submitted_datetime,
+                    None,
+                    None,
                 )
             else:
                 # We already are tracking this request- nothing to do
@@ -392,6 +409,12 @@ class MWAXCalvinController:
             try:
                 # Submit job and add to the ones we are tracking
                 new_job = self.mwax_asvo_helper.submit_download_job(request_id, obs_id)
+
+                # We submmited a new MWA ASVO job, update the request table so we know we're on it!
+                # Update database
+                update_calsolution_request_submit_mwa_asvo_job_status(
+                    self.db_handler_object, new_job.request_ids, new_job.job_id, new_job.submitted_datetime, None, None
+                )
             except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
                 # Handle me!
                 self.logger.warning(
@@ -403,25 +426,17 @@ class MWAXCalvinController:
                 error_message = f"Error submitting job for ObsID {obs_id} RequestID {request_id}."
                 self.logger.exception(error_message)
                 error_message = error_message + f" {str(e)}"
-                mwax_db.update_calsolution_request_download_complete_status(
+                update_calsolution_request_submit_mwa_asvo_job_status(
                     self.db_handler_object,
                     [
                         request_id,
                     ],
                     None,
+                    None,
                     datetime.now(),
                     error_message,
                 )
                 return
-
-            # We submmited a new MWA ASVO job, update the request table so we know we're on it!
-            # Update database
-            mwax_db.update_calsolution_request_submit_mwa_asvo_job(
-                self.db_handler_object,
-                new_job.request_ids,
-                mwa_asvo_submitted_datetime=new_job.submitted_datetime,
-                mwa_asvo_job_id=new_job.job_id,
-            )
 
     def mwa_asvo_update_tracked_jobs(self):
         # Find out the status of all this user's jobs in MWA ASVO
@@ -513,7 +528,7 @@ class MWAXCalvinController:
         self.mro_metadatadb_port = int(utils.read_config(self.logger, config, "mro metadata database", "port"))
 
         # Initiate database connection for rmo metadata db
-        self.db_handler_object = mwax_db.MWAXDBHandler(
+        self.db_handler_object = MWAXDBHandler(
             logger=self.logger,
             host=self.mro_metadatadb_host,
             port=self.mro_metadatadb_port,

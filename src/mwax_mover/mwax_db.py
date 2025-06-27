@@ -655,6 +655,31 @@ def insert_calibration_solutions_row(
         return False
 
 
+def get_incomplete_request_ids_for_obsid(db_handler_object: MWAXDBHandler, obs_id: int):
+    sql = """SELECT id
+          FROM calibration_request
+          WHERE cal_id =  %s
+          AND calibration_completed_datetime IS NULL
+          AND calibration_error_datetime IS NULL"""
+
+    # Run SQL
+    rows = db_handler_object.select_many_rows_postgres(
+        sql,
+        [
+            obs_id,
+        ],
+    )
+
+    # Return a list or None if no rows
+    if len(rows) > 0:
+        return [r["id"] for r in rows]
+    else:
+        return None
+
+
+#
+# Calvin controller
+#
 def get_unattempted_calsolution_requests(db_handler_object: MWAXDBHandler) -> list[Tuple[int, int, bool]] | None:
     """Returns the deatils of the next oldest unattempted calibration_requests.
 
@@ -749,39 +774,13 @@ def get_unattempted_calsolution_requests(db_handler_object: MWAXDBHandler) -> li
         raise
 
 
-def update_calibration_request_slurm_info(db_handler_object: MWAXDBHandler, request_ids: list[int], slurm_job_id: int):
-    sql_update = """
-    UPDATE public.calibration_request
-    SET
-        assigned_datetime = Now(),
-        slurm_job_id = %s
-    WHERE
-    id = ANY(%s)"""
-
-    # Update the row
-    db_handler_object.execute_dml(sql_update, [slurm_job_id, request_ids], len(request_ids))
-
-
-def update_calibration_request_assigned_hostname(
-    db_handler_object: MWAXDBHandler, slurm_job_id: int, slurm_hostname: str
-):
-    sql_update = """
-    UPDATE public.calibration_request
-    SET
-        assigned_hostname = %s
-    WHERE
-    slurm_job_id = %s
-    AND assigned_hostname IS NULL"""
-
-    # Update the row
-    db_handler_object.execute_dml(sql_update, [slurm_hostname, slurm_job_id], None)
-
-
-def update_calsolution_request_submit_mwa_asvo_job(
+def update_calsolution_request_submit_mwa_asvo_job_status(
     db_handler_object: MWAXDBHandler,
     request_ids: list[int],
-    mwa_asvo_submitted_datetime: datetime.datetime,
-    mwa_asvo_job_id: int,
+    mwa_asvo_job_id: Optional[int],
+    mwa_asvo_job_submission_complete_datetime: Optional[datetime.datetime],
+    mwa_asvo_job_submission_error_datetime: Optional[datetime.datetime],
+    mwa_asvo_job_submission_error_message: Optional[str],
 ):
     """Update a calibration_request request with status info regarding the MWA ASVO job submission.
 
@@ -789,8 +788,8 @@ def update_calsolution_request_submit_mwa_asvo_job(
             db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
             request_ids (int): The request_id of the calibration_request to update
                                (could be many including old!).
-            mwa_asvo_submitted_datetime (datetime): The date/time the MWA ASVO job was successfully submitted
-            mwa_asvo_job_id (int): The MWA ASVO Job ID which is handling the retrieval of this obsid
+            mwa_asvo_job_submission_error_datetime (datetime): The date/time the MWA ASVO job failed to be submitted
+            mwa_asvo_job_submission_error_message (str): The error when submitting
 
     Returns:
             Nothing. Raises exceptions on error"""
@@ -798,22 +797,31 @@ def update_calsolution_request_submit_mwa_asvo_job(
     sql = """
     UPDATE public.calibration_request
     SET
-        download_mwa_asvo_job_submitted_datetime = %s,
-        download_mwa_asvo_job_id = %s
+        mwa_asvo_job_id = %s,
+        mwa_asvo_job_submission_complete_datetime = %s,
+        mwa_asvo_job_submission_error_datetime = %s,
+        mwa_asvo_job_submission_error_message = %s
     WHERE
     id = ANY(%s)"""
 
-    params = [mwa_asvo_submitted_datetime, mwa_asvo_job_id, request_ids]
+    params = [
+        mwa_asvo_job_id,
+        mwa_asvo_job_submission_complete_datetime,
+        mwa_asvo_job_submission_error_datetime,
+        mwa_asvo_job_submission_error_message,
+        request_ids,
+    ]
 
     try:
-        db_handler_object.execute_dml(sql, params, None)
+        db_handler_object.execute_dml(sql, params, len(request_ids))
         db_handler_object.logger.debug(
-            "update_calsolution_request_submit_mwa_asvo_job(): Successfully updated " "calibration_request table."
+            "update_calsolution_request_submit_mwa_asvo_job_status(): Successfully updated "
+            "calibration_request table."
         )
 
     except Exception:  # pylint: disable=broad-except
         db_handler_object.logger.exception(
-            "update_calsolution_request_submit_mwa_asvo_job(): error updating calibration_request record. SQL"
+            "update_calsolution_request_submit_mwa_asvo_job_status(): error updating calibration_request record. SQL"
             f" was {sql}, params were: {params}"
         )
 
@@ -821,43 +829,42 @@ def update_calsolution_request_submit_mwa_asvo_job(
         raise
 
 
-def update_calsolution_request_download_started_status(
+def update_calibration_request_slurm_status(
     db_handler_object: MWAXDBHandler,
     request_ids: list[int],
-    download_started_datetime: datetime.datetime,
+    slurm_job_id: Optional[int],
+    slurm_job_submitted_datetime: Optional[datetime.datetime],
+    slurm_job_submission_error_datetime: Optional[datetime.datetime],
+    slurm_job_submission_error_message: Optional[str],
 ):
-    """Update a calsolution request with updated download start status info.
-
-    Parameters:
-            db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
-            request_ids (int): The request_id(s) of the calibration_request to update
-                               (could be many including old!)
-            download_started_datetime (datetime): The date/time the download started
-
-    Returns:
-            Nothing. Raises exceptions on error"""
-
     sql = """
     UPDATE public.calibration_request
     SET
-        download_started_datetime = %s,
-        download_completed_datetime = NULL,
-        download_error_datetime = NULL,
-        download_error_message = NULL
+        slurm_job_id = %s,
+        download_slurm_job_submitted_datetime = %s,
+        download_slurm_job_submission_error_datetime = %s,
+        download_slurm_job_submission_error_message = %s
     WHERE
     id = ANY(%s)"""
 
-    params = [download_started_datetime, request_ids]
+    params = [
+        slurm_job_id,
+        slurm_job_submitted_datetime,
+        slurm_job_submission_error_datetime,
+        slurm_job_submission_error_message,
+        request_ids,
+    ]
 
     try:
-        db_handler_object.execute_dml(sql, params, None)
+        # Update the rows
+        db_handler_object.execute_dml(sql, params, len(request_ids))
         db_handler_object.logger.debug(
-            "update_calsolution_request_download_started_status(): Successfully updated " "calibration_request table."
+            "update_calsolution_request_download_complete_status(): Successfully updated " "calibration_request table."
         )
 
     except Exception:  # pylint: disable=broad-except
         db_handler_object.logger.exception(
-            "update_calsolution_request_download_started_status(): error updating calibration_request "
+            "update_calsolution_request_download_complete_status(): error updating calibration_request "
             f"record. SQL was {sql}, params were: {params}"
         )
 
@@ -865,8 +872,12 @@ def update_calsolution_request_download_started_status(
         raise
 
 
+#
+# Calvin processor functions
+#
 def update_calsolution_request_download_complete_status(
     db_handler_object: MWAXDBHandler,
+    slurm_job_id: Optional[int],
     request_ids: list[int],
     download_completed_datetime: datetime.datetime | None,
     download_error_datetime: datetime.datetime | None,
@@ -876,8 +887,8 @@ def update_calsolution_request_download_complete_status(
 
     Parameters:
             db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
-            request_ids (int): The request_id(s) of the calibration_request to update
-                               (could be many including old!)
+            slurm_job_id Optional(int): slurm job id for this run (if we have it)
+            request_ids: list[int]: All the request ids for this job
             download_completed_datetime (datetime): Date/time the download succeeded or None on error
             download_error_datetime (datetime): Date/time the download failed with an error OR None if success
             download_error_message (str): Error message if download_error_datetime is provided OR None if success
@@ -886,13 +897,19 @@ def update_calsolution_request_download_complete_status(
             Nothing. Raises exceptions on error"""
 
     sql = """
-    UPDATE public.calibration_request
-    SET
-        download_completed_datetime = %s,
-        download_error_datetime = %s,
-        download_error_message = %s
-    WHERE
-    id = ANY(%s)"""
+        UPDATE public.calibration_request
+        SET
+            download_completed_datetime = %s,
+            download_error_datetime = %s,
+            download_error_message = %s
+        WHERE"""
+
+    if slurm_job_id:
+        sql = f"{sql} slurm_job_id = %s"
+        params = [download_completed_datetime, download_error_datetime, download_error_message, slurm_job_id]
+    else:
+        sql = f"{sql} id = ANY(%s)"
+        params = [download_completed_datetime, download_error_datetime, download_error_message, request_ids]
 
     # check for validity, raise exception if not valid
     if (
@@ -909,10 +926,8 @@ def update_calsolution_request_download_complete_status(
             f"{download_completed_datetime, download_error_datetime, download_error_message}"
         )
 
-    params = [download_completed_datetime, download_error_datetime, download_error_message, request_ids]
-
     try:
-        db_handler_object.execute_dml(sql, params, len(request_ids))
+        db_handler_object.execute_dml(sql, params, None)
         db_handler_object.logger.debug(
             "update_calsolution_request_download_complete_status(): Successfully updated " "calibration_request table."
         )
@@ -927,35 +942,48 @@ def update_calsolution_request_download_complete_status(
         raise
 
 
-def get_incomplete_request_ids_for_obsid(db_handler_object: MWAXDBHandler, obs_id: int):
-    sql = """SELECT id
-          FROM calibration_request
-          WHERE cal_id =  %s
-          AND calibration_completed_datetime IS NULL
-          AND calibration_error_datetime IS NULL"""
+def update_calibration_request_assign_hostname_start_download(
+    db_handler_object: MWAXDBHandler,
+    slurm_job_id: int,
+    slurm_hostname: str,
+    download_started_datetime: datetime.datetime,
+):
+    sql = """
+    UPDATE public.calibration_request
+    SET
+        assigned_hostname = %s,
+        download_started_datetime = %s
+    WHERE
+    slurm_job_id = %s"""
 
-    # Run SQL
-    rows = db_handler_object.select_many_rows_postgres(
-        sql,
-        [
-            obs_id,
-        ],
-    )
+    params = [slurm_hostname, download_started_datetime, slurm_job_id]
 
-    # Return a list or None if no rows
-    if len(rows) > 0:
-        return [r["id"] for r in rows]
-    else:
-        return None
+    try:
+        # Update the row
+        db_handler_object.execute_dml(sql, params, None)
+
+        db_handler_object.logger.debug(
+            "update_calibration_request_assign_hostname_start_download(): Successfully updated "
+            "calibration_request table."
+        )
+
+    except Exception:  # pylint: disable=broad-except
+        db_handler_object.logger.exception(
+            "update_calibration_request_assign_hostname_start_download(): error updating calibration_request "
+            f"record. SQL was {sql}, params were: {params}"
+        )
+
+        # Re-raise error
+        raise
 
 
 def update_calsolution_request_calibration_started_status(
     db_handler_object: MWAXDBHandler,
-    obs_id: int,
-    request_ids: list[int] | None,
+    slurm_job_id: int,
     calibration_started_datetime: datetime.datetime,
 ):
     """Update a calsolution request with updated calibration start status info.
+    This makes the very valid assumption that the download has completed too.
 
     Parameters:
             db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
@@ -971,38 +999,25 @@ def update_calsolution_request_calibration_started_status(
     sql = """
     UPDATE public.calibration_request
     SET
+        download_completed_datetime = %s,
         calibration_started_datetime = %s,
         calibration_completed_datetime = NULL,
         calibration_fit_id = NULL,
         calibration_error_datetime = NULL,
         calibration_error_message = NULL
     WHERE
-    id = ANY(%s)"""
+    slurm_job_id = %s"""
 
     params = []
 
-    # calvin_processor won't know the requestids so get them (if any!)
-    if request_ids is None:
-        # We need to get the request ids
-        request_ids = get_incomplete_request_ids_for_obsid(db_handler_object, obs_id)
-
     try:
-        params = [calibration_started_datetime, request_ids]
+        params = [calibration_started_datetime, calibration_started_datetime, slurm_job_id]
 
-        if request_ids is not None:
-            # update the params varible if the request_ids changed (above)
-            params = [calibration_started_datetime, request_ids]
-
-            db_handler_object.execute_dml(sql, params, len(request_ids))
-            db_handler_object.logger.debug(
-                "update_calsolution_request_calibration_started_status(): Successfully updated "
-                "calibration_request table."
-            )
-        else:
-            db_handler_object.logger.debug(
-                "update_calsolution_request_calibration_started_status(): No requests to update "
-                "in the calibration_request table."
-            )
+        db_handler_object.execute_dml(sql, params, None)
+        db_handler_object.logger.debug(
+            "update_calsolution_request_calibration_started_status(): Successfully updated "
+            "calibration_request table."
+        )
 
     except Exception:  # pylint: disable=broad-except
         db_handler_object.logger.exception(
@@ -1016,8 +1031,7 @@ def update_calsolution_request_calibration_started_status(
 
 def update_calsolution_request_calibration_complete_status(
     db_handler_object: MWAXDBHandler,
-    obs_id: int,
-    request_ids: Optional[list[int]],
+    slurm_job_id: int,
     calibration_completed_datetime: Optional[datetime.datetime],
     calibration_fit_id: Optional[int],
     calibration_error_datetime: Optional[datetime.datetime],
@@ -1027,10 +1041,7 @@ def update_calsolution_request_calibration_complete_status(
 
     Parameters:
             db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
-            obs_id (int): Obs ID this cal soltution is for
-            request_ids (int) | None: The request_id(s) of the calibration_request to update
-                               (could be many including old!). None is passed by calvin_processor
-                               as it has no idea about which request_ids this could be for (if any)
+            slurm_job_id (int): identifies the row/rows of requests for this slurm job
             calibration_completed_datetime (datetime): Date/time the calibration succeeded or None on error
             calibration_fit_id (int): ID of the fit inserted or None on error
             calibration_error_datetime (datetime): Date/time the calibration failed with an error OR None if success
@@ -1047,7 +1058,7 @@ def update_calsolution_request_calibration_complete_status(
         calibration_error_datetime = %s,
         calibration_error_message = %s
     WHERE
-    id = ANY(%s)"""
+    slurm_job_id = %s"""
     params = ""
 
     # check for validity, raise exception if not valid
@@ -1070,31 +1081,20 @@ def update_calsolution_request_calibration_complete_status(
             "calibration_error_datetime and calibration_error_message"
         )
 
-    # calvin_processor won't know the requestids so get them (if any!)
-    if request_ids is None:
-        # We need to get the request ids
-        request_ids = get_incomplete_request_ids_for_obsid(db_handler_object, obs_id)
-
     try:
-        if request_ids is not None:
-            params = [
-                calibration_completed_datetime,
-                calibration_fit_id,
-                calibration_error_datetime,
-                calibration_error_message,
-                request_ids,
-            ]
+        params = [
+            calibration_completed_datetime,
+            calibration_fit_id,
+            calibration_error_datetime,
+            calibration_error_message,
+            slurm_job_id,
+        ]
 
-            db_handler_object.execute_dml(sql, params, None)
-            db_handler_object.logger.debug(
-                "update_calsolution_request_calibration_complete_status(): Successfully updated "
-                "calibration_request table."
-            )
-        else:
-            db_handler_object.logger.debug(
-                "update_calsolution_request_calibration_complete_status(): No requests to update "
-                "in the calibration_request table."
-            )
+        db_handler_object.execute_dml(sql, params, None)
+        db_handler_object.logger.debug(
+            "update_calsolution_request_calibration_complete_status(): Successfully updated "
+            "calibration_request table."
+        )
 
     except Exception:  # pylint: disable=broad-except
         db_handler_object.logger.exception(
