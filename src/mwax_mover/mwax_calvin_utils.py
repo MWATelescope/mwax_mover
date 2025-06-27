@@ -1530,7 +1530,7 @@ def run_birli(
             f" {avg_arg} {passband_arg} {data_file_arg}"
         )
 
-        birli_popen_process = run_command_popen(logger, cmdline, -1, False, True)
+        birli_popen_process = run_command_popen(logger, cmdline, -1, False, False)
 
         exit_code, stdout, stderr = check_popen_finished(
             logger,
@@ -1642,7 +1642,7 @@ def run_hyperdrive(
 
             # run hyperdrive
             logger.info(f"{obs_id}: Running hyperdrive on {uvfits_file}...")
-            hyperdrive_popen_process = run_command_popen(logger, cmdline, -1, False, True)
+            hyperdrive_popen_process = run_command_popen(logger, cmdline, -1, False, False)
 
             exit_code, stdout, stderr = check_popen_finished(
                 logger,
@@ -1885,6 +1885,10 @@ echo "Starting Calvin {jobtype.value} Job: $SLURM_JOBID";
 # Source the python environment
 cd /home/mwa/mwax_mover
 source .venv/bin/activate
+
+# Explicitly specifying these as they dont seem to be passed from the mwa env
+export MWA_BEAM_FILE=/software/hyperdrive/mwa_full_embedded_element_pattern.h5
+export HYPERDRIVE_CUDA_COMPUTE=86
 
 # Process
 srun --nodes=1 --ntasks=1 --cpus-per-task=90 \
