@@ -130,6 +130,22 @@ class MWAXCalvinProcessor:
             os.makedirs(name=self.job_output_path, exist_ok=True)
             self.logger.info(f"Job Output Data will be written to: {self.job_output_path}")
 
+            # Get metafits file
+            self.logger.info(f"Downloading metafits file: {self.metafits_filename}")
+            try:
+                utils.download_metafits_file(self.logger, self.obs_id, self.job_input_path)
+            except Exception as catch_all_exception:  # pylint: disable=broad-except
+                error_message = f"Metafits file {self.metafits_filename} did not exist and"
+                " could not download one from web service. Exiting."
+                f" {catch_all_exception}"
+                self.logger.exception(error_message)
+                self.fail_job_downloading(error_message)
+                exit(-1)
+
+            # Create metafits context
+            self.logger.info(f"Reading metafits file {self.metafits_filename} with mwalib...")
+            self.metafits_context = MetafitsContext(self.metafits_filename, None)
+
             # Get list of expected files from web service- wait if obs is still in progress!
             self.logger.info("Getting observation file list from web service...")
             result, error_message = self.get_observation_file_list()
@@ -165,24 +181,6 @@ class MWAXCalvinProcessor:
                     f"Failed to download data after {self.download_retries} attempts. Error: {error_message}"
                 )
                 exit(0)
-
-            # Download the metafits file from the webservice if we are in a realtime job
-            # Otherwise for asvo, asvo provides the latest one
-            if self.job_type == CalvinJobType.realtime:
-                self.logger.info(f"Downloading metafits file: {self.metafits_filename}")
-                try:
-                    utils.download_metafits_file(self.logger, self.obs_id, self.job_input_path)
-                except Exception as catch_all_exception:  # pylint: disable=broad-except
-                    error_message = f"Metafits file {self.metafits_filename} did not exist and"
-                    " could not download one from web service. Exiting."
-                    f" {catch_all_exception}"
-                    self.logger.exception(error_message)
-                    self.fail_job_downloading(error_message)
-                    exit(-1)
-
-            # Create metafits context
-            self.logger.info(f"Reading metafits file {self.metafits_filename} with mwalib...")
-            self.metafits_context = MetafitsContext(self.metafits_filename, None)
 
             # Working path for Birli / uvfits output is determined by calculating the size of the output visibilites:
             self.logger.info("Calculating observation output size...")
@@ -290,19 +288,39 @@ class MWAXCalvinProcessor:
 
     def fail_job_downloading(self, error_message: str):
         # Update database
-        mwax_db.update_calsolution_request_download_complete_status(
-            self.db_handler_object, self.request_id_list, None, datetime.datetime.now(), error_message
-        )
-        self.stop()
+        try:
+            mwax_db.update_calsolution_request_download_complete_status(
+                self.db_handler_object, self.request_id_list, None, datetime.datetime.now(), error_message
+            )
+        except Exception as e:
+            if self.logger:
+                self.logger.info(f"Failed to update_calsolution_request_download_complete_status {str(e)}")
+
+        try:
+            self.stop()
+        except Exception as e:
+            if self.logger:
+                self.logger.info(f"Failed to stop processor {str(e)}")
+
         if self.logger:
             self.logger.info("Completed with downloading errors")
 
     def fail_job_processing(self, error_message: str):
         # Update database
-        mwax_db.update_calsolution_request_calibration_complete_status(
-            self.db_handler_object, self.obs_id, None, None, None, datetime.datetime.now(), error_message
-        )
-        self.stop()
+        try:
+            mwax_db.update_calsolution_request_calibration_complete_status(
+                self.db_handler_object, self.obs_id, None, None, None, datetime.datetime.now(), error_message
+            )
+        except Exception as e:
+            if self.logger:
+                self.logger.info(f"Failed to update_calsolution_request_calibration_complete_status {str(e)}")
+
+        try:
+            self.stop()
+        except Exception as e:
+            if self.logger:
+                self.logger.info(f"Failed to stop processor {str(e)}")
+
         if self.logger:
             self.logger.info("Completed with processing errors")
 
