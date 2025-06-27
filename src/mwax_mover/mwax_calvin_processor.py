@@ -483,15 +483,10 @@ class MWAXCalvinProcessor:
 
         try:
             # Check for gpubox files (mwax OR legacy)
-            glob_spec = "*.fits"
+            glob_spec = f"{self.obs_id}_*_*_*.fits"
             data_dir_full_path_files = glob.glob(os.path.join(self.job_input_path, glob_spec))
             data_dir_filenames = [os.path.basename(i) for i in data_dir_full_path_files]
             data_dir_filenames.sort()
-            # Remove any metafits files from the list
-            for file in data_dir_filenames:
-                if "metafits" in file:
-                    self.logger.debug(f"Removing {file} from data_dir_filenames")
-                    data_dir_filenames.remove(file)
 
             # How does what we need compare to what we have?
             return_value = len(data_dir_filenames) == len(self.ws_filenames)

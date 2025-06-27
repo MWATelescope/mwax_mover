@@ -1482,13 +1482,7 @@ def run_birli(
     stdout = None
     try:
         # Get only data files
-        data_files = glob.glob(os.path.join(input_data_path, "*.fits"))
-        # Remove the metafits (we specify it seperately)
-        try:
-            data_files.remove(metafits_filename)
-        except ValueError:
-            # Metafits was not in the file list
-            raise Exception(f"Metafits file '{metafits_filename}' was not found. Cannot run birli.")
+        data_files = glob.glob(os.path.join(input_data_path, f"{obs_id}_*_*_*.fits"))
 
         data_file_arg = ""
         for data_file in data_files:
@@ -1926,6 +1920,9 @@ def submit_sbatch(logger: logging.Logger, script_path: str, script: str, obs_id:
     stdout = ""
     try:
         return_val, stdout = run_command_ext(logger, cmdline, None, 60, True)
+
+        # remove crlf from stdout
+        stdout = stdout.replace("\n", " ")
 
         # Success- get the new job id
         # sbatch should send this to std out:
