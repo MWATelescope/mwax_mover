@@ -3,12 +3,12 @@ import glob
 import logging
 import os
 import traceback
+from typing import Optional
 import numpy as np
 from mwax_mover.mwax_db import (
     MWAXDBHandler,
     insert_calibration_fits_row,
     insert_calibration_solutions_row,
-    update_calsolution_request_calibration_complete_status,
 )
 from mwax_mover.mwax_calvin_utils import (
     GainFitInfo,
@@ -32,10 +32,12 @@ def process_solutions(
     data_path: str,
     phase_fit_niter: int,
     produce_debug_plots: bool,
-) -> bool:
+) -> tuple[bool, str, Optional[int]]:
     """Will deal with completed hyperdrive solutions
     by getting them into a format we can insert into
-    the calibration database"""
+    the calibration database
+
+    Returns Success (t/f), error_message (or "" if none) and fit_id or None"""
 
     conn = None
     try:
@@ -228,7 +230,7 @@ def process_solutions(
             db_handler_object, obs_id, None, datetime.now(), int(fit_id), None, None
         )
 
-        return True
+        return True, ""
     except Exception:
         error_text = f"{data_path} - Error in upload_handler:\n{traceback.format_exc()}"
         logger.exception(error_text)
@@ -243,17 +245,4 @@ def process_solutions(
             error_text,
         )
 
-        #
-        # If this cal solution was a requested one, update it to failed
-        #
-        update_calsolution_request_calibration_complete_status(
-            db_handler_object,
-            obs_id,
-            None,
-            None,
-            None,
-            datetime.now(),
-            error_text.replace("\n", " "),
-        )
-
-        return False
+        return False, error_text.replace("\n", "")

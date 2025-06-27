@@ -9,7 +9,6 @@ import datetime
 import glob
 import logging
 import os
-
 import shutil
 import signal
 import sys
@@ -18,8 +17,6 @@ from typing import Optional
 import coloredlogs
 from itertools import repeat
 from multiprocessing import Pool
-from tenacity import Retrying, RetryError, stop_after_attempt, wait_fixed
-from astropy.io import fits
 from mwax_mover import (
     utils,
     version,
@@ -30,6 +27,7 @@ from mwax_mover import (
 from mwax_mover.mwa_archiver import copy_file_rsync
 from mwax_mover.mwax_calvin_utils import CalvinJobType, estimate_birli_output_GB
 from mwax_mover.mwax_calvin_solutions import process_solutions
+from mwalib import MetafitsContext
 
 
 class MWAXCalvinProcessor:
@@ -56,6 +54,14 @@ class MWAXCalvinProcessor:
         self.uvfits_filename: str = ""
         self.ws_filenames: list[str] = []
         self.mwax_download_filenames: list[str] = []  # Only applicable for realtime
+        self.data_downloaded: bool = False
+        self.metafits_context: MetafitsContext
+
+        # downloading
+        self.download_retries: int = 0
+        self.download_retry_wait: int = 0
+        self.realtime_download_file_timeout: int = 0
+        self.mwaasvo_download_obs_timeout: int = 0
 
         # processing
         self.job_input_path: str = (
@@ -88,166 +94,223 @@ class MWAXCalvinProcessor:
         """Start the processor"""
         self.running = True
 
-        # Cleaning up /tmp in case there is a left over failed job that wasn't cleaned up
-        if os.path.exists(self.temp_working_path):
-            self.logger.info(f"Cleaning old working path ({self.temp_working_path}/)")
-            shutil.rmtree(f"{self.temp_working_path}/")
-
-        # creating database connection pool(s)
-        self.logger.info("Starting database connection pool...")
-        self.db_handler_object.start_database_pool()
-
-        self.logger.info("Started...")
-
-        # Update this request with the slurm job_id
-        self.logger.info(f"Assigning request to this host {self.hostname}")
-        mwax_db.update_calibration_request_assigned_hostname(self.db_handler_object, self.slurm_job_id, self.hostname)
-
-        # Set the data path and metadata
-        # will be something like: /data/calvin/jobs/SLURM_JOB_ID_OBSID
-        self.job_input_path = os.path.join(self.job_input_path, f"{str(self.slurm_job_id)}_{str(self.obs_id)}")
-
-        # Ensure input data path exists
-        os.makedirs(name=self.job_input_path, exist_ok=True)
-        self.logger.info(f"Job Input Data will be downloaded to: {self.job_input_path}")
-
-        self.metafits_filename = os.path.join(self.job_input_path, f"{self.obs_id}_metafits.fits")
-        self.logger.info(f"Job metafits filename will be: {self.metafits_filename}")
-
-        # Output dirs
-        self.job_output_path = os.path.join(self.job_output_path, f"{str(self.slurm_job_id)}_{str(self.obs_id)}")
-
-        # Ensure output path exists
-        os.makedirs(name=self.job_output_path, exist_ok=True)
-        self.logger.info(f"Job Output Data will be written to: {self.job_output_path}")
-
-        # Download the metafits file from the webservice (it's the latest)
-        self.logger.info(f"Downloading metafits file: {self.metafits_filename}")
         try:
-            utils.download_metafits_file(self.logger, self.obs_id, self.job_input_path)
-        except Exception as catch_all_exception:  # pylint: disable=broad-except
-            self.logger.exception(
-                f"Metafits file {self.metafits_filename} did not exist and"
-                " could not download one from web service. Exiting."
-                f" {catch_all_exception}"
+            # Cleaning up /tmp in case there is a left over failed job that wasn't cleaned up
+            if os.path.exists(self.temp_working_path):
+                self.logger.info(f"Cleaning old working path ({self.temp_working_path}/)")
+                shutil.rmtree(f"{self.temp_working_path}/")
+
+            # creating database connection pool(s)
+            self.logger.info("Starting database connection pool...")
+            self.db_handler_object.start_database_pool()
+
+            self.logger.info("Started process...")
+
+            # Update this request with the slurm job_id
+            self.logger.info(f"Assigning request to this host {self.hostname}")
+            mwax_db.update_calibration_request_assigned_hostname(
+                self.db_handler_object, self.slurm_job_id, self.hostname
             )
-            self.stop()
-            exit(-2)
 
-        # Working path for Birli / uvfits output is determined by calculating the size of the output visibilites:
-        self.logger.info("Calculating observation output size...")
-        self.estimated_uvfits_GB = estimate_birli_output_GB(
-            self.metafits_filename, self.birli_freq_res_khz, self.birli_int_time_res_sec
-        )
+            # Set the data path and metadata
+            # will be something like: /data/calvin/jobs/SLURM_JOB_ID_OBSID
+            self.job_input_path = os.path.join(self.job_input_path, f"{str(self.slurm_job_id)}_{str(self.obs_id)}")
 
-        self.logger.info(
-            f"Observation UVFITS output is estimated to be : {self.estimated_uvfits_GB} GB "
-            f"({int(utils.gigabyte_to_gibibyte(self.estimated_uvfits_GB))} GiB)"
-        )
-
-        if self.estimated_uvfits_GB < 500:
-            # Use temp_working_dir
-            self.working_path = os.path.join(self.temp_working_path, f"{str(self.obs_id)}_{str(self.slurm_job_id)}")
             # Ensure input data path exists
-            os.makedirs(name=self.working_path, exist_ok=True)
+            os.makedirs(name=self.job_input_path, exist_ok=True)
+            self.logger.info(f"Job Input Data will be downloaded to: {self.job_input_path}")
 
-            # Override the birli allowed memory
-            self.birli_max_mem_gib -= int(utils.gigabyte_to_gibibyte(self.estimated_uvfits_GB))
-            self.logger.info(
-                f"Using temporary work dir {self.temp_working_path} for Birli output. Reduced "
-                f"allowed Birli memory to: {self.birli_max_mem_gib} GiB"
-            )
-        else:
-            # Use output_dir
-            self.working_path = self.job_output_path
-            self.logger.info(f"Using work dir {self.working_path} for Birli output.")
+            self.metafits_filename = os.path.join(self.job_input_path, f"{self.obs_id}.metafits")
+            self.logger.info(f"Job metafits filename: {self.metafits_filename}")
 
-        # Set uvfits filename
-        self.uvfits_filename = os.path.join(self.working_path, f"{self.obs_id}.uvfits")
-        self.logger.info(f"Job Output UVFITS file(s) will be created as: {self.uvfits_filename}")
+            # Output dirs
+            self.job_output_path = os.path.join(self.job_output_path, f"{str(self.slurm_job_id)}_{str(self.obs_id)}")
 
-        # Get list of expected files from web service- wait if obs is still in progress!
-        self.get_observation_file_list()
+            # Ensure output path exists
+            os.makedirs(name=self.job_output_path, exist_ok=True)
+            self.logger.info(f"Job Output Data will be written to: {self.job_output_path}")
 
-        # next step depends on jobtype
-        data_downloaded: bool = False
-        data_download_attempt: int = 1
+            # Get list of expected files from web service- wait if obs is still in progress!
+            return_value, error_message = self.get_observation_file_list()
+            if not return_value:
+                self.fail_job_downloading(error_message)
+                exit(0)
 
-        DOWNLOAD_RETRY_ATTEMPTS = 3
-        DOWNLOAD_RETRY_WAIT_SECONDS = 240
+            # next step depends on jobtype
+            data_download_attempt: int = 1
 
-        while not data_downloaded and data_download_attempt < DOWNLOAD_RETRY_ATTEMPTS:
+            while not self.data_downloaded and data_download_attempt <= self.download_retries:
+                if self.job_type == CalvinJobType.realtime:
+                    # Download from MWAX boxes
+                    self.data_downloaded, error_message = self.download_realtime_data()
+                elif self.job_type == CalvinJobType.mwa_asvo:
+                    # Download from MWA ASVO URL
+                    self.data_downloaded, error_message = self.download_mwa_asvo_data()
+                else:
+                    error_message = f"Error- unknown job_type {self.job_type}. Aborting"
+                    self.logger.error(error_message)
+                    self.fail_job_downloading(error_message)
+                    exit(-1)
+
+                data_download_attempt += 1
+
+                # Wait before trying again if we failed
+                if not self.data_downloaded:
+                    self.sleep(self.download_retry_wait)
+
+            if not self.data_downloaded:
+                self.fail_job_downloading(
+                    f"Failed to download data after {self.download_retries} attempts. Error: {error_message}"
+                )
+                exit(0)
+
+            # Download the metafits file from the webservice if we are in a realtime job
+            # Otherwise for asvo, asvo provides the latest one
             if self.job_type == CalvinJobType.realtime:
-                # Download from MWAX boxes
-                data_downloaded = self.download_realtime_data()
-            elif self.job_type == CalvinJobType.mwa_asvo:
-                # Download from MWA ASVO URL
-                data_downloaded = self.download_mwa_asvo_data()
+                self.logger.info(f"Downloading metafits file: {self.metafits_filename}")
+                try:
+                    utils.download_metafits_file(self.logger, self.obs_id, self.job_input_path)
+                except Exception as catch_all_exception:  # pylint: disable=broad-except
+                    error_message = f"Metafits file {self.metafits_filename} did not exist and"
+                    " could not download one from web service. Exiting."
+                    f" {catch_all_exception}"
+                    self.logger.exception(error_message)
+                    self.fail_job_downloading(error_message)
+                    exit(-1)
+
+            # Create metafits context
+            self.metafits_context = MetafitsContext(self.metafits_filename, None)
+
+            # Working path for Birli / uvfits output is determined by calculating the size of the output visibilites:
+            self.logger.info("Calculating observation output size...")
+            self.estimated_uvfits_GB = estimate_birli_output_GB(
+                self.metafits_context, self.birli_freq_res_khz, self.birli_int_time_res_sec
+            )
+
+            self.logger.info(
+                f"Observation UVFITS output is estimated to be : {self.estimated_uvfits_GB} GB "
+                f"({int(utils.gigabyte_to_gibibyte(self.estimated_uvfits_GB))} GiB)"
+            )
+
+            if self.estimated_uvfits_GB < 500:
+                # Use temp_working_dir
+                self.working_path = os.path.join(self.temp_working_path, f"{str(self.obs_id)}_{str(self.slurm_job_id)}")
+                # Ensure input data path exists
+                os.makedirs(name=self.working_path, exist_ok=True)
+
+                # Override the birli allowed memory
+                self.birli_max_mem_gib -= int(utils.gigabyte_to_gibibyte(self.estimated_uvfits_GB))
+                self.logger.info(
+                    f"Using temporary work dir {self.temp_working_path} for Birli output. Reduced "
+                    f"allowed Birli memory to: {self.birli_max_mem_gib} GiB"
+                )
             else:
-                self.logger.error(f"Error- unknown job_type {self.job_type}. Aborting")
-                exit(-2)
+                # Use output_dir
+                self.working_path = self.job_output_path
+                self.logger.info(f"Using work dir {self.working_path} for Birli output.")
 
-            data_download_attempt += 1
+            # Set uvfits filename
+            self.uvfits_filename = os.path.join(self.working_path, f"{self.obs_id}.uvfits")
+            self.logger.info(f"Job Output UVFITS file(s) will be created as: {self.uvfits_filename}")
 
-            # Wait before trying again if we failed
-            if not data_downloaded:
-                self.sleep(DOWNLOAD_RETRY_WAIT_SECONDS)
+            # All files we could get are now in the processing_path
+            self.logger.info("Ensuring all data is ready for processing...")
+            result, error_message = self.check_obs_is_ready_to_process()
 
-        if not data_downloaded:
-            self.logger.error("Unabled to download data after all attempts. Exiting")
-            self.stop()
-            exit(-1)
+            # Update database that we are processing this obsid
+            if result:
+                mwax_db.update_calsolution_request_calibration_started_status(
+                    self.db_handler_object, self.obs_id, None, datetime.datetime.now()
+                )
+            else:
+                self.fail_job_downloading(error_message)
+                exit(-1)
 
-        # All files we could get are now in the processing_path
-        self.logger.info("Ensuring all data is ready for processing...")
-        if not self.check_obs_is_ready_to_process():
-            self.stop()
-            exit(-3)
+            # We have all the files, so run birli
+            result, error_message = self.run_birli()
 
-        # We have all the files, so run birli
-        if not self.run_birli():
-            self.stop()
-            exit(-4)
+            if not result:
+                self.fail_job_processing(error_message)
+                exit(-1)
 
-        # Birli was successful so run hyperdrive!
-        if not self.run_hyperdrive():
-            self.stop()
-            exit(-5)
+            # Birli was successful so run hyperdrive!
+            result, error_message = self.run_hyperdrive()
 
-        # If that worked, process the solutions and insert into db
-        self.logger.info("Processing solutions...")
-        if not process_solutions(
-            self.logger,
-            self.db_handler_object,
-            self.obs_id,
-            self.working_path,
-            self.phase_fit_niter,
-            self.produce_debug_plots,
-        ):
-            self.stop()
-            exit(-6)
+            if not result:
+                self.fail_job_processing(error_message)
+                exit(-1)
 
-        # clean up
-        # if we get here, the whole calibration solution was inserted ok.
-        # The transaction context will commit the transation
-        if not self.keep_completed_visibility_files:
-            # Remove visibilitiy files
-            visibility_files = glob.glob(os.path.join(self.job_input_path, f"{self.obs_id}_*_*_*.fits"))
-            for file_to_delete in visibility_files:
-                os.remove(file_to_delete)
+            # If that worked, process the solutions and insert into db
+            self.logger.info("Processing solutions...")
 
-            # Now remove uvfits too
-            uvfits_files = glob.glob(os.path.join(self.job_input_path, "*.uvfits"))
-            for file_to_delete in uvfits_files:
-                os.remove(file_to_delete)
+            result, error_message, fit_id = process_solutions(
+                self.logger,
+                self.db_handler_object,
+                self.obs_id,
+                self.working_path,
+                self.phase_fit_niter,
+                self.produce_debug_plots,
+            )
 
-        # Stop!
+            if result:
+                if fit_id:
+                    self.succeed_job_processing(fit_id)
+                else:
+                    self.fail_job_processing("Error: process_solutions() did not return a fit_id")
+                    exit(-1)
+            else:
+                self.fail_job_processing(error_message)
+                exit(0)
+
+            # This clean up only happens on success
+            # if we get here, the whole calibration solution was inserted ok.
+            if not self.keep_completed_visibility_files:
+                # Remove visibilitiy files
+                visibility_files = glob.glob(os.path.join(self.job_input_path, f"{self.obs_id}_*_*_*.fits"))
+                for file_to_delete in visibility_files:
+                    os.remove(file_to_delete)
+
+                # Now remove uvfits too
+                uvfits_files = glob.glob(os.path.join(self.job_input_path, "*.uvfits"))
+                for file_to_delete in uvfits_files:
+                    os.remove(file_to_delete)
+
+            # Final log message
+            self.logger.info("Completed Successfully")
+        except Exception as e:
+            # Something really bad went wrong!
+            error_message = f"Unhandled Exception: {str(e)}"
+            if self.data_downloaded:
+                self.fail_job_processing(error_message)
+            else:
+                self.fail_job_downloading(error_message)
+
+    def fail_job_downloading(self, error_message: str):
+        # Update database
+        mwax_db.update_calsolution_request_download_complete_status(
+            self.db_handler_object, self.request_id_list, None, datetime.datetime.now(), error_message
+        )
+        self.stop()
+        if self.logger:
+            self.logger.info("Completed with downloading errors")
+
+    def fail_job_processing(self, error_message: str):
+        # Update database
+        mwax_db.update_calsolution_request_calibration_complete_status(
+            self.db_handler_object, self.obs_id, None, None, None, datetime.datetime.now(), error_message
+        )
+        self.stop()
+        if self.logger:
+            self.logger.info("Completed with processing errors")
+
+    def succeed_job_processing(self, fit_id: int):
+        # Update database
+        mwax_db.update_calsolution_request_calibration_complete_status(
+            self.db_handler_object, self.obs_id, None, datetime.datetime.now(), fit_id, None, None
+        )
         self.stop()
 
-        # Final log message
-        self.logger.info("Completed Successfully")
-
-    def get_observation_file_list(self):
+    def get_observation_file_list(self) -> tuple[bool, str]:
         # Get the duration of the obs from the metafits and only proceed
         # if the current gps time is > the obs_id + duration + a constant
         exp_time = int(utils.get_metafits_value(self.metafits_filename, "EXPOSURE"))
@@ -273,8 +336,9 @@ class MWAXCalvinProcessor:
             )
         except Exception:
             # The previous call would have already logged tonnes of errors so no need to log anything specific here
-            self.logger.error(f"{self.obs_id} No webservice was able to provide list of data files.")
-            return False
+            error_message = f"{self.obs_id} No webservice was able to provide list of data files."
+            self.logger.error(error_message)
+            return False, error_message
 
         # Assemble the filenames
         self.ws_filenames = []  # this is just filename
@@ -284,85 +348,84 @@ class MWAXCalvinProcessor:
             self.mwax_download_filenames.append(f"mwa@{hostname}:/{os.path.join("visdata/cal_outgoing/", filename)}")
             self.ws_filenames.append(filename)
 
-    def download_mwa_asvo_data(self) -> bool:
+        return True, ""
+
+    def download_mwa_asvo_data(self) -> tuple[bool, str]:
         # Given the URL from command line args, download and untar the MWA ASVO data
-        iteration = 0
-        max_iterations = 3
         try:
-            for attempt in Retrying(stop=stop_after_attempt(max_iterations), wait=wait_fixed(60)):
-                iteration += 1
-
-                if self.running:
-                    with attempt:
-                        stdout = ""
-                        self.logger.info(
-                            f"{self.obs_id}: Attempting to download MWA ASVO data ({iteration} of {max_iterations})"
-                            f" {self.mwa_asvo_download_url} to {self.job_input_path}..."
-                        )
-
-                        cmdline = f'wget -q -O - "{self.mwa_asvo_download_url}" | tar -x -C {self.job_input_path}'
-
-                        try:
-                            # Submit the job
-                            return_val, stdout = mwax_command.run_command_ext(self.logger, cmdline, None, 3600, True)
-
-                            if return_val:
-                                self.logger.info(
-                                    f"{str(self.obs_id)} successfully downloaded "
-                                    f"from {self.mwa_asvo_download_url} into {self.job_input_path}"
-                                )
-                                return True
-                            else:
-                                error_message = f"{str(self.obs_id)} failed when running {cmdline} Error" f" {stdout}"
-                                raise Exception(error_message)
-
-                        except Exception:
-                            self.logger.exception(
-                                f"Failed to download and untar observation {self.obs_id} from "
-                                f"{self.mwa_asvo_download_url}"
-                                f" {stdout}"
-                            )
-                            raise
-                else:
-                    break
-        except RetryError:
-            self.logger.error(
-                f"Failed to download and untar observation {self.obs_id} from {self.mwa_asvo_download_url} "
-                "after all attempts. Giving up!"
+            stdout = ""
+            self.logger.info(
+                f"{self.obs_id}: Attempting to download MWA ASVO data"
+                f" {self.mwa_asvo_download_url} to {self.job_input_path}..."
             )
-            return False
-        return False
 
-    def download_realtime_data(self) -> bool:
+            cmdline = f'wget -q -O - "{self.mwa_asvo_download_url}" | tar -x -C {self.job_input_path}'
+
+            try:
+                # Submit the job
+                return_val, stdout = mwax_command.run_command_ext(
+                    self.logger, cmdline, None, self.mwaasvo_download_obs_timeout, True
+                )
+
+                if return_val:
+                    self.logger.info(
+                        f"{str(self.obs_id)} successfully downloaded "
+                        f"from {self.mwa_asvo_download_url} into {self.job_input_path}"
+                    )
+                    return True, ""
+                else:
+                    error_message = f"{str(self.obs_id)} failed when running {cmdline} Error" f" {stdout}"
+                    raise Exception(error_message)
+
+            except Exception:
+                self.logger.exception(
+                    f"Failed to download and untar observation {self.obs_id} from "
+                    f"{self.mwa_asvo_download_url}"
+                    f" {stdout}"
+                )
+                raise
+
+        except Exception as e:
+            error_message = f"Failed to download and untar observation {self.obs_id} from {self.mwa_asvo_download_url}"
+            f" Error ({str(e)})"
+            self.logger.error(error_message)
+            return False, error_message
+
+    def download_realtime_data(self) -> tuple[bool, str]:
         # In parallel download all the files
 
         # Now download the files
-        RSYNC_TIMEOUT_SECONDS = 600
         COPY_WORKERS = 24
 
-        with Pool(processes=COPY_WORKERS) as pool:
-            results = pool.starmap(
-                copy_file_rsync,
-                zip(
-                    repeat(self.logger),
-                    self.mwax_download_filenames,
-                    repeat(self.job_input_path),
-                    repeat(RSYNC_TIMEOUT_SECONDS),
-                ),
-            )
+        try:
+            with Pool(processes=COPY_WORKERS) as pool:
+                results = pool.starmap(
+                    copy_file_rsync,
+                    zip(
+                        repeat(self.logger),
+                        self.mwax_download_filenames,
+                        repeat(self.job_input_path),
+                        repeat(self.realtime_download_file_timeout),
+                    ),
+                )
 
-        all_errors = ""
-        for result, index in enumerate(results):
-            if not result:
-                all_errors += f"{self.ws_filenames[index]} "
+            all_errors = ""
+            for result, index in enumerate(results):
+                if not result:
+                    all_errors += f"{self.ws_filenames[index]} "
 
-        if all_errors != "":
-            self.logger.error(f"Error downloading files: {all_errors}")
-            return False
+            if all_errors != "":
+                error_message = f"Error downloading files: {all_errors}"
+                self.logger.error(error_message)
+                return False, error_message
 
-        return True
+            return True, ""
+        except Exception as e:
+            error_message = f"Exception downloading files: {str(e)}"
+            self.logger.error(error_message)
+            return False, error_message
 
-    def check_obs_is_ready_to_process(self) -> bool:
+    def check_obs_is_ready_to_process(self) -> tuple[bool, str]:
         """This routine checks to see if an observation is ready to be processed and
         also sums up the total size and determines if there is enough RAM to write
         the uvfits file to RAM or not"""
@@ -370,42 +433,35 @@ class MWAXCalvinProcessor:
         # this first list has the full path
         # put a basic UNIX pattern so we don't pick up the metafits
 
-        # Check for gpubox files (mwax OR legacy)
-        glob_spec = "*.fits"
-        data_dir_full_path_files = glob.glob(os.path.join(self.job_input_path, glob_spec))
-        data_dir_filenames = [os.path.basename(i) for i in data_dir_full_path_files]
-        data_dir_filenames.sort()
-        # Remove the metafits file
-        if self.metafits_name in data_dir_filenames:
-            data_dir_filenames.remove(self.metafits_name)
+        try:
+            # Check for gpubox files (mwax OR legacy)
+            glob_spec = "*.fits"
+            data_dir_full_path_files = glob.glob(os.path.join(self.job_input_path, glob_spec))
+            data_dir_filenames = [os.path.basename(i) for i in data_dir_full_path_files]
+            data_dir_filenames.sort()
+            # Remove any metafits files from the list
+            for file in data_dir_filenames:
+                if "metafits" in file:
+                    data_dir_filenames.remove(file)
 
-        # How does what we need compare to what we have?
-        return_value = len(data_dir_filenames) == len(self.ws_filenames)
+            # How does what we need compare to what we have?
+            return_value = len(data_dir_filenames) == len(self.ws_filenames)
 
-        self.logger.info(
-            f"{self.obs_id} check_obs_is_ready_to_process() =="
+            message = f"{self.obs_id} check_obs_is_ready_to_process() =="
             f" {return_value} (WS: {len(self.ws_filenames)},"
             f" data_dir: {len(data_dir_filenames)})"
-        )
-        return return_value
 
-    def run_birli(self) -> bool:
+            self.logger.info(message)
+            return return_value, message
+        except Exception as e:
+            return False, f"Exception in check_obs_is_ready_to_process: {str(e)}"
+
+    def run_birli(self) -> tuple[bool, str]:
         """Run birli to produce uvfits file(s)"""
         birli_success: bool = False
-        error_message: str = ""
-
-        # Update database that we are processing this obsid
-        mwax_db.update_calsolution_request_calibration_started_status(
-            self.db_handler_object, self.obs_id, None, datetime.datetime.now()
-        )
 
         # Determine if the obs is oversampled
-        try:
-            with fits.open(self.metafits_filename) as hdus:  # type: ignore
-                oversampled: bool = int(hdus["PRIMARY"].header["OVERSAMP"]) == 1
-        except KeyError:
-            # No OVERSAMP key? Then it is not oversampled!
-            oversampled: bool = False
+        oversampled = self.metafits_context.oversampled
 
         # Run Birli
         self.logger.info(f"{self.obs_id}: Running Birli...")
@@ -425,20 +481,13 @@ class MWAXCalvinProcessor:
             self.birli_edge_width_khz * 1000,
         )
 
-        if not birli_success:
-            error_message = "Birli run failed. See logs"
-
-            # Update database
-            mwax_db.update_calsolution_request_calibration_complete_status(
-                self.db_handler_object, self.obs_id, None, None, None, datetime.datetime.now(), error_message
-            )
-            return False
+        if birli_success:
+            return True, ""
         else:
-            return True
+            return False, "Birli run failed. See logs"
 
-    def run_hyperdrive(self) -> bool:
+    def run_hyperdrive(self) -> tuple[bool, str]:
         """Run hyperdrive to produce solutions"""
-        error_message: str = ""
         hyperdrive_success = False
 
         # If all good run hyperdrive- once per uvfits file created
@@ -468,16 +517,10 @@ class MWAXCalvinProcessor:
                 self.logger, uvfits_files, self.metafits_filename, self.obs_id, self.hyperdrive_binary_path
             )
 
-        if not hyperdrive_success:
-            error_message = "Hyperdrive run failed. See logs"
-
-            # Update database
-            mwax_db.update_calsolution_request_calibration_complete_status(
-                self.db_handler_object, self.obs_id, None, None, None, datetime.datetime.now(), error_message
-            )
-            return False
+        if hyperdrive_success:
+            return True, ""
         else:
-            return True
+            return False, "Hyperdrive run failed. See logs"
 
     def stop(self):
         """Shutdown all processes"""
@@ -571,6 +614,18 @@ class MWAXCalvinProcessor:
             db_name=self.mro_metadatadb_db,
             user=self.mro_metadatadb_user,
             password=self.mro_metadatadb_pass,
+        )
+
+        #
+        # Downloading
+        #
+        self.download_retries = int(utils.read_config(self.logger, config, "downloading", "download_retries"))
+        self.download_retry_wait = int(utils.read_config(self.logger, config, "downloading", "download_retry_wait"))
+        self.realtime_download_file_timeout = int(
+            utils.read_config(self.logger, config, "downloading", "realtime_download_file_timeout")
+        )
+        self.mwaasvo_download_obs_timeout = int(
+            utils.read_config(self.logger, config, "downloading", "mwaasvo_download_obs_timeout")
         )
 
         #

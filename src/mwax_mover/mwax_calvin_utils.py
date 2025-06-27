@@ -1951,7 +1951,9 @@ def submit_sbatch(logger: logging.Logger, script_path: str, script: str, obs_id:
         return (False, None)
 
 
-def estimate_birli_output_GB(metafits_filename: str, birli_freq_res_khz: int, birli_int_time_res_sec: float) -> int:
+def estimate_birli_output_GB(
+    metafits_context: MetafitsContext, birli_freq_res_khz: int, birli_int_time_res_sec: float
+) -> int:
     # baselines = (tiles * tiles + 1)
     # timesteps = duration / birli_int_time_res_sec
     # fine_channels = 30.72 MHz / birli_freq_res_khz
@@ -1960,8 +1962,6 @@ def estimate_birli_output_GB(metafits_filename: str, birli_freq_res_khz: int, bi
     # bytes_per_value = 4 (f32)
     # Total bytes = (baselines * fine_channels * pols * values * bytes_per_value * timesteps)
     # Total GB = bytes / 1000.^3
-    mctx = MetafitsContext(metafits_filename)
-
     baselines: int = mctx.num_baselines  # 144T (10440)
     timesteps: int = int(mctx.sched_duration_ms / (birli_int_time_res_sec * 1000.0))  # 60
     fine_channels: int = int(mctx.obs_bandwidth_hz / (birli_freq_res_khz * 1000.0))  # 30720000 / 80000 == 384

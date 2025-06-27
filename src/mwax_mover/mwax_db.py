@@ -54,7 +54,10 @@ class MWAXDBHandler:
     def stop_database_pool(self):
         # Gracefully close the connections in the pool
         if self.pool:
-            self.pool.close()
+            try:
+                self.pool.close()
+            except Exception:
+                pass
 
     def select_one_row_postgres(self, sql: str, parm_list):
         """Returns a single row from postgres given SQL and params"""
