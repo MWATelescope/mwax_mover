@@ -131,8 +131,8 @@ class MWAXCalvinProcessor:
             self.logger.info(f"Job Output Data will be written to: {self.job_output_path}")
 
             # Get list of expected files from web service- wait if obs is still in progress!
-            return_value, error_message = self.get_observation_file_list()
-            if not return_value:
+            result, error_message = self.get_observation_file_list()
+            if not result:
                 self.fail_job_downloading(error_message)
                 exit(0)
 
@@ -313,14 +313,17 @@ class MWAXCalvinProcessor:
     def get_observation_file_list(self) -> tuple[bool, str]:
         # Get the duration of the obs from the metafits and only proceed
         # if the current gps time is > the obs_id + duration + a constant
-        exp_time = int(utils.get_metafits_value(self.metafits_filename, "EXPOSURE"))
+        exp_time = int(self.metafits_context.sched_duration_ms / 1000.0)
         current_gpstime: int = utils.get_gpstime_of_now()
 
         # We need to allow for some time for the observation to update the database,
         # so add an additional 120 seconds before we check
         OBS_FINISH_DELAY_SECONDS = 120
         OBS_FINISH_WAIT_SECONDS = 4
-        while current_gpstime < (self.obs_id + exp_time + OBS_FINISH_DELAY_SECONDS) and self.running:
+        while current_gpstime < (self.obs_id + exp_time + OBS_FINISH_DELAY_SECONDS):
+            if not self.running:
+                return False, "get_observation_file_list cancelled due to processor shutdown"
+
             self.logger.warning(
                 f"{self.obs_id} Observation is still in progress:"
                 f" {current_gpstime} < ({self.obs_id} - {int(self.obs_id) + exp_time + OBS_FINISH_DELAY_SECONDS})"
@@ -330,25 +333,30 @@ class MWAXCalvinProcessor:
             current_gpstime: int = utils.get_gpstime_of_now()
 
         # Ok, should be safe to get the list of files and hosts
-        try:
-            ws_filenames_and_hosts: list[tuple[str, str]] = (
-                utils.get_data_files_with_hostname_for_obsid_from_webservice(self.logger, self.obs_id)
-            )
-        except Exception:
-            # The previous call would have already logged tonnes of errors so no need to log anything specific here
-            error_message = f"{self.obs_id} No webservice was able to provide list of data files."
-            self.logger.error(error_message)
-            return False, error_message
+        if self.running:
+            try:
+                ws_filenames_and_hosts: list[tuple[str, str]] = (
+                    utils.get_data_files_with_hostname_for_obsid_from_webservice(self.logger, self.obs_id)
+                )
+            except Exception:
+                # The previous call would have already logged tonnes of errors so no need to log anything specific here
+                error_message = f"{self.obs_id} No webservice was able to provide list of data files."
+                self.logger.error(error_message)
+                return False, error_message
 
-        # Assemble the filenames
-        self.ws_filenames = []  # this is just filename
-        self.mwax_download_filenames = []  # this is the full rsync user@host:/path/filename
+            # Assemble the filenames
+            self.ws_filenames = []  # this is just filename
+            self.mwax_download_filenames = []  # this is the full rsync user@host:/path/filename
 
-        for filename, hostname in ws_filenames_and_hosts:
-            self.mwax_download_filenames.append(f"mwa@{hostname}:/{os.path.join("visdata/cal_outgoing/", filename)}")
-            self.ws_filenames.append(filename)
+            for filename, hostname in ws_filenames_and_hosts:
+                self.mwax_download_filenames.append(
+                    f"mwa@{hostname}:/{os.path.join("visdata/cal_outgoing/", filename)}"
+                )
+                self.ws_filenames.append(filename)
 
-        return True, ""
+            return True, ""
+        else:
+            return False, "get_observation_file_list cancelled due to processor shutdown"
 
     def download_mwa_asvo_data(self) -> tuple[bool, str]:
         # Given the URL from command line args, download and untar the MWA ASVO data
