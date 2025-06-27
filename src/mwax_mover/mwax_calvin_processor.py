@@ -120,7 +120,7 @@ class MWAXCalvinProcessor:
             os.makedirs(name=self.job_input_path, exist_ok=True)
             self.logger.info(f"Job Input Data will be downloaded to: {self.job_input_path}")
 
-            self.metafits_filename = os.path.join(self.job_input_path, f"{self.obs_id}.metafits")
+            self.metafits_filename = os.path.join(self.job_input_path, f"{self.obs_id}_metafits.fits")
             self.logger.info(f"Job metafits filename: {self.metafits_filename}")
 
             # Output dirs
@@ -195,7 +195,7 @@ class MWAXCalvinProcessor:
 
             if self.estimated_uvfits_GB < 500:
                 # Use temp_working_dir
-                self.working_path = os.path.join(self.temp_working_path, f"{str(self.obs_id)}_{str(self.slurm_job_id)}")
+                self.working_path = os.path.join(self.temp_working_path, f"{str(self.slurm_job_id)}_{str(self.obs_id)}")
                 # Ensure input data path exists
                 os.makedirs(name=self.working_path, exist_ok=True)
 
