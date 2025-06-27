@@ -778,7 +778,7 @@ def update_calsolution_request_submit_mwa_asvo_job_status(
     db_handler_object: MWAXDBHandler,
     request_ids: list[int],
     mwa_asvo_job_id: Optional[int],
-    mwa_asvo_job_submission_complete_datetime: Optional[datetime.datetime],
+    mwa_asvo_job_submitted_datetime: Optional[datetime.datetime],
     mwa_asvo_job_submission_error_datetime: Optional[datetime.datetime],
     mwa_asvo_job_submission_error_message: Optional[str],
 ):
@@ -797,16 +797,16 @@ def update_calsolution_request_submit_mwa_asvo_job_status(
     sql = """
     UPDATE public.calibration_request
     SET
-        mwa_asvo_job_id = %s,
-        mwa_asvo_job_submission_complete_datetime = %s,
-        mwa_asvo_job_submission_error_datetime = %s,
-        mwa_asvo_job_submission_error_message = %s
+        download_mwa_asvo_job_id = %s,
+        download_mwa_asvo_job_submitted_datetime = %s,
+        download_mwa_asvo_job_submission_error_datetime = %s,
+        download_mwa_asvo_job_submission_error_message = %s
     WHERE
     id = ANY(%s)"""
 
     params = [
         mwa_asvo_job_id,
-        mwa_asvo_job_submission_complete_datetime,
+        mwa_asvo_job_submitted_datetime,
         mwa_asvo_job_submission_error_datetime,
         mwa_asvo_job_submission_error_message,
         request_ids,
