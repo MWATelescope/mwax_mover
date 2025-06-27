@@ -1883,7 +1883,7 @@ def create_sbatch_script(
 #SBATCH --job-name={job_name}
 #SBATCH --signal=TERM@60
 #SBATCH --output={log_path}/%J.out
-#SBATCH --error={log_path}/%J.err
+#SBATCH --error={log_path}/%J.out
 #SBATCH --open-mode=append
 #SBATCH --parsable
 echo "Starting Calvin {jobtype.value} Job: $SLURM_JOBID";

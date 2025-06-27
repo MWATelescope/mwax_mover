@@ -779,17 +779,17 @@ def update_calsolution_request_submit_mwa_asvo_job_status(
     request_ids: list[int],
     mwa_asvo_job_id: Optional[int],
     mwa_asvo_job_submitted_datetime: Optional[datetime.datetime],
-    mwa_asvo_job_submission_error_datetime: Optional[datetime.datetime],
-    mwa_asvo_job_submission_error_message: Optional[str],
+    mwa_asvo_job_submitted_error_datetime: Optional[datetime.datetime],
+    mwa_asvo_job_submitted_error_message: Optional[str],
 ):
-    """Update a calibration_request request with status info regarding the MWA ASVO job submission.
+    """Update a calibration_request request with status info regarding the MWA ASVO job submitted.
 
     Parameters:
             db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
             request_ids (int): The request_id of the calibration_request to update
                                (could be many including old!).
-            mwa_asvo_job_submission_error_datetime (datetime): The date/time the MWA ASVO job failed to be submitted
-            mwa_asvo_job_submission_error_message (str): The error when submitting
+            mwa_asvo_job_submitted_error_datetime (datetime): The date/time the MWA ASVO job failed to be submitted
+            mwa_asvo_job_submitted_error_message (str): The error when submitting
 
     Returns:
             Nothing. Raises exceptions on error"""
@@ -799,16 +799,16 @@ def update_calsolution_request_submit_mwa_asvo_job_status(
     SET
         download_mwa_asvo_job_id = %s,
         download_mwa_asvo_job_submitted_datetime = %s,
-        download_mwa_asvo_job_submission_error_datetime = %s,
-        download_mwa_asvo_job_submission_error_message = %s
+        download_mwa_asvo_job_submitted_error_datetime = %s,
+        download_mwa_asvo_job_submitted_error_message = %s
     WHERE
     id = ANY(%s)"""
 
     params = [
         mwa_asvo_job_id,
         mwa_asvo_job_submitted_datetime,
-        mwa_asvo_job_submission_error_datetime,
-        mwa_asvo_job_submission_error_message,
+        mwa_asvo_job_submitted_error_datetime,
+        mwa_asvo_job_submitted_error_message,
         request_ids,
     ]
 
@@ -834,24 +834,24 @@ def update_calibration_request_slurm_status(
     request_ids: list[int],
     slurm_job_id: Optional[int],
     slurm_job_submitted_datetime: Optional[datetime.datetime],
-    slurm_job_submission_error_datetime: Optional[datetime.datetime],
-    slurm_job_submission_error_message: Optional[str],
+    slurm_job_submitted_error_datetime: Optional[datetime.datetime],
+    slurm_job_submitted_error_message: Optional[str],
 ):
     sql = """
     UPDATE public.calibration_request
     SET
         slurm_job_id = %s,
         download_slurm_job_submitted_datetime = %s,
-        download_slurm_job_submission_error_datetime = %s,
-        download_slurm_job_submission_error_message = %s
+        download_slurm_job_submitted_error_datetime = %s,
+        download_slurm_job_submitted_error_message = %s
     WHERE
     id = ANY(%s)"""
 
     params = [
         slurm_job_id,
         slurm_job_submitted_datetime,
-        slurm_job_submission_error_datetime,
-        slurm_job_submission_error_message,
+        slurm_job_submitted_error_datetime,
+        slurm_job_submitted_error_message,
         request_ids,
     ]
 
