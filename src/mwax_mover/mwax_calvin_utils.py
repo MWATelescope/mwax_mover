@@ -1530,7 +1530,7 @@ def run_birli(
             f" {avg_arg} {passband_arg} {data_file_arg}"
         )
 
-        birli_popen_process = run_command_popen(logger, cmdline, -1, False)
+        birli_popen_process = run_command_popen(logger, cmdline, -1, False, True)
 
         exit_code, stdout, stderr = check_popen_finished(
             logger,
@@ -1642,7 +1642,7 @@ def run_hyperdrive(
 
             # run hyperdrive
             logger.info(f"{obs_id}: Running hyperdrive on {uvfits_file}...")
-            hyperdrive_popen_process = run_command_popen(logger, cmdline, -1, False)
+            hyperdrive_popen_process = run_command_popen(logger, cmdline, -1, False, True)
 
             exit_code, stdout, stderr = check_popen_finished(
                 logger,
