@@ -190,8 +190,7 @@ def archive_file_rclone(
         #  test.txt banksia:/mwaingest-14322
         #
         try:
-            cmdline = f'/usr/bin/rclone copyto -M --metadata-set "md5={md5hash}" --s3-endpoint={endpoint_url} '
-            f"{full_filename} {rclone_profile}:/{bucket_name}"
+            cmdline = f'/usr/bin/rclone copyto -M --metadata-set "md5={md5hash}" --s3-endpoint={endpoint_url} {full_filename} {rclone_profile}:/{bucket_name}'
 
             # run rclone copyto
             return_val, stdout = run_command_ext(logger, cmdline, None, 600, False)
