@@ -166,6 +166,9 @@ def archive_file_rclone(
     """Archive file via rclone"""
     logger.debug(f"{full_filename} attempting archive_file_rclone...")
 
+    # Get just the filename
+    filename = os.path.basename(full_filename)
+
     # get file size
     try:
         file_size = os.path.getsize(full_filename)
@@ -190,7 +193,7 @@ def archive_file_rclone(
         #  test.txt banksia:/mwaingest-14322
         #
         try:
-            cmdline = f'/usr/bin/rclone copyto -M --metadata-set "md5={md5hash}" --s3-endpoint={endpoint_url} {full_filename} {rclone_profile}:/{bucket_name}'
+            cmdline = f'/usr/bin/rclone copyto -M --metadata-set "md5={md5hash}" --s3-endpoint={endpoint_url} {full_filename} {rclone_profile}:/{bucket_name}/{filename}'
 
             # run rclone copyto
             return_val, stdout = run_command_ext(logger, cmdline, None, 600, False)
