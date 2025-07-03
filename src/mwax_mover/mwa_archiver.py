@@ -207,8 +207,7 @@ def archive_file_rclone(
                 logger.debug(
                     f"{full_filename} attempting check against {rclone_profile} {endpoint_url} bucket {bucket_name}..."
                 )
-                cmdline = f"/usr/bin/rclone check --s3-endpoint={endpoint_url} {full_filename}"
-                f"{rclone_profile}:/{bucket_name}"
+                cmdline = f"/usr/bin/rclone check --s3-endpoint={endpoint_url} {full_filename} {rclone_profile}:/{bucket_name}/{filename}"
 
                 # run rclone check
                 return_val, stdout = run_command_ext(logger, cmdline, None, 600, False)
