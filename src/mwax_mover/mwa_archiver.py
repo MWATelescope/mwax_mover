@@ -207,12 +207,14 @@ def archive_file_rclone(
                 logger.debug(
                     f"{full_filename} attempting check against {rclone_profile} {endpoint_url} bucket {bucket_name}..."
                 )
-                cmdline = f"/usr/bin/rclone check --s3-endpoint={endpoint_url} {full_filename} {rclone_profile}:/{bucket_name}/{filename}"
+                cmdline = f"/usr/bin/rclone check --s3-endpoint={endpoint_url} {full_filename} {rclone_profile}:/{bucket_name}"
 
                 # run rclone check
                 return_val, stdout = run_command_ext(logger, cmdline, None, 600, False)
 
                 if return_val:
+                    # If checksums match then rclone returns exit code 0. Otherwise !=0.
+                    # run_command_ext returns True for 0 and False for anything else
                     check_elapsed = time.time() - start_time
 
                     logger.info(
