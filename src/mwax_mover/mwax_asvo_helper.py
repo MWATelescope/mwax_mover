@@ -236,7 +236,7 @@ class MWAASVOHelper:
         # We'll set all the jobs we see to this exact datetime so
         # we can figure out if one of our in memory jobs is no longer
         # reported by giant-squid
-        update_datetime = datetime.now(timezone.utc)
+        update_datetime = datetime.now().astimezone()
 
         # Iterate through each job
         for json_one_job in json_stdout:
