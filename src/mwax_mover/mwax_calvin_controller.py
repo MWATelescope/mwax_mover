@@ -140,12 +140,16 @@ class MWAXCalvinController:
         self.logger.info("Completed Successfully")
 
     def main_loop_handler(self):
+        # Look at the schedule and create cal requests for any unattempted calibrator observations
+        self.realtime_create_requests_for_unattempted_cal_obs(self)
+
+        # get new requests
         requests_list: list[CalibrationRequest] = self.get_new_calibration_requests()
 
         if self.mwax_asvo_helper.mwa_asvo_outage_datetime:
             # There was an outage at some point.
             # If it's been long enough reset the outage and retry
-            elapsed: timedelta = datetime.now() - self.mwax_asvo_helper.mwa_asvo_outage_datetime
+            elapsed: timedelta = datetime.now().astimezone() - self.mwax_asvo_helper.mwa_asvo_outage_datetime
             if elapsed.total_seconds() >= self.mwa_asvo_outage_check_seconds:
                 # Reset the MWA ASVO outage so we retry
                 self.mwax_asvo_helper.mwa_asvo_outage_datetime = None
@@ -164,6 +168,9 @@ class MWAXCalvinController:
             self.mwa_asvo_update_tracked_jobs()
             self.mwa_asvo_submit_ready_asvo_jobs_to_slurm()
 
+    def realtime_create_requests_for_unattempted_cal_obs(self):
+
+    
     def realtime_submit_to_slurm(self, realtime_request: CalibrationRequest):
         # Create a sbatch script
         script = create_sbatch_script(
@@ -197,7 +204,7 @@ class MWAXCalvinController:
                     realtime_request.request_id,
                 ],
                 slurm_job_id,
-                datetime.now(),
+                datetime.now().astimezone(),
                 None,
                 None,
             )
@@ -220,7 +227,7 @@ class MWAXCalvinController:
                     error_message = "MWA ASVO completed this job with an Error state"
                     self.logger.warning(f"{job}: {error_message}")
 
-                    job.download_error_datetime = datetime.now()
+                    job.download_error_datetime = datetime.now().astimezone()
                     job.download_error_message = error_message
 
                     # Update database
@@ -253,7 +260,7 @@ class MWAXCalvinController:
                         if success and slurm_job_id is not None:
                             job.download_slurm_job_submitted = True
                             job.download_slurm_job_id = slurm_job_id
-                            job.download_slurm_job_submitted_datetime = datetime.now()
+                            job.download_slurm_job_submitted_datetime = datetime.now().astimezone()
 
                             # Now update the database with the jobid
                             update_calibration_request_slurm_status(
@@ -433,7 +440,7 @@ class MWAXCalvinController:
                     ],
                     None,
                     None,
-                    datetime.now(),
+                    datetime.now().astimezone(),
                     error_message,
                 )
                 return

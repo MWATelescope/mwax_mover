@@ -30,7 +30,6 @@ def process_solutions(
     db_handler_object: MWAXDBHandler,
     obs_id: int,
     input_data_path: str,
-    uvfits_path: str,
     output_data_path: str,
     phase_fit_niter: int,
     produce_debug_plots: bool,
@@ -126,7 +125,7 @@ def process_solutions(
                 all_xx_solns[0],
                 all_yy_solns[0],
                 weights,
-                prefix=f"{uvfits_path}/{obs_id}_",
+                prefix=f"{output_data_path}/{obs_id}_",
                 plot_residual=True,
             )
         # phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
@@ -228,7 +227,7 @@ def process_solutions(
         # If this cal solution was a requested one, update it to completed
         #
         mwax_db.update_calsolution_request_calibration_complete_status(
-            db_handler_object, obs_id, datetime.now(), int(fit_id), None, None
+            db_handler_object, obs_id, datetime.now().astimezone(), int(fit_id), None, None
         )
 
         return True, "", int(fit_id)

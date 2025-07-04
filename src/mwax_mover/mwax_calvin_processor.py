@@ -115,7 +115,7 @@ class MWAXCalvinProcessor:
             # Update this request with the slurm job_id
             self.logger.info(f"Assigning request to this host {self.hostname}")
             update_calibration_request_assign_hostname_start_download(
-                self.db_handler_object, self.slurm_job_id, self.hostname, datetime.datetime.now()
+                self.db_handler_object, self.slurm_job_id, self.hostname, datetime.datetime.now().astimezone()
             )
 
             # Set the data path and metadata
@@ -227,7 +227,7 @@ class MWAXCalvinProcessor:
             # Update database that we are processing this obsid and we finished the download
             if result:
                 update_calsolution_request_calibration_started_status(
-                    self.db_handler_object, self.slurm_job_id, datetime.datetime.now()
+                    self.db_handler_object, self.slurm_job_id, datetime.datetime.now().astimezone()
                 )
             else:
                 self.fail_job_downloading(error_message)
@@ -254,7 +254,8 @@ class MWAXCalvinProcessor:
                 self.logger,
                 self.db_handler_object,
                 self.obs_id,
-                self.working_path,
+                self.job_input_path,
+                self.job_output_path,
                 self.phase_fit_niter,
                 self.produce_debug_plots,
             )
@@ -293,6 +294,7 @@ class MWAXCalvinProcessor:
                 self.fail_job_downloading(error_message)
 
     def fail_job_downloading(self, error_message: str):
+        error_datetime = datetime.datetime.now().astimezone()
         # Update database
         try:
             update_calsolution_request_download_complete_status(
@@ -300,14 +302,14 @@ class MWAXCalvinProcessor:
                 self.slurm_job_id,
                 self.request_id_list,
                 None,
-                datetime.datetime.now(),
+                error_datetime,
                 error_message,
             )
         except Exception as e:
             if self.logger:
                 self.logger.info(
                     "Failed to update_calsolution_request_download_complete_status. "
-                    f"Params: {self.request_id_list}, None, datetime.datetime.now(), {error_message}. "
+                    f"Params: {self.request_id_list}, None, {error_datetime}, {error_message}. "
                     f"Error: {str(e)}"
                 )
 
@@ -321,16 +323,23 @@ class MWAXCalvinProcessor:
             self.logger.info("Completed with downloading errors")
 
     def fail_job_processing(self, error_message: str):
+        error_datetime = datetime.datetime.now().astimezone()
+
         # Update database
         try:
             update_calsolution_request_calibration_complete_status(
-                self.db_handler_object, self.slurm_job_id, None, None, datetime.datetime.now(), error_message
+                self.db_handler_object,
+                self.slurm_job_id,
+                None,
+                None,
+                error_datetime,
+                error_message,
             )
         except Exception as e:
             if self.logger:
                 self.logger.info(
                     "Failed to update_calsolution_request_calibration_complete_status. "
-                    f"Params: {self.obs_id}, None,  None, None, datetime.datetime.now(), {error_message}. "
+                    f"Params: {self.obs_id}, None,  None, None, {error_datetime}, {error_message}. "
                     f"Error: {str(e)}"
                 )
 
@@ -346,7 +355,7 @@ class MWAXCalvinProcessor:
     def succeed_job_processing(self, fit_id: int):
         # Update database
         update_calsolution_request_calibration_complete_status(
-            self.db_handler_object, self.slurm_job_id, datetime.datetime.now(), fit_id, None, None
+            self.db_handler_object, self.slurm_job_id, datetime.datetime.now().astimezone(), fit_id, None, None
         )
         self.stop()
 
