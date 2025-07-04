@@ -135,6 +135,17 @@ class MWAXCalvinController:
             else:
                 self.logger.debug("Not tracking any MWA ASVO jobs.")
 
+            # Dump out the counters
+            self.logger.debug(
+                "Counters:\n"
+                f"realtime_slurm_jobs_submitted: {self.realtime_slurm_jobs_submitted}\n"
+                f"mwa_asvo_slurm_jobs_submitted: {self.mwa_asvo_slurm_jobs_submitted}\n"
+                f"giant_squid_errors           : {self.giant_squid_errors}\n"
+                f"mwa_asvo_errors              : {self.mwa_asvo_errors}\n"
+                f"database_errors              : {self.database_errors}\n"
+                f"slurm_errors                 : {self.slurm_errors}"
+            )
+
             # If we're still running, wait before we do the next loop
             if self.running:
                 self.logger.debug(f"Sleeping for {self.check_interval_seconds} seconds")
@@ -373,7 +384,7 @@ class MWAXCalvinController:
             "giant_squid_errors": self.giant_squid_errors,
             "mwa_asvo_errors": self.mwa_asvo_errors,
             "database_errors": self.database_errors,
-            "slurm_erors": self.slurm_errors,
+            "slurm_errors": self.slurm_errors,
         }
 
         status = {"main": main_status}
