@@ -349,7 +349,7 @@ class MWAXArchiveProcessor:
             )
             self.worker_threads.append(queue_worker_outgoing_thread)
 
-            # Setup thread for processing items on the outgoing vis queue
+            # Setup thread for processing items on the outgoing cal queue
             queue_worker_cal_outgoing_thread = threading.Thread(
                 name="work_cal_outgoing",
                 target=queue_worker_outgoing_cal.start,

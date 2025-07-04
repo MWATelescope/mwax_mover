@@ -223,13 +223,6 @@ def process_solutions(
                         # calibration_solutions child rows
                         raise Exception(f"failed to insert calibration solution for tile {tile_id}")
 
-        #
-        # If this cal solution was a requested one, update it to completed
-        #
-        mwax_db.update_calsolution_request_calibration_complete_status(
-            db_handler_object, obs_id, datetime.now().astimezone(), int(fit_id), None, None
-        )
-
         return True, "", int(fit_id)
 
     except Exception:

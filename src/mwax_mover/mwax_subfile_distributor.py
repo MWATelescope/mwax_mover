@@ -2,6 +2,7 @@
 
 import argparse
 from configparser import ConfigParser
+import glob
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import logging
@@ -12,6 +13,7 @@ import sys
 import time
 import threading
 import typing
+
 from typing import Optional
 from urllib.parse import urlparse, parse_qs
 from mwax_mover import mwax_archive_processor
@@ -70,6 +72,39 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.end_headers()
                 self.wfile.write(b"OK")
+
+            elif parsed_path == "/release_cal_obs":
+                try:
+                    obs_id = int(parameter_list["obs_id"][0])
+
+                    self.server.context.logger.debug(f"{obs_id}: recieved call to release_cal_obs")
+
+                    # Release (delete) any cal_outgoing files
+                    obs_files = glob.glob(
+                        os.path.join(self.server.context.archive_processor.watch_dir_outgoing_cal, f"{obs_id}*.fits")
+                    )
+
+                    if len(obs_files) == 0:
+                        self.server.context.logger.debug(f"{obs_id}: release_cal_obs()- no files found for this obs_id")
+
+                    for file in obs_files:
+                        if os.path.exists(file):
+                            try:
+                                os.remove(file)
+                                self.server.context.logger.debug(f"{obs_id}: release_cal_obs()- deleted {file}")
+                            except Exception:
+                                self.server.context.logger.exception(
+                                    f"{obs_id}: release_cal_obs()- failed to delete {file}"
+                                )
+
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b"OK")
+
+                except Exception as parameters_exception:
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(f"Value Error: {parameters_exception}".encode("utf-8"))
 
             elif parsed_path == "/dump_voltages":
                 # Check for correct params

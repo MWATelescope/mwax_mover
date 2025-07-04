@@ -263,6 +263,10 @@ class MWAXCalvinProcessor:
             if result:
                 if fit_id:
                     self.succeed_job_processing(fit_id)
+
+                    # Ensure all mwax boxes know they can remove their files for this obs
+                    if self.job_type == CalvinJobType.realtime:
+                        self.release_mwax_files()
                 else:
                     self.fail_job_processing("Error: process_solutions() did not return a fit_id")
                     exit(-1)
@@ -292,6 +296,27 @@ class MWAXCalvinProcessor:
                 self.fail_job_processing(error_message)
             else:
                 self.fail_job_downloading(error_message)
+
+    def release_mwax_files(self):
+        hostnames = set()
+        # Loop through all the hosts and filenames and just get the set of hostnames
+        for mwax_host_and_filename in self.mwax_download_filenames:
+            # The filenames are in format: mwa@mwaxNN:/path_to_file/filename.fits
+            at_pos = mwax_host_and_filename.index("@") + 1
+            colon_pos = mwax_host_and_filename.index(":")
+            hostname = mwax_host_and_filename[at_pos:colon_pos]
+            hostnames.add(hostname)
+
+        for hostname in hostnames:
+            # call webservice for each host to release the obsid's files
+            utils.call_webservice(
+                self.logger,
+                self.obs_id,
+                [
+                    f"http://{hostname}:9999/release_cal_obs",
+                ],
+                self.obs_id,
+            )
 
     def fail_job_downloading(self, error_message: str):
         error_datetime = datetime.datetime.now().astimezone()
@@ -357,7 +382,6 @@ class MWAXCalvinProcessor:
         update_calsolution_request_calibration_complete_status(
             self.db_handler_object, self.slurm_job_id, datetime.datetime.now().astimezone(), fit_id, None, None
         )
-        self.stop()
 
     def get_observation_file_list(self) -> tuple[bool, str]:
         # Get the duration of the obs from the metafits and only proceed
