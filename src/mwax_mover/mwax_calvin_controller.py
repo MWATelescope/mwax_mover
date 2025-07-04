@@ -173,12 +173,7 @@ class MWAXCalvinController:
 
             # Handle realtime requests first!
             for cal_request in realtime_requests_list:
-                try:
-                    self.realtime_submit_to_slurm(cal_request)
-                    self.realtime_slurm_jobs_submitted += 1
-                except Exception:
-                    self.logger.exception("Error submitting realtime slurm job")
-                    self.slurm_errors += 1
+                self.realtime_submit_to_slurm(cal_request)
 
             # now handle ASVO
             if self.mwax_asvo_helper.mwa_asvo_outage_datetime:
@@ -194,7 +189,6 @@ class MWAXCalvinController:
                 # This prevents us pulling in dupes
                 try:
                     self.mwa_asvo_add_new_asvo_job(cal_request.request_id, cal_request.obs_id)
-                    self.mwa_asvo_slurm_jobs_submitted += 1
                 except Exception:
                     self.logger.exception("Error submitting asvo slurm job")
                     self.slurm_errors += 1
@@ -234,26 +228,37 @@ class MWAXCalvinController:
         # submit sbatch script
         try:
             (success, slurm_job_id) = submit_sbatch(self.logger, self.script_path, script, realtime_request.obs_id)
+
+            if success:
+                self.realtime_slurm_jobs_submitted += 1
+            else:
+                self.slurm_errors += 1
+
         except Exception:
             self.logger.exception(
                 f"{str(realtime_request.obs_id)}: Unable to submit a realtime calibration "
                 "sbatch job. Will retry next loop"
             )
+            self.slurm_errors += 1
             return
 
         if success and slurm_job_id is not None:
             # Success- update request to ensure it does not get picked up next loop
             # i.e. we have already submitted it, so don't do it again!
-            update_calibration_request_slurm_status(
-                self.db_handler_object,
-                [
-                    realtime_request.request_id,
-                ],
-                slurm_job_id,
-                datetime.now().astimezone(),
-                None,
-                None,
-            )
+            try:
+                update_calibration_request_slurm_status(
+                    self.db_handler_object,
+                    [
+                        realtime_request.request_id,
+                    ],
+                    slurm_job_id,
+                    datetime.now().astimezone(),
+                    None,
+                    None,
+                )
+            except Exception:
+                self.logger.exception("Unable to update calibration_request table")
+                self.database_errors += 1
         else:
             error_message = (
                 f"Unable to submit {realtime_request.obs_id} to SLURM for realtime calibration. Will retry next loop"
@@ -310,6 +315,11 @@ class MWAXCalvinController:
                         slurm_job_id = None
                         try:
                             (success, slurm_job_id) = submit_sbatch(self.logger, self.script_path, script, job.obs_id)
+
+                            if success:
+                                self.mwa_asvo_slurm_jobs_submitted += 1
+                            else:
+                                self.slurm_errors += 1
                         except Exception:
                             self.logger.exception("Unable to submit MWA ASVO slurm job")
                             self.slurm_errors += 1
@@ -321,14 +331,18 @@ class MWAXCalvinController:
                             job.download_slurm_job_submitted_datetime = datetime.now().astimezone()
 
                             # Now update the database with the jobid
-                            update_calibration_request_slurm_status(
-                                self.db_handler_object,
-                                job.request_ids,
-                                slurm_job_id,
-                                job.download_slurm_job_submitted_datetime,
-                                None,
-                                None,
-                            )
+                            try:
+                                update_calibration_request_slurm_status(
+                                    self.db_handler_object,
+                                    job.request_ids,
+                                    slurm_job_id,
+                                    job.download_slurm_job_submitted_datetime,
+                                    None,
+                                    None,
+                                )
+                            except Exception:
+                                self.logger.exception("Unable to update calibration_request table")
+                                self.database_errors += 1
 
                     except Exception:
                         # Something went wrong!
@@ -465,14 +479,18 @@ class MWAXCalvinController:
                 # The point of this is:
                 # If we are already handling obsid X, then another bunch of requests come through
                 # we should "catch them up" to the current status in the database
-                update_calsolution_request_submit_mwa_asvo_job_status(
-                    self.db_handler_object,
-                    asvo_job.request_ids,
-                    asvo_job.job_id,
-                    asvo_job.submitted_datetime,
-                    None,
-                    None,
-                )
+                try:
+                    update_calsolution_request_submit_mwa_asvo_job_status(
+                        self.db_handler_object,
+                        asvo_job.request_ids,
+                        asvo_job.job_id,
+                        asvo_job.submitted_datetime,
+                        None,
+                        None,
+                    )
+                except Exception:
+                    self.logger.exception("Unable to update calibration_request table")
+                    self.database_errors += 1
             else:
                 # We already are tracking this request- nothing to do
                 pass
@@ -484,9 +502,19 @@ class MWAXCalvinController:
 
                 # We submmited a new MWA ASVO job, update the request table so we know we're on it!
                 # Update database
-                update_calsolution_request_submit_mwa_asvo_job_status(
-                    self.db_handler_object, new_job.request_ids, new_job.job_id, new_job.submitted_datetime, None, None
-                )
+                try:
+                    update_calsolution_request_submit_mwa_asvo_job_status(
+                        self.db_handler_object,
+                        new_job.request_ids,
+                        new_job.job_id,
+                        new_job.submitted_datetime,
+                        None,
+                        None,
+                    )
+                except Exception:
+                    self.logger.exception("Unable to update calibration_request table")
+                    self.database_errors += 1
+
             except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
                 # Handle me!
                 self.logger.warning(
@@ -508,6 +536,7 @@ class MWAXCalvinController:
                     datetime.now().astimezone(),
                     error_message,
                 )
+                self.giant_squid_errors += 1
                 return
 
     def mwa_asvo_update_tracked_jobs(self):
@@ -525,6 +554,7 @@ class MWAXCalvinController:
 
             except Exception:
                 self.logger.exception("Error in update_all_job_status. Will retry next loop")
+                self.giant_squid_errors += 1
 
     def initialise(self, config_filename: str):
         """Initialise the processor from the command line"""
