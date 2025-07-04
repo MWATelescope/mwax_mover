@@ -36,6 +36,8 @@ from mwax_mover.mwax_db import (
     get_unattempted_calsolution_requests,
     update_calsolution_request_submit_mwa_asvo_job_status,
     update_calibration_request_slurm_status,
+    get_unattempted_unrequested_cal_obsids,
+    insert_calibration_request_row,
 )
 from mwax_mover.mwax_calvin_utils import submit_sbatch, create_sbatch_script, CalvinJobType
 
@@ -79,6 +81,13 @@ class MWAXCalvinController:
         self.health_multicast_port: int = 0
         self.health_multicast_hops: int = 0
 
+        self.realtime_slurm_jobs_submitted: int = 0
+        self.mwa_asvo_slurm_jobs_submitted: int = 0
+        self.giant_squid_errors: int = 0
+        self.database_errors: int = 0
+        self.slurm_errors: int = 0
+        self.mwa_asvo_errors: int = 0
+
         # calvin settings
         self.check_interval_seconds: int = 0
         self.script_path = ""
@@ -112,17 +121,17 @@ class MWAXCalvinController:
         while self.running:
             self.main_loop_handler()
 
-            current_job_count: int = 0
+            tracked_asvo_job_count: int = 0
             for job in self.mwax_asvo_helper.current_asvo_jobs:
                 if job.download_slurm_job_submitted is False and job.download_error_datetime is None:
-                    current_job_count += 1
+                    tracked_asvo_job_count += 1
                     self.logger.debug(
                         f"{job} {job.job_state}; "
                         f"elapsed: {job.elapsed_time_seconds()} s; "
                         f"last_seen={job.last_seen_datetime}"
                     )
-            if current_job_count > 0:
-                self.logger.debug(f"Currently tracking {current_job_count} MWA ASVO jobs.")
+            if tracked_asvo_job_count > 0:
+                self.logger.debug(f"Currently tracking {tracked_asvo_job_count} MWA ASVO jobs.")
             else:
                 self.logger.debug("Not tracking any MWA ASVO jobs.")
 
@@ -141,27 +150,47 @@ class MWAXCalvinController:
 
     def main_loop_handler(self):
         # Look at the schedule and create cal requests for any unattempted calibrator observations
-        self.realtime_create_requests_for_unattempted_cal_obs(self)
+        try:
+            self.realtime_create_requests_for_unattempted_cal_obs()
+        except Exception:
+            self.logger.exception("Error creating requests for unattempted cal obs")
+            self.database_errors += 1
 
         # get new requests
-        requests_list: list[CalibrationRequest] = self.get_new_calibration_requests()
+        try:
+            realtime_requests_list, asvo_requests_list = self.get_new_calibration_requests()
 
-        if self.mwax_asvo_helper.mwa_asvo_outage_datetime:
-            # There was an outage at some point.
-            # If it's been long enough reset the outage and retry
-            elapsed: timedelta = datetime.now().astimezone() - self.mwax_asvo_helper.mwa_asvo_outage_datetime
-            if elapsed.total_seconds() >= self.mwa_asvo_outage_check_seconds:
-                # Reset the MWA ASVO outage so we retry
-                self.mwax_asvo_helper.mwa_asvo_outage_datetime = None
+            # Handle realtime requests first!
+            for cal_request in realtime_requests_list:
+                try:
+                    self.realtime_submit_to_slurm(cal_request)
+                    self.realtime_slurm_jobs_submitted += 1
+                except Exception:
+                    self.logger.exception("Error submitting realtime slurm job")
+                    self.slurm_errors += 1
 
-        for cal_request in requests_list:
-            if cal_request.type == CalvinJobType.realtime:
-                self.realtime_submit_to_slurm(cal_request)
+            # now handle ASVO
+            if self.mwax_asvo_helper.mwa_asvo_outage_datetime:
+                # There was an outage at some point.
+                # If it's been long enough reset the outage and retry
+                elapsed: timedelta = datetime.now() - self.mwax_asvo_helper.mwa_asvo_outage_datetime
+                if elapsed.total_seconds() >= self.mwa_asvo_outage_check_seconds:
+                    # Reset the MWA ASVO outage so we retry
+                    self.mwax_asvo_helper.mwa_asvo_outage_datetime = None
 
-            elif cal_request.type == CalvinJobType.mwa_asvo:
+            for cal_request in asvo_requests_list:
                 # For mwa_asvo, if we are not already dealing with this obsid, add it!
                 # This prevents us pulling in dupes
-                self.mwa_asvo_add_new_asvo_job(cal_request.request_id, cal_request.obs_id)
+                try:
+                    self.mwa_asvo_add_new_asvo_job(cal_request.request_id, cal_request.obs_id)
+                    self.mwa_asvo_slurm_jobs_submitted += 1
+                except Exception:
+                    self.logger.exception("Error submitting asvo slurm job")
+                    self.slurm_errors += 1
+
+        except Exception:
+            self.logger.exception("Error retrieving new calibration requests")
+            self.database_errors += 1
 
         # For mwa_asvo requests, if we're not in an MWA ASVO outage, update jobs check for ready ones
         if self.mwax_asvo_helper.mwa_asvo_outage_datetime is None:
@@ -169,8 +198,14 @@ class MWAXCalvinController:
             self.mwa_asvo_submit_ready_asvo_jobs_to_slurm()
 
     def realtime_create_requests_for_unattempted_cal_obs(self):
+        # First get the obs's which need requests created
+        obs_ids_to_request: Optional[list[int]] = get_unattempted_unrequested_cal_obsids(self.db_handler_object)
 
-    
+        if obs_ids_to_request:
+            # Insert them all as requests
+            for obs_id in obs_ids_to_request:
+                insert_calibration_request_row(self.db_handler_object, obs_id)
+
     def realtime_submit_to_slurm(self, realtime_request: CalibrationRequest):
         # Create a sbatch script
         script = create_sbatch_script(
@@ -227,18 +262,24 @@ class MWAXCalvinController:
                     error_message = "MWA ASVO completed this job with an Error state"
                     self.logger.warning(f"{job}: {error_message}")
 
+                    self.mwa_asvo_errors += 1
+
                     job.download_error_datetime = datetime.now().astimezone()
                     job.download_error_message = error_message
 
                     # Update database
-                    update_calsolution_request_submit_mwa_asvo_job_status(
-                        self.db_handler_object,
-                        job.request_ids,
-                        job.job_id,
-                        None,
-                        job.download_error_datetime,
-                        job.download_error_message,
-                    )
+                    try:
+                        update_calsolution_request_submit_mwa_asvo_job_status(
+                            self.db_handler_object,
+                            job.request_ids,
+                            job.job_id,
+                            None,
+                            job.download_error_datetime,
+                            job.download_error_message,
+                        )
+                    except Exception:
+                        self.logger.exception("Unable to update calibration_request table")
+                        self.database_errors += 1
 
                 elif job.job_state == mwax_asvo_helper.MWAASVOJobState.Ready:
                     try:
@@ -254,7 +295,13 @@ class MWAXCalvinController:
                         )
 
                         # submit sbatch script
-                        (success, slurm_job_id) = submit_sbatch(self.logger, self.script_path, script, job.obs_id)
+                        success = False
+                        slurm_job_id = None
+                        try:
+                            (success, slurm_job_id) = submit_sbatch(self.logger, self.script_path, script, job.obs_id)
+                        except Exception:
+                            self.logger.exception("Unable to submit MWA ASVO slurm job")
+                            self.slurm_errors += 1
 
                         # all is good
                         if success and slurm_job_id is not None:
@@ -271,14 +318,13 @@ class MWAXCalvinController:
                                 None,
                                 None,
                             )
-                        else:
-                            self.logger.error(f"{job} Unable to submit job to SLURM, will try again in next loop")
 
                     except Exception:
                         # Something went wrong!
                         self.logger.exception(
                             f"{job}: Exception submitting sbtach to SLURM, will try again in next loop"
                         )
+                        self.slurm_errors += 1
 
     def stop(self):
         """Shutsdown all processes"""
@@ -322,6 +368,12 @@ class MWAXCalvinController:
             "version": version.get_mwax_mover_version_string(),
             "host": self.hostname,
             "running": self.running,
+            "realtime_slurm_jobs_submitted": self.realtime_slurm_jobs_submitted,
+            "mwa_asvo_slurm_jobs_submitted": self.mwa_asvo_slurm_jobs_submitted,
+            "giant_squid_errors": self.giant_squid_errors,
+            "mwa_asvo_errors": self.mwa_asvo_errors,
+            "database_errors": self.database_errors,
+            "slurm_erors": self.slurm_errors,
         }
 
         status = {"main": main_status}
@@ -335,12 +387,15 @@ class MWAXCalvinController:
         # Stop any Processors
         self.stop()
 
-    def get_new_calibration_requests(self) -> list[CalibrationRequest]:
+    def get_new_calibration_requests(self) -> tuple[list[CalibrationRequest], list[CalibrationRequest]]:
         """This code checks for any unassigned requests and assigns them to this host.
         For mwaasvo jobs, it also adds them to our tracked jobs in
-        self.mwa_asvo_helper.current_asvo_jobs"""
+        self.mwa_asvo_helper.current_asvo_jobs
 
-        return_list: list[CalibrationRequest] = []
+        returns a tuple of realtime requests and asvo requests respectively"""
+
+        return_list_realtime: list[CalibrationRequest] = []
+        return_list_asvo: list[CalibrationRequest] = []
 
         if self.running:
             self.logger.debug("Querying database for unattempted calsolution_requests...")
@@ -365,13 +420,12 @@ class MWAXCalvinController:
                     # Get the type
                     if result[2]:
                         new_request.type = CalvinJobType.realtime
+                        return_list_realtime.append(new_request)
                     else:
                         new_request.type = CalvinJobType.mwa_asvo
+                        return_list_asvo.append(new_request)
 
-                    # add to return list
-                    return_list.append(new_request)
-
-        return return_list
+        return return_list_realtime, return_list_asvo
 
     def mwa_asvo_add_new_asvo_job(self, request_id: int, obs_id: int):
         """Starts tracking a new MWAASVOJob and, if not submitted already,

@@ -487,6 +487,37 @@ def update_data_file_row_as_archived(
         return False
 
 
+def insert_calibration_request_row(
+    db_handler_object: MWAXDBHandler,
+    obs_id: int,
+) -> bool:
+    """Inserts a new calibration_request row and return true if successful
+
+    Returns:
+        Success (bool)
+    """
+
+    sql = "INSERT INTO calibration_request(cal_id) VALUES (%s);"
+
+    sql_values = (obs_id,)
+
+    try:
+        db_handler_object.execute_dml(sql, sql_values, 1)
+
+        db_handler_object.logger.info(
+            f"{obs_id}: insert_calibration_request_row() Successfully inserted into calibration_request table."
+        )
+        return True
+
+    except Exception:  # pylint: disable=broad-except
+        db_handler_object.logger.exception(
+            f"{obs_id}: insert_calibration_request_row() error inserting"
+            f" calibration_request record in table. SQL was"
+            f" {sql} Values: {sql_values}"
+        )
+        return False
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_random(10, 60),
@@ -655,24 +686,36 @@ def insert_calibration_solutions_row(
         return False
 
 
-def get_incomplete_request_ids_for_obsid(db_handler_object: MWAXDBHandler, obs_id: int):
-    sql = """SELECT id
-          FROM calibration_request
-          WHERE cal_id =  %s
-          AND calibration_completed_datetime IS NULL
-          AND calibration_error_datetime IS NULL"""
+def get_unattempted_unrequested_cal_obsids(db_handler_object: MWAXDBHandler) -> Optional[list[int]]:
+    # This SQL gets all calibrator obs which have not yet been calibrated and
+    # have not had a cal request added yet
+    sql = """SELECT m.starttime as obs_id
+            FROM mwa_setting m
+            INNER JOIN schedule_metadata s ON m.starttime = s.observation_number
+            LEFT OUTER JOIN calibration_fits f ON f.obsid = s.observation_number
+            LEFT OUTER JOIN calibration_request c ON c.cal_id = s.observation_number
+            LEFT OUTER JOIN data_files d ON d.observation_num = s.observation_number
+            WHERE
+            m.mode = 'MWAX_CORRELATOR'       	  -- Obs must be correlator
+            AND d.filename IS NOT NULL 			  -- Ensure we have data files
+            AND d.deleted_timestamp IS NULL 	  -- Ensure they are not deleted
+            AND d.filetype = 18 				  -- Ensure the files are MWAX_VISIBILITIES
+            AND s.calibration IS True 			  -- Is a calibrator obs
+            AND f.fitid IS NULL   				  -- No cal solution has been generated
+            AND c.id IS NULL      				  -- No cal request has been created yet
+            AND s.observation_number > 1437000368 -- Hard coded obsid which is the last one handled by old calvinproc
+            GROUP BY m.starttime
+            ORDER BY m.starttime asc"""
 
     # Run SQL
     rows = db_handler_object.select_many_rows_postgres(
         sql,
-        [
-            obs_id,
-        ],
+        None,
     )
 
     # Return a list or None if no rows
     if len(rows) > 0:
-        return [r["id"] for r in rows]
+        return [int(r["obs_id"]) for r in rows]
     else:
         return None
 
