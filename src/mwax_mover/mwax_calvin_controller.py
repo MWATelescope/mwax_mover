@@ -130,14 +130,11 @@ class MWAXCalvinController:
                         f"elapsed: {job.elapsed_time_seconds()} s; "
                         f"last_seen={job.last_seen_datetime}"
                     )
-            if tracked_asvo_job_count > 0:
-                self.logger.debug(f"Currently tracking {tracked_asvo_job_count} MWA ASVO jobs.")
-            else:
-                self.logger.debug("Not tracking any MWA ASVO jobs.")
 
             # Dump out the counters
             self.logger.debug(
                 "Counters:\n"
+                f"Tracked MWA ASVO jobs        : {tracked_asvo_job_count}\n"
                 f"realtime_slurm_jobs_submitted: {self.realtime_slurm_jobs_submitted}\n"
                 f"mwa_asvo_slurm_jobs_submitted: {self.mwa_asvo_slurm_jobs_submitted}\n"
                 f"giant_squid_errors           : {self.giant_squid_errors}\n"
