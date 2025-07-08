@@ -2,7 +2,6 @@
 
 import argparse
 from configparser import ConfigParser
-import glob
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import logging
@@ -12,8 +11,6 @@ import signal
 import sys
 import time
 import threading
-import typing
-
 from typing import Optional
 from urllib.parse import urlparse, parse_qs
 from mwax_mover import mwax_archive_processor
@@ -29,7 +26,7 @@ class MWAXHTTPServer(HTTPServer):
 
     def __init__(self, *args, **kw):
         HTTPServer.__init__(self, *args, **kw)
-        self.context: typing.Optional[MWAXSubfileDistributor] = None
+        self.context: Optional[MWAXSubfileDistributor] = None
 
 
 class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
@@ -79,23 +76,7 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
 
                     self.server.context.logger.debug(f"{obs_id}: recieved call to release_cal_obs")
 
-                    # Release (delete) any cal_outgoing files
-                    obs_files = glob.glob(
-                        os.path.join(self.server.context.archive_processor.watch_dir_outgoing_cal, f"{obs_id}*.fits")
-                    )
-
-                    if len(obs_files) == 0:
-                        self.server.context.logger.debug(f"{obs_id}: release_cal_obs()- no files found for this obs_id")
-
-                    for file in obs_files:
-                        if os.path.exists(file):
-                            try:
-                                os.remove(file)
-                                self.server.context.logger.debug(f"{obs_id}: release_cal_obs()- deleted {file}")
-                            except Exception:
-                                self.server.context.logger.exception(
-                                    f"{obs_id}: release_cal_obs()- failed to delete {file}"
-                                )
+                    self.server.context.archive_processor.release_cal_obs(obs_id)
 
                     self.send_response(200)
                     self.end_headers()
@@ -198,8 +179,8 @@ class MWAXSubfileDistributor:
         self.subfile_processor = None
 
         # Web server
-        self.web_server = None
-        self.web_server_thread = None
+        self.web_server: MWAXHTTPServer
+        self.web_server_thread: threading.Thread
 
         #
         # Config file vars
@@ -258,10 +239,7 @@ class MWAXSubfileDistributor:
         self.cfg_corr_visdata_processing_stats_path: str = ""
         # calibration config
         self.cfg_corr_calibrator_outgoing_path: str = ""
-        self.cfg_corr_calibrator_destination_host: str = ""
-        self.cfg_corr_calibrator_destination_port: int = 0
         self.cfg_corr_calibrator_destination_enabled: int = 0
-        self.cfg_corr_calibrator_transfer_command_timeout_sec: int = 0
         self.cfg_corr_metafits_path: str = ""
 
         # Connection info for metadata db
@@ -570,35 +548,12 @@ class MWAXSubfileDistributor:
                 "correlator",
                 "calibrator_outgoing_path",
             )
-            self.cfg_corr_calibrator_destination_host = utils.read_config(
-                self.logger,
-                self.config,
-                "correlator",
-                "calibrator_destination_host",
-            )
-            self.cfg_corr_calibrator_destination_port = int(
-                utils.read_config(
-                    self.logger,
-                    self.config,
-                    "correlator",
-                    "calibrator_destination_port",
-                )
-            )
             self.cfg_corr_calibrator_destination_enabled = int(
                 utils.read_config(
                     self.logger,
                     self.config,
                     "correlator",
                     "calibrator_destination_enabled",
-                )
-            )
-
-            self.cfg_corr_calibrator_transfer_command_timeout_sec = int(
-                utils.read_config(
-                    self.logger,
-                    self.config,
-                    "correlator",
-                    "calibrator_transfer_command_timeout_sec",
                 )
             )
 
@@ -818,10 +773,7 @@ class MWAXSubfileDistributor:
                 self.cfg_corr_visdata_processing_stats_path,
                 self.cfg_corr_visdata_outgoing_path,
                 self.cfg_corr_calibrator_outgoing_path,
-                self.cfg_corr_calibrator_destination_host,
-                self.cfg_corr_calibrator_destination_port,
                 self.cfg_corr_calibrator_destination_enabled,
-                self.cfg_corr_calibrator_transfer_command_timeout_sec,
                 self.cfg_corr_metafits_path,
                 self.cfg_corr_visdata_dont_archive_path,
                 self.cfg_voltdata_dont_archive_path,
@@ -961,7 +913,7 @@ class MWAXSubfileDistributor:
                             self.running = False
                             break
 
-            time.sleep(0.001)
+            time.sleep(0.1)
 
         #
         # Finished- do some clean up
