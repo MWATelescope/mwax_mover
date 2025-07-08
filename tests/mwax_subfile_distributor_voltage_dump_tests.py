@@ -14,9 +14,9 @@ from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
 from mwax_mover.utils import write_mock_subfile, read_subfile_trigger_value
 
 TEST_BASE_PATH = "tests/mock_mwax_dump"
-TEST_CONFIG_FILE1 = "tests/mwax_voltage_dump_test1.cfg"
-TEST_CONFIG_FILE2 = "tests/mwax_voltage_dump_test2.cfg"
-TEST_CONFIG_FILE3 = "tests/mwax_voltage_dump_test3.cfg"
+TEST_CONFIG_FILE1 = "tests/mwax_subfile_distributor/mwax_voltage_dump_test1.cfg"
+TEST_CONFIG_FILE2 = "tests/mwax_subfile_distributor/mwax_voltage_dump_test2.cfg"
+TEST_CONFIG_FILE3 = "tests/mwax_subfile_distributor/mwax_voltage_dump_test3.cfg"
 
 
 def get_base_path() -> str:

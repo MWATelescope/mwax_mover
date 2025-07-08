@@ -21,7 +21,7 @@ def setup_calvin_processor_tables():
     db_handler.start_database_pool()
 
     # Setup database tables
-    tests_common.run_create_test_db_object_script(db_handler, "tests/mwax_calvin_processor.sql")
+    tests_common.run_create_test_db_object_script(logger, "tests/mwax_calvin_processor.sql")
 
     return db_handler
 

@@ -686,7 +686,7 @@ def insert_calibration_solutions_row(
         return False
 
 
-def get_unattempted_unrequested_cal_obsids(db_handler_object: MWAXDBHandler) -> Optional[list[int]]:
+def get_unattempted_unrequested_cal_obsids(db_handler_object: MWAXDBHandler, oldest_obs_id: int) -> Optional[list[int]]:
     # This SQL gets all calibrator obs which have not yet been calibrated and
     # have not had a cal request added yet
     sql = """SELECT m.starttime as obs_id
@@ -703,14 +703,16 @@ def get_unattempted_unrequested_cal_obsids(db_handler_object: MWAXDBHandler) -> 
             AND s.calibration IS True 			  -- Is a calibrator obs
             AND f.fitid IS NULL   				  -- No cal solution has been generated
             AND c.id IS NULL      				  -- No cal request has been created yet
-            AND s.observation_number > 1437000368 -- Hard coded obsid which is the last one handled by old calvinproc
+            AND s.observation_number > %s         -- Oldest Obsid which is the last one handled by old calvinproc
             GROUP BY m.starttime
             ORDER BY m.starttime asc"""
 
     # Run SQL
     rows = db_handler_object.select_many_rows_postgres(
         sql,
-        None,
+        [
+            oldest_obs_id,
+        ],
     )
 
     # Return a list or None if no rows

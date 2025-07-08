@@ -91,6 +91,7 @@ class MWAXCalvinController:
         # calvin settings
         self.check_interval_seconds: int = 0
         self.script_path = ""
+        self.oldest_cal_obs_id: int = 0
 
         # giant-squid
         self.mwa_asvo_outage_check_seconds: int = 0
@@ -201,7 +202,9 @@ class MWAXCalvinController:
 
     def realtime_create_requests_for_unattempted_cal_obs(self):
         # First get the obs's which need requests created
-        obs_ids_to_request: Optional[list[int]] = get_unattempted_unrequested_cal_obsids(self.db_handler_object)
+        obs_ids_to_request: Optional[list[int]] = get_unattempted_unrequested_cal_obsids(
+            self.db_handler_object, self.oldest_cal_obs_id
+        )
 
         if obs_ids_to_request:
             # Insert them all as requests
@@ -648,6 +651,10 @@ class MWAXCalvinController:
         if not os.path.exists(self.script_path):
             print(f"script_path {self.script_path} does not exist. Quiting.")
             sys.exit(1)
+
+        # oldest calvin obsid (when looking for new calibrator obs in the schedule, don't
+        # look before this obsid)
+        self.oldest_cal_obs_id = int(config.get("calvin", "oldest_calibrator_obs_id"))
 
         #
         # giant-squid config

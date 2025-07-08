@@ -398,8 +398,8 @@ dependencies = [
     { name = "tenacity" },
 ]
 
-[package.optional-dependencies]
-test = [
+[package.dev-dependencies]
+dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
 ]
@@ -415,14 +415,17 @@ requires-dist = [
     { name = "pandas" },
     { name = "psycopg", extras = ["binary"] },
     { name = "psycopg", extras = ["pool"] },
-    { name = "pytest", marker = "extra == 'test'" },
-    { name = "pytest-cov", marker = "extra == 'test'" },
     { name = "requests" },
     { name = "scipy" },
     { name = "seaborn" },
     { name = "tenacity" },
 ]
-provides-extras = ["test"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-cov" },
+]
 
 [[package]]
 name = "nose"

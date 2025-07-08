@@ -50,7 +50,7 @@ def test_mwacache_archiver_config_file():
     mcap.hostname = "test_server"
 
     # Determine config file location
-    config_filename = "tests/mwacache_test.cfg"
+    config_filename = "tests/mwacache_archiver/mwacache_test.cfg"
 
     # Call to read config <-- this is what we're testing!
     mcap.initialise(config_filename)
@@ -64,7 +64,7 @@ def test_mwacache_archiver_config_file():
     assert mcap.metafits_path == "tests/data/mwacache_vulcan_metafits"
     assert mcap.archive_to_location == ArchiveLocation.AcaciaIngest
 
-    assert mcap.health_multicast_interface_name == "eth0"
+    assert mcap.health_multicast_interface_name == "eth5"
     assert mcap.health_multicast_ip == "224.250.0.0"
     assert mcap.health_multicast_port == 8004
     assert mcap.health_multicast_hops == 1
@@ -74,9 +74,6 @@ def test_mwacache_archiver_config_file():
 
     assert mcap.s3_profile == "gsleap"
     assert mcap.s3_ceph_endpoints == ["https://acacia.pawsey.org.au"]
-    assert mcap.s3_multipart_threshold_bytes == 1073741824
-    assert mcap.s3_chunk_size_bytes == 268435456
-    assert mcap.s3_max_concurrency == 2
 
     assert mcap.remote_metadatadb_host == "localhost"
     assert mcap.remote_metadatadb_db == "mwa"

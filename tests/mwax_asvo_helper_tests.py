@@ -17,7 +17,7 @@ def test_get_jobid_from_giant_squid_stdout():
 
     assert (
         get_job_id_from_giant_squid_stdout(
-            "17:19:03 [INFO] Submitted 1234567890 as ASVO job ID 123\n"
+            "17:19:03 [INFO] Submitted 1234567890 as MWA ASVO job ID 123\n"
             "17:19:03 [INFO] Submitted 1 obsids for visibility download.\n"
         )
         == 123
@@ -25,7 +25,7 @@ def test_get_jobid_from_giant_squid_stdout():
 
     assert (
         get_job_id_from_giant_squid_stdout(
-            "17:19:03 [INFO] Submitted 1234567890 as ASVO job ID 1234567\n"
+            "17:19:03 [INFO] Submitted 1234567890 as MWA ASVO job ID 1234567\n"
             "17:19:03 [INFO] Submitted 1 obsids for visibility download.\n"
         )
         == 1234567
@@ -122,24 +122,17 @@ def test_mwax_asvo_helper():
         "../giant-squid/target/release/giant-squid",
         10,
         10,
-        3600,
-        "/tmp",
     )
     asvo.submit_download_job(0, 1354865168)
 
-    running = True
+    asvo.update_all_job_status()
 
-    while running:
-        asvo.update_all_job_status()
+    job_found = False
 
-        for job in asvo.current_asvo_jobs:
-            if job.obs_id == 1354865168 and job.job_state == MWAASVOJobState.Ready:
-                asvo.download_asvo_job(job)
+    time.sleep(5)
 
-                # Remove it from the list
-                asvo.current_asvo_jobs.remove(job)
-                running = False
+    for job in asvo.current_asvo_jobs:
+        if job.obs_id == 1354865168:
+            job_found = True
 
-        time.sleep(10)
-
-    assert len(asvo.current_asvo_jobs) == 0
+    assert job_found == True

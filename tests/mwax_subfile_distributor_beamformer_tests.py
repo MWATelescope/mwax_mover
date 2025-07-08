@@ -7,8 +7,8 @@ import os
 from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
 
 TEST_BASE_PATH = "tests/mock_mwax_bf"
-TEST_CONFIG_FILE = "tests/mwax_subfile_distributor_beamformer_test.cfg"
-TEST_BEAMFORMER_SETTINGS_FILE = "tests/beamformer_settings.txt"
+TEST_CONFIG_FILE = "tests/mwax_subfile_distributor/mwax_subfile_distributor_beamformer_test.cfg"
+TEST_BEAMFORMER_SETTINGS_FILE = "tests/mwax_subfile_distributor/beamformer_settings.txt"
 
 
 def get_base_path() -> str:
@@ -87,7 +87,7 @@ def test_beamformer_config_file():
     # mwax_mover section
     assert msd.cfg_log_path == os.path.join(base_dir, "logs")
     assert msd.cfg_webserver_port == 7998
-    assert msd.cfg_health_multicast_interface_name == "eth0"
+    assert msd.cfg_health_multicast_interface_name == "eth5"
     assert msd.cfg_health_multicast_ip == "224.234.0.0"
     assert msd.cfg_health_multicast_port == 8666
     assert msd.cfg_health_multicast_hops == 1
