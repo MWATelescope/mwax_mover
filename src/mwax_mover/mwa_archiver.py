@@ -33,12 +33,10 @@ def copy_file_rsync(
     # Build final command line
     # --no-compress ensures we don't try to compress (it's going to be quite
     # uncompressible)
-    # The -e "xxx" is there to remove as much encryption/compression of the
-    # ssh connection as possible to speed up the xfer
     cmdline = (
-        "rsync --no-compress -e 'ssh -T -c aes128-cbc -o"
-        " StrictHostKeyChecking=no -o Compression=no -x ' "
-        f"-r {source} {destination}"
+        "rsync --no-compress -e 'ssh -T -c aes128-ctr -o"
+        " StrictHostKeyChecking=no -o Compression=no -x' "
+        f"{source} {destination}"
     )
 
     start_time = time.time()
