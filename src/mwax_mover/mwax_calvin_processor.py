@@ -422,9 +422,11 @@ class MWAXCalvinProcessor:
             self.mwax_download_filenames = []  # this is the full rsync user@host:/path/filename
 
             for filename, hostname in ws_filenames_and_hosts:
-                self.mwax_download_filenames.append(
-                    f"mwa@{hostname}:/{os.path.join("visdata/cal_outgoing/", filename)}"
-                )
+                # To use the 100G nic, we need to translate the hostname e.g. mwax01
+                # to 192.168.120.201
+                host_ip = hostname.replace("mwax", "192.168.120.2")
+
+                self.mwax_download_filenames.append(f"mwa@{host_ip}:/{os.path.join("visdata/cal_outgoing/", filename)}")
                 self.ws_filenames.append(filename)
 
             return True, ""
