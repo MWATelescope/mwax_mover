@@ -493,7 +493,7 @@ class MWAXCalvinProcessor:
                 )
 
             all_errors = ""
-            for result, index in enumerate(results):
+            for index, result in enumerate(results):
                 if not result:
                     all_errors += f"{self.ws_filenames[index]} "
 
@@ -696,190 +696,202 @@ class MWAXCalvinProcessor:
         )
 
         #
-        # Downloading
+        # Any errors after here can be recorded in the db
         #
-        self.download_retries = int(utils.read_config(self.logger, config, "downloading", "download_retries"))
-        self.download_retry_wait = int(utils.read_config(self.logger, config, "downloading", "download_retry_wait"))
-        self.realtime_download_file_timeout = int(
-            utils.read_config(self.logger, config, "downloading", "realtime_download_file_timeout")
-        )
-        self.mwaasvo_download_obs_timeout = int(
-            utils.read_config(self.logger, config, "downloading", "mwaasvo_download_obs_timeout")
-        )
+        try:
+            #
+            # Downloading
+            #
+            self.download_retries = int(utils.read_config(self.logger, config, "downloading", "download_retries"))
+            self.download_retry_wait = int(utils.read_config(self.logger, config, "downloading", "download_retry_wait"))
+            self.realtime_download_file_timeout = int(
+                utils.read_config(self.logger, config, "downloading", "realtime_download_file_timeout")
+            )
+            self.mwaasvo_download_obs_timeout = int(
+                utils.read_config(self.logger, config, "downloading", "mwaasvo_download_obs_timeout")
+            )
 
-        #
-        # Birli
-        #
+            #
+            # Birli
+            #
 
-        # Birli timeout
-        self.birli_timeout = int(
-            utils.read_config(
+            # Birli timeout
+            self.birli_timeout = int(
+                utils.read_config(
+                    self.logger,
+                    config,
+                    "birli",
+                    "timeout",
+                )
+            )
+
+            # Get Birli max mem
+            self.birli_max_mem_gib = int(
+                utils.read_config(
+                    self.logger,
+                    config,
+                    "birli",
+                    "max_mem_gib",
+                )
+            )
+
+            # Get the Birli binary
+            self.birli_binary_path = utils.read_config(
                 self.logger,
                 config,
                 "birli",
-                "timeout",
+                "binary_path",
             )
-        )
 
-        # Get Birli max mem
-        self.birli_max_mem_gib = int(
-            utils.read_config(
-                self.logger,
-                config,
-                "birli",
-                "max_mem_gib",
-            )
-        )
-
-        # Get the Birli binary
-        self.birli_binary_path = utils.read_config(
-            self.logger,
-            config,
-            "birli",
-            "binary_path",
-        )
-
-        if not os.path.exists(self.birli_binary_path):
-            self.logger.error("birli_binary_path location " f" {self.birli_binary_path} does not exist. Quitting.")
-            sys.exit(1)
-
-        # Get Birli freq res
-        self.birli_freq_res_khz = int(
-            utils.read_config(
-                self.logger,
-                config,
-                "birli",
-                "freq_res_khz",
-            )
-        )
-
-        # Get Birli time res
-        self.birli_int_time_res_sec = float(
-            utils.read_config(
-                self.logger,
-                config,
-                "birli",
-                "int_time_res_sec",
-            )
-        )
-
-        # Get Birli edge width
-        self.birli_edge_width_khz = int(
-            utils.read_config(
-                self.logger,
-                config,
-                "birli",
-                "edge_width_khz",
-            )
-        )
-
-        #
-        # Hyperdrive config
-        #
-        self.phase_fit_niter = int(
-            utils.read_config(
-                self.logger,
-                config,
-                "hyperdrive",
-                "phase_fit_niter",
-            )
-        )
-
-        self.source_list_filename = utils.read_config(
-            self.logger,
-            config,
-            "hyperdrive",
-            "source_list_filename",
-        )
-
-        if not os.path.exists(self.source_list_filename):
-            self.logger.error(
-                "source_list_filename location " f" {self.source_list_filename} does not exist. Quitting."
-            )
-            sys.exit(1)
-
-        self.source_list_type = utils.read_config(
-            self.logger,
-            config,
-            "hyperdrive",
-            "source_list_type",
-        )
-
-        # hyperdrive timeout
-        self.hyperdrive_timeout = int(
-            utils.read_config(
-                self.logger,
-                config,
-                "hyperdrive",
-                "timeout",
-            )
-        )
-
-        # Get the hyperdrive binary
-        self.hyperdrive_binary_path = utils.read_config(
-            self.logger,
-            config,
-            "hyperdrive",
-            "binary_path",
-        )
-
-        if not os.path.exists(self.hyperdrive_binary_path):
-            self.logger.error(
-                "hyperdrive_binary_path location " f" {self.hyperdrive_binary_path} does not exist. Quitting."
-            )
-            sys.exit(1)
-
-        #
-        # processing config
-        #
-        # Get the job_input_path dir
-        self.job_input_path = utils.read_config(
-            self.logger,
-            config,
-            "processing",
-            "job_input_path",
-        )
-
-        if not os.path.exists(self.job_input_path):
-            self.logger.error("job_input_path location " f" {self.job_input_path} does not exist. Quitting.")
-            sys.exit(1)
-
-        # Get the job_output_path dir
-        self.job_output_path = utils.read_config(
-            self.logger,
-            config,
-            "processing",
-            "job_output_path",
-        )
-
-        if not os.path.exists(self.job_output_path):
-            self.logger.error("job_output_path location " f" {self.job_output_path} does not exist. Quitting.")
-            sys.exit(1)
-
-        # Get the temp working dir
-        self.temp_working_path = utils.read_config(
-            self.logger,
-            config,
-            "processing",
-            "temp_working_path",
-        )
-
-        if not os.path.exists(self.temp_working_path):
-            if self.temp_working_path.startswith("/tmp"):
-                # Create it (if it does not start with /tmp assume it is a permanent path in
-                # which case user has to create it
-                self.logger.debug(f"temp_working_path location {self.temp_working_path} does not exist, creating it.")
-                os.makedirs(self.temp_working_path)
-            else:
-                self.logger.error("temp_working_path location " f" {self.temp_working_path} does not exist. Quitting.")
+            if not os.path.exists(self.birli_binary_path):
+                self.logger.error("birli_binary_path location " f" {self.birli_binary_path} does not exist. Quitting.")
                 sys.exit(1)
 
-        self.keep_completed_visibility_files = utils.read_config_bool(
-            self.logger,
-            config,
-            "processing",
-            "keep_completed_visibility_files",
-        )
+            # Get Birli freq res
+            self.birli_freq_res_khz = int(
+                utils.read_config(
+                    self.logger,
+                    config,
+                    "birli",
+                    "freq_res_khz",
+                )
+            )
+
+            # Get Birli time res
+            self.birli_int_time_res_sec = float(
+                utils.read_config(
+                    self.logger,
+                    config,
+                    "birli",
+                    "int_time_res_sec",
+                )
+            )
+
+            # Get Birli edge width
+            self.birli_edge_width_khz = int(
+                utils.read_config(
+                    self.logger,
+                    config,
+                    "birli",
+                    "edge_width_khz",
+                )
+            )
+
+            #
+            # Hyperdrive config
+            #
+            self.phase_fit_niter = int(
+                utils.read_config(
+                    self.logger,
+                    config,
+                    "hyperdrive",
+                    "phase_fit_niter",
+                )
+            )
+
+            self.source_list_filename = utils.read_config(
+                self.logger,
+                config,
+                "hyperdrive",
+                "source_list_filename",
+            )
+
+            if not os.path.exists(self.source_list_filename):
+                self.logger.error(
+                    "source_list_filename location " f" {self.source_list_filename} does not exist. Quitting."
+                )
+                sys.exit(1)
+
+            self.source_list_type = utils.read_config(
+                self.logger,
+                config,
+                "hyperdrive",
+                "source_list_type",
+            )
+
+            # hyperdrive timeout
+            self.hyperdrive_timeout = int(
+                utils.read_config(
+                    self.logger,
+                    config,
+                    "hyperdrive",
+                    "timeout",
+                )
+            )
+
+            # Get the hyperdrive binary
+            self.hyperdrive_binary_path = utils.read_config(
+                self.logger,
+                config,
+                "hyperdrive",
+                "binary_path",
+            )
+
+            if not os.path.exists(self.hyperdrive_binary_path):
+                self.logger.error(
+                    "hyperdrive_binary_path location " f" {self.hyperdrive_binary_path} does not exist. Quitting."
+                )
+                sys.exit(1)
+
+            #
+            # processing config
+            #
+            # Get the job_input_path dir
+            self.job_input_path = utils.read_config(
+                self.logger,
+                config,
+                "processing",
+                "job_input_path",
+            )
+
+            if not os.path.exists(self.job_input_path):
+                self.logger.error("job_input_path location " f" {self.job_input_path} does not exist. Quitting.")
+                sys.exit(1)
+
+            # Get the job_output_path dir
+            self.job_output_path = utils.read_config(
+                self.logger,
+                config,
+                "processing",
+                "job_output_path",
+            )
+
+            if not os.path.exists(self.job_output_path):
+                self.logger.error("job_output_path location " f" {self.job_output_path} does not exist. Quitting.")
+                sys.exit(1)
+
+            # Get the temp working dir
+            self.temp_working_path = utils.read_config(
+                self.logger,
+                config,
+                "processing",
+                "temp_working_path",
+            )
+
+            if not os.path.exists(self.temp_working_path):
+                if self.temp_working_path.startswith("/tmp"):
+                    # Create it (if it does not start with /tmp assume it is a permanent path in
+                    # which case user has to create it
+                    self.logger.debug(
+                        f"temp_working_path location {self.temp_working_path} does not exist, creating it."
+                    )
+                    os.makedirs(self.temp_working_path)
+                else:
+                    self.logger.error(
+                        "temp_working_path location " f" {self.temp_working_path} does not exist. Quitting."
+                    )
+                    sys.exit(1)
+
+            self.keep_completed_visibility_files = utils.read_config_bool(
+                self.logger,
+                config,
+                "processing",
+                "keep_completed_visibility_files",
+            )
+        except Exception as e:
+            error_message = str(e)
+            self.fail_job_downloading(error_message)
+            exit(-1)
 
     def initialise_from_command_line(self):
         """Initialise if initiated from command line"""
