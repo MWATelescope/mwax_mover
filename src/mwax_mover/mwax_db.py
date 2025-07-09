@@ -487,19 +487,19 @@ def update_data_file_row_as_archived(
         return False
 
 
-def insert_calibration_request_row(
-    db_handler_object: MWAXDBHandler,
-    obs_id: int,
-) -> bool:
+def insert_calibration_request_row(db_handler_object: MWAXDBHandler, obs_id: int, realtime: bool) -> bool:
     """Inserts a new calibration_request row and return true if successful
 
     Returns:
         Success (bool)
     """
 
-    sql = "INSERT INTO calibration_request(cal_id) VALUES (%s);"
+    sql = "INSERT INTO calibration_request(cal_id, realtime) VALUES (%s, %s);"
 
-    sql_values = (obs_id,)
+    sql_values = (
+        obs_id,
+        realtime,
+    )
 
     try:
         db_handler_object.execute_dml(sql, sql_values, 1)

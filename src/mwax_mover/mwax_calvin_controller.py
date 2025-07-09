@@ -209,7 +209,7 @@ class MWAXCalvinController:
         if obs_ids_to_request:
             # Insert them all as requests
             for obs_id in obs_ids_to_request:
-                insert_calibration_request_row(self.db_handler_object, obs_id)
+                insert_calibration_request_row(self.db_handler_object, obs_id, True)
 
     def realtime_submit_to_slurm(self, realtime_request: CalibrationRequest):
         # Create a sbatch script
