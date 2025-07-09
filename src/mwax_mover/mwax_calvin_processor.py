@@ -289,6 +289,8 @@ class MWAXCalvinProcessor:
 
             # Final log message
             self.logger.info("Completed Successfully")
+            self.stop()
+
         except Exception as e:
             # Something really bad went wrong!
             error_message = f"Unhandled Exception: {str(e)}"
