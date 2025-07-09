@@ -78,9 +78,9 @@ def run_command_ext(
                 f"StdErr: {stderror_log} "
                 f"StdOut: {stdout_log}"
             )
-            return False, stderror
+            return False, f"{stdout} {stderror}"
         else:
-            return True, stdout
+            return True, f"{stdout} {stderror}"
 
     except Exception as command_exception:  # pylint: disable=broad-except
         error = f"Exception executing {cmdline}: {str(command_exception)}"

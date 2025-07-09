@@ -697,6 +697,7 @@ def get_unattempted_unrequested_cal_obsids(db_handler_object: MWAXDBHandler, old
             LEFT OUTER JOIN data_files d ON d.observation_num = s.observation_number
             WHERE
             m.mode = 'MWAX_CORRELATOR'       	  -- Obs must be correlator
+            AND m.projectid <> 'C123'             -- Ignore C123 (non archive jobs)
             AND d.filename IS NOT NULL 			  -- Ensure we have data files
             AND d.deleted_timestamp IS NULL 	  -- Ensure they are not deleted
             AND d.filetype = 18 				  -- Ensure the files are MWAX_VISIBILITIES
@@ -776,6 +777,8 @@ def get_unattempted_calsolution_requests(db_handler_object: MWAXDBHandler) -> li
             -- Next 2 clauses prevent old calvin2 rows from being picked up!
             AND c.download_completed_datetime IS NULL
             AND c.download_error_datetime IS NULL
+            -- Check for failed giant squid submission
+            AND c.download_mwa_asvo_job_submitted_error_datetime IS NULL
         )
         OR
         (

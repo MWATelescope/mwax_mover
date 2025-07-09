@@ -186,6 +186,10 @@ class MWAASVOHelper:
             # Re-raise this error
             raise
 
+        except Exception:
+            # Some other error happened- update database as an error
+            raise
+
         # create, populate and add the MWAASVOJob if we don't already have it
         job = self.get_first_job_for_obs_id(obs_id)
 
@@ -376,7 +380,7 @@ def get_job_id_from_giant_squid_stdout(stdout: str) -> int:
         return int(job_id_str)
 
     # No job_id was found, raise exception
-    raise Exception(f"No 'Job Id' could be found in the output from giant-squid '{stdout}'")
+    raise Exception(f"No Job Id could be found in the output from giant-squid: {stdout}")
 
 
 def get_job_info_from_giant_squid_json(stdout_json, json_for_one_job) -> tuple[int, int, MWAASVOJobState, str | None]:
