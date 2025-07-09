@@ -72,11 +72,17 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
 
             elif parsed_path == "/release_cal_obs":
                 try:
-                    obs_id = int(parameter_list["obs_id"][0])
+                    self.server.context.logger.info("Recieved call to release_cal_obs()")
 
-                    self.server.context.logger.debug(f"{obs_id}: recieved call to release_cal_obs")
+                    obs_id = str(parameter_list["obs_id"][0])
 
-                    self.server.context.archive_processor.release_cal_obs(obs_id)
+                    if utils.is_int(obs_id):
+                        self.server.context.logger.info(
+                            f"{obs_id}: release_cal_obs(): calling archive_processor.release_cal_obs({obs_id})"
+                        )
+                        self.server.context.archive_processor.release_cal_obs(int(obs_id))
+                    else:
+                        raise ValueError(f"obs_id {obs_id} passed to release_cal_obs() is not an int")
 
                     self.send_response(200)
                     self.end_headers()

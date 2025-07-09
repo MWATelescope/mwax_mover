@@ -313,9 +313,9 @@ class MWAXCalvinProcessor:
                 self.logger,
                 self.obs_id,
                 [
-                    f"http://{hostname}:9999/release_cal_obs",
+                    f"http://{hostname}:9999/release_cal_obs?obs_id={str(self.obs_id)}",
                 ],
-                str(self.obs_id),
+                None,
             )
 
     def fail_job_downloading(self, error_message: str):
