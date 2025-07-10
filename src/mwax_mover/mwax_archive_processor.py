@@ -344,7 +344,7 @@ class MWAXArchiveProcessor:
             # Setup thread for processing items on the
             # cal outgoing queue
             queue_worker_cal_outgoing_thread = threading.Thread(
-                name="work_vis_processing_stats",
+                name="work_cal_outgoing",
                 target=queue_worker_cal_outgoing.start,
                 daemon=True,
             )
