@@ -773,6 +773,25 @@ class MWAXCalvinProcessor:
         # Any errors after here can be recorded in the db
         #
         try:
+            # health
+            self.health_multicast_ip = utils.read_config(self.logger, config, "mwax mover", "health_multicast_ip")
+            self.health_multicast_port = int(
+                utils.read_config(self.logger, config, "mwax mover", "health_multicast_port")
+            )
+            self.health_multicast_hops = int(
+                utils.read_config(self.logger, config, "mwax mover", "health_multicast_hops")
+            )
+            self.health_multicast_interface_name = utils.read_config(
+                self.logger,
+                config,
+                "mwax mover",
+                "health_multicast_interface_name",
+            )
+
+            # get this hosts primary network interface ip
+            self.health_multicast_interface_ip = utils.get_ip_address(self.health_multicast_interface_name)
+            self.logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
+
             #
             # Downloading
             #
