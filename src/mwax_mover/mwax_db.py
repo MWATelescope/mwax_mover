@@ -545,8 +545,8 @@ def insert_calibration_fits_row(
         " VALUES (%s,%s,%s,now(),%s,%s,%s);"
     )
 
-    # Fit ID is the Unix timestamp to nearest integer
-    fit_id = math.floor(time.time())
+    # Fit ID is the Unix timestamp multiplied by 10**6 so it's an int
+    fit_id = math.floor(time.time() * 10**6)
 
     sql_values = (
         fit_id,
