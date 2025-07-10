@@ -1954,11 +1954,12 @@ def submit_sbatch(logger: logging.Logger, script_path: str, script: str, obs_id:
         return (False, None)
 
 
-def estimate_birli_output_GB(
+def estimate_birli_output_bytes(
     metafits_context: MetafitsContext, birli_freq_res_khz: int, birli_int_time_res_sec: float
 ) -> int:
     # baselines = (tiles * tiles + 1)
     # timesteps = duration / birli_int_time_res_sec
+    # coarse_chans = 24
     # fine_channels = 30.72 MHz / birli_freq_res_khz
     # pols = 4 (XX,XY,YX,YY)
     # values = 2 (real, imag)
@@ -1967,13 +1968,12 @@ def estimate_birli_output_GB(
     # Total GB = bytes / 1000.^3
     baselines: int = metafits_context.num_baselines  # 144T (10440)
     timesteps: int = int(metafits_context.sched_duration_ms / (birli_int_time_res_sec * 1000.0))  # 60
+    coarse_channels: int = metafits_context.num_metafits_coarse_chans
     fine_channels: int = int(
-        metafits_context.obs_bandwidth_hz / (birli_freq_res_khz * 1000.0)
-    )  # 30720000 / 80000 == 384
+        metafits_context.coarse_chan_width_hz / (birli_freq_res_khz * 1000.0)
+    )  # 1280000 / 80000 == 16
     pols: int = metafits_context.num_visibility_pols  # (XX,XY,YX,YY) # 4
     values: int = 2  # (real, imag)
     bytes_per_value: int = 4  # f32
-    total_bytes: int = baselines * fine_channels * pols * values * bytes_per_value * timesteps
-    total_GB: int = int(total_bytes / (1000**3))
 
-    return total_GB
+    return baselines * coarse_channels * fine_channels * pols * values * bytes_per_value * timesteps

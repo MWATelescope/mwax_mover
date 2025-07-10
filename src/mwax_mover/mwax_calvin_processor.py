@@ -6,12 +6,14 @@ calibration
 import argparse
 from configparser import ConfigParser
 import datetime
+import json
 import glob
 import logging
 import os
 import shutil
 import signal
 import sys
+import threading
 import time
 from typing import Optional
 import coloredlogs
@@ -24,7 +26,7 @@ from mwax_mover import (
     mwax_command,
 )
 from mwax_mover.mwa_archiver import copy_file_rsync
-from mwax_mover.mwax_calvin_utils import CalvinJobType, estimate_birli_output_GB
+from mwax_mover.mwax_calvin_utils import CalvinJobType, estimate_birli_output_bytes
 from mwax_mover.mwax_calvin_solutions import process_solutions
 from mwax_mover.mwax_db import (
     MWAXDBHandler,
@@ -49,7 +51,15 @@ class MWAXCalvinProcessor:
         self.hostname: str = ""
         self.db_handler_object: MWAXDBHandler
 
+        # health
+        self.health_multicast_interface_ip: str = ""
+        self.health_multicast_interface_name: str = ""
+        self.health_multicast_ip: str = ""
+        self.health_multicast_port: int = 0
+        self.health_multicast_hops: int = 0
+
         # Metadata
+        self.current_task_name: str = "unknown"
         self.job_type: CalvinJobType
         self.mwa_asvo_download_url: str = ""
         self.obs_id: int = 0
@@ -98,9 +108,15 @@ class MWAXCalvinProcessor:
 
     def start(self):
         """Start the processor"""
+        self.current_task_name = "Initialising"
         self.running = True
 
         try:
+            # create a health thread
+            self.logger.info("Starting health_thread...")
+            health_thread = threading.Thread(name="health_thread", target=self.health_loop, daemon=True)
+            health_thread.start()
+
             # Cleaning up /tmp in case there is a left over failed job that wasn't cleaned up
             if os.path.exists(self.temp_working_path):
                 self.logger.info(f"Cleaning old working path ({self.temp_working_path}/)")
@@ -137,6 +153,7 @@ class MWAXCalvinProcessor:
             self.logger.info(f"Job Output Data will be written to: {self.job_output_path}")
 
             # Get metafits file
+            self.current_task_name = "Get metafits"
             self.logger.info(f"Downloading metafits file: {self.metafits_filename}")
             try:
                 utils.download_metafits_file(self.logger, self.obs_id, self.job_input_path)
@@ -153,6 +170,7 @@ class MWAXCalvinProcessor:
             self.metafits_context = MetafitsContext(self.metafits_filename, None)
 
             # Get list of expected files from web service- wait if obs is still in progress!
+            self.current_task_name = "Get file list"
             self.logger.info("Getting observation file list from web service...")
             result, error_message = self.get_observation_file_list()
             if not result:
@@ -163,6 +181,7 @@ class MWAXCalvinProcessor:
             data_download_attempt: int = 1
 
             while not self.data_downloaded and data_download_attempt <= self.download_retries:
+                self.current_task_name = f"Download ({data_download_attempt}/{self.download_retries})"
                 self.logger.info(f"Download attempt {data_download_attempt} of {self.download_retries}...")
                 if self.job_type == CalvinJobType.realtime:
                     # Download from MWAX boxes
@@ -190,9 +209,13 @@ class MWAXCalvinProcessor:
 
             # Working path for Birli / uvfits output is determined by calculating the size of the output visibilites:
             self.logger.info("Calculating observation output size...")
-            self.estimated_uvfits_GB = estimate_birli_output_GB(
-                self.metafits_context, self.birli_freq_res_khz, self.birli_int_time_res_sec
+            self.estimated_uvfits_GB = int(
+                estimate_birli_output_bytes(self.metafits_context, self.birli_freq_res_khz, self.birli_int_time_res_sec)
+                / (1000**3)
             )
+            # Round up
+            if self.estimated_uvfits_GB < 1:
+                self.estimated_uvfits_GB = 1
 
             self.logger.info(
                 f"Observation UVFITS output is estimated to be : {self.estimated_uvfits_GB} GB "
@@ -234,6 +257,7 @@ class MWAXCalvinProcessor:
                 exit(-1)
 
             # We have all the files, so run birli
+            self.current_task_name = "Birli"
             result, error_message = self.run_birli()
 
             if not result:
@@ -241,6 +265,7 @@ class MWAXCalvinProcessor:
                 exit(-1)
 
             # Birli was successful so run hyperdrive!
+            self.current_task_name = "Hyperdrive"
             result, error_message = self.run_hyperdrive()
 
             if not result:
@@ -248,8 +273,8 @@ class MWAXCalvinProcessor:
                 exit(-1)
 
             # If that worked, process the solutions and insert into db
+            self.current_task_name = "Processing"
             self.logger.info("Processing solutions...")
-
             result, error_message, fit_id = process_solutions(
                 self.logger,
                 self.db_handler_object,
@@ -266,6 +291,7 @@ class MWAXCalvinProcessor:
 
                     # Ensure all mwax boxes know they can remove their files for this obs
                     if self.job_type == CalvinJobType.realtime:
+                        self.current_task_name = "Releasing MWAX files"
                         self.release_mwax_files()
                 else:
                     self.fail_job_processing("Error: process_solutions() did not return a fit_id")
@@ -288,6 +314,7 @@ class MWAXCalvinProcessor:
                     os.remove(file_to_delete)
 
             # Final log message
+            self.current_task_name = "Complete"
             self.logger.info("Completed Successfully")
             self.stop()
 
@@ -608,6 +635,51 @@ class MWAXCalvinProcessor:
         # Close all database connections
         self.db_handler_object.stop_database_pool()
         self.running = False
+
+    def health_loop(self):
+        """Send health information via UDP multicast"""
+        while self.running:
+            # Code to run by the health thread
+            status_dict = self.get_status()
+
+            # Convert the status to bytes
+            status_bytes = json.dumps(status_dict).encode("utf-8")
+
+            # Send the bytes
+            try:
+                utils.send_multicast(
+                    self.health_multicast_interface_ip,
+                    self.health_multicast_ip,
+                    self.health_multicast_port,
+                    status_bytes,
+                    self.health_multicast_hops,
+                )
+            except Exception as catch_all_exception:  # pylint: disable=broad-except
+                self.logger.warning("health_handler: Failed to send health information." f" {catch_all_exception}")
+
+            # Sleep for a second
+            self.sleep(1)
+
+    def get_status(self) -> dict:
+        """Returns status of all process as a dictionary"""
+        requests = ",".join(str(r) for r in self.request_id_list)
+
+        main_status = {
+            "Unix timestamp": time.time(),
+            "process": type(self).__name__,
+            "version": version.get_mwax_mover_version_string(),
+            "host": self.hostname,
+            "running": self.running,
+            "slurm job_id": self.slurm_job_id,
+            "obs_id": self.obs_id,
+            "job_type": self.job_type.value,
+            "task": self.current_task_name,
+            "requests": requests,
+        }
+
+        status = {"main": main_status}
+
+        return status
 
     def signal_handler(self, _signum, _frame):
         """Handles SIGINT and SIGTERM"""
