@@ -283,7 +283,7 @@ class MWAXCalvinProcessor:
                 self.job_input_path,
                 self.job_output_path,
                 self.phase_fit_niter,
-                self.source_list_filename,
+                os.path.basename(self.source_list_filename),
                 self.num_sources,
                 self.produce_debug_plots,
             )
