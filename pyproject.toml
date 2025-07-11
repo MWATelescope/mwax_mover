@@ -1,10 +1,66 @@
-[build-system]
-requires = [
-    "setuptools>=42",
-    "wheel"
+[project]
+name = "mwax_mover"
+version = "1.0.72"
+description = "A module to manage input, archiving and calibration for the MWAX correlator"
+readme = "README.md"
+requires-python = ">=3.12"
+keywords = ["MWA", "MWAX", "radioastronomy", "radiotelescope"]
+authors = [
+    {email = "greg.sleap@curtin.edu.au"},
+    {name = "Greg Sleap"}, 
+    {email = "dev.null@curtin.edu.au"},
+    {name = "Dev Null"}
 ]
-build-backend = "setuptools.build_meta"
+maintainers = [
+    {email = "greg.sleap@curtin.edu.au"},
+    {name = "Greg Sleap"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+    "Programming Language :: Python :: 3.12"
+]
+
+dependencies = [
+    "astropy",
+    "coloredlogs",
+    "importlib_metadata",
+    "inotify",
+    "matplotlib",
+    "mwalib",
+    "pandas",
+    "psycopg[binary]",
+    "psycopg[pool]",
+    "requests",
+    "scipy",
+    "seaborn",
+    "tenacity"
+]
+
+[dependency-groups]
+dev = [
+  "pytest",
+  "pytest-cov"
+]
+
+[project.urls]
+homepage = "https://github.com/MWATelescope/mwax_mover"
+documentation = "https://github.com/MWATelescope/mwax_mover"
+repository = "https://github.com/MWATelescope/mwax_mover"
+changelog = "https://github.com/MWATelescope/mwax_mover/CHANGELOG.md"
+
+[project.scripts]
+mwax_calvin_processor = "mwax_mover.mwax_calvin_processor:main"
+mwax_calvin_controller = "mwax_mover.mwax_calvin_controller:main"
+mwax_subfile_distributor = "mwax_mover.mwax_subfile_distributor:main"
+mwacache_archiver = "mwax_mover.mwacache_archive_processor:main"
+mwacache_checks = "mwax_mover.mwacache_checks:main"
 
 [tool.black]
 line-length = 120
-target-version = ['py311']
+target-version = ['py312']
+
+[tool.uv]
+package = true

@@ -14,9 +14,7 @@ import threading
 import time
 from typing import Optional
 import astropy
-import boto3
-import botocore
-from boto3 import Session
+
 from mwax_mover import (
     mwax_mover,
     mwax_db,
@@ -24,8 +22,8 @@ from mwax_mover import (
     utils,
     version,
 )
+from mwax_mover.mwax_priority_queue_worker import PriorityQueueWorker
 from mwax_mover.mwax_priority_watcher import PriorityWatcher
-from mwax_mover.mwax_ceph_priority_queue_worker import CephPriorityQueueWorker
 from mwax_mover.utils import ValidationData, ArchiveLocation
 from mwax_mover.mwax_db import DataFileRow
 
@@ -65,9 +63,6 @@ class MWACacheArchiveProcessor:
         # s3 config
         self.s3_profile: str = ""
         self.s3_ceph_endpoints: list[str] = []
-        self.s3_multipart_threshold_bytes: Optional[int] = None
-        self.s3_chunk_size_bytes: Optional[int] = None
-        self.s3_max_concurrency: Optional[int] = None
 
         self.health_multicast_interface_ip: str = ""
         self.health_multicast_ip: str = ""
@@ -92,7 +87,7 @@ class MWACacheArchiveProcessor:
         self.watch_dirs: list[str] = []
         self.queue: queue.PriorityQueue = queue.PriorityQueue()
         self.watchers: list[PriorityWatcher] = []
-        self.queue_workers: list[CephPriorityQueueWorker] = []
+        self.queue_workers: list[PriorityQueueWorker] = []
 
     def start(self):
         """This method is used to start the processor"""
@@ -159,14 +154,13 @@ class MWACacheArchiveProcessor:
         self.logger.info("Creating workers...")
 
         for archive_worker in range(0, self.concurrent_archive_workers):
-            new_worker = CephPriorityQueueWorker(
+            new_worker = PriorityQueueWorker(
                 name=f"Archiver{archive_worker}",
                 source_queue=self.queue,
                 executable_path=None,
                 event_handler=self.archive_handler,
                 log=self.logger,
                 requeue_to_eoq_on_failure=True,
-                ceph_profile=self.s3_profile,
                 exit_once_queue_empty=False,
             )
             self.queue_workers.append(new_worker)
@@ -214,7 +208,7 @@ class MWACacheArchiveProcessor:
         # Final log message
         self.logger.info("Completed Successfully")
 
-    def archive_handler(self, item: str, ceph_session: Session) -> bool:
+    def archive_handler(self, item: str) -> bool:
         """Handles sending files to Pawsey"""
         self.logger.info(f"{item}- archive_handler() Started...")
 
@@ -229,7 +223,6 @@ class MWACacheArchiveProcessor:
 
             # Lookup file from db
             data_files_row: DataFileRow = mwax_db.get_data_file_row(self.remote_db_handler_object, item, val.obs_id)
-
             database_file_size = data_files_row.size
 
             # Check for 0 size
@@ -254,7 +247,20 @@ class MWACacheArchiveProcessor:
                 # with the item and it should not be requeued
                 return True
 
-            self.logger.debug(f"{item}- archive_handler() File size matches metadata" " database")
+            self.logger.debug(f"{item}- archive_handler() File size matches metadata. Checking md5sum..." " database")
+
+            # Check md5sum
+            actual_checksum = utils.do_checksum_md5(self.logger, item, None, 600)
+
+            # Compare
+            if actual_checksum != data_files_row.checksum:
+                self.logger.warning(
+                    f"{item}- archive_handler() checksum"
+                    f" {actual_checksum} does not match {data_files_row.checksum}."
+                )
+                return False
+
+            self.logger.debug(f"{item}- archive_handler() md5 checksum matches")
 
             # Determine where to archive it
             bucket = utils.determine_bucket(
@@ -269,16 +275,13 @@ class MWACacheArchiveProcessor:
                 or self.archive_to_location == ArchiveLocation.Banksia
                 or self.archive_to_location == ArchiveLocation.AcaciaMWA
             ):  # Acacia or Banksia
-                archive_success = mwa_archiver.archive_file_ceph(
+                archive_success = mwa_archiver.archive_file_rclone(
                     self.logger,
-                    ceph_session,
+                    self.s3_profile,
                     self.s3_ceph_endpoints,
                     item,
                     bucket,
                     data_files_row.checksum,
-                    self.s3_multipart_threshold_bytes,
-                    self.s3_chunk_size_bytes,
-                    self.s3_max_concurrency,
                 )
             else:
                 raise NotImplementedError(f"Location {self.archive_to_location.value} not implemented")
@@ -479,8 +482,6 @@ class MWACacheArchiveProcessor:
         py_version = py_version.replace("\n", " ")
         self.logger.info(f"Python v{py_version}")
         self.logger.info(f"astropy v{astropy.__version__}")
-        self.logger.info(f"boto3 v{boto3.__version__}")
-        self.logger.info(f"botocore v{botocore.__version__}")
 
         self.logger.info(f"Reading config file: {config_filename}")
 
@@ -562,20 +563,6 @@ class MWACacheArchiveProcessor:
             s3_section,
             "ceph_endpoints",
         )
-
-        s3_multipart_threshold_bytes = utils.read_optional_config(
-            self.logger, config, s3_section, "multipart_threshold_bytes"
-        )
-        if s3_multipart_threshold_bytes is not None:
-            self.s3_multipart_threshold_bytes = int(s3_multipart_threshold_bytes)
-
-        s3_chunk_size_bytes = utils.read_optional_config(self.logger, config, s3_section, "chunk_size_bytes")
-        if s3_chunk_size_bytes is not None:
-            self.s3_chunk_size_bytes = int(s3_chunk_size_bytes)
-
-        s3_max_concurrency = utils.read_optional_config(self.logger, config, s3_section, "max_concurrency")
-        if s3_max_concurrency is not None:
-            self.s3_max_concurrency = int(s3_max_concurrency)
 
         #
         # Options specified per host

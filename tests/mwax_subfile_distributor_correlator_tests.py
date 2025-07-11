@@ -8,7 +8,7 @@ import shutil
 from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
 
 TEST_BASE_PATH = "tests/mock_mwax"
-TEST_CONFIG_FILE = "tests/mwax_subfile_distributor_correlator_test.cfg"
+TEST_CONFIG_FILE = "tests/mwax_subfile_distributor/mwax_subfile_distributor_correlator_test.cfg"
 
 
 def get_base_path() -> str:
@@ -114,7 +114,7 @@ def test_correlator_config_file():
     # mwax_mover section
     assert msd.cfg_log_path == os.path.join(base_dir, "logs")
     assert msd.cfg_webserver_port == 7999
-    assert msd.cfg_health_multicast_interface_name == "eth0"
+    assert msd.cfg_health_multicast_interface_name == "eth5"
     assert msd.cfg_health_multicast_ip == "224.234.0.0"
     assert msd.cfg_health_multicast_port == 8005
     assert msd.cfg_health_multicast_hops == 1
@@ -139,8 +139,6 @@ def test_correlator_config_file():
     assert msd.cfg_corr_mwax_stats_dump_dir == os.path.join(base_dir, "mwax_stats_dump")
     assert msd.cfg_corr_mwax_stats_timeout_sec == 600
     assert msd.cfg_corr_calibrator_outgoing_path == os.path.join(base_dir, "visdata_cal_outgoing")
-    assert msd.cfg_corr_calibrator_destination_host == "192.168.120.1://dest/path"
-    assert msd.cfg_corr_calibrator_destination_port == 1094
     assert msd.cfg_corr_calibrator_destination_enabled == 1
     assert msd.cfg_corr_metafits_path == os.path.join(base_dir, "vulcan_metafits")
     assert not msd.cfg_corr_high_priority_correlator_projectids

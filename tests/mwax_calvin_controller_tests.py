@@ -3,7 +3,7 @@ import shutil
 import signal
 import threading
 import time
-from mwax_mover.mwax_calvin_download_processor import MWAXCalvinDownloadProcessor
+from mwax_mover.mwax_calvin_controller import MWAXCalvinController
 from tests_common import run_create_test_db_object_script
 
 
@@ -16,17 +16,17 @@ def test_calvin_downloader_test():
         shutil.rmtree(test_dir)
     os.mkdir(test_dir)
 
-    processor: MWAXCalvinDownloadProcessor = MWAXCalvinDownloadProcessor()
+    controller: MWAXCalvinController = MWAXCalvinController()
 
-    processor.initialise("tests/mwax_calvin_downloader_test.cfg")
+    controller.initialise("tests/mwax_calvin_controller/mwax_calvin_controller_test.cfg")
 
     # Setup a test database
-    run_create_test_db_object_script(processor.logger, "tests/mwax_calvin_download_processor_test.sql")
-    processor.db_handler_object.start_database_pool()
+    run_create_test_db_object_script(controller.logger, "tests/mwax_calvin_download_processor_test.sql")
+    controller.db_handler_object.start_database_pool()
 
     # Start the pipeline
     # Create and start a thread for the processor
-    thrd = threading.Thread(name="caldl_main_thread", target=processor.start, daemon=True)
+    thrd = threading.Thread(name="caldl_main_thread", target=controller.start, daemon=True)
 
     # Start the processor
     thrd.start()
@@ -36,5 +36,5 @@ def test_calvin_downloader_test():
 
     # Quit
     # Ok time's up! Stop the processor
-    processor.signal_handler(signal.SIGINT, 0)
+    controller.signal_handler(signal.SIGINT, 0)
     thrd.join()

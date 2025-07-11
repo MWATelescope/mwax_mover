@@ -1,5 +1,6 @@
 """Module file for MWAXArchiveProcessor"""
 
+import glob
 import logging
 import logging.handlers
 import os
@@ -49,10 +50,7 @@ class MWAXArchiveProcessor:
         visdata_processing_stats_path: str,
         visdata_outgoing_path: str,
         visdata_cal_outgoing_path: str,
-        calibrator_destination_host: str,
-        calibrator_destination_port: int,
         calibrator_destination_enabled: int,
-        calibrator_transfer_command_timeout_sec: int,
         metafits_path: str,
         visdata_dont_archive_path: str,
         voltdata_dont_archive_path: str,
@@ -84,7 +82,6 @@ class MWAXArchiveProcessor:
         self.archive_destination_port: int = archive_port
         self.archive_command_numa_node: int = archive_command_numa_node
         self.archive_command_timeout_sec: int = archive_command_timeout_sec
-        self.calibrator_transfer_command_timeout_sec: int = calibrator_transfer_command_timeout_sec
 
         # Full path to executable for mwax_stats
         self.mwax_stats_binary_dir: str = mwax_stats_binary_dir
@@ -119,11 +116,15 @@ class MWAXArchiveProcessor:
         self.queue_outgoing: queue.PriorityQueue = queue.PriorityQueue()
 
         self.watch_dir_outgoing_cal: str = visdata_cal_outgoing_path
+        # this queue is simply for health stats- we don't actually "process"
+        # files in the cal_outgoing_path- calvin servers take the files
         self.queue_outgoing_cal: queue.Queue = queue.Queue()
+        # Since our watcher needs a queue, we'll just get the queue to dump the filenames
+        # into this list so we can easily remove them when release_cal_obs is called
+        # by a calvin
+        self.outgoing_cal_list: list[str] = []
 
         self.calibrator_destination_enabled: int = calibrator_destination_enabled
-        self.calibrator_destination_host: str = calibrator_destination_host
-        self.calibrator_destination_port: int = calibrator_destination_port
 
         self.metafits_path: str = metafits_path
         self.list_of_correlator_high_priority_projects: list[str] = high_priority_correlator_projectids
@@ -177,6 +178,19 @@ class MWAXArchiveProcessor:
             )
             self.watchers.append(watcher_processing_stats_vis)
 
+            # Create watcher for calibration data
+            # (only for health stats)
+            watcher_outgoing_cal = mwax_watcher.Watcher(
+                name="watcher_outgoing_cal",
+                path=self.watch_dir_outgoing_cal,
+                dest_queue=self.queue_outgoing_cal,
+                pattern=".fits",
+                log=self.logger,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
+                recursive=False,
+            )
+            self.watchers.append(watcher_outgoing_cal)
+
             # Create watcher for archiving outgoing voltage data
             watcher_outgoing_volt = mwax_priority_watcher.PriorityWatcher(
                 name="watcher_outgoing_volt",
@@ -207,19 +221,6 @@ class MWAXArchiveProcessor:
             )
             self.watchers.append(watcher_outgoing_vis)
 
-            # Create watcher for sending calibration visibility data
-            # for processing
-            watcher_outgoing_cal = mwax_watcher.Watcher(
-                name="watcher_outgoing_cal",
-                path=self.watch_dir_outgoing_cal,
-                dest_queue=self.queue_outgoing_cal,
-                pattern=".fits",
-                log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
-                recursive=False,
-            )
-            self.watchers.append(watcher_outgoing_cal)
-
             #
             # Create watcher threads
             #
@@ -248,6 +249,14 @@ class MWAXArchiveProcessor:
             )
             self.watcher_threads.append(watcher_vis_processing_stats_thread)
 
+            # Setup thread for watching cal_outgoing filesystem
+            watcher_cal_outgoing_thread = threading.Thread(
+                name="watch_cal_outgoing",
+                target=watcher_outgoing_cal.start,
+                daemon=True,
+            )
+            self.watcher_threads.append(watcher_cal_outgoing_thread)
+
             # Setup thread for watching outgoing filesystem (volt)
             watcher_volt_outgoing_thread = threading.Thread(
                 name="watch_volt_outgoing",
@@ -263,14 +272,6 @@ class MWAXArchiveProcessor:
                 daemon=True,
             )
             self.watcher_threads.append(watcher_vis_outgoing_thread)
-
-            # Setup thread for watching outgoing filesystem (cal)
-            watcher_cal_outgoing_thread = threading.Thread(
-                name="watch_cal_outgoing",
-                target=watcher_outgoing_cal.start,
-                daemon=True,
-            )
-            self.watcher_threads.append(watcher_cal_outgoing_thread)
 
             #
             # Create Workers
@@ -298,6 +299,17 @@ class MWAXArchiveProcessor:
             )
             self.workers.append(queue_worker_processing_stats_vis)
 
+            # worker for cal_outgoing
+            queue_worker_cal_outgoing = mwax_queue_worker.QueueWorker(
+                name="outgoing cal vis worker",
+                source_queue=self.queue_outgoing_cal,
+                executable_path=None,
+                event_handler=self.cal_handler,
+                log=self.logger,
+                exit_once_queue_empty=False,
+            )
+            self.workers.append(queue_worker_cal_outgoing)
+
             # Create queueworker for outgoing queue
             queue_worker_outgoing = mwax_priority_queue_worker.PriorityQueueWorker(
                 name="outgoing worker",
@@ -308,18 +320,6 @@ class MWAXArchiveProcessor:
                 exit_once_queue_empty=False,
             )
             self.workers.append(queue_worker_outgoing)
-
-            # Create queueworker for sending calibration visibility data
-            # for processing
-            queue_worker_outgoing_cal = mwax_queue_worker.QueueWorker(
-                name="outgoing cal vis worker",
-                source_queue=self.queue_outgoing_cal,
-                executable_path=None,
-                event_handler=self.cal_handler,
-                log=self.logger,
-                exit_once_queue_empty=False,
-            )
-            self.workers.append(queue_worker_outgoing_cal)
 
             #
             # Setup queue worker threads
@@ -341,6 +341,15 @@ class MWAXArchiveProcessor:
             )
             self.worker_threads.append(queue_worker_vis_processing_stats_thread)
 
+            # Setup thread for processing items on the
+            # cal outgoing queue
+            queue_worker_cal_outgoing_thread = threading.Thread(
+                name="work_cal_outgoing",
+                target=queue_worker_cal_outgoing.start,
+                daemon=True,
+            )
+            self.worker_threads.append(queue_worker_cal_outgoing_thread)
+
             # Setup thread for processing items on the outgoing queue
             queue_worker_outgoing_thread = threading.Thread(
                 name="work_outgoing",
@@ -348,14 +357,6 @@ class MWAXArchiveProcessor:
                 daemon=True,
             )
             self.worker_threads.append(queue_worker_outgoing_thread)
-
-            # Setup thread for processing items on the outgoing vis queue
-            queue_worker_cal_outgoing_thread = threading.Thread(
-                name="work_cal_outgoing",
-                target=queue_worker_outgoing_cal.start,
-                daemon=True,
-            )
-            self.worker_threads.append(queue_worker_cal_outgoing_thread)
 
         else:
             # We have disabled archiving, so use a different
@@ -670,6 +671,10 @@ class MWAXArchiveProcessor:
         self.logger.info(f"{item}- checksum_and_db_handler() Finished")
         return True
 
+    def cal_handler(self, item: str) -> bool:
+        self.outgoing_cal_list.append(item)
+        return True
+
     def stats_handler(self, item: str) -> bool:
         """This runs stats against mwax FITS files"""
         self.logger.info(f"{item}- stats_handler() Started...")
@@ -689,14 +694,80 @@ class MWAXArchiveProcessor:
         ):
             self.logger.warning(f"{item}- stats_handler() mwax_stats failed. Skipping.")
 
-        # Take the input filename - strip the path, then append the output path
-        outgoing_filename = os.path.join(self.watch_dir_outgoing_cal, os.path.basename(item))
+        # If observation is a calibrator AND this host is enabled as an archiver then
+        # we should put the obs into the cal_outgoing dir so that calvin can
+        # pull it in and calibrate it. The calvin server which processed the file(s)
+        # will then call our webservice endpoint "release_cal_obs" and then that will
+        # move the file into visdata_outgoing so it can be archived.
 
-        self.logger.debug(f"{item}- stats_handler() moving file to outgoing cal dir")
-        os.rename(item, outgoing_filename)
+        # Is this host doing archiving?
+        if self.archive_destination_enabled == 1:
+            # Validate and get info about the obs
+            obs_info: ValidationData = utils.validate_filename(self.logger, item, self.metafits_path)
+
+            # Is the observation a calibrator?
+            if obs_info.calibrator:
+                # Send to cal_outgoing
+                # Take the input filename - strip the path, then append the output path
+                outgoing_filename = os.path.join(self.watch_dir_outgoing_cal, os.path.basename(item))
+                self.logger.debug(f"{item}- stats_handler() moving file to outgoing cal dir")
+                os.rename(item, outgoing_filename)
+            else:
+                # Should this project be archived?
+                if utils.should_project_be_archived(obs_info.project_id):
+                    # Send to vis_outgoing
+                    # Take the input filename - strip the path, then append the output path
+                    outgoing_filename = os.path.join(self.watch_dir_outgoing_vis, os.path.basename(item))
+                    self.logger.debug(f"{item}- stats_handler() moving file to outgoing vis dir")
+                    os.rename(item, outgoing_filename)
+                else:
+                    # No this project doesn't get archived
+                    self.dont_archive_handler_vis(item)
+        else:
+            # This host is not doing any archiving
+            self.dont_archive_handler_vis(item)
 
         self.logger.info(f"{item}- stats_handler() Finished")
         return True
+
+    def release_cal_obs(self, obs_id: int):
+        try:
+            # Release any cal_outgoing files- this is triggered by a calvin server finishing processing
+            # and calling the release_cal_obs web service endpoint on this host
+            obs_files = glob.glob(os.path.join(self.watch_dir_outgoing_cal, f"{obs_id}*.fits"))
+
+            if len(obs_files) == 0:
+                self.logger.debug(f"{obs_id}: release_cal_obs()- no files found for this obs_id")
+
+            # For file in the cal_outgoing dir for this obs_id
+            for item in obs_files:
+                # Does the file exist?
+                if os.path.exists(item):
+                    # Is this host doing archiving?
+                    if self.archive_destination_enabled == 1:
+                        # Validate and get info about the obs
+                        obs_info: ValidationData = utils.validate_filename(self.logger, item, self.metafits_path)
+
+                        # Should this project be archived?
+                        if utils.should_project_be_archived(obs_info.project_id):
+                            # Send to vis_outgoing
+                            # Take the input filename - strip the path, then append the output path
+                            outgoing_filename = os.path.join(self.watch_dir_outgoing_vis, os.path.basename(item))
+                            self.logger.debug(f"{obs_id}- release_cal_obs() moving {item} to outgoing vis dir")
+                            os.rename(item, outgoing_filename)
+                        else:
+                            # No this project doesn't get archived
+                            self.dont_archive_handler_vis(item)
+                    else:
+                        # This host is not doing any archiving
+                        self.dont_archive_handler_vis(item)
+
+                    # Remove item from queue
+                    self.outgoing_cal_list.remove(item)
+                else:
+                    self.logger.exception(f"{obs_id}: release_cal_obs()- failed to archive {item}- file does not exist")
+        except Exception:
+            self.logger.exception(f"{obs_id}: release_cal_obs()- something went wrong when releasing this obs_id")
 
     def archive_handler(self, item: str) -> bool:
         """This is called whenever a file is moved into the
@@ -720,67 +791,6 @@ class MWAXArchiveProcessor:
         utils.remove_file(self.logger, item, raise_error=False)
 
         self.logger.info(f"{item}- archive_handler() Finished")
-        return True
-
-    def cal_handler(self, item: str) -> bool:
-        """This is called when a file is detected in the cal watch directory.
-        If the observation is a calibrator, then copy this file to the
-        designated calibrator destination for processing. Regardless,
-        Move the file into the vis_outgoing directory for archiving"""
-        self.logger.info(f"{item}- cal_handler() Started...")
-
-        # Determine properties of the file we are dealing with
-        val: ValidationData = utils.validate_filename(self.logger, item, self.metafits_path)
-
-        #
-        # if this project id is not for archiving we don't want to pass it to calvin either
-        #
-        if utils.should_project_be_archived(val.project_id):
-            # Do we even need to check for a calibrator?
-            if self.calibrator_destination_enabled == 1:
-                self.logger.debug(
-                    f"{item}- cal_handler() checking if observation is a " "calibrator by reading metafits file"
-                )
-
-                if val.calibrator:
-                    # It is an MWAX visibility AND the obs is a calibrator
-                    # so send it to the calibrator destination
-                    self.logger.debug(
-                        f"{item}- cal_handler() observation IS a calibrator,"
-                        " sending to calibration server"
-                        f" {self.calibrator_destination_host}"
-                    )
-
-                    if (
-                        mwa_archiver.archive_file_xrootd(
-                            self.logger,
-                            item,
-                            int(self.archive_command_numa_node),
-                            self.calibrator_destination_host,
-                            self.calibrator_transfer_command_timeout_sec,
-                        )
-                        is not True
-                    ):
-                        return False
-                else:
-                    self.logger.debug(f"{item}- cal_handler() observation IS NOT calibrator. Skipping.")
-            else:
-                self.logger.info(f"{item}- cal_handler() calibrator_destination is disbaled. Skipping.")
-
-        #
-        # If we should be archived, the move the file to the outgoing dir,
-        # otherwise move it to the don't_archive dir
-        #
-        if utils.should_project_be_archived(val.project_id) and self.archive_destination_enabled:
-            # Take the input filename - strip the path, then append the output path
-            self.logger.debug(f"{item}- cal_handler() moving file to vis outgoing dir")
-            outgoing_filename = os.path.join(self.watch_dir_outgoing_vis, os.path.basename(item))
-            os.rename(item, outgoing_filename)
-        else:
-            # Pass it to the dont_archive_vis handler
-            self.dont_archive_handler_vis(item)
-
-        self.logger.info(f"{item}- cal_handler() Finished")
         return True
 
     def pause_archiving(self, paused: bool):
@@ -839,7 +849,18 @@ class MWAXArchiveProcessor:
         for worker in self.workers:
             if worker:
                 status = dict({"name": worker.name})
-                status.update(worker.get_status())
+
+                # for the cal_outgoing worker we will do the stats manually
+                if worker.name == "outgoing cal vis worker":
+                    outgoing_cal_dict = {
+                        "Unix timestamp": time.time(),
+                        "current item": "",
+                        "queue_size": len(self.outgoing_cal_list),
+                    }
+                    status.update(outgoing_cal_dict)
+                else:
+                    status.update(worker.get_status())
+
                 worker_list.append(status)
 
         if self.archiving_paused:

@@ -2,11 +2,13 @@
 
 import datetime
 import glob
+import logging
 import os
 import shutil
 import time
 import traceback
 import numpy as np
+from enum import Enum
 from astropy.io import fits
 from astropy import units as u
 from astropy.constants import c
@@ -22,13 +24,23 @@ from mwax_mover.mwax_command import (
     run_command_popen,
     check_popen_finished,
 )
-
+from mwax_mover.utils import is_int
+from mwalib import MetafitsContext
 import numpy.typing as npt  # noqa: F401
 from numpy.typing import ArrayLike, NDArray
-from typing import NamedTuple, List, Tuple, Dict, Optional  # noqa: F401
+from typing import NamedTuple, List, Tuple, Optional  # noqa: F401
 
 # from nptyping import NDArray, Shape
 import sys
+
+V_LIGHT_M_S = 299792458.0
+
+
+class CalvinJobType(Enum):
+    """Calvin Job Type"""
+
+    realtime = "realtime"
+    mwa_asvo = "mwa_asvo"
 
 
 class Tile(NamedTuple):
@@ -70,38 +82,6 @@ class TimeInfo(NamedTuple):
 
     num_times: int
     int_time_s: float
-
-
-# class Config(Enum):
-#     """Array configuration"""
-#     COMPACT = 0
-#     EXTENDED = 1
-
-#     @staticmethod
-#     def from_tiles(tiles: List[Tile]) -> 'Config':
-#         """Determine array config from tiles"""
-#         nhex = len([tile for tile in tiles if tile.tile_name.startswith("Hex")])
-#         nlb = len([tile for tile in tiles if tile.tile_name.startswith("LB")])
-#         if nhex > nlb:
-#             return Config.COMPACT
-#         elif nlb > nhex:
-#             return Config.EXTENDED
-#         else:
-#             raise ValueError(f"Unknown array config with {nlb=} and {nhex=}")
-
-
-def ensure_system_byte_order(arr):
-    system_byte_order = ">" if sys.byteorder == "big" else "<"
-    if arr.dtype.byteorder not in f"{system_byte_order}|=":
-        return arr.newbyteorder(system_byte_order)
-    return arr
-
-
-def parse_csv_header(value: str, dtype: type) -> ArrayLike:
-    """
-    parse comma separated values (in metafits header)
-    """
-    return np.array(value.split(","), dtype=dtype)
 
 
 class Metafits:
@@ -691,9 +671,6 @@ class HyperfitsSolutionGroup:
         return soln_tile_ids, all_xx_solns, all_yy_solns
 
 
-v_light_m_s = 299792458.0
-
-
 class PhaseFitInfo(NamedTuple):
     length: float
     intercept: float
@@ -746,6 +723,20 @@ class GainFitInfo(NamedTuple):
             pol1=[np.nan] * 24,
             sigma_resid=[np.nan] * 24,
         )
+
+
+def ensure_system_byte_order(arr):
+    system_byte_order = ">" if sys.byteorder == "big" else "<"
+    if arr.dtype.byteorder not in f"{system_byte_order}|=":
+        return arr.newbyteorder(system_byte_order)
+    return arr
+
+
+def parse_csv_header(value: str, dtype: type) -> ArrayLike:
+    """
+    parse comma separated values (in metafits header)
+    """
+    return np.array(value.split(","), dtype=dtype)
 
 
 def wrap_angle(angle):
@@ -815,7 +806,7 @@ def fit_phase_line(
     # This is set by the resolution I want in delay space (Nyquist rate)
     # type: ignore
     dm = 0.01 * u.m  # type: ignore
-    dt = dm / c  # The target time resolution
+    dt = dm / c  # type: ignore The target time resolution
     νmax = 0.5 / dt  # The Nyquist rate
     N = 2 * int(np.round(νmax / dν))  # The number of bins to use during the FFTs
 
@@ -1467,7 +1458,19 @@ def write_readme_file(logger, filename, cmd, exit_code, stdout, stderr):
 
 
 def run_birli(
-    processor, metafits_filename: str, uvfits_filename: str, obs_id: int, processing_dir: str, oversampled: bool
+    logger: logging.Logger,
+    input_data_path: str,
+    metafits_filename: str,
+    uvfits_filename: str,
+    job_output_path: str,
+    obs_id: int,
+    oversampled: bool,
+    birli_binary_path: str,
+    birli_max_mem_gib: int,
+    birli_timeout: int,
+    birli_freq_res_hz: int,
+    birli_int_time_res_sec: float,
+    birli_edge_width_hz: int,
 ) -> bool:
     """Execute Birli, returning true on success, false on failure"""
     birli_success: bool = False
@@ -1479,13 +1482,7 @@ def run_birli(
     stdout = None
     try:
         # Get only data files
-        data_files = glob.glob(os.path.join(processing_dir, "*.fits"))
-        # Remove the metafits (we specify it seperately)
-        try:
-            data_files.remove(metafits_filename)
-        except ValueError:
-            # Metafits was not in the file list
-            raise Exception(f"Metafits file '{metafits_filename}' was not found. Cannot run birli.")
+        data_files = glob.glob(os.path.join(input_data_path, f"{obs_id}_*_*_*.fits"))
 
         data_file_arg = ""
         for data_file in data_files:
@@ -1499,46 +1496,46 @@ def run_birli(
         fine_chan_width_hz = metafits.chan_info.fine_chan_width_hz
         time_time_s = metafits.time_info.int_time_s
 
-        # TODO: set default edge_width res from config
+        # set default edge_width res from config
         if oversampled:
             # For oversampled obs we don't flag edges and we don't correct passband
             edge_width_hz = 0
             passband_arg = "--passband-gains none"
         else:
-            edge_width_hz = 80e3  # default
+            edge_width_hz = birli_edge_width_hz  # default
             edge_width_hz = np.max([fine_chan_width_hz, edge_width_hz])
             assert edge_width_hz >= fine_chan_width_hz, f"{edge_width_hz=} must be >= {fine_chan_width_hz=}"
             assert edge_width_hz % fine_chan_width_hz == 0, f"{edge_width_hz=} must multiple of {fine_chan_width_hz=}"
             passband_arg = ""  # leave as default
 
-        # TODO: set minimum freq res from config
-        min_freq_res = 40e3
+        # set minimum freq res from config
+        min_freq_res = birli_freq_res_hz
         avg_arg = ""
         if fine_chan_width_hz < min_freq_res:
             avg_arg += f" --avg-freq-res={int(min_freq_res/1e3)}"
 
-        # TODO: set minimum time res from config
-        min_time_res = 2
+        # set minimum time res from config
+        min_time_res = birli_int_time_res_sec
         if time_time_s < min_time_res:
             avg_arg += f" --avg-time-res={min_time_res}"
 
         # Run birli
         cmdline = (
-            f"{processor.birli_binary_path}"
+            f"{birli_binary_path}"
             f" --metafits {metafits_filename}"
             " --no-draw-progress"
             f" --uvfits-out={uvfits_filename}"
             f" --flag-edge-width={int(edge_width_hz/1e3)}"
-            f" --max-memory={processor.birli_max_mem_gib}"
+            f" --max-memory={birli_max_mem_gib}"
             f" {avg_arg} {passband_arg} {data_file_arg}"
         )
 
-        processor.birli_popen_process = run_command_popen(processor.logger, cmdline, -1, False)
+        birli_popen_process = run_command_popen(logger, cmdline, -1, False, False)
 
         exit_code, stdout, stderr = check_popen_finished(
-            processor.logger,
-            processor.birli_popen_process,
-            processor.birli_timeout,
+            logger,
+            birli_popen_process,
+            birli_timeout,
         )
 
         # return_val, stdout = run_command_ext(logger, cmdline, -1, timeout, False)
@@ -1546,15 +1543,14 @@ def run_birli(
 
         if exit_code == 0:
             # Success!
-            processor.logger.info(f"{obs_id}: Birli run successful in {elapsed:.3f} seconds")
+            logger.info(f"{obs_id}: Birli run successful in {elapsed:.3f} seconds")
             birli_success = True
-            processor.birli_popen_process = None
 
             # Success!
             # Write out a useful file of command line info
-            readme_filename = os.path.join(processing_dir, f"{obs_id}_birli_readme.txt")
+            readme_filename = os.path.join(job_output_path, f"{obs_id}_birli_readme.txt")
             write_readme_file(
-                processor.logger,
+                logger,
                 readme_filename,
                 cmdline,
                 exit_code,
@@ -1562,12 +1558,10 @@ def run_birli(
                 stderr,
             )
         else:
-            processor.logger.error(
-                f"{obs_id}: Birli run FAILED: Exit code of {exit_code} in" f" {elapsed:.3f} seconds: {stderr}"
-            )
+            logger.error(f"{obs_id}: Birli run FAILED: Exit code of {exit_code} in" f" {elapsed:.3f} seconds: {stderr}")
     except Exception as birli_run_exception:
         elapsed = time.time() - start_time
-        processor.logger.error(
+        logger.error(
             f"{obs_id}: birli run FAILED: Unhandled exception"
             f" {birli_run_exception} in {elapsed:.3f} seconds:"
             f" {stderr}"
@@ -1576,44 +1570,43 @@ def run_birli(
     if not birli_success:
         # If we are not shutting down,
         # Move the files to an error dir
-        #
-        # If we are shutting down, then this error is because
-        # we have effectively sent it a SIGINT. This should not be a
-        # reason to abandon processing. Leave it there to be picked up
-        # next run (ie this will trigger the "else" which does nothing)
-        if processor.running:
-            error_path = os.path.join(processor.processing_error_path, str(obs_id))
-            processor.logger.info(
-                f"{obs_id}: moving failed files to {error_path} for manual" " analysis and writing readme_error.txt"
-            )
+        logger.info(
+            f"{obs_id}: moving failed files to {job_output_path} for manual" " analysis and writing readme_error.txt"
+        )
 
-            # Move the processing dir
-            shutil.move(processing_dir, error_path)
+        # Move the processing dir
+        shutil.move(input_data_path, job_output_path)
 
-            # Write out a useful file of error and command line info
-            readme_filename = os.path.join(error_path, "readme_error.txt")
-            write_readme_file(
-                processor.logger,
-                readme_filename,
-                cmdline,
-                exit_code,
-                stdout,
-                stderr,
-            )
+        # Write out a useful file of error and command line info
+        readme_filename = os.path.join(job_output_path, "readme_error.txt")
+        write_readme_file(
+            logger,
+            readme_filename,
+            cmdline,
+            exit_code,
+            stdout,
+            stderr,
+        )
 
     return birli_success
 
 
 def run_hyperdrive(
-    processor,
-    uvfits_files,
+    logger: logging.Logger,
+    input_uvfits_files: List[str],
     metafits_filename: str,
+    job_output_path: str,
     obs_id: int,
-    processing_dir: str,
+    hyperdrive_binary_path: str,
+    source_list_filename: str,
+    source_list_type: str,
+    num_sources: int,
+    hyperdrive_timeout: int,
 ) -> bool:
     """Runs hyperdrive N times and returns true on success or false if not all runs worked"""
-    processor.logger.info(
-        f"{obs_id}: {len(uvfits_files)} contiguous bands detected." f" Running hyperdrive {len(uvfits_files)} times...."
+    logger.info(
+        f"{obs_id}: {len(input_uvfits_files)} contiguous bands detected."
+        f" Running hyperdrive {len(input_uvfits_files)} times...."
     )
 
     # Keep track of the number of successful hyperdrive runs
@@ -1624,57 +1617,58 @@ def run_hyperdrive(
     cmdline = ""
     exit_code = 0
 
-    for hyperdrive_run, uvfits_file in enumerate(uvfits_files):
+    for hyperdrive_run, uvfits_file in enumerate(input_uvfits_files):
         # Take the filename which for picket fence will also have
         # the band info and in all cases the obsid. We will use
         # this as a base for other files we work with
-        obsid_and_band = uvfits_file.replace(".uvfits", "")
+
+        # Remove the path to the uvfits file, leave the filename then remove the ".uvfits"
+        obsid_and_band = os.path.basename(uvfits_file.replace(".uvfits", ""))
 
         try:
-            hyperdrive_solution_filename = f"{obsid_and_band}_solutions.fits"
-            bin_solution_filename = f"{obsid_and_band}_solutions.bin"
+            hyperdrive_solution_filename = os.path.join(job_output_path, f"{obsid_and_band}_solutions.fits")
+            bin_solution_filename = os.path.join(job_output_path, f"{obsid_and_band}_solutions.bin")
 
             # Run hyperdrive
             # Output to hyperdrive format and old aocal format (bin)
             cmdline = (
-                f"{processor.hyperdrive_binary_path} di-calibrate"
+                f"{hyperdrive_binary_path} di-calibrate"
                 " --no-progress-bars --data"
-                f" {uvfits_file} {metafits_filename} --num-sources 99"
+                f" {uvfits_file} {metafits_filename} --num-sources {num_sources}"
                 " --source-list"
-                f" {processor.source_list_filename} --source-list-type"
-                f" {processor.source_list_type} --outputs"
+                f" {source_list_filename} --source-list-type"
+                f" {source_list_type} --outputs"
                 f" {hyperdrive_solution_filename} {bin_solution_filename}"
             )
 
             start_time = time.time()
 
             # run hyperdrive
-            processor.logger.info(f"{obs_id}: Running hyperdrive on {uvfits_file}...")
-            processor.hyperdrive_popen_process = run_command_popen(processor.logger, cmdline, -1, False)
+            logger.info(f"{obs_id}: Running hyperdrive on {uvfits_file}...")
+            hyperdrive_popen_process = run_command_popen(logger, cmdline, -1, False, False)
 
             exit_code, stdout, stderr = check_popen_finished(
-                processor.logger,
-                processor.hyperdrive_popen_process,
-                processor.hyperdrive_timeout,
+                logger,
+                hyperdrive_popen_process,
+                hyperdrive_timeout,
             )
 
             # return_val, stdout = run_command_ext(logger, cmdline, -1, timeout, False)
             elapsed = time.time() - start_time
 
             if exit_code == 0:
-                processor.logger.info(
+                logger.info(
                     f"{obs_id}: hyperdrive run"
-                    f" {hyperdrive_run + 1}/{len(uvfits_files)} successful"
+                    f" {hyperdrive_run + 1}/{len(input_uvfits_files)} successful"
                     f" in {elapsed:.3f} seconds"
                 )
-                processor.hyperdrive_popen_process = None
 
                 # Success!
                 # Write out a useful file of command line info
                 readme_filename = f"{obsid_and_band}_hyperdrive_readme.txt"
 
                 write_readme_file(
-                    processor.logger,
+                    logger,
                     readme_filename,
                     cmdline,
                     exit_code,
@@ -1684,18 +1678,18 @@ def run_hyperdrive(
 
                 hyperdrive_runs_success += 1
             else:
-                processor.logger.error(
+                logger.error(
                     f"{obs_id}: hyperdrive run"
-                    f" {hyperdrive_run + 1}/{len(uvfits_files)} FAILED:"
+                    f" {hyperdrive_run + 1}/{len(input_uvfits_files)} FAILED:"
                     f" Exit code of {exit_code} in"
                     f" {elapsed:.3f} seconds. StdErr: {stderr}"
                 )
                 # exit for loop- since run failed
                 break
         except Exception as hyperdrive_run_exception:
-            processor.logger.error(
+            logger.error(
                 f"{obs_id}: hyperdrive run"
-                f" {hyperdrive_run + 1}/{len(uvfits_files)} FAILED:"
+                f" {hyperdrive_run + 1}/{len(input_uvfits_files)} FAILED:"
                 " Unhandled exception"
                 f" {hyperdrive_run_exception} in"
                 f" {elapsed:.3f} seconds. StdErr: {stderr}"
@@ -1703,57 +1697,50 @@ def run_hyperdrive(
             # exit for loop since run failed
             break
 
-    if hyperdrive_runs_success != len(uvfits_files):
+    if hyperdrive_runs_success != len(input_uvfits_files):
         # We did not run successfully on one or all hyperdrive calls.
-        # If we are not shutting down,
-        # Move the files to an error dir
-        #
-        # If we are shutting down, then this error is because
-        # we have effectively sent it a SIGINT. This should not be a
-        # reason to abandon processing. Leave it there to be picked up
-        # next run (ie this will trigger the "else" which does nothing)
-        if processor.running:
-            error_path = os.path.join(processor.processing_error_path, str(obs_id))
-            processor.logger.info(
-                f"{obs_id}: moving failed files to {error_path} for manual" " analysis and writing readme_error.txt"
-            )
+        # Move the files to a the job output dir
+        logger.info(
+            f"{obs_id}: moving failed files to {job_output_path} for manual" " analysis and writing readme_error.txt"
+        )
 
-            # Move the processing dir
-            shutil.move(processing_dir, error_path)
+        # Move the input uvfits files to the job path
+        for uvfits_file in input_uvfits_files:
+            shutil.move(uvfits_file, job_output_path)
 
-            # Write out a useful file of error and command line info
-            readme_filename = os.path.join(error_path, "readme_error.txt")
-            write_readme_file(
-                processor.logger,
-                readme_filename,
-                cmdline,
-                exit_code,
-                stdout,
-                stderr,
-            )
+        # Write out a useful file of error and command line info
+        readme_filename = os.path.join(job_output_path, "readme_error.txt")
+        write_readme_file(
+            logger,
+            readme_filename,
+            cmdline,
+            exit_code,
+            stdout,
+            stderr,
+        )
         return False
-    else:
-        return True
+
+    return True
 
 
 def run_hyperdrive_stats(
-    processor,
-    uvfits_files,
+    logger: logging.Logger,
+    input_uvfits_files,
     metafits_filename: str,
     obs_id: int,
-    processing_dir: str,
+    hyperdrive_binary_path: str,
 ) -> bool:
     """Call hyperdrive again but just to produce plots and stats"""
 
     # produce stats/plots
     stats_successful: int = 0
 
-    processor.logger.info(
-        f"{obs_id}: {len(uvfits_files)} contiguous bands detected."
-        f" Running hyperdrive stats {len(uvfits_files)} times...."
+    logger.info(
+        f"{obs_id}: {len(input_uvfits_files)} contiguous bands detected."
+        f" Running hyperdrive stats {len(input_uvfits_files)} times...."
     )
 
-    for hyperdrive_stats_run, uvfits_file in enumerate(uvfits_files):
+    for hyperdrive_stats_run, uvfits_file in enumerate(input_uvfits_files):
         # Take the filename which for picket fence will also have
         # the band info and in all cases the obsid. We will use
         # this as a base for other files we work with
@@ -1766,40 +1753,40 @@ def run_hyperdrive_stats(
             stats_success,
             stats_error,
         ) = write_stats(
-            processor.logger,
+            logger,
             obs_id,
             stats_filename,
             hyperdrive_solution_filename,
-            processor.hyperdrive_binary_path,
+            hyperdrive_binary_path,
             metafits_filename,
         )
 
         if stats_success:
             stats_successful += 1
         else:
-            processor.logger.warning(
+            logger.warning(
                 f"{obs_id}: hyperdrive stats run"
-                f" {hyperdrive_stats_run + 1}/{len(uvfits_files)} FAILED:"
+                f" {hyperdrive_stats_run + 1}/{len(input_uvfits_files)} FAILED:"
                 f" {stats_error}."
             )
 
-    if stats_successful == len(uvfits_files):
-        processor.logger.info(f"{obs_id}: All {stats_successful} hyperdrive stats" " runs successful")
+    if stats_successful == len(input_uvfits_files):
+        logger.info(f"{obs_id}: All {stats_successful} hyperdrive stats" " runs successful")
         return True
     else:
-        processor.logger.warning(f"{obs_id}: Not all hyperdrive stats runs were successful.")
+        logger.warning(f"{obs_id}: Not all hyperdrive stats runs were successful.")
         return False
 
 
 def process_phase_fits(
-    logger, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
+    logger, output_path, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
 ):
     """
     Fit a line to each tile phase solution, return a dataframe of phase fit parameters for each
     tile and pol
     """
     fits = []
-    phase_diff_path = os.path.join(item, "phase_diff.txt")
+    phase_diff_path = os.path.join(output_path, "phase_diff.txt")
     # by default we don't want to apply any phase rotation.
     phase_diff = np.full((len(chanblocks_hz),), 1.0, dtype=np.complex128)
     if os.path.exists(phase_diff_path):
@@ -1827,16 +1814,16 @@ def process_phase_fits(
             try:
                 fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)
             except Exception as exc:
-                logger.error(f"{item} - {tile_id=:4} {pol} ({name}) {exc}")
+                logger.error(f"{tile_id=:4} {pol} ({name}) {exc}")
                 continue
-            logger.debug(f"{item} - {tile_id=:4} {pol} ({name}) {fit=}")
+            logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
             fits.append([tile_id, soln_idx, pol, *fit])
 
     return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])
 
 
 def process_gain_fits(
-    logger, item, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, chanblocks_per_coarse
+    logger, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, chanblocks_per_coarse
 ):
     """
     for each tile, pol, fit a GainFitInfo to the gains
@@ -1854,10 +1841,140 @@ def process_gain_fits(
             try:
                 fit = fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse)
             except Exception as exc:
-                logger.error(f"{item} - {tile_id=:4} {pol} ({name}) {exc}")
+                logger.error(f"{tile_id=:4} {pol} ({name}) {exc}")
                 continue
-            logger.debug(f"{item} - {tile_id=:4} {pol} ({name}) {fit=}")
+            logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
             fits.append([tile_id, soln_idx, pol, *fit])
     logger.warning("TODO: fake gain fits!")
 
     return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *GainFitInfo._fields])
+
+
+def create_sbatch_script(
+    config_file_path: str,
+    obs_id: int,
+    jobtype: CalvinJobType,
+    log_path: str,
+    request_ids: list[str],
+    processor_args: str,
+) -> str:
+    # log_path is the global log path e.g. /home/mwa/logs
+    # processor_args is to allow the caller to add extra processor cmd line args.
+    # E.g. MWA ASVO requires --mwa-asvo-download-url=URL
+    #
+    if jobtype == CalvinJobType.realtime:
+        job_name = f"real{obs_id}"
+    else:
+        job_name = f"asvo{obs_id}"
+
+    job_script = f"""#!/bin/bash
+#SBATCH --partition=gpu
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=90
+#SBATCH --ntasks=1
+#SBATCH --gpus-per-task=1
+#SBATCH --exclusive # use all cpus
+#SBATCH --mem=900G
+#SBATCH --time=03:00:00
+#SBATCH --account=mwa
+#SBATCH --job-name={job_name}
+#SBATCH --signal=TERM@60
+#SBATCH --output={log_path}/%J.out
+#SBATCH --error={log_path}/%J.out
+#SBATCH --open-mode=append
+#SBATCH --parsable
+echo "Starting Calvin {jobtype.value} Job: $SLURM_JOBID";
+
+# Source the python environment
+cd /home/mwa/mwax_mover
+source .venv/bin/activate
+
+# Explicitly specifying these as they dont seem to be passed from the mwa env
+export MWA_BEAM_FILE=/software/hyperdrive/mwa_full_embedded_element_pattern.h5
+export HYPERDRIVE_CUDA_COMPUTE=86
+
+# Process
+srun --nodes=1 --ntasks=1 --cpus-per-task=90 \
+mwax_calvin_processor \
+--cfg={config_file_path} \
+--job-type={jobtype.value} \
+--obs-id={obs_id} \
+--request-ids={",".join(request_ids)} \
+--slurm-job-id=$SLURM_JOBID {processor_args}
+
+exit $?
+"""
+
+    return job_script
+
+
+def submit_sbatch(logger: logging.Logger, script_path: str, script: str, obs_id: int) -> Tuple[bool, Optional[int]]:
+    # Submits the provided sbatch script to SLURM
+    # Returns (success, jobid or None if failed)
+    try:
+        script_filename: str = os.path.join(script_path, datetime.datetime.now().strftime(f"%Y%m%d-%H%M%S-{obs_id}.sh"))
+        cmdline = f"sbatch {script_filename}"
+
+        # Create an sbatch file
+        with open(script_filename, "w") as job_script:
+            job_script.write(script)
+    except Exception:
+        logger.exception(f"{str(obs_id)} failure creating temp sbatch script.")
+        return (False, None)
+
+    # Submit the job
+    return_val: bool = False
+    stdout = ""
+    try:
+        return_val, stdout = run_command_ext(logger, cmdline, None, 60, True)
+
+        # remove crlf from stdout
+        stdout = stdout.replace("\n", " ")
+
+        # Success- get the new job id
+        # sbatch should send this to std out:
+        # "Submitted batch job 34987"
+        if return_val:
+            logger.info(f"{script_filename} successfully submitted to Slurm. Stdout: {stdout}")
+            slurm_job_id_string = stdout.replace("Submitted batch job ", "")
+            if is_int(slurm_job_id_string):
+                return (True, int(slurm_job_id_string))
+            else:
+                # This deserves to be a massive failure, as if SBATCH returned true it should always give
+                # us the SLURM job id!
+                logger.error(f"Slurm job submitted OK, but could not get slurm_job_id from: {stdout}. Aborting")
+                exit(-10)
+        else:
+            logger.error(f"{script_filename} failed to be submitted to SLURM. Error" f" {stdout}")
+
+    except Exception:
+        logger.exception(f"{script_filename} failure running sbatch.")
+        return_val = False
+
+    if not return_val:
+        return (False, None)
+
+
+def estimate_birli_output_bytes(
+    metafits_context: MetafitsContext, birli_freq_res_khz: int, birli_int_time_res_sec: float
+) -> int:
+    # baselines = (tiles * tiles + 1)
+    # timesteps = duration / birli_int_time_res_sec
+    # coarse_chans = 24
+    # fine_channels = 30.72 MHz / birli_freq_res_khz
+    # pols = 4 (XX,XY,YX,YY)
+    # values = 2 (real, imag)
+    # bytes_per_value = 4 (f32)
+    # Total bytes = (baselines * fine_channels * pols * values * bytes_per_value * timesteps)
+    # Total GB = bytes / 1000.^3
+    baselines: int = metafits_context.num_baselines  # 144T (10440)
+    timesteps: int = int(metafits_context.sched_duration_ms / (birli_int_time_res_sec * 1000.0))  # 60
+    coarse_channels: int = metafits_context.num_metafits_coarse_chans
+    fine_channels: int = int(
+        metafits_context.coarse_chan_width_hz / (birli_freq_res_khz * 1000.0)
+    )  # 1280000 / 80000 == 16
+    pols: int = metafits_context.num_visibility_pols  # (XX,XY,YX,YY) # 4
+    values: int = 2  # (real, imag)
+    bytes_per_value: int = 4  # f32
+
+    return baselines * coarse_channels * fine_channels * pols * values * bytes_per_value * timesteps

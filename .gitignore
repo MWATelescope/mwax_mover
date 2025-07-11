@@ -9,10 +9,6 @@ mwax_mover.egg-info/
 tests/mock_mwacache_archiver
 tests/mock_mwax
 tests/mock_mwax_bf
-tests/mock_mwax_calvin_test01
-tests/mock_mwax_calvin_test02
-tests/mock_mwax_calvin_test03
-tests/mock_mwax_calvin_test04
 tests/mock_mwax_dump
 tests/data/solution_handler_*
 tests/data/1119683928/
@@ -23,3 +19,4 @@ logs
 .python-version
 .vscode/
 .pytest_cache
+.venv

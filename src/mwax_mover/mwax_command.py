@@ -1,8 +1,10 @@
 """Module to execute arbitrary commands"""
 
+import os
 import subprocess
 import shlex
 import typing
+from typing import Optional
 
 
 # This will return true/false plus the output from stdout
@@ -14,8 +16,15 @@ def run_command_ext(
     numa_node: typing.Optional[int],
     timeout: int = 60,
     use_shell: bool = False,
+    copy_user_env: bool = False,
 ) -> typing.Tuple[bool, str]:
     """Runs a command and returns success or failure and stdout"""
+    myenv: Optional[dict[str, str]] = None
+
+    if copy_user_env:
+        # Should we copy the user's environment for the subprocess? Default is no
+        myenv = os.environ.copy()
+
     # Example: ["dada_diskdb", "-k 1234", "-f 1216447872_02_256_201.sub -s"]
     if numa_node is None:
         cmdline = f"{command}"
@@ -41,12 +50,7 @@ def run_command_ext(
 
         # Execute the command
         completed_process = subprocess.run(
-            args,
-            shell=use_shell,
-            check=False,
-            timeout=timeout,
-            capture_output=True,
-            text=True,
+            args, shell=use_shell, check=False, timeout=timeout, capture_output=True, text=True, env=myenv
         )
 
         return_code = completed_process.returncode
@@ -74,9 +78,9 @@ def run_command_ext(
                 f"StdErr: {stderror_log} "
                 f"StdOut: {stdout_log}"
             )
-            return False, stderror
+            return False, f"{stdout} {stderror}"
         else:
-            return True, stdout
+            return True, f"{stdout} {stderror}"
 
     except Exception as command_exception:  # pylint: disable=broad-except
         error = f"Exception executing {cmdline}: {str(command_exception)}"
@@ -92,8 +96,15 @@ def run_command_popen(
     command: str,
     numa_node: int,
     use_shell: bool = False,
+    copy_user_env: bool = False,
 ):
     """Runs a command and returns success or failure and stdout"""
+    myenv: Optional[dict[str, str]] = None
+
+    if copy_user_env:
+        # Should we copy the user's environment for the subprocess? Default is no
+        myenv = os.environ.copy()
+
     # Example: ["dada_diskdb", "-k 1234", "-f 1216447872_02_256_201.sub -s"]
     if numa_node is None:
         cmdline = f"{command}"
@@ -118,11 +129,7 @@ def run_command_popen(
 
     # Execute the command
     popen_process = subprocess.Popen(
-        args,
-        shell=use_shell,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        args, shell=use_shell, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=myenv
     )
     return popen_process
 
