@@ -1600,6 +1600,7 @@ def run_hyperdrive(
     hyperdrive_binary_path: str,
     source_list_filename: str,
     source_list_type: str,
+    num_sources: int,
     hyperdrive_timeout: int,
 ) -> bool:
     """Runs hyperdrive N times and returns true on success or false if not all runs worked"""
@@ -1633,7 +1634,7 @@ def run_hyperdrive(
             cmdline = (
                 f"{hyperdrive_binary_path} di-calibrate"
                 " --no-progress-bars --data"
-                f" {uvfits_file} {metafits_filename} --num-sources 99"
+                f" {uvfits_file} {metafits_filename} --num-sources {num_sources}"
                 " --source-list"
                 f" {source_list_filename} --source-list-type"
                 f" {source_list_type} --outputs"

@@ -91,6 +91,7 @@ class MWAXCalvinProcessor:
         self.source_list_filename: str = ""
         self.source_list_type: str = ""
         self.phase_fit_niter: int = 0
+        self.num_sources: int = 0
         self.produce_debug_plots: bool = True  # default to true- for now only off if running via pytest
         self.keep_completed_visibility_files: bool = False
 
@@ -282,6 +283,8 @@ class MWAXCalvinProcessor:
                 self.job_input_path,
                 self.job_output_path,
                 self.phase_fit_niter,
+                self.source_list_filename,
+                self.num_sources,
                 self.produce_debug_plots,
             )
 
@@ -294,9 +297,20 @@ class MWAXCalvinProcessor:
                         self.current_task_name = "Releasing MWAX files"
                         self.release_mwax_files()
                 else:
-                    self.fail_job_processing("Error: process_solutions() did not return a fit_id")
-                    exit(-1)
+                    # We returned True (no unexpected errors occured)
+                    # but we didn't get a fit_id. This is due to
+                    # things like "no unflagged tiles found" which is
+                    # an error, however there is nothing more we can do
+                    # so update db as an error, but release any obs from
+                    # mwax if this is realtime
+                    if self.job_type == CalvinJobType.realtime:
+                        self.current_task_name = "Releasing MWAX files"
+                        self.release_mwax_files()
+                        
+                    self.fail_job_processing(error_message)
+                    exit(0)
             else:
+                # Something unexpected went wrong
                 self.fail_job_processing(error_message)
                 exit(0)
 
@@ -615,6 +629,7 @@ class MWAXCalvinProcessor:
             self.hyperdrive_binary_path,
             self.source_list_filename,
             self.source_list_type,
+            self.num_sources,
             self.hyperdrive_timeout,
         )
 
@@ -879,6 +894,15 @@ class MWAXCalvinProcessor:
                     config,
                     "hyperdrive",
                     "phase_fit_niter",
+                )
+            )
+
+            self.num_sources = int(
+                utils.read_config(
+                    self.logger,
+                    config,
+                    "hyperdrive",
+                    "num_sources",
                 )
             )
 

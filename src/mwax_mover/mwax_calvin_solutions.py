@@ -32,6 +32,8 @@ def process_solutions(
     input_data_path: str,
     output_data_path: str,
     phase_fit_niter: int,
+    source_list: str,
+    num_sources: int,
     produce_debug_plots: bool,
 ) -> tuple[bool, str, Optional[int]]:
     """Will deal with completed hyperdrive solutions
@@ -62,7 +64,11 @@ def process_solutions(
         # determine refant
         unflagged_tiles = tiles[tiles.flag == 0]
         if not len(unflagged_tiles):
-            raise ValueError("No unflagged tiles found")
+            # Even though this is a "failure" we want to return True
+            # so we can release the obs if it is realtime- i.e. there's
+            # nothing more we can do
+            return True, "No unflagged tiles found", None
+
         refant = unflagged_tiles.sort_values(by=["id"]).iloc[0]
         logger.debug(f"{refant['name']=} ({refant['id']})")
 
@@ -147,7 +153,9 @@ def process_solutions(
                     code_version=get_mwax_mover_version_string(),
                     creator="calvin",
                     fit_niter=phase_fit_niter,
-                    fit_limit=20,
+                    fit_limit=None,
+                    source_list=source_list,
+                    num_sources=num_sources
                 )
 
                 if fit_id is None or not success:

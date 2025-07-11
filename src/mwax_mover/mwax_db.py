@@ -518,19 +518,16 @@ def insert_calibration_request_row(db_handler_object: MWAXDBHandler, obs_id: int
         return False
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_random(10, 60),
-    retry=retry_if_exception_type(psycopg.errors.UniqueViolation),
-)
 def insert_calibration_fits_row(
     db_handler_object,
     transaction_cursor: Optional[psycopg.Cursor],
     obs_id: int,
     code_version: str,
     creator: str,
-    fit_niter: int = 10,
-    fit_limit: int = 20,
+    fit_niter: int,
+    fit_limit: Optional[int],
+    source_list: str,
+    num_sources: int
 ) -> Tuple[bool, int | None]:
     """Inserts a new calibration_fits row and return the fit_id if successful
     This row represents the calibration 'header' for an obsid.
@@ -541,8 +538,8 @@ def insert_calibration_fits_row(
 
     sql = (
         "INSERT INTO calibration_fits"
-        " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit)"
-        " VALUES (%s,%s,%s,now(),%s,%s,%s);"
+        " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit,source_list,num_sources)"
+        " VALUES (%s,%s,%s,now(),%s,%s,%s,%s,%s);"
     )
 
     # Fit ID is the Unix timestamp multiplied by 10**6 so it's an int
@@ -555,6 +552,8 @@ def insert_calibration_fits_row(
         creator,
         fit_niter,
         fit_limit,
+        source_list,
+        num_sources
     )
 
     try:
@@ -565,20 +564,7 @@ def insert_calibration_fits_row(
             f"into calibration_fits table. fit_id={fit_id}"
         )
         return (True, fit_id)
-
-    except psycopg.errors.UniqueViolation:
-        # We have a collision with fit_id- since it is the PK of the table and
-        # it is just the integer UNIX timestep (down to 1 second resolution) it
-        # is unlikely, but POSSIBLE to have a conflict if another calvin is
-        # inserting a fit at the same second in time! So just warn and try again.
-        # The 'raise' will trigger a retry based on the function's tenacity decorator
-        db_handler_object.logger.warning(
-            f"{obs_id}: insert_calibration_fits_row() error inserting "
-            f"calibration_fits record in table- Unique Key violation on fit_id {fit_id}. Retrying with "
-            "a new fit_id!"
-        )
-        raise
-
+    
     except Exception:  # pylint: disable=broad-except
         db_handler_object.logger.exception(
             f"{obs_id}: insert_calibration_fits_row() error inserting"
