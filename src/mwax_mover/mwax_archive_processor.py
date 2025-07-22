@@ -705,24 +705,24 @@ class MWAXArchiveProcessor:
             # Validate and get info about the obs
             obs_info: ValidationData = utils.validate_filename(self.logger, item, self.metafits_path)
 
-            # Is the observation a calibrator?
-            if obs_info.calibrator:
-                # Send to cal_outgoing
-                # Take the input filename - strip the path, then append the output path
-                outgoing_filename = os.path.join(self.watch_dir_outgoing_cal, os.path.basename(item))
-                self.logger.debug(f"{item}- stats_handler() moving file to outgoing cal dir")
-                os.rename(item, outgoing_filename)
-            else:
-                # Should this project be archived?
-                if utils.should_project_be_archived(obs_info.project_id):
+            # Should this project be archived?
+            if utils.should_project_be_archived(obs_info.project_id):
+                if obs_info.calibrator:
+                    # Send to cal_outgoing
+                    # Take the input filename - strip the path, then append the output path
+                    outgoing_filename = os.path.join(self.watch_dir_outgoing_cal, os.path.basename(item))
+                    self.logger.debug(f"{item}- stats_handler() moving file to outgoing cal dir")
+                    os.rename(item, outgoing_filename)
+                else:
+                    # Not a calibrator just archive it
                     # Send to vis_outgoing
                     # Take the input filename - strip the path, then append the output path
                     outgoing_filename = os.path.join(self.watch_dir_outgoing_vis, os.path.basename(item))
                     self.logger.debug(f"{item}- stats_handler() moving file to outgoing vis dir")
                     os.rename(item, outgoing_filename)
-                else:
-                    # No this project doesn't get archived
-                    self.dont_archive_handler_vis(item)
+            else:
+                # No this project doesn't get archived or calibrated, just send it to dont_archive
+                self.dont_archive_handler_vis(item)            
         else:
             # This host is not doing any archiving
             self.dont_archive_handler_vis(item)
@@ -760,12 +760,16 @@ class MWAXArchiveProcessor:
                             self.dont_archive_handler_vis(item)
                     else:
                         # This host is not doing any archiving
-                        self.dont_archive_handler_vis(item)
-
-                    # Remove item from queue
-                    self.outgoing_cal_list.remove(item)
+                        self.dont_archive_handler_vis(item)                    
                 else:
                     self.logger.exception(f"{obs_id}: release_cal_obs()- failed to archive {item}- file does not exist")
+
+                # Remove item from queue
+                try:
+                    self.outgoing_cal_list.remove(item)
+                except:
+                    # Don't want an exception if file is already gone from list
+                    pass
         except Exception:
             self.logger.exception(f"{obs_id}: release_cal_obs()- something went wrong when releasing this obs_id")
 

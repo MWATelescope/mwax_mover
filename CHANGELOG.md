@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.73 22-Jul-2025
+
+* mwax_archive_processor: fixed logic so that C123 calibrator obs don't wait for calibration.
+
+## 1.0.72 11-Jul-2025
+
+* Calvin/mwax_archive_processor: major refactor to support HPC
+
 ## 0.23.7 1-May-2025
 
 * Calvin: fixed passing correct passband option to Birli
