@@ -691,7 +691,9 @@ def get_unattempted_unrequested_cal_obsids(db_handler_object: MWAXDBHandler, old
             AND f.fitid IS NULL   				  -- No cal solution has been generated
             AND c.id IS NULL      				  -- No cal request has been created yet
             AND s.observation_number > %s         -- Oldest Obsid which is the last one handled by old calvinproc
+            AND UPPER(s.calibrators) <> 'SUN'     -- Don't try to calibrate on the SUN!
             GROUP BY m.starttime
+            HAVING COUNT(d.filename)>0            -- This obs should have some data files
             ORDER BY m.starttime asc"""
 
     # Run SQL

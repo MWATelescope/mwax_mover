@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.74 22-Jul-2025
+
+* mwax_calvin_controller: fixed SQL to not try to pick up SUN calibrators for realtime calibration
+
 ## 1.0.73 22-Jul-2025
 
 * mwax_archive_processor: fixed logic so that C123 calibrator obs don't wait for calibration.
