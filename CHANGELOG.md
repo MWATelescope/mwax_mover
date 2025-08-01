@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.75 01-Aug-2025
+
+* Fixed bug in mwax_subfile_processor where the dd command was not correctly trimming subfiles to the TRANSFER_SIZE from the PSRDADA header.
+
 ## 1.0.74 22-Jul-2025
 
 * mwax_calvin_controller: fixed SQL to not try to pick up SUN calibrators for realtime calibration
