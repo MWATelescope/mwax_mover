@@ -1499,14 +1499,12 @@ def run_birli(
         # set default edge_width res from config
         if oversampled:
             # For oversampled obs we don't flag edges and we don't correct passband
-            edge_width_hz = 0
-            passband_arg = "--passband-gains none"
+            edge_width_hz = 0            
         else:
             edge_width_hz = birli_edge_width_hz  # default
             edge_width_hz = np.max([fine_chan_width_hz, edge_width_hz])
             assert edge_width_hz >= fine_chan_width_hz, f"{edge_width_hz=} must be >= {fine_chan_width_hz=}"
-            assert edge_width_hz % fine_chan_width_hz == 0, f"{edge_width_hz=} must multiple of {fine_chan_width_hz=}"
-            passband_arg = ""  # leave as default
+            assert edge_width_hz % fine_chan_width_hz == 0, f"{edge_width_hz=} must multiple of {fine_chan_width_hz=}"            
 
         # set minimum freq res from config
         min_freq_res = birli_freq_res_hz
@@ -1527,7 +1525,7 @@ def run_birli(
             f" --uvfits-out={uvfits_filename}"
             f" --flag-edge-width={int(edge_width_hz/1e3)}"
             f" --max-memory={birli_max_mem_gib}"
-            f" {avg_arg} {passband_arg} {data_file_arg}"
+            f" {avg_arg} {data_file_arg}"
         )
 
         birli_popen_process = run_command_popen(logger, cmdline, -1, False, False)

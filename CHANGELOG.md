@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.76 15-Aug-2025
+
+* Birli now uses the default "auto" pfb_gains instead of "none" for oversampled observations.
+
 ## 1.0.75 01-Aug-2025
 
 * Fixed bug in mwax_subfile_processor where the dd command was not correctly trimming subfiles to the TRANSFER_SIZE from the PSRDADA header.
