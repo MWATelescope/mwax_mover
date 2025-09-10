@@ -1873,10 +1873,10 @@ def create_sbatch_script(
 #SBATCH --gpus-per-task=1
 #SBATCH --exclusive # use all cpus
 #SBATCH --mem=900G
-#SBATCH --time=03:00:00
+#SBATCH --time=04:00:00
 #SBATCH --account=mwa
 #SBATCH --job-name={job_name}
-#SBATCH --signal=TERM@60
+#SBATCH --signal=USR1@360
 #SBATCH --output={log_path}/%J.out
 #SBATCH --error={log_path}/%J.out
 #SBATCH --open-mode=append

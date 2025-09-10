@@ -650,6 +650,7 @@ class MWAXCalvinProcessor:
         # Close all database connections
         self.db_handler_object.stop_database_pool()
         self.running = False
+        sys.exit(0)      
 
     def health_loop(self):
         """Send health information via UDP multicast"""
@@ -696,12 +697,27 @@ class MWAXCalvinProcessor:
 
         return status
 
-    def signal_handler(self, _signum, _frame):
-        """Handles SIGINT and SIGTERM"""
-        self.logger.warning("Interrupted. Shutting down processor...")
+    def signal_handler(self, signum, _frame):
+        """Handles SIGINT, SIGTERM, USR1"""        
+        # Update the database that this job has been cancelled
+        if signum==signal.SIGUSR1:
+            signal_message = "Slurm hit walltime"
+        elif signum==signal.SIGINT:
+            signal_message = "Received SIGINT"
+        elif signum==signal.SIGTERM:
+            signal_message = "Received SIGTERM"
+        else:
+            signal_message = f"Received unknown signal {signum}"        
+        
+        self.logger.warning("Updating job to cancelled...")
+        if self.data_downloaded:
+            self.fail_job_processing(f"Cancelled: {signal_message}")
+        else:
+            self.fail_job_downloading(f"Cancelled: {signal_message}")
 
         # Stop any Processors
-        self.stop()
+        self.logger.warning(f"{signal_message}. Shutting down processor...")
+        self.stop()        
 
     def initialise(
         self,
@@ -728,6 +744,7 @@ class MWAXCalvinProcessor:
         # Make sure we can Ctrl-C / kill out of this
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
+        signal.signal(signal.SIGUSR1, self.signal_handler)
 
         # Parse config file
         config = ConfigParser()
