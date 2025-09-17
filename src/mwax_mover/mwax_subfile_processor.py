@@ -202,7 +202,7 @@ class SubfileProcessor:
         destination_filename: str = os.path.join(self.packet_stats_destination_dir, os.path.basename(item))
 
         try:
-            self.logger.debug(f"{item}: Attempting to copy local packet stats file {item} to" f"{destination_filename}")
+            self.logger.debug(f"{item}: Attempting to copy local packet stats file {item} to{destination_filename}")
             shutil.copy2(item, destination_filename)
 
             self.logger.debug(f"{item}: Copy success. Deleting local packet stats file {item}")
@@ -225,7 +225,7 @@ class SubfileProcessor:
         # Get next keep file off the queue
         keep_filename = self.dump_keep_file_queue.get()
 
-        self.logger.info("SubfileProcessor.handle_next_keep_file is handling" f" {keep_filename}...")
+        self.logger.info(f"SubfileProcessor.handle_next_keep_file is handling {keep_filename}...")
 
         # Read TRANSFER_SIZE from subfile header
         # We only use this when writing a subfile to disk in case the subfile is
@@ -255,9 +255,7 @@ class SubfileProcessor:
             try:
                 shutil.move(keep_filename, free_filename)
             except Exception as move_exception:  # pylint: disable=broad-except
-                self.logger.error(
-                    f"Could not rename {keep_filename} back to" f" {free_filename}. Error {move_exception}"
-                )
+                self.logger.error(f"Could not rename {keep_filename} back to {free_filename}. Error {move_exception}")
                 sys.exit(2)
 
         else:
@@ -435,7 +433,7 @@ class SubfileProcessor:
                         success = True
 
                     else:
-                        self.logger.error(f"{item}- Unknown subfile mode {subfile_mode}," " ignoring.")
+                        self.logger.error(f"{item}- Unknown subfile mode {subfile_mode}, ignoring.")
                         success = False
 
                     # There is a semi-rare case where in between the top of this code and now
@@ -475,8 +473,7 @@ class SubfileProcessor:
                 # are doing a voltage capture!
                 if self.corr_enabled and CorrelatorMode.is_vcs(subfile_mode):
                     self.logger.warning(
-                        f"{item}- beamformer mode enabled and is in"
-                        f" {subfile_mode} mode, ignoring this beamformer job."
+                        f"{item}- beamformer mode enabled and is in {subfile_mode} mode, ignoring this beamformer job."
                     )
                     success = True
                 else:
@@ -503,7 +500,7 @@ class SubfileProcessor:
                         # added into the sub file (e.g. a failed load into ringbuffer)
                         # So check first, before appending them again!
                         if utils.read_subfile_value(item, "NUM_INCOHERENT_BEAMS") is None:
-                            self.logger.info(f"{item}- injecting beamformer header into" " subfile...")
+                            self.logger.info(f"{item}- injecting beamformer header into subfile...")
                             utils.inject_beamformer_headers(item, beamformer_settings)
                         else:
                             self.logger.info(f"{item}- beamformer header exists in subfile.")
@@ -524,7 +521,7 @@ class SubfileProcessor:
                         success = True
 
                     else:
-                        self.logger.error(f"{item}- Unknown subfile mode {subfile_mode}," " ignoring.")
+                        self.logger.error(f"{item}- Unknown subfile mode {subfile_mode}, ignoring.")
                         success = False
 
         except Exception as handler_exception:  # pylint: disable=broad-except
@@ -560,7 +557,7 @@ class SubfileProcessor:
 
                 except Exception as move_exception:  # pylint: disable=broad-except
                     self.logger.error(
-                        f"{item}- Could not rename {item} back to" f" {free_filename}. Error {move_exception}"
+                        f"{item}- Could not rename {item} back to {free_filename}. Error {move_exception}"
                     )
                     sys.exit(2)
 
@@ -623,9 +620,7 @@ class SubfileProcessor:
             )
         else:
             self.logger.error(
-                f"{filename}- Copying file into"
-                f" {destination_path}/{destination_filename} failed with error"
-                f" {stdout}"
+                f"{filename}- Copying file into {destination_path}/{destination_filename} failed with error {stdout}"
             )
 
         return retval
@@ -682,7 +677,7 @@ class SubfileProcessor:
         self.dump_trigger_id = trigger_id
 
         self.logger.info(
-            f"dump_voltages: from {str(start_gps_time)} to" f" {str(end_gps_time)} for trigger {trigger_id}..."
+            f"dump_voltages: from {str(start_gps_time)} to {str(end_gps_time)} for trigger {trigger_id}..."
         )
 
         # Look for any .free files which have the first 10 characters of
@@ -741,9 +736,7 @@ class SubfileProcessor:
                     # append to queue so it can be copied off when in NO_CAPTURE mode
                     self.dump_keep_file_queue.put(keep_filename)
                 else:
-                    self.logger.info(
-                        f"dump_voltages: NOT keeping {free_filename} as it is" " a MWAX_VCS subobservation"
-                    )
+                    self.logger.info(f"dump_voltages: NOT keeping {free_filename} as it is a MWAX_VCS subobservation")
 
         self.logger.info("dump_voltages: complete")
         return True

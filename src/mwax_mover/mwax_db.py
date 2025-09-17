@@ -13,7 +13,6 @@ from tenacity import (
     retry,
     stop_after_attempt,
     wait_fixed,
-    wait_random,
     retry_if_exception_type,
 )
 from mwax_mover.utils import ArchiveLocation
@@ -111,10 +110,10 @@ class MWAXDBHandler:
                         else:
                             # Something went wrong
                             self.logger.error(
-                                "select_postgres(): Error- queried" f" {rows_affected} rows, expected 1. SQL={sql}"
+                                f"select_postgres(): Error- queried {rows_affected} rows, expected 1. SQL={sql}"
                             )
                             raise Exception(
-                                "select_postgres(): Error- queried" f" {rows_affected} rows, expected 1. SQL={sql}"
+                                f"select_postgres(): Error- queried {rows_affected} rows, expected 1. SQL={sql}"
                             )
                     else:
                         # We don't know how many rows, so cool, return them
@@ -344,7 +343,7 @@ def get_data_file_row(db_handler_object: MWAXDBHandler, full_filename: str, obs_
         data_files_row.checksum = row["checksum"]
 
         db_handler_object.logger.info(
-            f"{full_filename} get_data_file_row() Successfully read from" f" data_files table {vars(data_files_row)}"
+            f"{full_filename} get_data_file_row() Successfully read from data_files table {vars(data_files_row)}"
         )
         return data_files_row
 
@@ -410,7 +409,7 @@ def insert_data_file_row(
             ),
         )
 
-        db_handler_object.logger.info(f"{filename} insert_data_file_row() Successfully wrote into" " data_files table")
+        db_handler_object.logger.info(f"{filename} insert_data_file_row() Successfully wrote into data_files table")
         return True
 
     except psycopg.errors.ForeignKeyViolation:
@@ -430,8 +429,7 @@ def insert_data_file_row(
     except Exception as upsert_exception:  # pylint: disable=broad-except
         db_handler_object.logger.exception(
             upsert_exception,
-            f"{filename} insert_data_file_row() error inserting data_files"
-            f" record in data_files table. SQL was {sql}",
+            f"{filename} insert_data_file_row() error inserting data_files record in data_files table. SQL was {sql}",
         )
         return False
 
@@ -474,7 +472,7 @@ def update_data_file_row_as_archived(
         )
 
         db_handler_object.logger.info(
-            f"{filename} update_data_file_row_as_archived() Successfully" " updated data_files table"
+            f"{filename} update_data_file_row_as_archived() Successfully updated data_files table"
         )
         return True
 
@@ -527,7 +525,7 @@ def insert_calibration_fits_row(
     fit_niter: int,
     fit_limit: Optional[int],
     source_list: str,
-    num_sources: int
+    num_sources: int,
 ) -> Tuple[bool, int | None]:
     """Inserts a new calibration_fits row and return the fit_id if successful
     This row represents the calibration 'header' for an obsid.
@@ -545,26 +543,16 @@ def insert_calibration_fits_row(
     # Fit ID is the Unix timestamp multiplied by 10**6 so it's an int
     fit_id = math.floor(time.time() * 10**6)
 
-    sql_values = (
-        fit_id,
-        obs_id,
-        code_version,
-        creator,
-        fit_niter,
-        fit_limit,
-        source_list,
-        num_sources
-    )
+    sql_values = (fit_id, obs_id, code_version, creator, fit_niter, fit_limit, source_list, num_sources)
 
     try:
         db_handler_object.execute_dml_row_within_transaction(sql, sql_values, transaction_cursor)
 
         db_handler_object.logger.info(
-            f"{obs_id}: insert_calibration_fits_row() Successfully wrote "
-            f"into calibration_fits table. fit_id={fit_id}"
+            f"{obs_id}: insert_calibration_fits_row() Successfully wrote into calibration_fits table. fit_id={fit_id}"
         )
         return (True, fit_id)
-    
+
     except Exception:  # pylint: disable=broad-except
         db_handler_object.logger.exception(
             f"{obs_id}: insert_calibration_fits_row() error inserting"
@@ -851,8 +839,7 @@ def update_calsolution_request_submit_mwa_asvo_job_status(
     try:
         db_handler_object.execute_dml(sql, params, len(request_ids))
         db_handler_object.logger.debug(
-            "update_calsolution_request_submit_mwa_asvo_job_status(): Successfully updated "
-            "calibration_request table."
+            "update_calsolution_request_submit_mwa_asvo_job_status(): Successfully updated calibration_request table."
         )
 
     except Exception:  # pylint: disable=broad-except
@@ -895,7 +882,7 @@ def update_calibration_request_slurm_status(
         # Update the rows
         db_handler_object.execute_dml(sql, params, len(request_ids))
         db_handler_object.logger.debug(
-            "update_calsolution_request_download_complete_status(): Successfully updated " "calibration_request table."
+            "update_calsolution_request_download_complete_status(): Successfully updated calibration_request table."
         )
 
     except Exception:  # pylint: disable=broad-except
@@ -965,7 +952,7 @@ def update_calsolution_request_download_complete_status(
     try:
         db_handler_object.execute_dml(sql, params, None)
         db_handler_object.logger.debug(
-            "update_calsolution_request_download_complete_status(): Successfully updated " "calibration_request table."
+            "update_calsolution_request_download_complete_status(): Successfully updated calibration_request table."
         )
 
     except Exception:  # pylint: disable=broad-except
@@ -1052,8 +1039,7 @@ def update_calsolution_request_calibration_started_status(
 
         db_handler_object.execute_dml(sql, params, None)
         db_handler_object.logger.debug(
-            "update_calsolution_request_calibration_started_status(): Successfully updated "
-            "calibration_request table."
+            "update_calsolution_request_calibration_started_status(): Successfully updated calibration_request table."
         )
 
     except Exception:  # pylint: disable=broad-except
@@ -1129,8 +1115,7 @@ def update_calsolution_request_calibration_complete_status(
 
         db_handler_object.execute_dml(sql, params, None)
         db_handler_object.logger.debug(
-            "update_calsolution_request_calibration_complete_status(): Successfully updated "
-            "calibration_request table."
+            "update_calsolution_request_calibration_complete_status(): Successfully updated calibration_request table."
         )
 
     except Exception:  # pylint: disable=broad-except

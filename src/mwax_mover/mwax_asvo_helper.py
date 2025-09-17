@@ -244,7 +244,6 @@ class MWAASVOHelper:
 
         # Iterate through each job
         for json_one_job in json_stdout:
-
             # Extract the job_id, state and a download url (if status is Ready)
             obs_id, job_id, job_state, download_url = get_job_info_from_giant_squid_json(json_stdout, json_one_job)
 

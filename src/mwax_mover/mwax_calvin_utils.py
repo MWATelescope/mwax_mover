@@ -187,7 +187,7 @@ class Metafits:
         # sanity checks
         if total_bandwidth_hz != fine_chan_width_hz * obs_num_fine_chans:
             raise ValueError(
-                f"{self.filename} - ({total_bandwidth_hz=})" f" != ({fine_chan_width_hz=}) * ({obs_num_fine_chans=})"
+                f"{self.filename} - ({total_bandwidth_hz=}) != ({fine_chan_width_hz=}) * ({obs_num_fine_chans=})"
             )
 
         if obs_num_fine_chans % len(coarse_chans) != 0:
@@ -322,7 +322,8 @@ class HyperfitsSolution:
         ref_solutions = [solution[:, ref_tile_idx, :] for solution in solutions]  # type: ignore
         # divide solutions jones matrix by reference jones matrix, via inverse determinant
         ref_inv_det = np.divide(
-            1 + 0j, ref_solutions[0] * ref_solutions[3] - ref_solutions[1] * ref_solutions[2]  # type: ignore
+            1 + 0j,
+            ref_solutions[0] * ref_solutions[3] - ref_solutions[1] * ref_solutions[2],  # type: ignore
         )
         return [  # type: ignore
             (solutions[0] * ref_solutions[3] - solutions[1] * ref_solutions[2]) * ref_inv_det,
@@ -389,7 +390,7 @@ class HyperfitsSolutionGroup:
         # assert coarse channel ranges do not overlap
         for left, right in zip(all_ranges[:-1], all_ranges[1:]):
             if left[0] == right[0] or left[-1] >= right[0]:
-                raise RuntimeError("coarse channel ranges from metafits overlap. " f"{[left, right]}, {metafits=}")
+                raise RuntimeError(f"coarse channel ranges from metafits overlap. {[left, right]}, {metafits=}")
         return ChanInfo(
             coarse_chan_ranges=all_ranges,
             fine_chan_width_hz=first_chan_info.fine_chan_width_hz,
@@ -447,7 +448,7 @@ class HyperfitsSolutionGroup:
                     coarse_bandwidth_hz = coarse_chanblocks[-1] - coarse_chanblocks[0]
                     if coarse_bandwidth_hz > metafits_coarse_bandwidth_hz:
                         raise RuntimeError(
-                            f"{soln.filename} - solution {coarse_bandwidth_hz=}" f" > {metafits_coarse_bandwidth_hz=}"
+                            f"{soln.filename} - solution {coarse_bandwidth_hz=} > {metafits_coarse_bandwidth_hz=}"
                         )
                     coarse_centroid_hz = np.mean(coarse_chanblocks + chanblock_width_hz / 2)
                 coarse_chan_idx = np.round(coarse_centroid_hz // metafits_coarse_bandwidth_hz)
@@ -571,7 +572,6 @@ class HyperfitsSolutionGroup:
         all_yy_solns = None
 
         for chanblocks_hz, soln in zip(self.all_chanblocks_hz, self.solns):
-
             # TODO: ch_flags = hdus['CHANBLOCKS'].data['Flag']
             # TODO: results = hdus['RESULTS'].data.flatten()
 
@@ -587,10 +587,10 @@ class HyperfitsSolutionGroup:
             if refant_name is not None:
                 _ref_tiles = soln_tiles[soln_tiles["name"] == refant_name]
                 if not len(_ref_tiles):
-                    raise RuntimeError(f"{soln.filename} - reference tile {refant_name}" f" not found in solution file")
+                    raise RuntimeError(f"{soln.filename} - reference tile {refant_name} not found in solution file")
                 if len(_ref_tiles) > 1:
                     raise RuntimeError(
-                        f"{soln.filename} - more than one tile with name {refant_name}" f" found in solution file"
+                        f"{soln.filename} - more than one tile with name {refant_name} found in solution file"
                     )
                 _ref_tile_idx = _ref_tiles.index[0]
                 _ref_tile_flag = _ref_tiles.iloc[0]["flag"]
@@ -605,7 +605,7 @@ class HyperfitsSolutionGroup:
                     # self.logger.debug(f"{soln.filename} - ref tile found at index {ref_tile_idx}")
                 elif ref_tile_idx != _ref_tile_idx:
                     raise RuntimeError(
-                        f"{soln.filename} - reference tile in solution file" f" does not match previous solution files"
+                        f"{soln.filename} - reference tile in solution file does not match previous solution files"
                     )
 
             _tile_ids = soln_tiles["id"].to_numpy()
@@ -810,9 +810,9 @@ def fit_phase_line(
     νmax = 0.5 / dt  # The Nyquist rate
     N = 2 * int(np.round(νmax / dν))  # The number of bins to use during the FFTs
 
-    shifted_bins[
-        shifted_bins < 0
-    ] += N  # Now the "negative" frequencies are put at the end, which is where FFT wants them
+    shifted_bins[shifted_bins < 0] += (
+        N  # Now the "negative" frequencies are put at the end, which is where FFT wants them
+    )
 
     # Create a zero-padded, shifted version of the spectrum, which I'll call sol0
     # sol0: This shifts the non-zero data down to a set of frequencies straddling the DC bin.
@@ -1039,7 +1039,7 @@ def debug_phase_fits(
     )
 
     if len(flavor_fits):
-        rx_means = plot_rx_lengths(flavor_fits, prefix, show, title)
+        _rx_means = plot_rx_lengths(flavor_fits, prefix, show, title)
         # print(f"{rx_means=}")
 
     def ensure_system_byte_order(arr):
@@ -1124,7 +1124,6 @@ def plot_rx_lengths(flavor_fits, prefix, show, title):
 
 
 def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fits_pivot, weights2):
-
     rxs = np.sort(np.unique(phase_fits_pivot["rx"]))
     slots = np.sort(np.unique(phase_fits_pivot["slot"]))
     figsize = (np.clip(len(slots) * 2.5, 5, 20), np.clip(len(rxs) * 3, 5, 30))
@@ -1402,7 +1401,7 @@ def write_stats(
         return_value, _ = run_command_ext(logger, cmd, -1, timeout=10, use_shell=False)
 
         logger.info(
-            f"{obs_id} Finished running hyperdrive stats on" f" {hyperdrive_solution_filename}. Return={return_value}"
+            f"{obs_id} Finished running hyperdrive stats on {hyperdrive_solution_filename}. Return={return_value}"
         )
     except Exception as catch_all_exception:
         return False, str(catch_all_exception)
@@ -1442,9 +1441,9 @@ def write_readme_file(logger, filename, cmd, exit_code, stdout, stderr):
     try:
         with open(filename, "w", encoding="UTF-8") as readme:
             if exit_code == 0:
-                readme.write("This run succeded at:" f" {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
+                readme.write(f"This run succeded at: {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
             else:
-                readme.write("This run failed at:" f" {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
+                readme.write(f"This run failed at: {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
             readme.write(f"Command: {cmd}\n")
             readme.write(f"Exit code: {exit_code}\n")
             readme.write(f"stdout: {stdout}\n")
@@ -1452,7 +1451,7 @@ def write_readme_file(logger, filename, cmd, exit_code, stdout, stderr):
 
     except Exception:
         logger.warning(
-            (f"Could not write text file {filename} describing the" " problem observation."),
+            (f"Could not write text file {filename} describing the problem observation."),
             exc_info=True,
         )
 
@@ -1499,18 +1498,18 @@ def run_birli(
         # set default edge_width res from config
         if oversampled:
             # For oversampled obs we don't flag edges and we don't correct passband
-            edge_width_hz = 0            
+            edge_width_hz = 0
         else:
             edge_width_hz = birli_edge_width_hz  # default
             edge_width_hz = np.max([fine_chan_width_hz, edge_width_hz])
             assert edge_width_hz >= fine_chan_width_hz, f"{edge_width_hz=} must be >= {fine_chan_width_hz=}"
-            assert edge_width_hz % fine_chan_width_hz == 0, f"{edge_width_hz=} must multiple of {fine_chan_width_hz=}"            
+            assert edge_width_hz % fine_chan_width_hz == 0, f"{edge_width_hz=} must multiple of {fine_chan_width_hz=}"
 
         # set minimum freq res from config
         min_freq_res = birli_freq_res_hz
         avg_arg = ""
         if fine_chan_width_hz < min_freq_res:
-            avg_arg += f" --avg-freq-res={int(min_freq_res/1e3)}"
+            avg_arg += f" --avg-freq-res={int(min_freq_res / 1e3)}"
 
         # set minimum time res from config
         min_time_res = birli_int_time_res_sec
@@ -1523,7 +1522,7 @@ def run_birli(
             f" --metafits {metafits_filename}"
             " --no-draw-progress"
             f" --uvfits-out={uvfits_filename}"
-            f" --flag-edge-width={int(edge_width_hz/1e3)}"
+            f" --flag-edge-width={int(edge_width_hz / 1e3)}"
             f" --max-memory={birli_max_mem_gib}"
             f" {avg_arg} {data_file_arg}"
         )
@@ -1556,20 +1555,18 @@ def run_birli(
                 stderr,
             )
         else:
-            logger.error(f"{obs_id}: Birli run FAILED: Exit code of {exit_code} in" f" {elapsed:.3f} seconds: {stderr}")
+            logger.error(f"{obs_id}: Birli run FAILED: Exit code of {exit_code} in {elapsed:.3f} seconds: {stderr}")
     except Exception as birli_run_exception:
         elapsed = time.time() - start_time
         logger.error(
-            f"{obs_id}: birli run FAILED: Unhandled exception"
-            f" {birli_run_exception} in {elapsed:.3f} seconds:"
-            f" {stderr}"
+            f"{obs_id}: birli run FAILED: Unhandled exception {birli_run_exception} in {elapsed:.3f} seconds: {stderr}"
         )
 
     if not birli_success:
         # If we are not shutting down,
         # Move the files to an error dir
         logger.info(
-            f"{obs_id}: moving failed files to {job_output_path} for manual" " analysis and writing readme_error.txt"
+            f"{obs_id}: moving failed files to {job_output_path} for manual analysis and writing readme_error.txt"
         )
 
         # Move the processing dir
@@ -1699,7 +1696,7 @@ def run_hyperdrive(
         # We did not run successfully on one or all hyperdrive calls.
         # Move the files to a the job output dir
         logger.info(
-            f"{obs_id}: moving failed files to {job_output_path} for manual" " analysis and writing readme_error.txt"
+            f"{obs_id}: moving failed files to {job_output_path} for manual analysis and writing readme_error.txt"
         )
 
         # Move the input uvfits files to the job path
@@ -1769,7 +1766,7 @@ def run_hyperdrive_stats(
             )
 
     if stats_successful == len(input_uvfits_files):
-        logger.info(f"{obs_id}: All {stats_successful} hyperdrive stats" " runs successful")
+        logger.info(f"{obs_id}: All {stats_successful} hyperdrive stats runs successful")
         return True
     else:
         logger.warning(f"{obs_id}: Not all hyperdrive stats runs were successful.")
@@ -1943,7 +1940,7 @@ def submit_sbatch(logger: logging.Logger, script_path: str, script: str, obs_id:
                 logger.error(f"Slurm job submitted OK, but could not get slurm_job_id from: {stdout}. Aborting")
                 exit(-10)
         else:
-            logger.error(f"{script_filename} failed to be submitted to SLURM. Error" f" {stdout}")
+            logger.error(f"{script_filename} failed to be submitted to SLURM. Error {stdout}")
 
     except Exception:
         logger.exception(f"{script_filename} failure running sbatch.")
@@ -1961,9 +1958,11 @@ def estimate_birli_output_bytes(
     # coarse_chans = 24
     # fine_channels = 30.72 MHz / birli_freq_res_khz
     # pols = 4 (XX,XY,YX,YY)
-    # values = 2 (real, imag)
-    # bytes_per_value = 4 (f32)
-    # Total bytes = (baselines * fine_channels * pols * values * bytes_per_value * timesteps)
+    # bytes_per_visibility = 8+4+1
+    # Total bytes = (timesteps * coarse_chans * fine_channels * baselines * pols * bytes_per_visibility )
+    #
+    # (Normally you would use values * bytes_per_value but Birli has more outputs than this)
+    #
     # Total GB = bytes / 1000.^3
     baselines: int = metafits_context.num_baselines  # 144T (10440)
     timesteps: int = int(metafits_context.sched_duration_ms / (birli_int_time_res_sec * 1000.0))  # 60
@@ -1972,7 +1971,9 @@ def estimate_birli_output_bytes(
         metafits_context.coarse_chan_width_hz / (birli_freq_res_khz * 1000.0)
     )  # 1280000 / 80000 == 16
     pols: int = metafits_context.num_visibility_pols  # (XX,XY,YX,YY) # 4
-    values: int = 2  # (real, imag)
-    bytes_per_value: int = 4  # f32
+    bytes_per_visibility: int = 13  # based on Birli
 
-    return baselines * coarse_channels * fine_channels * pols * values * bytes_per_value * timesteps
+    # Uncomment for debug
+    # print(f"{timesteps}ts * {coarse_channels * fine_channels}ch * {baselines}bl * {pols}pol * {bytes_per_visibility} bytes")
+
+    return timesteps * coarse_channels * fine_channels * baselines * pols * bytes_per_visibility

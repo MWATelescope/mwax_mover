@@ -47,7 +47,7 @@ class PriorityQueueWorker(object):
         if (event_handler is None and executable_path is None) or (
             event_handler is not None and executable_path is not None
         ):
-            raise Exception("QueueWorker requires event_handler OR executable_path not" " both and not neither!")
+            raise Exception("QueueWorker requires event_handler OR executable_path not both and not neither!")
 
         self._executable_path = executable_path
         self._event_handler = event_handler
@@ -101,7 +101,7 @@ class PriorityQueueWorker(object):
                     else:
                         # Dequeue the item
                         self.logger.warning(
-                            f"Processing {self.current_item } Complete... file"
+                            f"Processing {self.current_item} Complete... file"
                             " was moved or deleted. Queue size:"
                             f" {self.source_queue.qsize()}"
                         )
@@ -110,9 +110,7 @@ class PriorityQueueWorker(object):
                         continue
 
                     elapsed = time.time() - start_time
-                    self.logger.info(
-                        "Complete. Queue size:" f" {self.source_queue.qsize()} Elapsed:" f" {elapsed:.2f} sec"
-                    )
+                    self.logger.info(f"Complete. Queue size: {self.source_queue.qsize()} Elapsed: {elapsed:.2f} sec")
 
                     if success:
                         # reset our error count and backoffs
@@ -124,8 +122,7 @@ class PriorityQueueWorker(object):
                             backoff = self.backoff_limit_seconds
 
                         self.logger.info(
-                            f"{self.consecutive_error_count} consecutive"
-                            f" failures. Backing off for {backoff} seconds."
+                            f"{self.consecutive_error_count} consecutive failures. Backing off for {backoff} seconds."
                         )
                         self.event.wait(backoff)
 

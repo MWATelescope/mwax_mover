@@ -65,7 +65,7 @@ class PriorityWatcher(object):
     def start(self):
         """Begins watching the directory"""
         if self.recursive:
-            self.logger.info(f"PriorityWatcher starting on {self.path}/*{self.pattern} and" " all subdirectories...")
+            self.logger.info(f"PriorityWatcher starting on {self.path}/*{self.pattern} and all subdirectories...")
             self.inotify_tree = inotify.adapters.InotifyTree(self.path, mask=self.mask)
         else:
             self.logger.info(f"PriorityWatcher starting on {self.path}/*{self.pattern}...")
@@ -73,7 +73,7 @@ class PriorityWatcher(object):
             self.inotify_tree.add_watch(self.path, mask=self.mask)
 
         if self.exclude_pattern:
-            self.logger.info(f"Watcher on {self.path}/*{self.pattern} is excluding" f" *{self.exclude_pattern}")
+            self.logger.info(f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}")
 
         self.watching = True
         self.do_watch_loop()
@@ -140,7 +140,7 @@ class PriorityWatcher(object):
 
                         self.dest_queue.put(new_queue_item)
                         self.logger.info(
-                            f"{dest_filename} added to queue with priority" f" {priority} ({self.dest_queue.qsize()})"
+                            f"{dest_filename} added to queue with priority {priority} ({self.dest_queue.qsize()})"
                         )
 
     def get_status(self) -> dict:

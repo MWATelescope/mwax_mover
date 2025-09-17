@@ -1,4 +1,3 @@
-from datetime import datetime
 import glob
 import logging
 import os
@@ -21,7 +20,6 @@ from mwax_mover.mwax_calvin_utils import (
     process_gain_fits,
     write_readme_file,
 )
-from mwax_mover import mwax_db
 from mwax_mover.version import get_mwax_mover_version_string
 
 
@@ -155,7 +153,7 @@ def process_solutions(
                     fit_niter=phase_fit_niter,
                     fit_limit=None,
                     source_list=source_list,
-                    num_sources=num_sources
+                    num_sources=num_sources,
                 )
 
                 if fit_id is None or not success:

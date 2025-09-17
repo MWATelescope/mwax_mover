@@ -187,7 +187,7 @@ def validate_filename(
 
         if not obs_id_check.isdigit():
             valid = False
-            validation_error = "Filename does not start with a 10 digit observation_id-" " ignoring"
+            validation_error = "Filename does not start with a 10 digit observation_id- ignoring"
         else:
             obs_id = int(obs_id_check)
 
@@ -275,7 +275,7 @@ def validate_filename(
         # Obtain a lock so we can only do this inside one thread
         with metafits_file_lock:
             if not os.path.exists(metafits_filename):
-                logger.info(f"Metafits file {metafits_filename} not found. Atempting" " to download it")
+                logger.info(f"Metafits file {metafits_filename} not found. Atempting to download it")
                 try:
                     download_metafits_file(logger, obs_id, metafits_path)
                 except Exception as catch_all_exception:  # pylint: disable=broad-except
@@ -350,7 +350,7 @@ def get_metafits_value(metafits_filename: str, key: str):
 
     except Exception as catch_all_exception:
         raise Exception(
-            f"Error reading metafits file: {metafits_filename}:" f" {catch_all_exception}"
+            f"Error reading metafits file: {metafits_filename}: {catch_all_exception}"
         ) from catch_all_exception
 
 
@@ -436,7 +436,7 @@ def read_config_list(logger, config: ConfigParser, section: str, key: str):
         return_list = []
 
     logger.info(
-        f"Read cfg [{section}].{key}: '{string_value}' converted to list of" f" {len(return_list)} items: {return_list}"
+        f"Read cfg [{section}].{key}: '{string_value}' converted to list of {len(return_list)} items: {return_list}"
     )
     return return_list
 
@@ -474,7 +474,7 @@ def process_mwax_stats(
 
     metafits_filename = os.path.join(metafits_path, f"{obs_id}_metafits.fits")
 
-    cmd = f"{mwax_stats_dir}/mwax_stats -t {full_filename} -m" f" {metafits_filename} -o {stats_dump_dir}"
+    cmd = f"{mwax_stats_dir}/mwax_stats -t {full_filename} -m {metafits_filename} -o {stats_dump_dir}"
 
     logger.debug(f"{full_filename}- attempting to run stats: {cmd}")
 
@@ -512,7 +512,7 @@ def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, num
             f" {gbps_per_sec:.3f} Gbps)"
         )
     else:
-        logger.error(f"{full_filename} load_psrdada_ringbuffer failed with error" f" {stdout}")
+        logger.error(f"{full_filename} load_psrdada_ringbuffer failed with error {stdout}")
 
     return return_value
 
@@ -532,7 +532,7 @@ def run_mwax_packet_stats(
     if return_value:
         logger.info(f"{full_filename} mwax_packet_stats success in {elapsed:.3f} sec")
     else:
-        logger.error(f"{full_filename} mwax_packet_stats failed with error" f" {stdout}")
+        logger.error(f"{full_filename} mwax_packet_stats failed with error {stdout}")
 
     return return_value
 
@@ -986,17 +986,13 @@ def call_webservice(logger: logging.Logger, obs_id: int, url_list: list[str], da
                 return response
 
             elif response.status_code >= 400 and response.status_code < 500:
-                error_message = (
-                    f"{obs_id}: call_webservice() returned {response.status_code} " f"{response.text} (failure)"
-                )
+                error_message = f"{obs_id}: call_webservice() returned {response.status_code} {response.text} (failure)"
                 logger.error(error_message)
                 raise ValueError(error_message)
 
             else:
                 # Non-200 status code- try next url
-                logger.warning(
-                    f"{obs_id}: call_webservice() returned {response.status_code} " f"{response.text} (failure)"
-                )
+                logger.warning(f"{obs_id}: call_webservice() returned {response.status_code} {response.text} (failure)")
         except ValueError:
             raise
 
@@ -1074,10 +1070,10 @@ def remove_file(logger, filename: str, raise_error: bool) -> bool:
 
     except Exception as delete_exception:  # pylint: disable=broad-except
         if raise_error:
-            logger.error(f"{filename}- Error deleting: {delete_exception}. Retrying up" " to 5 times.")
+            logger.error(f"{filename}- Error deleting: {delete_exception}. Retrying up to 5 times.")
             raise delete_exception
         else:
-            logger.warning(f"{filename}- Error deleting: {delete_exception}. File may" " have been moved or removed.")
+            logger.warning(f"{filename}- Error deleting: {delete_exception}. File may have been moved or removed.")
             return True
 
 

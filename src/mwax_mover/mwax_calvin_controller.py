@@ -380,7 +380,7 @@ class MWAXCalvinController:
                     self.health_multicast_hops,
                 )
             except Exception as catch_all_exception:  # pylint: disable=broad-except
-                self.logger.warning("health_handler: Failed to send health information." f" {catch_all_exception}")
+                self.logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
 
             # Sleep for a second
             self.sleep(1)
@@ -565,7 +565,7 @@ class MWAXCalvinController:
         self.hostname = utils.get_hostname()
 
         if not os.path.exists(config_filename):
-            print(f"Configuration file location {config_filename} does not" " exist. Quitting.")
+            print(f"Configuration file location {config_filename} does not exist. Quitting.")
             sys.exit(1)
 
         # Make sure we can Ctrl-C / kill out of this
@@ -680,7 +680,7 @@ class MWAXCalvinController:
 
         if not os.path.exists(self.giant_squid_binary_path):
             self.logger.error(
-                "giant_squid_binary_path location " f" {self.giant_squid_binary_path} does not exist. Quitting."
+                f"giant_squid_binary_path location  {self.giant_squid_binary_path} does not exist. Quitting."
             )
             sys.exit(1)
 

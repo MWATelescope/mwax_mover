@@ -30,7 +30,7 @@ def run_command_ext(
         cmdline = f"{command}"
     else:
         if int(numa_node) >= 0:
-            cmdline = "numactl" f" --cpunodebind={str(numa_node)} --membind={str(numa_node)} " f"{command}"
+            cmdline = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} {command}"
         else:
             cmdline = f"{command}"
 
@@ -74,9 +74,7 @@ def run_command_ext(
                 stdout = ""
 
             logger.error(
-                f"Error executing {cmdline}. Return code: {return_code} "
-                f"StdErr: {stderror_log} "
-                f"StdOut: {stdout_log}"
+                f"Error executing {cmdline}. Return code: {return_code} StdErr: {stderror_log} StdOut: {stdout_log}"
             )
             return False, f"{stdout} {stderror}"
         else:
@@ -110,7 +108,7 @@ def run_command_popen(
         cmdline = f"{command}"
     else:
         if int(numa_node) > 0:
-            cmdline = "numactl" f" --cpunodebind={str(numa_node)} --membind={str(numa_node)} " f"{command}"
+            cmdline = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} {command}"
         else:
             cmdline = f"{command}"
 
@@ -148,8 +146,7 @@ def check_popen_finished(logger, popen_process, timeout: int = 60) -> typing.Tup
 
         if exit_code != 0:
             logger.error(
-                f"Error executing {popen_process.args}. Return code:"
-                f" {exit_code} StdErr: {stderror} StdOut: {stdout}"
+                f"Error executing {popen_process.args}. Return code: {exit_code} StdErr: {stderror} StdOut: {stdout}"
             )
 
     except subprocess.TimeoutExpired as timeout_expired:
@@ -157,9 +154,9 @@ def check_popen_finished(logger, popen_process, timeout: int = 60) -> typing.Tup
         stderror += "\nTimeout expired"
 
     except subprocess.CalledProcessError as cpe:
-        logger.error(f"CalledProcessError executing {popen_process.args}:" f" {str(cpe)} {cpe.stderr}")
+        logger.error(f"CalledProcessError executing {popen_process.args}: {str(cpe)} {cpe.stderr}")
 
     except Exception as command_exception:  # pylint: disable=broad-except
-        logger.error(f"Exception executing {popen_process.args}:" f" {str(command_exception)}")
+        logger.error(f"Exception executing {popen_process.args}: {str(command_exception)}")
 
     return (exit_code, stdout, stderror)

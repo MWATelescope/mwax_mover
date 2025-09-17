@@ -1,9 +1,13 @@
 # Changelog
 
+## 1.0.78 17-Sep-2025
+
+* Calvin processor: More accurately calculates output size of Birli.
+
 ## 1.0.77 10-Sep-2025
 
-* Calvin processor: slurm job walltime is now 4 hours (for slow to download/large ASVO jobs)
-* Calvin processor: added slurm directive to send a USR1 signal on 5 mins before walltime hit to error the job properly in the database
+* Calvin processor: slurm job walltime is now 4 hours (for slow to download/large ASVO jobs).
+* Calvin processor: added slurm directive to send a USR1 signal on 5 mins before walltime hit to error the job properly in the database.
 
 ## 1.0.76 15-Aug-2025
 

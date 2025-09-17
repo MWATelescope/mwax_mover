@@ -219,7 +219,7 @@ class MWACacheArchiveProcessor:
         if val.valid:
             # Get the file size
             actual_file_size = os.stat(item).st_size
-            self.logger.debug(f"{item}- archive_handler() file size on disk is" f" {actual_file_size} bytes")
+            self.logger.debug(f"{item}- archive_handler() file size on disk is {actual_file_size} bytes")
 
             # Lookup file from db
             data_files_row: DataFileRow = mwax_db.get_data_file_row(self.remote_db_handler_object, item, val.obs_id)
@@ -228,7 +228,7 @@ class MWACacheArchiveProcessor:
             # Check for 0 size
             if actual_file_size == 0:
                 # File size is 0- lets just blow it away
-                self.logger.warning(f"{item}- archive_handler() File size is 0 bytes. Deleting" " file")
+                self.logger.warning(f"{item}- archive_handler() File size is 0 bytes. Deleting file")
                 utils.remove_file(self.logger, item, raise_error=False)
 
                 # even though its a problem,we return true as we are finished
@@ -247,7 +247,7 @@ class MWACacheArchiveProcessor:
                 # with the item and it should not be requeued
                 return True
 
-            self.logger.debug(f"{item}- archive_handler() File size matches metadata. Checking md5sum..." " database")
+            self.logger.debug(f"{item}- archive_handler() File size matches metadata. Checking md5sum... database")
 
             # Check md5sum
             actual_checksum = utils.do_checksum_md5(self.logger, item, None, 600)
@@ -255,8 +255,7 @@ class MWACacheArchiveProcessor:
             # Compare
             if actual_checksum != data_files_row.checksum:
                 self.logger.warning(
-                    f"{item}- archive_handler() checksum"
-                    f" {actual_checksum} does not match {data_files_row.checksum}."
+                    f"{item}- archive_handler() checksum {actual_checksum} does not match {data_files_row.checksum}."
                 )
                 return False
 
@@ -376,7 +375,7 @@ class MWACacheArchiveProcessor:
                     self.health_multicast_hops,
                 )
             except Exception as catch_all_exception:  # pylint: disable=broad-except
-                self.logger.warning("health_handler: Failed to send health information." f" {catch_all_exception}")
+                self.logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
 
             # Sleep for a second
             time.sleep(1)
@@ -436,7 +435,7 @@ class MWACacheArchiveProcessor:
     def initialise(self, config_filename):
         """Do initial setup"""
         if not os.path.exists(config_filename):
-            print(f"Configuration file location {config_filename} does not" " exist. Quitting.")
+            print(f"Configuration file location {config_filename} does not exist. Quitting.")
             sys.exit(1)
 
         # Parse config file
@@ -468,9 +467,7 @@ class MWACacheArchiveProcessor:
         console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(console_log)
 
-        self.logger.info(
-            "Starting mwacache_archive_processor" f" processor...v{version.get_mwax_mover_version_string()}"
-        )
+        self.logger.info(f"Starting mwacache_archive_processor processor...v{version.get_mwax_mover_version_string()}")
 
         # Get this hosts hostname
         if self.hostname == "":
@@ -492,7 +489,7 @@ class MWACacheArchiveProcessor:
         self.metafits_path = utils.read_config(self.logger, config, "mwax mover", "metafits_path")
 
         if not os.path.exists(self.metafits_path):
-            self.logger.error("Metafits file location " f" {self.metafits_path} does not exist. Quitting.")
+            self.logger.error(f"Metafits file location  {self.metafits_path} does not exist. Quitting.")
             sys.exit(1)
 
         self.archive_to_location = ArchiveLocation(
@@ -573,7 +570,7 @@ class MWACacheArchiveProcessor:
             new_incoming_path = utils.read_config(self.logger, config, self.hostname, f"incoming_path{i}")
             if not os.path.exists(new_incoming_path):
                 self.logger.error(
-                    f"incoming file location in incoming_path{i} -" f" {new_incoming_path} does not exist. Quitting."
+                    f"incoming file location in incoming_path{i} - {new_incoming_path} does not exist. Quitting."
                 )
                 sys.exit(1)
             self.watch_dirs.append(new_incoming_path)

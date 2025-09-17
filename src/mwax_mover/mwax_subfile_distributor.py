@@ -107,9 +107,7 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
                         self.wfile.write(b"OK")
                     else:
                         if len(str(starttime)) != 10 and starttime != 0:
-                            raise ValueError(
-                                "start must be gps seconds and length 10 (or 0" " for as early as possible)"
-                            )
+                            raise ValueError("start must be gps seconds and length 10 (or 0 for as early as possible)")
 
                         if len(str(endtime)) != 10:
                             raise ValueError("end must be gps seconds and length 10")
@@ -135,7 +133,7 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
                             # Reject this request
                             self.send_response(400)
                             self.end_headers()
-                            self.wfile.write(b"Voltage Buffer Dump already in progress." b" Request canceled.")
+                            self.wfile.write(b"Voltage Buffer Dump already in progress. Request canceled.")
 
                 except ValueError as parameters_exception:  # pylint: disable=broad-except
                     self.send_response(400)
@@ -146,7 +144,7 @@ class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
                     self.send_response(400)
                     self.end_headers()
                     self.wfile.write(
-                        "Unhandled exception running dump_voltages" f" {dump_voltages_exception}".encode("utf-8")
+                        f"Unhandled exception running dump_voltages {dump_voltages_exception}".encode("utf-8")
                     )
 
             else:
@@ -286,7 +284,7 @@ class MWAXSubfileDistributor:
     def initialise(self, config_filename):
         """Initialise common code"""
         if not os.path.exists(config_filename):
-            self.logger.error(f"Configuration file location {config_filename} does not" " exist. Quitting.")
+            self.logger.error(f"Configuration file location {config_filename} does not exist. Quitting.")
             sys.exit(1)
 
         # Parse config file
@@ -318,7 +316,7 @@ class MWAXSubfileDistributor:
         console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
         self.logger.addHandler(console_log)
 
-        self.logger.info("Starting mwax_subfile_distributor" f" processor...v{version.get_mwax_mover_version_string()}")
+        self.logger.info(f"Starting mwax_subfile_distributor processor...v{version.get_mwax_mover_version_string()}")
         self.logger.info(f"Reading config file: {config_filename}")
 
         self.cfg_webserver_port = int(utils.read_config(self.logger, self.config, "mwax mover", "webserver_port"))
@@ -378,22 +376,20 @@ class MWAXSubfileDistributor:
 
         if not os.path.exists(self.cfg_voltdata_dont_archive_path):
             self.logger.error(
-                "'Voltdata Dont Archive' location"
-                f" {self.cfg_voltdata_dont_archive_path} does not exist."
-                " Quitting."
+                f"'Voltdata Dont Archive' location {self.cfg_voltdata_dont_archive_path} does not exist. Quitting."
             )
             sys.exit(1)
 
         if not os.path.exists(self.cfg_subfile_incoming_path):
-            self.logger.error(f"Subfile file location {self.cfg_subfile_incoming_path} does" " not exist. Quitting.")
+            self.logger.error(f"Subfile file location {self.cfg_subfile_incoming_path} does not exist. Quitting.")
             sys.exit(1)
 
         if not os.path.exists(self.cfg_voltdata_incoming_path):
-            self.logger.error("Voltdata file location" f" {self.cfg_voltdata_incoming_path} does not exist. Quitting.")
+            self.logger.error(f"Voltdata file location {self.cfg_voltdata_incoming_path} does not exist. Quitting.")
             sys.exit(1)
 
         if not os.path.exists(self.cfg_voltdata_outgoing_path):
-            self.logger.error("Voltdata file location" f" {self.cfg_voltdata_outgoing_path} does not exist. Quitting.")
+            self.logger.error(f"Voltdata file location {self.cfg_voltdata_outgoing_path} does not exist. Quitting.")
             sys.exit(1)
 
         self.cfg_always_keep_subfiles = (
@@ -453,7 +449,7 @@ class MWAXSubfileDistributor:
             self.cfg_bf_fildata_path = utils.read_config(self.logger, self.config, "beamformer", "fildata_path")
 
             if not os.path.exists(self.cfg_bf_fildata_path):
-                self.logger.error(f"Fildata file location {self.cfg_bf_fildata_path} does" " not exist. Quitting.")
+                self.logger.error(f"Fildata file location {self.cfg_bf_fildata_path} does not exist. Quitting.")
                 sys.exit(1)
 
             self.cfg_bf_settings_path = utils.read_config(
@@ -464,11 +460,11 @@ class MWAXSubfileDistributor:
             )
             if not os.path.exists(self.cfg_bf_settings_path):
                 self.logger.error(
-                    "Beamformer settings file location" f" {self.cfg_bf_settings_path} does not exist. Quitting."
+                    f"Beamformer settings file location {self.cfg_bf_settings_path} does not exist. Quitting."
                 )
                 sys.exit(1)
 
-            self.logger.info("Beam settings will be read from:" f" {self.cfg_bf_settings_path} at runtime.")
+            self.logger.info(f"Beam settings will be read from: {self.cfg_bf_settings_path} at runtime.")
 
             # Read filterbank config specific to this host
             self.cfg_bf_archive_destination_host = utils.read_config(
@@ -582,7 +578,7 @@ class MWAXSubfileDistributor:
 
             if not os.path.exists(self.cfg_corr_visdata_incoming_path):
                 self.logger.error(
-                    "Visdata file location" f" {self.cfg_corr_visdata_incoming_path} does not exist." " Quitting."
+                    f"Visdata file location {self.cfg_corr_visdata_incoming_path} does not exist. Quitting."
                 )
                 sys.exit(1)
 
@@ -596,34 +592,30 @@ class MWAXSubfileDistributor:
 
             if not os.path.exists(self.cfg_corr_visdata_processing_stats_path):
                 self.logger.error(
-                    "Visdata file location"
-                    f" {self.cfg_corr_visdata_processing_stats_path} does not"
-                    " exist. Quitting."
+                    f"Visdata file location {self.cfg_corr_visdata_processing_stats_path} does not exist. Quitting."
                 )
                 sys.exit(1)
 
             if not os.path.exists(self.cfg_corr_visdata_outgoing_path):
                 self.logger.error(
-                    "Visdata file location" f" {self.cfg_corr_visdata_outgoing_path} does not exist." " Quitting."
+                    f"Visdata file location {self.cfg_corr_visdata_outgoing_path} does not exist. Quitting."
                 )
                 sys.exit(1)
 
             if not os.path.exists(self.cfg_corr_mwax_stats_binary_dir):
                 self.logger.error(
-                    "mwax_stats binary dir" f" {self.cfg_corr_mwax_stats_binary_dir} does not exist." " Quitting."
+                    f"mwax_stats binary dir {self.cfg_corr_mwax_stats_binary_dir} does not exist. Quitting."
                 )
                 sys.exit(1)
 
             if not os.path.exists(self.cfg_corr_calibrator_outgoing_path):
                 self.logger.error(
-                    "calibrator outgoing location"
-                    f" {self.cfg_corr_calibrator_outgoing_path} does not"
-                    " exist. Quitting."
+                    f"calibrator outgoing location {self.cfg_corr_calibrator_outgoing_path} does not exist. Quitting."
                 )
                 sys.exit(1)
 
             if not os.path.exists(self.cfg_corr_metafits_path):
-                self.logger.error(f"metafits location {self.cfg_corr_metafits_path} does not" " exist. Quitting.")
+                self.logger.error(f"metafits location {self.cfg_corr_metafits_path} does not exist. Quitting.")
                 sys.exit(1)
 
             self.cfg_metadatadb_host = utils.read_config(self.logger, self.config, "mwa metadata database", "host")
@@ -805,7 +797,7 @@ class MWAXSubfileDistributor:
                 self.processors.append(self.filterbank_processor)
             else:
                 self.logger.info(
-                    "Filterbank Archiving is disabled due to configuration" " setting `fil_destination_enabled`."
+                    "Filterbank Archiving is disabled due to configuration setting `fil_destination_enabled`."
                 )
 
         # Make sure we can Ctrl-C / kill out of this
@@ -834,7 +826,7 @@ class MWAXSubfileDistributor:
                     self.cfg_health_multicast_hops,
                 )
             except Exception as catch_all_exception:  # pylint: disable=broad-except
-                self.logger.warning("health_handler: Failed to send health information." f" {catch_all_exception}")
+                self.logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
 
             # Sleep for a second
             time.sleep(1)

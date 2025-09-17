@@ -25,7 +25,7 @@ def copy_file_rsync(
         try:
             file_size = os.path.getsize(source)
         except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
-            logger.error(f"{source}: Error determining source file size. Error" f" {catch_all_exceptiion}")
+            logger.error(f"{source}: Error determining source file size. Error {catch_all_exceptiion}")
             return False
     else:
         file_size = -1
@@ -50,7 +50,7 @@ def copy_file_rsync(
             try:
                 file_size = os.path.getsize(destination)
             except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
-                logger.error(f"{source}: Error determining destination file size. Error" f" {catch_all_exceptiion}")
+                logger.error(f"{source}: Error determining destination file size. Error {catch_all_exceptiion}")
                 return False
 
         elapsed = time.time() - start_time
@@ -83,7 +83,7 @@ def archive_file_xrootd(
     try:
         file_size = os.path.getsize(full_filename)
     except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
-        logger.error(f"{full_filename}: Error determining file size. Error" f" {catch_all_exceptiion}")
+        logger.error(f"{full_filename}: Error determining file size. Error {catch_all_exceptiion}")
         return False
 
     # Gather some info for later
@@ -146,7 +146,7 @@ def archive_file_xrootd(
             )
             return True
         else:
-            logger.error(f"{full_filename} archive_file_xrootd rename failed. Error" f" {stdout}")
+            logger.error(f"{full_filename} archive_file_xrootd rename failed. Error {stdout}")
             return False
     else:
         logger.error(f"{full_filename} archive_file_xrootd failed. Error {stdout}")

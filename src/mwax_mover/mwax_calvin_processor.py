@@ -306,7 +306,7 @@ class MWAXCalvinProcessor:
                     if self.job_type == CalvinJobType.realtime:
                         self.current_task_name = "Releasing MWAX files"
                         self.release_mwax_files()
-                        
+
                     self.fail_job_processing(error_message)
                     exit(0)
             else:
@@ -469,7 +469,7 @@ class MWAXCalvinProcessor:
                 # to 192.168.120.201
                 host_ip = hostname.replace("mwax", "192.168.120.2")
 
-                self.mwax_download_filenames.append(f"mwa@{host_ip}:/{os.path.join("visdata/cal_outgoing/", filename)}")
+                self.mwax_download_filenames.append(f"mwa@{host_ip}:/{os.path.join('visdata/cal_outgoing/', filename)}")
                 self.ws_filenames.append(filename)
 
             return True, ""
@@ -500,14 +500,12 @@ class MWAXCalvinProcessor:
                     )
                     return True, ""
                 else:
-                    error_message = f"{str(self.obs_id)} failed when running {cmdline} Error" f" {stdout}"
+                    error_message = f"{str(self.obs_id)} failed when running {cmdline} Error {stdout}"
                     raise Exception(error_message)
 
             except Exception:
                 self.logger.exception(
-                    f"Failed to download and untar observation {self.obs_id} from "
-                    f"{self.mwa_asvo_download_url}"
-                    f" {stdout}"
+                    f"Failed to download and untar observation {self.obs_id} from {self.mwa_asvo_download_url} {stdout}"
                 )
                 raise
 
@@ -650,7 +648,7 @@ class MWAXCalvinProcessor:
         # Close all database connections
         self.db_handler_object.stop_database_pool()
         self.running = False
-        sys.exit(0)      
+        sys.exit(0)
 
     def health_loop(self):
         """Send health information via UDP multicast"""
@@ -671,7 +669,7 @@ class MWAXCalvinProcessor:
                     self.health_multicast_hops,
                 )
             except Exception as catch_all_exception:  # pylint: disable=broad-except
-                self.logger.warning("health_handler: Failed to send health information." f" {catch_all_exception}")
+                self.logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
 
             # Sleep for a second
             self.sleep(1)
@@ -698,17 +696,17 @@ class MWAXCalvinProcessor:
         return status
 
     def signal_handler(self, signum, _frame):
-        """Handles SIGINT, SIGTERM, USR1"""        
+        """Handles SIGINT, SIGTERM, USR1"""
         # Update the database that this job has been cancelled
-        if signum==signal.SIGUSR1:
+        if signum == signal.SIGUSR1:
             signal_message = "Slurm hit walltime"
-        elif signum==signal.SIGINT:
+        elif signum == signal.SIGINT:
             signal_message = "Received SIGINT"
-        elif signum==signal.SIGTERM:
+        elif signum == signal.SIGTERM:
             signal_message = "Received SIGTERM"
         else:
-            signal_message = f"Received unknown signal {signum}"        
-        
+            signal_message = f"Received unknown signal {signum}"
+
         self.logger.warning("Updating job to cancelled...")
         if self.data_downloaded:
             self.fail_job_processing(f"Cancelled: {signal_message}")
@@ -717,7 +715,7 @@ class MWAXCalvinProcessor:
 
         # Stop any Processors
         self.logger.warning(f"{signal_message}. Shutting down processor...")
-        self.stop()        
+        self.stop()
 
     def initialise(
         self,
@@ -738,7 +736,7 @@ class MWAXCalvinProcessor:
         self.request_id_list = request_ids
 
         if not os.path.exists(config_filename):
-            print(f"Configuration file location {config_filename} does not" " exist. Quitting.")
+            print(f"Configuration file location {config_filename} does not exist. Quitting.")
             sys.exit(1)
 
         # Make sure we can Ctrl-C / kill out of this
@@ -779,7 +777,7 @@ class MWAXCalvinProcessor:
         if config.getboolean("mwax mover", "coloredlogs", fallback=False):
             coloredlogs.install(level="INFO", logger=self.logger)
 
-        self.logger.info("Starting mwax_calvin_processor" f" processor...v{version.get_mwax_mover_version_string()}")
+        self.logger.info(f"Starting mwax_calvin_processor processor...v{version.get_mwax_mover_version_string()}")
         self.logger.info(f"Reading config file: {config_filename}")
 
         #
@@ -869,7 +867,7 @@ class MWAXCalvinProcessor:
             )
 
             if not os.path.exists(self.birli_binary_path):
-                self.logger.error("birli_binary_path location " f" {self.birli_binary_path} does not exist. Quitting.")
+                self.logger.error(f"birli_binary_path location  {self.birli_binary_path} does not exist. Quitting.")
                 sys.exit(1)
 
             # Get Birli freq res
@@ -932,7 +930,7 @@ class MWAXCalvinProcessor:
 
             if not os.path.exists(self.source_list_filename):
                 self.logger.error(
-                    "source_list_filename location " f" {self.source_list_filename} does not exist. Quitting."
+                    f"source_list_filename location  {self.source_list_filename} does not exist. Quitting."
                 )
                 sys.exit(1)
 
@@ -963,7 +961,7 @@ class MWAXCalvinProcessor:
 
             if not os.path.exists(self.hyperdrive_binary_path):
                 self.logger.error(
-                    "hyperdrive_binary_path location " f" {self.hyperdrive_binary_path} does not exist. Quitting."
+                    f"hyperdrive_binary_path location  {self.hyperdrive_binary_path} does not exist. Quitting."
                 )
                 sys.exit(1)
 
@@ -979,7 +977,7 @@ class MWAXCalvinProcessor:
             )
 
             if not os.path.exists(self.job_input_path):
-                self.logger.error("job_input_path location " f" {self.job_input_path} does not exist. Quitting.")
+                self.logger.error(f"job_input_path location  {self.job_input_path} does not exist. Quitting.")
                 sys.exit(1)
 
             # Get the job_output_path dir
@@ -991,7 +989,7 @@ class MWAXCalvinProcessor:
             )
 
             if not os.path.exists(self.job_output_path):
-                self.logger.error("job_output_path location " f" {self.job_output_path} does not exist. Quitting.")
+                self.logger.error(f"job_output_path location  {self.job_output_path} does not exist. Quitting.")
                 sys.exit(1)
 
             # Get the temp working dir
@@ -1011,9 +1009,7 @@ class MWAXCalvinProcessor:
                     )
                     os.makedirs(self.temp_working_path)
                 else:
-                    self.logger.error(
-                        "temp_working_path location " f" {self.temp_working_path} does not exist. Quitting."
-                    )
+                    self.logger.error(f"temp_working_path location  {self.temp_working_path} does not exist. Quitting.")
                     sys.exit(1)
 
             self.keep_completed_visibility_files = utils.read_config_bool(

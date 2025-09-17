@@ -497,7 +497,7 @@ class MWAXArchiveProcessor:
 
         outgoing_filename = os.path.join(self.dont_archive_path_vis, os.path.basename(item))
 
-        self.logger.debug(f"{item}- dont_archive_handler_vis() moving file to" f" {self.dont_archive_path_vis}")
+        self.logger.debug(f"{item}- dont_archive_handler_vis() moving file to {self.dont_archive_path_vis}")
         os.rename(item, outgoing_filename)
 
         self.logger.info(
@@ -515,7 +515,7 @@ class MWAXArchiveProcessor:
 
         outgoing_filename = os.path.join(self.dont_archive_path_volt, os.path.basename(item))
 
-        self.logger.debug(f"{item}- dont_archive_handler_volt() moving file to" f" {self.dont_archive_path_volt}")
+        self.logger.debug(f"{item}- dont_archive_handler_volt() moving file to {self.dont_archive_path_volt}")
         os.rename(item, outgoing_filename)
 
         self.logger.info(
@@ -550,7 +550,7 @@ class MWAXArchiveProcessor:
                 trigger_id = utils.read_subfile_trigger_value(item)
             except FileNotFoundError:
                 # The filename was not valid
-                self.logger.warning(f"{item}- checksum_and_db_handler() file was removed while" " processing.")
+                self.logger.warning(f"{item}- checksum_and_db_handler() file was removed while processing.")
                 return True
 
             # Insert record into metadata database
@@ -587,7 +587,7 @@ class MWAXArchiveProcessor:
                     # output path
                     outgoing_filename = os.path.join(self.watch_dir_outgoing_volt, os.path.basename(item))
 
-                    self.logger.debug(f"{item}- checksum_and_db_handler() moving subfile to volt" " outgoing dir")
+                    self.logger.debug(f"{item}- checksum_and_db_handler() moving subfile to volt outgoing dir")
                     os.rename(item, outgoing_filename)
 
                     self.logger.info(
@@ -602,7 +602,7 @@ class MWAXArchiveProcessor:
                     outgoing_filename = os.path.join(self.watch_dir_processing_stats_vis, os.path.basename(item))
 
                     self.logger.debug(
-                        f"{item}- checksum_and_db_handler() moving visibility file" " to vis processing stats dir"
+                        f"{item}- checksum_and_db_handler() moving visibility file to vis processing stats dir"
                     )
                     os.rename(item, outgoing_filename)
 
@@ -618,7 +618,7 @@ class MWAXArchiveProcessor:
                     # output path
                     outgoing_filename = os.path.join(self.watch_dir_outgoing_vis, os.path.basename(item))
 
-                    self.logger.debug(f"{item}- checksum_and_db_handler() moving metafits file" " to vis outgoing dir")
+                    self.logger.debug(f"{item}- checksum_and_db_handler() moving metafits file to vis outgoing dir")
                     os.rename(item, outgoing_filename)
 
                     self.logger.info(
@@ -642,7 +642,7 @@ class MWAXArchiveProcessor:
                     outgoing_filename = os.path.join(self.watch_dir_processing_stats_vis, os.path.basename(item))
 
                     self.logger.debug(
-                        f"{item}- checksum_and_db_handler() moving visibility file" " to vis processing stats dir"
+                        f"{item}- checksum_and_db_handler() moving visibility file to vis processing stats dir"
                     )
                     os.rename(item, outgoing_filename)
 
@@ -722,7 +722,7 @@ class MWAXArchiveProcessor:
                     os.rename(item, outgoing_filename)
             else:
                 # No this project doesn't get archived or calibrated, just send it to dont_archive
-                self.dont_archive_handler_vis(item)            
+                self.dont_archive_handler_vis(item)
         else:
             # This host is not doing any archiving
             self.dont_archive_handler_vis(item)
@@ -760,14 +760,14 @@ class MWAXArchiveProcessor:
                             self.dont_archive_handler_vis(item)
                     else:
                         # This host is not doing any archiving
-                        self.dont_archive_handler_vis(item)                    
+                        self.dont_archive_handler_vis(item)
                 else:
                     self.logger.exception(f"{obs_id}: release_cal_obs()- failed to archive {item}- file does not exist")
 
                 # Remove item from queue
                 try:
                     self.outgoing_cal_list.remove(item)
-                except:
+                except Exception:
                     # Don't want an exception if file is already gone from list
                     pass
         except Exception:

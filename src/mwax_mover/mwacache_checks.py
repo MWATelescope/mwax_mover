@@ -39,10 +39,10 @@ def check_pawsey_lts(
 
     # Check they match
     if filename_checksum != temp_filename_checksum:
-        logger.error(f"Checksums do not match! Local: {filename_checksum} vs Downloaded" f" {temp_filename_checksum}")
+        logger.error(f"Checksums do not match! Local: {filename_checksum} vs Downloaded {temp_filename_checksum}")
         exit(-1)
 
-    logger.info(f"Checksums match OK: Local: {filename_checksum} vs Downloaded" f" {temp_filename_checksum}")
+    logger.info(f"Checksums match OK: Local: {filename_checksum} vs Downloaded {temp_filename_checksum}")
 
     # Remove temp file
     logger.info(f"Removing output file: {output_filename}")
@@ -150,7 +150,7 @@ def main():
         "-l",
         "--leave_file_on_ceph",
         action="store_true",
-        help=("Leave uploaded file on Ceph (i.e. don't delete after the test" " completes).\n"),
+        help=("Leave uploaded file on Ceph (i.e. don't delete after the test completes).\n"),
     )
 
     args = vars(parser.parse_args())

@@ -48,7 +48,7 @@ class Watcher(object):
     def start(self):
         """Begins watching the directory"""
         if self.recursive:
-            self.logger.info(f"Watcher starting on {self.path}/*{self.pattern} and all" " subdirectories...")
+            self.logger.info(f"Watcher starting on {self.path}/*{self.pattern} and all subdirectories...")
             self.inotify_tree = inotify.adapters.InotifyTree(self.path, mask=self.mask)
         else:
             self.logger.info(f"Watcher starting on {self.path}/*{self.pattern}...")
@@ -56,7 +56,7 @@ class Watcher(object):
             self.inotify_tree.add_watch(self.path, mask=self.mask)
 
         if self.exclude_pattern:
-            self.logger.info(f"Watcher on {self.path}/*{self.pattern} is excluding" f" *{self.exclude_pattern}")
+            self.logger.info(f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}")
 
         self.watching = True
         self.do_watch_loop()
@@ -103,7 +103,7 @@ class Watcher(object):
                     )[1] != self.exclude_pattern:
                         dest_filename = os.path.join(path, filename)
                         self.dest_queue.put(dest_filename)
-                        self.logger.info(f"{dest_filename} added to queue" f" ({self.dest_queue.qsize()})")
+                        self.logger.info(f"{dest_filename} added to queue ({self.dest_queue.qsize()})")
 
     def get_status(self) -> dict:
         """Returns a dictionary describing status of this watcher"""
