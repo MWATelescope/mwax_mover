@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.79 23-Sep-2025
+
+* mwax_subfile_distributor: mwax_stats will only be run on visibilities which end in "_000.fits" (we ignore the 001,002, etc).
+
 ## 1.0.78 17-Sep-2025
 
 * Calvin processor: More accurately calculates output size of Birli.

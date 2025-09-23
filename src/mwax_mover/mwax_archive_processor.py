@@ -679,20 +679,25 @@ class MWAXArchiveProcessor:
         """This runs stats against mwax FITS files"""
         self.logger.info(f"{item}- stats_handler() Started...")
 
-        # This is a normal mwax fits file. Run stats on it
-        if (
-            utils.process_mwax_stats(
-                self.logger,
-                self.mwax_stats_binary_dir,
-                item,
-                int(self.archive_command_numa_node),
-                self.mwax_stats_timeout_sec,
-                self.mwax_stats_dump_dir,
-                self.metafits_path,
-            )
-            is not True
-        ):
-            self.logger.warning(f"{item}- stats_handler() mwax_stats failed. Skipping.")
+        # This is a normal mwax fits file.
+        # Run stats on it, but only if it is the 000 file.
+        # Don't bother doing the 001, 002, etc if they exist
+        if os.path.basename(item)[-9:] == "_000.fits":
+            if (
+                utils.process_mwax_stats(
+                    self.logger,
+                    self.mwax_stats_binary_dir,
+                    item,
+                    int(self.archive_command_numa_node),
+                    self.mwax_stats_timeout_sec,
+                    self.mwax_stats_dump_dir,
+                    self.metafits_path,
+                )
+                is not True
+            ):
+                self.logger.warning(f"{item}- stats_handler() mwax_stats failed. Skipping.")
+        else:
+            self.logger.debug(f"{item}- stats_handler() skipping mwax_stats as file does not end in _000.fits")
 
         # If observation is a calibrator AND this host is enabled as an archiver then
         # we should put the obs into the cal_outgoing dir so that calvin can
