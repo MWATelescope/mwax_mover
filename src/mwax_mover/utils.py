@@ -966,46 +966,55 @@ def should_project_be_archived(project_id: str) -> bool:
         return True
 
 
-@retry(stop=stop_after_attempt(10), wait=wait_fixed(30), retry=retry_if_not_exception_type((ValueError)))
-def call_webservice(logger: logging.Logger, obs_id: int, url_list: list[str], data) -> requests.Response:
-    """Call each url in the list until: a response of
-    200 (in which case return the response)
-    """
-    i = 0
+def call_webservice(
+    logger: logging.Logger, obs_id: int, url_list: list[str], data, max_retries: int = 10, wait: int = 30
+) -> requests.Response:
+    @retry(stop=stop_after_attempt(max_retries), wait=wait_fixed(wait), retry=retry_if_not_exception_type((ValueError)))
+    def call_webservice_inner(logger: logging.Logger, obs_id: int, url_list: list[str], data) -> requests.Response:
+        """Call each url in the list until: a response of
+        200 (in which case return the response)
+        """
+        i = 0
 
-    while i < len(url_list):
-        url = url_list[i]
+        while i < len(url_list):
+            url = url_list[i]
 
-        logger.debug(f"{obs_id}: call_webservice() trying with {url} with data ({'' if data is None else data})")
+            logger.debug(f"{obs_id}: call_webservice() trying with {url} with data ({'' if data is None else data})")
 
-        try:
-            response = requests.get(url, data, timeout=30)
+            try:
+                response = requests.get(url, data, timeout=30)
 
-            if response.status_code == 200:
-                logger.debug(f"{obs_id}: call_webservice() returned 200 (success)")
-                return response
+                if response.status_code == 200:
+                    logger.debug(f"{obs_id}: call_webservice() returned 200 (success)")
+                    return response
 
-            elif response.status_code >= 400 and response.status_code < 500:
-                error_message = f"{obs_id}: call_webservice() returned {response.status_code} {response.text} (failure)"
-                logger.error(error_message)
-                raise ValueError(error_message)
+                elif response.status_code >= 400 and response.status_code < 500:
+                    error_message = (
+                        f"{obs_id}: call_webservice() returned {response.status_code} {response.text} (failure)"
+                    )
+                    logger.error(error_message)
+                    raise ValueError(error_message)
 
-            else:
-                # Non-200 status code- try next url
-                logger.warning(f"{obs_id}: call_webservice() returned {response.status_code} {response.text} (failure)")
-        except ValueError:
-            raise
+                else:
+                    # Non-200 status code- try next url
+                    logger.warning(
+                        f"{obs_id}: call_webservice() returned {response.status_code} {response.text} (failure)"
+                    )
+            except ValueError:
+                raise
 
-        except Exception as e:
-            # Exception raised- try next url
-            logger.exception(f"{obs_id}: call_webservice() exception", e)
+            except Exception as e:
+                # Exception raised- try next url
+                logger.exception(f"{obs_id}: call_webservice() exception", e)
 
-        # try next url
-        i += 1
+            # try next url
+            i += 1
 
-    # We tried all urls without success- up to tenacity to retry X times now
-    logger.error(f"{obs_id}: call_webservice() - failed after trying {len(url_list)} urls.")
-    raise Exception(f"{obs_id}: call_webservice()- failed after trying {len(url_list)} urls.")
+        # We tried all urls without success- up to tenacity to retry X times now
+        logger.error(f"{obs_id}: call_webservice() - failed after trying {len(url_list)} urls.")
+        raise Exception(f"{obs_id}: call_webservice()- failed after trying {len(url_list)} urls.")
+
+    return call_webservice_inner(logger, obs_id, url_list, data)
 
 
 def get_data_files_for_obsid_from_webservice(

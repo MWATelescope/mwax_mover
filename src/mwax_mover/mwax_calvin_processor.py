@@ -350,16 +350,40 @@ class MWAXCalvinProcessor:
             hostname = mwax_host_and_filename[at_pos:colon_pos]
             hostnames.add(hostname)
 
-        for hostname in hostnames:
-            # call webservice for each host to release the obsid's files
-            utils.call_webservice(
-                self.logger,
-                self.obs_id,
-                [
-                    f"http://{hostname}:9999/release_cal_obs?obs_id={str(self.obs_id)}",
-                ],
-                None,
-            )
+        MAX_WAIT_FOR_MWAX_SECONDS = 3600  # 60 minutes
+        start_time = datetime.datetime.now()
+
+        # Do this while there are hosts to release and we have not exceeded our MAX_WAIT_FOR_MWAX_SECONDS
+        while len(hostnames) > 0 and (datetime.datetime.now() - start_time).seconds < MAX_WAIT_FOR_MWAX_SECONDS:
+            self.logger.info(f"Attempting to release {len(hostnames)} files from MWAX boxes...")
+            successful_hosts = set()
+
+            for hostname in hostnames:
+                # call webservice for each host to release the obsid's files
+                try:
+                    utils.call_webservice(
+                        self.logger,
+                        self.obs_id,
+                        [
+                            f"http://{hostname}:9999/release_cal_obs?obs_id={str(self.obs_id)}",
+                        ],
+                        None,
+                        max_retries=1,
+                        wait=60,
+                    )
+                    # success
+                    successful_hosts.add(hostname)
+
+                except ValueError:
+                    # This is a 400<->500 error - so maybe just try again
+                    pass
+                except Exception:
+                    # A much worse error occurred- definitely try again
+                    pass
+
+            # All remaining hosts have been tried- remove the sucessful ones from the set
+            for hostname in successful_hosts:
+                hostnames.remove(hostname)
 
     def fail_job_downloading(self, error_message: str):
         error_datetime = datetime.datetime.now().astimezone()

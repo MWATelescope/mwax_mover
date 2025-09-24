@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.80 24-Sep-2025
+
+* calvin_processor: When trying to call the URL to release calibration files, try indefinitely since the mwax boxes may be in the processing of stopping/starting due to change from oversampling to critically sampling and so might be down for ~10-15 mins.
+
 ## 1.0.79 23-Sep-2025
 
 * mwax_subfile_distributor: mwax_stats will only be run on visibilities which end in "_000.fits" (we ignore the 001,002, etc).
