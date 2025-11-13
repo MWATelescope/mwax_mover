@@ -44,16 +44,15 @@ class CorrelatorMode(Enum):
     """Class representing correlator mode"""
 
     NO_CAPTURE = "NO_CAPTURE"
+    CORR_MODE_CHANGE = "CORR_MODE_CHANGE"
     MWAX_CORRELATOR = "MWAX_CORRELATOR"
     MWAX_VCS = "MWAX_VCS"
     MWAX_BUFFER = "MWAX_BUFFER"
 
     @staticmethod
     def is_no_capture(mode_string: str) -> bool:
-        """Returns true if mode is a no capture"""
-        return mode_string in [
-            CorrelatorMode.NO_CAPTURE.value,
-        ]
+        """Returns true if mode is a no capture or mode change- i.e. don't do anything"""
+        return mode_string in [CorrelatorMode.NO_CAPTURE.value, CorrelatorMode.CORR_MODE_CHANGE.value]
 
     @staticmethod
     def is_correlator(mode_string: str) -> bool:

@@ -434,7 +434,7 @@ class SubfileProcessor:
 
                     else:
                         self.logger.error(f"{item}- Unknown subfile mode {subfile_mode}, ignoring.")
-                        success = False
+                        success = True
 
                     # There is a semi-rare case where in between the top of this code and now
                     # a voltage trigger has been received. If so THIS subfile may not have been added to
@@ -522,7 +522,7 @@ class SubfileProcessor:
 
                     else:
                         self.logger.error(f"{item}- Unknown subfile mode {subfile_mode}, ignoring.")
-                        success = False
+                        success = True
 
         except Exception as handler_exception:  # pylint: disable=broad-except
             self.logger.error(f"{item} {handler_exception}")
