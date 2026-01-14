@@ -11,6 +11,8 @@ import logging
 import os
 import pytest
 import queue
+import shutil
+import time
 from mwax_mover import utils
 
 
@@ -868,3 +870,66 @@ def test_get_data_files_for_obsid_from_webservice_200():
         "1157306584_20160907180249_gpubox23_00.fits",
         "1157306584_20160907180249_gpubox24_00.fits",
     ]
+
+
+def test_delete_files_older_than():
+    test_content = "hello word"
+    test_path = "/tmp/delete_files_older_than"
+
+    # Remove test dir if it already exists
+    if os.path.exists(test_path):
+        shutil.rmtree(test_path)
+    os.mkdir(test_path)
+
+    # Create some test files which SHOULD be deleted
+    filename_1 = os.path.join(test_path, "file_1.txt")
+    with open(filename_1, "w") as f:
+        f.write(test_content)
+
+    filename_2 = os.path.join(test_path, "file_2.dat")
+    with open(filename_2, "w") as f:
+        f.write(test_content)
+
+    filename_3 = os.path.join(test_path, "file_3.dat")
+    with open(filename_3, "w") as f:
+        f.write(test_content)
+
+    # Create some test files which SHOULD NOT be deleted (wrong ext)
+    filename_4 = os.path.join(test_path, "file_4.blah")
+    with open(filename_4, "w") as f:
+        f.write(test_content)
+
+    filename_5 = os.path.join(test_path, "file_5.keep")
+    with open(filename_5, "w") as f:
+        f.write(test_content)
+
+    time.sleep(10)
+
+    # Create some test files which SHOULD NOT be deleted (not old enough)
+    filename_6 = os.path.join(test_path, "file_6.txt")
+    with open(filename_6, "w") as f:
+        f.write(test_content)
+
+    filename_7 = os.path.join(test_path, "file_7.dat")
+    with open(filename_7, "w") as f:
+        f.write(test_content)
+
+    # Do test delete
+    files_deleted = utils.delete_files_older_than(test_path, 5, [".txt", ".dat"])
+
+    # 3 files should be deleted
+    assert len(files_deleted) == 3
+
+    # They should be the first 3 files
+    assert not os.path.exists(filename_1)
+    assert not os.path.exists(filename_2)
+    assert not os.path.exists(filename_3)
+
+    # These should not be deleted
+    assert os.path.exists(filename_4)
+    assert os.path.exists(filename_5)
+    assert os.path.exists(filename_6)
+    assert os.path.exists(filename_7)
+
+    # Clean up
+    shutil.rmtree(test_path)

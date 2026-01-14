@@ -94,6 +94,8 @@ class MWAXCalvinProcessor:
         self.num_sources: int = 0
         self.produce_debug_plots: bool = True  # default to true- for now only off if running via pytest
         self.keep_completed_visibility_files: bool = False
+        self.aocal_export_path: Optional[str] = None
+        self.aocal_max_age_hours: int = 24  # default to 24 hours
 
         # birli
         self.birli_timeout: int = 0
@@ -641,7 +643,7 @@ class MWAXCalvinProcessor:
         # get a list of the uvfits files
         uvfits_files = glob.glob(os.path.join(self.working_path, "*.uvfits"))
 
-        # Run hyperdrive
+        # Run hyperdrive (might be multiple times if picket fence)
         hyperdrive_success = mwax_calvin_utils.run_hyperdrive(
             self.logger,
             uvfits_files,
@@ -653,6 +655,7 @@ class MWAXCalvinProcessor:
             self.source_list_type,
             self.num_sources,
             self.hyperdrive_timeout,
+            self.aocal_export_path,
         )
 
         # Did we have N number of successful runs?
@@ -661,6 +664,18 @@ class MWAXCalvinProcessor:
             mwax_calvin_utils.run_hyperdrive_stats(
                 self.logger, uvfits_files, self.metafits_filename, self.obs_id, self.hyperdrive_binary_path
             )
+
+            # if aocal_export_path is set then try and clean up old files
+            if self.aocal_export_path is not None:
+                # Clean up old files
+                ext_list = ["*.fits", "*.bin"]
+                files_removed = utils.delete_files_older_than(
+                    self.aocal_export_path, self.aocal_max_age_hours * 3600, ext_list
+                )
+                if len(files_removed) > 0:
+                    self.logger.debug(
+                        f"Removed the following files from {self.aocal_export_path} as they were older than {self.aocal_max_age_hours} hours: {files_removed}"
+                    )
 
         if hyperdrive_success:
             return True, ""
@@ -1042,6 +1057,31 @@ class MWAXCalvinProcessor:
                 "processing",
                 "keep_completed_visibility_files",
             )
+
+            # Get the aocal_export_path dir
+            self.aocal_export_path = utils.read_optional_config(
+                self.logger,
+                config,
+                "processing",
+                "aocal_export_path",
+            )
+
+            if self.aocal_export_path is None:
+                self.logger.warning("aocal_export_path not set. Will not be exporting aocal bin files.")
+            else:
+                if not os.path.exists(self.aocal_export_path):
+                    self.logger.error(f"aocal_export_path location  {self.aocal_export_path} does not exist. Quitting.")
+                    sys.exit(1)
+
+            self.aocal_max_age_hours: int = int(
+                utils.read_config(
+                    self.logger,
+                    config,
+                    "processing",
+                    "aocal_max_age_hours",
+                )
+            )
+
         except Exception as e:
             error_message = str(e)
             self.fail_job_downloading(error_message)

@@ -1,26 +1,23 @@
 [project]
 name = "mwax_mover"
-version = "1.0.81"
+version = "1.0.82"
 description = "A module to manage input, archiving and calibration for the MWAX correlator"
 readme = "README.md"
-requires-python = ">=3.12, <3.14"
+requires-python = ">=3.12, <3.15"
 keywords = ["MWA", "MWAX", "radioastronomy", "radiotelescope"]
 authors = [
-    {email = "greg.sleap@curtin.edu.au"},
-    {name = "Greg Sleap"}, 
-    {email = "dev.null@curtin.edu.au"},
-    {name = "Dev Null"}
+    { email = "greg.sleap@curtin.edu.au" },
+    { name = "Greg Sleap" },
+    { email = "dev.null@curtin.edu.au" },
+    { name = "Dev Null" },
 ]
-maintainers = [
-    {email = "greg.sleap@curtin.edu.au"},
-    {name = "Greg Sleap"}
-]
+maintainers = [{ email = "greg.sleap@curtin.edu.au" }, { name = "Greg Sleap" }]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Astronomy",
     "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
-    "Programming Language :: Python :: 3.12"
+    "Programming Language :: Python :: 3.12",
 ]
 
 dependencies = [
@@ -36,14 +33,11 @@ dependencies = [
     "requests",
     "scipy",
     "seaborn",
-    "tenacity"
+    "tenacity",
 ]
 
 [dependency-groups]
-dev = [
-  "pytest",
-  "pytest-cov"
-]
+dev = ["pytest", "pytest-cov"]
 
 [project.urls]
 homepage = "https://github.com/MWATelescope/mwax_mover"

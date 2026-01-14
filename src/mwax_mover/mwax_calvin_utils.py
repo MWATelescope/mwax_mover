@@ -16,6 +16,7 @@ from scipy.optimize import minimize
 import pandas as pd
 from pandas import DataFrame
 import seaborn as sns
+import struct
 import matplotlib as mpl
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
@@ -1597,6 +1598,7 @@ def run_hyperdrive(
     source_list_type: str,
     num_sources: int,
     hyperdrive_timeout: int,
+    aocal_export_path: Optional[str],
 ) -> bool:
     """Runs hyperdrive N times and returns true on success or false if not all runs worked"""
     logger.info(
@@ -1621,8 +1623,9 @@ def run_hyperdrive(
         obsid_and_band = os.path.basename(uvfits_file.replace(".uvfits", ""))
 
         try:
-            hyperdrive_solution_filename = os.path.join(job_output_path, f"{obsid_and_band}_solutions.fits")
-            bin_solution_filename = os.path.join(job_output_path, f"{obsid_and_band}_solutions.bin")
+            hyperdrive_solution_full_filename = os.path.join(job_output_path, f"{obsid_and_band}_solutions.fits")
+            bin_solution_filename = f"{obsid_and_band}_solutions.bin"
+            bin_solution_full_filename = os.path.join(job_output_path, bin_solution_filename)
 
             # Run hyperdrive
             # Output to hyperdrive format and old aocal format (bin)
@@ -1633,7 +1636,7 @@ def run_hyperdrive(
                 " --source-list"
                 f" {source_list_filename} --source-list-type"
                 f" {source_list_type} --outputs"
-                f" {hyperdrive_solution_filename} {bin_solution_filename}"
+                f" {hyperdrive_solution_full_filename} {bin_solution_full_filename}"
             )
 
             start_time = time.time()
@@ -1657,6 +1660,20 @@ def run_hyperdrive(
                     f" {hyperdrive_run + 1}/{len(input_uvfits_files)} successful"
                     f" in {elapsed:.3f} seconds"
                 )
+
+                # if config file has the aocal_export_path, then export the file
+                if aocal_export_path is not None:
+                    destination_full_filename = ""
+                    try:
+                        destination_full_filename = os.path.join(aocal_export_path, bin_solution_filename)
+                        logger.info(f"{obs_id}: Exporting {bin_solution_full_filename} to {destination_full_filename}")
+                        shutil.copyfile(bin_solution_full_filename, destination_full_filename)
+                    except Exception as export_exception:
+                        # If this fails, fail hard as beamformer relies on this and we need to know!
+                        export_exception.add_note(
+                            f"{obs_id}: Export of {bin_solution_full_filename} to {destination_full_filename} failed"
+                        )
+                        raise
 
                 # Success!
                 # Write out a useful file of command line info
@@ -1977,3 +1994,160 @@ def estimate_birli_output_bytes(
     # print(f"{timesteps}ts * {coarse_channels * fine_channels}ch * {baselines}bl * {pols}pol * {bytes_per_visibility} bytes")
 
     return timesteps * coarse_channels * fine_channels * baselines * pols * bytes_per_visibility
+
+
+def split_aocal_file_into_coarse_channels(
+    obs_id: int, input_aocal_filename: str, input_rec_chans: list[int]
+) -> list[str]:
+    # Given any aocal file which may have 1 - 24 coarse channels of data within, split it into 1 file per coarse channel
+    # Since aocal files have minimal metadata in the file, give the function input_rec_chans which is a hint as to how many
+    # and what the coarse chans are in the aocal file and what their receiver chan numbers are.
+    #
+    # Returns a list of new aocal filenames written
+    #
+    # Assuming a normal contiguous aocal file of 24 coarse chans, you would get 24 aocal files, all with the same header
+    # called: obsid_chXXX_aocal.bin where XXX is the rec chan number
+
+    # If it is picket fence and there are, say, 3 8 channel aocal files, you would run this function 3 times and each time
+    # you would get 8 files, 1 per coarse chan
+
+    # See: https://mwatelescope.atlassian.net/wiki/spaces/MP/pages/1190658052/aocal+File+Format for description of file format
+
+    AOCAL_INTRO = "MWAOCAL\0".encode("utf8")
+    AOCAL_FILE_TYPE = 0
+    AOCAL_STRUCTURE_TYPE = 0
+    AOCAL_INTERVAL_COUNT = 1
+    AOCAL_POLS = 4  # XX,XY,YX,YY
+    AOCAL_VALUES = 2  # real and imaginary
+    DOUBLE_SIZE = 8  # 8 bytes for a float64
+    STRUCT_HEADER_FORMAT = "<8s6I2d"
+
+    # get count of coarse channels worth of cal data provided
+    input_aocal_coarse_chans = len(input_rec_chans)
+
+    # Do some validity checks
+    file_size_bytes: int = os.stat(input_aocal_filename).st_size
+
+    # header size
+    header_size_bytes = struct.calcsize(STRUCT_HEADER_FORMAT)
+
+    # Data size
+    data_size_bytes = file_size_bytes - header_size_bytes
+
+    # Read the header of the file
+    with open(input_aocal_filename, "rb") as in_file:
+        header_bytes = in_file.read(header_size_bytes)
+        (
+            intro,
+            file_type,
+            structure_type,
+            interval_count,
+            antenna_count,
+            input_aocal_fine_channel_count,
+            polarisation_count,
+            start_gpstime,
+            end_gpstime,
+        ) = struct.unpack(STRUCT_HEADER_FORMAT, header_bytes)
+
+        if intro != AOCAL_INTRO:
+            raise ValueError(f"aocal file {input_aocal_filename} does not start with expected string {AOCAL_INTRO}")
+
+        if file_type != AOCAL_FILE_TYPE:
+            raise ValueError(
+                f"aocal file {input_aocal_filename} has invalid file_type {file_type} expected {AOCAL_FILE_TYPE}"
+            )
+
+        if structure_type != AOCAL_STRUCTURE_TYPE:
+            raise ValueError(
+                f"aocal file {input_aocal_filename} has invalid structure_type {structure_type} expected {AOCAL_STRUCTURE_TYPE}"
+            )
+
+        if interval_count != AOCAL_INTERVAL_COUNT:
+            raise ValueError(
+                f"aocal file {input_aocal_filename} has invalid interval_count {interval_count} expected {AOCAL_INTERVAL_COUNT}"
+            )
+
+        if polarisation_count != AOCAL_POLS:
+            raise ValueError(
+                f"aocal file {input_aocal_filename} has invalid polarisation_count {polarisation_count} expected {AOCAL_POLS}"
+            )
+
+        input_data = in_file.read()
+
+    # Expected data size
+    expected_input_data_size_bytes = (
+        AOCAL_INTERVAL_COUNT
+        * antenna_count
+        * input_aocal_fine_channel_count
+        * polarisation_count
+        * AOCAL_VALUES
+        * DOUBLE_SIZE
+    )
+
+    if expected_input_data_size_bytes != data_size_bytes:
+        raise ValueError(
+            f"aocal file {input_aocal_filename} data size of {data_size_bytes} doesn't match expected size of {expected_input_data_size_bytes}"
+        )
+
+    if expected_input_data_size_bytes != len(input_data):
+        raise ValueError(
+            f"aocal file {input_aocal_filename} read data size of {len(input_data)} which doesn't match expected size of {expected_input_data_size_bytes}"
+        )
+
+    fine_chans_per_coarse = int(input_aocal_fine_channel_count / input_aocal_coarse_chans)
+
+    np_data = np.frombuffer(input_data, dtype=np.float64)
+    np_data = np.reshape(
+        np_data,
+        (
+            AOCAL_INTERVAL_COUNT,
+            antenna_count,
+            input_aocal_coarse_chans,
+            fine_chans_per_coarse,
+            polarisation_count,
+            AOCAL_VALUES,
+        ),
+    )
+    print(np_data.shape)
+
+    # This is the number of doubles
+    values_per_coarse_chan = (
+        AOCAL_INTERVAL_COUNT * antenna_count * fine_chans_per_coarse * polarisation_count * AOCAL_VALUES
+    )
+    bytes_per_coarse_chan = values_per_coarse_chan * 8
+
+    out_filenames = []
+
+    for c_idx, rec_chan_no in enumerate(input_rec_chans):
+        out_filename = os.path.join(f"{os.path.split(input_aocal_filename)[0]}", f"{obs_id}_ch{rec_chan_no}_aocal.bin")
+
+        # create new file
+        with open(out_filename, "wb") as out_file:
+            out_file.write(
+                struct.pack(
+                    STRUCT_HEADER_FORMAT,
+                    AOCAL_INTRO,
+                    AOCAL_FILE_TYPE,
+                    AOCAL_STRUCTURE_TYPE,
+                    interval_count,
+                    antenna_count,
+                    fine_chans_per_coarse,
+                    polarisation_count,
+                    start_gpstime,
+                    end_gpstime,
+                )
+            )
+
+            # Write out just this coarse channel
+            subarray_le = np.asarray(np_data[:, :, c_idx, :, :, :], dtype="<f8")
+
+            bytes_written = out_file.write(subarray_le.tobytes(order="C"))
+
+            if bytes_written != bytes_per_coarse_chan:
+                raise ValueError(
+                    f"aocal file {input_aocal_filename}: wrote wrong number of bytes {bytes_written} (should have been {bytes_per_coarse_chan}) to new aocal file {out_filename}"
+                )
+
+            out_filenames.append(out_filename)
+
+    return out_filenames

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.82 12-Jan-2026
+
+* calvin: provide mechanism to save calibration aocal file to NFS share/dir and ensure no more than 24 hours of files are stored.
+  * If config option [processing]->`aocal_export_path` exists in the config file, Hyperdrive created aocal.bin file is copied. If not exist, ignore.
+  * If config option [processing]->`aocal_export_path` exists in the config file, then [processing]->`aocal_max_age_hours` is used to determine how old the oldest aocal files can be before removal.
+
+## 1.0.81 13-Nov-2025
+
+* Updated deps. Fixed bug where CORR_MODE_CHANGE would cause subfile to not be renamed to .free
+
+
 ## 1.0.80 24-Sep-2025
 
 * calvin_processor: When trying to call the URL to release calibration files, try indefinitely since the mwax boxes may be in the processing of stopping/starting due to change from oversampling to critically sampling and so might be down for ~10-15 mins.

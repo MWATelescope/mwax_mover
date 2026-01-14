@@ -18,6 +18,8 @@ from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_not_excepti
 import threading
 import time
 import typing
+from pathlib import Path
+from typing import List
 from typing import Tuple, Optional
 import astropy.io.fits as fits
 import requests
@@ -1108,3 +1110,79 @@ def is_int(value) -> bool:
 
 def gigabyte_to_gibibyte(gigabytes: float) -> float:
     return gigabytes * 1.07374
+
+
+def delete_files_older_than(path: str, older_than_seconds: int, extensions: list[str]) -> list[str]:
+    """
+    Delete files in `path` that:
+      1) are older than `older_than_seconds` (based on modification time), and
+      2) have an extension that matches any in `extensions`.
+
+    Args:
+        path (str): Directory to scan (non-recursive).
+        older_than_seconds (int): Age threshold in seconds. Files with (now - mtime) >= threshold are deleted.
+        extensions (list[str]): List of extensions to match. Each can be with or without leading dot, case-insensitive.
+                                Examples: ["log", ".tmp", ".TXT"]
+
+                                NOTE: The default `list[str]` in the signature is a type placeholder.
+                                You should pass an explicit list at call time, e.g., ["log", "tmp"].
+
+    Returns:
+        List[str]: Absolute paths of files successfully deleted.
+
+    Raises:
+        ValueError: If `path` is not a directory or `older_than_seconds` is negative.
+    """
+    # --- Validate inputs ---
+    p = Path(path)
+    if not p.exists() or not p.is_dir():
+        raise ValueError(f"Path is not a directory or does not exist: {path}")
+
+    if older_than_seconds < 0:
+        raise ValueError("older_than_seconds must be non-negative")
+
+    # Normalize extensions: make them lower-case and ensure they start with a dot.
+    norm_exts = {("." + ext.lower().lstrip(".")) for ext in extensions}
+
+    now = time.time()
+    deleted: List[str] = []
+
+    # Iterate non-recursively over files in the directory
+    for entry in p.iterdir():
+        # Only operate on files (skip directories, symlinks-to-directories, etc.)
+        try:
+            is_file = entry.is_file()
+        except OSError:
+            # Some entries may be inaccessible; skip them
+            continue
+
+        if not is_file:
+            continue
+
+        # Check extension match (case-insensitive)
+        suffix = entry.suffix.lower()  # includes leading dot if any
+        if norm_exts and suffix not in norm_exts:
+            continue
+        # If norm_exts is empty, treat as "match none" (requires explicit extensions)
+        if not norm_exts:
+            continue
+
+        # Check age based on modification time (mtime)
+        try:
+            mtime = entry.stat().st_mtime
+        except OSError:
+            # Could be permission issues; skip
+            continue
+
+        file_age = now - mtime
+        if file_age >= older_than_seconds:
+            # Attempt deletion
+            try:
+                os.remove(entry)  # pathlib's unlink() also works; os.remove is fine for files
+                deleted.append(str(entry.resolve()))
+            except OSError:
+                # If deletion fails (permissions, locked files), skip silently or log if desired
+                # You could collect failures separately if you want to report them.
+                continue
+
+    return deleted
