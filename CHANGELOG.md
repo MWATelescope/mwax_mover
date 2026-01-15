@@ -1,10 +1,11 @@
 # Changelog
 
-## 1.0.82 12-Jan-2026
+## 1.0.82 15-Jan-2026
 
 * calvin: provide mechanism to save calibration aocal file to NFS share/dir and ensure no more than 24 hours of files are stored.
-  * If config option [processing]->`aocal_export_path` exists in the config file, Hyperdrive created aocal.bin file is copied. If not exist, ignore.
+  * If config option [processing]->`aocal_export_path` exists in the config file, Hyperdrive created aocal.bin file is split into 1 file per coarse channel and then copied there. If not exist, ignore.
   * If config option [processing]->`aocal_export_path` exists in the config file, then [processing]->`aocal_max_age_hours` is used to determine how old the oldest aocal files can be before removal.
+* calvin: fixed bug where the hyperdrive stats txt file was being written to the source code dir instead of the output dir.
 
 ## 1.0.81 13-Nov-2025
 

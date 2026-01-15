@@ -35,6 +35,14 @@ from typing import NamedTuple, List, Tuple, Optional  # noqa: F401
 import sys
 
 V_LIGHT_M_S = 299792458.0
+AOCAL_INTRO = "MWAOCAL\0".encode("utf8")
+AOCAL_FILE_TYPE = 0
+AOCAL_STRUCTURE_TYPE = 0
+AOCAL_INTERVAL_COUNT = 1
+AOCAL_POLS = 4  # XX,XY,YX,YY
+AOCAL_VALUES = 2  # real and imaginary
+DOUBLE_SIZE = 8  # 8 bytes for a float64
+AOCAL_HEADER_FORMAT = "<8s6I2d"
 
 
 class CalvinJobType(Enum):
@@ -1759,7 +1767,11 @@ def run_hyperdrive_stats(
         obsid_and_band = uvfits_file.replace(".uvfits", "")
 
         hyperdrive_solution_filename = f"{obsid_and_band}_solutions.fits"
-        stats_filename = f"{obsid_and_band}_stats.txt"
+
+        # Write the stats to the output dir (where we put the uvfits file Birli created)
+        out_dir = input_uvfits_files[0].split()[0]
+
+        stats_filename = os.path.join(out_dir, f"{obsid_and_band}_stats.txt")
 
         (
             stats_success,
@@ -1809,6 +1821,8 @@ def process_phase_fits(
             idx = np.abs(phase_diff_raw[:, 0] - chanblock_hz).argmin()
             diff = phase_diff_raw[idx, 1]
             phase_diff[i] = np.exp(-1j * diff)
+    else:
+        logger.warning(f"{phase_diff_path} file not found. Using all 1s.")
 
     for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
         for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
@@ -2013,15 +2027,6 @@ def split_aocal_file_into_coarse_channels(
 
     # See: https://mwatelescope.atlassian.net/wiki/spaces/MP/pages/1190658052/aocal+File+Format for description of file format
 
-    AOCAL_INTRO = "MWAOCAL\0".encode("utf8")
-    AOCAL_FILE_TYPE = 0
-    AOCAL_STRUCTURE_TYPE = 0
-    AOCAL_INTERVAL_COUNT = 1
-    AOCAL_POLS = 4  # XX,XY,YX,YY
-    AOCAL_VALUES = 2  # real and imaginary
-    DOUBLE_SIZE = 8  # 8 bytes for a float64
-    STRUCT_HEADER_FORMAT = "<8s6I2d"
-
     # get count of coarse channels worth of cal data provided
     input_aocal_coarse_chans = len(input_rec_chans)
 
@@ -2029,7 +2034,7 @@ def split_aocal_file_into_coarse_channels(
     file_size_bytes: int = os.stat(input_aocal_filename).st_size
 
     # header size
-    header_size_bytes = struct.calcsize(STRUCT_HEADER_FORMAT)
+    header_size_bytes = struct.calcsize(AOCAL_HEADER_FORMAT)
 
     # Data size
     data_size_bytes = file_size_bytes - header_size_bytes
@@ -2047,7 +2052,7 @@ def split_aocal_file_into_coarse_channels(
             polarisation_count,
             start_gpstime,
             end_gpstime,
-        ) = struct.unpack(STRUCT_HEADER_FORMAT, header_bytes)
+        ) = struct.unpack(AOCAL_HEADER_FORMAT, header_bytes)
 
         if intro != AOCAL_INTRO:
             raise ValueError(f"aocal file {input_aocal_filename} does not start with expected string {AOCAL_INTRO}")
@@ -2108,7 +2113,6 @@ def split_aocal_file_into_coarse_channels(
             AOCAL_VALUES,
         ),
     )
-    print(np_data.shape)
 
     # This is the number of doubles
     values_per_coarse_chan = (
@@ -2119,13 +2123,16 @@ def split_aocal_file_into_coarse_channels(
     out_filenames = []
 
     for c_idx, rec_chan_no in enumerate(input_rec_chans):
-        out_filename = os.path.join(f"{os.path.split(input_aocal_filename)[0]}", f"{obs_id}_ch{rec_chan_no}_aocal.bin")
+        out_filename = os.path.join(
+            f"{os.path.split(input_aocal_filename)[0]}",
+            get_aocal_filename(obs_id, antenna_count, fine_chans_per_coarse, rec_chan_no),
+        )
 
         # create new file
         with open(out_filename, "wb") as out_file:
             out_file.write(
                 struct.pack(
-                    STRUCT_HEADER_FORMAT,
+                    AOCAL_HEADER_FORMAT,
                     AOCAL_INTRO,
                     AOCAL_FILE_TYPE,
                     AOCAL_STRUCTURE_TYPE,
@@ -2151,3 +2158,8 @@ def split_aocal_file_into_coarse_channels(
             out_filenames.append(out_filename)
 
     return out_filenames
+
+
+def get_aocal_filename(obsid: int, num_tiles: int, num_fine_chans: int, rec_chan_no: int) -> str:
+    # Provides a string with the correct aocal filename to use
+    return f"{obsid}_{num_tiles:03}_{num_fine_chans:04}_{rec_chan_no:03}_calfile.bin"

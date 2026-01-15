@@ -665,8 +665,22 @@ class MWAXCalvinProcessor:
                 self.logger, uvfits_files, self.metafits_filename, self.obs_id, self.hyperdrive_binary_path
             )
 
-            # if aocal_export_path is set then try and clean up old files
+            # if aocal_export_path is set then split the aocal files into coarse chan files and try to clean up old files
             if self.aocal_export_path is not None:
+                # re-export aocal into 1 file per coarse channel
+                aocal_files = glob.glob(os.path.join(self.working_path, "*.bin"))
+
+                for aocal_file in aocal_files:
+                    out_aocal_files = mwax_calvin_utils.split_aocal_file_into_coarse_channels(
+                        self.obs_id,
+                        aocal_file,
+                        [c.rec_chan_number for c in self.metafits_context.metafits_coarse_chans],
+                    )
+
+                    for f in out_aocal_files:
+                        # Copy aocal files to the aocal_export directory
+                        shutil.copy(f, os.path.join(self.aocal_export_path, os.path.split(f)[1]))
+
                 # Clean up old files
                 ext_list = ["*.fits", "*.bin"]
                 files_removed = utils.delete_files_older_than(
