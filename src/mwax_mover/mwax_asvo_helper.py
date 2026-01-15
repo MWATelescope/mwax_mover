@@ -194,7 +194,9 @@ class MWAASVOHelper:
         job = self.get_first_job_for_obs_id(obs_id)
 
         if job:
-            job.request_ids.append(request_id)
+            # Only add this request if it is not already in the list
+            if request_id not in job.request_ids:
+                job.request_ids.append(request_id)
 
             if job.submitted_datetime is None:
                 job.submitted_datetime = datetime.now(timezone.utc)

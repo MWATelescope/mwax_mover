@@ -1,8 +1,12 @@
 # Changelog
 
+## 1.0.84 15-Jan-2026
+
+* calvin: Fixed bug where multiple copies of the requestid were being added to the calvin_controller list.
+
 ## 1.0.83 15-Jan-2026
 
-* Fixed bug where aocal splitting was not working.
+* calvin: Fixed bug where aocal splitting was not working.
 
 ## 1.0.82 15-Jan-2026
 
