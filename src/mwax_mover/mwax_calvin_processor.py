@@ -670,7 +670,10 @@ class MWAXCalvinProcessor:
                 # re-export aocal into 1 file per coarse channel
                 aocal_files = glob.glob(os.path.join(self.working_path, "*.bin"))
 
+                self.logger.info(f"Taking {len(aocal_files)} and splitting into 1 aocal file per coarse channel.")
+
                 for aocal_file in aocal_files:
+                    self.logger.debug(f"Splitting {aocal_file}...")
                     out_aocal_files = mwax_calvin_utils.split_aocal_file_into_coarse_channels(
                         self.obs_id,
                         aocal_file,
@@ -679,7 +682,9 @@ class MWAXCalvinProcessor:
 
                     for f in out_aocal_files:
                         # Copy aocal files to the aocal_export directory
-                        shutil.copy(f, os.path.join(self.aocal_export_path, os.path.split(f)[1]))
+                        aocal_dest = os.path.join(self.aocal_export_path, os.path.split(f)[1])
+                        self.logger.info(f"Copying split aocal file {f} to {aocal_dest}")
+                        shutil.copy(f, aocal_dest)
 
                 # Clean up old files
                 ext_list = ["*.fits", "*.bin"]

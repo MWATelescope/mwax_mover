@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.83 15-Jan-2026
+
+* Fixed bug where aocal splitting was not working.
+
 ## 1.0.82 15-Jan-2026
 
 * calvin: provide mechanism to save calibration aocal file to NFS share/dir and ensure no more than 24 hours of files are stored.

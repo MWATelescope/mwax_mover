@@ -1669,20 +1669,6 @@ def run_hyperdrive(
                     f" in {elapsed:.3f} seconds"
                 )
 
-                # if config file has the aocal_export_path, then export the file
-                if aocal_export_path is not None:
-                    destination_full_filename = ""
-                    try:
-                        destination_full_filename = os.path.join(aocal_export_path, bin_solution_filename)
-                        logger.info(f"{obs_id}: Exporting {bin_solution_full_filename} to {destination_full_filename}")
-                        shutil.copyfile(bin_solution_full_filename, destination_full_filename)
-                    except Exception as export_exception:
-                        # If this fails, fail hard as beamformer relies on this and we need to know!
-                        export_exception.add_note(
-                            f"{obs_id}: Export of {bin_solution_full_filename} to {destination_full_filename} failed"
-                        )
-                        raise
-
                 # Success!
                 # Write out a useful file of command line info
                 readme_filename = f"{obsid_and_band}_hyperdrive_readme.txt"
