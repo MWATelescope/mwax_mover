@@ -1,6 +1,10 @@
 # Changelog
 
-## 1.0.86 17-Jan-2026
+## 1.0.88 17-Jan-2026
+
+* Calvin: Fixed Silly bug when getting the rec chan number from the aocal file
+
+## 1.0.87 17-Jan-2026
 
 * Calvin: Fix for when there are already 1 aocal per coarse channel (24-band picket fence)- now the code renames them properly!
 

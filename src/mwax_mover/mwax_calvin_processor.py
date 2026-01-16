@@ -708,7 +708,7 @@ class MWAXCalvinProcessor:
                         self.logger.debug(
                             f"...Removed first bit of string from {aocal_file}: {aocal_file_rec_chan_no_str}"
                         )
-                        aocal_file_rec_chan_no_str: str = aocal_file_rec_chan_no_str.replace("_solutions", "")
+                        aocal_file_rec_chan_no_str: str = aocal_file_rec_chan_no_str.replace("_solutions.bin", "")
                         self.logger.debug(
                             f"...Removed last bit of string: {aocal_file_rec_chan_no_str} and converting to int"
                         )
