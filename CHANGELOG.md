@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.86 16-Jan-2026
+
+* Calvin: Fix for when there are already 1 aocal per coarse channel (24-band picket fence)
+
+## 1.0.85 16-Jan-2026
+
+* calvin: Another attempt to fix the splitting of aocal files.
+* calvin: Fix for calvin not producing hyperdrive stats txt file
+* calvin: Logic change to calvin_controller to always start a new cal job even if it has seen this obs before 
+
 ## 1.0.84 16-Jan-2026
 
 * calvin: Another attempt to fix the splitting of aocal files.

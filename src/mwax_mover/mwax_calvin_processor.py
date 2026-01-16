@@ -673,24 +673,30 @@ class MWAXCalvinProcessor:
             if self.aocal_export_path is not None:
                 # re-export aocal into 1 file per coarse channel
                 aocal_files = glob.glob(os.path.join(self.job_output_path, "*.bin"))
+                out_aocal_files = []
 
-                self.logger.info(
-                    f"Found {len(aocal_files)} aocal files in {self.job_output_path} and splitting into 1 aocal file per coarse channel."
-                )
+                self.logger.info(f"Found {len(aocal_files)} aocal files in {self.job_output_path}.")
 
-                for aocal_file in aocal_files:
-                    self.logger.debug(f"Splitting {aocal_file}...")
-                    out_aocal_files = mwax_calvin_utils.split_aocal_file_into_coarse_channels(
-                        self.obs_id,
-                        aocal_file,
-                        [c.rec_chan_number for c in self.metafits_context.metafits_coarse_chans],
-                    )
+                if len(aocal_files) < len(self.metafits_context.metafits_coarse_chans):
+                    self.logger.info("Splitting each into 1 aocal file per coarse channel.")
 
-                    for f in out_aocal_files:
-                        # Copy aocal files to the aocal_export directory
-                        aocal_dest = os.path.join(self.aocal_export_path, os.path.split(f)[1])
-                        self.logger.info(f"Copying split aocal file {f} to {aocal_dest}")
-                        shutil.copy(f, aocal_dest)
+                    for aocal_file in aocal_files:
+                        self.logger.debug(f"Splitting {aocal_file}...")
+                        out_aocal_files = mwax_calvin_utils.split_aocal_file_into_coarse_channels(
+                            self.obs_id,
+                            aocal_file,
+                            [c.rec_chan_number for c in self.metafits_context.metafits_coarse_chans],
+                        )
+                else:
+                    # We already have 1 per coarse channel
+                    self.logger.info("No spliting needed, we already have 1 aocal file per coarse channel.")
+                    out_aocal_files = aocal_files
+
+                for f in out_aocal_files:
+                    # Copy aocal files to the aocal_export directory
+                    aocal_dest = os.path.join(self.aocal_export_path, os.path.split(f)[1])
+                    self.logger.info(f"Copying split aocal file {f} to {aocal_dest}")
+                    shutil.copy(f, aocal_dest)
 
                 # Clean up old files
                 ext_list = ["*.fits", "*.bin"]
