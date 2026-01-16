@@ -728,6 +728,8 @@ class MWAXCalvinProcessor:
                             rec_chan_number,
                         )
 
+                        aocal_dest = os.path.join(self.aocal_export_path, aocal_dest)
+
                         self.logger.info(f"Copying aocal file {aocal_file} to {aocal_dest}")
                         shutil.copy(aocal_file, aocal_dest)
 

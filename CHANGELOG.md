@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.90 17-Jan-2026
+
+* Calvin: Fixed another bug with 24 band picket fence edge case (missed the path)
+
 ## 1.0.89 17-Jan-2026
 
 * Calvin: Fixed another bug with 24 band picket fence edge case
