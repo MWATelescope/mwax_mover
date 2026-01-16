@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.89 17-Jan-2026
+
+* Calvin: Fixed another bug with 24 band picket fence edge case
+
 ## 1.0.88 17-Jan-2026
 
 * Calvin: Fixed Silly bug when getting the rec chan number from the aocal file

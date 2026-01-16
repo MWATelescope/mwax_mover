@@ -687,6 +687,12 @@ class MWAXCalvinProcessor:
                             aocal_file,
                             [c.rec_chan_number for c in self.metafits_context.metafits_coarse_chans],
                         )
+
+                    for f in out_aocal_files:
+                        # Copy aocal files to the aocal_export directory
+                        aocal_dest = os.path.join(self.aocal_export_path, os.path.split(f)[1])
+                        self.logger.info(f"Copying split aocal file {f} to {aocal_dest}")
+                        shutil.copy(f, aocal_dest)
                 else:
                     # We already have 1 per coarse channel
                     self.logger.info("No spliting needed, we already have 1 aocal file per coarse channel.")
@@ -715,19 +721,15 @@ class MWAXCalvinProcessor:
                         # Should be left with a 1,2 or 3 digit number
                         rec_chan_number = int(aocal_file_rec_chan_no_str)
 
-                        new_filename = mwax_calvin_utils.get_aocal_filename(
+                        aocal_dest = mwax_calvin_utils.get_aocal_filename(
                             self.obs_id,
                             self.metafits_context.num_ants,
                             self.metafits_context.num_corr_fine_chans_per_coarse,
                             rec_chan_number,
                         )
-                        out_aocal_files.append(new_filename)
 
-                for f in out_aocal_files:
-                    # Copy aocal files to the aocal_export directory
-                    aocal_dest = os.path.join(self.aocal_export_path, os.path.split(f)[1])
-                    self.logger.info(f"Copying split aocal file {f} to {aocal_dest}")
-                    shutil.copy(f, aocal_dest)
+                        self.logger.info(f"Copying aocal file {aocal_file} to {aocal_dest}")
+                        shutil.copy(aocal_file, aocal_dest)
 
                 # Clean up old files
                 ext_list = ["*.fits", "*.bin"]
