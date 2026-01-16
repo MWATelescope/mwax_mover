@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.86 17-Jan-2026
+
+* Calvin: Fix for when there are already 1 aocal per coarse channel (24-band picket fence)- now the code renames them properly!
+
 ## 1.0.86 16-Jan-2026
 
 * Calvin: Fix for when there are already 1 aocal per coarse channel (24-band picket fence)

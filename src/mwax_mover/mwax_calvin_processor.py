@@ -690,7 +690,38 @@ class MWAXCalvinProcessor:
                 else:
                     # We already have 1 per coarse channel
                     self.logger.info("No spliting needed, we already have 1 aocal file per coarse channel.")
-                    out_aocal_files = aocal_files
+                    for aocal_file in aocal_files:
+                        self.logger.debug(f"Renaming {aocal_file}...")
+
+                        # determine rec_chan_number - we don't want to mess this up!
+                        # The existing aocal filename will be in the form of
+                        #
+                        # /path/to/file/obsid_chNNN_solutions.bin
+                        # (where NNN is either 1 2 or 3 digits)
+                        #
+                        # So we will remove the path then cut the first bit up to "ch" and chop off "_solutions.bin"
+                        # then convert to int. It's a big messy but we really don't want to assume the order of coarse
+                        # channels in our file list matches the order of coarse chans in the metafits_context.
+
+                        # strip the directory then remove the first part of the filename
+                        aocal_file_rec_chan_no_str: str = os.path.basename(aocal_file).replace(f"{self.obs_id}_ch", "")
+                        self.logger.debug(
+                            f"...Removed first bit of string from {aocal_file}: {aocal_file_rec_chan_no_str}"
+                        )
+                        aocal_file_rec_chan_no_str: str = aocal_file_rec_chan_no_str.replace("_solutions", "")
+                        self.logger.debug(
+                            f"...Removed last bit of string: {aocal_file_rec_chan_no_str} and converting to int"
+                        )
+                        # Should be left with a 1,2 or 3 digit number
+                        rec_chan_number = int(aocal_file_rec_chan_no_str)
+
+                        new_filename = mwax_calvin_utils.get_aocal_filename(
+                            self.obs_id,
+                            self.metafits_context.num_ants,
+                            self.metafits_context.num_corr_fine_chans_per_coarse,
+                            rec_chan_number,
+                        )
+                        out_aocal_files.append(new_filename)
 
                 for f in out_aocal_files:
                     # Copy aocal files to the aocal_export directory
