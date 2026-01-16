@@ -464,38 +464,40 @@ class MWAXCalvinController:
             Nothing. Exceptions can be raised though
         """
 
-        # Check if we have this obs_id tracked
-        asvo_job = self.mwax_asvo_helper.get_first_job_for_obs_id(obs_id)
-
-        # If this obs exists in another job AND we have not yet submitted it to slurm
-        # Then just add this request onto the existing job
-        if asvo_job and not asvo_job.download_slurm_job_submitted:
-            # Found!
-            if request_id not in asvo_job.request_ids:
-                asvo_job.request_ids.append(request_id)
-
-                # Update database
-                #
-                # The point of this is:
-                # If we are already handling obsid X, then another bunch of requests come through
-                # we should "catch them up" to the current status in the database
-                try:
-                    update_calsolution_request_submit_mwa_asvo_job_status(
-                        self.db_handler_object,
-                        asvo_job.request_ids,
-                        asvo_job.job_id,
-                        asvo_job.submitted_datetime,
-                        None,
-                        None,
-                    )
-                except Exception:
-                    self.logger.exception("Unable to update calibration_request table")
-                    self.database_errors += 1
-            else:
-                # We already are tracking this request- nothing to do
-                pass
-        else:
-            # Not found
+        #
+        # GJS: Commenting this logic out- we want any new request to always trigger a new calibration
+        #
+        # # Check if we have this obs_id tracked
+        # asvo_job = self.mwax_asvo_helper.get_first_job_for_obs_id(obs_id)
+        # # If this obs exists in another job AND we have not yet submitted it to slurm
+        # # Then just add this request onto the existing job
+        # if asvo_job and not asvo_job.download_slurm_job_submitted:
+        #     # Found!
+        #     if request_id not in asvo_job.request_ids:
+        #         asvo_job.request_ids.append(request_id)
+        #         # Update database
+        #         #
+        #         # The point of this is:
+        #         # If we are already handling obsid X, then another bunch of requests come through
+        #         # we should "catch them up" to the current status in the database
+        #         try:
+        #             update_calsolution_request_submit_mwa_asvo_job_status(
+        #                 self.db_handler_object,
+        #                 asvo_job.request_ids,
+        #                 asvo_job.job_id,
+        #                 asvo_job.submitted_datetime,
+        #                 None,
+        #                 None,
+        #             )
+        #         except Exception:
+        #             self.logger.exception("Unable to update calibration_request table")
+        #             self.database_errors += 1
+        #     else:
+        #         # We already are tracking this request- nothing to do
+        #         pass
+        # else:
+        #    # Not found
+        if not self.mwax_asvo_helper.does_request_exist(request_id):
             try:
                 # Submit job and add to the ones we are tracking
                 new_job = self.mwax_asvo_helper.submit_download_job(request_id, obs_id)
