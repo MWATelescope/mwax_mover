@@ -136,21 +136,21 @@ class MWAASVOHelper:
         self.giant_squid_list_timeout_seconds = giant_squid_list_timeout_seconds
         self.giant_squid_submitvis_timeout_seconds = giant_squid_submitvis_timeout_seconds
 
-    def get_first_job_for_obs_id(self, obs_id: int) -> MWAASVOJob | None:
-        """Get the first MWAASVOJob object found in current_asvo_jobs, matching on obs_id.
+    def does_request_exist(self, request_id: int) -> bool:
+        """Check if the request_id is already being handled by calvin
 
         Parameters:
-            obs_id (int): the obs_id we want to find the first job for
+            request_id (int): the request_id we want to find a job for
 
         Returns:
-            The MWAASVOJob object found, or None if none are found
+            True if found, False if not found
         """
         for job in self.current_asvo_jobs:
-            if job.obs_id == obs_id:
-                return job
+            if request_id in job.request_ids:
+                return True
 
         # not found
-        return None
+        return False
 
     def submit_download_job(self, request_id: int, obs_id: int) -> MWAASVOJob:
         """Submits an MWA ASVO Download Job by executing giant-squid
@@ -190,29 +190,29 @@ class MWAASVOHelper:
             # Some other error happened- update database as an error
             raise
 
-        # create, populate and add the MWAASVOJob if we don't already have it
-        job = self.get_first_job_for_obs_id(obs_id)
+            #
+            # GJS commenting out so we always add a job
+            #
+            # create, populate and add the MWAASVOJob if we don't already have it
+            # job = self.get_first_job_for_obs_id(obs_id)
+            # if job:
+            #     # Only add this request if it is not already in the list
+            #     if request_id not in job.request_ids:
+            #         job.request_ids.append(request_id)
 
-        if job:
-            # Only add this request if it is not already in the list
-            if request_id not in job.request_ids:
-                job.request_ids.append(request_id)
+            #     if job.submitted_datetime is None:
+            #         job.submitted_datetime = datetime.now(timezone.utc)
 
-            if job.submitted_datetime is None:
-                job.submitted_datetime = datetime.now(timezone.utc)
-
-            self.logger.info(
-                f"{obs_id}: Added RequestID {request_id} to JobID {job_id} as this ObsID is already tracked."
-                f"Tracking {len(self.current_asvo_jobs)} MWA ASVO jobs"
-            )
-        else:
-            # add a new job to be tracked
-            job = MWAASVOJob(request_id=request_id, obs_id=obs_id, job_id=job_id)
-            job.submitted_datetime = datetime.now(timezone.utc)
-            self.current_asvo_jobs.append(job)
-            self.logger.info(
-                f"{obs_id}: Added JobID {job_id}. Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs"
-            )
+            #     self.logger.info(
+            #         f"{obs_id}: Added RequestID {request_id} to JobID {job_id} as this ObsID is already tracked."
+            #         f"Tracking {len(self.current_asvo_jobs)} MWA ASVO jobs"
+            #     )
+            # else:
+        # add a new job to be tracked
+        job = MWAASVOJob(request_id=request_id, obs_id=obs_id, job_id=job_id)
+        job.submitted_datetime = datetime.now(timezone.utc)
+        self.current_asvo_jobs.append(job)
+        self.logger.info(f"{obs_id}: Added JobID {job_id}. Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs")
 
         return job
 

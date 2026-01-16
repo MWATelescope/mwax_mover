@@ -1388,7 +1388,7 @@ def write_stats(
     Returns:
     bool = Success/fail
     str  = Error message if fail"""
-    logger.info(f"{obs_id} Writing stats for {hyperdrive_solution_filename}...")
+    logger.info(f"{obs_id} Writing stats for {hyperdrive_solution_filename} to {stats_filename}...")
 
     try:
         conv_summary_list = get_convergence_summary(hyperdrive_solution_filename)
@@ -1606,7 +1606,6 @@ def run_hyperdrive(
     source_list_type: str,
     num_sources: int,
     hyperdrive_timeout: int,
-    aocal_export_path: Optional[str],
 ) -> bool:
     """Runs hyperdrive N times and returns true on success or false if not all runs worked"""
     logger.info(
@@ -1735,6 +1734,7 @@ def run_hyperdrive_stats(
     metafits_filename: str,
     obs_id: int,
     hyperdrive_binary_path: str,
+    hyperdrive_output_path: str,
 ) -> bool:
     """Call hyperdrive again but just to produce plots and stats"""
 
@@ -1750,14 +1750,12 @@ def run_hyperdrive_stats(
         # Take the filename which for picket fence will also have
         # the band info and in all cases the obsid. We will use
         # this as a base for other files we work with
-        obsid_and_band = uvfits_file.replace(".uvfits", "")
+        obsid_and_band = os.path.basename(uvfits_file).replace(".uvfits", "")
 
-        hyperdrive_solution_filename = f"{obsid_and_band}_solutions.fits"
+        hyperdrive_solution_filename = os.path.join(hyperdrive_output_path, f"{obsid_and_band}_solutions.fits")
 
-        # Write the stats to the output dir (where we put the uvfits file Birli created)
-        out_dir = input_uvfits_files[0].split()[0]
-
-        stats_filename = os.path.join(out_dir, f"{obsid_and_band}_stats.txt")
+        # Write the stats to the output dir
+        stats_filename = os.path.join(hyperdrive_output_path, f"{obsid_and_band}_stats.txt")
 
         (
             stats_success,

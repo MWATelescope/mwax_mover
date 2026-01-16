@@ -655,22 +655,28 @@ class MWAXCalvinProcessor:
             self.source_list_type,
             self.num_sources,
             self.hyperdrive_timeout,
-            self.aocal_export_path,
         )
 
         # Did we have N number of successful runs?
         if hyperdrive_success:
             # Run hyperdrive and get plots and stats
             mwax_calvin_utils.run_hyperdrive_stats(
-                self.logger, uvfits_files, self.metafits_filename, self.obs_id, self.hyperdrive_binary_path
+                self.logger,
+                uvfits_files,
+                self.metafits_filename,
+                self.obs_id,
+                self.hyperdrive_binary_path,
+                self.job_output_path,
             )
 
             # if aocal_export_path is set then split the aocal files into coarse chan files and try to clean up old files
             if self.aocal_export_path is not None:
                 # re-export aocal into 1 file per coarse channel
-                aocal_files = glob.glob(os.path.join(self.working_path, "*.bin"))
+                aocal_files = glob.glob(os.path.join(self.job_output_path, "*.bin"))
 
-                self.logger.info(f"Taking {len(aocal_files)} and splitting into 1 aocal file per coarse channel.")
+                self.logger.info(
+                    f"Found {len(aocal_files)} aocal files in {self.job_output_path} and splitting into 1 aocal file per coarse channel."
+                )
 
                 for aocal_file in aocal_files:
                     self.logger.debug(f"Splitting {aocal_file}...")

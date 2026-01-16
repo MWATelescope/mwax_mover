@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.84 16-Jan-2026
+
+* calvin: Another attempt to fix the splitting of aocal files.
+* calvin: If receiving a calibration request for one just process, reprocess it anyway.
+
 ## 1.0.84 15-Jan-2026
 
 * calvin: Fixed bug where multiple copies of the requestid were being added to the calvin_controller list.
