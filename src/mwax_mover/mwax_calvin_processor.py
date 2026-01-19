@@ -734,13 +734,17 @@ class MWAXCalvinProcessor:
                         shutil.copy(aocal_file, aocal_dest)
 
                 # Clean up old files
-                ext_list = ["*.fits", "*.bin"]
+                ext_list = ["fits", "bin"]
                 files_removed = utils.delete_files_older_than(
                     self.aocal_export_path, self.aocal_max_age_hours * 3600, ext_list
                 )
                 if len(files_removed) > 0:
                     self.logger.debug(
                         f"Removed the following files from {self.aocal_export_path} as they were older than {self.aocal_max_age_hours} hours: {files_removed}"
+                    )
+                else:
+                    self.logger.debug(
+                        f"No files older than {self.aocal_max_age_hours} hours found in {self.aocal_export_path} to remove."
                     )
 
         if hyperdrive_success:
