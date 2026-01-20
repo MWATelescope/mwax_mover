@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.0 20-Jan-2026
+
+* Calvin: Remove step that uses phase_diff.txt as it is no longer useful.
+* Calvin: Invert the gains since the phases are negated and calculate pol0, pol1, sigma_res and quality for gains.
+
 ## 1.0.90 19-Jan-2026
 
 * Calvin: Fix bug where the deletion of stale aolcal files was not picking up any files for deletion

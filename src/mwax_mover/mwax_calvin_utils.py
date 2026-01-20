@@ -910,16 +910,25 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse) -> GainFitInf
     """
     Fit gain solutions
     """
-    # length check
-    assert len(chanblocks_hz) == len(solns) == len(weights)
-    n_coarse = len(chanblocks_hz) // chanblocks_per_coarse
+    # length check- should be the number of fine channels
+    n_freqs = len(chanblocks_hz)
+    assert n_freqs == len(solns) == len(weights)
+    # This is out output number of channels
+    n_coarse = n_freqs // chanblocks_per_coarse
 
+    # Take the absolte value of the amplitudes
     amps = np.abs(solns)
 
+    # Initialize output arrays
     gains = np.full(n_coarse, np.nan)
     pol0 = np.full(n_coarse, np.nan)
     pol1 = np.full(n_coarse, np.nan)
     sigma_resid = np.full(n_coarse, np.nan)
+
+    residuals = np.full(n_freqs, np.nan)
+
+    # Initialise other variables
+    quality: float = np.nan
 
     # split chans, solns, weights into chunks of chanblocks_per_coarse
     for coarse_idx, (
@@ -937,18 +946,42 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse) -> GainFitInf
         coarse_mask = np.where(np.logical_and(np.isfinite(coarse_amps), coarse_weights > 0))[0]
         if len(coarse_mask) < 2:
             continue
+
+        print(f"Coarse amps: {coarse_amps}")
+
+        # Apply mask to arrays to remove nans and zero weights
+        # Remember these arrays are as big as the number of fine channels per coarse
         coarse_amps = coarse_amps[coarse_mask]
+        # Invert the gains since we already negate the phase
+        coarse_amps = 1 / coarse_amps
+
         coarse_hz = coarse_hz[coarse_mask]
         coarse_weights = coarse_weights[coarse_mask]
 
-        gains[coarse_idx] = np.sum(coarse_amps * coarse_weights) / np.sum(coarse_weights)
-        # TODO(Dev): finish this bit
-        pol0[coarse_idx] = 0.0
-        pol1[coarse_idx] = 0.0
-        sigma_resid[coarse_idx] = 0.0
+        print(f"coarse_idx={coarse_idx}, coarse_hz={coarse_hz}, coarse_amps={coarse_amps}")
 
-    # TODO(Dev): calculate quality
-    quality = 1.0
+        # Calculate the weighted mean of the amplitudes for this coarse channel
+        gains[coarse_idx] = np.sum(coarse_amps * coarse_weights) / np.sum(coarse_weights)
+        print(f"gain={gains[coarse_idx]}")
+
+        # Determine the slope and intercept of the gain (amplitude) vs frequency
+        slope, intercept = np.polyfit(coarse_hz, coarse_amps, deg=1)
+
+        # Residuals
+        y_hat = slope * coarse_hz + intercept
+        residuals = coarse_amps - y_hat
+        print(f"residuals={residuals}")
+
+        # Store slope and intercept
+        pol1[coarse_idx] = slope
+        pol0[coarse_idx] = intercept
+
+        sigma_resid[coarse_idx] = np.std(residuals)
+
+    # Calculate quality
+    # How many of the residuals are within 2*stderr of zero
+    # quality = proportion of residuals within ±2*sigma of 0
+    quality = float(np.mean(np.abs(sigma_resid) <= 2.0))
 
     return GainFitInfo(
         quality=quality,
@@ -1794,19 +1827,6 @@ def process_phase_fits(
     tile and pol
     """
     fits = []
-    phase_diff_path = os.path.join(output_path, "phase_diff.txt")
-    # by default we don't want to apply any phase rotation.
-    phase_diff = np.full((len(chanblocks_hz),), 1.0, dtype=np.complex128)
-    if os.path.exists(phase_diff_path):
-        # phase_diff_raw is an array, first column is frequency, second column is phase difference
-        phase_diff_raw = np.loadtxt(phase_diff_path)
-        for i, chanblock_hz in enumerate(chanblocks_hz):
-            # find the closest frequency in phase_diff_raw
-            idx = np.abs(phase_diff_raw[:, 0] - chanblock_hz).argmin()
-            diff = phase_diff_raw[idx, 1]
-            phase_diff[i] = np.exp(-1j * diff)
-    else:
-        logger.warning(f"{phase_diff_path} file not found. Using all 1s.")
 
     for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
         for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
@@ -1817,10 +1837,6 @@ def process_phase_fits(
             if tile.flag:
                 continue
             name = tile.name
-            if tile.flavor.endswith("-NI"):
-                solns *= phase_diff
-            # else:
-            #     continue
             try:
                 fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)
             except Exception as exc:
@@ -1855,7 +1871,6 @@ def process_gain_fits(
                 continue
             logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
             fits.append([tile_id, soln_idx, pol, *fit])
-    logger.warning("TODO: fake gain fits!")
 
     return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *GainFitInfo._fields])
 

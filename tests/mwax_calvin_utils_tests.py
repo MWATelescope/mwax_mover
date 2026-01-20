@@ -358,3 +358,117 @@ def test_get_aocal_filename():
         mwax_mover.mwax_calvin_utils.get_aocal_filename(1234567890, 64, 6400, 123)
         == "1234567890_064_6400_123_calfile.bin"
     )
+
+
+def test_fit_gains_good1_no_nan():
+    start_freq_hz = 100000000.0  # 100 MHz
+    n_coarse = 2
+    n_fch = 4
+    fch_width_hz = 40000.0  # 40 kHz
+    chan_array = np.array(np.arange(start_freq_hz, start_freq_hz + (n_coarse * n_fch * fch_width_hz), fch_width_hz))
+    print(f"chan_array: {chan_array}")
+    assert len(chan_array) == 8
+
+    fit_gains = mwax_mover.mwax_calvin_utils.fit_gain(
+        # 100 kHz
+        chanblocks_hz=chan_array,
+        solns=np.array([1.4, 1.3, 1.2, 1.1, 1.0, 0.9, 0.8, 0.7]),
+        weights=np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
+        chanblocks_per_coarse=n_fch,
+    )
+
+    assert len(fit_gains.gains) == n_coarse
+    assert len(fit_gains.pol0) == n_coarse
+    assert len(fit_gains.pol1) == n_coarse
+    assert len(fit_gains.sigma_resid) == n_coarse
+
+    # cc 1
+    assert np.isclose(fit_gains.gains[0], 0.80649)
+    assert np.isclose(fit_gains.pol0[0], -161.420330)  # intercept
+    assert np.isclose(fit_gains.pol1[0], 0.00000162)  # slope
+    assert np.isclose(fit_gains.sigma_resid[0], 0.005210617)
+
+    # cc 2
+    assert np.isclose(fit_gains.gains[1], 1.19742)
+    assert np.isclose(fit_gains.pol0[1], -355.736905)  # intercept
+    assert np.isclose(fit_gains.pol1[1], 0.00000356)  # slope
+    assert np.isclose(fit_gains.sigma_resid[1], 0.016917519)
+
+    # overall
+    assert np.isclose(fit_gains.quality, 1.0)
+
+
+def test_fit_gains_good2_some_nan():
+    start_freq_hz = 100000000.0  # 100 MHz
+    n_coarse = 2
+    n_fch = 4
+    fch_width_hz = 40000.0  # 40 kHz
+    chan_array = np.array(np.arange(start_freq_hz, start_freq_hz + (n_coarse * n_fch * fch_width_hz), fch_width_hz))
+    print(f"chan_array: {chan_array}")
+    assert len(chan_array) == 8
+
+    fit_gains = mwax_mover.mwax_calvin_utils.fit_gain(
+        # 100 kHz
+        chanblocks_hz=chan_array,
+        solns=np.array([1.4, 1.3, 1.2, np.nan, 1.0, 0.9, 0.8, np.nan]),
+        weights=np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
+        chanblocks_per_coarse=n_fch,
+    )
+
+    assert len(fit_gains.gains) == n_coarse
+    assert len(fit_gains.pol0) == n_coarse
+    assert len(fit_gains.pol1) == n_coarse
+    assert len(fit_gains.sigma_resid) == n_coarse
+
+    # cc 1
+    assert np.isclose(fit_gains.gains[0], 0.77228)
+    assert np.isclose(fit_gains.pol0[0], -148.096764)  # intercept
+    assert np.isclose(fit_gains.pol1[0], 0.00000149)  # slope
+    assert np.isclose(fit_gains.sigma_resid[0], 0.002158446)
+
+    # cc 2
+    assert np.isclose(fit_gains.gains[1], 1.12037)
+    assert np.isclose(fit_gains.pol0[1], -312.004630)  # intercept
+    assert np.isclose(fit_gains.pol1[1], 0.00000313)  # slope
+    assert np.isclose(fit_gains.sigma_resid[1], 0.006547285)
+
+    # overall
+    assert np.isclose(fit_gains.quality, 1)
+
+
+def test_fit_gains_good3_outlier():
+    start_freq_hz = 100000000.0  # 100 MHz
+    n_coarse = 2
+    n_fch = 4
+    fch_width_hz = 40000.0  # 40 kHz
+    chan_array = np.array(np.arange(start_freq_hz, start_freq_hz + (n_coarse * n_fch * fch_width_hz), fch_width_hz))
+    print(f"chan_array: {chan_array}")
+    assert len(chan_array) == 8
+
+    fit_gains = mwax_mover.mwax_calvin_utils.fit_gain(
+        # 100 kHz
+        chanblocks_hz=chan_array,
+        solns=np.array([1.4, 1.3, 1.2, 9, 1.0, 0.9, 0.8, 9]),
+        weights=np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
+        chanblocks_per_coarse=n_fch,
+    )
+
+    assert len(fit_gains.gains) == n_coarse
+    assert len(fit_gains.pol0) == n_coarse
+    assert len(fit_gains.pol1) == n_coarse
+    assert len(fit_gains.sigma_resid) == n_coarse
+
+    # cc 1
+    assert np.isclose(fit_gains.gains[0], 0.6069902)
+    assert np.isclose(fit_gains.pol0[0], 437.224115)  # intercept
+    assert np.isclose(fit_gains.pol1[0], -0.00000436)  # slope
+    assert np.isclose(fit_gains.sigma_resid[0], 0.213680163)
+
+    # cc 2
+    assert np.isclose(fit_gains.gains[1], 0.8680556)
+    assert np.isclose(fit_gains.pol0[1], 634.202778)  # intercept
+    assert np.isclose(fit_gains.pol1[1], -0.00000632)  # slope
+    assert np.isclose(fit_gains.sigma_resid[1], 0.344908961)
+
+    # overall
+    assert np.isclose(fit_gains.quality, 1)
