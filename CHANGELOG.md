@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.2 22-Jan-2026
+
+* Calvin: Reverted x_intercept and y_intercept so they get inserted into calibration_solutions rows as radians (they are back to being radains!).
+
 ## 1.1.1 22-Jan-2026
 
 * Calvin: Fixed bug where x_intercept and y_intercept were being inserted into calibration_solutions rows as radians not degrees.
