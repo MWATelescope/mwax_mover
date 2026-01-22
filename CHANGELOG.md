@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1 22-Jan-2026
+
+* Calvin: Fixed bug where x_intercept and y_intercept were being inserted into calibration_solutions rows as radians not degrees.
+
 ## 1.1.0 20-Jan-2026
 
 * Calvin: Remove step that uses phase_diff.txt as it is no longer useful.

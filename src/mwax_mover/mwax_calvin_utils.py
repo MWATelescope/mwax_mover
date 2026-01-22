@@ -682,6 +682,7 @@ class HyperfitsSolutionGroup:
 
 class PhaseFitInfo(NamedTuple):
     length: float
+    # Intercept is in radians
     intercept: float
     sigma_resid: float
     chi2dof: float

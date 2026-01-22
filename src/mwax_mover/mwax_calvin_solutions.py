@@ -194,6 +194,10 @@ def process_solutions(
                         # continue
                         pass
 
+                    # Convert intercepts from radians to degrees
+                    x_phase_intercept = np.rad2deg(x_phase.intercept) if np.isfinite(x_phase.intercept) else np.nan
+                    y_phase_intercept = np.rad2deg(y_phase.intercept) if np.isfinite(y_phase.intercept) else np.nan
+
                     success = insert_calibration_solutions_row(
                         db_handler_object,
                         transaction_cursor,
@@ -201,10 +205,10 @@ def process_solutions(
                         int(obs_id),
                         int(tile_id),
                         -1 * x_phase.length,  # legacy calibration pipeline used inverse convention
-                        x_phase.intercept,
+                        x_phase_intercept,
                         x_gains.gains,
                         -1 * y_phase.length,  # legacy calibration pipeline used inverse convention
-                        y_phase.intercept,
+                        y_phase_intercept,
                         y_gains.gains,
                         x_gains.pol1,
                         y_gains.pol1,
