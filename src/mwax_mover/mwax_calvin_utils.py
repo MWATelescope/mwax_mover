@@ -963,26 +963,14 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse) -> GainFitInf
 
         # Calculate the weighted mean of the amplitudes for this coarse channel
         gains[coarse_idx] = np.sum(coarse_amps * coarse_weights) / np.sum(coarse_weights)
-        print(f"gain={gains[coarse_idx]}")
 
-        # Determine the slope and intercept of the gain (amplitude) vs frequency
-        slope, intercept = np.polyfit(coarse_hz, coarse_amps, deg=1)
+        # TODO: calculate values for pol0, pol1, sigma_resid- the calibration web services don't use these anyway
+        pol0[coarse_idx] = 0.0
+        pol1[coarse_idx] = 0.0
+        sigma_resid[coarse_idx] = 0.0
 
-        # Residuals
-        y_hat = slope * coarse_hz + intercept
-        residuals = coarse_amps - y_hat
-        print(f"residuals={residuals}")
-
-        # Store slope and intercept
-        pol1[coarse_idx] = slope
-        pol0[coarse_idx] = intercept
-
-        sigma_resid[coarse_idx] = np.std(residuals)
-
-    # Calculate quality
-    # How many of the residuals are within 2*stderr of zero
-    # quality = proportion of residuals within ±2*sigma of 0
-    quality = float(np.mean(np.abs(sigma_resid) <= 2.0))
+    # TODO: Calculate quality
+    quality = 1.0
 
     return GainFitInfo(
         quality=quality,

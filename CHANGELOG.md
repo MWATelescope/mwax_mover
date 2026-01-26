@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.3 27-Jan-2026
+
+* Calvin: Reverted x_gains_pol0, x_gains_pol1, x_gains_sigma_resid (and same for y) back to populating 0s. x and y gains_quality is now reverted back to 1.0 for now.
+
 ## 1.1.2 22-Jan-2026
 
 * Calvin: Reverted x_intercept and y_intercept so they get inserted into calibration_solutions rows as radians (they are back to being radains!).
