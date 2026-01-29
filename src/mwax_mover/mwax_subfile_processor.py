@@ -571,11 +571,25 @@ class SubfileProcessor:
 
     def stop(self):
         """Stop the processor"""
+        self.logger.debug("subfile_watcher Stopping...")
         if self.subfile_watcher:
             self.subfile_watcher.stop()
+        self.logger.debug("subfile_watcher Stopped")
 
+        self.logger.debug("subfile_queue_worker Stopping...")
         if self.subfile_queue_worker:
             self.subfile_queue_worker.stop()
+        self.logger.debug("subfile_queue_worker Stopped")
+
+        self.logger.debug("packet_stats_watcher Stopping...")
+        if self.packet_stats_watcher:
+            self.packet_stats_watcher.stop()
+        self.logger.debug("packet_stats_watcher Stopped")
+
+        self.logger.debug("packet_stats_destination_queue_worker Stopping...")
+        if self.packet_stats_destination_queue_worker:
+            self.packet_stats_destination_queue_worker.stop()
+        self.logger.debug("packet_stats_destination_queue_worker Stopped")
 
         # Wait for threads to finish
         for watcher_thread in self.watcher_threads:
