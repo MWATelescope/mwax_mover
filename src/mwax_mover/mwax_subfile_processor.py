@@ -81,8 +81,8 @@ class SubfileProcessor:
         self.packet_stats_dump_dir = packet_stats_dump_dir
         self.packet_stats_destination_dir = packet_stats_destination_dir
         self.packet_stats_destination_queue = queue.Queue()
+        self.packet_stats_destination_queue_worker = None
         self.packet_stats_watcher = None
-        self.packet_stats_queue_worker = None
 
         self.bf_pipe_path = bf_pipe_path
         self.bf_aocal_path = bf_aocal_path

@@ -2,7 +2,7 @@
 
 # 1.2.3 30-Jan-2026
 
-* SubfileDistributor: switched from homebrew web server to Flask
+* SubfileDistributor: switched from HTTPServer web server to Flask
 
 ## 1.2.1 - 2 30-Jan-2026
 
