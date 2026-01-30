@@ -775,14 +775,6 @@ class MWAXSubfileDistributor:
         for processor in self.processors:
             processor.stop()
 
-        # Stop web server
-        if flask_app:
-            func = request.environ.get("werkzeug.server.shutdown")
-            if func is not None:
-                func()
-            else:
-                raise RuntimeError("Not running with the Werkzeug Server")
-
     def start(self):
         """Start the processor"""
         self.running = True

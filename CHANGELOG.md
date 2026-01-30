@@ -1,6 +1,6 @@
 # Changelog
 
-# 1.2.5 30-Jan-2026
+# 1.2.5-6 30-Jan-2026
 
 * SubfileDistributor: fixed endpoint methods and shutdown code for web server
 
