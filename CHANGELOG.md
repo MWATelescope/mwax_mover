@@ -1,8 +1,27 @@
 # Changelog
 
+## 1.2.0 30-Jan-2026
+
+* MWAX Realtime Beamformer support:
+  * SubfileProcessor will detect a BF observation and send the subfile filename plus a space plus the aocal filename to a named pipe (/home/mwa/bf_pipe).
+  * SubfileProcessor will send EOF to named pipe on shutdown
+    * If error writing to named pipe, then die (for now)
+    * Beamformer will rename .sub to .free once finished (not mwax_mover)
+    * Beamformer will output files for archiving to /voltdata/bf/outgoing    
+  * MWAXArchiveProcessor will watch the /voltdata/bf/outgoing and then:
+    * Checksum file
+    * Insert row into database
+    * Send file to mwacache boxes
+  * mwacache_archiver will handle VDIF and Filterbank files for archiving
+* Old "Beamformer" (aka the Breakthrough listen pipeline) is removed from mwax_mover codebase (mwax_filterbank_processor.py and beamformer mode of subfile_distributor)
+* All logging is now to console/stdout instead of named log files:
+  * mwax_subfile_distributor
+  * mwacache_archiver
+* Calvin: increased the wait time for realtime observations to be finished (and database records inserted)
+
 ## 1.1.4 29-Jan-2026
 
-* SubfileDistributor: Added more debug and more shutdown code to prevent hanging on shutdown.
+* SubfileDistributor: Added more debug and more shutdown code to prevent hanging on shutdown. Fixes #31.
 
 ## 1.1.3 27-Jan-2026
 

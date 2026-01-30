@@ -2151,3 +2151,8 @@ def split_aocal_file_into_coarse_channels(
 def get_aocal_filename(obsid: int, num_tiles: int, num_fine_chans: int, rec_chan_no: int) -> str:
     # Provides a string with the correct aocal filename to use
     return f"{obsid}_{num_tiles:03}_{num_fine_chans:04}_{rec_chan_no:03}_calfile.bin"
+
+
+def get_partial_aocal_filename(obsid: int, num_tiles: int, rec_chan_no: int) -> str:
+    # Provides a string with the correct partial aocal filename to use
+    return f"{obsid}_{num_tiles:03}_*_{rec_chan_no:03}_calfile.bin"

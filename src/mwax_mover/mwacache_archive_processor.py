@@ -39,7 +39,6 @@ class MWACacheArchiveProcessor:
         self.logger = logging.getLogger(__name__)
 
         self.hostname: str = ""
-        self.log_path: str = ""
         self.log_level: str = ""
         self.metafits_path: str = ""
         self.archive_to_location: ArchiveLocation = ArchiveLocation.Unknown
@@ -441,13 +440,6 @@ class MWACacheArchiveProcessor:
         # Parse config file
         config = ConfigParser()
         config.read_file(open(config_filename, "r", encoding="utf-8"))
-
-        # read from config file
-        self.log_path = config.get("mwax mover", "log_path")
-
-        if not os.path.exists(self.log_path):
-            print(f"log_path {self.log_path} does not exist. Quiting.")
-            sys.exit(1)
 
         # Read log level
         config_file_log_level: Optional[str] = utils.read_optional_config(

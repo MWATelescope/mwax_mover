@@ -1,17 +1,17 @@
 """Module for subfile processor"""
 
 import glob
-import logging
-import logging.handlers
 import os
 import queue
 import shutil
 import sys
 import threading
 import time
+from mwax_mover.mwax_calvin_utils import get_partial_aocal_filename
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME, MODE_WATCH_DIR_FOR_NEW
 from mwax_mover import utils, mwax_queue_worker, mwax_watcher, mwax_command
 from mwax_mover.utils import CorrelatorMode
+from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
 
 COMMAND_DADA_DISKDB = "dada_diskdb"
 
@@ -21,16 +21,10 @@ class SubfileProcessor:
 
     def __init__(
         self,
-        context,
+        context: MWAXSubfileDistributor,
         subfile_incoming_path: str,
         voltdata_incoming_path: str,
         always_keep_subfiles: bool,
-        bf_enabled: bool,
-        bf_ringbuffer_key: str,
-        bf_numa_node,
-        bf_fildata_path: str,
-        bf_settings_path: str,
-        corr_enabled: bool,
         corr_ringbuffer_key: str,
         corr_diskdb_numa_node,
         psrdada_timeout_sec: int,
@@ -39,23 +33,13 @@ class SubfileProcessor:
         packet_stats_dump_dir: str,
         packet_stats_destination_dir: str,
         hostname: str,
+        bf_pipe_path: str,
+        bf_aocal_path: str,
     ):
         self.sd_ctx = context
 
         # Setup logging
-        self.logger = logging.getLogger(__name__)
-        # pass all logged events to the parent (subfile distributor/main log)
-        self.logger.propagate = True
-        self.logger.setLevel(logging.DEBUG)
-        file_log = logging.FileHandler(
-            filename=os.path.join(
-                self.sd_ctx.cfg_log_path,
-                f"{__name__}.log",
-            )
-        )
-        file_log.setLevel(logging.DEBUG)
-        file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
-        self.logger.addHandler(file_log)
+        self.logger = self.sd_ctx.logger
         self.hostname = hostname
 
         self.ext_sub_file = ".sub"
@@ -84,17 +68,6 @@ class SubfileProcessor:
         self.subfile_watcher = None
         self.subfile_queue_worker = None
 
-        self.bf_enabled = bf_enabled
-        # PSRDADA ringbuffer key for INPUT into correlator or beamformer
-        self.bf_ringbuffer_key = bf_ringbuffer_key
-        self.bf_numa_node = bf_numa_node  # Numa node to use to do a file copy
-        # Path where filterbank files are written to
-        # (and sub files in debug mode)
-        self.bf_fildata_path = bf_fildata_path
-        # Path to text file containing the PSRDADA Beamformer header info
-        self.bf_settings_path = bf_settings_path
-
-        self.corr_enabled = corr_enabled
         # PSRDADA ringbuffer key for INPUT into correlator or beamformer
         self.corr_ringbuffer_key = corr_ringbuffer_key
         # Numa node for ringbuffers
@@ -112,8 +85,20 @@ class SubfileProcessor:
         self.packet_stats_watcher = None
         self.packet_stats_queue_worker = None
 
+        self.bf_pipe_path = bf_pipe_path
+        self.bf_aocal_path = bf_aocal_path
+        self.bf_named_pipe = None
+
     def start(self):
         """Start the processor"""
+        # Open the beamformer named pipe for writing
+        try:
+            self.bf_named_pipe = open(self.bf_pipe_path, "w")
+            self.logger.debug(f"Opened beamformer named pipe {self.bf_pipe_path} for writing")
+        except Exception:
+            self.logger.exception(f"Could not open beamformer named pipe {self.bf_pipe_path} for writing.")
+            sys.exit(2)
+
         # Create watcher for the subfiles
         self.subfile_watcher = mwax_watcher.Watcher(
             name="subfile_watcher",
@@ -294,13 +279,20 @@ class SubfileProcessor:
         subfile_header_values = utils.read_subfile_values(
             item,
             [
+                utils.PSRDADA_OBS_ID,
                 utils.PSRDADA_SUBOBS_ID,
                 utils.PSRDADA_TRANSFER_SIZE,
                 utils.PSRDADA_MODE,
+                utils.PSRDADA_COARSE_CHANNEL,
+                utils.PSRDADA_NINPUTS,
             ],
         )
 
         # Validate each one
+        if subfile_header_values[utils.PSRDADA_OBS_ID] is None:
+            raise ValueError(f"Keyword {utils.PSRDADA_OBS_ID} not found in {item}")
+        obs_id = int(subfile_header_values[utils.PSRDADA_OBS_ID])
+
         if subfile_header_values[utils.PSRDADA_SUBOBS_ID] is None:
             raise ValueError(f"Keyword {utils.PSRDADA_SUBOBS_ID} not found in {item}")
         subobs_id = int(subfile_header_values[utils.PSRDADA_SUBOBS_ID])
@@ -328,38 +320,82 @@ class SubfileProcessor:
             )
 
         try:
-            if self.corr_enabled:
-                #
-                # We need to check we are not in a voltage dump. If so, whatever
-                # observation is happening is ignored and instead we treat this
-                # like a VCS observation
-                #
-                if (
-                    (self.dump_start_gps is not None and self.dump_end_gps is not None)
-                    and subobs_id >= self.dump_start_gps
-                    and subobs_id < self.dump_end_gps
-                ):
-                    # We ARE in voltage dump and so we go and do a VCS capture instead
-                    # of whatever else we were doing
-                    self.logger.info(
-                        f"{item}- ignoring existing mode: {subfile_mode} as we"
-                        f" are within a voltage dump ({self.dump_start_gps} <"
-                        f" {self.dump_end_gps}) for trigger {self.dump_trigger_id}."
-                        " Doing VCS instead."
-                    )
+            #
+            # We need to check we are not in a voltage dump. If so, whatever
+            # observation is happening is ignored and instead we treat this
+            # like a VCS observation
+            #
+            if (
+                (self.dump_start_gps is not None and self.dump_end_gps is not None)
+                and subobs_id >= self.dump_start_gps
+                and subobs_id < self.dump_end_gps
+            ):
+                # We ARE in voltage dump and so we go and do a VCS capture instead
+                # of whatever else we were doing
+                self.logger.info(
+                    f"{item}- ignoring existing mode: {subfile_mode} as we"
+                    f" are within a voltage dump ({self.dump_start_gps} <"
+                    f" {self.dump_end_gps}) for trigger {self.dump_trigger_id}."
+                    " Doing VCS instead."
+                )
 
-                    # Pause archiving so we have the disk to ourselves
-                    if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
+                # Pause archiving so we have the disk to ourselves
+                if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
+                    if self.sd_ctx.archive_processor:
                         self.sd_ctx.archive_processor.pause_archiving(True)  # pylint: disable=line-too-long
 
-                    # See if there already is a TRIGGER_ID keyword in the subfile- if so
-                    # don't overwrite it. We must have overlapping triggers happening
-                    if not utils.read_subfile_trigger_value(item):
-                        # No TRIGGER_ID yet, so add it
-                        self.logger.info(
-                            f"{item}- injecting {utils.PSRDADA_TRIGGER_ID} {self.dump_trigger_id} into subfile..."
-                        )
-                        utils.inject_subfile_header(item, f"{utils.PSRDADA_TRIGGER_ID} {self.dump_trigger_id}\n")
+                # See if there already is a TRIGGER_ID keyword in the subfile- if so
+                # don't overwrite it. We must have overlapping triggers happening
+                if not utils.read_subfile_trigger_value(item):
+                    # No TRIGGER_ID yet, so add it
+                    self.logger.info(
+                        f"{item}- injecting {utils.PSRDADA_TRIGGER_ID} {self.dump_trigger_id} into subfile..."
+                    )
+                    utils.inject_subfile_header(item, f"{utils.PSRDADA_TRIGGER_ID} {self.dump_trigger_id}\n")
+
+                success = self.copy_subfile_to_disk_dd(
+                    item,
+                    self.corr_devshm_numa_node,
+                    self.voltdata_incoming_path,
+                    self.copy_subfile_to_disk_timeout_sec,
+                    os.path.split(item)[1],
+                    subfile_bytes_to_write,
+                )
+            else:
+                # 1. Read header of subfile.
+                # 2. If mode==MWAX_CORRELATOR then
+                #       load into PSRDADA ringbuffer for correlator input
+                #    else if mode==MWAX_VCS then
+                #       Ensure archiving to Pawsey is stopped while we capture
+                #       copy subfile onto /voltdata where it will eventually
+                #       get archived
+                #    else if mode==MWAX_BEAMFORMER then
+                #       Send obs_subobs info to beamformer via named pipe
+                #    else
+                #       Ignore the subfile
+                # 3. Rename .sub file to .free so that udpgrab can reuse it
+                if CorrelatorMode.is_correlator(subfile_mode):
+                    # This is a normal MWAX_CORRELATOR obs, continue as normal
+                    if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
+                        if self.sd_ctx.archive_processor:
+                            self.sd_ctx.archive_processor.pause_archiving(False)  # pylint: disable=line-too-long
+
+                    success = utils.load_psrdada_ringbuffer(
+                        self.logger,
+                        item,
+                        self.corr_ringbuffer_key,
+                        -1,
+                        self.psrdada_timeout_sec,
+                    )
+
+                    if self.always_keep_subfiles:
+                        keep_subfiles_path = self.voltdata_incoming_path
+
+                elif CorrelatorMode.is_vcs(subfile_mode):
+                    # Pause archiving so we have the disk to ourselves
+                    if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
+                        if self.sd_ctx.archive_processor:
+                            self.sd_ctx.archive_processor.pause_archiving(True)  # pylint: disable=line-too-long
 
                     success = self.copy_subfile_to_disk_dd(
                         item,
@@ -369,160 +405,83 @@ class SubfileProcessor:
                         os.path.split(item)[1],
                         subfile_bytes_to_write,
                     )
-                else:
-                    # 1. Read header of subfile.
-                    # 2. If mode==HW_LFILES then
-                    #       load into PSRDADA ringbuffer for correlator input
-                    #    else if mode==VOLTAGE_START then
-                    #       Ensure archiving to Pawsey is stopped while we capture
-                    #       copy subfile onto /voltdata where it will eventually
-                    #       get archived
-                    #    else
-                    #       Ignore the subfile
-                    # 3. Rename .sub file to .free so that udpgrab can reuse it
-                    if CorrelatorMode.is_correlator(subfile_mode):
-                        # This is a normal MWAX_CORRELATOR obs, continue as normal
+
+                elif CorrelatorMode.is_beamformer(subfile_mode):
+                    # This is a beamformer obs, enable archiving as normal (if configured)
+                    if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
+                        if self.sd_ctx.archive_processor:
+                            self.sd_ctx.archive_processor.pause_archiving(False)
+
+                    # Get number of inputs and coarse channel from header
+                    if subfile_header_values[utils.PSRDADA_COARSE_CHANNEL] is None:
+                        raise ValueError(f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {item}")
+                    rec_chan_no = subfile_header_values[utils.PSRDADA_COARSE_CHANNEL]
+
+                    if subfile_header_values[utils.PSRDADA_NINPUTS] is None:
+                        raise ValueError(f"Keyword {utils.PSRDADA_NINPUTS} not found in {item}")
+                    num_tiles = subfile_header_values[utils.PSRDADA_NINPUTS] / 2
+
+                    success = self.signal_beamformer(item, obs_id, num_tiles, rec_chan_no)
+
+                elif CorrelatorMode.is_no_capture(subfile_mode) or CorrelatorMode.is_voltage_buffer(subfile_mode):
+                    self.logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
+
+                    #
+                    # This is our opportunity to write any "keep" files to disk
+                    # which were held from a voltage buffer dump
+                    #
+                    if self.dump_keep_file_queue.qsize() > 0:
+                        # Pause archiving
                         if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
-                            self.sd_ctx.archive_processor.pause_archiving(False)  # pylint: disable=line-too-long
-
-                        success = utils.load_psrdada_ringbuffer(
-                            self.logger,
-                            item,
-                            self.corr_ringbuffer_key,
-                            -1,
-                            self.psrdada_timeout_sec,
-                        )
-
-                        if self.always_keep_subfiles:
-                            keep_subfiles_path = self.voltdata_incoming_path
-
-                    elif CorrelatorMode.is_vcs(subfile_mode):
-                        # Pause archiving so we have the disk to ourselves
-                        if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
-                            self.sd_ctx.archive_processor.pause_archiving(True)  # pylint: disable=line-too-long
-
-                        success = self.copy_subfile_to_disk_dd(
-                            item,
-                            self.corr_devshm_numa_node,
-                            self.voltdata_incoming_path,
-                            self.copy_subfile_to_disk_timeout_sec,
-                            os.path.split(item)[1],
-                            subfile_bytes_to_write,
-                        )
-
-                    elif CorrelatorMode.is_no_capture(subfile_mode) or CorrelatorMode.is_voltage_buffer(subfile_mode):
-                        self.logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
-
-                        #
-                        # This is our opportunity to write any "keep" files to disk
-                        # which were held from a voltage buffer dump
-                        #
-                        if self.dump_keep_file_queue.qsize() > 0:
-                            # Pause archiving
-                            if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
+                            if self.sd_ctx.archive_processor:
                                 self.sd_ctx.archive_processor.pause_archiving(True)  # pylint: disable=line-too-long
 
-                            # Since we're not doing anything with this subfile we can
-                            # try and handle any remaining keep files
-                            self.handle_next_keep_file()
-                        else:
-                            # Unpause archiving
-                            if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
+                        # Since we're not doing anything with this subfile we can
+                        # try and handle any remaining keep files
+                        self.handle_next_keep_file()
+                    else:
+                        # Unpause archiving
+                        if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
+                            if self.sd_ctx.archive_processor:
                                 self.sd_ctx.archive_processor.pause_archiving(False)  # pylint: disable=line-too-long
 
-                        success = True
-
-                    else:
-                        self.logger.error(f"{item}- Unknown subfile mode {subfile_mode}, ignoring.")
-                        success = True
-
-                    # There is a semi-rare case where in between the top of this code and now
-                    # a voltage trigger has been received. If so THIS subfile may not have been added to
-                    # the keep list, so deal with it now
-
-                    # Commenting out below for now as it is not necessary I think...
-                    # if (
-                    #    (
-                    #        self.dump_start_gps is not None
-                    #        and self.dump_end_gps is not None
-                    #    )
-                    #    and subobs_id >= self.dump_start_gps
-                    #    and subobs_id < self.dump_end_gps
-                    # ):
-                    #    # Rename it now to .keep
-                    #    keep_filename = item.replace(
-                    #        self.ext_sub_file, self.ext_keep_file
-                    #    )
-                    #
-                    #    os.rename(item, keep_filename)
-                    #
-                    #    # add it to the queue
-                    #    # Lucky for us it will add it to the bottom.
-                    #    self.dump_keep_file_queue.put(keep_filename)
-
-                # Check if we need to clear the dump info
-                if self.dump_end_gps is not None:
-                    if subobs_id >= self.dump_end_gps:
-                        # Reset the dump start and end
-                        self.dump_start_gps = None
-                        self.dump_end_gps = None
-                        self.dump_trigger_id = None
-
-            if self.bf_enabled:
-                # Don't run beamformer if we are in correlator mode too and we
-                # are doing a voltage capture!
-                if self.corr_enabled and CorrelatorMode.is_vcs(subfile_mode):
-                    self.logger.warning(
-                        f"{item}- beamformer mode enabled and is in {subfile_mode} mode, ignoring this beamformer job."
-                    )
                     success = True
+
                 else:
-                    # Otherwise:
-                    # 1. If mode is correlator or vcs or voltage buffer, then:
-                    # 2. Inject the relevant beamformer keywords into the
-                    # header of the sub file
-                    # 3. load file into PSRDADA ringbuffer for beamformer input
-                    # 4. Rename .sub file to .free so that udpgrab can reuse it
-                    if (
-                        CorrelatorMode.is_correlator(subfile_mode)
-                        or CorrelatorMode.is_vcs(subfile_mode)
-                        or CorrelatorMode.is_voltage_buffer(subfile_mode)
-                    ):
-                        # Get the settings we want for the beamformer from the
-                        # text file NOTE: this is read per subfile, and the
-                        # idea is it can be updated at runtime but this makes
-                        # it a bit less efficient than reading it once and
-                        # using it many times.
-                        with open(self.bf_settings_path, "r", encoding="utf-8") as bf_settings_file:
-                            beamformer_settings = bf_settings_file.read()
+                    self.logger.error(f"{item}- Unknown subfile mode {subfile_mode}, ignoring.")
+                    success = True
 
-                        # It is possible the beamformer settings are already
-                        # added into the sub file (e.g. a failed load into ringbuffer)
-                        # So check first, before appending them again!
-                        if utils.read_subfile_value(item, "NUM_INCOHERENT_BEAMS") is None:
-                            self.logger.info(f"{item}- injecting beamformer header into subfile...")
-                            utils.inject_beamformer_headers(item, beamformer_settings)
-                        else:
-                            self.logger.info(f"{item}- beamformer header exists in subfile.")
+                # There is a semi-rare case where in between the top of this code and now
+                # a voltage trigger has been received. If so THIS subfile may not have been added to
+                # the keep list, so deal with it now
 
-                        success = utils.load_psrdada_ringbuffer(
-                            self.logger,
-                            item,
-                            self.bf_ringbuffer_key,
-                            -1,
-                            self.psrdada_timeout_sec,
-                        )
+                # Commenting out below for now as it is not necessary I think...
+                # if (
+                #    (
+                #        self.dump_start_gps is not None
+                #        and self.dump_end_gps is not None
+                #    )
+                #    and subobs_id >= self.dump_start_gps
+                #    and subobs_id < self.dump_end_gps
+                # ):
+                #    # Rename it now to .keep
+                #    keep_filename = item.replace(
+                #        self.ext_sub_file, self.ext_keep_file
+                #    )
+                #
+                #    os.rename(item, keep_filename)
+                #
+                #    # add it to the queue
+                #    # Lucky for us it will add it to the bottom.
+                #    self.dump_keep_file_queue.put(keep_filename)
 
-                        if self.always_keep_subfiles:
-                            keep_subfiles_path = self.voltdata_incoming_path
-
-                    elif CorrelatorMode.is_no_capture(subfile_mode):
-                        self.logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
-                        success = True
-
-                    else:
-                        self.logger.error(f"{item}- Unknown subfile mode {subfile_mode}, ignoring.")
-                        success = True
+            # Check if we need to clear the dump info
+            if self.dump_end_gps is not None:
+                if subobs_id >= self.dump_end_gps:
+                    # Reset the dump start and end
+                    self.dump_start_gps = None
+                    self.dump_end_gps = None
+                    self.dump_trigger_id = None
 
         except Exception as handler_exception:  # pylint: disable=broad-except
             self.logger.error(f"{item} {handler_exception}")
@@ -544,22 +503,25 @@ class SubfileProcessor:
                         subfile_bytes_to_write,
                     )
 
-                # Rename subfile so that udpgrab can reuse it
-                free_filename = str(item).replace(self.ext_sub_file, self.ext_free_file)
+                # Rename to free but not if we are in MWAX_BEAMFORMER mode as the BF will
+                # take care of it when it has finished with it
+                if CorrelatorMode.is_beamformer(subfile_mode):
+                    # Rename subfile so that udpgrab can reuse it
+                    free_filename = str(item).replace(self.ext_sub_file, self.ext_free_file)
 
-                try:
-                    # Check it exists first- the dump process
-                    # may have renamed it already to .keep
                     try:
-                        shutil.move(item, free_filename)
-                    except FileNotFoundError:
-                        pass
+                        # Check it exists first- the dump process
+                        # may have renamed it already to .keep
+                        try:
+                            shutil.move(item, free_filename)
+                        except FileNotFoundError:
+                            pass
 
-                except Exception as move_exception:  # pylint: disable=broad-except
-                    self.logger.error(
-                        f"{item}- Could not rename {item} back to {free_filename}. Error {move_exception}"
-                    )
-                    sys.exit(2)
+                    except Exception as move_exception:  # pylint: disable=broad-except
+                        self.logger.error(
+                            f"{item}- Could not rename {item} back to {free_filename}. Error {move_exception}"
+                        )
+                        sys.exit(2)
 
             handler_elapsed = time.time() - handler_starttime
 
@@ -569,8 +531,49 @@ class SubfileProcessor:
 
         return success
 
+    def signal_beamformer(self, item: str, obs_id: int, num_tiles: int, rec_chan_no: int) -> bool:
+        # Send obs_subobs info to beamformer via named pipe
+
+        # We don't know the exact aocal filename as we dont have num_fine_chans
+        # so we'll use a wildcard
+        aocal_filename = ""
+        partial_aocal_filename = os.path.join(
+            self.bf_aocal_path, get_partial_aocal_filename(obs_id, num_tiles, rec_chan_no)
+        )
+        try:
+            found_files = glob.glob(partial_aocal_filename)
+            if not found_files:
+                self.logger.warning(f"{item}- No aocal file found matching pattern {partial_aocal_filename}.")
+            else:
+                aocal_filename = found_files[0]
+                self.logger.info(f"{item}- Found aocal file {aocal_filename} for pattern {partial_aocal_filename}.")
+        except Exception as e:
+            self.logger.error(
+                f"{item}- Error searching for aocal file with pattern {partial_aocal_filename}. Error: {e}"
+            )
+
+        singal_value = f"{item}|{aocal_filename}"
+        self.logger.info(
+            f"{item}- Signalling beamformer with subfile|aocal ('{singal_value}') via named pipe {self.bf_pipe_path}..."
+        )
+        try:
+            if self.bf_named_pipe:
+                self.bf_named_pipe.write(f"{singal_value}\n")
+                return True
+            else:
+                self.logger.error(f"{item}- Beamformer named pipe {self.bf_pipe_path} is not open.")
+                raise Exception("Beamformer named pipe is not open.")
+        except Exception:
+            self.logger.exception(f"{item}- Failed to signal beamformer via named pipe.")
+            raise
+
     def stop(self):
         """Stop the processor"""
+        # Tell the beamformer to shutdown
+        if self.bf_named_pipe:
+            self.bf_named_pipe.close()
+            self.logger.debug("Closed beamformer named pipe")
+
         self.logger.debug("subfile_watcher Stopping...")
         if self.subfile_watcher:
             self.subfile_watcher.stop()

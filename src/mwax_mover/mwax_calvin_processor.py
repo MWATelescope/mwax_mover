@@ -459,9 +459,9 @@ class MWAXCalvinProcessor:
         current_gpstime: int = utils.get_gpstime_of_now()
 
         # We need to allow for some time for the observation to update the database,
-        # so add an additional 120 seconds before we check
-        OBS_FINISH_DELAY_SECONDS = 120
-        OBS_FINISH_WAIT_SECONDS = 4
+        # so add an additional 180 seconds before we check
+        OBS_FINISH_DELAY_SECONDS = 180
+        OBS_FINISH_WAIT_SECONDS = 10
         while current_gpstime < (self.obs_id + exp_time + OBS_FINISH_DELAY_SECONDS):
             if not self.running:
                 return False, "get_observation_file_list cancelled due to processor shutdown"

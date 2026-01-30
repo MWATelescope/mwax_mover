@@ -32,6 +32,7 @@ PSRDADA_HEADER_BYTES = 4096
 # PSRDADA keywords
 PSRDADA_MODE = "MODE"
 PSRDADA_TRANSFER_SIZE = "TRANSFER_SIZE"
+PSRDADA_OBS_ID = "OBS_ID"
 PSRDADA_SUBOBS_ID = "SUBOBS_ID"
 PSRDADA_TRIGGER_ID = "TRIGGER_ID"
 PSRDADA_NINPUTS = "NINPUTS"
@@ -50,6 +51,8 @@ class CorrelatorMode(Enum):
     MWAX_CORRELATOR = "MWAX_CORRELATOR"
     MWAX_VCS = "MWAX_VCS"
     MWAX_BUFFER = "MWAX_BUFFER"
+    MWAX_BEAMFORMER = "MWAX_BEAMFORMER"
+    MWAX_CORR_BF = "MWAX_CORR_BF"
 
     @staticmethod
     def is_no_capture(mode_string: str) -> bool:
@@ -61,6 +64,7 @@ class CorrelatorMode(Enum):
         """Returns true if mode is a correlator obs"""
         return mode_string in [
             CorrelatorMode.MWAX_CORRELATOR.value,
+            CorrelatorMode.MWAX_CORR_BF.value,
         ]
 
     @staticmethod
@@ -75,6 +79,11 @@ class CorrelatorMode(Enum):
         """Returns true if mode is voltage buffer"""
         return mode_string == CorrelatorMode.MWAX_BUFFER.value
 
+    @staticmethod
+    def is_beamformer(mode_string: str) -> bool:
+        """Returns true if mode is beamformer"""
+        return mode_string in [CorrelatorMode.MWAX_BEAMFORMER.value, CorrelatorMode.MWAX_CORR_BF.value]
+
 
 class MWADataFileType(Enum):
     """Enum for the possible MWA data file types"""
@@ -84,6 +93,8 @@ class MWADataFileType(Enum):
     MWA_PPD_FILE = 14
     MWAX_VOLTAGES = 17
     MWAX_VISIBILITIES = 18
+    VDIF = 19
+    FILTERBANK = 20
 
 
 class ValidationData:
@@ -209,7 +220,16 @@ def validate_filename(
             filetype_id = MWADataFileType.MWA_PPD_FILE.value
 
         elif file_ext_part.lower() == ".zip":
+            # flag file
             filetype_id = MWADataFileType.MWA_FLAG_FILE.value
+
+        elif file_ext_part.lower() == ".vdif":
+            # vdif file
+            filetype_id = MWADataFileType.VDIF.value
+
+        elif file_ext_part.lower() == ".fil":
+            # filterbank file
+            filetype_id = MWADataFileType.FILTERBANK.value
 
         else:
             # Error - unknown filetype
@@ -261,7 +281,24 @@ def validate_filename(
                     f" format (incorrect length ({len(file_name_part)})."
                     " Format should be obsid_flags.zip)- ignoring"
                 )
-
+        elif filetype_id == MWADataFileType.VDIF.value:
+            # filename format should be obsid_subobsid_XXX.vdif
+            if len(file_name_part) < 23 or len(file_name_part) > 25:
+                valid = False
+                validation_error = (
+                    "Filename (excluding extension) is not in the correct"
+                    f" format (incorrect length ({len(file_name_part)})."
+                    " Format should be obsid_subobsid_XXX.vdif)- ignoring"
+                )
+        elif filetype_id == MWADataFileType.FILTERBANK.value:
+            # filename format should be obsid_subobsid_XXX.fil
+            if len(file_name_part) < 23 or len(file_name_part) > 25:
+                valid = False
+                validation_error = (
+                    "Filename (excluding extension) is not in the correct"
+                    f" format (incorrect length ({len(file_name_part)})."
+                    " Format should be obsid_subobsid_XXX.fil)- ignoring"
+                )
     # 5. Get project id and calibrator info
     if valid:
         # Now check that the observation is a calibrator by
@@ -764,6 +801,12 @@ def get_priority(
                 return_priority = 90
         elif val.filetype_id == MWADataFileType.MWA_PPD_FILE.value:
             return_priority = 1
+        elif val.filetype_id == MWADataFileType.VDIF.value or val.filetype_id == MWADataFileType.FILTERBANK.value:
+            # VDIF and filterbank files are treated as high priority as they are small and quick to archive
+            if val.project_id in list_of_vcs_high_priority_projects:
+                return_priority = 5
+            else:
+                return_priority = 10
     else:
         raise Exception(f"File {filename} is not valid! Reason: {val.validation_message}")
 
