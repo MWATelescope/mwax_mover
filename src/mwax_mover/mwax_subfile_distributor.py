@@ -613,7 +613,7 @@ class MWAXSubfileDistributor:
         flask_app.run(debug=False, host="0.0.0.0", port=self.cfg_webserver_port, use_reloader=False, threaded=True)
 
     def endpoint_shutdown(self):
-        self.signal_handler(signal.SIGINT, None)
+        self.stop()
         return b"OK", 200
 
     def endpoint_status(self):
@@ -769,11 +769,7 @@ class MWAXSubfileDistributor:
     def signal_handler(self, _signum, _frame):
         """Handle SIGINT, SIGTERM"""
         self.logger.warning(f"Interrupted. Shutting down {len(self.processors)} processors...")
-        self.running = False
-
-        # Stop any Processors
-        for processor in self.processors:
-            processor.stop()
+        self.stop()
 
     def start(self):
         """Start the processor"""
@@ -809,18 +805,27 @@ class MWAXSubfileDistributor:
 
             time.sleep(0.1)
 
+        # Final log message
+        self.logger.info("Completed Successfully")
+
+    def stop(self):
         #
-        # Finished- do some clean up of the web server
+        # Finished
+        #
+        self.running = False
+
+        # Stop any Processors
+        for processor in self.processors:
+            processor.stop()
+
+        # do some clean up of the web server
         #
         shutdown_func = request.environ.get("werkzeug.server.shutdown")
         if shutdown_func is None:
-            print("WARNING: Not running with the Werkzeug Server")
+            self.logger.warning("Not running with the Werkzeug Server")
         else:
             shutdown_func()
-            print("Flask web server shut down successfully.")
-
-        # Final log message
-        self.logger.info("Completed Successfully")
+            self.logger.debug("Flask web server shut down successfully.")
 
 
 def main():
