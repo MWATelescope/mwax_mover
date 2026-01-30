@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1 30-Jan-2026
+
+* Bug fix for subflie_distributor circular reference
+
 ## 1.2.0 30-Jan-2026
 
 * MWAX Realtime Beamformer support:

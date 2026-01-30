@@ -11,7 +11,6 @@ from mwax_mover.mwax_calvin_utils import get_partial_aocal_filename
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME, MODE_WATCH_DIR_FOR_NEW
 from mwax_mover import utils, mwax_queue_worker, mwax_watcher, mwax_command
 from mwax_mover.utils import CorrelatorMode
-from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
 
 COMMAND_DADA_DISKDB = "dada_diskdb"
 
@@ -21,7 +20,7 @@ class SubfileProcessor:
 
     def __init__(
         self,
-        context: MWAXSubfileDistributor,
+        context,
         subfile_incoming_path: str,
         voltdata_incoming_path: str,
         always_keep_subfiles: bool,
