@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.2.4 30-Jan-2026
+
+* SubfileDistributor: changed status endpoint to GET
+
 # 1.2.3 30-Jan-2026
 
 * SubfileDistributor: switched from HTTPServer web server to Flask

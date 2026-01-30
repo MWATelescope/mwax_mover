@@ -604,7 +604,7 @@ class MWAXSubfileDistributor:
         self.signal_handler(signal.SIGINT, None)
         return b"OK", 200
 
-    @flask_app.post("/status")
+    @flask_app.get("/status")
     def endpoint_status(self):
         data = json.dumps(self.get_status())
         return data.encode("utf-8"), 200
