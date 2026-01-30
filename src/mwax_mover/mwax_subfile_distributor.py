@@ -820,12 +820,16 @@ class MWAXSubfileDistributor:
 
         # do some clean up of the web server
         #
-        shutdown_func = request.environ.get("werkzeug.server.shutdown")
-        if shutdown_func is None:
-            self.logger.warning("Not running with the Werkzeug Server")
-        else:
-            shutdown_func()
-            self.logger.debug("Flask web server shut down successfully.")
+        try:
+            shutdown_func = request.environ.get("werkzeug.server.shutdown")
+            if shutdown_func is None:
+                self.logger.warning("Not running with the Werkzeug Server")
+            else:
+                shutdown_func()
+                self.logger.debug("Flask web server shut down successfully.")
+        except:
+            # If this fails just ignore for now
+            pass
 
 
 def main():
