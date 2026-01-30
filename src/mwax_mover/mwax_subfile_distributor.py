@@ -2,7 +2,7 @@
 
 import argparse
 from configparser import ConfigParser
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from flask import Flask, request
 import json
 import logging
 import os
@@ -11,12 +11,13 @@ import sys
 import time
 import threading
 from typing import Optional
-from urllib.parse import urlparse, parse_qs
 from mwax_mover import mwax_archive_processor
 from mwax_mover import mwax_db
 from mwax_mover import mwax_subfile_processor
 from mwax_mover import utils
 from mwax_mover import version
+
+flask_app: Flask = Flask(__name__)
 
 
 class MWAXSubfileDistributor:
@@ -39,8 +40,7 @@ class MWAXSubfileDistributor:
         self.subfile_processor = None
 
         # Web server
-        self.web_server: MWAXHTTPServer
-        self.web_server_thread: threading.Thread
+        self.flask_thread: threading.Thread
 
         #
         # Config file vars
@@ -526,12 +526,8 @@ class MWAXSubfileDistributor:
 
         # Create and start web server
         self.logger.info(f"Starting http server on port {self.cfg_webserver_port}...")
-        self.web_server = MWAXHTTPServer(("", int(self.cfg_webserver_port)), MWAXHTTPGetHandler)
-        self.web_server.context = self
-        self.web_server_thread = threading.Thread(
-            name="webserver", target=self.web_server_loop, args=(self.web_server,), daemon=True
-        )
-        self.web_server_thread.start()
+        self.flask_thread = threading.Thread(name="webserver", target=self.start_flask_web_server, daemon=True)
+        self.flask_thread.start()
 
         # Start the processors
         self.subfile_processor = mwax_subfile_processor.SubfileProcessor(
@@ -599,6 +595,121 @@ class MWAXSubfileDistributor:
 
         self.logger.info("Ready to start...")
 
+    def start_flask_web_server(self):
+        # threaded=True lets Flask handle multiple requests concurrently
+        flask_app.run(host="0.0.0.0", port=self.cfg_webserver_port, threaded=True)
+
+    @flask_app.post("/shutdown")
+    def endpoint_shutdown(self):
+        self.signal_handler(signal.SIGINT, None)
+        return b"OK", 200
+
+    @flask_app.post("/status")
+    def endpoint_status(self):
+        data = json.dumps(self.get_status())
+        return data.encode("utf-8"), 200
+
+    @flask_app.post("/pause_archiving")
+    def endpoint_pause_archiving(self):
+        if self.archive_processor:
+            self.archive_processor.pause_archiving(paused=True)
+        return b"OK", 200
+
+    @flask_app.post("/resume_archiving")
+    def endpoint_resume_archiving(self):
+        if self.archive_processor:
+            self.archive_processor.pause_archiving(paused=False)
+        return b"OK", 200
+
+    @flask_app.post("/release_cal_obs")
+    def endpoint_release_cal_obs(self):
+        try:
+            self.logger.info("Recieved call to release_cal_obs()")
+
+            obs_id = request.args.get("obs_id")  # returns None if missing
+
+            if obs_id is None:
+                raise ValueError("obs_id parameter missing from release_cal_obs() call")
+            else:
+                if utils.is_int(obs_id):
+                    self.logger.info(
+                        f"{obs_id}: release_cal_obs(): calling archive_processor.release_cal_obs({obs_id})"
+                    )
+                    if self.archive_processor:
+                        self.archive_processor.release_cal_obs(int(obs_id))
+                        return b"OK", 200
+                    else:
+                        raise ValueError("archive_processor not initialised")
+                else:
+                    raise ValueError(f"obs_id {obs_id} passed to release_cal_obs() is not an int")
+
+        except Exception as ws_exception:
+            return f"ERROR: {ws_exception}".encode("utf-8"), 500
+
+    @flask_app.post("/dump_voltages")
+    def endpoint_dump_voltages(self):
+        # Check for correct params
+        try:
+            starttime = request.args.get("start")
+            if starttime is None:
+                raise ValueError("start parameter missing from dump_voltages() call")
+            else:
+                if utils.is_int(starttime):
+                    starttime = int(starttime)
+                else:
+                    raise ValueError("start parameter is not an integer")
+
+            endtime = request.args.get("end")
+            if endtime is None:
+                raise ValueError("end parameter missing from dump_voltages() call")
+            else:
+                if utils.is_int(endtime):
+                    endtime = int(endtime)
+                else:
+                    raise ValueError("end parameter is not an integer")
+
+            trigger_id = request.args.get("trigger_id")
+            if trigger_id is None:
+                raise ValueError("trigger_id parameter missing from dump_voltages() call")
+            else:
+                if utils.is_int(trigger_id):
+                    trigger_id = int(trigger_id)
+                else:
+                    raise ValueError("trigger_id parameter is not an integer")
+
+            # Special test mode- if start and end == 0 just return 200
+            if starttime == endtime == 0:
+                return b"OK", 200
+            else:
+                if len(str(starttime)) != 10 and starttime != 0:
+                    raise ValueError("start must be gps seconds and length 10 (or 0 for as early as possible)")
+
+                if len(str(endtime)) != 10:
+                    raise ValueError("end must be gps seconds and length 10")
+
+                if endtime - starttime <= 0:
+                    raise ValueError("end must be after start")
+
+                # Check to see if we aren't already doing a dump
+                if self.subfile_processor:
+                    if self.subfile_processor.dump_start_gps is None and self.subfile_processor.dump_end_gps is None:
+                        # Now call the method to dump the voltages
+                        if self.subfile_processor.dump_voltages(starttime, endtime, trigger_id):
+                            return b"OK", 200
+                        else:
+                            return b"Failed to start Voltage Buffer Dump", 400
+                    else:
+                        # Reject this request
+                        return b"Voltage Buffer Dump already in progress. Request canceled.", 400
+                else:
+                    return b"Subfile processor not initialised. Cannot dump voltages.", 400
+
+        except ValueError as parameters_exception:  # pylint: disable=broad-except
+            return f"Value Error: {parameters_exception}".encode("utf-8"), 400
+
+        except Exception as dump_voltages_exception:  # pylint: disable=broad-except
+            return f"ERROR: {dump_voltages_exception}".encode("utf-8"), 500
+
     def health_handler(self):
         """Sends health data via UDP multicast"""
         while self.running:
@@ -648,10 +759,6 @@ class MWAXSubfileDistributor:
 
         return status
 
-    def web_server_loop(self, webserver):
-        """Method to start the webserver serving"""
-        webserver.serve_forever()
-
     def signal_handler(self, _signum, _frame):
         """Handle SIGINT, SIGTERM"""
         self.logger.warning(f"Interrupted. Shutting down {len(self.processors)} processors...")
@@ -699,156 +806,8 @@ class MWAXSubfileDistributor:
         # Finished- do some clean up
         #
 
-        # End the web server
-        self.logger.info("Stopping webserver...")
-        self.web_server.socket.close()
-        self.web_server.server_close()
-        self.web_server_thread.join(timeout=4)
-
         # Final log message
         self.logger.info("Completed Successfully")
-
-
-class MWAXHTTPServer(HTTPServer):
-    """Class representing a web server for web service control"""
-
-    def __init__(self, *args, **kw):
-        HTTPServer.__init__(self, *args, **kw)
-        self.context: Optional[MWAXSubfileDistributor] = None
-
-
-class MWAXHTTPGetHandler(BaseHTTPRequestHandler):
-    """Class for handling GET requests"""
-
-    def do_GET(self):  # pylint: disable=invalid-name
-        """Process a web service GET"""
-        # This is the path (e.g. /status) but with no parameters
-        parsed_path = urlparse(self.path.lower()).path
-
-        # Check for ending /'s and remove them all
-        while parsed_path[-1] == "/":
-            parsed_path = parsed_path[:-1]
-
-        # This is a dictionary of key value pairs of all parameters
-        parameter_list = parse_qs(urlparse(self.path.lower()).query)
-
-        try:
-            if parsed_path == "/shutdown":
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(b"OK")
-                self.server.context.signal_handler(signal.SIGINT, None)
-
-            elif parsed_path == "/status":
-                data = json.dumps(self.server.context.get_status())
-
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(data.encode())
-
-            elif parsed_path == "/pause_archiving":
-                self.server.context.archive_processor.pause_archiving(paused=True)
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(b"OK")
-
-            elif parsed_path == "/resume_archiving":
-                self.server.context.archive_processor.pause_archiving(paused=False)
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(b"OK")
-
-            elif parsed_path == "/release_cal_obs":
-                try:
-                    self.server.context.logger.info("Recieved call to release_cal_obs()")
-
-                    obs_id = str(parameter_list["obs_id"][0])
-
-                    if utils.is_int(obs_id):
-                        self.server.context.logger.info(
-                            f"{obs_id}: release_cal_obs(): calling archive_processor.release_cal_obs({obs_id})"
-                        )
-                        self.server.context.archive_processor.release_cal_obs(int(obs_id))
-                    else:
-                        raise ValueError(f"obs_id {obs_id} passed to release_cal_obs() is not an int")
-
-                    self.send_response(200)
-                    self.end_headers()
-                    self.wfile.write(b"OK")
-
-                except Exception as parameters_exception:
-                    self.send_response(400)
-                    self.end_headers()
-                    self.wfile.write(f"Value Error: {parameters_exception}".encode("utf-8"))
-
-            elif parsed_path == "/dump_voltages":
-                # Check for correct params
-                try:
-                    starttime = int(parameter_list["start"][0])
-                    endtime = int(parameter_list["end"][0])
-                    trigger_id = int(parameter_list["trigger_id"][0])
-
-                    # Special test mode- if start and end == 0 just return 200
-                    if starttime == endtime == 0:
-                        self.send_response(200)
-                        self.end_headers()
-                        self.wfile.write(b"OK")
-                    else:
-                        if len(str(starttime)) != 10 and starttime != 0:
-                            raise ValueError("start must be gps seconds and length 10 (or 0 for as early as possible)")
-
-                        if len(str(endtime)) != 10:
-                            raise ValueError("end must be gps seconds and length 10")
-
-                        if endtime - starttime <= 0:
-                            raise ValueError("end must be after start")
-
-                        # Check to see if we aren't already doing a dump
-                        if (
-                            self.server.context.subfile_processor.dump_start_gps is None
-                            and self.server.context.subfile_processor.dump_end_gps is None
-                        ):
-                            # Now call the method to dump the voltages
-                            if self.server.context.subfile_processor.dump_voltages(starttime, endtime, trigger_id):
-                                self.send_response(200)
-                                self.end_headers()
-                                self.wfile.write(b"OK")
-                            else:
-                                self.send_response(400)
-                                self.end_headers()
-                                self.wfile.write(b"Failed")
-                        else:
-                            # Reject this request
-                            self.send_response(400)
-                            self.end_headers()
-                            self.wfile.write(b"Voltage Buffer Dump already in progress. Request canceled.")
-
-                except ValueError as parameters_exception:  # pylint: disable=broad-except
-                    self.send_response(400)
-                    self.end_headers()
-                    self.wfile.write(f"Value Error: {parameters_exception}".encode("utf-8"))
-
-                except Exception as dump_voltages_exception:  # pylint: disable=broad-except
-                    self.send_response(400)
-                    self.end_headers()
-                    self.wfile.write(
-                        f"Unhandled exception running dump_voltages {dump_voltages_exception}".encode("utf-8")
-                    )
-
-            else:
-                self.send_response(400)
-                self.end_headers()
-                self.wfile.write(f"Unknown command {parsed_path}".encode("utf-8"))
-
-        except Exception as catch_all_exception:  # pylint: disable=broad-except
-            self.server.context.logger.error(f"GET: Error {str(catch_all_exception)}")
-            self.send_response(400)
-            self.end_headers()
-
-    def log_message(self, format: str, *args):
-        """Logs a message"""
-        self.server.context.logger.debug(f"{self.address_string()} {format % args}")
-        return
 
 
 def main():

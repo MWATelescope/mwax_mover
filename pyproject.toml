@@ -23,6 +23,7 @@ classifiers = [
 dependencies = [
     "astropy",
     "coloredlogs",
+    "flask",
     "importlib_metadata",
     "inotify",
     "matplotlib",

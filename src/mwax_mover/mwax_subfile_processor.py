@@ -38,7 +38,7 @@ class SubfileProcessor:
         self.sd_ctx = context
 
         # Setup logging
-        self.logger = self.sd_ctx.logger
+        self.logger = self.sd_ctx.logger.getChild("SubfileProcessor")
         self.hostname = hostname
 
         self.ext_sub_file = ".sub"
