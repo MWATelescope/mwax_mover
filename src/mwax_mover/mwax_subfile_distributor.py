@@ -610,7 +610,7 @@ class MWAXSubfileDistributor:
         )
         flask_app.add_url_rule("/dump_voltages", "dump_voltages", self.endpoint_dump_voltages, methods=["POST", "GET"])
 
-        flask_app.run(debug=False, host="0.0.0.0", port=self.cfg_webserver_port, threaded=True)
+        flask_app.run(debug=False, host="0.0.0.0", port=self.cfg_webserver_port, use_reloader=False, threaded=True)
 
     def endpoint_shutdown(self):
         self.signal_handler(signal.SIGINT, None)
@@ -810,8 +810,14 @@ class MWAXSubfileDistributor:
             time.sleep(0.1)
 
         #
-        # Finished- do some clean up
+        # Finished- do some clean up of the web server
         #
+        shutdown_func = request.environ.get("werkzeug.server.shutdown")
+        if shutdown_func is None:
+            print("WARNING: Not running with the Werkzeug Server")
+        else:
+            shutdown_func()
+            print("Flask web server shut down successfully.")
 
         # Final log message
         self.logger.info("Completed Successfully")
