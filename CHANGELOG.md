@@ -1,8 +1,9 @@
 # Changelog
 
-## 1.2.1 30-Jan-2026
+## 1.2.1 - 2 30-Jan-2026
 
 * Bug fix for subflie_distributor circular reference
+* Bug fix for logging issue with archive_processor
 
 ## 1.2.0 30-Jan-2026
 

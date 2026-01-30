@@ -63,19 +63,7 @@ class MWAXArchiveProcessor:
         self.sd_ctx = context
 
         # Setup logging
-        self.logger: logging.Logger = logging.getLogger(__name__)
-        # pass all logged events to the parent (subfile distributor/main log)
-        self.logger.propagate = True
-        self.logger.setLevel(logging.DEBUG)
-        file_log = logging.FileHandler(
-            filename=os.path.join(
-                self.sd_ctx.cfg_log_path,
-                f"{__name__}.log",
-            )
-        )
-        file_log.setLevel(logging.DEBUG)
-        file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
-        self.logger.addHandler(file_log)
+        self.logger: logging.Logger = context.logger
 
         self.db_handler_object: mwax_db.MWAXDBHandler = db_handler_object
 
