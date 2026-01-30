@@ -597,31 +597,39 @@ class MWAXSubfileDistributor:
 
     def start_flask_web_server(self):
         # threaded=True lets Flask handle multiple requests concurrently
-        flask_app.run(host="0.0.0.0", port=self.cfg_webserver_port, threaded=True)
+        flask_app.add_url_rule("/shutdown", "shutdown", self.endpoint_shutdown, methods=["POST", "GET"])
+        flask_app.add_url_rule("/status", "status", self.endpoint_status, methods=["GET"])
+        flask_app.add_url_rule(
+            "/pause_archiving", "pause_archiving", self.endpoint_pause_archiving, methods=["POST", "GET"]
+        )
+        flask_app.add_url_rule(
+            "/resume_archiving", "resume_archiving", self.endpoint_resume_archiving, methods=["POST", "GET"]
+        )
+        flask_app.add_url_rule(
+            "/release_cal_obs", "release_cal_obs", self.endpoint_release_cal_obs, methods=["POST", "GET"]
+        )
+        flask_app.add_url_rule("/dump_voltages", "dump_voltages", self.endpoint_dump_voltages, methods=["POST", "GET"])
 
-    @flask_app.post("/shutdown")
+        flask_app.run(debug=False, host="0.0.0.0", port=self.cfg_webserver_port, threaded=True)
+
     def endpoint_shutdown(self):
         self.signal_handler(signal.SIGINT, None)
         return b"OK", 200
 
-    @flask_app.get("/status")
     def endpoint_status(self):
         data = json.dumps(self.get_status())
         return data.encode("utf-8"), 200
 
-    @flask_app.post("/pause_archiving")
     def endpoint_pause_archiving(self):
         if self.archive_processor:
             self.archive_processor.pause_archiving(paused=True)
         return b"OK", 200
 
-    @flask_app.post("/resume_archiving")
     def endpoint_resume_archiving(self):
         if self.archive_processor:
             self.archive_processor.pause_archiving(paused=False)
         return b"OK", 200
 
-    @flask_app.post("/release_cal_obs")
     def endpoint_release_cal_obs(self):
         try:
             self.logger.info("Recieved call to release_cal_obs()")
@@ -646,7 +654,6 @@ class MWAXSubfileDistributor:
         except Exception as ws_exception:
             return f"ERROR: {ws_exception}".encode("utf-8"), 500
 
-    @flask_app.post("/dump_voltages")
     def endpoint_dump_voltages(self):
         # Check for correct params
         try:
@@ -767,6 +774,14 @@ class MWAXSubfileDistributor:
         # Stop any Processors
         for processor in self.processors:
             processor.stop()
+
+        # Stop web server
+        if flask_app:
+            func = request.environ.get("werkzeug.server.shutdown")
+            if func is not None:
+                func()
+            else:
+                raise RuntimeError("Not running with the Werkzeug Server")
 
     def start(self):
         """Start the processor"""

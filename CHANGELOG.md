@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.2.5 30-Jan-2026
+
+* SubfileDistributor: fixed endpoint methods and shutdown code for web server
+
 # 1.2.4 30-Jan-2026
 
 * SubfileDistributor: changed status endpoint to GET
