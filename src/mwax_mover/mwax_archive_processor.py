@@ -2,7 +2,6 @@
 
 import glob
 import logging
-import logging.handlers
 import os
 import queue
 import sys
@@ -63,7 +62,7 @@ class MWAXArchiveProcessor:
         self.sd_ctx = context
 
         # Setup logging
-        self.logger: logging.Logger = self.sd_ctx.logger.getChild("ArchiveProcessor")
+        self.logger: logging.Logger = logging.getLogger(__name__)
 
         self.db_handler_object: mwax_db.MWAXDBHandler = db_handler_object
 

@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.2.11 02-Feb-2026
+
+* SubfileDistributor: Added better logging for unexpected termination of subprocessor threads
+
 # 1.2.10 02-Feb-2026
 
 * SubfileProcessor: Fixed named pipe so it only opens on first beamformer observation but then stays open

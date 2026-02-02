@@ -800,6 +800,10 @@ class MWAXSubfileDistributor:
                 for worker_threads in processor.worker_threads:
                     if worker_threads:
                         if not worker_threads.is_alive():
+                            self.logger.error(
+                                f"Processor {type(processor).__name__} worker thread"
+                                f" {worker_threads.name} has stopped unexpectedly."
+                            )
                             self.running = False
                             break
 

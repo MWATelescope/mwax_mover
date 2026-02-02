@@ -1,6 +1,7 @@
 """Module for subfile processor"""
 
 import glob
+import logging
 import os
 import queue
 import shutil
@@ -39,7 +40,7 @@ class SubfileProcessor:
         self.sd_ctx = context
 
         # Setup logging
-        self.logger = self.sd_ctx.logger.getChild("SubfileProcessor")
+        self.logger = logging.getLogger(__name__)
         self.hostname = hostname
 
         self.ext_sub_file = ".sub"
