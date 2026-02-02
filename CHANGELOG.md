@@ -1,8 +1,52 @@
 # Changelog
 
+# 1.2.11-13 02-Feb-2026
+
+* SubfileDistributor: Added better logging for unexpected termination of subprocessor threads
+
+# 1.2.10 02-Feb-2026
+
+* SubfileProcessor: Fixed named pipe so it only opens on first beamformer observation but then stays open
+
+# 1.2.5-9 30-Jan-2026
+
+* SubfileDistributor: fixed endpoint methods and shutdown code for web server
+
+# 1.2.4 30-Jan-2026
+
+* SubfileDistributor: changed status endpoint to GET
+
+# 1.2.3 30-Jan-2026
+
+* SubfileDistributor: switched from HTTPServer web server to Flask
+
+## 1.2.1 - 2 30-Jan-2026
+
+* Bug fix for subflie_distributor circular reference
+* Bug fix for logging issue with archive_processor
+
+## 1.2.0 30-Jan-2026
+
+* MWAX Realtime Beamformer support:
+  * SubfileProcessor will detect a BF observation and send the subfile filename plus a space plus the aocal filename to a named pipe (/home/mwa/bf_pipe).
+  * SubfileProcessor will send EOF to named pipe on shutdown
+    * If error writing to named pipe, then die (for now)
+    * Beamformer will rename .sub to .free once finished (not mwax_mover)
+    * Beamformer will output files for archiving to /voltdata/bf/outgoing    
+  * MWAXArchiveProcessor will watch the /voltdata/bf/outgoing and then:
+    * Checksum file
+    * Insert row into database
+    * Send file to mwacache boxes
+  * mwacache_archiver will handle VDIF and Filterbank files for archiving
+* Old "Beamformer" (aka the Breakthrough listen pipeline) is removed from mwax_mover codebase (mwax_filterbank_processor.py and beamformer mode of subfile_distributor)
+* All logging is now to console/stdout instead of named log files:
+  * mwax_subfile_distributor
+  * mwacache_archiver
+* Calvin: increased the wait time for realtime observations to be finished (and database records inserted)
+
 ## 1.1.4 29-Jan-2026
 
-* SubfileDistributor: Added more debug and more shutdown code to prevent hanging on shutdown.
+* SubfileDistributor: Added more debug and more shutdown code to prevent hanging on shutdown. Fixes #31.
 
 ## 1.1.3 27-Jan-2026
 

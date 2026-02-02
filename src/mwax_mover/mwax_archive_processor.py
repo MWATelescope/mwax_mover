@@ -2,7 +2,6 @@
 
 import glob
 import logging
-import logging.handlers
 import os
 import queue
 import sys
@@ -56,23 +55,14 @@ class MWAXArchiveProcessor:
         voltdata_dont_archive_path: str,
         high_priority_correlator_projectids: list[str],
         high_priority_vcs_projectids: list[str],
+        bf_incoming_path: str,
+        bf_outgoing_path: str,
+        bf_dont_archive_path: str,
     ):
         self.sd_ctx = context
 
         # Setup logging
-        self.logger: logging.Logger = logging.getLogger(__name__)
-        # pass all logged events to the parent (subfile distributor/main log)
-        self.logger.propagate = True
-        self.logger.setLevel(logging.DEBUG)
-        file_log = logging.FileHandler(
-            filename=os.path.join(
-                self.sd_ctx.cfg_log_path,
-                f"{__name__}.log",
-            )
-        )
-        file_log.setLevel(logging.DEBUG)
-        file_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
-        self.logger.addHandler(file_log)
+        self.logger: logging.Logger = context.logger.getChild("MWAXArchiveProcessor")
 
         self.db_handler_object: mwax_db.MWAXDBHandler = db_handler_object
 
@@ -103,16 +93,21 @@ class MWAXArchiveProcessor:
         self.dont_archive_path_volt: str = voltdata_dont_archive_path
         self.queue_dont_archive_volt: queue.Queue = queue.Queue()
 
+        self.dont_archive_path_bf: str = bf_dont_archive_path
+        self.queue_dont_archive_bf: queue.Queue = queue.Queue()
+
         self.queue_checksum_and_db: queue.PriorityQueue = queue.PriorityQueue()
 
         self.watch_dir_incoming_volt: str = voltdata_incoming_path
         self.watch_dir_incoming_vis: str = visdata_incoming_path
+        self.watch_dir_incoming_bf: str = bf_incoming_path
 
         self.watch_dir_processing_stats_vis: str = visdata_processing_stats_path
         self.queue_processing_stats_vis: queue.Queue = queue.Queue()
 
         self.watch_dir_outgoing_volt: str = voltdata_outgoing_path
         self.watch_dir_outgoing_vis: str = visdata_outgoing_path
+        self.watch_dir_outgoing_bf: str = bf_outgoing_path
         self.queue_outgoing: queue.PriorityQueue = queue.PriorityQueue()
 
         self.watch_dir_outgoing_cal: str = visdata_cal_outgoing_path
@@ -132,6 +127,7 @@ class MWAXArchiveProcessor:
 
     def start(self):
         """This method is used to start the processor"""
+        self.logger.info("Starting ArchiveProcessor...")
         if self.archive_destination_enabled:
             # Create watcher for voltage data -> checksum+db queue
             watcher_incoming_volt = mwax_priority_watcher.PriorityWatcher(
@@ -147,6 +143,40 @@ class MWAXArchiveProcessor:
                 recursive=False,
             )
             self.watchers.append(watcher_incoming_volt)
+
+            # Create watcher for visibility data -> checksum+db queue
+            # This will watch for mwax visibilities being renamed OR
+            # fits files being created
+            # (e.g. metafits ppd files being copied into /visdata).
+            watcher_incoming_vis = mwax_priority_watcher.PriorityWatcher(
+                name="watcher_incoming_vis",
+                path=self.watch_dir_incoming_vis,
+                dest_queue=self.queue_checksum_and_db,
+                pattern=".fits",
+                log=self.logger,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+                metafits_path=self.metafits_path,
+                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
+                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
+                recursive=False,
+            )
+            self.watchers.append(watcher_incoming_vis)
+
+            # Create watchers for beamformer data -> checksum+db queue
+            # This will watch for beamformer files being created
+            watcher_incoming_bf = mwax_priority_watcher.PriorityWatcher(
+                name="watcher_incoming_bf",
+                path=self.watch_dir_incoming_bf,
+                dest_queue=self.queue_checksum_and_db,
+                pattern=".*",
+                log=self.logger,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+                metafits_path=self.metafits_path,
+                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
+                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
+                recursive=False,
+            )
+            self.watchers.append(watcher_incoming_bf)
 
             # Create watcher for visibility data -> checksum+db queue
             # This will watch for mwax visibilities being renamed OR
@@ -221,6 +251,20 @@ class MWAXArchiveProcessor:
             )
             self.watchers.append(watcher_outgoing_vis)
 
+            watcher_outgoing_bf = mwax_priority_watcher.PriorityWatcher(
+                name="watcher_outgoing_bf",
+                path=self.watch_dir_outgoing_bf,
+                dest_queue=self.queue_outgoing,
+                pattern=".*",
+                log=self.logger,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+                metafits_path=self.metafits_path,
+                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
+                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
+                recursive=False,
+            )
+            self.watchers.append(watcher_outgoing_bf)
+
             #
             # Create watcher threads
             #
@@ -240,6 +284,14 @@ class MWAXArchiveProcessor:
                 daemon=True,
             )
             self.watcher_threads.append(watcher_vis_incoming_thread)
+
+            # Setup thread for watching incoming filesystem (bf)
+            watcher_bf_incoming_thread = threading.Thread(
+                name="watch_bf_incoming",
+                target=watcher_incoming_bf.start,
+                daemon=True,
+            )
+            self.watcher_threads.append(watcher_bf_incoming_thread)
 
             # Setup thread for watching processing_stats filesystem (vis)
             watcher_vis_processing_stats_thread = threading.Thread(
@@ -272,6 +324,14 @@ class MWAXArchiveProcessor:
                 daemon=True,
             )
             self.watcher_threads.append(watcher_vis_outgoing_thread)
+
+            # Setup thread for watching outgoing filesystem (bf)
+            watcher_bf_outgoing_thread = threading.Thread(
+                name="watch_bf_outgoing",
+                target=watcher_outgoing_bf.start,
+                daemon=True,
+            )
+            self.watcher_threads.append(watcher_bf_outgoing_thread)
 
             #
             # Create Workers
@@ -372,10 +432,12 @@ class MWAXArchiveProcessor:
                 or len(next(os.walk(self.watch_dir_outgoing_vis))[2]) > 0
                 or len(next(os.walk(self.watch_dir_outgoing_cal))[2]) > 0
                 or len(next(os.walk(self.watch_dir_processing_stats_vis))[2]) > 0
+                or len(next(os.walk(self.watch_dir_incoming_bf))[2]) > 0
+                or len(next(os.walk(self.watch_dir_outgoing_bf))[2]) > 0
             ):
                 self.logger.error(
                     "Error- voltage incoming/outgoing and/or visibility "
-                    "incoming/processing/outgoing/cal dirs are not empty! "
+                    "incoming/processing/outgoing/cal/bf dirs are not empty! "
                     "Watched paths must be empty before starting with  "
                     "archiving disabled to prevent inadvertent data loss. "
                     "Exiting."
@@ -389,7 +451,7 @@ class MWAXArchiveProcessor:
                 dest_queue=self.queue_dont_archive_volt,
                 pattern=".sub",
                 log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
                 recursive=False,
             )
             self.watchers.append(watcher_incoming_volt)
@@ -408,6 +470,18 @@ class MWAXArchiveProcessor:
                 recursive=False,
             )
             self.watchers.append(watcher_incoming_vis)
+
+            # Create watcher for beamformed data -> dont_archive queue
+            watcher_incoming_bf = mwax_watcher.Watcher(
+                name="watcher_incoming_bf",
+                path=self.watch_dir_incoming_bf,
+                dest_queue=self.queue_dont_archive_bf,
+                pattern=".*",
+                log=self.logger,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+                recursive=False,
+            )
+            self.watchers.append(watcher_incoming_bf)
 
             # Create queueworker for the vis don't archive queue
             queue_worker_dont_archive_vis = mwax_queue_worker.QueueWorker(
@@ -431,6 +505,16 @@ class MWAXArchiveProcessor:
             )
             self.workers.append(queue_worker_dont_archive_volt)
 
+            # Create queueworker for the bf don't archive queue
+            queue_worker_dont_archive_bf = mwax_queue_worker.QueueWorker(
+                name="dont archive worker (bf)",
+                source_queue=self.queue_dont_archive_bf,
+                executable_path=None,
+                event_handler=self.dont_archive_handler_bf,
+                log=self.logger,
+                exit_once_queue_empty=False,
+            )
+            self.workers.append(queue_worker_dont_archive_bf)
             #
             # Create watcher threads
             #
@@ -451,6 +535,14 @@ class MWAXArchiveProcessor:
             )
             self.watcher_threads.append(watcher_vis_incoming_thread)
 
+            # Setup thread for watching incoming filesystem (bf)
+            watcher_bf_incoming_thread = threading.Thread(
+                name="watch_bf_incoming",
+                target=watcher_incoming_bf.start,
+                daemon=True,
+            )
+            self.watcher_threads.append(watcher_bf_incoming_thread)
+
             # Setup thread for processing items on the dont archive queue
             queue_worker_dont_archive_thread_vis = threading.Thread(
                 name="work_dont_archive_vis",
@@ -467,6 +559,13 @@ class MWAXArchiveProcessor:
             )
             self.worker_threads.append(queue_worker_dont_archive_thread_volt)
 
+            # Setup thread for processing items on the dont archive queue
+            queue_worker_dont_archive_thread_bf = threading.Thread(
+                name="work_dont_archive_bf",
+                target=queue_worker_dont_archive_bf.start,
+                daemon=True,
+            )
+            self.worker_threads.append(queue_worker_dont_archive_thread_bf)
         #
         # Start Watcher threads
         #
@@ -490,6 +589,8 @@ class MWAXArchiveProcessor:
         for worker_thread in self.worker_threads:
             if worker_thread:
                 worker_thread.start()
+
+        self.logger.info("ArchiveProcessor started.")
 
     def dont_archive_handler_vis(self, item: str) -> bool:
         """This handles the visibility case where we have disabled archiving"""
@@ -525,6 +626,23 @@ class MWAXArchiveProcessor:
         )
 
         self.logger.debug(f"{item}- dont_archive_handler_volt() Finished")
+        return True
+
+    def dont_archive_handler_bf(self, item: str) -> bool:
+        """This handles the beamformed case where we have disabled archiving"""
+        self.logger.debug(f"{item}- dont_archive_handler_bf() Started")
+
+        outgoing_filename = os.path.join(self.dont_archive_path_bf, os.path.basename(item))
+        self.logger.debug(f"{item}- dont_archive_handler_bf() moving file to {self.dont_archive_path_bf}")
+        os.rename(item, outgoing_filename)
+
+        self.logger.info(
+            f"{item}- dont_archive_handler_bf() moved file to"
+            f" {self.dont_archive_path_bf} dir Queue size:"
+            f" {self.queue_dont_archive_bf.qsize()}"
+        )
+
+        self.logger.debug(f"{item}- dont_archive_handler_bf() Finished")
         return True
 
     def checksum_and_db_handler(self, item: str) -> bool:
@@ -608,7 +726,7 @@ class MWAXArchiveProcessor:
 
                     self.logger.info(
                         f"{item}- checksum_and_db_handler() moved visibility file"
-                        " to vis processing stats dir Queue size:"
+                        " to vis processing stats dir. Queue size:"
                         f" {self.queue_checksum_and_db.qsize()}"
                     )
 
@@ -623,7 +741,26 @@ class MWAXArchiveProcessor:
 
                     self.logger.info(
                         f"{item}- checksum_and_db_handler() moved metafits file to"
-                        " vis outgoing dir Queue size:"
+                        " vis outgoing dir. Queue size:"
+                        f" {self.queue_checksum_and_db.qsize()}"
+                    )
+
+                elif (
+                    val.filetype_id == MWADataFileType.VDIF.value or val.filetype_id == MWADataFileType.FILTERBANK.value
+                ):
+                    # move to voltdata/bf/outgoing
+                    # Take the input filename - strip the path, then append the
+                    # output path
+                    outgoing_filename = os.path.join(self.watch_dir_outgoing_bf, os.path.basename(item))
+
+                    self.logger.debug(
+                        f"{item}- checksum_and_db_handler() moving beamformer data file to bf outgoing dir"
+                    )
+                    os.rename(item, outgoing_filename)
+
+                    self.logger.info(
+                        f"{item}- checksum_and_db_handler() moved beamformer data file to"
+                        " bf outgoing dir. Queue size:"
                         f" {self.queue_checksum_and_db.qsize()}"
                     )
                 else:
@@ -633,7 +770,9 @@ class MWAXArchiveProcessor:
                     )
                     return False
             else:
+                #
                 # This is a "do not archive" project
+                #
                 # If it is visibilities, then produce stats, otherwise move to dont_archive
                 if val.filetype_id == MWADataFileType.MWAX_VISIBILITIES.value:
                     # move to visdata/processing_stats
@@ -657,6 +796,10 @@ class MWAXArchiveProcessor:
                     self.dont_archive_handler_volt(item)
                 elif val.filetype_id == MWADataFileType.MWA_PPD_FILE.value:
                     self.dont_archive_handler_vis(item)
+                elif (
+                    val.filetype_id == MWADataFileType.VDIF.value or val.filetype_id == MWADataFileType.FILTERBANK.value
+                ):
+                    self.dont_archive_handler_bf(item)
                 else:
                     self.logger.error(
                         f"{item}- checksum_and_db_handler() - not a valid file"
