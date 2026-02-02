@@ -11,6 +11,7 @@ from mwax_mover.mwax_calvin_utils import get_partial_aocal_filename
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME, MODE_WATCH_DIR_FOR_NEW
 from mwax_mover import utils, mwax_queue_worker, mwax_watcher, mwax_command
 from mwax_mover.utils import CorrelatorMode
+from mwax_mover.named_pipe import FifoWriter
 
 COMMAND_DADA_DISKDB = "dada_diskdb"
 
@@ -86,17 +87,12 @@ class SubfileProcessor:
 
         self.bf_pipe_path = bf_pipe_path
         self.bf_aocal_path = bf_aocal_path
-        self.bf_named_pipe = None
+        self.bf_named_pipe: FifoWriter
 
     def start(self):
         """Start the processor"""
-        # Open the beamformer named pipe for writing
-        try:
-            self.bf_named_pipe = open(self.bf_pipe_path, "w")
-            self.logger.debug(f"Opened beamformer named pipe {self.bf_pipe_path} for writing")
-        except Exception:
-            self.logger.exception(f"Could not open beamformer named pipe {self.bf_pipe_path} for writing.")
-            sys.exit(2)
+        # Setup the named pipe for bf observations
+        self.bf_named_pipe = FifoWriter(self.bf_pipe_path)
 
         # Create watcher for the subfiles
         self.subfile_watcher = mwax_watcher.Watcher(
@@ -556,12 +552,12 @@ class SubfileProcessor:
             f"{item}- Signalling beamformer with subfile|aocal ('{singal_value}') via named pipe {self.bf_pipe_path}..."
         )
         try:
-            if self.bf_named_pipe:
-                self.bf_named_pipe.write(f"{singal_value}\n")
-                return True
-            else:
-                self.logger.error(f"{item}- Beamformer named pipe {self.bf_pipe_path} is not open.")
-                raise Exception("Beamformer named pipe is not open.")
+            # Open method will retry until a reader connects or hits the timeout
+            self.bf_named_pipe.open()
+            # Write the signal value- if reader disconnects it will auto-reopen unless timeout is hit
+            self.bf_named_pipe.write(f"{singal_value}")
+            return True
+
         except Exception:
             self.logger.exception(f"{item}- Failed to signal beamformer via named pipe.")
             raise
@@ -570,6 +566,7 @@ class SubfileProcessor:
         """Stop the processor"""
         # Tell the beamformer to shutdown
         if self.bf_named_pipe:
+            self.logger.debug("Closing beamformer named pipe")
             self.bf_named_pipe.close()
             self.logger.debug("Closed beamformer named pipe")
 

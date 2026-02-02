@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.2.10 02-Feb-2026
+
+* SubfileProcessor: Fixed named pipe so it only opens on first beamformer observation but then stays open
+
 # 1.2.5-9 30-Jan-2026
 
 * SubfileDistributor: fixed endpoint methods and shutdown code for web server
