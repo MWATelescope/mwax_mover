@@ -381,13 +381,15 @@ class MWAXSubfileDistributor:
         self.cfg_metadatadb_host = utils.read_config(self.logger, self.config, "mwa metadata database", "host")
         self.cfg_metadatadb_db = utils.read_config(self.logger, self.config, "mwa metadata database", "db")
         self.cfg_metadatadb_user = utils.read_config(self.logger, self.config, "mwa metadata database", "user")
-        self.cfg_metadatadb_pass = utils.read_config(
-            self.logger,
-            self.config,
-            "mwa metadata database",
-            "pass",
-            True,
-        )
+        # Only read the password if host is not dummy
+        if self.cfg_metadatadb_host != "dummy":
+            self.cfg_metadatadb_pass = utils.read_config(
+                self.logger,
+                self.config,
+                "mwa metadata database",
+                "pass",
+                True,
+            )
         self.cfg_metadatadb_port = int(utils.read_config(self.logger, self.config, "mwa metadata database", "port"))
 
         # Read config specific to this host
@@ -794,20 +796,37 @@ class MWAXSubfileDistributor:
         self.logger.info("Starting health_thread...")
         health_thread = threading.Thread(name="health_thread", target=self.health_handler, daemon=True)
         health_thread.start()
+        self.logger.info("health_thread started.")
 
+        self.logger.info("Entering main loop...")
+        loop = 0
         while self.running:
             for processor in self.processors:
-                for worker_threads in processor.worker_threads:
-                    if worker_threads:
-                        if not worker_threads.is_alive():
+                for worker_thread in processor.worker_threads:
+                    if worker_thread:
+                        if loop % 100 == 0:
+                            print(f"Checking worker thread {worker_thread.name}...")
+                        if not worker_thread.is_alive():
                             self.logger.error(
                                 f"Processor {type(processor).__name__} worker thread"
-                                f" {worker_threads.name} has stopped unexpectedly."
+                                f" {worker_thread.name} has stopped unexpectedly."
+                            )
+                            self.running = False
+                            break
+                for watcher_thread in processor.watcher_threads:
+                    if watcher_thread:
+                        if loop % 100 == 0:
+                            print(f"Checking watcher thread {watcher_thread.name}...")
+                        if not watcher_thread.is_alive():
+                            self.logger.error(
+                                f"Processor {type(processor).__name__} watcher thread"
+                                f" {watcher_thread.name} has stopped unexpectedly."
                             )
                             self.running = False
                             break
 
             time.sleep(0.1)
+            loop += 1
 
         # Final log message
         self.logger.info("Completed Successfully")

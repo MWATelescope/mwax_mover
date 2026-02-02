@@ -62,7 +62,7 @@ class MWAXArchiveProcessor:
         self.sd_ctx = context
 
         # Setup logging
-        self.logger: logging.Logger = logging.getLogger(__name__)
+        self.logger: logging.Logger = context.logger.getChild("MWAXArchiveProcessor")
 
         self.db_handler_object: mwax_db.MWAXDBHandler = db_handler_object
 
@@ -127,6 +127,7 @@ class MWAXArchiveProcessor:
 
     def start(self):
         """This method is used to start the processor"""
+        self.logger.info("Starting ArchiveProcessor...")
         if self.archive_destination_enabled:
             # Create watcher for voltage data -> checksum+db queue
             watcher_incoming_volt = mwax_priority_watcher.PriorityWatcher(
@@ -450,7 +451,7 @@ class MWAXArchiveProcessor:
                 dest_queue=self.queue_dont_archive_volt,
                 pattern=".sub",
                 log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
                 recursive=False,
             )
             self.watchers.append(watcher_incoming_volt)
@@ -588,6 +589,8 @@ class MWAXArchiveProcessor:
         for worker_thread in self.worker_threads:
             if worker_thread:
                 worker_thread.start()
+
+        self.logger.info("ArchiveProcessor started.")
 
     def dont_archive_handler_vis(self, item: str) -> bool:
         """This handles the visibility case where we have disabled archiving"""

@@ -37,13 +37,14 @@ class MWAXDBHandler:
         self.user = user
         self.password = password
 
-        self.pool = ConnectionPool(
-            min_size=1,
-            max_size=3,
-            open=False,
-            check=ConnectionPool.check_connection,
-            conninfo=f"postgresql://{user}:{password}@{host}:{port}/{db_name}",
-        )
+        if self.host != "dummy":
+            self.pool = ConnectionPool(
+                min_size=1,
+                max_size=3,
+                open=False,
+                check=ConnectionPool.check_connection,
+                conninfo=f"postgresql://{user}:{password}@{host}:{port}/{db_name}",
+            )
 
     def start_database_pool(self):
         # Check we are not already started

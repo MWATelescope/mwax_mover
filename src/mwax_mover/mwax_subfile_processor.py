@@ -1,7 +1,6 @@
 """Module for subfile processor"""
 
 import glob
-import logging
 import os
 import queue
 import shutil
@@ -40,7 +39,7 @@ class SubfileProcessor:
         self.sd_ctx = context
 
         # Setup logging
-        self.logger = logging.getLogger(__name__)
+        self.logger = context.logger.getChild("SubfileProcessor")
         self.hostname = hostname
 
         self.ext_sub_file = ".sub"
@@ -92,6 +91,7 @@ class SubfileProcessor:
 
     def start(self):
         """Start the processor"""
+        self.logger.info("Starting SubfileProcessor...")
         # Setup the named pipe for bf observations
         self.bf_named_pipe = FifoWriter(self.bf_pipe_path)
 
@@ -173,6 +173,8 @@ class SubfileProcessor:
             )
             self.worker_threads.append(queue_worker_thread)
             queue_worker_thread.start()
+
+        self.logger.info("SubfileProcessor started.")
 
     def packet_stats_destination_handler(self, item: str) -> bool:
         # This gets called by the queueworker who had put an "item"
