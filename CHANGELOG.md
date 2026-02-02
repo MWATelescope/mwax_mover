@@ -1,6 +1,6 @@
 # Changelog
 
-# 1.2.11-12 02-Feb-2026
+# 1.2.11-13 02-Feb-2026
 
 * SubfileDistributor: Added better logging for unexpected termination of subprocessor threads
 

@@ -799,13 +799,11 @@ class MWAXSubfileDistributor:
         self.logger.info("health_thread started.")
 
         self.logger.info("Entering main loop...")
-        loop = 0
+
         while self.running:
             for processor in self.processors:
                 for worker_thread in processor.worker_threads:
                     if worker_thread:
-                        if loop % 100 == 0:
-                            print(f"Checking worker thread {worker_thread.name}...")
                         if not worker_thread.is_alive():
                             self.logger.error(
                                 f"Processor {type(processor).__name__} worker thread"
@@ -815,8 +813,6 @@ class MWAXSubfileDistributor:
                             break
                 for watcher_thread in processor.watcher_threads:
                     if watcher_thread:
-                        if loop % 100 == 0:
-                            print(f"Checking watcher thread {watcher_thread.name}...")
                         if not watcher_thread.is_alive():
                             self.logger.error(
                                 f"Processor {type(processor).__name__} watcher thread"
@@ -826,7 +822,6 @@ class MWAXSubfileDistributor:
                             break
 
             time.sleep(0.1)
-            loop += 1
 
         # Final log message
         self.logger.info("Completed Successfully")
