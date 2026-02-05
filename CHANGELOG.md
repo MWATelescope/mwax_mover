@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.2.11-14 05-Feb-2026
+
+* archive_processor (beamformer): when end of an obs detected, stitch together filterbank and vdif files before archiving
+
 # 1.2.11-13 02-Feb-2026
 
 * SubfileDistributor: Added better logging for unexpected termination of subprocessor threads

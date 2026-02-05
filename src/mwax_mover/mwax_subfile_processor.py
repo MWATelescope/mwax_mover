@@ -10,8 +10,8 @@ import time
 from mwax_mover.mwax_calvin_utils import get_partial_aocal_filename
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME, MODE_WATCH_DIR_FOR_NEW
 from mwax_mover import utils, mwax_queue_worker, mwax_watcher, mwax_command
-from mwax_mover.utils import CorrelatorMode
-from mwax_mover.named_pipe import FifoWriter
+from mwax_mover.utils import PSRDADA_HEADER_BYTES, CorrelatorMode
+from mwax_mover.mwax_named_pipe import NamedPipeWriter
 
 COMMAND_DADA_DISKDB = "dada_diskdb"
 
@@ -87,13 +87,13 @@ class SubfileProcessor:
 
         self.bf_pipe_path = bf_pipe_path
         self.bf_aocal_path = bf_aocal_path
-        self.bf_named_pipe: FifoWriter
+        self.bf_named_pipe: NamedPipeWriter
 
     def start(self):
         """Start the processor"""
         self.logger.info("Starting SubfileProcessor...")
         # Setup the named pipe for bf observations
-        self.bf_named_pipe = FifoWriter(self.bf_pipe_path)
+        self.bf_named_pipe = NamedPipeWriter(self.bf_pipe_path)
 
         # Create watcher for the subfiles
         self.subfile_watcher = mwax_watcher.Watcher(
@@ -218,7 +218,7 @@ class SubfileProcessor:
             raise ValueError(f"Keyword {utils.PSRDADA_TRANSFER_SIZE} not found in {keep_filename}")
 
         transfer_size = int(transfer_size_str)
-        subfile_bytes_to_write = transfer_size + 4096  # We add the header to the transfer size
+        subfile_bytes_to_write = transfer_size + PSRDADA_HEADER_BYTES  # We add the header to the transfer size
 
         # Copy the .keep file to the voltdata incoming dir
         # and ensure it is named as a ".sub" file
@@ -302,7 +302,7 @@ class SubfileProcessor:
         if subfile_header_values[utils.PSRDADA_TRANSFER_SIZE] is None:
             raise ValueError(f"Keyword {utils.PSRDADA_TRANSFER_SIZE} not found in {item}")
         transfer_size = int(subfile_header_values[utils.PSRDADA_TRANSFER_SIZE])
-        subfile_bytes_to_write = transfer_size + 4096  # We add the header to the transfer size
+        subfile_bytes_to_write = transfer_size + PSRDADA_HEADER_BYTES  # We add the header to the transfer size
 
         # Get Mode
         if subfile_header_values[utils.PSRDADA_MODE] is None:
@@ -555,8 +555,6 @@ class SubfileProcessor:
             f"{item}- Signalling beamformer with subfile|aocal ('{singal_value}') via named pipe {self.bf_pipe_path}..."
         )
         try:
-            # Open method will retry until a reader connects or hits the timeout
-            self.bf_named_pipe.open()
             # Write the signal value- if reader disconnects it will auto-reopen unless timeout is hit
             self.bf_named_pipe.write(f"{singal_value}")
             return True
@@ -567,10 +565,13 @@ class SubfileProcessor:
 
     def stop(self):
         """Stop the processor"""
-        # Tell the beamformer to shutdown
+        # Close the named pipe
         if self.bf_named_pipe:
             self.logger.debug("Closing beamformer named pipe")
-            self.bf_named_pipe.close()
+            try:
+                self.bf_named_pipe.close()
+            except Exception:
+                self.logger.exception("Error closing beamformer named pipe, ignoring")
             self.logger.debug("Closed beamformer named pipe")
 
         self.logger.debug("subfile_watcher Stopping...")

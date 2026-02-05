@@ -14,7 +14,7 @@ except Exception:
     pass
 
 
-class FifoWriter:
+class NamedPipeWriter:
     """
     Robust writer for a POSIX named pipe (FIFO).
     - Opens write end in non-blocking mode with retry until a reader connects.
@@ -51,14 +51,14 @@ class FifoWriter:
                     try:
                         st = os.stat(self.path)
                         if not stat.S_ISFIFO(st.st_mode):
-                            raise RuntimeError(f"{self.path} is not a FIFO")
+                            raise RuntimeError(f"{self.path} is not a named pipe")
                     except FileNotFoundError:
                         pass
                     continue
                 raise
 
         # If we got here we hit the timeout
-        raise TimeoutError(f"Timeout waiting for reader to connect to FIFO {self.path}")
+        raise TimeoutError(f"Timeout waiting for reader to connect to named pipe {self.path}")
 
     def write(self, data: str) -> None:
         """
@@ -72,23 +72,23 @@ class FifoWriter:
                     raise BrokenPipeError
                 return
             except BrokenPipeError:
-                self.logger.warning("[FifoWriter] Reader disconnected; reopening…")
+                self.logger.warning(f"Named pipe {self.path} not connected (BrokenPipeError). Opening...")
                 self.open()
                 # loop and retry the write
             except OSError as e:
                 # EPIPE is the same condition via OSError path
                 if e.errno == errno.EPIPE:
-                    self.logger.warning("[FifoWriter] EPIPE; reopening…")
+                    self.logger.warning(f"Named pipe {self.path} not connected (EPIPE). Opening...")
                     self.open()
                 elif e.errno in (errno.ENXIO, errno.ENOENT):
-                    self.logger.warning("[FifoWriter] No reader or FIFO missing; reopening…")
+                    self.logger.warning(f"Named pipe {self.path} not connected (ENXIO / ENOENT). Opening...")
                     self.open()
                 else:
                     raise  # unexpected I/O error → bubble up
 
     def close(self) -> None:
         try:
-            self.logger.debug("[FifoWriter] Closing FIFO writer")
+            self.logger.debug(f"Closing named pipe: {self.path}")
             if self._file:
                 self._file.close()
         finally:
