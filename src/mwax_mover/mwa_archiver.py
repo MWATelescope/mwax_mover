@@ -12,23 +12,12 @@ from mwax_mover.mwax_command import run_command_ext
 
 def copy_file_rsync(
     logger: logging.Logger,
-    source: str,
-    destination: str,
+    source_filename: str,
+    destination_dir: str,
     timeout: int,
 ):
     """Copies a file via rsync"""
-    logger.debug(f"{source} attempting copy_file_rsync...")
-
-    # get file size if file is not remote!
-    # a remote source will include user@host:path
-    if ":/" not in source:
-        try:
-            file_size = os.path.getsize(source)
-        except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
-            logger.error(f"{source}: Error determining source file size. Error {catch_all_exceptiion}")
-            return False
-    else:
-        file_size = -1
+    logger.debug(f"{source_filename} attempting copy_file_rsync...")
 
     # Build final command line
     # --no-compress ensures we don't try to compress (it's going to be quite
@@ -36,7 +25,7 @@ def copy_file_rsync(
     cmdline = (
         "rsync --no-compress -e 'ssh -T -c aes128-ctr -o"
         " StrictHostKeyChecking=no -o Compression=no -x' "
-        f"{source} {destination}"
+        f"{source_filename} {destination_dir}"
     )
 
     start_time = time.time()
@@ -45,13 +34,11 @@ def copy_file_rsync(
     return_val, stdout = run_command_ext(logger, cmdline, None, timeout, False)
 
     if return_val:
-        # if source was remote, then we can now check the file size
-        if file_size == -1:
-            try:
-                file_size = os.path.getsize(destination)
-            except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
-                logger.error(f"{source}: Error determining destination file size. Error {catch_all_exceptiion}")
-                return False
+        try:
+            file_size = os.path.getsize(os.path.join(destination_dir, os.path.basename(source_filename)))
+        except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
+            logger.error(f"{source_filename}: Error determining destination file size. Error {catch_all_exceptiion}")
+            return False
 
         elapsed = time.time() - start_time
 
@@ -59,13 +46,13 @@ def copy_file_rsync(
         gbps_per_sec = (size_gigabytes * 8) / elapsed
 
         logger.info(
-            f"{source} copy_file_rsync success"
+            f"{source_filename} copy_file_rsync success"
             f" ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at"
             f" {gbps_per_sec:.3f} Gbps)"
         )
         return True
     else:
-        logger.error(f"{source} copy_file_rsync failed. Error {stdout}")
+        logger.error(f"{source_filename} copy_file_rsync failed. Error {stdout}")
         return False
 
 

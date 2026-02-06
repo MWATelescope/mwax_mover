@@ -9,8 +9,8 @@ KEY_NSAMPLES = "nsamples"
 CHUNK_SIZE = 8 * 1024 * 1024  # 8 MiB
 
 
-def get_filterbank_components(filename: str) -> tuple[str, int]:
-    # Returns the (header, data_start) as string and the start byte location respectively
+def get_filterbank_components(filename: str) -> tuple[bytearray, int]:
+    # Returns the (header, data_start) as bytearray and the start byte location respectively
     with open(filename, "rb") as f:
         header_bytes = bytearray()
         while True:
@@ -23,46 +23,44 @@ def get_filterbank_components(filename: str) -> tuple[str, int]:
 
         # Store the exact header length
         header_end_index = header_bytes.index(HEADER_END_BYTES) + len(HEADER_END)
-        header = header_bytes[:header_end_index].decode("ascii", errors="ignore")
+
+        # each key value is stored like this:
+        # 4 bytes=length of next keyword
+        # N bytes=keyword
+        # X bytes=value (int or string or etc)
 
         # The rest of the file is raw binary data
-        return (header, header_end_index)
+        return (header_bytes, header_end_index)
 
 
-def get_filterbank_key_value(header: str, key: str) -> str:
-    lines = header.splitlines()
-    for line in lines:
-        if line.startswith(key):
-            # Line will be:
-            # key value
-            # value could also have spaces, so we only want to split the first space
-            values = line.split(" ", 1)
-            if len(values) == 2:
-                return values[1]
-            else:
-                # We have the key but no value- return empty string
-                return ""
+def get_filterbank_key_value_int(header: bytearray, key: str) -> int:
+    key_bytes = key.encode("utf-8")
+    cuml_bytes = bytearray()
+    for b in header:
+        cuml_bytes.append(b)
+
+        # The value we want will be the next 4 bytes
+        if key_bytes in cuml_bytes:
+            start_idx = len(cuml_bytes)
+            value_bytes = header[start_idx : start_idx + 4]
+            return int.from_bytes(value_bytes, "little", signed=False)
     raise ValueError(f"Key {key} not found in filterbank file")
 
 
 # Returns a new header after modifying a key's value
-def set_filterbank_key_value(header: str, key: str, value) -> str:
-    replaced: bool = False
-    new_header: str = ""
-    lines = header.splitlines()
-    for line in lines:
-        if line.startswith(key):
-            # Line will be:
-            # key value
-            line = f"{key} {value}\n"
-            replaced = True
+def set_filterbank_key_value_int(header: bytearray, key: str, value: int) -> bytearray:
+    key_bytes = key.encode("utf-8")
+    cuml_bytes = bytearray()
+    for b in header:
+        cuml_bytes.append(b)
 
-        new_header += line
+        # The value we want to replace will be the next 4 bytes
+        if key_bytes in cuml_bytes:
+            start_idx = len(cuml_bytes)
+            header[start_idx : start_idx + 4] = value.to_bytes(4, "little", signed=False)
+            return header
 
-    if not replaced:
-        raise ValueError(f"Key {key} not found in filterbank file")
-
-    return new_header
+    raise ValueError(f"Key {key} not found in filterbank file")
 
 
 # Stitches filterbank files together and writes an output file- output filename is returned
@@ -83,8 +81,8 @@ def stitch_filterbank_files(logger: logging.Logger, files: List[str]) -> str:
     logger.info(f"Stitching {len(files)} filterbank files: {files[0]}...{files[-1]}")
 
     # The first file header will be the one we will use
-    all_headers: List[str] = []
-    all_n_samples: List[int] = []
+    first_header = bytearray()
+    total_nsamples: int = 0
     all_data_start_indices: List[int] = []
 
     for filename in sorted_files:
@@ -92,34 +90,30 @@ def stitch_filterbank_files(logger: logging.Logger, files: List[str]) -> str:
         this_header, this_data_start_indicies = get_filterbank_components(filename)
 
         # Get the nsamples value for this file from the header
-        this_nsamples = get_filterbank_key_value(this_header, KEY_NSAMPLES)
+        this_nsamples = get_filterbank_key_value_int(this_header, KEY_NSAMPLES)
 
-        try:
-            all_n_samples.append(int(this_nsamples))
-        except ValueError:
-            logger.warning(f"{KEY_NSAMPLES} in {filename} is not a number! {this_nsamples}")
-            pass
+        if total_nsamples == 0:
+            first_header = this_header
 
-        all_headers.append(this_header)
+        # Accumulate nsamples
+        total_nsamples += this_nsamples
+
         all_data_start_indices.append(this_data_start_indicies)
 
-    # Go through all files and get the total number of samples
-    total_nsamples = sum(all_n_samples)
-
     # update the first header nsamples (this will be our header for the new file)
-    new_header: str = set_filterbank_key_value(all_headers[0], KEY_NSAMPLES, total_nsamples)
+    new_header = set_filterbank_key_value_int(first_header, KEY_NSAMPLES, total_nsamples)
 
     # Ensure new header and old header have same length!
-    assert len(new_header) == len(all_headers[0])
+    assert len(new_header) == len(first_header)
 
-    # Encode it into bytes
-    new_header_bytes = new_header.encode("ascii")
+    # we'll need to adjust the start byte location for the first file possibly due to the header changing
+    all_data_start_indices[0] = len(new_header)
 
     # Create new filterbank file
     # --- Write new file ---
     with open(output_filename, "wb") as out_file:
         # write the header
-        out_file.write(new_header_bytes)
+        out_file.write(new_header)
 
         # Read the data so we can write it to the new file
         # Now loop through all files and write data

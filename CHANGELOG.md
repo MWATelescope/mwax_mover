@@ -1,8 +1,10 @@
 # Changelog
 
-# 1.2.11-14 05-Feb-2026
+# 1.2.11-14 06-Feb-2026
 
 * archive_processor (beamformer): when end of an obs detected, stitch together filterbank and vdif files before archiving
+* calvin_processor: copy_file_rsync now correctly displays the throughput of rsyncing files from the mwax boxes
+* utils: the function which converts GB to GiB now divides instead of multiplies the conversion factor(!)
 
 # 1.2.11-13 02-Feb-2026
 

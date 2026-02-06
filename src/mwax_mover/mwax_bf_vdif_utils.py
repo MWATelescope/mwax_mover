@@ -2,6 +2,7 @@ from typing import List
 import logging
 from mwalib import MetafitsContext
 import mwax_mover.version
+import os
 import re
 import shutil
 
@@ -40,13 +41,14 @@ class VDIFHeader:
         self.ra = str(0)  # TODO: get from voltage beams info from mwalib new version
         self.dec = str(0)  # TODO: get from voltage beams info from mwalib new version
         self.freq = mc.centre_freq_hz / 1000000.0  # convert Hz to MHz
-        self.bw = mc.obs_bandwidth_hz / 1000000.0  # convert Hz to MHz
+        self.bw = mc.metafits_coarse_chans[0].chan_width_hz / 1000000.0  # convert Hz to MHz
         self.tsamp = 0.781  # TODO: get from voltage beams info from mwalib new version
 
-    def write(self, vdif_hdr_filename):
+    def write(self, vdif_hdr_filename: str):
         """
         Write an ASCII header file using the fields stored
         """
+        self.datafile = os.path.basename(vdif_hdr_filename.replace(".hdr", ".vdif"))
 
         lines = [
             f"HDR_VERSION {self.VDIF_HDR_VERSION}                   # Version of this ASCII header",
@@ -93,28 +95,30 @@ def get_stitched_filename(filename: str) -> str:
     XXX    = 3 digits (zero padded)
     NN     = 2 digits (zero padded)
     """
-    pattern = r"^(?P<obsid>\d{10})_(?P<subobs>\d{10})_ch(?P<chan>\d{3})_beam(?P<beam>\d{2})\.vdif$"
+    pattern = r"^(?P<path>.*)/(?P<obsid>\d{10})_(?P<subobs>\d{10})_ch(?P<chan>\d{3})_beam(?P<beam>\d{2})\.vdif$"
     m = re.match(pattern, filename)
 
     if not m:
         raise ValueError(f"Filename does not match expected format: {filename}")
 
+    file_path = m.group("path")
     obsid = m.group("obsid")
     chan = m.group("chan")
     beam = m.group("beam")
 
-    return f"{obsid}_ch{chan}_beam{beam}.vdif"
+    return f"{file_path}/{obsid}_ch{chan}_beam{beam}.vdif"
 
 
 def stitch_vdif_files_and_write_hdr(
     logger: logging.Logger,
     metafits_filename: str,
     files: List[str],
-    output_vdif_filename: str,
-    output_hdr_filename: str,
-):
+) -> tuple[str, str]:
     if len(files) == 0:
         raise Exception("No VDIF files to stitch")
+
+    output_vdif_filename: str = get_stitched_filename(files[0])
+    output_hdr_filename: str = output_vdif_filename.replace(".vdif", ".hdr")
 
     if len(files) == 1:
         # Nothing to stitch- but we still need the output_vdif_filename to be created, so copy the file
@@ -143,3 +147,4 @@ def stitch_vdif_files_and_write_hdr(
     hdr.write(output_hdr_filename)
 
     logger.info(f"Successfully wrote VDIF header file into {output_hdr_filename}")
+    return output_vdif_filename, output_hdr_filename

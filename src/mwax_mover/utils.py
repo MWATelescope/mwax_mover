@@ -1152,7 +1152,7 @@ def is_int(value) -> bool:
 
 
 def gigabyte_to_gibibyte(gigabytes: float) -> float:
-    return gigabytes * 1.07374
+    return gigabytes / 1.07374
 
 
 def delete_files_older_than(path: str, older_than_seconds: int, extensions: list[str]) -> list[str]:
