@@ -1,8 +1,8 @@
 # Changelog
 
-# 1.21.15 10-Feb-2026
+# 1.21.15-16 10-Feb-2026
 
-* archive_processor: Added extra debug
+* archive_processor: Added extra debug and fixed duplicate watcher_incoming_vis bug
 
 # 1.2.11-14 06-Feb-2026
 

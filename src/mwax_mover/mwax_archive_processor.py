@@ -183,24 +183,6 @@ class MWAXArchiveProcessor:
             )
             self.watchers.append(watcher_incoming_bf)
 
-            # Create watcher for visibility data -> checksum+db queue
-            # This will watch for mwax visibilities being renamed OR
-            # fits files being created
-            # (e.g. metafits ppd files being copied into /visdata).
-            watcher_incoming_vis = mwax_priority_watcher.PriorityWatcher(
-                name="watcher_incoming_vis",
-                path=self.watch_dir_incoming_vis,
-                dest_queue=self.queue_checksum_and_db,
-                pattern=".fits",
-                log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
-                metafits_path=self.metafits_path,
-                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
-                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
-                recursive=False,
-            )
-            self.watchers.append(watcher_incoming_vis)
-
             # Create watcher for visibility processing stats
             watcher_processing_stats_vis = mwax_watcher.Watcher(
                 name="watcher_processing_stats_vis",
