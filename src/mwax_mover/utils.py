@@ -223,7 +223,7 @@ def validate_filename(
             # flag file
             filetype_id = MWADataFileType.MWA_FLAG_FILE.value
 
-        elif file_ext_part.lower() == ".vdif":
+        elif file_ext_part.lower() == ".vdif" or file_ext_part.lower() == ".hdr":
             # vdif file
             filetype_id = MWADataFileType.VDIF.value
 
@@ -282,22 +282,30 @@ def validate_filename(
                     " Format should be obsid_flags.zip)- ignoring"
                 )
         elif filetype_id == MWADataFileType.VDIF.value:
-            # filename format should be obsid_subobsid_XXX.vdif
-            if len(file_name_part) < 23 or len(file_name_part) > 25:
+            # filename format should be:
+            #   obsid_subobsid_chNNN_beamNN.vdif
+            # or if stitched:
+            #   obsid_chNNN_beamNN.vdif
+            if len(file_name_part) != 23 or len(file_name_part) != 34:
                 valid = False
                 validation_error = (
                     "Filename (excluding extension) is not in the correct"
                     f" format (incorrect length ({len(file_name_part)})."
-                    " Format should be obsid_subobsid_XXX.vdif)- ignoring"
+                    " Format should be obsid_subobsid_chXXX_beamXX.vdif or "
+                    "obsid_chXXX_beamXX.vdif)- ignoring"
                 )
         elif filetype_id == MWADataFileType.FILTERBANK.value:
-            # filename format should be obsid_subobsid_XXX.fil
-            if len(file_name_part) < 23 or len(file_name_part) > 25:
+            # filename format should be:
+            #   obsid_subobsid_chNNN_beamNN.fil
+            # or if stitched:
+            #   obsid_chNNN_beamNN.fil
+            if len(file_name_part) != 23 or len(file_name_part) != 34:
                 valid = False
                 validation_error = (
                     "Filename (excluding extension) is not in the correct"
                     f" format (incorrect length ({len(file_name_part)})."
-                    " Format should be obsid_subobsid_XXX.fil)- ignoring"
+                    " Format should be obsid_subobsid_chXXX_beamXX.fil or "
+                    "obsid_chXXX_beamXX.fil)- ignoring"
                 )
     # 5. Get project id and calibrator info
     if valid:

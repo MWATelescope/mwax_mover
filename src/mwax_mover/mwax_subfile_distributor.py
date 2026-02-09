@@ -36,7 +36,6 @@ class MWAXSubfileDistributor:
         self.running: bool = False
         self.processors: list = []
         self.archive_processor = None
-        self.filterbank_processor = None
         self.subfile_processor = None
 
         # Web server

@@ -16,12 +16,16 @@ from mwax_mover import (
     mwax_watcher,
     mwa_archiver,
     utils,
+    mwax_bf_filterbank_utils,
+    mwax_bf_vdif_utils,
 )
 from mwax_mover.mwax_watcher import Watcher
 from mwax_mover.mwax_queue_worker import QueueWorker
 from mwax_mover.mwax_priority_watcher import PriorityWatcher
-from mwax_mover.mwax_priority_queue_worker import PriorityQueueWorker
+from mwax_mover.mwax_priority_queue_worker import PriorityQueueWorker, MWAXPriorityQueueData
 from mwax_mover.utils import MWADataFileType, ValidationData
+
+METAFITS_EXPOSURE = "EXPOSURE"
 
 
 class MWAXArchiveProcessor:
@@ -101,6 +105,7 @@ class MWAXArchiveProcessor:
         self.watch_dir_incoming_volt: str = voltdata_incoming_path
         self.watch_dir_incoming_vis: str = visdata_incoming_path
         self.watch_dir_incoming_bf: str = bf_incoming_path
+        self.queue_bf_stitching: queue.PriorityQueue = queue.PriorityQueue()
 
         self.watch_dir_processing_stats_vis: str = visdata_processing_stats_path
         self.queue_processing_stats_vis: queue.Queue = queue.Queue()
@@ -162,12 +167,12 @@ class MWAXArchiveProcessor:
             )
             self.watchers.append(watcher_incoming_vis)
 
-            # Create watchers for beamformer data -> checksum+db queue
+            # Create watchers for beamformer data -> stitch files (once they are all there)
             # This will watch for beamformer files being created
             watcher_incoming_bf = mwax_priority_watcher.PriorityWatcher(
                 name="watcher_incoming_bf",
                 path=self.watch_dir_incoming_bf,
-                dest_queue=self.queue_checksum_and_db,
+                dest_queue=self.queue_bf_stitching,
                 pattern=".*",
                 log=self.logger,
                 mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
@@ -336,6 +341,15 @@ class MWAXArchiveProcessor:
             #
             # Create Workers
             #
+            queue_worker_bf_stitching = mwax_priority_queue_worker.PriorityQueueWorker(
+                name="beamformer stitching worker",
+                source_queue=self.queue_bf_stitching,
+                executable_path=None,
+                event_handler=self.bf_stitching_handler,
+                log=self.logger,
+                exit_once_queue_empty=False,
+            )
+            self.workers.append(queue_worker_bf_stitching)
 
             # Create queueworker for the checksum and db queue
             queue_worker_checksum_and_db = mwax_priority_queue_worker.PriorityQueueWorker(
@@ -384,6 +398,14 @@ class MWAXArchiveProcessor:
             #
             # Setup queue worker threads
             #
+            # Setup thread for processing items on the checksum and db queue
+            queue_worker_bf_stitching_thread = threading.Thread(
+                name="bf_stitching",
+                target=queue_worker_bf_stitching.start,
+                daemon=True,
+            )
+            self.worker_threads.append(queue_worker_bf_stitching_thread)
+
             # Setup thread for processing items on the checksum and db queue
             queue_worker_checksum_and_db_thread = threading.Thread(
                 name="work_checksum_and_db",
@@ -592,6 +614,139 @@ class MWAXArchiveProcessor:
 
         self.logger.info("ArchiveProcessor started.")
 
+    def bf_stitching_handler(self, item: str) -> bool:
+        #
+        # Each time we get a new filterbank or vdif file
+        # We *may* need to kick off stitching things together.
+        # Once stitched, we send to the checksum+db queue
+        #
+        filename = os.path.basename(item)
+        ext = os.path.splitext(filename)[1]
+        if ext == ".hdr":
+            # Ignore the hdr file that the stitching process produces
+            return True
+
+        # get the obsid and subobs from the filename
+        # obsid_subobsid_chXXX_beamXX.vdif / .fil
+        try:
+            obs_id = int(filename[0:10])
+        except Exception:
+            raise ValueError(f"{item}: Error getting obs_id from filename {filename}")
+        try:
+            subobs_id = int(filename[11:21])
+        except Exception:
+            raise ValueError(f"{item}: Error getting subobs_id from filename {filename}")
+
+        # Determine metafits filename
+        metafits_filename = os.path.join(self.metafits_path, f"{obs_id}_metafits.fits")
+
+        try:
+            duration_sec = int(utils.get_metafits_value(item, METAFITS_EXPOSURE))
+        except Exception:
+            raise ValueError(f"{item}: Error reading {METAFITS_EXPOSURE} from metafits filename {metafits_filename}")
+
+        self.logger.debug(f"{item}: Read {METAFITS_EXPOSURE} of {duration_sec}s from {metafits_filename}")
+
+        # Now determine the last subobs we should see
+        # we subtract 8 seconds because the subobsid is the START of the subobs. Examples:
+        # 1. Obsid =1234500000 Duration: 8 => last subobsid = 1234500000
+        # 2. Obsid =1234500000 Duration: 16 => last subobsid = 1234500008
+        expected_last_subobs_id = (obs_id + duration_sec) - 8
+
+        # Check to see if this subobsid == last subobsid
+        self.logger.debug(
+            f"{item}: Checking this subobs_id {subobs_id} against expected last subobs_id {expected_last_subobs_id}"
+        )
+        if subobs_id >= expected_last_subobs_id:
+            # Time to stitch up the files
+            self.logger.debug(f"{item}: Observation complete. Stitching up beamformer {ext} files...")
+            if ext == ".vdif":
+                # determine the file_path, rec_chan and beam number
+                file_path, _, _, rec_chan, beam = mwax_bf_vdif_utils.get_vdif_filename_components(item)
+
+                # find all the vdif files for this beam, channel and obs
+                files = glob.glob(os.path.join(file_path, f"{obs_id}_*_ch{rec_chan:03d}_beam{beam:02d}.vdif"))
+
+                self.logger.debug(
+                    f"{item}: Found {len(files)} vdif files to stitch for rec_chan {rec_chan:03d}, beam {beam:02d}"
+                )
+
+                vdif_filename, hdr_filename = mwax_bf_vdif_utils.stitch_vdif_files_and_write_hdr(
+                    self.logger, metafits_filename, files
+                )
+
+                # Add files to the checksum and db queue
+                # We need to determine the priority
+                priority = utils.get_priority(
+                    self.logger,
+                    vdif_filename,
+                    self.metafits_path,
+                    self.list_of_correlator_high_priority_projects,
+                    self.list_of_vcs_high_priority_projects,
+                )
+
+                new_queue_item = (
+                    priority,
+                    MWAXPriorityQueueData(hdr_filename),
+                )
+
+                self.queue_checksum_and_db.put(new_queue_item)
+                self.logger.info(
+                    f"{item}: {hdr_filename} added to queue with priority {priority} ({self.queue_checksum_and_db.qsize()})"
+                )
+
+                new_queue_item = (
+                    priority,
+                    MWAXPriorityQueueData(vdif_filename),
+                )
+
+                self.queue_checksum_and_db.put(new_queue_item)
+                self.logger.info(
+                    f"{item}: {vdif_filename} added to queue with priority {priority} ({self.queue_checksum_and_db.qsize()})"
+                )
+                return True
+
+            elif ext == ".fil":
+                # determine file_path, rec_chan and beam number
+                file_path, _, _, rec_chan, beam = mwax_bf_filterbank_utils.get_filterbank_filename_components(item)
+
+                # find all the fil files for this beam, channel and obs
+                files = glob.glob(os.path.join(file_path, f"{obs_id}_*_ch{rec_chan:03d}_beam{beam:02d}.fil"))
+
+                self.logger.debug(
+                    f"{item}: Found {len(files)} filterbank files to stitch for rec_chan {rec_chan:03d}, beam {beam:02d}"
+                )
+                fil_filename = mwax_bf_filterbank_utils.stitch_filterbank_files(self.logger, files)
+
+                # Add files to the checksum and db queue
+                # We need to determine the priority
+                priority = utils.get_priority(
+                    self.logger,
+                    fil_filename,
+                    self.metafits_path,
+                    self.list_of_correlator_high_priority_projects,
+                    self.list_of_vcs_high_priority_projects,
+                )
+
+                new_queue_item = (
+                    priority,
+                    MWAXPriorityQueueData(fil_filename),
+                )
+
+                self.queue_checksum_and_db.put(new_queue_item)
+                self.logger.info(
+                    f"{item}: {fil_filename} added to queue with priority {priority} ({self.queue_checksum_and_db.qsize()})"
+                )
+                return True
+            else:
+                raise Exception(f"{item} Extension {ext} is not supported")
+        else:
+            # Nothing to do
+            self.logger.debug(
+                f"{item}: waiting for end of observation. This subobs_id {subobs_id} is < {expected_last_subobs_id}"
+            )
+            return True
+
     def dont_archive_handler_vis(self, item: str) -> bool:
         """This handles the visibility case where we have disabled archiving"""
         self.logger.debug(f"{item}- dont_archive_handler_vis() Started")
@@ -665,7 +820,10 @@ class MWAXArchiveProcessor:
                 # if file is a VCS subfile, check if it is from a trigger and
                 # grab the trigger_id as an int
                 # If not found it will return None
-                trigger_id = utils.read_subfile_trigger_value(item)
+                if val.filetype_id == MWADataFileType.MWAX_VOLTAGES.value:
+                    trigger_id = utils.read_subfile_trigger_value(item)
+                else:
+                    trigger_id = None
             except FileNotFoundError:
                 # The filename was not valid
                 self.logger.warning(f"{item}- checksum_and_db_handler() file was removed while processing.")

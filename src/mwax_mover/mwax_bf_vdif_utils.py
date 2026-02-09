@@ -31,7 +31,7 @@ class VDIFHeader:
         self.bw: float = 0.0
         self.tsamp: float = 0.0
 
-    def populate(self, metafits_filename: str):
+    def populate(self, metafits_filename: str, rec_chan: int):
         mc = MetafitsContext(metafits_filename)
 
         self.mjd_start = mc.sched_start_mjd
@@ -40,9 +40,14 @@ class VDIFHeader:
         self.source = mc.obs_name
         self.ra = str(0)  # TODO: get from voltage beams info from mwalib new version
         self.dec = str(0)  # TODO: get from voltage beams info from mwalib new version
-        self.freq = mc.centre_freq_hz / 1000000.0  # convert Hz to MHz
-        self.bw = mc.metafits_coarse_chans[0].chan_width_hz / 1000000.0  # convert Hz to MHz
         self.tsamp = 0.781  # TODO: get from voltage beams info from mwalib new version
+
+        # Find the coarse channel
+        for chan in mc.metafits_coarse_chans:
+            if chan.rec_chan_number == rec_chan:
+                self.bw = chan.chan_width_hz / 1000000.0  # convert Hz to MHz
+                self.freq = chan.chan_centre_hz / 1000000.0  # convert Hz to MHz
+                break
 
     def write(self, vdif_hdr_filename: str):
         """
@@ -85,10 +90,9 @@ class VDIFHeader:
                 f.write(line + "\n")
 
 
-def get_stitched_filename(filename: str) -> str:
+def get_vdif_filename_components(filename: str) -> tuple[str, int, int, int, int]:
     """
-    Convert 'obsid_subobs_chXXX_beamNN.vdif'
-    into    'obsid_chXXX_beamNN.vdif'.
+    For 'obsid_subobs_chXXX_beamNN.vdif', return: filepath,obsid,subobsid,rec_chan,beam
 
     obsid  = 10 digits
     subobs = 10 digits
@@ -101,12 +105,28 @@ def get_stitched_filename(filename: str) -> str:
     if not m:
         raise ValueError(f"Filename does not match expected format: {filename}")
 
-    file_path = m.group("path")
-    obsid = m.group("obsid")
-    chan = m.group("chan")
-    beam = m.group("beam")
+    file_path = str(m.group("path"))
+    obsid = int(m.group("obsid"))
+    subobsid = int(m.group("subobs"))
+    chan = int(m.group("chan"))
+    beam = int(m.group("beam"))
 
-    return f"{file_path}/{obsid}_ch{chan}_beam{beam}.vdif"
+    return file_path, obsid, subobsid, chan, beam
+
+
+def get_stitched_filename(filename: str) -> str:
+    """
+    Convert 'obsid_subobs_chXXX_beamNN.vdif'
+    into    'obsid_chXXX_beamNN.vdif'.
+
+    obsid  = 10 digits
+    subobs = 10 digits
+    XXX    = 3 digits (zero padded)
+    NN     = 2 digits (zero padded)
+    """
+    file_path, obsid, _, chan, beam = get_vdif_filename_components(filename)
+
+    return os.path.join(file_path, f"{obsid}_ch{chan:03d}_beam{beam:02d}.vdif")
 
 
 def stitch_vdif_files_and_write_hdr(
@@ -141,9 +161,12 @@ def stitch_vdif_files_and_write_hdr(
 
         logger.info(f"Successfully stitched VDIF files into {output_vdif_filename}")
 
+    # get the rec chan number
+    _, _, _, rec_chan, _ = get_vdif_filename_components(files[0])
+
     # Write the header file
     hdr = VDIFHeader()
-    hdr.populate(metafits_filename)
+    hdr.populate(metafits_filename, rec_chan)
     hdr.write(output_hdr_filename)
 
     logger.info(f"Successfully wrote VDIF header file into {output_hdr_filename}")

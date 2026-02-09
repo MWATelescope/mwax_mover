@@ -1,5 +1,6 @@
 from typing import List
 import logging
+import os
 import re
 import shutil
 
@@ -116,7 +117,7 @@ def stitch_filterbank_files(logger: logging.Logger, files: List[str]) -> str:
     return output_filename
 
 
-def get_stitched_filename(filename: str) -> str:
+def get_filterbank_filename_components(filename: str) -> tuple[str, int, int, int, int]:
     """
     Convert '[path]/obsid_subobs_chXXX_beamNN.vdif'
     into    '[path]/obsid_chXXX_beamNN.vdif'.
@@ -132,9 +133,25 @@ def get_stitched_filename(filename: str) -> str:
     if not m:
         raise ValueError(f"Filename does not match expected format: {filename}")
 
-    file_path = m.group("path")
-    obsid = m.group("obsid")
-    chan = m.group("chan")
-    beam = m.group("beam")
+    file_path = str(m.group("path"))
+    obsid = int(m.group("obsid"))
+    subobsid = int(m.group("subobs"))
+    chan = int(m.group("chan"))
+    beam = int(m.group("beam"))
 
-    return f"{file_path}/{obsid}_ch{chan}_beam{beam}.fil"
+    return file_path, obsid, subobsid, chan, beam
+
+
+def get_stitched_filename(filename: str) -> str:
+    """
+    Convert '[path]/obsid_subobs_chXXX_beamNN.vdif'
+    into    '[path]/obsid_chXXX_beamNN.vdif'.
+
+    obsid  = 10 digits
+    subobs = 10 digits
+    XXX    = 3 digits (zero padded)
+    NN     = 2 digits (zero padded)
+    """
+    file_path, obsid, _, chan, beam = get_filterbank_filename_components(filename)
+
+    return os.path.join(file_path, f"{obsid}_ch{chan:03d}_beam{beam:02d}.fil")

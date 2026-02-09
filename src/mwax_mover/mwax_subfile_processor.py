@@ -503,7 +503,7 @@ class SubfileProcessor:
 
                 # Rename to free but not if we are in MWAX_BEAMFORMER mode as the BF will
                 # take care of it when it has finished with it
-                if CorrelatorMode.is_beamformer(subfile_mode):
+                if not CorrelatorMode.is_beamformer(subfile_mode):
                     # Rename subfile so that udpgrab can reuse it
                     free_filename = str(item).replace(self.ext_sub_file, self.ext_free_file)
 
