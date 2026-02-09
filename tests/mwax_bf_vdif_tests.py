@@ -53,3 +53,8 @@ def test_stitch_many_files():
 
     assert os.path.exists(output_vdif_filename)
     assert os.path.exists(output_hdr_filename)
+
+    file1_size = os.path.getsize(filenames[0])
+    file2_size = os.path.getsize(filenames[1])
+
+    assert os.path.getsize(output_vdif_filename) == file1_size + file2_size

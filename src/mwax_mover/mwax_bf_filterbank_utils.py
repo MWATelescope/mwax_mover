@@ -5,7 +5,7 @@ import shutil
 
 HEADER_END = "HEADER_END"
 HEADER_END_BYTES = b"HEADER_END"
-KEY_NSAMPLES = "nsamples"
+KEY_DATALEN = "datalen"
 CHUNK_SIZE = 8 * 1024 * 1024  # 8 MiB
 
 
@@ -82,38 +82,22 @@ def stitch_filterbank_files(logger: logging.Logger, files: List[str]) -> str:
 
     # The first file header will be the one we will use
     first_header = bytearray()
-    total_nsamples: int = 0
     all_data_start_indices: List[int] = []
 
     for filename in sorted_files:
         # Read each header and get the start index of data
         this_header, this_data_start_indicies = get_filterbank_components(filename)
 
-        # Get the nsamples value for this file from the header
-        this_nsamples = get_filterbank_key_value_int(this_header, KEY_NSAMPLES)
-
-        if total_nsamples == 0:
+        if len(first_header) == 0:
             first_header = this_header
 
-        # Accumulate nsamples
-        total_nsamples += this_nsamples
-
         all_data_start_indices.append(this_data_start_indicies)
-
-    # update the first header nsamples (this will be our header for the new file)
-    new_header = set_filterbank_key_value_int(first_header, KEY_NSAMPLES, total_nsamples)
-
-    # Ensure new header and old header have same length!
-    assert len(new_header) == len(first_header)
-
-    # we'll need to adjust the start byte location for the first file possibly due to the header changing
-    all_data_start_indices[0] = len(new_header)
 
     # Create new filterbank file
     # --- Write new file ---
     with open(output_filename, "wb") as out_file:
         # write the header
-        out_file.write(new_header)
+        out_file.write(first_header)
 
         # Read the data so we can write it to the new file
         # Now loop through all files and write data
