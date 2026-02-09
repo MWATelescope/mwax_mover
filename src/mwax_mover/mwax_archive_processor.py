@@ -601,6 +601,7 @@ class MWAXArchiveProcessor:
             count_of_watchers_still_scanning = 0
             for watcher in self.watchers:
                 if not watcher.scan_completed:
+                    self.logger.debug(f"{watcher.name} still scanning!")
                     count_of_watchers_still_scanning += 1
             time.sleep(1)  # hold off for another second
         self.logger.info("Watchers are finished scanning.")
@@ -802,7 +803,7 @@ class MWAXArchiveProcessor:
 
     def checksum_and_db_handler(self, item: str) -> bool:
         """This is the first handler executed when we process a new file"""
-        self.logger.info(f"{item}- checksum_and_db_handler() Started")
+        self.logger.info(f"{item}: checksum_and_db_handler() Started")
 
         # validate the filename
         val: ValidationData = utils.validate_filename(self.logger, item, self.metafits_path)

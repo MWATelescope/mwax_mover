@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.21.15 10-Feb-2026
+
+* archive_processor: Added extra debug
+
 # 1.2.11-14 06-Feb-2026
 
 * archive_processor (beamformer): when end of an obs detected, stitch together filterbank and vdif files before archiving
