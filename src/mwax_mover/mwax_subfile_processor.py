@@ -11,7 +11,6 @@ from mwax_mover.mwax_calvin_utils import get_partial_aocal_filename
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME, MODE_WATCH_DIR_FOR_NEW
 from mwax_mover import utils, mwax_queue_worker, mwax_watcher, mwax_command
 from mwax_mover.utils import PSRDADA_HEADER_BYTES, CorrelatorMode
-from mwax_mover.mwax_named_pipe import NamedPipeWriter
 
 COMMAND_DADA_DISKDB = "dada_diskdb"
 
@@ -87,13 +86,10 @@ class SubfileProcessor:
 
         self.bf_pipe_path = bf_pipe_path
         self.bf_aocal_path = bf_aocal_path
-        self.bf_named_pipe: NamedPipeWriter
 
     def start(self):
         """Start the processor"""
         self.logger.info("Starting SubfileProcessor...")
-        # Setup the named pipe for bf observations
-        self.bf_named_pipe = NamedPipeWriter(self.bf_pipe_path)
 
         # Create watcher for the subfiles
         self.subfile_watcher = mwax_watcher.Watcher(
@@ -437,7 +433,29 @@ class SubfileProcessor:
                             raise ValueError(f"Keyword {utils.PSRDADA_NINPUTS} not found in {item}")
                         num_tiles = int(subfile_header_values[utils.PSRDADA_NINPUTS]) // 2
 
-                        success = self.signal_beamformer(item, obs_id, num_tiles, rec_chan_no)
+                        # Get cal_obsid from metafits
+                        metafits_filename = os.path.join(self.sd_ctx.metafits_path, f"{obs_id}_metafits.fits")
+                        METAFITS_CALOBSID = "CALOBSID"
+                        METAFITS_CALIBDATA_HDU = "CALIBDATA"
+                        try:
+                            cal_obs_id_str = utils.get_metafits_value_from_hdu(
+                                metafits_filename, METAFITS_CALIBDATA_HDU, METAFITS_CALOBSID
+                            )
+                        except Exception:
+                            self.logger.exception(
+                                f"{item} key {METAFITS_CALOBSID} not found in metafits file {metafits_filename} hdu {METAFITS_CALIBDATA_HDU}"
+                            )
+                            cal_obs_id_str = "0"
+
+                        try:
+                            cal_obs_id: int = int(cal_obs_id_str)
+                        except Exception:
+                            self.logger.exception(
+                                f"{item}: value {cal_obs_id_str} for key {METAFITS_CALOBSID} in {metafits_filename} hdu {METAFITS_CALIBDATA_HDU} is not a number"
+                            )
+                            cal_obs_id = 0
+
+                        success = self.signal_beamformer(item, cal_obs_id, num_tiles, rec_chan_no)
                     else:
                         # Ignore
                         self.logger.warning(
@@ -553,14 +571,14 @@ class SubfileProcessor:
 
         return success
 
-    def signal_beamformer(self, item: str, obs_id: int, num_tiles: int, rec_chan_no: int) -> bool:
+    def signal_beamformer(self, item: str, cal_obs_id: int, num_tiles: int, rec_chan_no: int) -> bool:
         # Send obs_subobs info to beamformer via named pipe
 
         # We don't know the exact aocal filename as we dont have num_fine_chans
         # so we'll use a wildcard
         aocal_filename = ""
         partial_aocal_filename = os.path.join(
-            self.bf_aocal_path, get_partial_aocal_filename(obs_id, num_tiles, rec_chan_no)
+            self.bf_aocal_path, get_partial_aocal_filename(cal_obs_id, num_tiles, rec_chan_no)
         )
         try:
             found_files = glob.glob(partial_aocal_filename)
@@ -574,13 +592,19 @@ class SubfileProcessor:
                 f"{item}- Error searching for aocal file with pattern {partial_aocal_filename}. Error: {e}"
             )
 
-        singal_value = f"{item}|{aocal_filename}"
+        signal_value = f"{item}|{aocal_filename}\n"
         self.logger.info(
-            f"{item}- Signalling beamformer with subfile|aocal ('{singal_value}') via named pipe {self.bf_pipe_path}..."
+            f"{item}- Signalling beamformer with subfile|aocal ('{signal_value}') via named pipe {self.bf_pipe_path}..."
         )
         try:
             # Write the signal value- if reader disconnects it will auto-reopen unless timeout is hit
-            self.bf_named_pipe.write(f"{singal_value}")
+            if utils.write_to_named_pipe(self.bf_pipe_path, f"{signal_value}"):
+                # Success
+                self.logger.info(f"{item}- Signalling beamformer SUCCESS")
+            else:
+                # Failed because no reader
+                self.logger.warning(f"{item}- Signalling beamformer FAILED- nothing was listening")
+
             return True
 
         except Exception:
@@ -589,15 +613,6 @@ class SubfileProcessor:
 
     def stop(self):
         """Stop the processor"""
-        # Close the named pipe
-        if self.bf_named_pipe:
-            self.logger.debug("Closing beamformer named pipe")
-            try:
-                self.bf_named_pipe.close()
-            except Exception:
-                self.logger.exception("Error closing beamformer named pipe, ignoring")
-            self.logger.debug("Closed beamformer named pipe")
-
         self.logger.debug("subfile_watcher Stopping...")
         if self.subfile_watcher:
             self.subfile_watcher.stop()

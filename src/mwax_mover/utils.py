@@ -5,6 +5,7 @@ from astropy import time as astrotime
 from configparser import ConfigParser
 import datetime
 from enum import Enum
+import errno
 import fcntl
 import glob
 import json
@@ -401,6 +402,21 @@ def get_metafits_value(metafits_filename: str, key: str):
         with fits.open(metafits_filename) as hdul:
             # Read key from primary HDU
             return hdul[0].header[key]  # type: ignore # pylint: disable=no-member
+
+    except Exception as catch_all_exception:
+        raise Exception(
+            f"Error reading metafits file: {metafits_filename}: {catch_all_exception}"
+        ) from catch_all_exception
+
+
+def get_metafits_value_from_hdu(metafits_filename: str, hdu_name: str, key: str):
+    """
+    Returns a metafits value based on key in the provided HDU
+    """
+    try:
+        with fits.open(metafits_filename) as hdul:
+            # Read key from primary HDU
+            return hdul[hdu_name].header[key]  # type: ignore # pylint: disable=no-member
 
     except Exception as catch_all_exception:
         raise Exception(
@@ -1245,3 +1261,30 @@ def delete_files_older_than(path: str, older_than_seconds: int, extensions: list
                 continue
 
     return deleted
+
+
+def write_to_named_pipe(named_pipe_path: str, message: str) -> bool:
+    """
+    write_to_named_pipe: writes a string to a named pipe
+
+    :param named_pipe_path: full path to existing named pipe
+    :type named_pipe_path: str
+
+    :param message: message to be sent
+    :type message: str
+
+    :return: True if success, False if named_pipe has no one listening
+    :rtype: bool
+
+    Raises exception on any other error
+    """
+    try:
+        fd = os.open(named_pipe_path, os.O_WRONLY | os.O_NONBLOCK)
+        os.write(fd, message.encode("utf-8"))
+        os.close(fd)
+        return True
+    except OSError as e:
+        if e.errno == errno.ENXIO:  # No such device or address
+            return False
+        else:
+            raise

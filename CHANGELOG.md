@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.3.3 11-Feb-2026
+
+* subfile_processor: reworked the named_pipe handling to be MUCH simpler. Also aocal obsid is not worked out from the CALIBDATA / CALOBSID from the metafits file.
+
 # 1.3.0-2 11-Feb-2026
 
 * subfile_distributor: Now has a --mode param (c/C or b/B) to ensure it handles beamformer obs when b or correlator obs when c and ignores the other. Fixed error message.
