@@ -317,6 +317,34 @@ class SubfileProcessor:
                 self.logger, self.mwax_stats_binary_dir, item, self.packet_stats_dump_dir, -1, 3
             )
 
+        #
+        # If we are in correlator mode, ignore beamformer obs
+        # If we are in beamformer mode, ignore correlator and vcs obs
+        #
+        if self.sd_ctx.mode == utils.MWAXSubfileDistirbutorMode.CORRELATOR:
+            if not (
+                CorrelatorMode.is_correlator(subfile_mode)
+                or CorrelatorMode.is_vcs(subfile_mode)
+                or CorrelatorMode.is_voltage_buffer(subfile_mode)
+            ):
+                # Ignore
+                self.logger.warning(
+                    f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor running in CORRELATOR mode"
+                )
+                return True
+
+        elif self.sd_ctx.mode == utils.MWAXSubfileDistirbutorMode.BEAMFORMER:
+            if not CorrelatorMode.is_beamformer(subfile_mode):
+                # Ignore
+                self.logger.warning(
+                    f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor running in BEAMFORMER mode"
+                )
+                return True
+        else:
+            # Should not get here!
+            self.logger.warning(f"Invalid mode {self.sd_ctx.mode.value}")
+            return True
+
         try:
             #
             # We need to check we are not in a voltage dump. If so, whatever
@@ -372,54 +400,78 @@ class SubfileProcessor:
                 #    else
                 #       Ignore the subfile
                 # 3. Rename .sub file to .free so that udpgrab can reuse it
+
                 if CorrelatorMode.is_correlator(subfile_mode):
-                    # This is a normal MWAX_CORRELATOR obs, continue as normal
-                    if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
-                        if self.sd_ctx.archive_processor:
-                            self.sd_ctx.archive_processor.pause_archiving(False)  # pylint: disable=line-too-long
+                    # Check if we're in the right mwax_subfile_distributor mode
+                    if self.sd_ctx.mode == utils.MWAXSubfileDistirbutorMode.CORRELATOR:
+                        # This is a normal MWAX_CORRELATOR obs, continue as normal
+                        if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
+                            if self.sd_ctx.archive_processor:
+                                self.sd_ctx.archive_processor.pause_archiving(False)  # pylint: disable=line-too-long
 
-                    success = utils.load_psrdada_ringbuffer(
-                        self.logger,
-                        item,
-                        self.corr_ringbuffer_key,
-                        -1,
-                        self.psrdada_timeout_sec,
-                    )
+                        success = utils.load_psrdada_ringbuffer(
+                            self.logger,
+                            item,
+                            self.corr_ringbuffer_key,
+                            -1,
+                            self.psrdada_timeout_sec,
+                        )
 
-                    if self.always_keep_subfiles:
-                        keep_subfiles_path = self.voltdata_incoming_path
+                        if self.always_keep_subfiles:
+                            keep_subfiles_path = self.voltdata_incoming_path
+                    else:
+                        # Ignore
+                        self.logger.warning(
+                            f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor running in CORRELATOR mode"
+                        )
+                        success = True  # It's True because that signals the caller to keep going and don't retry
 
                 elif CorrelatorMode.is_vcs(subfile_mode):
-                    # Pause archiving so we have the disk to ourselves
-                    if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
-                        if self.sd_ctx.archive_processor:
-                            self.sd_ctx.archive_processor.pause_archiving(True)  # pylint: disable=line-too-long
+                    # Check if we're in the right mwax_subfile_distributor mode
+                    if self.sd_ctx.mode == utils.MWAXSubfileDistirbutorMode.CORRELATOR:
+                        # Pause archiving so we have the disk to ourselves
+                        if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
+                            if self.sd_ctx.archive_processor:
+                                self.sd_ctx.archive_processor.pause_archiving(True)  # pylint: disable=line-too-long
 
-                    success = self.copy_subfile_to_disk_dd(
-                        item,
-                        self.corr_devshm_numa_node,
-                        self.voltdata_incoming_path,
-                        self.copy_subfile_to_disk_timeout_sec,
-                        os.path.split(item)[1],
-                        subfile_bytes_to_write,
-                    )
+                        success = self.copy_subfile_to_disk_dd(
+                            item,
+                            self.corr_devshm_numa_node,
+                            self.voltdata_incoming_path,
+                            self.copy_subfile_to_disk_timeout_sec,
+                            os.path.split(item)[1],
+                            subfile_bytes_to_write,
+                        )
+                    else:
+                        # Ignore
+                        self.logger.warning(
+                            f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor running in CORRELATOR mode"
+                        )
+                        success = True  # It's True because that signals the caller to keep going and don't retry
 
                 elif CorrelatorMode.is_beamformer(subfile_mode):
-                    # This is a beamformer obs, enable archiving as normal (if configured)
-                    if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
-                        if self.sd_ctx.archive_processor:
-                            self.sd_ctx.archive_processor.pause_archiving(False)
+                    if self.sd_ctx.mode == utils.MWAXSubfileDistirbutorMode.BEAMFORMER:
+                        # This is a beamformer obs, enable archiving as normal (if configured)
+                        if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
+                            if self.sd_ctx.archive_processor:
+                                self.sd_ctx.archive_processor.pause_archiving(False)
 
-                    # Get number of inputs and coarse channel from header
-                    if subfile_header_values[utils.PSRDADA_COARSE_CHANNEL] is None:
-                        raise ValueError(f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {item}")
-                    rec_chan_no = int(subfile_header_values[utils.PSRDADA_COARSE_CHANNEL])
+                        # Get number of inputs and coarse channel from header
+                        if subfile_header_values[utils.PSRDADA_COARSE_CHANNEL] is None:
+                            raise ValueError(f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {item}")
+                        rec_chan_no = int(subfile_header_values[utils.PSRDADA_COARSE_CHANNEL])
 
-                    if subfile_header_values[utils.PSRDADA_NINPUTS] is None:
-                        raise ValueError(f"Keyword {utils.PSRDADA_NINPUTS} not found in {item}")
-                    num_tiles = int(subfile_header_values[utils.PSRDADA_NINPUTS]) // 2
+                        if subfile_header_values[utils.PSRDADA_NINPUTS] is None:
+                            raise ValueError(f"Keyword {utils.PSRDADA_NINPUTS} not found in {item}")
+                        num_tiles = int(subfile_header_values[utils.PSRDADA_NINPUTS]) // 2
 
-                    success = self.signal_beamformer(item, obs_id, num_tiles, rec_chan_no)
+                        success = self.signal_beamformer(item, obs_id, num_tiles, rec_chan_no)
+                    else:
+                        # Ignore
+                        self.logger.warning(
+                            f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor running in BEAMFORMER mode"
+                        )
+                        success = True  # It's True because that signals the caller to keep going and don't retry
 
                 elif CorrelatorMode.is_no_capture(subfile_mode) or CorrelatorMode.is_voltage_buffer(subfile_mode):
                     self.logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
@@ -561,7 +613,7 @@ class SubfileProcessor:
 
         except Exception:
             self.logger.exception(f"{item}- Failed to signal beamformer via named pipe.")
-            raise
+            exit(3)
 
     def stop(self):
         """Stop the processor"""

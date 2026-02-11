@@ -64,7 +64,10 @@ class NamedPipeWriter:
         """
         Write data, auto-reopening if the reader disconnects
         """
-        while True:
+        retries = 3
+        retry = 0
+        while retry <= retries:
+            retry += 1
             try:
                 if self._file is not None:
                     self._file.write(data)

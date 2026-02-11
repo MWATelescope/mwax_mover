@@ -4,6 +4,7 @@ This is to test if MWAXSubfileDistributor correctly handles a MWAX_BEAMFORMER ob
 
 import os
 import shutil
+from mwax_mover.utils import MWAXSubfileDistirbutorMode
 from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
 from tests_common import setup_test_directories
 
@@ -18,7 +19,7 @@ def test_beamformer_subfile():
 
     # Create a subfile distributor
     sd = MWAXSubfileDistributor()
-    sd.initialise(TEST_CONFIG_FILE)
+    sd.initialise(TEST_CONFIG_FILE, MWAXSubfileDistirbutorMode.BEAMFORMER)
 
     # Copy the test subfile into the correct test dir
     subfile_name = os.path.join(sd.cfg_subfile_incoming_path, os.path.basename(TEST_SUBFILE))

@@ -43,6 +43,14 @@ PSRDADA_COARSE_CHANNEL = "COARSE_CHANNEL"
 metafits_file_lock = threading.Lock()
 
 
+class MWAXSubfileDistirbutorMode(Enum):
+    """Class representing the mode running"""
+
+    UNKNOWN = ""
+    BEAMFORMER = "B"
+    CORRELATOR = "C"
+
+
 class CorrelatorMode(Enum):
     """Class representing correlator mode"""
 

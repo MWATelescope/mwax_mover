@@ -28,6 +28,8 @@ class MWAXSubfileDistributor:
         self.logger = logging.getLogger("mwax_mover")
         self.cfg_log_level: str = ""
 
+        self.mode: utils.MWAXSubfileDistirbutorMode = utils.MWAXSubfileDistirbutorMode.UNKNOWN
+
         # Config parser
         self.config: ConfigParser
 
@@ -113,14 +115,31 @@ class MWAXSubfileDistributor:
 
         parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
 
+        parser.add_argument(
+            "--mode",
+            choices=["c", "b", "C", "B"],
+            required=True,
+            help="Mode of operation: C (correlator) or B (beamformer)",
+        )
+
         args = vars(parser.parse_args())
 
         # Check that config file exists
         config_filename = args["cfg"]
 
-        self.initialise(config_filename)
+        # mode
+        config_mode: utils.MWAXSubfileDistirbutorMode = utils.MWAXSubfileDistirbutorMode.UNKNOWN
+        mode_str = ""
+        try:
+            mode_str = str(args["mode"])
+            config_mode: utils.MWAXSubfileDistirbutorMode = utils.MWAXSubfileDistirbutorMode(mode_str.upper())
+        except Exception:
+            print(f"--mode {mode_str} is not supported")
+            exit(-1)
 
-    def initialise(self, config_filename):
+        self.initialise(config_filename, config_mode)
+
+    def initialise(self, config_filename: str, config_mode: utils.MWAXSubfileDistirbutorMode):
         """Initialise common code"""
         if not os.path.exists(config_filename):
             self.logger.error(f"Configuration file location {config_filename} does not exist. Quitting.")
@@ -149,6 +168,20 @@ class MWAXSubfileDistributor:
         self.logger.addHandler(console_log)
 
         self.logger.info(f"Starting mwax_subfile_distributor processor...v{version.get_mwax_mover_version_string()}")
+
+        self.logger.info("==========================================================================================")
+
+        self.mode = config_mode
+        if self.mode == utils.MWAXSubfileDistirbutorMode.CORRELATOR:
+            self.logger.info("running in CORRELATOR mode: ignoring Beamforming observations")
+        elif self.mode == utils.MWAXSubfileDistirbutorMode.BEAMFORMER:
+            self.logger.info("running in BEAMFORMER mode: ignoring VCS and Correlator observations")
+        else:
+            self.logger.warning(f"Incorrect mode: {self.mode.value} exiting")
+            exit(2)
+
+        self.logger.info("==========================================================================================")
+
         self.logger.info(f"Reading config file: {config_filename}")
 
         self.cfg_webserver_port = int(utils.read_config(self.logger, self.config, "mwax mover", "webserver_port"))
@@ -844,7 +877,7 @@ class MWAXSubfileDistributor:
             else:
                 shutdown_func()
                 self.logger.debug("Flask web server shut down successfully.")
-        except:
+        except Exception:
             # If this fails just ignore for now
             pass
 

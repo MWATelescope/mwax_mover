@@ -1,10 +1,14 @@
 # Changelog
 
-# 1.21.17 11-Feb-2026
+# 1.3.0 11-Feb-2026
+
+* subfile_distributor: Now has a --mode param (c/C or b/B) to ensure it handles beamformer obs when b or correlator obs when c and ignores the other.
+
+# 1.2.17 11-Feb-2026
 
 * subfile_processor: fixed int/str bug preventing subfileprocessor from handling beamformer subfiles
 
-# 1.21.15-16 10-Feb-2026
+# 1.2.15-16 10-Feb-2026
 
 * archive_processor: Added extra debug and fixed duplicate watcher_incoming_vis bug
 
