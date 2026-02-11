@@ -394,7 +394,7 @@ class SubfileProcessor:
                     else:
                         # Ignore
                         self.logger.warning(
-                            f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor running in CORRELATOR mode"
+                            f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor NOT running in CORRELATOR mode"
                         )
                         success = True  # It's True because that signals the caller to keep going and don't retry
 
@@ -417,7 +417,7 @@ class SubfileProcessor:
                     else:
                         # Ignore
                         self.logger.warning(
-                            f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor running in CORRELATOR mode"
+                            f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor NOT running in CORRELATOR mode"
                         )
                         success = True  # It's True because that signals the caller to keep going and don't retry
 
@@ -441,7 +441,7 @@ class SubfileProcessor:
                     else:
                         # Ignore
                         self.logger.warning(
-                            f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor running in BEAMFORMER mode"
+                            f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor NOT running in BEAMFORMER mode"
                         )
                         success = True  # It's True because that signals the caller to keep going and don't retry
 

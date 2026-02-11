@@ -1,8 +1,8 @@
 # Changelog
 
-# 1.3.0-1 11-Feb-2026
+# 1.3.0-2 11-Feb-2026
 
-* subfile_distributor: Now has a --mode param (c/C or b/B) to ensure it handles beamformer obs when b or correlator obs when c and ignores the other.
+* subfile_distributor: Now has a --mode param (c/C or b/B) to ensure it handles beamformer obs when b or correlator obs when c and ignores the other. Fixed error message.
 
 # 1.2.17 11-Feb-2026
 
