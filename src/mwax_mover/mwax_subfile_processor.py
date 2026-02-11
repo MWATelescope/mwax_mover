@@ -317,34 +317,6 @@ class SubfileProcessor:
                 self.logger, self.mwax_stats_binary_dir, item, self.packet_stats_dump_dir, -1, 3
             )
 
-        #
-        # If we are in correlator mode, ignore beamformer obs
-        # If we are in beamformer mode, ignore correlator and vcs obs
-        #
-        if self.sd_ctx.mode == utils.MWAXSubfileDistirbutorMode.CORRELATOR:
-            if not (
-                CorrelatorMode.is_correlator(subfile_mode)
-                or CorrelatorMode.is_vcs(subfile_mode)
-                or CorrelatorMode.is_voltage_buffer(subfile_mode)
-            ):
-                # Ignore
-                self.logger.warning(
-                    f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor running in CORRELATOR mode"
-                )
-                return True
-
-        elif self.sd_ctx.mode == utils.MWAXSubfileDistirbutorMode.BEAMFORMER:
-            if not CorrelatorMode.is_beamformer(subfile_mode):
-                # Ignore
-                self.logger.warning(
-                    f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor running in BEAMFORMER mode"
-                )
-                return True
-        else:
-            # Should not get here!
-            self.logger.warning(f"Invalid mode {self.sd_ctx.mode.value}")
-            return True
-
         try:
             #
             # We need to check we are not in a voltage dump. If so, whatever
