@@ -413,11 +413,11 @@ class SubfileProcessor:
                     # Get number of inputs and coarse channel from header
                     if subfile_header_values[utils.PSRDADA_COARSE_CHANNEL] is None:
                         raise ValueError(f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {item}")
-                    rec_chan_no = subfile_header_values[utils.PSRDADA_COARSE_CHANNEL]
+                    rec_chan_no = int(subfile_header_values[utils.PSRDADA_COARSE_CHANNEL])
 
                     if subfile_header_values[utils.PSRDADA_NINPUTS] is None:
                         raise ValueError(f"Keyword {utils.PSRDADA_NINPUTS} not found in {item}")
-                    num_tiles = subfile_header_values[utils.PSRDADA_NINPUTS] / 2
+                    num_tiles = int(subfile_header_values[utils.PSRDADA_NINPUTS]) // 2
 
                     success = self.signal_beamformer(item, obs_id, num_tiles, rec_chan_no)
 

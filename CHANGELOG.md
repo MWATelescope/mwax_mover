@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.21.17 11-Feb-2026
+
+* subfile_processor: fixed int/str bug preventing subfileprocessor from handling beamformer subfiles
+
 # 1.21.15-16 10-Feb-2026
 
 * archive_processor: Added extra debug and fixed duplicate watcher_incoming_vis bug
