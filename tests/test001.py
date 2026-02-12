@@ -4,6 +4,9 @@ This is to test if MWAXSubfileDistributor correctly handles a MWAX_BEAMFORMER ob
 
 import os
 import shutil
+import signal
+import threading
+import time
 from mwax_mover.utils import MWAXSubfileDistirbutorMode
 from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
 from tests_common import setup_test_directories
@@ -12,8 +15,22 @@ TEST_CONFIG_FILE = "tests/data/test001/test001.cfg"
 TEST_SUBFILE = "tests/data/test001/1454743816_1454743816_55.sub"
 TEST_METAFITS = "tests/data/test001/1454743816_metafits.fits"
 
+# VDIF
+TEST_VDIF = [
+    "tests/data/test001/1454343736_1454343736_ch109_beam00.vdif",
+    "tests/data/test001/1454343736_1454343744_ch109_beam00.vdif",
+    "tests/data/test001/1454343736_1454343736_ch109_beam01.vdif",
+    "tests/data/test001/1454343736_1454343744_ch109_beam01.vdif",
+]
+
+# Filterbank
+
 
 def test_beamformer_subfile():
+    #
+    # This test checks how the mwax_subfile_processor handles a beamformer subfile
+    #
+
     # Setup dirs
     setup_test_directories(__file__)
 
@@ -21,13 +38,26 @@ def test_beamformer_subfile():
     sd = MWAXSubfileDistributor()
     sd.initialise(TEST_CONFIG_FILE, MWAXSubfileDistirbutorMode.BEAMFORMER)
 
-    # Copy the test subfile into the correct test dir
-    subfile_name = os.path.join(sd.cfg_subfile_incoming_path, os.path.basename(TEST_SUBFILE))
+    # setup data
+    metafits = os.path.join(sd.cfg_corr_metafits_path, os.path.basename(TEST_METAFITS))
+    shutil.copyfile(TEST_METAFITS, metafits)
 
-    # Initiate processing
+    subfile_name = os.path.join(sd.cfg_subfile_incoming_path, os.path.basename(TEST_SUBFILE))
     shutil.copyfile(TEST_SUBFILE, subfile_name)
 
     # start processor
-    sd.start()
+    # Create and start a thread for the processor
+    thrd = threading.Thread(name="msd_thread", target=sd.start, daemon=True)
 
-    #
+    # Start the processor
+    thrd.start()
+
+    # allow things to start
+    time.sleep(10)
+
+    # Quit
+    # Ok time's up! Stop the processor
+    sd.signal_handler(signal.SIGINT, 0)
+
+    # Check that the subfile is still there
+    assert os.path.exists(subfile_name)

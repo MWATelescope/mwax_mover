@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.3.4 12-Feb-2026
+
+* subfile_processor: another refactor- using redis to signal the beamformer now. Better testing.
+
 # 1.3.3 11-Feb-2026
 
 * subfile_processor: reworked the named_pipe handling to be MUCH simpler. Also aocal obsid is not worked out from the CALIBDATA / CALOBSID from the metafits file.

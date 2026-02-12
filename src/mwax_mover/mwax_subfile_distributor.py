@@ -34,7 +34,11 @@ class MWAXSubfileDistributor:
         self.config: ConfigParser
 
         # init vars
-        self.hostname: str = utils.get_hostname()
+        if utils.running_under_pytest():
+            # pretend I am mwax99
+            self.hostname = "mwax99"
+        else:
+            self.hostname: str = utils.get_hostname()
         self.running: bool = False
         self.processors: list = []
         self.archive_processor = None
@@ -468,16 +472,19 @@ class MWAXSubfileDistributor:
         )
 
         # beamformer options
-        self.cfg_bf_pipe_path = utils.read_config(
+        self.cfg_bf_redis_host = utils.read_config(
             self.logger,
             self.config,
             "beamformer",
-            "bf_pipe_path",
+            "bf_redis_host",
         )
 
-        if not os.path.exists(self.cfg_bf_pipe_path):
-            self.logger.error(f"bf_pipe_path location {self.cfg_bf_pipe_path} does not exist. Quitting.")
-            sys.exit(1)
+        self.cfg_bf_redis_queue_key = utils.read_config(
+            self.logger,
+            self.config,
+            "beamformer",
+            "bf_redis_queue_key",
+        )
 
         self.cfg_bf_aocal_path = utils.read_config(
             self.logger,
@@ -577,7 +584,8 @@ class MWAXSubfileDistributor:
             self.cfg_packet_stats_dump_dir,
             self.cfg_packet_stats_destination_dir,
             self.hostname,
-            self.cfg_bf_pipe_path,
+            self.cfg_bf_redis_host,
+            self.cfg_bf_redis_queue_key,
             self.cfg_bf_aocal_path,
         )
 

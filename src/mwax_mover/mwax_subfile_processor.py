@@ -32,7 +32,8 @@ class SubfileProcessor:
         packet_stats_dump_dir: str,
         packet_stats_destination_dir: str,
         hostname: str,
-        bf_pipe_path: str,
+        bf_redis_host: str,
+        bf_redis_queue_key: str,
         bf_aocal_path: str,
     ):
         self.sd_ctx = context
@@ -84,7 +85,20 @@ class SubfileProcessor:
         self.packet_stats_destination_queue_worker = None
         self.packet_stats_watcher = None
 
-        self.bf_pipe_path = bf_pipe_path
+        self.bf_redis_host = bf_redis_host
+
+        # Each server will use a unique queue key. The queue key we read in the cfg gile
+        # is just the base- we then add the zero padded 2 digit MWAXNN number.
+        # e.g. mwax25 will have a queue key of "bf_queue25"
+
+        # Get the last 2 digits of the hostname
+        host_number_str = hostname.replace("mwax", "")
+        self.logger.debug(f"Hostname: {hostname}; extracted host number: {host_number_str}")
+
+        self.bf_redis_queue_key = f"{bf_redis_queue_key}{host_number_str}"
+
+        self.logger.debug(f"Using redis queue key: {self.bf_redis_queue_key}")
+
         self.bf_aocal_path = bf_aocal_path
 
     def start(self):
@@ -434,7 +448,7 @@ class SubfileProcessor:
                         num_tiles = int(subfile_header_values[utils.PSRDADA_NINPUTS]) // 2
 
                         # Get cal_obsid from metafits
-                        metafits_filename = os.path.join(self.sd_ctx.metafits_path, f"{obs_id}_metafits.fits")
+                        metafits_filename = os.path.join(self.sd_ctx.cfg_corr_metafits_path, f"{obs_id}_metafits.fits")
                         METAFITS_CALOBSID = "CALOBSID"
                         METAFITS_CALIBDATA_HDU = "CALIBDATA"
                         try:
@@ -442,7 +456,7 @@ class SubfileProcessor:
                                 metafits_filename, METAFITS_CALIBDATA_HDU, METAFITS_CALOBSID
                             )
                         except Exception:
-                            self.logger.exception(
+                            self.logger.warning(
                                 f"{item} key {METAFITS_CALOBSID} not found in metafits file {metafits_filename} hdu {METAFITS_CALIBDATA_HDU}"
                             )
                             cal_obs_id_str = "0"
@@ -450,7 +464,7 @@ class SubfileProcessor:
                         try:
                             cal_obs_id: int = int(cal_obs_id_str)
                         except Exception:
-                            self.logger.exception(
+                            self.logger.warning(
                                 f"{item}: value {cal_obs_id_str} for key {METAFITS_CALOBSID} in {metafits_filename} hdu {METAFITS_CALIBDATA_HDU} is not a number"
                             )
                             cal_obs_id = 0
@@ -545,7 +559,13 @@ class SubfileProcessor:
 
                 # Rename to free but not if we are in MWAX_BEAMFORMER mode as the BF will
                 # take care of it when it has finished with it
-                if not CorrelatorMode.is_beamformer(subfile_mode):
+                if (
+                    CorrelatorMode.is_beamformer(subfile_mode)
+                    and self.sd_ctx.mode == utils.MWAXSubfileDistirbutorMode.BEAMFORMER
+                ):
+                    # Don't rename .sub to .free- the beamformer does it
+                    pass
+                else:
                     # Rename subfile so that udpgrab can reuse it
                     free_filename = str(item).replace(self.ext_sub_file, self.ext_free_file)
 
@@ -592,23 +612,17 @@ class SubfileProcessor:
                 f"{item}- Error searching for aocal file with pattern {partial_aocal_filename}. Error: {e}"
             )
 
-        signal_value = f"{item}|{aocal_filename}\n"
-        self.logger.info(
-            f"{item}- Signalling beamformer with subfile|aocal ('{signal_value}') via named pipe {self.bf_pipe_path}..."
-        )
+        signal_value = {"subfile": item, "aocalfile": aocal_filename}
+        self.logger.info(f"{item}- Signalling beamformer with ('{signal_value}') via redis {self.bf_redis_host}...")
         try:
             # Write the signal value- if reader disconnects it will auto-reopen unless timeout is hit
-            if utils.write_to_named_pipe(self.bf_pipe_path, f"{signal_value}"):
-                # Success
-                self.logger.info(f"{item}- Signalling beamformer SUCCESS")
-            else:
-                # Failed because no reader
-                self.logger.warning(f"{item}- Signalling beamformer FAILED- nothing was listening")
-
+            utils.push_message_to_redis(self.bf_redis_host, self.bf_redis_queue_key, f"{signal_value}")
+            # Success
+            self.logger.info(f"{item}- Signalling beamformer success")
             return True
 
         except Exception:
-            self.logger.exception(f"{item}- Failed to signal beamformer via named pipe.")
+            self.logger.exception(f"{item}- signal_beamformer failed.")
             exit(3)
 
     def stop(self):

@@ -5,13 +5,13 @@ from astropy import time as astrotime
 from configparser import ConfigParser
 import datetime
 from enum import Enum
-import errno
 import fcntl
 import glob
 import json
 import logging
 import os
 import queue
+import redis
 import shutil
 import socket
 import struct
@@ -1263,28 +1263,36 @@ def delete_files_older_than(path: str, older_than_seconds: int, extensions: list
     return deleted
 
 
-def write_to_named_pipe(named_pipe_path: str, message: str) -> bool:
+def push_message_to_redis(redis_host: str, redis_queue_key: str, message_data):
+    """Push a message to Redis list as JSON
+    message is any data that can be serialised into json.
+    Raises exception if we fail more than MAX_RETRIES times
     """
-    write_to_named_pipe: writes a string to a named pipe
+    MAX_RETRIES = 3
 
-    :param named_pipe_path: full path to existing named pipe
-    :type named_pipe_path: str
+    json_message = json.dumps(message_data)
 
-    :param message: message to be sent
-    :type message: str
+    # Connect to Redis
+    attempt = 0
+    while attempt <= MAX_RETRIES:
+        attempt += 1
 
-    :return: True if success, False if named_pipe has no one listening
-    :rtype: bool
+        try:
+            with redis.Redis(host=redis_host, port=6379, decode_responses=True) as r:
+                r.rpush(redis_queue_key, json_message)
 
-    Raises exception on any other error
-    """
-    try:
-        fd = os.open(named_pipe_path, os.O_WRONLY | os.O_NONBLOCK)
-        os.write(fd, message.encode("utf-8"))
-        os.close(fd)
-        return True
-    except OSError as e:
-        if e.errno == errno.ENXIO:  # No such device or address
-            return False
-        else:
-            raise
+        except redis.RedisError as e:
+            # wait 1 rec between retries
+            time.sleep(1)
+
+            if attempt == MAX_RETRIES:
+                raise redis.RedisError(
+                    f"Could not push message to Redis host {redis_host} [{redis_queue_key}] after {attempt} tries: {e}"
+                ) from e
+            else:
+                continue
+
+
+def running_under_pytest() -> bool:
+    # Returns True if we are running as part of pytest
+    return "PYTEST_CURRENT_TEST" in os.environ
