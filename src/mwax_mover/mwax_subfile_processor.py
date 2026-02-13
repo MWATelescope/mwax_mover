@@ -607,10 +607,10 @@ class SubfileProcessor:
             )
 
         signal_value = {"subfile": item, "aocalfile": aocal_filename}
-        self.logger.info(f"{item}- Signalling beamformer with ('{signal_value}') via redis {self.bf_redis_host}...")
+        self.logger.info(f"{item}- Signalling beamformer with ({signal_value}) via redis {self.bf_redis_host}...")
         try:
             # Write the signal value- if reader disconnects it will auto-reopen unless timeout is hit
-            utils.push_message_to_redis(self.bf_redis_host, self.bf_redis_queue_key, f"{signal_value}")
+            utils.push_message_to_redis(self.bf_redis_host, self.bf_redis_queue_key, signal_value)
             # Success
             self.logger.info(f"{item}- Signalling beamformer success")
             return True
