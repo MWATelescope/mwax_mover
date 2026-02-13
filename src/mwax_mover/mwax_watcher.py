@@ -93,17 +93,19 @@ class Watcher(object):
 
         while self.watching:
             for event in self.inotify_tree.event_gen(timeout_s=0.1, yield_nones=False):
-                (header, _, path, filename) = event  # type: ignore
+                # This if is redundant as we don't yeild nones
+                if event:
+                    (header, _, path, filename) = event
 
-                # check event is one we care about
-                if header.mask | self.mask == self.mask:
-                    # Check file extension is one we care about
-                    if (os.path.splitext(filename)[1] == self.pattern or self.pattern == ".*") and os.path.splitext(
-                        filename
-                    )[1] != self.exclude_pattern:
-                        dest_filename = os.path.join(path, filename)
-                        self.dest_queue.put(dest_filename)
-                        self.logger.info(f"{dest_filename} added to queue ({self.dest_queue.qsize()})")
+                    # check event is one we care about
+                    if header.mask | self.mask == self.mask:
+                        # Check file extension is one we care about
+                        if (os.path.splitext(filename)[1] == self.pattern or self.pattern == ".*") and os.path.splitext(
+                            filename
+                        )[1] != self.exclude_pattern:
+                            dest_filename = os.path.join(path, filename)
+                            self.dest_queue.put(dest_filename)
+                            self.logger.info(f"{dest_filename} added to queue ({self.dest_queue.qsize()})")
 
     def get_status(self) -> dict:
         """Returns a dictionary describing status of this watcher"""

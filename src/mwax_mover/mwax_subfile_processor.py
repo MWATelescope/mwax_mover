@@ -443,10 +443,6 @@ class SubfileProcessor:
                             raise ValueError(f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {item}")
                         rec_chan_no = int(subfile_header_values[utils.PSRDADA_COARSE_CHANNEL])
 
-                        if subfile_header_values[utils.PSRDADA_NINPUTS] is None:
-                            raise ValueError(f"Keyword {utils.PSRDADA_NINPUTS} not found in {item}")
-                        num_tiles = int(subfile_header_values[utils.PSRDADA_NINPUTS]) // 2
-
                         # Get cal_obsid from metafits
                         metafits_filename = os.path.join(self.sd_ctx.cfg_corr_metafits_path, f"{obs_id}_metafits.fits")
                         METAFITS_CALOBSID = "CALOBSID"
@@ -469,7 +465,7 @@ class SubfileProcessor:
                             )
                             cal_obs_id = 0
 
-                        success = self.signal_beamformer(item, cal_obs_id, num_tiles, rec_chan_no)
+                        success = self.signal_beamformer(item, cal_obs_id, rec_chan_no)
                     else:
                         # Ignore
                         self.logger.warning(
@@ -591,15 +587,13 @@ class SubfileProcessor:
 
         return success
 
-    def signal_beamformer(self, item: str, cal_obs_id: int, num_tiles: int, rec_chan_no: int) -> bool:
+    def signal_beamformer(self, item: str, cal_obs_id: int, rec_chan_no: int) -> bool:
         # Send obs_subobs info to beamformer via named pipe
 
         # We don't know the exact aocal filename as we dont have num_fine_chans
         # so we'll use a wildcard
         aocal_filename = ""
-        partial_aocal_filename = os.path.join(
-            self.bf_aocal_path, get_partial_aocal_filename(cal_obs_id, num_tiles, rec_chan_no)
-        )
+        partial_aocal_filename = os.path.join(self.bf_aocal_path, get_partial_aocal_filename(cal_obs_id, rec_chan_no))
         try:
             found_files = glob.glob(partial_aocal_filename)
             if not found_files:

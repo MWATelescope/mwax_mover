@@ -9,21 +9,11 @@ import threading
 import time
 from mwax_mover.utils import MWAXSubfileDistirbutorMode
 from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
-from tests_common import setup_test_directories
+from tests_common import setup_test_directories, create_observation_subfiles
 
 TEST_CONFIG_FILE = "tests/data/test001/test001.cfg"
-TEST_SUBFILE = "tests/data/test001/1454743816_1454743816_55.sub"
 TEST_METAFITS = "tests/data/test001/1454743816_metafits.fits"
-
-# VDIF
-TEST_VDIF = [
-    "tests/data/test001/1454343736_1454343736_ch109_beam00.vdif",
-    "tests/data/test001/1454343736_1454343744_ch109_beam00.vdif",
-    "tests/data/test001/1454343736_1454343736_ch109_beam01.vdif",
-    "tests/data/test001/1454343736_1454343744_ch109_beam01.vdif",
-]
-
-# Filterbank
+TEST_AOCAL_FILES = [f"tests/data/test001/1454343616_256_32_{c}_calfile.bin" for c in range(109, 109 + 24)]
 
 
 def test_beamformer_subfile():
@@ -32,7 +22,7 @@ def test_beamformer_subfile():
     #
 
     # Setup dirs
-    setup_test_directories(__file__)
+    base_dir = setup_test_directories(__file__)
 
     # Create a subfile distributor
     sd = MWAXSubfileDistributor()
@@ -42,8 +32,12 @@ def test_beamformer_subfile():
     metafits = os.path.join(sd.cfg_corr_metafits_path, os.path.basename(TEST_METAFITS))
     shutil.copyfile(TEST_METAFITS, metafits)
 
-    subfile_name = os.path.join(sd.cfg_subfile_incoming_path, os.path.basename(TEST_SUBFILE))
-    shutil.copyfile(TEST_SUBFILE, subfile_name)
+    create_observation_subfiles(
+        1454743816, 2, "MWAX_BEAMFORMER", 109, 0, os.path.join(base_dir, "tmp"), sd.cfg_subfile_incoming_path
+    )
+
+    for c in TEST_AOCAL_FILES:
+        shutil.copyfile(c, os.path.join(sd.cfg_bf_aocal_path, os.path.basename(c)))
 
     # start processor
     # Create and start a thread for the processor
@@ -59,5 +53,4 @@ def test_beamformer_subfile():
     # Ok time's up! Stop the processor
     sd.signal_handler(signal.SIGINT, 0)
 
-    # Check that the subfile is still there
-    assert os.path.exists(subfile_name)
+    # Check the redis server for a message

@@ -113,35 +113,41 @@ class PriorityWatcher(object):
         self.scan_completed = True
 
         while self.watching:
-            for event in self.inotify_tree.event_gen(timeout_s=0.1, yield_nones=False):
-                (header, _, path, filename) = event
+            if self.inotify_tree:
+                for event in self.inotify_tree.event_gen(timeout_s=0.1, yield_nones=False):
+                    # This if is a bit redundant as above we specify we don't yield nones.
+                    if event:
+                        (header, _, path, filename) = event
 
-                # check event is one we care about
-                if header.mask | self.mask == self.mask:
-                    # Check file extension is one we care about
-                    if (os.path.splitext(filename)[1] == self.pattern or self.pattern == ".*") and os.path.splitext(
-                        filename
-                    )[1] != self.exclude_pattern:
-                        dest_filename = os.path.join(path, filename)
+                        # debug (uncomment if needed)
+                        # self.logger.debug(f"Event {path} {filename}")
 
-                        # We need to determine the priority
-                        priority = utils.get_priority(
-                            self.logger,
-                            dest_filename,
-                            self.metafits_path,
-                            self.list_of_correlator_high_priority_projects,
-                            self.list_of_vcs_high_priority_projects,
-                        )
+                        # check event is one we care about
+                        if header.mask | self.mask == self.mask:
+                            # Check file extension is one we care about
+                            if (
+                                os.path.splitext(filename)[1] == self.pattern or self.pattern == ".*"
+                            ) and os.path.splitext(filename)[1] != self.exclude_pattern:
+                                dest_filename = os.path.join(path, filename)
 
-                        new_queue_item = (
-                            priority,
-                            MWAXPriorityQueueData(dest_filename),
-                        )
+                                # We need to determine the priority
+                                priority = utils.get_priority(
+                                    self.logger,
+                                    dest_filename,
+                                    self.metafits_path,
+                                    self.list_of_correlator_high_priority_projects,
+                                    self.list_of_vcs_high_priority_projects,
+                                )
 
-                        self.dest_queue.put(new_queue_item)
-                        self.logger.info(
-                            f"{dest_filename} added to queue with priority {priority} ({self.dest_queue.qsize()})"
-                        )
+                                new_queue_item = (
+                                    priority,
+                                    MWAXPriorityQueueData(dest_filename),
+                                )
+
+                                self.dest_queue.put(new_queue_item)
+                                self.logger.info(
+                                    f"{dest_filename} added to queue with priority {priority} ({self.dest_queue.qsize()})"
+                                )
 
     def get_status(self) -> dict:
         """Returns a dictionary describing status of this watcher"""

@@ -105,6 +105,7 @@ class MWAXArchiveProcessor:
         self.watch_dir_incoming_volt: str = voltdata_incoming_path
         self.watch_dir_incoming_vis: str = visdata_incoming_path
         self.watch_dir_incoming_bf: str = bf_incoming_path
+
         self.queue_bf_stitching: queue.PriorityQueue = queue.PriorityQueue()
 
         self.watch_dir_processing_stats_vis: str = visdata_processing_stats_path
@@ -167,13 +168,13 @@ class MWAXArchiveProcessor:
             )
             self.watchers.append(watcher_incoming_vis)
 
-            # Create watchers for beamformer data -> stitch files (once they are all there)
+            # Create watchers for beamformer vdif data -> stitch files (once they are all there)
             # This will watch for beamformer files being created
-            watcher_incoming_bf = mwax_priority_watcher.PriorityWatcher(
-                name="watcher_incoming_bf",
+            watcher_incoming_bf_vdif = mwax_priority_watcher.PriorityWatcher(
+                name="watcher_incoming_bf_vdif",
                 path=self.watch_dir_incoming_bf,
                 dest_queue=self.queue_bf_stitching,
-                pattern=".*",
+                pattern=".vdif",
                 log=self.logger,
                 mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
                 metafits_path=self.metafits_path,
@@ -181,7 +182,23 @@ class MWAXArchiveProcessor:
                 list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
                 recursive=False,
             )
-            self.watchers.append(watcher_incoming_bf)
+            self.watchers.append(watcher_incoming_bf_vdif)
+
+            # Create watchers for beamformer filterbank data -> stitch files (once they are all there)
+            # This will watch for beamformer files being created
+            watcher_incoming_bf_fil = mwax_priority_watcher.PriorityWatcher(
+                name="watcher_incoming_bf_fil",
+                path=self.watch_dir_incoming_bf,
+                dest_queue=self.queue_bf_stitching,
+                pattern=".fil",
+                log=self.logger,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+                metafits_path=self.metafits_path,
+                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
+                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
+                recursive=False,
+            )
+            self.watchers.append(watcher_incoming_bf_fil)
 
             # Create watcher for visibility processing stats
             watcher_processing_stats_vis = mwax_watcher.Watcher(
@@ -272,13 +289,21 @@ class MWAXArchiveProcessor:
             )
             self.watcher_threads.append(watcher_vis_incoming_thread)
 
-            # Setup thread for watching incoming filesystem (bf)
-            watcher_bf_incoming_thread = threading.Thread(
-                name="watch_bf_incoming",
-                target=watcher_incoming_bf.start,
+            # Setup thread for watching incoming filesystem (bf_vdif)
+            watcher_bf_vdif_incoming_thread = threading.Thread(
+                name="watch_bf_vdif_incoming",
+                target=watcher_incoming_bf_vdif.start,
                 daemon=True,
             )
-            self.watcher_threads.append(watcher_bf_incoming_thread)
+            self.watcher_threads.append(watcher_bf_vdif_incoming_thread)
+
+            # Setup thread for watching incoming filesystem (bf_fil)
+            watcher_bf_fil_incoming_thread = threading.Thread(
+                name="watch_bf_fil_incoming",
+                target=watcher_incoming_bf_fil.start,
+                daemon=True,
+            )
+            self.watcher_threads.append(watcher_bf_fil_incoming_thread)
 
             # Setup thread for watching processing_stats filesystem (vis)
             watcher_vis_processing_stats_thread = threading.Thread(
@@ -475,17 +500,37 @@ class MWAXArchiveProcessor:
             )
             self.watchers.append(watcher_incoming_vis)
 
-            # Create watcher for beamformed data -> dont_archive queue
-            watcher_incoming_bf = mwax_watcher.Watcher(
-                name="watcher_incoming_bf",
+            # Create watchers for beamformer vdif data -> stitch files (once they are all there)
+            # This will watch for beamformer files being created
+            watcher_incoming_bf_vdif = mwax_priority_watcher.PriorityWatcher(
+                name="watcher_incoming_bf_vdif",
                 path=self.watch_dir_incoming_bf,
-                dest_queue=self.queue_dont_archive_bf,
-                pattern=".*",
+                dest_queue=self.queue_bf_stitching,
+                pattern=".vdif",
                 log=self.logger,
                 mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+                metafits_path=self.metafits_path,
+                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
+                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
                 recursive=False,
             )
-            self.watchers.append(watcher_incoming_bf)
+            self.watchers.append(watcher_incoming_bf_vdif)
+
+            # Create watchers for beamformer filterbank data -> stitch files (once they are all there)
+            # This will watch for beamformer files being created
+            watcher_incoming_bf_fil = mwax_priority_watcher.PriorityWatcher(
+                name="watcher_incoming_bf_fil",
+                path=self.watch_dir_incoming_bf,
+                dest_queue=self.queue_bf_stitching,
+                pattern=".fil",
+                log=self.logger,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+                metafits_path=self.metafits_path,
+                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
+                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
+                recursive=False,
+            )
+            self.watchers.append(watcher_incoming_bf_fil)
 
             # Create queueworker for the vis don't archive queue
             queue_worker_dont_archive_vis = mwax_queue_worker.QueueWorker(
@@ -539,13 +584,21 @@ class MWAXArchiveProcessor:
             )
             self.watcher_threads.append(watcher_vis_incoming_thread)
 
-            # Setup thread for watching incoming filesystem (bf)
-            watcher_bf_incoming_thread = threading.Thread(
-                name="watch_bf_incoming",
-                target=watcher_incoming_bf.start,
+            # Setup thread for watching incoming filesystem (bf_vdif)
+            watcher_bf_vdif_incoming_thread = threading.Thread(
+                name="watch_bf_vdif_incoming",
+                target=watcher_incoming_bf_vdif.start,
                 daemon=True,
             )
-            self.watcher_threads.append(watcher_bf_incoming_thread)
+            self.watcher_threads.append(watcher_bf_vdif_incoming_thread)
+
+            # Setup thread for watching incoming filesystem (bf_fil)
+            watcher_bf_fil_incoming_thread = threading.Thread(
+                name="watch_bf_fil_incoming",
+                target=watcher_incoming_bf_fil.start,
+                daemon=True,
+            )
+            self.watcher_threads.append(watcher_bf_fil_incoming_thread)
 
             # Setup thread for processing items on the dont archive queue
             queue_worker_dont_archive_thread_vis = threading.Thread(
@@ -605,9 +658,6 @@ class MWAXArchiveProcessor:
         #
         filename = os.path.basename(item)
         ext = os.path.splitext(filename)[1]
-        if ext == ".hdr":
-            # Ignore the hdr file that the stitching process produces
-            return True
 
         # get the obsid and subobs from the filename
         # obsid_subobsid_chXXX_beamXX.vdif / .fil
@@ -624,7 +674,7 @@ class MWAXArchiveProcessor:
         metafits_filename = os.path.join(self.metafits_path, f"{obs_id}_metafits.fits")
 
         try:
-            duration_sec = int(utils.get_metafits_value(item, METAFITS_EXPOSURE))
+            duration_sec = int(utils.get_metafits_value(metafits_filename, METAFITS_EXPOSURE))
         except Exception:
             raise ValueError(f"{item}: Error reading {METAFITS_EXPOSURE} from metafits filename {metafits_filename}")
 

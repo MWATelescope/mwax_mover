@@ -295,7 +295,7 @@ def validate_filename(
             #   obsid_subobsid_chNNN_beamNN.vdif
             # or if stitched:
             #   obsid_chNNN_beamNN.vdif
-            if len(file_name_part) != 23 or len(file_name_part) != 34:
+            if len(file_name_part) != 23 and len(file_name_part) != 34:
                 valid = False
                 validation_error = (
                     "Filename (excluding extension) is not in the correct"
@@ -308,7 +308,7 @@ def validate_filename(
             #   obsid_subobsid_chNNN_beamNN.fil
             # or if stitched:
             #   obsid_chNNN_beamNN.fil
-            if len(file_name_part) != 23 or len(file_name_part) != 34:
+            if len(file_name_part) != 23 and len(file_name_part) != 34:
                 valid = False
                 validation_error = (
                     "Filename (excluding extension) is not in the correct"

@@ -161,6 +161,8 @@ def stitch_vdif_files_and_write_hdr(
 
         logger.info(f"Successfully stitched VDIF files into {output_vdif_filename}")
 
+    logger.info(f"Writing VDIF header file into {output_hdr_filename}...")
+
     # get the rec chan number
     _, _, _, rec_chan, _ = get_vdif_filename_components(files[0])
 

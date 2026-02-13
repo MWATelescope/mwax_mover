@@ -3,19 +3,22 @@ from configparser import ConfigParser
 import os
 from pathlib import Path
 import shutil
+import time
 from mwax_mover.mwax_db import MWAXDBHandler
+from mwax_mover.utils import write_mock_subfile
 
 
-def setup_test_directories(test_filename: str) -> None:
+def setup_test_directories(test_filename: str) -> str:
     """
     Ensure all configured directories exist. If a directory already exists,
     clear its contents (files/subdirectories) but keep the directory itself.
     """
     # The directories we create will be based on the test file name
     # e.g. /data/mwax_mover_testing/test001
-    base = f"/data/mwax_mover_testing/{os.path.splitext(os.path.basename(test_filename))[0]}/"
+    base = f"/mnt/c/data/mwax_mover_testing/{os.path.splitext(os.path.basename(test_filename))[0]}/"
 
     paths = [
+        "/tmp",
         "/dev/shm/mwax",
         "/voltdata/incoming",
         "/voltdata/outgoing",
@@ -68,6 +71,8 @@ def setup_test_directories(test_filename: str) -> None:
         else:
             p.mkdir(parents=True, exist_ok=True)
 
+    return base
+
 
 def get_test_db_handler(logger: logging.Logger):
     #
@@ -107,3 +112,49 @@ def run_create_test_db_object_script(logger: logging.Logger, creation_sql_filena
 
     with test_db_handler.pool.getconn() as conn:
         conn.execute(creation_sql_script)  # type: ignore
+
+
+def create_observation_subfiles(
+    obs_id: int,
+    subfile_count: int,
+    mode: str,
+    rec_chan: int,
+    corr_chan: int,
+    dev_shm_temp_dir: str,
+    dev_shm_dir: str,
+):
+    """Creates some test subfiles for an obs"""
+    sub_obs_id = obs_id
+    offset = 0
+
+    for _ in range(0, subfile_count):
+        tmp_subfile_filename = os.path.join(
+            dev_shm_temp_dir,
+            f"{obs_id}_{sub_obs_id}_{rec_chan}.$$$",
+        )
+
+        # Write new subfile to dev_shm_tmp
+        write_mock_subfile(
+            tmp_subfile_filename,
+            obs_id,
+            sub_obs_id,
+            mode,
+            offset,
+            rec_chan,
+            corr_chan,
+        )
+
+        # Now rename to real subfile for processing
+        # This is what subfile processor triggers on (RENAME)
+        subfile_filename = os.path.join(
+            dev_shm_dir,
+            f"{obs_id}_{sub_obs_id}_{rec_chan}.sub",
+        )
+        os.rename(tmp_subfile_filename, subfile_filename)
+
+        # simulate gap between subobs
+        time.sleep(2)
+
+        # Increment subobsid and offset
+        sub_obs_id += 8
+        offset += 8

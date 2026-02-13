@@ -11,7 +11,7 @@ import threading
 import time
 import requests
 from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
-from mwax_mover.utils import write_mock_subfile, read_subfile_trigger_value
+from mwax_mover.utils import read_subfile_trigger_value
 
 TEST_BASE_PATH = "tests/mock_mwax_dump"
 TEST_CONFIG_FILE1 = "tests/mwax_subfile_distributor/mwax_voltage_dump_test1.cfg"
@@ -29,52 +29,6 @@ def check_and_make_dir(path):
     if not os.path.exists(path):
         print(f"Creating {path}")
         os.mkdir(path)
-
-
-def create_observation_subfiles(
-    obs_id: int,
-    subfile_count: int,
-    mode: str,
-    rec_chan: int,
-    corr_chan: int,
-    dev_shm_temp_dir: str,
-    dev_shm_dir: str,
-):
-    """Creates some test subfiles for an obs"""
-    sub_obs_id = obs_id
-    offset = 0
-
-    for _ in range(0, subfile_count):
-        tmp_subfile_filename = os.path.join(
-            dev_shm_temp_dir,
-            f"{obs_id}_{sub_obs_id}_{rec_chan}.$$$",
-        )
-
-        # Write new subfile to dev_shm_tmp
-        write_mock_subfile(
-            tmp_subfile_filename,
-            obs_id,
-            sub_obs_id,
-            mode,
-            offset,
-            rec_chan,
-            corr_chan,
-        )
-
-        # Now rename to real subfile for processing
-        # This is what subfile processor triggers on (RENAME)
-        subfile_filename = os.path.join(
-            dev_shm_dir,
-            f"{obs_id}_{sub_obs_id}_{rec_chan}.sub",
-        )
-        os.rename(tmp_subfile_filename, subfile_filename)
-
-        # simulate gap between subobs
-        time.sleep(2)
-
-        # Increment subobsid and offset
-        sub_obs_id += 8
-        offset += 8
 
 
 def setup_test_dirs():

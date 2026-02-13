@@ -2153,6 +2153,6 @@ def get_aocal_filename(obsid: int, num_tiles: int, num_fine_chans: int, rec_chan
     return f"{obsid}_{num_tiles:03}_{num_fine_chans:04}_{rec_chan_no:03}_calfile.bin"
 
 
-def get_partial_aocal_filename(obsid: int, num_tiles: int, rec_chan_no: int) -> str:
+def get_partial_aocal_filename(obsid: int, rec_chan_no: int) -> str:
     # Provides a string with the correct partial aocal filename to use
-    return f"{obsid}_{num_tiles:03}_*_{rec_chan_no:03}_calfile.bin"
+    return f"{obsid}_*_{rec_chan_no:03}_calfile.bin"
