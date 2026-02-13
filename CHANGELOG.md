@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.3.5 13-Feb-2026
+
+* subfile_processor: fixed bug where all redis messages were sent thrice.
+
 # 1.3.4 12-Feb-2026
 
 * subfile_processor: another refactor- using redis to signal the beamformer now. Better testing.

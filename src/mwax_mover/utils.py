@@ -1280,6 +1280,7 @@ def push_message_to_redis(redis_host: str, redis_queue_key: str, message_data):
         try:
             with redis.Redis(host=redis_host, port=6379, decode_responses=True) as r:
                 r.rpush(redis_queue_key, json_message)
+                return
 
         except redis.RedisError as e:
             # wait 1 rec between retries
