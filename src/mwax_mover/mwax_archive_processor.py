@@ -98,7 +98,7 @@ class MWAXArchiveProcessor:
         self.queue_dont_archive_volt: queue.Queue = queue.Queue()
 
         self.dont_archive_path_bf: str = bf_dont_archive_path
-        self.queue_dont_archive_bf: queue.Queue = queue.Queue()
+        self.queue_dont_archive_bf: queue.PriorityQueue = queue.PriorityQueue()
 
         self.queue_checksum_and_db: queue.PriorityQueue = queue.PriorityQueue()
 
@@ -176,7 +176,7 @@ class MWAXArchiveProcessor:
                 dest_queue=self.queue_bf_stitching,
                 pattern=".vdif",
                 log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
                 metafits_path=self.metafits_path,
                 list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
                 list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
@@ -192,7 +192,7 @@ class MWAXArchiveProcessor:
                 dest_queue=self.queue_bf_stitching,
                 pattern=".fil",
                 log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
                 metafits_path=self.metafits_path,
                 list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
                 list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
@@ -508,7 +508,7 @@ class MWAXArchiveProcessor:
                 dest_queue=self.queue_bf_stitching,
                 pattern=".vdif",
                 log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
                 metafits_path=self.metafits_path,
                 list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
                 list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
@@ -524,7 +524,7 @@ class MWAXArchiveProcessor:
                 dest_queue=self.queue_bf_stitching,
                 pattern=".fil",
                 log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
                 metafits_path=self.metafits_path,
                 list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
                 list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
@@ -723,20 +723,36 @@ class MWAXArchiveProcessor:
                     MWAXPriorityQueueData(hdr_filename),
                 )
 
-                self.queue_checksum_and_db.put(new_queue_item)
-                self.logger.info(
-                    f"{item}: {hdr_filename} added to queue with priority {priority} ({self.queue_checksum_and_db.qsize()})"
-                )
+                if self.archive_destination_enabled:
+                    self.queue_checksum_and_db.put(new_queue_item)
+                    self.logger.info(
+                        f"{item}: {hdr_filename} added to queue queue_checksum_and_db with priority {priority} ({self.queue_checksum_and_db.qsize()})"
+                    )
+                else:
+                    # Dont archive
+                    self.queue_dont_archive_bf.put(new_queue_item)
+                    self.logger.info(
+                        f"{item}: {hdr_filename} added to queue dont_archive_bf with priority {priority} ({self.queue_dont_archive_bf.qsize()})"
+                    )
 
-                new_queue_item = (
-                    priority,
-                    MWAXPriorityQueueData(vdif_filename),
-                )
+                if self.archive_destination_enabled:
+                    new_queue_item = (
+                        priority,
+                        MWAXPriorityQueueData(vdif_filename),
+                    )
 
-                self.queue_checksum_and_db.put(new_queue_item)
-                self.logger.info(
-                    f"{item}: {vdif_filename} added to queue with priority {priority} ({self.queue_checksum_and_db.qsize()})"
-                )
+                    self.queue_checksum_and_db.put(new_queue_item)
+                    self.logger.info(
+                        f"{item}: {vdif_filename} added to queue queue_checksum_and_db with priority {priority} ({self.queue_checksum_and_db.qsize()})"
+                    )
+                else:
+                    # Dont archive
+                    # Dont archive
+                    self.queue_dont_archive_bf.put(new_queue_item)
+                    self.logger.info(
+                        f"{item}: {hdr_filename} added to queue dont_archive_bf with priority {priority} ({self.queue_dont_archive_bf.qsize()})"
+                    )
+
                 return True
 
             elif ext == ".fil":
@@ -766,10 +782,11 @@ class MWAXArchiveProcessor:
                     MWAXPriorityQueueData(fil_filename),
                 )
 
-                self.queue_checksum_and_db.put(new_queue_item)
-                self.logger.info(
-                    f"{item}: {fil_filename} added to queue with priority {priority} ({self.queue_checksum_and_db.qsize()})"
-                )
+                if self.archive_destination_enabled:
+                    self.queue_checksum_and_db.put(new_queue_item)
+                    self.logger.info(
+                        f"{item}: {fil_filename} added to queue queue_checksum_and_db with priority {priority} ({self.queue_checksum_and_db.qsize()})"
+                    )
                 return True
             else:
                 raise Exception(f"{item} Extension {ext} is not supported")
