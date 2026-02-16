@@ -87,15 +87,12 @@ class SubfileProcessor:
 
         self.bf_redis_host = bf_redis_host
 
-        # Each server will use a unique queue key. The queue key we read in the cfg gile
-        # is just the base- we then add the zero padded 2 digit MWAXNN number.
-        # e.g. mwax25 will have a queue key of "bf_queue25"
+        # Each server will use a unique queue key. The queue key we read in the cfg file
+        # is just the base- we then add the server name.
+        # e.g. mwax25 will have a queue key of "bfqq_mwax25"
 
         # Get the last 2 digits of the hostname
-        host_number_str = hostname.replace("mwax", "")
-        self.logger.debug(f"Hostname: {hostname}; extracted host number: {host_number_str}")
-
-        self.bf_redis_queue_key = f"{bf_redis_queue_key}{host_number_str}"
+        self.bf_redis_queue_key = f"{bf_redis_queue_key}{hostname}"
 
         self.logger.debug(f"Using redis queue key: {self.bf_redis_queue_key}")
 
