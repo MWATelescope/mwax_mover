@@ -1,5 +1,10 @@
 # Changelog
 
+# 1.4.1 17-Feb-2026
+
+* Dependencies: now requires mwalib >= v2.0.1
+* Updated test metafits files to have MWAX_BEAMFORMER mode
+
 # 1.4.0 17-Feb-2026
 
 * Dependencies: now requires mwalib >= v2.0.0
