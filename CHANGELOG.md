@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.3.9 17-Feb-2026
+
+* archive_processor: Fixed BF stitching when run for a host whos archiving is disabled.
+
 # 1.3.8 16-Feb-2026
 
 * subfile_processor: changed redis queue name it is now: "bfq_mwax26"- so "bfq_" will be read from config file and "mwax26" will be the hostname.

@@ -35,11 +35,11 @@ wheels = [
 
 [[package]]
 name = "astropy-iers-data"
-version = "0.2026.2.9.0.50.33"
+version = "0.2026.2.16.0.48.25"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ab/57/11e22fc9a6d57e9f422eeb6eaf7d799cf6ccf87085fc4ffee309b267b0ea/astropy_iers_data-0.2026.2.9.0.50.33.tar.gz", hash = "sha256:26aa979a2d309cd68367d4e9c0711dc0cd546bd29c797f473d9b4517cd74509a", size = 1922020, upload-time = "2026-02-09T00:51:13.093Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/dc/ce/9aed8765e4dcb2e12afd545c7ce63f2b9bcad592afcb9a0d5437d872060d/astropy_iers_data-0.2026.2.16.0.48.25.tar.gz", hash = "sha256:be14512844e71536a15e165d729385f3cb4865d7822172509e68c4ac79322067", size = 1926145, upload-time = "2026-02-16T00:49:11.138Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4e/67/6af8b422c04dec79c908cf60fdcd4725c3c112b2a058087c4ff58284a142/astropy_iers_data-0.2026.2.9.0.50.33-py3-none-any.whl", hash = "sha256:ac01dede0240499b23c2b89fdc93093500336197c5c794e6a01173cfd78a7620", size = 1978518, upload-time = "2026-02-09T00:51:11.903Z" },
+    { url = "https://files.pythonhosted.org/packages/49/94/dcdac330d2c26776956555610ef584147584acc6b060e451aa65dd9142d9/astropy_iers_data-0.2026.2.16.0.48.25-py3-none-any.whl", hash = "sha256:180d1c3f59d18aa616345560799c2d88ec6e5164b8c45c746380acf892946136", size = 1982562, upload-time = "2026-02-16T00:49:09.602Z" },
 ]
 
 [[package]]
@@ -669,7 +669,7 @@ wheels = [
 
 [[package]]
 name = "mwax-mover"
-version = "1.3.4"
+version = "1.3.9"
 source = { editable = "." }
 dependencies = [
     { name = "astropy" },
@@ -1136,11 +1136,11 @@ wheels = [
 
 [[package]]
 name = "redis"
-version = "7.1.1"
+version = "7.2.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f7/80/2971931d27651affa88a44c0ad7b8c4a19dc29c998abb20b23868d319b59/redis-7.1.1.tar.gz", hash = "sha256:a2814b2bda15b39dad11391cc48edac4697214a8a5a4bd10abe936ab4892eb43", size = 4800064, upload-time = "2026-02-09T18:39:40.292Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9f/32/6fac13a11e73e1bc67a2ae821a72bfe4c2d8c4c48f0267e4a952be0f1bae/redis-7.2.0.tar.gz", hash = "sha256:4dd5bf4bd4ae80510267f14185a15cba2a38666b941aff68cccf0256b51c1f26", size = 4901247, upload-time = "2026-02-16T17:16:22.797Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/29/55/1de1d812ba1481fa4b37fb03b4eec0fcb71b6a0d44c04ea3482eb017600f/redis-7.1.1-py3-none-any.whl", hash = "sha256:f77817f16071c2950492c67d40b771fa493eb3fccc630a424a10976dbb794b7a", size = 356057, upload-time = "2026-02-09T18:39:38.602Z" },
+    { url = "https://files.pythonhosted.org/packages/86/cf/f6180b67f99688d83e15c84c5beda831d1d341e95872d224f87ccafafe61/redis-7.2.0-py3-none-any.whl", hash = "sha256:01f591f8598e483f1842d429e8ae3a820804566f1c73dca1b80e23af9fba0497", size = 394898, upload-time = "2026-02-16T17:16:20.693Z" },
 ]
 
 [[package]]

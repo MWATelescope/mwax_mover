@@ -554,6 +554,16 @@ class MWAXArchiveProcessor:
             )
             self.workers.append(queue_worker_dont_archive_volt)
 
+            queue_worker_bf_stitching = mwax_priority_queue_worker.PriorityQueueWorker(
+                name="beamformer stitching worker",
+                source_queue=self.queue_bf_stitching,
+                executable_path=None,
+                event_handler=self.bf_stitching_handler,
+                log=self.logger,
+                exit_once_queue_empty=False,
+            )
+            self.workers.append(queue_worker_bf_stitching)
+
             # Create queueworker for the bf don't archive queue
             queue_worker_dont_archive_bf = mwax_queue_worker.QueueWorker(
                 name="dont archive worker (bf)",
@@ -599,6 +609,14 @@ class MWAXArchiveProcessor:
                 daemon=True,
             )
             self.watcher_threads.append(watcher_bf_fil_incoming_thread)
+
+            # Setup thread for processing items on the checksum and db queue
+            queue_worker_bf_stitching_thread = threading.Thread(
+                name="bf_stitching",
+                target=queue_worker_bf_stitching.start,
+                daemon=True,
+            )
+            self.worker_threads.append(queue_worker_bf_stitching_thread)
 
             # Setup thread for processing items on the dont archive queue
             queue_worker_dont_archive_thread_vis = threading.Thread(
@@ -747,7 +765,6 @@ class MWAXArchiveProcessor:
                     )
                 else:
                     # Dont archive
-                    # Dont archive
                     self.queue_dont_archive_bf.put(new_queue_item)
                     self.logger.info(
                         f"{item}: {hdr_filename} added to queue dont_archive_bf with priority {priority} ({self.queue_dont_archive_bf.qsize()})"
@@ -787,6 +804,13 @@ class MWAXArchiveProcessor:
                     self.logger.info(
                         f"{item}: {fil_filename} added to queue queue_checksum_and_db with priority {priority} ({self.queue_checksum_and_db.qsize()})"
                     )
+                else:
+                    # Dont archive
+                    self.queue_dont_archive_bf.put(new_queue_item)
+                    self.logger.info(
+                        f"{item}: {fil_filename} added to queue dont_archive_bf with priority {priority} ({self.queue_dont_archive_bf.qsize()})"
+                    )
+
                 return True
             else:
                 raise Exception(f"{item} Extension {ext} is not supported")
