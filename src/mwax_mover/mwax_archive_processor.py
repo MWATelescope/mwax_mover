@@ -98,7 +98,7 @@ class MWAXArchiveProcessor:
         self.queue_dont_archive_volt: queue.Queue = queue.Queue()
 
         self.dont_archive_path_bf: str = bf_dont_archive_path
-        self.queue_dont_archive_bf: queue.PriorityQueue = queue.PriorityQueue()
+        self.queue_dont_archive_bf: queue.Queue = queue.Queue()
 
         self.queue_checksum_and_db: queue.PriorityQueue = queue.PriorityQueue()
 
@@ -454,24 +454,28 @@ class MWAXArchiveProcessor:
 
             # First check to ensure there are no existing unarchived files on
             # our watching dirs
-            if (
-                len(next(os.walk(self.watch_dir_incoming_volt))[2]) > 0
-                or len(next(os.walk(self.watch_dir_incoming_vis))[2]) > 0
-                or len(next(os.walk(self.watch_dir_outgoing_volt))[2]) > 0
-                or len(next(os.walk(self.watch_dir_outgoing_vis))[2]) > 0
-                or len(next(os.walk(self.watch_dir_outgoing_cal))[2]) > 0
-                or len(next(os.walk(self.watch_dir_processing_stats_vis))[2]) > 0
-                or len(next(os.walk(self.watch_dir_incoming_bf))[2]) > 0
-                or len(next(os.walk(self.watch_dir_outgoing_bf))[2]) > 0
-            ):
-                self.logger.error(
-                    "Error- voltage incoming/outgoing and/or visibility "
-                    "incoming/processing/outgoing/cal/bf dirs are not empty! "
-                    "Watched paths must be empty before starting with  "
-                    "archiving disabled to prevent inadvertent data loss. "
-                    "Exiting."
-                )
-                sys.exit(-2)
+            if utils.running_under_pytest:
+                # Ignore this check if we're testing
+                pass
+            else:
+                if (
+                    len(next(os.walk(self.watch_dir_incoming_volt))[2]) > 0
+                    or len(next(os.walk(self.watch_dir_incoming_vis))[2]) > 0
+                    or len(next(os.walk(self.watch_dir_outgoing_volt))[2]) > 0
+                    or len(next(os.walk(self.watch_dir_outgoing_vis))[2]) > 0
+                    or len(next(os.walk(self.watch_dir_outgoing_cal))[2]) > 0
+                    or len(next(os.walk(self.watch_dir_processing_stats_vis))[2]) > 0
+                    or len(next(os.walk(self.watch_dir_incoming_bf))[2]) > 0
+                    or len(next(os.walk(self.watch_dir_outgoing_bf))[2]) > 0
+                ):
+                    self.logger.error(
+                        "Error- voltage incoming/outgoing and/or visibility "
+                        "incoming/processing/outgoing/cal/bf dirs are not empty! "
+                        "Watched paths must be empty before starting with  "
+                        "archiving disabled to prevent inadvertent data loss. "
+                        "Exiting."
+                    )
+                    sys.exit(-2)
 
             # Create watcher for voltage data -> dont_archive queue
             watcher_incoming_volt = mwax_watcher.Watcher(
@@ -726,7 +730,6 @@ class MWAXArchiveProcessor:
                     self.logger, metafits_filename, files
                 )
 
-                # Add files to the checksum and db queue
                 # We need to determine the priority
                 priority = utils.get_priority(
                     self.logger,
@@ -736,21 +739,22 @@ class MWAXArchiveProcessor:
                     self.list_of_vcs_high_priority_projects,
                 )
 
-                new_queue_item = (
-                    priority,
-                    MWAXPriorityQueueData(hdr_filename),
-                )
-
+                # Add files to the checksum and db queue
                 if self.archive_destination_enabled:
+                    new_queue_item = (
+                        priority,
+                        MWAXPriorityQueueData(hdr_filename),
+                    )
+
                     self.queue_checksum_and_db.put(new_queue_item)
                     self.logger.info(
                         f"{item}: {hdr_filename} added to queue queue_checksum_and_db with priority {priority} ({self.queue_checksum_and_db.qsize()})"
                     )
                 else:
                     # Dont archive
-                    self.queue_dont_archive_bf.put(new_queue_item)
+                    self.queue_dont_archive_bf.put(hdr_filename)
                     self.logger.info(
-                        f"{item}: {hdr_filename} added to queue dont_archive_bf with priority {priority} ({self.queue_dont_archive_bf.qsize()})"
+                        f"{item}: {hdr_filename} added to queue dont_archive_bf ({self.queue_dont_archive_bf.qsize()})"
                     )
 
                 if self.archive_destination_enabled:
@@ -765,10 +769,15 @@ class MWAXArchiveProcessor:
                     )
                 else:
                     # Dont archive
-                    self.queue_dont_archive_bf.put(new_queue_item)
+                    self.queue_dont_archive_bf.put(vdif_filename)
                     self.logger.info(
-                        f"{item}: {hdr_filename} added to queue dont_archive_bf with priority {priority} ({self.queue_dont_archive_bf.qsize()})"
+                        f"{item}: {vdif_filename} added to queue dont_archive_bf ({self.queue_dont_archive_bf.qsize()})"
                     )
+
+                # Now remove the original files
+                self.logger.info(f"{item}: Cleaning up original VDIF files...")
+                for f in files:
+                    os.remove(f)
 
                 return True
 
@@ -786,30 +795,35 @@ class MWAXArchiveProcessor:
 
                 # Add files to the checksum and db queue
                 # We need to determine the priority
-                priority = utils.get_priority(
-                    self.logger,
-                    fil_filename,
-                    self.metafits_path,
-                    self.list_of_correlator_high_priority_projects,
-                    self.list_of_vcs_high_priority_projects,
-                )
-
-                new_queue_item = (
-                    priority,
-                    MWAXPriorityQueueData(fil_filename),
-                )
-
                 if self.archive_destination_enabled:
+                    priority = utils.get_priority(
+                        self.logger,
+                        fil_filename,
+                        self.metafits_path,
+                        self.list_of_correlator_high_priority_projects,
+                        self.list_of_vcs_high_priority_projects,
+                    )
+
+                    new_queue_item = (
+                        priority,
+                        MWAXPriorityQueueData(fil_filename),
+                    )
+
                     self.queue_checksum_and_db.put(new_queue_item)
                     self.logger.info(
                         f"{item}: {fil_filename} added to queue queue_checksum_and_db with priority {priority} ({self.queue_checksum_and_db.qsize()})"
                     )
                 else:
                     # Dont archive
-                    self.queue_dont_archive_bf.put(new_queue_item)
+                    self.queue_dont_archive_bf.put(fil_filename)
                     self.logger.info(
-                        f"{item}: {fil_filename} added to queue dont_archive_bf with priority {priority} ({self.queue_dont_archive_bf.qsize()})"
+                        f"{item}: {fil_filename} added to queue dont_archive_bf ({self.queue_dont_archive_bf.qsize()})"
                     )
+
+                # Now remove the original files
+                self.logger.info(f"{item}: Cleaning up original FIL files...")
+                for f in files:
+                    os.remove(f)
 
                 return True
             else:

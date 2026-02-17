@@ -647,29 +647,29 @@ wheels = [
 
 [[package]]
 name = "mwalib"
-version = "1.9.0"
+version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d1/89/1626b0ee93c4611b0490c0b3521ee73bb790fb3662d7b22209cfffbca4f3/mwalib-1.9.0-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:4f180b14eb0325229ccd0ca7c45f31667ae5b4ca7c7587a61a830c74a2761c9e", size = 1925206, upload-time = "2025-10-27T04:31:52.756Z" },
-    { url = "https://files.pythonhosted.org/packages/da/39/116f11f74f30e089665242461c0235fd2b42f39b1c330e30da4b58f92135/mwalib-1.9.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:031f01c3631eece1a8d5039cbb8fd452ef24c7170155a4624dc612662885b33e", size = 1789468, upload-time = "2025-10-27T04:31:45.635Z" },
-    { url = "https://files.pythonhosted.org/packages/44/33/ae5e6e6cedfb945a05fe09594bdabbbac1b5eff5b8b3179347b3d30abe08/mwalib-1.9.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:3629c9fdafc656e069b1159d25ea68ad42e7dc1c722896c19e174d755d7e7d65", size = 2038255, upload-time = "2025-10-27T04:31:29.358Z" },
-    { url = "https://files.pythonhosted.org/packages/6c/cd/7d0101d84aca833413fb4037ae79c96258079909d378486530614dd83632/mwalib-1.9.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:44357f604b5d15416d896ed61b16ba2eff9a6f5d105da3aa0b039be63eb38141", size = 2100108, upload-time = "2025-10-27T04:31:37.932Z" },
-    { url = "https://files.pythonhosted.org/packages/90/fc/ec43d219b52ee094a19ce10d7503130efcb7c40fc1f2650d08493874d8ca/mwalib-1.9.0-cp313-cp313-macosx_10_12_x86_64.whl", hash = "sha256:ec4ffd267a6ff193969e4b1dda29a928adf3b6a7584a306944dd0d590a3f0a78", size = 1924760, upload-time = "2025-10-27T04:31:54.43Z" },
-    { url = "https://files.pythonhosted.org/packages/19/f3/9ffddccb057dd981d3801461e102651f000149ff04f79f86c1dd6410a881/mwalib-1.9.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:55e84e15e427eb9500291dbc375b1c60736e6a5a48ced7ee4564f418f4ef90ca", size = 1788915, upload-time = "2025-10-27T04:31:46.87Z" },
-    { url = "https://files.pythonhosted.org/packages/f7/2a/5e658edae42876c7b3b693c746bf9943fae5c283e066a29bc5f8cf7ef21a/mwalib-1.9.0-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:f518ab71ca447879dce7c0b37a86443392ae626fff034263c4f7baddec8ea7da", size = 2038221, upload-time = "2025-10-27T04:31:31.49Z" },
-    { url = "https://files.pythonhosted.org/packages/fb/43/26316569563357ca963cd4e09b6814d23271f98429dfaee321a9630b79b6/mwalib-1.9.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d6352b02fb8306ff2df602b207e4eefc70189492ecb09b854978ea9f4add8a16", size = 2099891, upload-time = "2025-10-27T04:31:39.64Z" },
-    { url = "https://files.pythonhosted.org/packages/8d/3b/f063ca9901cfac36e323bf3547e98430715aa41c167eb08262fdce8ad3e5/mwalib-1.9.0-cp314-cp314-macosx_10_12_x86_64.whl", hash = "sha256:6f63f47666c347ad5c0196d04a8f70084cd6e07336a8c0d33b937ca95ec09fb8", size = 1916369, upload-time = "2025-10-27T04:31:55.69Z" },
-    { url = "https://files.pythonhosted.org/packages/84/1c/7a7d2ddb23f78589ef45b8382c2d910cd665a19f10c08d2dab2d77ec5fb1/mwalib-1.9.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:92e2611be4951323852d395b4572068b8b003d4c92712f83059159158a7d36e7", size = 1786631, upload-time = "2025-10-27T04:31:48.156Z" },
-    { url = "https://files.pythonhosted.org/packages/46/82/3e64374788404f8c83c1791753258c1c76d8e44fc6e341c1a455406ab443/mwalib-1.9.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4e320644012ed6be77a80e24a72dc45e4ed793e3bc78002bbfda939167d4ed02", size = 2038593, upload-time = "2025-10-27T04:31:32.762Z" },
-    { url = "https://files.pythonhosted.org/packages/f5/05/d97f8e9c5bfa3f60ff5d7c75bd3faec4e5a99200891efd99ed3ab0318b36/mwalib-1.9.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b7a722b31b85039ce008f7fc61007763df84c67c0516fb755f3f1d4a9f6af885", size = 2092747, upload-time = "2025-10-27T04:31:41.2Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/1f/7c8fdcb87fa8bccb1ddd45b7017c40589a47bb9d90608b04940e0186056c/mwalib-2.0.0-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:a1ac1e61b0f3469bfc69d693a9cf4ca232f9dc8f71cfb928ebbe485594f04fc2", size = 1864426, upload-time = "2026-02-17T03:04:21.114Z" },
+    { url = "https://files.pythonhosted.org/packages/db/8f/24383c8dc960c6de736934355489bc3347ce93af0d9f0729b7897b96519e/mwalib-2.0.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:9830052a445cf29982e934e12e12c28c3d1f9fc7b1848835c3ff53082607826e", size = 1757700, upload-time = "2026-02-17T03:04:13.225Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/ad/6f8a4a5b8b9cd71386cd714112192ac2891a33274406506efb76b25f5462/mwalib-2.0.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:1dfea8fed210ce05e145fbb6087fc1c71faa43f67554a73baf22eff333d7fa97", size = 1988090, upload-time = "2026-02-17T03:03:56.687Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/85/15c51e01eb30f49541ccb50126f5d181e9e57c682ab49e2269b88d2d9395/mwalib-2.0.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:1d6f0e66e6d0876efd26e2538ea9e2c9872418ffacd4e137870577198fa9bafb", size = 2029113, upload-time = "2026-02-17T03:04:04.669Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/67/c72ab42630db94035790d933ad7a3028a64cb7e2d4bdbca009254333b3f0/mwalib-2.0.0-cp313-cp313-macosx_10_12_x86_64.whl", hash = "sha256:23de5b1f1684287285c542f3da06daa8987f8d9a81c0885f97b34422889b7476", size = 1863514, upload-time = "2026-02-17T03:04:23.765Z" },
+    { url = "https://files.pythonhosted.org/packages/29/ff/1d4e79a76d76c950f04e014b4875f472704e311a18d4b0d6712f2be3579f/mwalib-2.0.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:ec43a46ed81c3b622ea61a7cf766cff91d70c813bd12ccafc7360b593e95f577", size = 1757402, upload-time = "2026-02-17T03:04:14.432Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/19/b16ccfbba97b89ad68aca838444dc3cda2292a09ac4ea8b8200ef08f079d/mwalib-2.0.0-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:c0391391fc478d0fdc404b7492a78a4b88a731dfb22fa830f36f8a653aaff44d", size = 1987732, upload-time = "2026-02-17T03:03:58.396Z" },
+    { url = "https://files.pythonhosted.org/packages/b9/6a/355179ce34fdea10d48d3296c22cb067ca5bc0cfbabfc49187092f1745a5/mwalib-2.0.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d29f30517de4704ab3ad74ce7281e733fc2edaceb769f1e128a291cf89f9b2e7", size = 2028905, upload-time = "2026-02-17T03:04:06.377Z" },
+    { url = "https://files.pythonhosted.org/packages/46/15/c02b01e9794f3d69d1bfbd1760f8897c63c65b172deda2a6822c53e4b699/mwalib-2.0.0-cp314-cp314-macosx_10_12_x86_64.whl", hash = "sha256:7610b1c994d739a8742d8f89b516e3887a15ffc121816d4ade04c02c33de6d30", size = 1862866, upload-time = "2026-02-17T03:04:25.067Z" },
+    { url = "https://files.pythonhosted.org/packages/b6/d0/5bd063d3bb52533be9f2757c84a2a8e12414dbaecadf1d39513436dda180/mwalib-2.0.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:079e4bad5871e425f307bba2b62b8711a49a41071ef753d6c648bf01ba622270", size = 1756445, upload-time = "2026-02-17T03:04:15.716Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/bb/51c8d023744db40dd78f6aebcc93e41a23b85758366423beaf8d65e61937/mwalib-2.0.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:fa99f76260403d7c7b0a26f8c0332299fbcf2331efe7ca1476155578b4ce3dfa", size = 1988883, upload-time = "2026-02-17T03:04:00.165Z" },
+    { url = "https://files.pythonhosted.org/packages/80/f1/31206d3e5ffe9def7541e18e399f6d65ec1e8766ac399e27d8c84c195f4f/mwalib-2.0.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:99329a1531621c00d2601fb63ddc39c2f9171e47a43dae93704142d78145ce80", size = 2027572, upload-time = "2026-02-17T03:04:08.26Z" },
 ]
 
 [[package]]
 name = "mwax-mover"
-version = "1.3.9"
+version = "1.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "astropy" },
@@ -702,7 +702,7 @@ requires-dist = [
     { name = "importlib-metadata" },
     { name = "inotify" },
     { name = "matplotlib" },
-    { name = "mwalib" },
+    { name = "mwalib", specifier = ">=2.0.0" },
     { name = "pandas" },
     { name = "psycopg", extras = ["binary"] },
     { name = "psycopg", extras = ["pool"] },

@@ -23,9 +23,9 @@ TEST_FIL = [
 ]
 
 
-def test_beamformer_archiver_vdif():
+def test_beamformer_archiver_fil():
     #
-    # This test will test how the mwax_archive_processor handles new vdif files
+    # This test will test how the mwax_archive_processor handles new fil files
     #
     # Setup dirs
     setup_test_directories(__file__)

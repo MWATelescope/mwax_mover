@@ -31,16 +31,24 @@ class VDIFHeader:
         self.bw: float = 0.0
         self.tsamp: float = 0.0
 
-    def populate(self, metafits_filename: str, rec_chan: int):
+    def populate(self, metafits_filename: str, rec_chan: int, beam_no: int):
         mc = MetafitsContext(metafits_filename)
 
         self.mjd_start = mc.sched_start_mjd
         self.mjd_epoch = mc.sched_start_mjd
         self.sec_offset = 0
         self.source = mc.obs_name
-        self.ra = str(0)  # TODO: get from voltage beams info from mwalib new version
-        self.dec = str(0)  # TODO: get from voltage beams info from mwalib new version
-        self.tsamp = 0.781  # TODO: get from voltage beams info from mwalib new version
+
+        if mc.metafits_voltage_beams:
+            self.voltage_beam = mc.metafits_voltage_beams[beam_no]
+            self.ra = str(self.voltage_beam.ra_deg)
+            self.dec = str(self.voltage_beam.dec_deg)
+            self.tsamp = 1.0 / self.voltage_beam.frequency_resolution_hz
+        else:
+            # weird there are no beams
+            self.ra = str(0)
+            self.dec = str(0)
+            self.tsamp = 1.0 / 1280000
 
         # Find the coarse channel
         for chan in mc.metafits_coarse_chans:
@@ -164,11 +172,11 @@ def stitch_vdif_files_and_write_hdr(
     logger.info(f"Writing VDIF header file into {output_hdr_filename}...")
 
     # get the rec chan number
-    _, _, _, rec_chan, _ = get_vdif_filename_components(files[0])
+    _, _, _, rec_chan, beam_no = get_vdif_filename_components(files[0])
 
     # Write the header file
     hdr = VDIFHeader()
-    hdr.populate(metafits_filename, rec_chan)
+    hdr.populate(metafits_filename, rec_chan, beam_no)
     hdr.write(output_hdr_filename)
 
     logger.info(f"Successfully wrote VDIF header file into {output_hdr_filename}")

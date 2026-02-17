@@ -32,7 +32,6 @@ def setup_test_directories(test_filename: str) -> str:
         "/vulcan/mwax_stats_dump",
         "/visdata/cal_outgoing",
         "/vulcan/metafits",
-        "/bf_pipe",
         "/voltdata/bf/incoming",
         "/voltdata/bf/outgoing",
         "/voltdata/bf/dont_archive",

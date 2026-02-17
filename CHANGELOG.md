@@ -1,5 +1,12 @@
 # Changelog
 
+# 1.4.0 17-Feb-2026
+
+* Dependencies: now requires mwalib >= v2.0.0
+* archive_processor: using mwalib voltagebeam class we can now populate more of the VDIF hdr
+* archive_processor: fixed bug where dont_archive queue was of the wrong type
+* archive_processor: clean up pre-stitched vdif and file files
+
 # 1.3.9 17-Feb-2026
 
 * archive_processor: Fixed BF stitching when run for a host whos archiving is disabled.
