@@ -723,7 +723,7 @@ class MWAXArchiveProcessor:
                 files = glob.glob(os.path.join(file_path, f"{obs_id}_*_ch{rec_chan:03d}_beam{beam:02d}.vdif"))
 
                 self.logger.debug(
-                    f"{item}: Found {len(files)} vdif files to stitch for rec_chan {rec_chan:03d}, beam {beam:02d}"
+                    f"{item}: Found {len(files)} vdif files to stitch for rec_chan {rec_chan:03d}, beam {beam:02d}: {files}"
                 )
 
                 vdif_filename, hdr_filename = mwax_bf_vdif_utils.stitch_vdif_files_and_write_hdr(
@@ -775,9 +775,10 @@ class MWAXArchiveProcessor:
                     )
 
                 # Now remove the original files
-                self.logger.info(f"{item}: Cleaning up original VDIF files...")
-                for f in files:
-                    os.remove(f)
+                # TODO- this needs to be a config option
+                # self.logger.info(f"{item}: Cleaning up original VDIF files...")
+                # for f in files:
+                #    os.remove(f)
 
                 return True
 

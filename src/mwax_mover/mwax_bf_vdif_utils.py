@@ -156,7 +156,7 @@ def stitch_vdif_files_and_write_hdr(
         # The filenames will ensure a good sort order
         sorted_files = sorted(files)
 
-        logger.info(f"Stitching {len(sorted_files)} VDIF files: {sorted_files[0]}...{sorted_files[-1]}")
+        logger.info(f"Stitching {len(sorted_files)} VDIF files: {sorted_files}")
 
         with open(output_vdif_filename, "wb") as output:
             for f in sorted_files:

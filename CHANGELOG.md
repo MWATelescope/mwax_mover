@@ -1,5 +1,10 @@
 # Changelog
 
+# 1.4.2 18-Feb-2026
+
+* archive_processor: More debugging for stitching process.
+* archive_processor: will not delete beamformer files after stitching (TODO- change to config option)
+
 # 1.4.1 17-Feb-2026
 
 * Dependencies: now requires mwalib >= v2.0.1
