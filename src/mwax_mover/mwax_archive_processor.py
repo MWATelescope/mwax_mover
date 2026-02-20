@@ -783,7 +783,15 @@ class MWAXArchiveProcessor:
                     for f in files:
                         os.remove(f)
                 else:
-                    self.logger.info(f"{item}: Keeping original VDIF files as per config.")
+                    self.logger.info(
+                        f"{item}: Keeping original VDIF files as per config- moving them to {self.dont_archive_path_bf}."
+                    )
+                    for f in files:
+                        # Dont archive
+                        self.queue_dont_archive_bf.put(f)
+                        self.logger.info(
+                            f"{item}: {f} added to queue dont_archive_bf ({self.queue_dont_archive_bf.qsize()})"
+                        )
                 return True
 
             elif ext == ".fil":
@@ -831,7 +839,15 @@ class MWAXArchiveProcessor:
                     for f in files:
                         os.remove(f)
                 else:
-                    self.logger.info(f"{item}: Keeping original Filterbank files as per config.")
+                    self.logger.info(
+                        f"{item}: Keeping original Filterbank files as per config- moving them to {self.dont_archive_path_bf}."
+                    )
+                    for f in files:
+                        # Dont archive
+                        self.queue_dont_archive_bf.put(f)
+                        self.logger.info(
+                            f"{item}: {f} added to queue dont_archive_bf ({self.queue_dont_archive_bf.qsize()})"
+                        )
 
                 return True
             else:

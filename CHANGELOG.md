@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.4.4 20-Feb-2026
+
+* archive_processor: unstitched files that are kept are moved into dont_archive dir
+
 # 1.4.3 20-Feb-2026
 
 * subfile_processor: Fixed bug where redis message was being rpushed instead of lpushed
