@@ -1,5 +1,10 @@
 # Changelog
 
+# 1.4.3 20-Feb-2026
+
+* subfile_processor: Fixed bug where redis message was being rpushed instead of lpushed
+* archive_processor: Provide config option to keep unstitched files (beamformer)
+
 # 1.4.2 18-Feb-2026
 
 * archive_processor: More debugging for stitching process.

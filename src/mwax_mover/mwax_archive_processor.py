@@ -62,6 +62,7 @@ class MWAXArchiveProcessor:
         bf_incoming_path: str,
         bf_outgoing_path: str,
         bf_dont_archive_path: str,
+        bf_keep_original_files_after_stitching: bool,
     ):
         self.sd_ctx = context
 
@@ -130,6 +131,8 @@ class MWAXArchiveProcessor:
         self.metafits_path: str = metafits_path
         self.list_of_correlator_high_priority_projects: list[str] = high_priority_correlator_projectids
         self.list_of_vcs_high_priority_projects: list[str] = high_priority_vcs_projectids
+
+        self.bf_keep_original_files_after_stitching: bool = bf_keep_original_files_after_stitching
 
     def start(self):
         """This method is used to start the processor"""
@@ -774,12 +777,13 @@ class MWAXArchiveProcessor:
                         f"{item}: {vdif_filename} added to queue dont_archive_bf ({self.queue_dont_archive_bf.qsize()})"
                     )
 
-                # Now remove the original files
-                # TODO- this needs to be a config option
-                # self.logger.info(f"{item}: Cleaning up original VDIF files...")
-                # for f in files:
-                #    os.remove(f)
-
+                # Now remove the original files if the config file tells us we should
+                if not self.bf_keep_original_files_after_stitching:
+                    self.logger.info(f"{item}: Cleaning up original VDIF files...")
+                    for f in files:
+                        os.remove(f)
+                else:
+                    self.logger.info(f"{item}: Keeping original VDIF files as per config.")
                 return True
 
             elif ext == ".fil":
@@ -821,10 +825,13 @@ class MWAXArchiveProcessor:
                         f"{item}: {fil_filename} added to queue dont_archive_bf ({self.queue_dont_archive_bf.qsize()})"
                     )
 
-                # Now remove the original files
-                self.logger.info(f"{item}: Cleaning up original FIL files...")
-                for f in files:
-                    os.remove(f)
+                # Now remove the original files if the config file tells us we should
+                if not self.bf_keep_original_files_after_stitching:
+                    self.logger.info(f"{item}: Cleaning up original FIL files...")
+                    for f in files:
+                        os.remove(f)
+                else:
+                    self.logger.info(f"{item}: Keeping original Filterbank files as per config.")
 
                 return True
             else:

@@ -531,6 +531,10 @@ class MWAXSubfileDistributor:
             )
             sys.exit(1)
 
+        self.cfg_bf_keep_original_files_after_stitching = utils.read_config_bool(
+            self.logger, self.config, "beamformer", "bf_keep_original_files_after_stitching"
+        )
+
         # Initiate database connection pool for metadata db
         self.db_handler = mwax_db.MWAXDBHandler(
             logger=self.logger,
@@ -625,6 +629,7 @@ class MWAXSubfileDistributor:
             self.cfg_bf_incoming_path,
             self.cfg_bf_outgoing_path,
             self.cfg_bf_dont_archive_path,
+            self.cfg_bf_keep_original_files_after_stitching,
         )
 
         # Add this processor to list of processors we manage
