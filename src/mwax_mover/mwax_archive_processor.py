@@ -687,13 +687,19 @@ class MWAXArchiveProcessor:
         # get the obsid and subobs from the filename
         # obsid_subobsid_chXXX_beamXX.vdif / .fil
         try:
-            obs_id = int(filename[0:10])
+            try:
+                obs_id = int(filename[0:10])
+            except Exception:
+                raise ValueError(f"{item}: Error getting obs_id from filename {filename}")
+            try:
+                subobs_id = int(filename[11:21])
+            except Exception:
+                raise ValueError(f"{item}: Error getting subobs_id from filename {filename}")
         except Exception:
-            raise ValueError(f"{item}: Error getting obs_id from filename {filename}")
-        try:
-            subobs_id = int(filename[11:21])
-        except Exception:
-            raise ValueError(f"{item}: Error getting subobs_id from filename {filename}")
+            self.logger.warning(
+                f"{item}: filename not in correct format. Should be obsid_subobsid_chXXX_beamXX.vdif or .fil. It's probably a failed file from a previous run and can probably be safely deleted (by you). Skipping file."
+            )
+            return True
 
         # Determine metafits filename
         metafits_filename = os.path.join(self.metafits_path, f"{obs_id}_metafits.fits")

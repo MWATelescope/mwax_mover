@@ -2,6 +2,10 @@
 
 # 1.4.4 20-Feb-2026
 
+* archive_processor: Fix to ensure leftover files in bf/incoming don't crash subfile_distributor.
+
+# 1.4.4 20-Feb-2026
+
 * archive_processor: unstitched files that are kept are moved into dont_archive dir
 
 # 1.4.3 20-Feb-2026
