@@ -89,7 +89,7 @@ class SubfileProcessor:
 
         # Each server will use a unique queue key. The queue key we read in the cfg file
         # is just the base- we then add the server name.
-        # e.g. mwax25 will have a queue key of "bfqq_mwax25"
+        # e.g. mwax25 will have a queue key of "bfq_mwax25"
 
         # Get the last 2 digits of the hostname
         self.bf_redis_queue_key = f"{bf_redis_queue_key}{hostname}"
