@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.5.0 24-Feb-2026
+
+* Refactor to clean up all the watcher, queue and worker mess
+
 # 1.4.4 20-Feb-2026
 
 * archive_processor: Fix to ensure leftover files in bf/incoming don't crash subfile_distributor.
