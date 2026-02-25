@@ -138,14 +138,13 @@ def get_stitched_filename(filename: str) -> str:
 
 
 def stitch_vdif_files_and_write_hdr(
-    logger: logging.Logger,
-    metafits_filename: str,
-    files: List[str],
+    logger: logging.Logger, metafits_filename: str, files: List[str], output_dir: str
 ) -> tuple[str, str]:
     if len(files) == 0:
         raise Exception("No VDIF files to stitch")
 
     output_vdif_filename: str = get_stitched_filename(files[0])
+    output_vdif_filename = os.path.join(output_dir, os.path.basename(output_vdif_filename))
     output_hdr_filename: str = output_vdif_filename.replace(".vdif", ".hdr")
 
     if len(files) == 1:

@@ -3,35 +3,30 @@
 import glob
 import logging
 import os
-import queue
 import sys
-import threading
 import time
 from mwax_mover import (
-    mwax_mover,
     mwax_db,
-    mwax_queue_worker,
-    mwax_priority_queue_worker,
-    mwax_priority_watcher,
-    mwax_watcher,
-    mwa_archiver,
     utils,
-    mwax_bf_filterbank_utils,
-    mwax_bf_vdif_utils,
 )
-from mwax_mover.mwax_watcher import Watcher
-from mwax_mover.mwax_queue_worker import QueueWorker
-from mwax_mover.mwax_priority_watcher import PriorityWatcher
-from mwax_mover.mwax_priority_queue_worker import PriorityQueueWorker, MWAXPriorityQueueData
-from mwax_mover.utils import MWADataFileType, ValidationData
-
-METAFITS_EXPOSURE = "EXPOSURE"
+from mwax_mover.mwax_wqw_bf_stitching_processor import BfStitchingProcessor
+from mwax_mover.mwax_wqw_checksum_and_db import ChecksumAndDBProcessor
+from mwax_mover.mwax_wqw_outgoing import OutgoingProcessor
+from mwax_mover.mwax_wqw_vis_stats import VisStatsProcessor
+from mwax_mover.mwax_wqw_vis_cal_outgoing import VisCalOutgoingProcessor
+from mwax_mover.mwax_watch_queue_worker import MWAXWatchQueueWorker, MWAXPriorityWatchQueueWorker
+from mwax_mover.utils import ValidationData
 
 
 class MWAXArchiveProcessor:
     """
     A class representing an instance which sends
     MWAX data products to the mwacache servers.
+
+    visdata/incoming    -> checksum_and_db (or dont_archive_vis) -> processing_stats -> cal_outgoing (if calibrator) -> outgoing
+    voltdata/incoming   -> checksum_and_db (or dont_archive_volt) -> outgoing
+    bf/incoming         -> stitching-> checksum_and_db (or dont_archive_bf) -> outgoing
+
     """
 
     def __init__(
@@ -60,6 +55,7 @@ class MWAXArchiveProcessor:
         high_priority_correlator_projectids: list[str],
         high_priority_vcs_projectids: list[str],
         bf_incoming_path: str,
+        bf_stitching_path: str,
         bf_outgoing_path: str,
         bf_dont_archive_path: str,
         bf_keep_original_files_after_stitching: bool,
@@ -69,387 +65,158 @@ class MWAXArchiveProcessor:
         # Setup logging
         self.logger: logging.Logger = context.logger.getChild("MWAXArchiveProcessor")
 
+        # Database handler object
         self.db_handler_object: mwax_db.MWAXDBHandler = db_handler_object
 
+        # Hostname, metafits, etc
         self.hostname: str = hostname
+        self.metafits_path: str = metafits_path
+        self.list_of_correlator_high_priority_projects: list[str] = high_priority_correlator_projectids
+        self.list_of_vcs_high_priority_projects: list[str] = high_priority_vcs_projectids
+
+        # Archive config
         self.archive_destination_enabled: int = archive_destination_enabled
         self.archive_destination_host: str = archive_host
         self.archive_destination_port: int = archive_port
         self.archive_command_numa_node: int = archive_command_numa_node
         self.archive_command_timeout_sec: int = archive_command_timeout_sec
-
-        # Full path to executable for mwax_stats
-        self.mwax_stats_binary_dir: str = mwax_stats_binary_dir
-        # Directory where to dump the stats files
-        self.mwax_stats_dump_dir: str = mwax_stats_dump_dir
-        self.mwax_stats_timeout_sec: int = mwax_stats_timeout_sec
-
         self.archiving_paused: bool = False
 
-        self.watchers: list[PriorityWatcher | Watcher] = []
-        self.watcher_threads: list[threading.Thread] = []
+        # mwax / vis stats
+        self.mwax_stats_binary_dir: str = mwax_stats_binary_dir  # Full path to executable for mwax_stats
+        self.mwax_stats_dump_dir: str = mwax_stats_dump_dir  # Directory where to dump the stats files
+        self.mwax_stats_timeout_sec: int = mwax_stats_timeout_sec
 
-        self.workers: list[PriorityQueueWorker | QueueWorker] = []
-        self.worker_threads: list[threading.Thread] = []
-
-        self.dont_archive_path_vis: str = visdata_dont_archive_path
-        self.queue_dont_archive_vis: queue.Queue = queue.Queue()
-
-        self.dont_archive_path_volt: str = voltdata_dont_archive_path
-        self.queue_dont_archive_volt: queue.Queue = queue.Queue()
-
-        self.dont_archive_path_bf: str = bf_dont_archive_path
-        self.queue_dont_archive_bf: queue.Queue = queue.Queue()
-
-        self.queue_checksum_and_db: queue.PriorityQueue = queue.PriorityQueue()
-
-        self.watch_dir_incoming_volt: str = voltdata_incoming_path
+        # Visibility paths
         self.watch_dir_incoming_vis: str = visdata_incoming_path
-        self.watch_dir_incoming_bf: str = bf_incoming_path
-
-        self.queue_bf_stitching: queue.PriorityQueue = queue.PriorityQueue()
-
         self.watch_dir_processing_stats_vis: str = visdata_processing_stats_path
-        self.queue_processing_stats_vis: queue.Queue = queue.Queue()
-
-        self.watch_dir_outgoing_volt: str = voltdata_outgoing_path
-        self.watch_dir_outgoing_vis: str = visdata_outgoing_path
-        self.watch_dir_outgoing_bf: str = bf_outgoing_path
-        self.queue_outgoing: queue.PriorityQueue = queue.PriorityQueue()
-
         self.watch_dir_outgoing_cal: str = visdata_cal_outgoing_path
-        # this queue is simply for health stats- we don't actually "process"
-        # files in the cal_outgoing_path- calvin servers take the files
-        self.queue_outgoing_cal: queue.Queue = queue.Queue()
+        self.dont_archive_path_vis: str = visdata_dont_archive_path
+        self.watch_dir_outgoing_vis: str = visdata_outgoing_path
+
+        # Voltage paths
+        self.watch_dir_incoming_volt: str = voltdata_incoming_path
+        self.dont_archive_path_volt: str = voltdata_dont_archive_path
+        self.watch_dir_outgoing_volt: str = voltdata_outgoing_path
+
+        # Beamformer paths
+        self.watch_dir_incoming_bf: str = bf_incoming_path
+        self.watch_dir_stitching_bf: str = bf_stitching_path
+        self.dont_archive_path_bf: str = bf_dont_archive_path
+        self.watch_dir_outgoing_bf: str = bf_outgoing_path
+        self.bf_keep_original_files_after_stitching: bool = bf_keep_original_files_after_stitching
+
         # Since our watcher needs a queue, we'll just get the queue to dump the filenames
         # into this list so we can easily remove them when release_cal_obs is called
         # by a calvin
-        self.outgoing_cal_list: list[str] = []
-
+        self.outgoing_cal_list: list[str] = list()
         self.calibrator_destination_enabled: int = calibrator_destination_enabled
 
-        self.metafits_path: str = metafits_path
-        self.list_of_correlator_high_priority_projects: list[str] = high_priority_correlator_projectids
-        self.list_of_vcs_high_priority_projects: list[str] = high_priority_vcs_projectids
-
-        self.bf_keep_original_files_after_stitching: bool = bf_keep_original_files_after_stitching
+        # This list helps us keep track of all the workers
+        self.workers: list[MWAXWatchQueueWorker | MWAXPriorityWatchQueueWorker] = list()
 
     def start(self):
         """This method is used to start the processor"""
         self.logger.info("Starting ArchiveProcessor...")
+
+        # Watch:
+        #   watch_dir_incoming_vis
+        #   watch_dir_incoming_volt
+        #   watch_dir_stitching_bf
+        # Do:
+        #   Checksum and insert into database (if archiving)
+        # Then:
+        #   Move file to outgoing dir (if archiving) or dont_archive dir (if not archiving)
+        self.checksum_and_db_processor = ChecksumAndDBProcessor(
+            self.logger,
+            self.metafits_path,
+            self.watch_dir_incoming_vis,
+            self.watch_dir_processing_stats_vis,
+            self.watch_dir_outgoing_vis,
+            self.dont_archive_path_vis,
+            self.watch_dir_incoming_volt,
+            self.watch_dir_outgoing_volt,
+            self.dont_archive_path_volt,
+            self.watch_dir_stitching_bf,
+            self.watch_dir_outgoing_bf,
+            self.dont_archive_path_bf,
+            self.list_of_correlator_high_priority_projects,
+            self.list_of_vcs_high_priority_projects,
+            self.db_handler_object,
+            self.archive_destination_enabled == 1,
+        )
+        self.workers.append(self.checksum_and_db_processor)
+
+        # Watch:
+        #   watch_dir_processing_stats_vis
+        # Do:
+        #   Run mwax_stats
+        # Then:
+        #   Move file to outgoing cal dir (if archiving & calibrator), outgoing dir (if archiving and not calibrator) or dont_archive dir (if not archiving)
+        self.vis_stats_processor = VisStatsProcessor(
+            self.logger,
+            self.metafits_path,
+            self.watch_dir_processing_stats_vis,
+            self.mwax_stats_binary_dir,
+            self.mwax_stats_timeout_sec,
+            self.mwax_stats_dump_dir,
+            self.archive_destination_enabled == 1,
+            self.watch_dir_outgoing_vis,
+            self.watch_dir_outgoing_cal,
+            self.dont_archive_path_vis,
+        )
+
+        # Watch:
+        #   watch_dir_incoming_bf
+        # Do:
+        #   Stitch the files and save them into watch_dir_stitching_bf
+        #   (Optionally copy the pre-stitched files to dont_archive_path_bf if bf_keep_original_files_after_stitching is True)
+        # Then:
+        #   ChecksumAndDB processor will pick up the new files in watch_dir_stitching_bf
+        self.bf_stitching_processor = BfStitchingProcessor(
+            self.logger,
+            self.metafits_path,
+            self.watch_dir_incoming_bf,
+            self.watch_dir_stitching_bf,
+            self.dont_archive_path_bf,
+            self.list_of_correlator_high_priority_projects,
+            self.list_of_vcs_high_priority_projects,
+            self.archive_destination_enabled == 1,
+            self.bf_keep_original_files_after_stitching,
+        )
+
         if self.archive_destination_enabled:
-            # Create watcher for voltage data -> checksum+db queue
-            watcher_incoming_volt = mwax_priority_watcher.PriorityWatcher(
-                name="watcher_incoming_volt",
-                path=self.watch_dir_incoming_volt,
-                dest_queue=self.queue_checksum_and_db,
-                pattern=".sub",
-                log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
-                metafits_path=self.metafits_path,
-                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
-                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
-                recursive=False,
-            )
-            self.watchers.append(watcher_incoming_volt)
+            # Only start these processors if we are archiving
 
-            # Create watcher for visibility data -> checksum+db queue
-            # This will watch for mwax visibilities being renamed OR
-            # fits files being created
-            # (e.g. metafits ppd files being copied into /visdata).
-            watcher_incoming_vis = mwax_priority_watcher.PriorityWatcher(
-                name="watcher_incoming_vis",
-                path=self.watch_dir_incoming_vis,
-                dest_queue=self.queue_checksum_and_db,
-                pattern=".fits",
-                log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
-                metafits_path=self.metafits_path,
-                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
-                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
-                recursive=False,
-            )
-            self.watchers.append(watcher_incoming_vis)
-
-            # Create watchers for beamformer vdif data -> stitch files (once they are all there)
-            # This will watch for beamformer files being created
-            watcher_incoming_bf_vdif = mwax_priority_watcher.PriorityWatcher(
-                name="watcher_incoming_bf_vdif",
-                path=self.watch_dir_incoming_bf,
-                dest_queue=self.queue_bf_stitching,
-                pattern=".vdif",
-                log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
-                metafits_path=self.metafits_path,
-                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
-                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
-                recursive=False,
-            )
-            self.watchers.append(watcher_incoming_bf_vdif)
-
-            # Create watchers for beamformer filterbank data -> stitch files (once they are all there)
-            # This will watch for beamformer files being created
-            watcher_incoming_bf_fil = mwax_priority_watcher.PriorityWatcher(
-                name="watcher_incoming_bf_fil",
-                path=self.watch_dir_incoming_bf,
-                dest_queue=self.queue_bf_stitching,
-                pattern=".fil",
-                log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
-                metafits_path=self.metafits_path,
-                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
-                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
-                recursive=False,
-            )
-            self.watchers.append(watcher_incoming_bf_fil)
-
-            # Create watcher for visibility processing stats
-            watcher_processing_stats_vis = mwax_watcher.Watcher(
-                name="watcher_processing_stats_vis",
-                path=self.watch_dir_processing_stats_vis,
-                dest_queue=self.queue_processing_stats_vis,
-                pattern=".fits",
-                log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
-                recursive=False,
-            )
-            self.watchers.append(watcher_processing_stats_vis)
-
-            # Create watcher for calibration data
-            # (only for health stats)
-            watcher_outgoing_cal = mwax_watcher.Watcher(
-                name="watcher_outgoing_cal",
-                path=self.watch_dir_outgoing_cal,
-                dest_queue=self.queue_outgoing_cal,
-                pattern=".fits",
-                log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
-                recursive=False,
-            )
-            self.watchers.append(watcher_outgoing_cal)
-
-            # Create watcher for archiving outgoing voltage data
-            watcher_outgoing_volt = mwax_priority_watcher.PriorityWatcher(
-                name="watcher_outgoing_volt",
-                path=self.watch_dir_outgoing_volt,
-                dest_queue=self.queue_outgoing,
-                pattern=".sub",
-                log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
-                metafits_path=self.metafits_path,
-                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
-                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
-                recursive=False,
-            )
-            self.watchers.append(watcher_outgoing_volt)
-
-            # Create watcher for archiving outgoing visibility data
-            watcher_outgoing_vis = mwax_priority_watcher.PriorityWatcher(
-                name="watcher_outgoing_vis",
-                path=self.watch_dir_outgoing_vis,
-                dest_queue=self.queue_outgoing,
-                pattern=".fits",
-                log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
-                metafits_path=self.metafits_path,
-                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
-                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
-                recursive=False,
-            )
-            self.watchers.append(watcher_outgoing_vis)
-
-            watcher_outgoing_bf = mwax_priority_watcher.PriorityWatcher(
-                name="watcher_outgoing_bf",
-                path=self.watch_dir_outgoing_bf,
-                dest_queue=self.queue_outgoing,
-                pattern=".*",
-                log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
-                metafits_path=self.metafits_path,
-                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
-                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
-                recursive=False,
-            )
-            self.watchers.append(watcher_outgoing_bf)
-
+            # Watch:
+            #   watch_dir_outgoing_cal
+            # Do:
+            #   Add to the outgoing cal list so that when release_cal_obs is called by calvin, we can remove the file from the list and archive the file
             #
-            # Create watcher threads
-            #
-
-            # Setup thread for watching incoming filesystem (volt)
-            watcher_volt_incoming_thread = threading.Thread(
-                name="watch_volt_incoming",
-                target=watcher_incoming_volt.start,
-                daemon=True,
+            self.vis_s_cal_outgoing_processor = VisCalOutgoingProcessor(
+                self.logger,
+                self.watch_dir_outgoing_cal,
+                self.outgoing_cal_list,
             )
-            self.watcher_threads.append(watcher_volt_incoming_thread)
 
-            # Setup thread for watching incoming filesystem (vis)
-            watcher_vis_incoming_thread = threading.Thread(
-                name="watch_vis_incoming",
-                target=watcher_incoming_vis.start,
-                daemon=True,
+            # Watch:
+            #   watch_dir_outgoing_vis
+            #   watch_dir_outgoing_volt
+            #   watch_dir_outgoing_bf
+            # Do:
+            #   Use xrootd to transfer the files to the mwacache servers
+            self.outgoing_processor = OutgoingProcessor(
+                self.logger,
+                self.metafits_path,
+                self.watch_dir_outgoing_vis,
+                self.watch_dir_outgoing_volt,
+                self.watch_dir_outgoing_bf,
+                self.list_of_correlator_high_priority_projects,
+                self.list_of_vcs_high_priority_projects,
+                self.archive_command_numa_node,
+                self.archive_destination_host,
+                self.archive_command_timeout_sec,
             )
-            self.watcher_threads.append(watcher_vis_incoming_thread)
-
-            # Setup thread for watching incoming filesystem (bf_vdif)
-            watcher_bf_vdif_incoming_thread = threading.Thread(
-                name="watch_bf_vdif_incoming",
-                target=watcher_incoming_bf_vdif.start,
-                daemon=True,
-            )
-            self.watcher_threads.append(watcher_bf_vdif_incoming_thread)
-
-            # Setup thread for watching incoming filesystem (bf_fil)
-            watcher_bf_fil_incoming_thread = threading.Thread(
-                name="watch_bf_fil_incoming",
-                target=watcher_incoming_bf_fil.start,
-                daemon=True,
-            )
-            self.watcher_threads.append(watcher_bf_fil_incoming_thread)
-
-            # Setup thread for watching processing_stats filesystem (vis)
-            watcher_vis_processing_stats_thread = threading.Thread(
-                name="watch_vis_processing_stats",
-                target=watcher_processing_stats_vis.start,
-                daemon=True,
-            )
-            self.watcher_threads.append(watcher_vis_processing_stats_thread)
-
-            # Setup thread for watching cal_outgoing filesystem
-            watcher_cal_outgoing_thread = threading.Thread(
-                name="watch_cal_outgoing",
-                target=watcher_outgoing_cal.start,
-                daemon=True,
-            )
-            self.watcher_threads.append(watcher_cal_outgoing_thread)
-
-            # Setup thread for watching outgoing filesystem (volt)
-            watcher_volt_outgoing_thread = threading.Thread(
-                name="watch_volt_outgoing",
-                target=watcher_outgoing_volt.start,
-                daemon=True,
-            )
-            self.watcher_threads.append(watcher_volt_outgoing_thread)
-
-            # Setup thread for watching outgoing filesystem (vis)
-            watcher_vis_outgoing_thread = threading.Thread(
-                name="watch_vis_outgoing",
-                target=watcher_outgoing_vis.start,
-                daemon=True,
-            )
-            self.watcher_threads.append(watcher_vis_outgoing_thread)
-
-            # Setup thread for watching outgoing filesystem (bf)
-            watcher_bf_outgoing_thread = threading.Thread(
-                name="watch_bf_outgoing",
-                target=watcher_outgoing_bf.start,
-                daemon=True,
-            )
-            self.watcher_threads.append(watcher_bf_outgoing_thread)
-
-            #
-            # Create Workers
-            #
-            queue_worker_bf_stitching = mwax_priority_queue_worker.PriorityQueueWorker(
-                name="beamformer stitching worker",
-                source_queue=self.queue_bf_stitching,
-                executable_path=None,
-                event_handler=self.bf_stitching_handler,
-                log=self.logger,
-                exit_once_queue_empty=False,
-            )
-            self.workers.append(queue_worker_bf_stitching)
-
-            # Create queueworker for the checksum and db queue
-            queue_worker_checksum_and_db = mwax_priority_queue_worker.PriorityQueueWorker(
-                name="checksum and database worker",
-                source_queue=self.queue_checksum_and_db,
-                executable_path=None,
-                event_handler=self.checksum_and_db_handler,
-                log=self.logger,
-                exit_once_queue_empty=False,
-            )
-            self.workers.append(queue_worker_checksum_and_db)
-
-            # worker for visibility processing stats
-            queue_worker_processing_stats_vis = mwax_queue_worker.QueueWorker(
-                name="processing stats vis worker",
-                source_queue=self.queue_processing_stats_vis,
-                executable_path=None,
-                event_handler=self.stats_handler,
-                log=self.logger,
-                exit_once_queue_empty=False,
-            )
-            self.workers.append(queue_worker_processing_stats_vis)
-
-            # worker for cal_outgoing
-            queue_worker_cal_outgoing = mwax_queue_worker.QueueWorker(
-                name="outgoing cal vis worker",
-                source_queue=self.queue_outgoing_cal,
-                executable_path=None,
-                event_handler=self.cal_handler,
-                log=self.logger,
-                exit_once_queue_empty=False,
-            )
-            self.workers.append(queue_worker_cal_outgoing)
-
-            # Create queueworker for outgoing queue
-            queue_worker_outgoing = mwax_priority_queue_worker.PriorityQueueWorker(
-                name="outgoing worker",
-                source_queue=self.queue_outgoing,
-                executable_path=None,
-                event_handler=self.archive_handler,
-                log=self.logger,
-                exit_once_queue_empty=False,
-            )
-            self.workers.append(queue_worker_outgoing)
-
-            #
-            # Setup queue worker threads
-            #
-            # Setup thread for processing items on the checksum and db queue
-            queue_worker_bf_stitching_thread = threading.Thread(
-                name="bf_stitching",
-                target=queue_worker_bf_stitching.start,
-                daemon=True,
-            )
-            self.worker_threads.append(queue_worker_bf_stitching_thread)
-
-            # Setup thread for processing items on the checksum and db queue
-            queue_worker_checksum_and_db_thread = threading.Thread(
-                name="work_checksum_and_db",
-                target=queue_worker_checksum_and_db.start,
-                daemon=True,
-            )
-            self.worker_threads.append(queue_worker_checksum_and_db_thread)
-
-            # Setup thread for processing items on the
-            # processing stats vis queue
-            queue_worker_vis_processing_stats_thread = threading.Thread(
-                name="work_vis_processing_stats",
-                target=queue_worker_processing_stats_vis.start,
-                daemon=True,
-            )
-            self.worker_threads.append(queue_worker_vis_processing_stats_thread)
-
-            # Setup thread for processing items on the
-            # cal outgoing queue
-            queue_worker_cal_outgoing_thread = threading.Thread(
-                name="work_cal_outgoing",
-                target=queue_worker_cal_outgoing.start,
-                daemon=True,
-            )
-            self.worker_threads.append(queue_worker_cal_outgoing_thread)
-
-            # Setup thread for processing items on the outgoing queue
-            queue_worker_outgoing_thread = threading.Thread(
-                name="work_outgoing",
-                target=queue_worker_outgoing.start,
-                daemon=True,
-            )
-            self.worker_threads.append(queue_worker_outgoing_thread)
-
         else:
             # We have disabled archiving, so use a different
             # handler for incoming data
@@ -480,679 +247,27 @@ class MWAXArchiveProcessor:
                     )
                     sys.exit(-2)
 
-            # Create watcher for voltage data -> dont_archive queue
-            watcher_incoming_volt = mwax_watcher.Watcher(
-                name="watcher_incoming_volt",
-                path=self.watch_dir_incoming_volt,
-                dest_queue=self.queue_dont_archive_volt,
-                pattern=".sub",
-                log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
-                recursive=False,
-            )
-            self.watchers.append(watcher_incoming_volt)
-
-            # Create watcher for visibility data -> dont_archive queue
-            # This will watch for mwax visibilities being renamed OR
-            # fits files being created (e.g. metafits ppd files being copied
-            # into /visdata).
-            watcher_incoming_vis = mwax_watcher.Watcher(
-                name="watcher_incoming_vis",
-                path=self.watch_dir_incoming_vis,
-                dest_queue=self.queue_dont_archive_vis,
-                pattern=".fits",
-                log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
-                recursive=False,
-            )
-            self.watchers.append(watcher_incoming_vis)
-
-            # Create watchers for beamformer vdif data -> stitch files (once they are all there)
-            # This will watch for beamformer files being created
-            watcher_incoming_bf_vdif = mwax_priority_watcher.PriorityWatcher(
-                name="watcher_incoming_bf_vdif",
-                path=self.watch_dir_incoming_bf,
-                dest_queue=self.queue_bf_stitching,
-                pattern=".vdif",
-                log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
-                metafits_path=self.metafits_path,
-                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
-                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
-                recursive=False,
-            )
-            self.watchers.append(watcher_incoming_bf_vdif)
-
-            # Create watchers for beamformer filterbank data -> stitch files (once they are all there)
-            # This will watch for beamformer files being created
-            watcher_incoming_bf_fil = mwax_priority_watcher.PriorityWatcher(
-                name="watcher_incoming_bf_fil",
-                path=self.watch_dir_incoming_bf,
-                dest_queue=self.queue_bf_stitching,
-                pattern=".fil",
-                log=self.logger,
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
-                metafits_path=self.metafits_path,
-                list_of_correlator_high_priority_projects=self.list_of_correlator_high_priority_projects,
-                list_of_vcs_high_priority_projects=self.list_of_vcs_high_priority_projects,
-                recursive=False,
-            )
-            self.watchers.append(watcher_incoming_bf_fil)
-
-            # Create queueworker for the vis don't archive queue
-            queue_worker_dont_archive_vis = mwax_queue_worker.QueueWorker(
-                name="dont archive worker (vis)",
-                source_queue=self.queue_dont_archive_vis,
-                executable_path=None,
-                event_handler=self.dont_archive_handler_vis,
-                log=self.logger,
-                exit_once_queue_empty=False,
-            )
-            self.workers.append(queue_worker_dont_archive_vis)
-
-            # Create queueworker for the volt don't archive queue
-            queue_worker_dont_archive_volt = mwax_queue_worker.QueueWorker(
-                name="dont archive worker (volt)",
-                source_queue=self.queue_dont_archive_volt,
-                executable_path=None,
-                event_handler=self.dont_archive_handler_volt,
-                log=self.logger,
-                exit_once_queue_empty=False,
-            )
-            self.workers.append(queue_worker_dont_archive_volt)
-
-            queue_worker_bf_stitching = mwax_priority_queue_worker.PriorityQueueWorker(
-                name="beamformer stitching worker",
-                source_queue=self.queue_bf_stitching,
-                executable_path=None,
-                event_handler=self.bf_stitching_handler,
-                log=self.logger,
-                exit_once_queue_empty=False,
-            )
-            self.workers.append(queue_worker_bf_stitching)
-
-            # Create queueworker for the bf don't archive queue
-            queue_worker_dont_archive_bf = mwax_queue_worker.QueueWorker(
-                name="dont archive worker (bf)",
-                source_queue=self.queue_dont_archive_bf,
-                executable_path=None,
-                event_handler=self.dont_archive_handler_bf,
-                log=self.logger,
-                exit_once_queue_empty=False,
-            )
-            self.workers.append(queue_worker_dont_archive_bf)
-            #
-            # Create watcher threads
-            #
-
-            # Setup thread for watching incoming filesystem (volt)
-            watcher_volt_incoming_thread = threading.Thread(
-                name="watch_volt_incoming",
-                target=watcher_incoming_volt.start,
-                daemon=True,
-            )
-            self.watcher_threads.append(watcher_volt_incoming_thread)
-
-            # Setup thread for watching incoming filesystem (vis)
-            watcher_vis_incoming_thread = threading.Thread(
-                name="watch_vis_incoming",
-                target=watcher_incoming_vis.start,
-                daemon=True,
-            )
-            self.watcher_threads.append(watcher_vis_incoming_thread)
-
-            # Setup thread for watching incoming filesystem (bf_vdif)
-            watcher_bf_vdif_incoming_thread = threading.Thread(
-                name="watch_bf_vdif_incoming",
-                target=watcher_incoming_bf_vdif.start,
-                daemon=True,
-            )
-            self.watcher_threads.append(watcher_bf_vdif_incoming_thread)
-
-            # Setup thread for watching incoming filesystem (bf_fil)
-            watcher_bf_fil_incoming_thread = threading.Thread(
-                name="watch_bf_fil_incoming",
-                target=watcher_incoming_bf_fil.start,
-                daemon=True,
-            )
-            self.watcher_threads.append(watcher_bf_fil_incoming_thread)
-
-            # Setup thread for processing items on the checksum and db queue
-            queue_worker_bf_stitching_thread = threading.Thread(
-                name="bf_stitching",
-                target=queue_worker_bf_stitching.start,
-                daemon=True,
-            )
-            self.worker_threads.append(queue_worker_bf_stitching_thread)
-
-            # Setup thread for processing items on the dont archive queue
-            queue_worker_dont_archive_thread_vis = threading.Thread(
-                name="work_dont_archive_vis",
-                target=queue_worker_dont_archive_vis.start,
-                daemon=True,
-            )
-            self.worker_threads.append(queue_worker_dont_archive_thread_vis)
-
-            # Setup thread for processing items on the dont archive queue
-            queue_worker_dont_archive_thread_volt = threading.Thread(
-                name="work_dont_archive_volt",
-                target=queue_worker_dont_archive_volt.start,
-                daemon=True,
-            )
-            self.worker_threads.append(queue_worker_dont_archive_thread_volt)
-
-            # Setup thread for processing items on the dont archive queue
-            queue_worker_dont_archive_thread_bf = threading.Thread(
-                name="work_dont_archive_bf",
-                target=queue_worker_dont_archive_bf.start,
-                daemon=True,
-            )
-            self.worker_threads.append(queue_worker_dont_archive_thread_bf)
         #
-        # Start Watcher threads
+        # Start processors
         #
-        for watcher_thread in self.watcher_threads:
-            if watcher_thread:
-                watcher_thread.start()
-
-        self.logger.info("Waiting for all watchers to finish scanning....")
-        count_of_watchers_still_scanning = len(self.watchers)
-        while count_of_watchers_still_scanning > 0:
-            count_of_watchers_still_scanning = 0
-            for watcher in self.watchers:
-                if not watcher.scan_completed:
-                    self.logger.debug(f"{watcher.name} still scanning!")
-                    count_of_watchers_still_scanning += 1
+        self.logger.info("Waiting for all workers to finish scanning....")
+        workers_still_scanning = len(self.workers)
+        while workers_still_scanning > 0:
+            workers_still_scanning = 0
+            for w in self.workers:
+                if not w.scan_completed:
+                    self.logger.debug(f"{w.name} still scanning!")
+                    workers_still_scanning += 1
             time.sleep(1)  # hold off for another second
-        self.logger.info("Watchers are finished scanning.")
+        self.logger.info("Workers are finished scanning.")
 
         #
-        # Start worker threads
+        # Start workers
         #
-        for worker_thread in self.worker_threads:
-            if worker_thread:
-                worker_thread.start()
+        for w in self.workers:
+            w.start()
 
         self.logger.info("ArchiveProcessor started.")
-
-    def bf_stitching_handler(self, item: str) -> bool:
-        #
-        # Each time we get a new filterbank or vdif file
-        # We *may* need to kick off stitching things together.
-        # Once stitched, we send to the checksum+db queue
-        #
-        filename = os.path.basename(item)
-        ext = os.path.splitext(filename)[1]
-
-        # get the obsid and subobs from the filename
-        # obsid_subobsid_chXXX_beamXX.vdif / .fil
-        try:
-            try:
-                obs_id = int(filename[0:10])
-            except Exception:
-                raise ValueError(f"{item}: Error getting obs_id from filename {filename}")
-            try:
-                subobs_id = int(filename[11:21])
-            except Exception:
-                raise ValueError(f"{item}: Error getting subobs_id from filename {filename}")
-        except Exception:
-            self.logger.warning(
-                f"{item}: filename not in correct format. Should be obsid_subobsid_chXXX_beamXX.vdif or .fil. It's probably a failed file from a previous run and can probably be safely deleted (by you). Skipping file."
-            )
-            return True
-
-        # Determine metafits filename
-        metafits_filename = os.path.join(self.metafits_path, f"{obs_id}_metafits.fits")
-
-        try:
-            duration_sec = int(utils.get_metafits_value(metafits_filename, METAFITS_EXPOSURE))
-        except Exception:
-            raise ValueError(f"{item}: Error reading {METAFITS_EXPOSURE} from metafits filename {metafits_filename}")
-
-        self.logger.debug(f"{item}: Read {METAFITS_EXPOSURE} of {duration_sec}s from {metafits_filename}")
-
-        # Now determine the last subobs we should see
-        # we subtract 8 seconds because the subobsid is the START of the subobs. Examples:
-        # 1. Obsid =1234500000 Duration: 8 => last subobsid = 1234500000
-        # 2. Obsid =1234500000 Duration: 16 => last subobsid = 1234500008
-        expected_last_subobs_id = (obs_id + duration_sec) - 8
-
-        # Check to see if this subobsid == last subobsid
-        self.logger.debug(
-            f"{item}: Checking this subobs_id {subobs_id} against expected last subobs_id {expected_last_subobs_id}"
-        )
-        if subobs_id >= expected_last_subobs_id:
-            # Time to stitch up the files
-            self.logger.debug(f"{item}: Observation complete. Stitching up beamformer {ext} files...")
-            if ext == ".vdif":
-                # determine the file_path, rec_chan and beam number
-                file_path, _, _, rec_chan, beam = mwax_bf_vdif_utils.get_vdif_filename_components(item)
-
-                # find all the vdif files for this beam, channel and obs
-                files = glob.glob(os.path.join(file_path, f"{obs_id}_*_ch{rec_chan:03d}_beam{beam:02d}.vdif"))
-
-                self.logger.debug(
-                    f"{item}: Found {len(files)} vdif files to stitch for rec_chan {rec_chan:03d}, beam {beam:02d}: {files}"
-                )
-
-                vdif_filename, hdr_filename = mwax_bf_vdif_utils.stitch_vdif_files_and_write_hdr(
-                    self.logger, metafits_filename, files
-                )
-
-                # We need to determine the priority
-                priority = utils.get_priority(
-                    self.logger,
-                    vdif_filename,
-                    self.metafits_path,
-                    self.list_of_correlator_high_priority_projects,
-                    self.list_of_vcs_high_priority_projects,
-                )
-
-                # Add files to the checksum and db queue
-                if self.archive_destination_enabled:
-                    new_queue_item = (
-                        priority,
-                        MWAXPriorityQueueData(hdr_filename),
-                    )
-
-                    self.queue_checksum_and_db.put(new_queue_item)
-                    self.logger.info(
-                        f"{item}: {hdr_filename} added to queue queue_checksum_and_db with priority {priority} ({self.queue_checksum_and_db.qsize()})"
-                    )
-                else:
-                    # Dont archive
-                    self.queue_dont_archive_bf.put(hdr_filename)
-                    self.logger.info(
-                        f"{item}: {hdr_filename} added to queue dont_archive_bf ({self.queue_dont_archive_bf.qsize()})"
-                    )
-
-                if self.archive_destination_enabled:
-                    new_queue_item = (
-                        priority,
-                        MWAXPriorityQueueData(vdif_filename),
-                    )
-
-                    self.queue_checksum_and_db.put(new_queue_item)
-                    self.logger.info(
-                        f"{item}: {vdif_filename} added to queue queue_checksum_and_db with priority {priority} ({self.queue_checksum_and_db.qsize()})"
-                    )
-                else:
-                    # Dont archive
-                    self.queue_dont_archive_bf.put(vdif_filename)
-                    self.logger.info(
-                        f"{item}: {vdif_filename} added to queue dont_archive_bf ({self.queue_dont_archive_bf.qsize()})"
-                    )
-
-                # Now remove the original files if the config file tells us we should
-                if not self.bf_keep_original_files_after_stitching:
-                    self.logger.info(f"{item}: Cleaning up original VDIF files...")
-                    for f in files:
-                        os.remove(f)
-                else:
-                    self.logger.info(
-                        f"{item}: Keeping original VDIF files as per config- moving them to {self.dont_archive_path_bf}."
-                    )
-                    for f in files:
-                        # Dont archive
-                        self.queue_dont_archive_bf.put(f)
-                        self.logger.info(
-                            f"{item}: {f} added to queue dont_archive_bf ({self.queue_dont_archive_bf.qsize()})"
-                        )
-                return True
-
-            elif ext == ".fil":
-                # determine file_path, rec_chan and beam number
-                file_path, _, _, rec_chan, beam = mwax_bf_filterbank_utils.get_filterbank_filename_components(item)
-
-                # find all the fil files for this beam, channel and obs
-                files = glob.glob(os.path.join(file_path, f"{obs_id}_*_ch{rec_chan:03d}_beam{beam:02d}.fil"))
-
-                self.logger.debug(
-                    f"{item}: Found {len(files)} filterbank files to stitch for rec_chan {rec_chan:03d}, beam {beam:02d}"
-                )
-                fil_filename = mwax_bf_filterbank_utils.stitch_filterbank_files(self.logger, files)
-
-                # Add files to the checksum and db queue
-                # We need to determine the priority
-                if self.archive_destination_enabled:
-                    priority = utils.get_priority(
-                        self.logger,
-                        fil_filename,
-                        self.metafits_path,
-                        self.list_of_correlator_high_priority_projects,
-                        self.list_of_vcs_high_priority_projects,
-                    )
-
-                    new_queue_item = (
-                        priority,
-                        MWAXPriorityQueueData(fil_filename),
-                    )
-
-                    self.queue_checksum_and_db.put(new_queue_item)
-                    self.logger.info(
-                        f"{item}: {fil_filename} added to queue queue_checksum_and_db with priority {priority} ({self.queue_checksum_and_db.qsize()})"
-                    )
-                else:
-                    # Dont archive
-                    self.queue_dont_archive_bf.put(fil_filename)
-                    self.logger.info(
-                        f"{item}: {fil_filename} added to queue dont_archive_bf ({self.queue_dont_archive_bf.qsize()})"
-                    )
-
-                # Now remove the original files if the config file tells us we should
-                if not self.bf_keep_original_files_after_stitching:
-                    self.logger.info(f"{item}: Cleaning up original FIL files...")
-                    for f in files:
-                        os.remove(f)
-                else:
-                    self.logger.info(
-                        f"{item}: Keeping original Filterbank files as per config- moving them to {self.dont_archive_path_bf}."
-                    )
-                    for f in files:
-                        # Dont archive
-                        self.queue_dont_archive_bf.put(f)
-                        self.logger.info(
-                            f"{item}: {f} added to queue dont_archive_bf ({self.queue_dont_archive_bf.qsize()})"
-                        )
-
-                return True
-            else:
-                raise Exception(f"{item} Extension {ext} is not supported")
-        else:
-            # Nothing to do
-            self.logger.debug(
-                f"{item}: waiting for end of observation. This subobs_id {subobs_id} is < {expected_last_subobs_id}"
-            )
-            return True
-
-    def dont_archive_handler_vis(self, item: str) -> bool:
-        """This handles the visibility case where we have disabled archiving"""
-        self.logger.debug(f"{item}- dont_archive_handler_vis() Started")
-
-        outgoing_filename = os.path.join(self.dont_archive_path_vis, os.path.basename(item))
-
-        self.logger.debug(f"{item}- dont_archive_handler_vis() moving file to {self.dont_archive_path_vis}")
-        os.rename(item, outgoing_filename)
-
-        self.logger.info(
-            f"{item}- dont_archive_handler_vis() moved file to"
-            f" {self.dont_archive_path_vis} dir Queue size:"
-            f" {self.queue_dont_archive_vis.qsize()}"
-        )
-
-        self.logger.debug(f"{item}- dont_archive_handler_vis() Finished")
-        return True
-
-    def dont_archive_handler_volt(self, item: str) -> bool:
-        """This handles the voltage case where we have disabled archiving"""
-        self.logger.debug(f"{item}- dont_archive_handler_volt() Started")
-
-        outgoing_filename = os.path.join(self.dont_archive_path_volt, os.path.basename(item))
-
-        self.logger.debug(f"{item}- dont_archive_handler_volt() moving file to {self.dont_archive_path_volt}")
-        os.rename(item, outgoing_filename)
-
-        self.logger.info(
-            f"{item}- dont_archive_handler_volt() moved file to"
-            f" {self.dont_archive_path_volt} dir Queue size:"
-            f" {self.queue_dont_archive_volt.qsize()}"
-        )
-
-        self.logger.debug(f"{item}- dont_archive_handler_volt() Finished")
-        return True
-
-    def dont_archive_handler_bf(self, item: str) -> bool:
-        """This handles the beamformed case where we have disabled archiving"""
-        self.logger.debug(f"{item}- dont_archive_handler_bf() Started")
-
-        outgoing_filename = os.path.join(self.dont_archive_path_bf, os.path.basename(item))
-        self.logger.debug(f"{item}- dont_archive_handler_bf() moving file to {self.dont_archive_path_bf}")
-        os.rename(item, outgoing_filename)
-
-        self.logger.info(
-            f"{item}- dont_archive_handler_bf() moved file to"
-            f" {self.dont_archive_path_bf} dir Queue size:"
-            f" {self.queue_dont_archive_bf.qsize()}"
-        )
-
-        self.logger.debug(f"{item}- dont_archive_handler_bf() Finished")
-        return True
-
-    def checksum_and_db_handler(self, item: str) -> bool:
-        """This is the first handler executed when we process a new file"""
-        self.logger.info(f"{item}: checksum_and_db_handler() Started")
-
-        # validate the filename
-        val: ValidationData = utils.validate_filename(self.logger, item, self.metafits_path)
-
-        if val.valid:
-            try:
-                # Determine file size
-                file_size = os.stat(item).st_size
-
-                # checksum then add this file to the db so we insert a record into
-                # metadata data_files table
-                checksum_type_id: int = 1  # MD5
-                checksum: str = utils.do_checksum_md5(self.logger, item, int(self.archive_command_numa_node), 180)
-
-                # if file is a VCS subfile, check if it is from a trigger and
-                # grab the trigger_id as an int
-                # If not found it will return None
-                if val.filetype_id == MWADataFileType.MWAX_VOLTAGES.value:
-                    trigger_id = utils.read_subfile_trigger_value(item)
-                else:
-                    trigger_id = None
-            except FileNotFoundError:
-                # The filename was not valid
-                self.logger.warning(f"{item}- checksum_and_db_handler() file was removed while processing.")
-                return True
-
-            # Insert record into metadata database
-            if not mwax_db.insert_data_file_row(
-                self.db_handler_object,
-                val.obs_id,
-                item,
-                val.filetype_id,
-                self.hostname,
-                checksum_type_id,
-                checksum,
-                trigger_id,
-                file_size,
-            ):
-                # if something went wrong, requeue
-                return False
-
-            # Check to see if the file is still there- the above call could have deleted it
-            # if we got an FK error
-            if not os.path.exists(item):
-                # Return True, telling the queue worker we are done with this item
-                return True
-
-            #
-            # If the project_id is the special code C123 then
-            # do not archive it.
-            #
-            if utils.should_project_be_archived(val.project_id):
-                # immediately add this file (and a ptr to it's queue) to the
-                # voltage or vis queue which will deal with archiving
-                if val.filetype_id == MWADataFileType.MWAX_VOLTAGES.value:
-                    # move to voltdata/outgoing
-                    # Take the input filename - strip the path, then append the
-                    # output path
-                    outgoing_filename = os.path.join(self.watch_dir_outgoing_volt, os.path.basename(item))
-
-                    self.logger.debug(f"{item}- checksum_and_db_handler() moving subfile to volt outgoing dir")
-                    os.rename(item, outgoing_filename)
-
-                    self.logger.info(
-                        f"{item}- checksum_and_db_handler() moved subfile to volt"
-                        " outgoing dir Queue size:"
-                        f" {self.queue_checksum_and_db.qsize()}"
-                    )
-                elif val.filetype_id == MWADataFileType.MWAX_VISIBILITIES.value:
-                    # move to visdata/processing_stats
-                    # Take the input filename - strip the path, then append the
-                    # output path
-                    outgoing_filename = os.path.join(self.watch_dir_processing_stats_vis, os.path.basename(item))
-
-                    self.logger.debug(
-                        f"{item}- checksum_and_db_handler() moving visibility file to vis processing stats dir"
-                    )
-                    os.rename(item, outgoing_filename)
-
-                    self.logger.info(
-                        f"{item}- checksum_and_db_handler() moved visibility file"
-                        " to vis processing stats dir. Queue size:"
-                        f" {self.queue_checksum_and_db.qsize()}"
-                    )
-
-                elif val.filetype_id == MWADataFileType.MWA_PPD_FILE.value:
-                    # move to visdata/outgoing
-                    # Take the input filename - strip the path, then append the
-                    # output path
-                    outgoing_filename = os.path.join(self.watch_dir_outgoing_vis, os.path.basename(item))
-
-                    self.logger.debug(f"{item}- checksum_and_db_handler() moving metafits file to vis outgoing dir")
-                    os.rename(item, outgoing_filename)
-
-                    self.logger.info(
-                        f"{item}- checksum_and_db_handler() moved metafits file to"
-                        " vis outgoing dir. Queue size:"
-                        f" {self.queue_checksum_and_db.qsize()}"
-                    )
-
-                elif (
-                    val.filetype_id == MWADataFileType.VDIF.value or val.filetype_id == MWADataFileType.FILTERBANK.value
-                ):
-                    # move to voltdata/bf/outgoing
-                    # Take the input filename - strip the path, then append the
-                    # output path
-                    outgoing_filename = os.path.join(self.watch_dir_outgoing_bf, os.path.basename(item))
-
-                    self.logger.debug(
-                        f"{item}- checksum_and_db_handler() moving beamformer data file to bf outgoing dir"
-                    )
-                    os.rename(item, outgoing_filename)
-
-                    self.logger.info(
-                        f"{item}- checksum_and_db_handler() moved beamformer data file to"
-                        " bf outgoing dir. Queue size:"
-                        f" {self.queue_checksum_and_db.qsize()}"
-                    )
-                else:
-                    self.logger.error(
-                        f"{item}- checksum_and_db_handler() - not a valid file"
-                        f" extension {val.filetype_id} / {val.file_ext}"
-                    )
-                    return False
-            else:
-                #
-                # This is a "do not archive" project
-                #
-                # If it is visibilities, then produce stats, otherwise move to dont_archive
-                if val.filetype_id == MWADataFileType.MWAX_VISIBILITIES.value:
-                    # move to visdata/processing_stats
-                    # Take the input filename - strip the path, then append the
-                    # output path
-                    outgoing_filename = os.path.join(self.watch_dir_processing_stats_vis, os.path.basename(item))
-
-                    self.logger.debug(
-                        f"{item}- checksum_and_db_handler() moving visibility file to vis processing stats dir"
-                    )
-                    os.rename(item, outgoing_filename)
-
-                    self.logger.info(
-                        f"{item}- checksum_and_db_handler() moved visibility file"
-                        " to vis processing stats dir Queue size:"
-                        f" {self.queue_checksum_and_db.qsize()}"
-                    )
-                    # Note that the cal_handler code needs to ensure it does not
-                    # archvive any do not archive projects
-                elif val.filetype_id == MWADataFileType.MWAX_VOLTAGES.value:
-                    self.dont_archive_handler_volt(item)
-                elif val.filetype_id == MWADataFileType.MWA_PPD_FILE.value:
-                    self.dont_archive_handler_vis(item)
-                elif (
-                    val.filetype_id == MWADataFileType.VDIF.value or val.filetype_id == MWADataFileType.FILTERBANK.value
-                ):
-                    self.dont_archive_handler_bf(item)
-                else:
-                    self.logger.error(
-                        f"{item}- checksum_and_db_handler() - not a valid file"
-                        f" extension {val.filetype_id} / {val.file_ext}"
-                    )
-                    return False
-        else:
-            # The filename was not valid
-            self.logger.error(f"{item}- checksum_and_db_handler() {val.validation_message}")
-            return False
-
-        self.logger.info(f"{item}- checksum_and_db_handler() Finished")
-        return True
-
-    def cal_handler(self, item: str) -> bool:
-        self.outgoing_cal_list.append(item)
-        return True
-
-    def stats_handler(self, item: str) -> bool:
-        """This runs stats against mwax FITS files"""
-        self.logger.info(f"{item}- stats_handler() Started...")
-
-        # This is a normal mwax fits file.
-        # Run stats on it, but only if it is the 000 file.
-        # Don't bother doing the 001, 002, etc if they exist
-        if os.path.basename(item)[-9:] == "_000.fits":
-            if (
-                utils.process_mwax_stats(
-                    self.logger,
-                    self.mwax_stats_binary_dir,
-                    item,
-                    int(self.archive_command_numa_node),
-                    self.mwax_stats_timeout_sec,
-                    self.mwax_stats_dump_dir,
-                    self.metafits_path,
-                )
-                is not True
-            ):
-                self.logger.warning(f"{item}- stats_handler() mwax_stats failed. Skipping.")
-        else:
-            self.logger.debug(f"{item}- stats_handler() skipping mwax_stats as file does not end in _000.fits")
-
-        # If observation is a calibrator AND this host is enabled as an archiver then
-        # we should put the obs into the cal_outgoing dir so that calvin can
-        # pull it in and calibrate it. The calvin server which processed the file(s)
-        # will then call our webservice endpoint "release_cal_obs" and then that will
-        # move the file into visdata_outgoing so it can be archived.
-
-        # Is this host doing archiving?
-        if self.archive_destination_enabled == 1:
-            # Validate and get info about the obs
-            obs_info: ValidationData = utils.validate_filename(self.logger, item, self.metafits_path)
-
-            # Should this project be archived?
-            if utils.should_project_be_archived(obs_info.project_id):
-                if obs_info.calibrator:
-                    # Send to cal_outgoing
-                    # Take the input filename - strip the path, then append the output path
-                    outgoing_filename = os.path.join(self.watch_dir_outgoing_cal, os.path.basename(item))
-                    self.logger.debug(f"{item}- stats_handler() moving file to outgoing cal dir")
-                    os.rename(item, outgoing_filename)
-                else:
-                    # Not a calibrator just archive it
-                    # Send to vis_outgoing
-                    # Take the input filename - strip the path, then append the output path
-                    outgoing_filename = os.path.join(self.watch_dir_outgoing_vis, os.path.basename(item))
-                    self.logger.debug(f"{item}- stats_handler() moving file to outgoing vis dir")
-                    os.rename(item, outgoing_filename)
-            else:
-                # No this project doesn't get archived or calibrated, just send it to dont_archive
-                self.dont_archive_handler_vis(item)
-        else:
-            # This host is not doing any archiving
-            self.dont_archive_handler_vis(item)
-
-        self.logger.info(f"{item}- stats_handler() Finished")
-        return True
 
     def release_cal_obs(self, obs_id: int):
         try:
@@ -1181,10 +296,14 @@ class MWAXArchiveProcessor:
                             os.rename(item, outgoing_filename)
                         else:
                             # No this project doesn't get archived
-                            self.dont_archive_handler_vis(item)
+                            outgoing_filename = os.path.join(self.dont_archive_path_vis, os.path.basename(item))
+                            self.logger.debug(f"{item}- release_cal_obs() moving file to {self.dont_archive_path_vis}")
+                            os.rename(item, outgoing_filename)
                     else:
                         # This host is not doing any archiving
-                        self.dont_archive_handler_vis(item)
+                        outgoing_filename = os.path.join(self.dont_archive_path_vis, os.path.basename(item))
+                        self.logger.debug(f"{item}- release_cal_obs() moving file to {self.dont_archive_path_vis}")
+                        os.rename(item, outgoing_filename)
                 else:
                     self.logger.exception(f"{obs_id}: release_cal_obs()- failed to archive {item}- file does not exist")
 
@@ -1196,30 +315,6 @@ class MWAXArchiveProcessor:
                     pass
         except Exception:
             self.logger.exception(f"{obs_id}: release_cal_obs()- something went wrong when releasing this obs_id")
-
-    def archive_handler(self, item: str) -> bool:
-        """This is called whenever a file is moved into the
-        outgoing_vis or outgoing_volt directories. For each file attempt to
-        send to the mwacache boxes then remove the file"""
-        self.logger.info(f"{item}- archive_handler() Started...")
-
-        if (
-            mwa_archiver.archive_file_xrootd(
-                self.logger,
-                item,
-                int(self.archive_command_numa_node),
-                self.archive_destination_host,
-                self.archive_command_timeout_sec,
-            )
-            is not True
-        ):
-            return False
-
-        self.logger.debug(f"{item}- archive_handler() Deleting file")
-        utils.remove_file(self.logger, item, raise_error=False)
-
-        self.logger.info(f"{item}- archive_handler() Finished")
-        return True
 
     def pause_archiving(self, paused: bool):
         """Pauses archiving"""
@@ -1237,59 +332,17 @@ class MWAXArchiveProcessor:
 
     def stop(self):
         """Stops the processor"""
-        for watcher in self.watchers:
-            if watcher:
-                watcher.stop()
-
-        for worker in self.workers:
-            if worker:
-                worker.stop()
-
-        # Wait for threads to finish
-        for watcher_thread in self.watcher_threads:
-            if watcher_thread:
-                thread_name = watcher_thread.name
-                self.logger.debug(f"Watcher {thread_name} Stopping...")
-                if watcher_thread.is_alive():
-                    watcher_thread.join()
-                self.logger.debug(f"Watcher {thread_name} Stopped")
-
-        for worker_thread in self.worker_threads:
-            if worker_thread:
-                thread_name = worker_thread.name
-                self.logger.debug(f"QueueWorker {thread_name} Stopping...")
-                if worker_thread.is_alive():
-                    worker_thread.join()
-                self.logger.debug(f"QueueWorker {thread_name} Stopped")
+        for w in self.workers:
+            w.stop()
 
     def get_status(self) -> dict:
         """Returns a dictionary of status info from all processors"""
-        watcher_list = []
-
-        for watcher in self.watchers:
-            if watcher:
-                status = dict({"name": watcher.name})
-                status.update(watcher.get_status())
-                watcher_list.append(status)
-
         worker_list = []
 
-        for worker in self.workers:
-            if worker:
-                status = dict({"name": worker.name})
-
-                # for the cal_outgoing worker we will do the stats manually
-                if worker.name == "outgoing cal vis worker":
-                    outgoing_cal_dict = {
-                        "Unix timestamp": time.time(),
-                        "current item": "",
-                        "queue_size": len(self.outgoing_cal_list),
-                    }
-                    status.update(outgoing_cal_dict)
-                else:
-                    status.update(worker.get_status())
-
-                worker_list.append(status)
+        for w in self.workers:
+            status = dict({"name": w.name})
+            status.update(w.get_status())
+            worker_list.append(status)
 
         if self.archiving_paused:
             archiving = "paused"
@@ -1300,7 +353,6 @@ class MWAXArchiveProcessor:
             "Unix timestamp": time.time(),
             "type": type(self).__name__,
             "archiving": archiving,
-            "watchers": watcher_list,
             "workers": worker_list,
         }
 

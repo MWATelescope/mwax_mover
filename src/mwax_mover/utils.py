@@ -533,7 +533,7 @@ def process_mwax_stats(
     logger,
     mwax_stats_dir: str,
     full_filename: str,
-    numa_node: int,
+    numa_node: Optional[int],
     timeout: int,
     stats_dump_dir: str,
     metafits_path: str,

@@ -508,6 +508,17 @@ class MWAXSubfileDistributor:
             self.logger.error(f"bf_incoming_path location {self.cfg_bf_incoming_path} does not exist. Quitting.")
             sys.exit(1)
 
+        self.cfg_bf_stitching_path = utils.read_config(
+            self.logger,
+            self.config,
+            "beamformer",
+            "bf_stitching_path",
+        )
+
+        if not os.path.exists(self.cfg_bf_stitching_path):
+            self.logger.error(f"bf_stitching_path location {self.cfg_bf_stitching_path} does not exist. Quitting.")
+            sys.exit(1)
+
         self.cfg_bf_outgoing_path = utils.read_config(
             self.logger,
             self.config,
@@ -627,6 +638,7 @@ class MWAXSubfileDistributor:
             self.cfg_corr_high_priority_correlator_projectids,
             self.cfg_corr_high_priority_vcs_projectids,
             self.cfg_bf_incoming_path,
+            self.cfg_bf_stitching_path,
             self.cfg_bf_outgoing_path,
             self.cfg_bf_dont_archive_path,
             self.cfg_bf_keep_original_files_after_stitching,

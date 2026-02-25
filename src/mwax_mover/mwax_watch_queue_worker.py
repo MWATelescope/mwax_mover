@@ -5,6 +5,7 @@ from mwax_mover.mwax_watcher import Watcher
 from mwax_mover.mwax_queue_worker import QueueWorker
 from mwax_mover.mwax_priority_watcher import PriorityWatcher
 from mwax_mover.mwax_priority_queue_worker import PriorityQueueWorker
+from mwax_mover import utils
 from abc import ABC, abstractmethod
 import time
 from typing import Optional
@@ -121,6 +122,26 @@ class MWAXWatchQueueWorker(ABC):
 
         self.logger.info(f"MWAXWatchQueueWorker {self.name} stopped.")
 
+    def pause(self, pause: bool):
+        self.queue_worker.pause(pause)
+
+    def get_status(self) -> dict:
+        status = {
+            "name": self.name,
+            "hostname": utils.get_hostname(),
+            "watchers": [],
+            "queue_worker": self.queue_worker.get_status(),
+        }
+        for watcher in self.watchers:
+            status["watchers"].append(watcher.get_status())
+        return status
+
+    def scan_completed(self) -> bool:
+        for watcher in self.watchers:
+            if not watcher.scan_completed:
+                return False
+        return True
+
     @abstractmethod
     def handler(self, item: str) -> bool:
         pass
@@ -150,6 +171,8 @@ class MWAXPriorityWatchQueueWorker(ABC):
     ):
         self.logger = logger
         self.name = name
+        self.metafits_path = metafits_path
+        self.hostname = utils.get_hostname()
 
         # Watch
         self.pwatchers: list[PriorityWatcher] = []
@@ -239,6 +262,26 @@ class MWAXPriorityWatchQueueWorker(ABC):
             self.logger.debug(f"Queue Worker {self.pqueue_worker_thread.name} Stopped")
 
         self.logger.info(f"MWAXPriorityWatchQueueWorker {self.name} stopped.")
+
+    def get_status(self) -> dict:
+        status = {
+            "name": self.name,
+            "hostname": utils.get_hostname(),
+            "watchers": [],
+            "queue_worker": self.pqueue_worker.get_status(),
+        }
+        for watcher in self.pwatchers:
+            status["watchers"].append(watcher.get_status())
+        return status
+
+    def scan_completed(self) -> bool:
+        for watcher in self.pwatchers:
+            if not watcher.scan_completed:
+                return False
+        return True
+
+    def pause(self, pause: bool):
+        self.pqueue_worker.pause(pause)
 
     @abstractmethod
     def handler(self, item: str) -> bool:

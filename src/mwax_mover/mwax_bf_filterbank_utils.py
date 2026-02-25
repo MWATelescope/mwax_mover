@@ -65,11 +65,12 @@ def set_filterbank_key_value_int(header: bytearray, key: str, value: int) -> byt
 
 
 # Stitches filterbank files together and writes an output file- output filename is returned
-def stitch_filterbank_files(logger: logging.Logger, files: List[str]) -> str:
+def stitch_filterbank_files(logger: logging.Logger, files: List[str], output_dir: str) -> str:
     if len(files) == 0:
         raise Exception("No filterbank files to stitch")
 
     output_filename: str = get_stitched_filename(files[0])
+    output_filename = os.path.join(output_dir, os.path.basename(output_filename))
 
     if len(files) == 1:
         # Nothing to stitch but we still need the output_filename to be created, so copy the file
