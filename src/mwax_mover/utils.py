@@ -1294,6 +1294,83 @@ def push_message_to_redis(redis_host: str, redis_queue_key: str, message_data):
                 continue
 
 
+def copy_subfile_to_disk_cp(
+    logger: logging.Logger,
+    filename: str,
+    numa_node: int,
+    destination_path: str,
+    timeout: int,
+    destination_filename: str = ".",
+) -> bool:
+    """Copies the given filename to the destination path
+    DEPRECATED FOR NOW- replaced with copy_subfile_to_disk_dd()"""
+    logger.info(f"{filename}- Copying file into {destination_path}")
+
+    command = f"cp {filename} {destination_path}/{destination_filename}"
+
+    start_time = time.time()
+    retval, stdout = mwax_command.run_command_ext(logger, command, numa_node, timeout, False)
+    elapsed = time.time() - start_time
+
+    if retval:
+        logger.info(
+            f"{filename}- Copying file into"
+            f" {destination_path}/{destination_filename} was successful"
+            f" (took {elapsed:.3f} secs)."
+        )
+    else:
+        logger.error(
+            f"{filename}- Copying file into {destination_path}/{destination_filename} failed with error {stdout}"
+        )
+
+    return retval
+
+
+def copy_subfile_to_disk_dd(
+    logger: logging.Logger,
+    filename: str,
+    numa_node: int,
+    destination_path: str,
+    timeout: int,
+    destination_filename: str,
+    bytes_to_write: int,
+) -> bool:
+    """Copies the given filename to the destination path, trimming X bytes off the end of the file
+    This is for the case where the subfiles are sized for e.g. 144T but the observation is only
+    128T. When copied, dd will only copy the 128T worth of data (u2s would have already ensured
+    that the data written is only 128T worth and that the remaining space is 'empty')
+
+    filename: Abs or relative path and filename
+    destination_path: Just the destination directory
+    destination_filename: Just the destination filename (no path)- note- unlike with cp it cannot
+                        be just a "."! dd doesn't like that - it has to be a real filename.
+    bytes_to_write: only write the first N bytes"""
+    logger.debug(f"{filename}- Copying first {bytes_to_write} bytes of file into {destination_path}")
+
+    command = f"dd if={filename} of={destination_path}/{destination_filename} bs=4M oflag=direct iflag=count_bytes count={bytes_to_write}"
+
+    start_time = time.time()
+    retval, stdout = mwax_command.run_command_ext(logger, command, numa_node, timeout, False)
+
+    if retval:
+        elapsed = time.time() - start_time
+        speed = (bytes_to_write / elapsed) / (1000.0 * 1000.0 * 1000.0)
+
+        logger.info(
+            f"{filename}- Copying first {bytes_to_write} bytes of file into"
+            f" {destination_path}/{destination_filename} was successful"
+            f" (took {elapsed:.3f} secs at {speed:.3f} GB/sec)."
+        )
+    else:
+        logger.error(
+            f"{filename}- Copying first {bytes_to_write} bytes of file into"
+            f" {destination_path}/{destination_filename} failed with error"
+            f" {stdout}"
+        )
+
+    return retval
+
+
 def running_under_pytest() -> bool:
     # Returns True if we are running as part of pytest
     return "PYTEST_CURRENT_TEST" in os.environ

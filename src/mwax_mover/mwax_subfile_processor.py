@@ -4,15 +4,12 @@ import glob
 import os
 import queue
 import shutil
-import sys
-import threading
-import time
-from mwax_mover.mwax_calvin_utils import get_partial_aocal_filename
-from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME, MODE_WATCH_DIR_FOR_NEW
-from mwax_mover import utils, mwax_queue_worker, mwax_watcher, mwax_command
-from mwax_mover.utils import PSRDADA_HEADER_BYTES, CorrelatorMode
-
-COMMAND_DADA_DISKDB = "dada_diskdb"
+from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
+from mwax_mover import utils
+from mwax_mover.utils import CorrelatorMode
+from mwax_mover.mwax_wqw_subfile_incoming_processor import SubfileIncomingProcessor
+from mwax_mover.mwax_wqw_packet_stats_processor import PacketStatsProcessor
+from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker, MWAXWatchQueueWorker
 
 
 class SubfileProcessor:
@@ -37,6 +34,7 @@ class SubfileProcessor:
         bf_aocal_path: str,
     ):
         self.sd_ctx = context
+        self.workers: list[MWAXPriorityWatchQueueWorker | MWAXWatchQueueWorker] = []
 
         # Setup logging
         self.logger = context.logger.getChild("SubfileProcessor")
@@ -44,13 +42,14 @@ class SubfileProcessor:
 
         self.ext_sub_file = ".sub"
         self.mwax_mover_mode = MODE_WATCH_DIR_FOR_RENAME
-        self.packet_stats_mode = MODE_WATCH_DIR_FOR_NEW
         self.subfile_incoming_path = subfile_incoming_path
         self.voltdata_incoming_path = voltdata_incoming_path
         self.always_keep_subfiles = always_keep_subfiles
         self.ext_free_file = ".free"
         self.ext_keep_file = ".keep"
         self.ext_packet_stats_file = ".dat"
+        self.packet_stats_dump_dir = packet_stats_dump_dir
+        self.packet_stats_destination_dir = packet_stats_destination_dir
 
         # Voltage buffer dump vars
         self.dump_start_gps = None
@@ -58,677 +57,61 @@ class SubfileProcessor:
         self.dump_trigger_id = None
         self.dump_keep_file_queue = queue.Queue()
 
-        # Watchers and workers
-        self.watcher_threads = []
-        self.worker_threads = []
-
         # Use a priority queue to ensure earliest to oldest order of subfiles
         # by obsid and second
         self.subfile_queue = queue.PriorityQueue()
-        self.subfile_watcher = None
-        self.subfile_queue_worker = None
-
-        # PSRDADA ringbuffer key for INPUT into correlator or beamformer
-        self.corr_ringbuffer_key = corr_ringbuffer_key
-        # Numa node for ringbuffers
-        self.corr_diskdb_numa_node = corr_diskdb_numa_node
-        # Numa node for /dev/shm/mwax/*.free files (opposite of ringbuffers)
-        self.corr_devshm_numa_node = 1 if corr_diskdb_numa_node == 0 else 0
-
-        self.psrdada_timeout_sec = psrdada_timeout_sec
-        self.copy_subfile_to_disk_timeout_sec = copy_subfile_to_disk_timeout_sec
-
-        self.mwax_stats_binary_dir = mwax_stats_binary_dir
-        self.packet_stats_dump_dir = packet_stats_dump_dir
-        self.packet_stats_destination_dir = packet_stats_destination_dir
-        self.packet_stats_destination_queue = queue.Queue()
-        self.packet_stats_destination_queue_worker = None
-        self.packet_stats_watcher = None
-
-        self.bf_redis_host = bf_redis_host
 
         # Each server will use a unique queue key. The queue key we read in the cfg file
         # is just the base- we then add the server name.
         # e.g. mwax25 will have a queue key of "bfq_mwax25"
 
         # Get the last 2 digits of the hostname
-        self.bf_redis_queue_key = f"{bf_redis_queue_key}{hostname}"
+        bf_redis_queue_key = f"{bf_redis_queue_key}{hostname}"
 
-        self.logger.debug(f"Using redis queue key: {self.bf_redis_queue_key}")
+        self.logger.debug(f"Using redis queue key: {bf_redis_queue_key}")
 
-        self.bf_aocal_path = bf_aocal_path
+        # Create watch queue worker
+        subfile_incoming_worker = SubfileIncomingProcessor(
+            self.logger,
+            self,
+            subfile_incoming_path,
+            self.ext_sub_file,
+            self.ext_free_file,
+            self.ext_keep_file,
+            voltdata_incoming_path,
+            bf_aocal_path,
+            bf_redis_host,
+            bf_redis_queue_key,
+            packet_stats_dump_dir,
+            mwax_stats_binary_dir,
+            1 if corr_diskdb_numa_node == 0 else 0,
+            copy_subfile_to_disk_timeout_sec,
+            corr_ringbuffer_key,
+            corr_diskdb_numa_node,
+            psrdada_timeout_sec,
+            always_keep_subfiles,
+        )
+        self.workers.append(subfile_incoming_worker)
+
+        if packet_stats_destination_dir != "" and packet_stats_dump_dir != "":
+            packet_stats_worker = PacketStatsProcessor(
+                self.logger, packet_stats_dump_dir, self.ext_packet_stats_file, packet_stats_destination_dir
+            )
+            self.workers.append(packet_stats_worker)
 
     def start(self):
         """Start the processor"""
         self.logger.info("Starting SubfileProcessor...")
 
-        # Create watcher for the subfiles
-        self.subfile_watcher = mwax_watcher.Watcher(
-            name="subfile_watcher",
-            path=self.subfile_incoming_path,
-            dest_queue=self.subfile_queue,
-            pattern=f"{self.ext_sub_file}",
-            log=self.logger,
-            mode=self.mwax_mover_mode,
-            recursive=False,
-        )
-
-        # Create subfile queueworker
-        self.subfile_queue_worker = mwax_queue_worker.QueueWorker(
-            name="Subfile Input Queue",
-            source_queue=self.subfile_queue,
-            executable_path=None,
-            event_handler=self.subfile_handler,
-            log=self.logger,
-            requeue_to_eoq_on_failure=False,
-            exit_once_queue_empty=False,
-        )
-
-        # Setup thread for watching filesystem
-        watcher_thread = threading.Thread(name="watch_sub", target=self.subfile_watcher.start, daemon=True)
-        self.watcher_threads.append(watcher_thread)
-        watcher_thread.start()
-
-        # Setup thread for processing subfile items
-        queue_worker_thread = threading.Thread(
-            name="work_sub",
-            target=self.subfile_queue_worker.start,
-            daemon=True,
-        )
-        self.worker_threads.append(queue_worker_thread)
-        queue_worker_thread.start()
-
-        #
-        # Setup watcher, queue, worker for transferring packet stats to destination (e.g vulcan)
-        # But only if we have specified the destination in the config file (and the dump dir)
-        #
-        if self.packet_stats_destination_dir != "" and self.packet_stats_dump_dir != "":
-            # Create watcher for the packet stats files
-            self.packet_stats_watcher = mwax_watcher.Watcher(
-                name="packet_stats_watcher",
-                path=self.packet_stats_dump_dir,
-                dest_queue=self.packet_stats_destination_queue,
-                pattern=f"{self.ext_packet_stats_file}",
-                log=self.logger,
-                mode=self.packet_stats_mode,
-                recursive=False,
-            )
-
-            # Create subfile queueworker
-            self.packet_stats_destination_queue_worker = mwax_queue_worker.QueueWorker(
-                name="Packet stats destination Queue",
-                source_queue=self.packet_stats_destination_queue,
-                executable_path=None,
-                event_handler=self.packet_stats_destination_handler,
-                log=self.logger,
-                requeue_to_eoq_on_failure=False,
-                exit_once_queue_empty=False,
-            )
-
-            # Setup thread for watching filesystem
-            watcher_thread = threading.Thread(
-                name="watch_packet_stats", target=self.packet_stats_watcher.start, daemon=True
-            )
-            self.watcher_threads.append(watcher_thread)
-            watcher_thread.start()
-
-            # Setup thread for processing subfile items
-            queue_worker_thread = threading.Thread(
-                name="work_packet_stats",
-                target=self.packet_stats_destination_queue_worker.start,
-                daemon=True,
-            )
-            self.worker_threads.append(queue_worker_thread)
-            queue_worker_thread.start()
+        for w in self.workers:
+            w.start()
 
         self.logger.info("SubfileProcessor started.")
 
-    def packet_stats_destination_handler(self, item: str) -> bool:
-        # This gets called by the queueworker who had put an "item"
-        # on the queue from a watcher of the filesystem.
-        # The "item" is the full path and filename of a packet stats data file
-        # which now needs to be copied to the destination path (e.g. vulcan)
-        # and the deleted once successful
-        destination_filename: str = os.path.join(self.packet_stats_destination_dir, os.path.basename(item))
-
-        try:
-            self.logger.debug(f"{item}: Attempting to copy local packet stats file {item} to{destination_filename}")
-            shutil.copy2(item, destination_filename)
-
-            self.logger.debug(f"{item}: Copy success. Deleting local packet stats file {item}")
-
-            # Success- now delete the file
-            os.remove(item)
-
-            self.logger.debug(f"{item}: Deleted local packet stats file {item}")
-
-            return True
-        except Exception:
-            # Something went wrong- log it and requeue
-            self.logger.exception(f"Unable to copy/delete {item} to {destination_filename}")
-            return False
-
-    def handle_next_keep_file(self) -> bool:
-        """When we need to offload a keep file, this handles it"""
-        success = True
-
-        # Get next keep file off the queue
-        keep_filename = self.dump_keep_file_queue.get()
-
-        self.logger.info(f"SubfileProcessor.handle_next_keep_file is handling {keep_filename}...")
-
-        # Read TRANSFER_SIZE from subfile header
-        # We only use this when writing a subfile to disk in case the subfile is
-        # bigger than the data
-        transfer_size_str = utils.read_subfile_value(keep_filename, utils.PSRDADA_TRANSFER_SIZE)
-        if transfer_size_str is None:
-            raise ValueError(f"Keyword {utils.PSRDADA_TRANSFER_SIZE} not found in {keep_filename}")
-
-        transfer_size = int(transfer_size_str)
-        subfile_bytes_to_write = transfer_size + PSRDADA_HEADER_BYTES  # We add the header to the transfer size
-
-        # Copy the .keep file to the voltdata incoming dir
-        # and ensure it is named as a ".sub" file
-        copy_success = self.copy_subfile_to_disk_dd(
-            keep_filename,
-            self.corr_diskdb_numa_node,
-            self.voltdata_incoming_path,
-            self.copy_subfile_to_disk_timeout_sec,
-            os.path.basename(keep_filename).replace(self.ext_keep_file, self.ext_sub_file),
-            subfile_bytes_to_write,
-        )
-
-        if copy_success:
-            # Rename kept subfile so that mwax_u2s can reuse it
-            free_filename = keep_filename.replace(self.ext_keep_file, self.ext_free_file)
-
-            try:
-                shutil.move(keep_filename, free_filename)
-            except Exception as move_exception:  # pylint: disable=broad-except
-                self.logger.error(f"Could not rename {keep_filename} back to {free_filename}. Error {move_exception}")
-                sys.exit(2)
-
-        else:
-            # Reqeuue file to try again later
-            self.dump_keep_file_queue.put(keep_filename)
-
-        self.logger.info(
-            "SubfileProcessor.handle_next_keep_file finished handling"
-            f" {keep_filename}. Remaining .keep files:"
-            f" {self.dump_keep_file_queue.qsize()}."
-        )
-
-        return success
-
-    def subfile_handler(self, item: str) -> bool:
-        """When subfile detected this handles it"""
-        success = False
-
-        self.logger.info(f"{item}- SubfileProcessor.subfile_handler is handling {item}...")
-
-        handler_starttime = time.time()
-
-        # `keep_subfiles_path` is used after doing the main work. If we are
-        # running in with `always_keep_subfiles`=1,
-        # then we will always keep the voltages and not delete them.
-        # If so, we put them into the voltdata path. But if we are in VCS mode
-        # there is no need to do this as we
-        # already keep the sub files.
-        #
-        # If not in `always_keep_subfiles`=1 mode, this value will be None and
-        # will be ignored.
-        #
-        keep_subfiles_path = None
-
-        # Read all the things from the subfile header here!
-        subfile_header_values = utils.read_subfile_values(
-            item,
-            [
-                utils.PSRDADA_OBS_ID,
-                utils.PSRDADA_SUBOBS_ID,
-                utils.PSRDADA_TRANSFER_SIZE,
-                utils.PSRDADA_MODE,
-                utils.PSRDADA_COARSE_CHANNEL,
-                utils.PSRDADA_NINPUTS,
-            ],
-        )
-
-        # Validate each one
-        if subfile_header_values[utils.PSRDADA_OBS_ID] is None:
-            raise ValueError(f"Keyword {utils.PSRDADA_OBS_ID} not found in {item}")
-        obs_id = int(subfile_header_values[utils.PSRDADA_OBS_ID])
-
-        if subfile_header_values[utils.PSRDADA_SUBOBS_ID] is None:
-            raise ValueError(f"Keyword {utils.PSRDADA_SUBOBS_ID} not found in {item}")
-        subobs_id = int(subfile_header_values[utils.PSRDADA_SUBOBS_ID])
-
-        # Read TRANSFER_SIZE from subfile header
-        # We only use this when writing a subfile to disk in case the subfile is
-        # bigger than the data
-        # transfer_size_str = utils.read_subfile_value(item, utils.PSRDADA_TRANSFER_SIZE)
-        if subfile_header_values[utils.PSRDADA_TRANSFER_SIZE] is None:
-            raise ValueError(f"Keyword {utils.PSRDADA_TRANSFER_SIZE} not found in {item}")
-        transfer_size = int(subfile_header_values[utils.PSRDADA_TRANSFER_SIZE])
-        subfile_bytes_to_write = transfer_size + PSRDADA_HEADER_BYTES  # We add the header to the transfer size
-
-        # Get Mode
-        if subfile_header_values[utils.PSRDADA_MODE] is None:
-            raise ValueError(f"Keyword {utils.PSRDADA_MODE} not found in {item}")
-        subfile_mode = subfile_header_values[utils.PSRDADA_MODE]
-
-        # Only do packet stats if packet_stats_dump_dir is not an empty string
-        if self.packet_stats_dump_dir != "":
-            # For all subfiles we need to extract the packet stats:
-            # Ignore failures
-            utils.run_mwax_packet_stats(
-                self.logger, self.mwax_stats_binary_dir, item, self.packet_stats_dump_dir, -1, 3
-            )
-
-        try:
-            #
-            # We need to check we are not in a voltage dump. If so, whatever
-            # observation is happening is ignored and instead we treat this
-            # like a VCS observation
-            #
-            if (
-                (self.dump_start_gps is not None and self.dump_end_gps is not None)
-                and subobs_id >= self.dump_start_gps
-                and subobs_id < self.dump_end_gps
-            ):
-                # We ARE in voltage dump and so we go and do a VCS capture instead
-                # of whatever else we were doing
-                self.logger.info(
-                    f"{item}- ignoring existing mode: {subfile_mode} as we"
-                    f" are within a voltage dump ({self.dump_start_gps} <"
-                    f" {self.dump_end_gps}) for trigger {self.dump_trigger_id}."
-                    " Doing VCS instead."
-                )
-
-                # Pause archiving so we have the disk to ourselves
-                if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
-                    if self.sd_ctx.archive_processor:
-                        self.sd_ctx.archive_processor.pause_archiving(True)  # pylint: disable=line-too-long
-
-                # See if there already is a TRIGGER_ID keyword in the subfile- if so
-                # don't overwrite it. We must have overlapping triggers happening
-                if not utils.read_subfile_trigger_value(item):
-                    # No TRIGGER_ID yet, so add it
-                    self.logger.info(
-                        f"{item}- injecting {utils.PSRDADA_TRIGGER_ID} {self.dump_trigger_id} into subfile..."
-                    )
-                    utils.inject_subfile_header(item, f"{utils.PSRDADA_TRIGGER_ID} {self.dump_trigger_id}\n")
-
-                success = self.copy_subfile_to_disk_dd(
-                    item,
-                    self.corr_devshm_numa_node,
-                    self.voltdata_incoming_path,
-                    self.copy_subfile_to_disk_timeout_sec,
-                    os.path.split(item)[1],
-                    subfile_bytes_to_write,
-                )
-            else:
-                # 1. Read header of subfile.
-                # 2. If mode==MWAX_CORRELATOR then
-                #       load into PSRDADA ringbuffer for correlator input
-                #    else if mode==MWAX_VCS then
-                #       Ensure archiving to Pawsey is stopped while we capture
-                #       copy subfile onto /voltdata where it will eventually
-                #       get archived
-                #    else if mode==MWAX_BEAMFORMER then
-                #       Send obs_subobs info to beamformer via named pipe
-                #    else
-                #       Ignore the subfile
-                # 3. Rename .sub file to .free so that udpgrab can reuse it
-
-                if CorrelatorMode.is_correlator(subfile_mode):
-                    # Check if we're in the right mwax_subfile_distributor mode
-                    if self.sd_ctx.mode == utils.MWAXSubfileDistirbutorMode.CORRELATOR:
-                        # This is a normal MWAX_CORRELATOR obs, continue as normal
-                        if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
-                            if self.sd_ctx.archive_processor:
-                                self.sd_ctx.archive_processor.pause_archiving(False)  # pylint: disable=line-too-long
-
-                        success = utils.load_psrdada_ringbuffer(
-                            self.logger,
-                            item,
-                            self.corr_ringbuffer_key,
-                            -1,
-                            self.psrdada_timeout_sec,
-                        )
-
-                        if self.always_keep_subfiles:
-                            keep_subfiles_path = self.voltdata_incoming_path
-                    else:
-                        # Ignore
-                        self.logger.warning(
-                            f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor NOT running in CORRELATOR mode"
-                        )
-                        success = True  # It's True because that signals the caller to keep going and don't retry
-
-                elif CorrelatorMode.is_vcs(subfile_mode):
-                    # Check if we're in the right mwax_subfile_distributor mode
-                    if self.sd_ctx.mode == utils.MWAXSubfileDistirbutorMode.CORRELATOR:
-                        # Pause archiving so we have the disk to ourselves
-                        if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
-                            if self.sd_ctx.archive_processor:
-                                self.sd_ctx.archive_processor.pause_archiving(True)  # pylint: disable=line-too-long
-
-                        success = self.copy_subfile_to_disk_dd(
-                            item,
-                            self.corr_devshm_numa_node,
-                            self.voltdata_incoming_path,
-                            self.copy_subfile_to_disk_timeout_sec,
-                            os.path.split(item)[1],
-                            subfile_bytes_to_write,
-                        )
-                    else:
-                        # Ignore
-                        self.logger.warning(
-                            f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor NOT running in CORRELATOR mode"
-                        )
-                        success = True  # It's True because that signals the caller to keep going and don't retry
-
-                elif CorrelatorMode.is_beamformer(subfile_mode):
-                    if self.sd_ctx.mode == utils.MWAXSubfileDistirbutorMode.BEAMFORMER:
-                        # This is a beamformer obs, enable archiving as normal (if configured)
-                        if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
-                            if self.sd_ctx.archive_processor:
-                                self.sd_ctx.archive_processor.pause_archiving(False)
-
-                        # Get number of inputs and coarse channel from header
-                        if subfile_header_values[utils.PSRDADA_COARSE_CHANNEL] is None:
-                            raise ValueError(f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {item}")
-                        rec_chan_no = int(subfile_header_values[utils.PSRDADA_COARSE_CHANNEL])
-
-                        # Get cal_obsid from metafits
-                        metafits_filename = os.path.join(self.sd_ctx.cfg_corr_metafits_path, f"{obs_id}_metafits.fits")
-                        METAFITS_CALOBSID = "CALOBSID"
-                        METAFITS_CALIBDATA_HDU = "CALIBDATA"
-                        try:
-                            cal_obs_id_str = utils.get_metafits_value_from_hdu(
-                                metafits_filename, METAFITS_CALIBDATA_HDU, METAFITS_CALOBSID
-                            )
-                        except Exception:
-                            self.logger.warning(
-                                f"{item} key {METAFITS_CALOBSID} not found in metafits file {metafits_filename} hdu {METAFITS_CALIBDATA_HDU}"
-                            )
-                            cal_obs_id_str = "0"
-
-                        try:
-                            cal_obs_id: int = int(cal_obs_id_str)
-                        except Exception:
-                            self.logger.warning(
-                                f"{item}: value {cal_obs_id_str} for key {METAFITS_CALOBSID} in {metafits_filename} hdu {METAFITS_CALIBDATA_HDU} is not a number"
-                            )
-                            cal_obs_id = 0
-
-                        success = self.signal_beamformer(item, cal_obs_id, rec_chan_no)
-                    else:
-                        # Ignore
-                        self.logger.warning(
-                            f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor NOT running in BEAMFORMER mode"
-                        )
-                        success = True  # It's True because that signals the caller to keep going and don't retry
-
-                elif CorrelatorMode.is_no_capture(subfile_mode) or CorrelatorMode.is_voltage_buffer(subfile_mode):
-                    self.logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
-
-                    #
-                    # This is our opportunity to write any "keep" files to disk
-                    # which were held from a voltage buffer dump
-                    #
-                    if self.dump_keep_file_queue.qsize() > 0:
-                        # Pause archiving
-                        if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
-                            if self.sd_ctx.archive_processor:
-                                self.sd_ctx.archive_processor.pause_archiving(True)  # pylint: disable=line-too-long
-
-                        # Since we're not doing anything with this subfile we can
-                        # try and handle any remaining keep files
-                        self.handle_next_keep_file()
-                    else:
-                        # Unpause archiving
-                        if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
-                            if self.sd_ctx.archive_processor:
-                                self.sd_ctx.archive_processor.pause_archiving(False)  # pylint: disable=line-too-long
-
-                    success = True
-
-                else:
-                    self.logger.error(f"{item}- Unknown subfile mode {subfile_mode}, ignoring.")
-                    success = True
-
-                # There is a semi-rare case where in between the top of this code and now
-                # a voltage trigger has been received. If so THIS subfile may not have been added to
-                # the keep list, so deal with it now
-
-                # Commenting out below for now as it is not necessary I think...
-                # if (
-                #    (
-                #        self.dump_start_gps is not None
-                #        and self.dump_end_gps is not None
-                #    )
-                #    and subobs_id >= self.dump_start_gps
-                #    and subobs_id < self.dump_end_gps
-                # ):
-                #    # Rename it now to .keep
-                #    keep_filename = item.replace(
-                #        self.ext_sub_file, self.ext_keep_file
-                #    )
-                #
-                #    os.rename(item, keep_filename)
-                #
-                #    # add it to the queue
-                #    # Lucky for us it will add it to the bottom.
-                #    self.dump_keep_file_queue.put(keep_filename)
-
-            # Check if we need to clear the dump info
-            if self.dump_end_gps is not None:
-                if subobs_id >= self.dump_end_gps:
-                    # Reset the dump start and end
-                    self.dump_start_gps = None
-                    self.dump_end_gps = None
-                    self.dump_trigger_id = None
-
-        except Exception as handler_exception:  # pylint: disable=broad-except
-            self.logger.error(f"{item} {handler_exception}")
-            success = False
-
-        finally:
-            if success:
-                # Check if need to keep subfiles, if so we need to copy
-                # them off
-                if keep_subfiles_path:
-                    # we use -1 for numa node for now as this is really for
-                    # debug so it does not matter
-                    self.copy_subfile_to_disk_dd(
-                        item,
-                        self.corr_devshm_numa_node,
-                        keep_subfiles_path,
-                        self.copy_subfile_to_disk_timeout_sec,
-                        os.path.split(item)[1],
-                        subfile_bytes_to_write,
-                    )
-
-                # Rename to free but not if we are in MWAX_BEAMFORMER mode as the BF will
-                # take care of it when it has finished with it
-                if (
-                    CorrelatorMode.is_beamformer(subfile_mode)
-                    and self.sd_ctx.mode == utils.MWAXSubfileDistirbutorMode.BEAMFORMER
-                ):
-                    # Don't rename .sub to .free- the beamformer does it
-                    pass
-                else:
-                    # Rename subfile so that udpgrab can reuse it
-                    free_filename = str(item).replace(self.ext_sub_file, self.ext_free_file)
-
-                    try:
-                        # Check it exists first- the dump process
-                        # may have renamed it already to .keep
-                        try:
-                            shutil.move(item, free_filename)
-                        except FileNotFoundError:
-                            pass
-
-                    except Exception as move_exception:  # pylint: disable=broad-except
-                        self.logger.error(
-                            f"{item}- Could not rename {item} back to {free_filename}. Error {move_exception}"
-                        )
-                        sys.exit(2)
-
-            handler_elapsed = time.time() - handler_starttime
-
-            self.logger.info(
-                f"{item}- SubfileProcessor.subfile_handler finished handling in {handler_elapsed:.3f} secs."
-            )
-
-        return success
-
-    def signal_beamformer(self, item: str, cal_obs_id: int, rec_chan_no: int) -> bool:
-        # Send obs_subobs info to beamformer via named pipe
-
-        # We don't know the exact aocal filename as we dont have num_fine_chans
-        # so we'll use a wildcard
-        aocal_filename = ""
-        partial_aocal_filename = os.path.join(self.bf_aocal_path, get_partial_aocal_filename(cal_obs_id, rec_chan_no))
-        try:
-            found_files = glob.glob(partial_aocal_filename)
-            if not found_files:
-                self.logger.warning(f"{item}- No aocal file found matching pattern {partial_aocal_filename}.")
-            else:
-                aocal_filename = found_files[0]
-                self.logger.info(f"{item}- Found aocal file {aocal_filename} for pattern {partial_aocal_filename}.")
-        except Exception as e:
-            self.logger.error(
-                f"{item}- Error searching for aocal file with pattern {partial_aocal_filename}. Error: {e}"
-            )
-
-        signal_value = {"subfile": item, "aocalfile": aocal_filename}
-        self.logger.info(f"{item}- Signalling beamformer with ({signal_value}) via redis {self.bf_redis_host}...")
-        try:
-            # Write the signal value- if reader disconnects it will auto-reopen unless timeout is hit
-            utils.push_message_to_redis(self.bf_redis_host, self.bf_redis_queue_key, signal_value)
-            # Success
-            self.logger.info(f"{item}- Signalling beamformer success")
-            return True
-
-        except Exception:
-            self.logger.exception(f"{item}- signal_beamformer failed.")
-            exit(3)
-
     def stop(self):
         """Stop the processor"""
-        self.logger.debug("subfile_watcher Stopping...")
-        if self.subfile_watcher:
-            self.subfile_watcher.stop()
-        self.logger.debug("subfile_watcher Stopped")
-
-        self.logger.debug("subfile_queue_worker Stopping...")
-        if self.subfile_queue_worker:
-            self.subfile_queue_worker.stop()
-        self.logger.debug("subfile_queue_worker Stopped")
-
-        self.logger.debug("packet_stats_watcher Stopping...")
-        if self.packet_stats_watcher:
-            self.packet_stats_watcher.stop()
-        self.logger.debug("packet_stats_watcher Stopped")
-
-        self.logger.debug("packet_stats_destination_queue_worker Stopping...")
-        if self.packet_stats_destination_queue_worker:
-            self.packet_stats_destination_queue_worker.stop()
-        self.logger.debug("packet_stats_destination_queue_worker Stopped")
-
-        # Wait for threads to finish
-        for watcher_thread in self.watcher_threads:
-            if watcher_thread:
-                thread_name = watcher_thread.name
-                self.logger.debug(f"Watcher {thread_name} Stopping...")
-                if watcher_thread.is_alive():
-                    watcher_thread.join()
-                self.logger.debug(f"Watcher {thread_name} Stopped")
-
-        for worker_thread in self.worker_threads:
-            if worker_thread:
-                thread_name = worker_thread.name
-                self.logger.debug(f"QueueWorker {thread_name} Stopping...")
-                if worker_thread.is_alive():
-                    worker_thread.join()
-                self.logger.debug(f"QueueWorker {thread_name} Stopped")
-
-    def copy_subfile_to_disk_cp(
-        self,
-        filename: str,
-        numa_node: int,
-        destination_path: str,
-        timeout: int,
-        destination_filename: str = ".",
-    ) -> bool:
-        """Copies the given filename to the destination path
-        DEPRECATED FOR NOW- replaced with copy_subfile_to_disk_dd()"""
-        self.logger.info(f"{filename}- Copying file into {destination_path}")
-
-        command = f"cp {filename} {destination_path}/{destination_filename}"
-
-        start_time = time.time()
-        retval, stdout = mwax_command.run_command_ext(self.logger, command, numa_node, timeout, False)
-        elapsed = time.time() - start_time
-
-        if retval:
-            self.logger.info(
-                f"{filename}- Copying file into"
-                f" {destination_path}/{destination_filename} was successful"
-                f" (took {elapsed:.3f} secs)."
-            )
-        else:
-            self.logger.error(
-                f"{filename}- Copying file into {destination_path}/{destination_filename} failed with error {stdout}"
-            )
-
-        return retval
-
-    def copy_subfile_to_disk_dd(
-        self,
-        filename: str,
-        numa_node: int,
-        destination_path: str,
-        timeout: int,
-        destination_filename: str,
-        bytes_to_write: int,
-    ) -> bool:
-        """Copies the given filename to the destination path, trimming X bytes off the end of the file
-        This is for the case where the subfiles are sized for e.g. 144T but the observation is only
-        128T. When copied, dd will only copy the 128T worth of data (u2s would have already ensured
-        that the data written is only 128T worth and that the remaining space is 'empty')
-
-        filename: Abs or relative path and filename
-        destination_path: Just the destination directory
-        destination_filename: Just the destination filename (no path)- note- unlike with cp it cannot
-                            be just a "."! dd doesn't like that - it has to be a real filename.
-        bytes_to_write: only write the first N bytes"""
-        self.logger.debug(f"{filename}- Copying first {bytes_to_write} bytes of file into {destination_path}")
-
-        command = f"dd if={filename} of={destination_path}/{destination_filename} bs=4M oflag=direct iflag=count_bytes count={bytes_to_write}"
-
-        start_time = time.time()
-        retval, stdout = mwax_command.run_command_ext(self.logger, command, numa_node, timeout, False)
-
-        if retval:
-            elapsed = time.time() - start_time
-            speed = (bytes_to_write / elapsed) / (1000.0 * 1000.0 * 1000.0)
-
-            self.logger.info(
-                f"{filename}- Copying first {bytes_to_write} bytes of file into"
-                f" {destination_path}/{destination_filename} was successful"
-                f" (took {elapsed:.3f} secs at {speed:.3f} GB/sec)."
-            )
-        else:
-            self.logger.error(
-                f"{filename}- Copying first {bytes_to_write} bytes of file into"
-                f" {destination_path}/{destination_filename} failed with error"
-                f" {stdout}"
-            )
-
-        return retval
+        for w in self.workers:
+            w.stop()
 
     def dump_voltages(self, start_gps_time: int, end_gps_time: int, trigger_id: int) -> bool:
         """Dump whatever subfiles we have from /dev/shm to disk"""
@@ -804,18 +187,11 @@ class SubfileProcessor:
 
     def get_status(self) -> dict:
         """Return status as a dictionary"""
-        watcher_list = []
-
-        if self.subfile_watcher:
-            status = dict({"Unix timestamp": time.time(), "name": "subfile watcher"})
-            status.update(self.subfile_watcher.get_status())
-            watcher_list.append(status)
-
         worker_list = []
 
-        if self.subfile_queue_worker:
-            status = dict({"name": "subfile worker"})
-            status.update(self.subfile_queue_worker.get_status())
+        for w in self.workers:
+            status = dict({"name": w.name})
+            status.update(w.get_status())
             worker_list.append(status)
 
         return_status = {
@@ -823,7 +199,6 @@ class SubfileProcessor:
             "dump_keep_file_queue": self.dump_keep_file_queue.qsize(),
             "dump_start_gps": self.dump_start_gps,
             "dump_end_gps": self.dump_end_gps,
-            "watchers": watcher_list,
             "workers": worker_list,
         }
 

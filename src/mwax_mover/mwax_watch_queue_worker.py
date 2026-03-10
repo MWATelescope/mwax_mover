@@ -173,6 +173,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
         self.name = name
         self.metafits_path = metafits_path
         self.hostname = utils.get_hostname()
+        self.threads: list[Thread] = []
 
         # Watch
         self.pwatchers: list[PriorityWatcher] = []
@@ -195,6 +196,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
         self.pqueue_worker_thread = Thread(
             name=f"{self.pqueue_worker.name}_thread", target=self.pqueue_worker.start, daemon=True
         )
+        self.threads.append(self.pqueue_worker_thread)
 
         # Create a watcher and watcher thread for each path we're watching
         for p in watch_path_exts:
@@ -220,6 +222,13 @@ class MWAXPriorityWatchQueueWorker(ABC):
             # Create and store the new thread
             new_thread = Thread(target=new_watcher.start, daemon=True)
             self.pwatcher_threads.append(new_thread)
+            self.threads.append(new_thread)
+
+    def is_running(self) -> bool:
+        for thread in self.threads:
+            if not thread.is_alive():
+                return False
+        return True
 
     def start(self):
         for w in self.pwatcher_threads:

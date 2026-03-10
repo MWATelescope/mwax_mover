@@ -859,24 +859,11 @@ class MWAXSubfileDistributor:
 
         while self.running:
             for processor in self.processors:
-                for worker_thread in processor.worker_threads:
-                    if worker_thread:
-                        if not worker_thread.is_alive():
-                            self.logger.error(
-                                f"Processor {type(processor).__name__} worker thread"
-                                f" {worker_thread.name} has stopped unexpectedly."
-                            )
-                            self.running = False
-                            break
-                for watcher_thread in processor.watcher_threads:
-                    if watcher_thread:
-                        if not watcher_thread.is_alive():
-                            self.logger.error(
-                                f"Processor {type(processor).__name__} watcher thread"
-                                f" {watcher_thread.name} has stopped unexpectedly."
-                            )
-                            self.running = False
-                            break
+                for worker in processor.workers:
+                    if not worker.running:
+                        self.logger.error(f"Processor {type(processor).__name__} has stopped unexpectedly.")
+                        self.running = False
+                        break
 
             time.sleep(0.1)
 

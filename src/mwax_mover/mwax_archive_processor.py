@@ -115,10 +115,6 @@ class MWAXArchiveProcessor:
         # This list helps us keep track of all the workers
         self.workers: list[MWAXWatchQueueWorker | MWAXPriorityWatchQueueWorker] = list()
 
-    def start(self):
-        """This method is used to start the processor"""
-        self.logger.info("Starting ArchiveProcessor...")
-
         # Watch:
         #   watch_dir_incoming_vis
         #   watch_dir_incoming_volt
@@ -165,6 +161,7 @@ class MWAXArchiveProcessor:
             self.watch_dir_outgoing_cal,
             self.dont_archive_path_vis,
         )
+        self.workers.append(self.vis_stats_processor)
 
         # Watch:
         #   watch_dir_incoming_bf
@@ -184,6 +181,7 @@ class MWAXArchiveProcessor:
             self.archive_destination_enabled == 1,
             self.bf_keep_original_files_after_stitching,
         )
+        self.workers.append(self.bf_stitching_processor)
 
         if self.archive_destination_enabled:
             # Only start these processors if we are archiving
@@ -193,11 +191,12 @@ class MWAXArchiveProcessor:
             # Do:
             #   Add to the outgoing cal list so that when release_cal_obs is called by calvin, we can remove the file from the list and archive the file
             #
-            self.vis_s_cal_outgoing_processor = VisCalOutgoingProcessor(
+            self.vis_cal_outgoing_processor = VisCalOutgoingProcessor(
                 self.logger,
                 self.watch_dir_outgoing_cal,
                 self.outgoing_cal_list,
             )
+            self.workers.append(self.vis_cal_outgoing_processor)
 
             # Watch:
             #   watch_dir_outgoing_vis
@@ -217,6 +216,8 @@ class MWAXArchiveProcessor:
                 self.archive_destination_host,
                 self.archive_command_timeout_sec,
             )
+            self.workers.append(self.outgoing_processor)
+
         else:
             # We have disabled archiving, so use a different
             # handler for incoming data
@@ -247,19 +248,9 @@ class MWAXArchiveProcessor:
                     )
                     sys.exit(-2)
 
-        #
-        # Start processors
-        #
-        self.logger.info("Waiting for all workers to finish scanning....")
-        workers_still_scanning = len(self.workers)
-        while workers_still_scanning > 0:
-            workers_still_scanning = 0
-            for w in self.workers:
-                if not w.scan_completed:
-                    self.logger.debug(f"{w.name} still scanning!")
-                    workers_still_scanning += 1
-            time.sleep(1)  # hold off for another second
-        self.logger.info("Workers are finished scanning.")
+    def start(self):
+        """This method is used to start the processor"""
+        self.logger.info("Starting ArchiveProcessor...")
 
         #
         # Start workers

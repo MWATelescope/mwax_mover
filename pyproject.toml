@@ -64,8 +64,8 @@ package = true
 [tool.uv.sources]
 sigpyproc = { git = "https://github.com/FRBs/sigpyproc3" }
 
-[tool.pytest.ini_options]
-log_cli = true
-log_cli_level = "DEBUG"
-log_cli_format = "%(asctime)s %(levelname)s %(message)s"
-log_cli_date_format = "%Y-%m-%dT%H:%M:%S"
+#[tool.pytest.ini_options]
+#log_cli = true
+#log_cli_level = "DEBUG"
+#log_cli_format = "%(asctime)s %(levelname)s %(message)s"
+#log_cli_date_format = "%Y-%m-%dT%H:%M:%S"
