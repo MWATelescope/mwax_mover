@@ -52,8 +52,6 @@ class MWAXSubfileDistributor:
         else:
             self.hostname: str = utils.get_hostname()
         self.running: bool = False
-        self.processors: list = []
-        self.subfile_processor = None
 
         # Web server
         self.flask_thread: threading.Thread
@@ -1006,18 +1004,15 @@ class MWAXSubfileDistributor:
                     raise ValueError("end must be after start")
 
                 # Check to see if we aren't already doing a dump
-                if self.subfile_processor:
-                    if self.subfile_processor.dump_start_gps is None and self.subfile_processor.dump_end_gps is None:
-                        # Now call the method to dump the voltages
-                        if self.subfile_processor.dump_voltages(starttime, endtime, trigger_id):
-                            return b"OK", 200
-                        else:
-                            return b"Failed to start Voltage Buffer Dump", 400
+                if self.dump_start_gps is None and self.dump_end_gps is None:
+                    # Now call the method to dump the voltages
+                    if self.dump_voltages(starttime, endtime, trigger_id):
+                        return b"OK", 200
                     else:
-                        # Reject this request
-                        return b"Voltage Buffer Dump already in progress. Request canceled.", 400
+                        return b"Failed to start Voltage Buffer Dump", 400
                 else:
-                    return b"Subfile processor not initialised. Cannot dump voltages.", 400
+                    # Reject this request
+                    return b"Voltage Buffer Dump already in progress. Request canceled.", 400
 
         except ValueError as parameters_exception:  # pylint: disable=broad-except
             return f"Value Error: {parameters_exception}".encode("utf-8"), 400
@@ -1137,18 +1132,18 @@ class MWAXSubfileDistributor:
             "cmdline": " ".join(sys.argv[1:]),
         }
 
-        processor_status_list = []
+        worker_status_list = []
 
-        for processor in self.processors:
-            processor_status_list.append(processor.get_status())
+        for w in self.workers:
+            worker_status_list.append(w.get_status())
 
-        status = {"main": main_status, "processors": processor_status_list}
+        status = {"main": main_status, "workers": worker_status_list}
 
         return status
 
     def signal_handler(self, _signum, _frame):
         """Handle SIGINT, SIGTERM"""
-        self.logger.warning(f"Interrupted. Shutting down {len(self.processors)} processors...")
+        self.logger.warning(f"Interrupted. Shutting down {len(self.workers)} workers...")
         self.stop()
 
     def start(self):
@@ -1169,10 +1164,7 @@ class MWAXSubfileDistributor:
         health_thread.start()
         self.logger.info("health_thread started.")
 
-        self.logger.info("MWAX Subfile Distributor started successfully.")
-
-        for processor in self.processors:
-            processor.start()
+        self.logger.info("MWAX Subfile Distributor started and will run workers.")
 
         for w in self.workers:
             w.start()
@@ -1182,15 +1174,12 @@ class MWAXSubfileDistributor:
         self.logger.info("Entering main loop...")
 
         while self.running:
-            for processor in self.processors:
+            for w in self.workers:
                 if self.running:
-                    for worker in processor.workers:
-                        if not worker.is_running():
-                            self.logger.error(
-                                f"Processor {type(processor).__name__}.{worker.name} has stopped unexpectedly."
-                            )
-                            self.running = False
-                            break
+                    if not w.is_running():
+                        self.logger.error(f"Worker {w.name} has stopped unexpectedly.")
+                        self.running = False
+                        break
 
             time.sleep(0.1)
 
@@ -1204,8 +1193,8 @@ class MWAXSubfileDistributor:
         self.running = False
 
         # Stop any Processors
-        for processor in self.processors:
-            processor.stop()
+        for w in self.workers:
+            w.stop()
 
         # do some clean up of the web server
         #
