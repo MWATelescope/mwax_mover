@@ -621,11 +621,11 @@ def scan_for_existing_files_and_add_to_queue(
     """
     files = scan_directory(logger, watch_dir, pattern, recursive, exclude_pattern)
     files = sorted(files)
-    logger.info(f"Found {len(files)} files")
+    logger.info(f"{watch_dir}: Found {len(files)} files")
 
     for filename in files:
         queue_target.put(filename)
-        logger.info(f"{filename} added to queue")
+        logger.info(f"{watch_dir}: {os.path.basename(filename)} added to queue")
 
 
 def scan_for_existing_files_and_add_to_priority_queue(
@@ -645,7 +645,7 @@ def scan_for_existing_files_and_add_to_priority_queue(
     """
     files = scan_directory(logger, watch_dir, pattern, recursive, exclude_pattern)
     files = sorted(files)
-    logger.info(f"Found {len(files)} files")
+    logger.info(f"{watch_dir}: Found {len(files)} files")
 
     for filename in files:
         priority = get_priority(
@@ -656,7 +656,7 @@ def scan_for_existing_files_and_add_to_priority_queue(
             list_of_vcs_high_priority_projects,
         )
         queue_target.put((priority, MWAXPriorityQueueData(filename)))
-        logger.info(f"{filename} added to queue with priority {priority}")
+        logger.info(f"{watch_dir}: {os.path.basename(filename)} added to queue with priority {priority}")
 
 
 def scan_directory(logger, watch_dir: str, pattern: str, recursive: bool, exclude_pattern) -> list:
@@ -665,17 +665,17 @@ def scan_directory(logger, watch_dir: str, pattern: str, recursive: bool, exclud
     # Just loop through all files and add them to the queue
     if recursive:
         find_pattern = os.path.join(os.path.abspath(watch_dir), "**/*" + pattern)
-        logger.info(f"Scanning recursively for files matching {find_pattern}...")
+        logger.info(f"{watch_dir}: Scanning recursively for files matching {find_pattern}...")
     else:
         find_pattern = os.path.join(os.path.abspath(watch_dir), "*" + pattern)
-        logger.info(f"Scanning for files matching {find_pattern}...")
+        logger.info(f"{watch_dir}: Scanning for files matching {find_pattern}...")
 
     files = glob.glob(find_pattern, recursive=recursive)
 
     # Now exclude files if they match the exclude pattern
     if exclude_pattern:
         exclude_glob = os.path.join(os.path.abspath(watch_dir), "*" + exclude_pattern)
-        logger.info(f"Excluding files {exclude_glob}...")
+        logger.info(f"{watch_dir}: Excluding files {exclude_glob}...")
         return [fn for fn in files if fn not in glob.glob(exclude_glob)]
     else:
         return files

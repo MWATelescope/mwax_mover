@@ -36,9 +36,10 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
                 (voltdata_incoming_path, ".sub"),
                 (bf_stitching_path, ".*"),
             ],
-            MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
-            list_of_corr_hi_priority_projects,
-            list_of_vcs_hi_priority_projects,
+            mode=MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+            corr_hi_priority_projects=list_of_corr_hi_priority_projects,
+            vcs_hi_priority_projects=list_of_vcs_hi_priority_projects,
+            requeue_to_eoq_on_failure=False,
         )
         self.visdata_incoming_path = visdata_incoming_path
         self.voltdata_incoming_path = voltdata_incoming_path

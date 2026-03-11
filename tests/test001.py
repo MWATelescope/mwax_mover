@@ -47,7 +47,7 @@ def test_beamformer_subfile():
     thrd.start()
 
     # allow things to start
-    time.sleep(10)
+    time.sleep(30)
 
     # Quit
     # Ok time's up! Stop the processor

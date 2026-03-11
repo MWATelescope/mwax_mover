@@ -602,12 +602,15 @@ class MWAXSubfileDistributor:
             self.cfg_bf_redis_host,
             self.cfg_bf_redis_queue_key,
             self.cfg_bf_aocal_path,
+            self.cfg_corr_archive_destination_enabled == 1,
+            self.cfg_corr_metafits_path,
+            self.mode,
         )
 
         # Add this processor to list of processors we manage
         self.processors.append(self.subfile_processor)
 
-        if self.cfg_corr_archive_destination_enabled is False:
+        if self.cfg_corr_archive_destination_enabled == 0:
             self.logger.warning(
                 "'mwax_destination_enabled' is FALSE. Nothing will be"
                 " archived and nothing will be sent for calibration."
@@ -859,11 +862,14 @@ class MWAXSubfileDistributor:
 
         while self.running:
             for processor in self.processors:
-                for worker in processor.workers:
-                    if not worker.running:
-                        self.logger.error(f"Processor {type(processor).__name__} has stopped unexpectedly.")
-                        self.running = False
-                        break
+                if self.running:
+                    for worker in processor.workers:
+                        if not worker.is_running():
+                            self.logger.error(
+                                f"Processor {type(processor).__name__}.{worker.name} has stopped unexpectedly."
+                            )
+                            self.running = False
+                            break
 
             time.sleep(0.1)
 

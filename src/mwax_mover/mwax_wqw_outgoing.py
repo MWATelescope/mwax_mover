@@ -28,9 +28,10 @@ class OutgoingProcessor(MWAXPriorityWatchQueueWorker):
                 (voltdata_outgoing_path, ".sub"),
                 (bf_outgoing_path, ".*"),
             ],
-            MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
-            list_of_corr_hi_priority_projects,
-            list_of_vcs_hi_priority_projects,
+            mode=MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+            corr_hi_priority_projects=list_of_corr_hi_priority_projects,
+            vcs_hi_priority_projects=list_of_vcs_hi_priority_projects,
+            requeue_to_eoq_on_failure=False,
         )
         self.archive_command_numa_node = archive_command_numa_node
         self.archive_destination_host = archive_destination_host

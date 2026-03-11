@@ -35,6 +35,7 @@ class MWAXWatchQueueWorker(ABC):
     ):
         self.logger = logger
         self.name = name
+        self.threads: list[Thread] = []
 
         # watch
         self.watchers: list[Watcher] = []
@@ -57,6 +58,7 @@ class MWAXWatchQueueWorker(ABC):
         self.queue_worker_thread = Thread(
             name=f"{self.queue_worker.name}_thread", target=self.queue_worker.start, daemon=True
         )
+        self.threads.append(self.queue_worker_thread)
 
         # Create a watcher and watcher thread for each path we're watching
         for p in watch_paths_exts:
@@ -79,6 +81,7 @@ class MWAXWatchQueueWorker(ABC):
             # Create and store the new thread
             new_thread = Thread(name=f"{new_watcher.name}_thread", target=new_watcher.start, daemon=True)
             self.watcher_threads.append(new_thread)
+            self.threads.append(new_thread)
 
     def start(self):
         for w in self.watcher_threads:
@@ -98,6 +101,12 @@ class MWAXWatchQueueWorker(ABC):
         self.queue_worker_thread.start()
 
         self.logger.info(f"MWAXWatchQueueWorker {self.name} started.")
+
+    def is_running(self) -> bool:
+        for thread in self.threads:
+            if not thread.is_alive():
+                return False
+        return True
 
     def stop(self):
         self.logger.info(f"MWAXWatchQueueWorker {self.name} stopping.")

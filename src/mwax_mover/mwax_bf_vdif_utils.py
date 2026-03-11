@@ -1,5 +1,6 @@
 from typing import List
 import logging
+from astropy.io import fits
 from mwalib import MetafitsContext
 import mwax_mover.version
 import os
@@ -31,24 +32,22 @@ class VDIFHeader:
         self.bw: float = 0.0
         self.tsamp: float = 0.0
 
-    def populate(self, metafits_filename: str, rec_chan: int, beam_no: int):
+    def populate(self, logger: logging.Logger, metafits_filename: str, rec_chan: int, beam_no: int):
         mc = MetafitsContext(metafits_filename)
-
         self.mjd_start = mc.sched_start_mjd
         self.mjd_epoch = mc.sched_start_mjd
         self.sec_offset = 0
-        self.source = mc.obs_name
+
+        self.source = mc.obs_name  # might get overridden by metafits so this is the default
+        self.ra = str(0)  # might get overridden by metafits so this is the default
+        self.dec = str(0)  # might get overridden by metafits so this is the default
+        self.tsamp = 1.0 / 1280000  # might get overridden by metafits so this is the default
 
         if mc.metafits_voltage_beams:
             self.voltage_beam = mc.metafits_voltage_beams[beam_no]
             self.ra = str(self.voltage_beam.ra_deg)
             self.dec = str(self.voltage_beam.dec_deg)
             self.tsamp = 1.0 / self.voltage_beam.frequency_resolution_hz
-        else:
-            # weird there are no beams
-            self.ra = str(0)
-            self.dec = str(0)
-            self.tsamp = 1.0 / 1280000
 
         # Find the coarse channel
         for chan in mc.metafits_coarse_chans:
@@ -56,6 +55,45 @@ class VDIFHeader:
                 self.bw = chan.chan_width_hz / 1000000.0  # convert Hz to MHz
                 self.freq = chan.chan_centre_hz / 1000000.0  # convert Hz to MHz
                 break
+
+        # There are some optional values in newer metafits which are not yet supported in mwalib
+        with fits.open(metafits_filename) as hdul:
+            BEAM_ALT_AZ_HDU = "BEAMALTAZ"
+
+            # Get the start RA and DEC
+            try:
+                beamaltaz_hdu = hdul[BEAM_ALT_AZ_HDU]
+                s_ra = beamaltaz_hdu.header[f"B{beam_no:02d}_SRA"]  # type: ignore[reportAttributeAccessIssue]
+                s_dec = beamaltaz_hdu.header[f"B{beam_no:02d}_SDEC"]  # type: ignore[reportAttributeAccessIssue]
+
+                if s_ra is not None:
+                    self.ra = s_ra
+                if s_dec is not None:
+                    self.dec = s_dec
+            except KeyError:
+                logger.warning(f"Unable to read {BEAM_ALT_AZ_HDU} values")
+                pass
+
+            except Exception:
+                logger.exception(f"Unable to read {BEAM_ALT_AZ_HDU} values")
+                pass
+
+            # Get the beam target name
+            VOLTAGE_BEAMS_HDU = "VOLTAGEBEAMS"
+            try:
+                voltagebeams_hdu = hdul[VOLTAGE_BEAMS_HDU]
+                target_name = voltagebeams_hdu.header["target_name"]  # type: ignore[reportAttributeAccessIssue]
+
+                if target_name is not None:
+                    self.source = target_name
+
+            except KeyError:
+                logger.warning(f"Unable to read {VOLTAGE_BEAMS_HDU} values")
+                pass
+
+            except Exception:
+                logger.exception(f"Unable to read {VOLTAGE_BEAMS_HDU} values")
+                pass
 
     def write(self, vdif_hdr_filename: str):
         """
@@ -175,7 +213,7 @@ def stitch_vdif_files_and_write_hdr(
 
     # Write the header file
     hdr = VDIFHeader()
-    hdr.populate(metafits_filename, rec_chan, beam_no)
+    hdr.populate(logger, metafits_filename, rec_chan, beam_no)
     hdr.write(output_hdr_filename)
 
     logger.info(f"Successfully wrote VDIF header file into {output_hdr_filename}")

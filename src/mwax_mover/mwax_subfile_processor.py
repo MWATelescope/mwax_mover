@@ -6,7 +6,7 @@ import queue
 import shutil
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
 from mwax_mover import utils
-from mwax_mover.utils import CorrelatorMode
+from mwax_mover.utils import CorrelatorMode, MWAXSubfileDistirbutorMode
 from mwax_mover.mwax_wqw_subfile_incoming_processor import SubfileIncomingProcessor
 from mwax_mover.mwax_wqw_packet_stats_processor import PacketStatsProcessor
 from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker, MWAXWatchQueueWorker
@@ -32,6 +32,9 @@ class SubfileProcessor:
         bf_redis_host: str,
         bf_redis_queue_key: str,
         bf_aocal_path: str,
+        archive_destination_enabled: bool,
+        metafits_path: str,
+        subfile_dist_mode: MWAXSubfileDistirbutorMode,
     ):
         self.sd_ctx = context
         self.workers: list[MWAXPriorityWatchQueueWorker | MWAXWatchQueueWorker] = []
@@ -57,9 +60,9 @@ class SubfileProcessor:
         self.dump_trigger_id = None
         self.dump_keep_file_queue = queue.Queue()
 
-        # Use a priority queue to ensure earliest to oldest order of subfiles
-        # by obsid and second
-        self.subfile_queue = queue.PriorityQueue()
+        self.archive_destination_enabled = archive_destination_enabled
+        self.metafits_path = metafits_path
+        self.subfile_dist_mode = subfile_dist_mode
 
         # Each server will use a unique queue key. The queue key we read in the cfg file
         # is just the base- we then add the server name.
@@ -74,6 +77,7 @@ class SubfileProcessor:
         subfile_incoming_worker = SubfileIncomingProcessor(
             self.logger,
             self,
+            self.sd_ctx.archive_processor,
             subfile_incoming_path,
             self.ext_sub_file,
             self.ext_free_file,
@@ -90,6 +94,9 @@ class SubfileProcessor:
             corr_diskdb_numa_node,
             psrdada_timeout_sec,
             always_keep_subfiles,
+            self.archive_destination_enabled,
+            self.metafits_path,
+            self.subfile_dist_mode,
         )
         self.workers.append(subfile_incoming_worker)
 

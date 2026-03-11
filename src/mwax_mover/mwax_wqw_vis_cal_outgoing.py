@@ -14,8 +14,8 @@ class VisCalOutgoingProcessor(MWAXWatchQueueWorker):
             "VisSCalOutgoingProcessor",
             logger,
             [(visdata_outgoing_cal_path, ".fits")],
-            MODE_WATCH_DIR_FOR_RENAME,
-            exclude_pattern=None,
+            mode=MODE_WATCH_DIR_FOR_RENAME,
+            requeue_to_eoq_on_failure=False,
         )
 
         self.visdata_outgoing_cal_path = visdata_outgoing_cal_path

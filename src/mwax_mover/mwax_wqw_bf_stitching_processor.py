@@ -32,9 +32,10 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
                 (bf_incoming_path, ".vdif"),
                 (bf_incoming_path, ".fil"),
             ],
-            MODE_WATCH_DIR_FOR_RENAME,
-            list_of_corr_hi_priority_projects,
-            list_of_vcs_hi_priority_projects,
+            mode=MODE_WATCH_DIR_FOR_RENAME,
+            corr_hi_priority_projects=list_of_corr_hi_priority_projects,
+            vcs_hi_priority_projects=list_of_vcs_hi_priority_projects,
+            requeue_to_eoq_on_failure=False,
         )
         self.bf_incoming_path = bf_incoming_path
         self.bf_stitching_path = bf_stitching_path

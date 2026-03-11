@@ -13,7 +13,8 @@ class PacketStatsProcessor(MWAXWatchQueueWorker):
             "PacketStatsProcessor",
             logger,
             [(packet_stats_dump_dir, packet_stats_file_ext)],
-            MODE_WATCH_DIR_FOR_NEW,
+            mode=MODE_WATCH_DIR_FOR_NEW,
+            requeue_to_eoq_on_failure=False,
         )
         self.packet_stats_dump_dir = packet_stats_dump_dir
         self.packet_stats_destination_dir = packet_stats_destination_dir

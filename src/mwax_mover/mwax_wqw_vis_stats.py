@@ -24,7 +24,8 @@ class VisStatsProcessor(MWAXWatchQueueWorker):
             "VisStatsProcessing",
             logger,
             [(visdata_processing_stats_path, ".fits")],
-            MODE_WATCH_DIR_FOR_RENAME,
+            mode=MODE_WATCH_DIR_FOR_RENAME,
+            requeue_to_eoq_on_failure=False,
         )
 
         self.visdata_processing_stats_path = visdata_processing_stats_path

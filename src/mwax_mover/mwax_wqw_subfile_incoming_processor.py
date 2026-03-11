@@ -1,3 +1,4 @@
+from mwax_mover.mwax_calvin_utils import get_partial_aocal_filename
 from mwax_mover.mwax_watch_queue_worker import MWAXWatchQueueWorker
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
 from mwax_mover import utils
@@ -7,7 +8,7 @@ import glob
 import shutil
 import sys
 import time
-from mwax_mover.mwax_calvin_utils import get_partial_aocal_filename
+
 
 METAFITS_EXPOSURE = "EXPOSURE"
 COMMAND_DADA_DISKDB = "dada_diskdb"
@@ -17,7 +18,8 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
     def __init__(
         self,
         logger: Logger,
-        sd_ctx,
+        subfile_processor_ctx,
+        archive_processor_ctx,
         subfile_incoming_path: str,
         subfile_ext: str,
         freefile_ext: str,
@@ -34,6 +36,9 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         corr_diskdb_numa_node: int,
         psrdada_timeout_sec: int,
         always_keep_subfiles: bool,
+        archive_destination_enabled: bool,
+        metafits_path: str,
+        subfile_dist_mode: utils.MWAXSubfileDistirbutorMode,
     ):
         super().__init__(
             "SubfileIncomingProcessor",
@@ -41,10 +46,11 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
             [
                 (subfile_incoming_path, ".sub"),
             ],
-            MODE_WATCH_DIR_FOR_RENAME,
+            mode=MODE_WATCH_DIR_FOR_RENAME,
             requeue_to_eoq_on_failure=False,
         )
-        self.sd_ctx = sd_ctx
+        self.subfile_processor_ctx = subfile_processor_ctx
+        self.archive_processor_ctx = archive_processor_ctx
 
         self.subfile_incoming_path = subfile_incoming_path
         self.voltdata_incoming_path = voltdata_incoming_path
@@ -66,6 +72,9 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         self.psrdada_timeout_sec = psrdada_timeout_sec
 
         self.always_keep_subfiles = always_keep_subfiles
+        self.archive_destination_enabled = archive_destination_enabled
+        self.metafits_path = metafits_path
+        self.subfile_dist_mode = subfile_dist_mode
 
     def handler(self, item: str) -> bool:
         """When subfile detected this handles it"""
@@ -138,32 +147,37 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
             # like a VCS observation
             #
             if (
-                (self.dump_start_gps is not None and self.dump_end_gps is not None)
-                and subobs_id >= self.dump_start_gps
-                and subobs_id < self.dump_end_gps
+                (
+                    self.subfile_processor_ctx.dump_start_gps is not None
+                    and self.subfile_processor_ctx.dump_end_gps is not None
+                )
+                and subobs_id >= self.subfile_processor_ctx.dump_start_gps
+                and subobs_id < self.subfile_processor_ctx.dump_end_gps
             ):
                 # We ARE in voltage dump and so we go and do a VCS capture instead
                 # of whatever else we were doing
                 self.logger.info(
                     f"{item}- ignoring existing mode: {subfile_mode} as we"
-                    f" are within a voltage dump ({self.dump_start_gps} <"
-                    f" {self.dump_end_gps}) for trigger {self.dump_trigger_id}."
+                    f" are within a voltage dump ({self.subfile_processor_ctx.dump_start_gps} <"
+                    f" {self.subfile_processor_ctx.dump_end_gps}) for trigger {self.subfile_processor_ctx.dump_trigger_id}."
                     " Doing VCS instead."
                 )
 
                 # Pause archiving so we have the disk to ourselves
-                if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
-                    if self.sd_ctx.archive_processor:
-                        self.sd_ctx.archive_processor.pause_archiving(True)  # pylint: disable=line-too-long
+                if self.archive_destination_enabled:  # pylint: disable=line-too-long
+                    if self.archive_processor_ctx:
+                        self.archive_processor_ctx.pause_archiving(True)  # pylint: disable=line-too-long
 
                 # See if there already is a TRIGGER_ID keyword in the subfile- if so
                 # don't overwrite it. We must have overlapping triggers happening
                 if not utils.read_subfile_trigger_value(item):
                     # No TRIGGER_ID yet, so add it
                     self.logger.info(
-                        f"{item}- injecting {utils.PSRDADA_TRIGGER_ID} {self.dump_trigger_id} into subfile..."
+                        f"{item}- injecting {utils.PSRDADA_TRIGGER_ID} {self.subfile_processor_ctx.dump_trigger_id} into subfile..."
                     )
-                    utils.inject_subfile_header(item, f"{utils.PSRDADA_TRIGGER_ID} {self.dump_trigger_id}\n")
+                    utils.inject_subfile_header(
+                        item, f"{utils.PSRDADA_TRIGGER_ID} {self.subfile_processor_ctx.dump_trigger_id}\n"
+                    )
 
                 success = utils.copy_subfile_to_disk_dd(
                     self.logger,
@@ -190,11 +204,11 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
 
                 if utils.CorrelatorMode.is_correlator(subfile_mode):
                     # Check if we're in the right mwax_subfile_distributor mode
-                    if self.sd_ctx.mode == utils.MWAXSubfileDistirbutorMode.CORRELATOR:
+                    if self.subfile_dist_mode == utils.MWAXSubfileDistirbutorMode.CORRELATOR:
                         # This is a normal MWAX_CORRELATOR obs, continue as normal
-                        if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
-                            if self.sd_ctx.archive_processor:
-                                self.sd_ctx.archive_processor.pause_archiving(False)  # pylint: disable=line-too-long
+                        if self.archive_destination_enabled:  # pylint: disable=line-too-long
+                            if self.archive_processor_ctx:
+                                self.archive_processor_ctx.pause_archiving(False)  # pylint: disable=line-too-long
 
                         success = utils.load_psrdada_ringbuffer(
                             self.logger,
@@ -215,11 +229,11 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
 
                 elif utils.CorrelatorMode.is_vcs(subfile_mode):
                     # Check if we're in the right mwax_subfile_distributor mode
-                    if self.sd_ctx.mode == utils.MWAXSubfileDistirbutorMode.CORRELATOR:
+                    if self.subfile_dist_mode == utils.MWAXSubfileDistirbutorMode.CORRELATOR:
                         # Pause archiving so we have the disk to ourselves
-                        if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
-                            if self.sd_ctx.archive_processor:
-                                self.sd_ctx.archive_processor.pause_archiving(True)  # pylint: disable=line-too-long
+                        if self.archive_destination_enabled:  # pylint: disable=line-too-long
+                            if self.archive_processor_ctx:
+                                self.archive_processor_ctx.pause_archiving(True)  # pylint: disable=line-too-long
 
                         success = utils.copy_subfile_to_disk_dd(
                             self.logger,
@@ -238,11 +252,11 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                         success = True  # It's True because that signals the caller to keep going and don't retry
 
                 elif utils.CorrelatorMode.is_beamformer(subfile_mode):
-                    if self.sd_ctx.mode == utils.MWAXSubfileDistirbutorMode.BEAMFORMER:
+                    if self.subfile_dist_mode == utils.MWAXSubfileDistirbutorMode.BEAMFORMER:
                         # This is a beamformer obs, enable archiving as normal (if configured)
-                        if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
-                            if self.sd_ctx.archive_processor:
-                                self.sd_ctx.archive_processor.pause_archiving(False)
+                        if self.archive_destination_enabled:  # pylint: disable=line-too-long
+                            if self.archive_processor_ctx:
+                                self.archive_processor_ctx.pause_archiving(False)
 
                         # Get number of inputs and coarse channel from header
                         if subfile_header_values[utils.PSRDADA_COARSE_CHANNEL] is None:
@@ -250,7 +264,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                         rec_chan_no = int(subfile_header_values[utils.PSRDADA_COARSE_CHANNEL])
 
                         # Get cal_obsid from metafits
-                        metafits_filename = os.path.join(self.sd_ctx.cfg_corr_metafits_path, f"{obs_id}_metafits.fits")
+                        metafits_filename = os.path.join(self.metafits_path, f"{obs_id}_metafits.fits")
                         METAFITS_CALOBSID = "CALOBSID"
                         METAFITS_CALIBDATA_HDU = "CALIBDATA"
                         try:
@@ -288,20 +302,20 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                     # This is our opportunity to write any "keep" files to disk
                     # which were held from a voltage buffer dump
                     #
-                    if self.sd_ctx.dump_keep_file_queue.qsize() > 0:
+                    if self.subfile_processor_ctx.dump_keep_file_queue.qsize() > 0:
                         # Pause archiving
-                        if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
-                            if self.sd_ctx.archive_processor:
-                                self.sd_ctx.archive_processor.pause_archiving(True)  # pylint: disable=line-too-long
+                        if self.archive_destination_enabled:  # pylint: disable=line-too-long
+                            if self.archive_processor_ctx:
+                                self.archive_processor_ctx.pause_archiving(True)  # pylint: disable=line-too-long
 
                         # Since we're not doing anything with this subfile we can
                         # try and handle any remaining keep files
                         self.handle_next_keep_file()
                     else:
                         # Unpause archiving
-                        if self.sd_ctx.cfg_corr_archive_destination_enabled:  # pylint: disable=line-too-long
-                            if self.sd_ctx.archive_processor:
-                                self.sd_ctx.archive_processor.pause_archiving(False)  # pylint: disable=line-too-long
+                        if self.archive_destination_enabled:  # pylint: disable=line-too-long
+                            if self.archive_processor_ctx:
+                                self.archive_processor_ctx.pause_archiving(False)  # pylint: disable=line-too-long
 
                     success = True
 
@@ -334,12 +348,12 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                 #    self.dump_keep_file_queue.put(keep_filename)
 
             # Check if we need to clear the dump info
-            if self.dump_end_gps is not None:
-                if subobs_id >= self.dump_end_gps:
+            if self.subfile_processor_ctx.dump_end_gps is not None:
+                if subobs_id >= self.subfile_processor_ctx.dump_end_gps:
                     # Reset the dump start and end
-                    self.dump_start_gps = None
-                    self.dump_end_gps = None
-                    self.dump_trigger_id = None
+                    self.subfile_processor_ctx.dump_start_gps = None
+                    self.subfile_processor_ctx.dump_end_gps = None
+                    self.subfile_processor_ctx.dump_trigger_id = None
 
         except Exception as handler_exception:  # pylint: disable=broad-except
             self.logger.error(f"{item} {handler_exception}")
@@ -349,7 +363,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
             if success:
                 # Check if need to keep subfiles, if so we need to copy
                 # them off
-                if keep_subfiles_path:
+                if self.always_keep_subfiles and keep_subfiles_path:
                     # we use -1 for numa node for now as this is really for
                     # debug so it does not matter
                     utils.copy_subfile_to_disk_dd(
@@ -366,13 +380,13 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                 # take care of it when it has finished with it
                 if (
                     utils.CorrelatorMode.is_beamformer(subfile_mode)
-                    and self.sd_ctx.mode == utils.MWAXSubfileDistirbutorMode.BEAMFORMER
+                    and self.subfile_dist_mode == utils.MWAXSubfileDistirbutorMode.BEAMFORMER
                 ):
                     # Don't rename .sub to .free- the beamformer does it
                     pass
                 else:
                     # Rename subfile so that udpgrab can reuse it
-                    free_filename = str(item).replace(self.ext_sub_file, self.ext_free_file)
+                    free_filename = item.replace(self.ext_sub_file, self.ext_free_file)
 
                     try:
                         # Check it exists first- the dump process
@@ -433,7 +447,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         success = True
 
         # Get next keep file off the queue
-        keep_filename = self.sd_ctx.dump_keep_file_queue.get()
+        keep_filename = self.subfile_processor_ctx.dump_keep_file_queue.get()
 
         self.logger.info(f"SubfileProcessor.handle_next_keep_file is handling {keep_filename}...")
 
@@ -471,12 +485,12 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
 
         else:
             # Reqeuue file to try again later
-            self.sd_ctx.dump_keep_file_queue.put(keep_filename)
+            self.subfile_processor_ctx.dump_keep_file_queue.put(keep_filename)
 
         self.logger.info(
             "SubfileProcessor.handle_next_keep_file finished handling"
             f" {keep_filename}. Remaining .keep files:"
-            f" {self.sd_ctx.dump_keep_file_queue.qsize()}."
+            f" {self.subfile_processor_ctx.dump_keep_file_queue.qsize()}."
         )
 
         return success
