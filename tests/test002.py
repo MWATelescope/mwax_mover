@@ -1,5 +1,5 @@
 """
-This is to test if MWAXSubfileDistributor correctly handles a MWAX_BEAMFORMER observation.
+This is to test if MWAXSubfileDistributor correctly handles a MWAX_BEAMFORMER observation, stitching VDIF files.
 """
 
 import os
