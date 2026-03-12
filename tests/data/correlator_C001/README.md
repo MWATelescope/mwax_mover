@@ -1,1 +1,0 @@
-These test files are dervied from mwalib's test_files.

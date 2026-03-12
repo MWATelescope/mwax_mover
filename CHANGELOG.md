@@ -1,6 +1,14 @@
 # Changelog
 
-# 1.5.0 24-Feb-2026
+# 1.5.2 12-Feb-2026
+
+* calvin: Removed the "--max-amp 2" argument from hyperdrive plots
+
+# 1.5.1 11-Feb-2026
+
+* Unit tests and bug fixes for subfile distributor
+
+# 1.5.0 11-Feb-2026
 
 * Refactor to clean up all the watcher, queue and worker mess
 

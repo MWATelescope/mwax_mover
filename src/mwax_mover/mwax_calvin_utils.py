@@ -1420,9 +1420,7 @@ def write_stats(
                 stats.write(f"{row[0]}: {row[1]}\n")
 
         # Now run hyperdrive again to do some plots
-        hyp_soln_plot_args = (
-            f"--max-amp 2 --no-ref-tile --output-directory {os.path.dirname(hyperdrive_solution_filename)}"
-        )
+        hyp_soln_plot_args = f"--no-ref-tile --output-directory {os.path.dirname(hyperdrive_solution_filename)}"
         cmd = (
             f"{hyperdrive_binary_path} solutions-plot {hyp_soln_plot_args} "
             f"-m"

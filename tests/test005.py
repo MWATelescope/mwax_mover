@@ -40,7 +40,7 @@ def test_correlator_mode_class():
 
 def test_validate_filename_valid1():
     """Test that validate_filename() correctly identifies attributes based on filename"""
-    metafits_path = os.path.join(os.getcwd(), "tests/data/correlator_C001")
+    metafits_path = "tests/data/test005"
     logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
