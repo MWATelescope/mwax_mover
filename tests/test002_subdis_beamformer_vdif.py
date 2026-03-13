@@ -12,7 +12,7 @@ from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
 from tests_common import setup_test_directories
 
 TEST_CONFIG_FILE = "tests/data/test002/test002.cfg"
-TEST_METAFITS = "tests/data/test002/1454343736_metafits.fits"
+TEST_METAFITS = "tests/data/1454343736/1454343736_metafits.fits"
 
 # VDIF
 TEST_VDIF = [

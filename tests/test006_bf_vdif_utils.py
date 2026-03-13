@@ -8,13 +8,10 @@ def test_stitch_zero_files():
     logger = logging.getLogger()
     filenames = []
     metafits_filename = ""
-    output_vdif_filename = ""
-    output_hdr_filename = ""
+    output_dir = "tests/data/test006"
 
     with pytest.raises(Exception):
-        output_vdif_filename, output_hdr_filename = stitch_vdif_files_and_write_hdr(
-            logger, metafits_filename, filenames
-        )
+        _, _ = stitch_vdif_files_and_write_hdr(logger, metafits_filename, filenames, output_dir)
 
 
 def test_stitch_one_file():
@@ -26,8 +23,11 @@ def test_stitch_one_file():
     metafits_filename = "tests/data/vdif/1454361952_metafits.fits"
     output_vdif_filename = ""
     output_hdr_filename = ""
+    output_dir = "tests/data/test006"
 
-    output_vdif_filename, output_hdr_filename = stitch_vdif_files_and_write_hdr(logger, metafits_filename, filenames)
+    output_vdif_filename, output_hdr_filename = stitch_vdif_files_and_write_hdr(
+        logger, metafits_filename, filenames, output_dir
+    )
 
     assert output_vdif_filename == "tests/data/vdif/1454361952_ch109_beam00.vdif"
     assert output_hdr_filename == "tests/data/vdif/1454361952_ch109_beam00.hdr"

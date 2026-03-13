@@ -21,26 +21,36 @@ def test_correlator_mode_class():
     assert not utils.CorrelatorMode.is_correlator("NO_CAPTURE")
     assert not utils.CorrelatorMode.is_vcs("NO_CAPTURE")
     assert not utils.CorrelatorMode.is_voltage_buffer("NO_CAPTURE")
+    assert not utils.CorrelatorMode.is_beamformer("NO_CAPTURE")
 
     assert not utils.CorrelatorMode.is_no_capture("MWAX_CORRELATOR")
     assert utils.CorrelatorMode.is_correlator("MWAX_CORRELATOR")
     assert not utils.CorrelatorMode.is_vcs("MWAX_CORRELATOR")
     assert not utils.CorrelatorMode.is_voltage_buffer("MWAX_CORRELATOR")
+    assert not utils.CorrelatorMode.is_beamformer("MWAX_CORRELATOR")
 
     assert not utils.CorrelatorMode.is_no_capture("MWAX_VCS")
     assert not utils.CorrelatorMode.is_correlator("MWAX_VCS")
     assert utils.CorrelatorMode.is_vcs("MWAX_VCS")
     assert not utils.CorrelatorMode.is_voltage_buffer("MWAX_VCS")
+    assert not utils.CorrelatorMode.is_beamformer("MWAX_VCS")
 
     assert not utils.CorrelatorMode.is_no_capture("MWAX_BUFFER")
     assert not utils.CorrelatorMode.is_correlator("MWAX_BUFFER")
     assert not utils.CorrelatorMode.is_vcs("MWAX_BUFFER")
     assert utils.CorrelatorMode.is_voltage_buffer("MWAX_BUFFER")
+    assert not utils.CorrelatorMode.is_beamformer("MWAX_BUFFER")
+
+    assert not utils.CorrelatorMode.is_no_capture("MWAX_BEAMFORMER")
+    assert not utils.CorrelatorMode.is_correlator("MWAX_BEAMFORMER")
+    assert not utils.CorrelatorMode.is_vcs("MWAX_BEAMFORMER")
+    assert not utils.CorrelatorMode.is_voltage_buffer("MWAX_BEAMFORMER")
+    assert utils.CorrelatorMode.is_beamformer("MWAX_BEAMFORMER")
 
 
 def test_validate_filename_valid1():
     """Test that validate_filename() correctly identifies attributes based on filename"""
-    metafits_path = "tests/data/test005"
+    metafits_path = "tests/data/1244973688"
     logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
@@ -64,7 +74,7 @@ def test_validate_filename_valid1():
 
 def test_validate_filename_valid2():
     """Test that validate_filename() correctly identifies attributes based on filename"""
-    metafits_path = os.path.join(os.getcwd(), "tests/data/correlator_calibrator")
+    metafits_path = os.path.join(os.getcwd(), "tests/data/1347318488")
     logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
@@ -88,7 +98,7 @@ def test_validate_filename_valid2():
 
 def test_validate_filename_valid3():
     """Test that validate_filename() correctly identifies attributes based on filename"""
-    metafits_path = os.path.join(os.getcwd(), "tests/data/vcs_G0024")
+    metafits_path = os.path.join(os.getcwd(), "tests/data/1220738720")
     logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
@@ -112,7 +122,7 @@ def test_validate_filename_valid3():
 
 def test_validate_filename_valid4():
     """Test that validate_filename() correctly identifies attributes based on filename"""
-    metafits_path = os.path.join(os.getcwd(), "tests/data/vcs_G0024")
+    metafits_path = os.path.join(os.getcwd(), "tests/data/1220738720")
     logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
@@ -136,7 +146,7 @@ def test_validate_filename_valid4():
 
 def test_validate_filename_valid5():
     """Test that validate_filename() correctly identifies attributes based on filename"""
-    metafits_path = os.path.join(os.getcwd(), "tests/data/vcs_G0024")
+    metafits_path = os.path.join(os.getcwd(), "tests/data/1220738720")
     logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
@@ -160,7 +170,7 @@ def test_validate_filename_valid5():
 
 def test_validate_filename_valid6():
     """Test that validate_filename() correctly identifies attributes based on filename"""
-    metafits_path = os.path.join(os.getcwd(), "tests/data/metafits_ppd")
+    metafits_path = os.path.join(os.getcwd(), "tests/data/1328239120")
     logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
@@ -184,7 +194,7 @@ def test_validate_filename_valid6():
 
 def test_validate_filename_valid7():
     """Test that validate_filename() correctly identifies attributes based on filename"""
-    metafits_path = os.path.join(os.getcwd(), "tests/data/metafits_ppd")
+    metafits_path = os.path.join(os.getcwd(), "tests/data/1328239120")
     logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
@@ -214,9 +224,7 @@ def test_get_metafits_values_correlator():
     #
     # Run test
     #
-    is_calibrator, project_id, calib_src = utils.get_metafits_values(
-        "tests/data/correlator_calibrator/1347318488_metafits.fits"
-    )
+    is_calibrator, project_id, calib_src = utils.get_metafits_values("tests/data/1347318488/1347318488_metafits.fits")
     assert is_calibrator is True
     assert project_id == "G0080"
     assert calib_src == "J063633-204225"
@@ -228,9 +236,7 @@ def test_get_metafits_values_non_cal():
     metafits which is not a calibrator- i.e. it has
     CALIBRAT=False and no CALIBSRC key
     """
-    is_calibrator, project_id, calib_src = utils.get_metafits_values(
-        "tests/data/correlator_C001/1244973688_metafits.fits"
-    )
+    is_calibrator, project_id, calib_src = utils.get_metafits_values("tests/data/1244973688/1244973688_metafits.fits")
     assert is_calibrator is False
     assert project_id == "C001"
     assert calib_src == ""
@@ -239,7 +245,7 @@ def test_get_metafits_values_non_cal():
 def test_scan_for_existing_files_and_add_to_queue():
     """Test we can find files and add to a queue"""
     queue_target = queue.Queue()
-    watch_dir = "tests/data/correlator_C001"
+    watch_dir = "tests/data/1244973688"
     pattern = ".fits"
     recursive = False
     logger = logging.getLogger("test")
@@ -260,7 +266,7 @@ def test_scan_for_existing_files_and_add_to_queue():
 def test_scan_for_existing_files_and_add_to_priority_queue():
     """Test we can find files and add to a priority queue"""
     queue_target = queue.PriorityQueue()
-    watch_dir = "tests/data/correlator_C001"
+    watch_dir = "tests/data/1244973688"
     pattern = ".fits"
     recursive = False
     metafits_path = watch_dir
@@ -300,7 +306,7 @@ def test_scan_for_existing_files_and_add_to_priority_queue():
 
 def test_scan_directory():
     """Tests we can get a list of files in a dir"""
-    watch_dir = "tests/data/correlator_C001"
+    watch_dir = "tests/data/1244973688"
     pattern = ".fits"
     recursive = False
     logger = logging.getLogger("test")
@@ -330,8 +336,8 @@ def test_get_priority_correlator_calibrator():
 
     priority = utils.get_priority(
         logger,
-        "tests/data/correlator_calibrator/1347318488_20190619100110_ch101_000.fits",
-        "tests/data/correlator_calibrator/",
+        "tests/data/1347318488/1347318488_20190619100110_ch101_000.fits",
+        "tests/data/1347318488/",
         ["D0006"],
         ["C001"],
     )
@@ -350,8 +356,8 @@ def test_get_priority_correlator_high_priority_list():
 
     priority = utils.get_priority(
         logger,
-        "tests/data/correlator_D0006_not_cal/1122979144_20190619100110_ch101_000.fits",
-        "tests/data/correlator_D0006_not_cal/",
+        "tests/data/1122979144/1122979144_20190619100110_ch101_000.fits",
+        "tests/data/1122979144/",
         ["D0006"],
         ["C001"],
     )
@@ -367,8 +373,8 @@ def test_get_priority_vcs_c001():
 
     priority = utils.get_priority(
         logger,
-        "tests/data/vcs_C001/1347063304_1347063304_114.sub",
-        "tests/data/vcs_C001/",
+        "tests/data/1347063304/1347063304_1347063304_114.sub",
+        "tests/data/1347063304/",
         ["D0006"],
         ["C001"],
     )
@@ -384,8 +390,8 @@ def test_get_priority_correlator_c001():
 
     priority = utils.get_priority(
         logger,
-        "tests/data/correlator_C001/1244973688_20190619100110_ch114_000.fits",
-        "tests/data/correlator_C001/",
+        "tests/data/1244973688/1244973688_20190619100110_ch114_000.fits",
+        "tests/data/1244973688/",
         ["D0006"],
         ["C001"],
     )
@@ -401,8 +407,8 @@ def test_get_priority_vcs_g0024():
 
     priority = utils.get_priority(
         logger,
-        "tests/data/vcs_G0024/1220738720_1220738720_123.sub",
-        "tests/data/vcs_G0024/",
+        "tests/data/1220738720/1220738720_1220738720_123.sub",
+        "tests/data/1220738720/",
         ["D0006"],
         ["C001"],
     )
@@ -418,8 +424,8 @@ def test_get_priority_metafits_ppd():
 
     priority = utils.get_priority(
         logger,
-        "tests/data/metafits_ppd/1328239120_metafits_ppds.fits",
-        "tests/data/metafits_ppd/",
+        "tests/data/1328239120/1328239120_metafits_ppds.fits",
+        "tests/data/1328239120/",
         ["D0006"],
         ["C001"],
     )
@@ -432,7 +438,7 @@ def test_do_checksum_md5():
     logger = logging.getLogger("test")
     filename = os.path.join(
         os.getcwd(),
-        "tests/data/correlator_C001/1244973688_20190619100110_ch114_000.fits",
+        "tests/data/1244973688/1244973688_20190619100110_ch114_000.fits",
     )
 
     numa_node = None
@@ -450,7 +456,7 @@ def test_determine_bucket_acacia():
     """Tests we get the correct bucket and folder given a filename and location"""
     full_filename = os.path.join(
         os.getcwd(),
-        "tests/data/correlator_C001/1244973688_20190619100110_ch114_000.fits",
+        "tests/data/1244973688/1244973688_20190619100110_ch114_000.fits",
     )
     location = utils.ArchiveLocation.AcaciaIngest
     #
@@ -464,7 +470,7 @@ def test_determine_bucket_banksia():
     """Tests we get the correct bucket and folder given a filename and location"""
     full_filename = os.path.join(
         os.getcwd(),
-        "tests/data/correlator_C001/1244973688_20190619100110_ch114_000.fits",
+        "tests/data/1244973688/1244973688_20190619100110_ch114_000.fits",
     )
     location = utils.ArchiveLocation.Banksia
     #
@@ -478,7 +484,7 @@ def test_get_bucket_name_from_filename():
     """Test getting a bucket name for a filename"""
     filename = os.path.join(
         os.getcwd(),
-        "tests/data/correlator_C001/1244973688_20190619100110_ch114_000.fits",
+        "tests/data/1244973688/1244973688_20190619100110_ch114_000.fits",
     )
 
     #
@@ -508,7 +514,7 @@ def test_config_get_list_valid():
     An empty string would result in and empty list []
     """
     logger = logging.getLogger("test")
-    config_filename = os.path.join(os.getcwd(), "tests/mwax_subfile_distributor_correlator_test.cfg")
+    config_filename = os.path.join(os.getcwd(), "tests/data/test005/test005.cfg")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
@@ -520,22 +526,22 @@ def test_config_get_list_valid():
 def test_config_get_bool_true():
     logger = logging.getLogger("test")
 
-    config_filename = os.path.join(os.getcwd(), "tests/mwax_calvin_test02.cfg")
+    config_filename = os.path.join(os.getcwd(), "tests/data/test005/test005.cfg")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    true_bool = utils.read_config_bool(logger, config, "complete", "keep_completed_visibility_files")
+    true_bool = utils.read_config_bool(logger, config, "mwax mover", "archiving_enabled")
 
     assert true_bool is True
 
 
 def test_config_get_bool_false():
     logger = logging.getLogger("test")
-    config_filename = os.path.join(os.getcwd(), "tests/mwax_calvin_test01.cfg")
+    config_filename = os.path.join(os.getcwd(), "tests/data/test005/test005.cfg")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    false_bool = utils.read_config_bool(logger, config, "complete", "keep_completed_visibility_files")
+    false_bool = utils.read_config_bool(logger, config, "correlator", "calibrator_destination_enabled")
 
     assert false_bool is False
 
@@ -547,7 +553,7 @@ def test_config_get_list_empty():
     An empty string would result in and empty list []
     """
     logger = logging.getLogger("test")
-    config_filename = os.path.join(os.getcwd(), "tests/mwax_subfile_distributor_correlator_test.cfg")
+    config_filename = os.path.join(os.getcwd(), "tests/data/test005/test005.cfg")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
@@ -560,15 +566,15 @@ def test_config_get_optional_value():
     """Read an empty string from a config file and ensure it gets
     treated as None. Also test an non empty gets read right too"""
     logger = logging.getLogger("test")
-    config_filename = os.path.join(os.getcwd(), "tests/mwacache_test.cfg")
+    config_filename = os.path.join(os.getcwd(), "tests/data/test005/test005.cfg")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    empty_return_val = utils.read_optional_config(logger, config, "banksia", "max_concurrency")
+    empty_return_val = utils.read_optional_config(logger, config, "correlator", "high_priority_correlator_projectids")
 
-    non_empty_return_val = utils.read_optional_config(logger, config, "acacia_ingest", "max_concurrency")
+    non_empty_return_val = utils.read_optional_config(logger, config, "correlator", "mwax_stats_timeout_sec")
 
-    non_existing_key = utils.read_optional_config(logger, config, "acacia_ingest", "non_existant_key")
+    non_existing_key = utils.read_optional_config(logger, config, "correlator", "non_existant_key")
 
     assert empty_return_val is None
     assert non_empty_return_val is not None
@@ -581,18 +587,15 @@ def test_config_get_optional_value():
 
 def test_config_get_optional_value_spaces_not_empty_string():
     """Read an empty string which has spaces in it from a config file and ensure it gets
-    treated as None. Also test an non empty gets read right too"""
+    treated as None."""
     logger = logging.getLogger("test")
-    config_filename = os.path.join(os.getcwd(), "tests/mwacache_test.cfg")
+    config_filename = os.path.join(os.getcwd(), "tests/data/test005/test005.cfg")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    empty_return_val = utils.read_optional_config(logger, config, "banksia", "chunk_size_bytes")
-
-    non_empty_return_val = utils.read_optional_config(logger, config, "acacia_ingest", "chunk_size_bytes")
+    empty_return_val = utils.read_optional_config(logger, config, "correlator", "test_with_spaces")
 
     assert empty_return_val is None
-    assert non_empty_return_val is not None
 
 
 def test_download_metafits_file():
@@ -600,7 +603,7 @@ def test_download_metafits_file():
     from the web service"""
     logger = logging.getLogger("test")
     obs_id = 1244973688
-    metafits_path = "tests/data/"
+    metafits_path = "/tmp"
     metafits_filename = os.path.join(metafits_path, f"{obs_id}_metafits.fits")
 
     utils.download_metafits_file(logger, obs_id, metafits_path)
@@ -613,7 +616,7 @@ def test_download_metafits_file():
 
 def test_write_mock_subfile():
     """Test that our mock subfile is correct"""
-    output_filename = "/tmp/mock_subfile.sub"
+    output_filename = "/tmp/test005_test_subfile1.sub"
 
     # Write out the mock subfile
     utils.write_mock_subfile(
@@ -749,7 +752,7 @@ def test_inject_beamformer_headers():
     assert len(data_padding) == 256
 
     # Write the subfile
-    subfile_name = "tests/data/beamformer/test_subfile.sub"
+    subfile_name = "/tmp/test005_test_subfile2.sub"
     utils.write_mock_subfile_from_header(subfile_name, test_header)
 
     # inject the beamformer settings
@@ -810,7 +813,7 @@ def test_read_subfile_values():
         "MWAX_SUB_VER 2\n"
     )
     # Write the subfile
-    subfile_name = "tests/data/beamformer/test_subfile_2.sub"
+    subfile_name = "/tmp/test005_test_subfile_3.sub"
     utils.write_mock_subfile_from_header(subfile_name, test_header)
 
     keys = ["OBS_ID", "MODE", "EXPOSURE_SECS"]

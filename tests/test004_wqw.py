@@ -43,7 +43,7 @@ def test_priority_wqw():
     logger = logging.getLogger(__name__)
     logger.level = logging.DEBUG
 
-    metafits_path = "tests/test_data/metafits_ppd/1328239120.metafits"
+    metafits_path = "tests/test_data/1328239120/1328239120.metafits"
     wqw = MyPriorityWatchQueueWorker(
         "test_priority_wqw",
         logger,

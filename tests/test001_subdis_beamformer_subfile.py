@@ -12,7 +12,7 @@ from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
 from tests_common import setup_test_directories, create_observation_subfiles
 
 TEST_CONFIG_FILE = "tests/data/test001/test001.cfg"
-TEST_METAFITS = "tests/data/test001/1454743816_metafits.fits"
+TEST_METAFITS = "tests/data/1454743816/1454743816_metafits.fits"
 TEST_AOCAL_FILES = [f"tests/data/test001/1454343616_256_32_{c}_calfile.bin" for c in range(109, 109 + 24)]
 
 
