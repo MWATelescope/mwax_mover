@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.5.3 16-Feb-2026
+
+* subfile_distributor: Removed the calibration_destination_enabled option as it wasn't being used.
+
 # 1.5.2 12-Feb-2026
 
 * calvin: Removed the "--max-amp 2" argument from hyperdrive plots

@@ -16,10 +16,10 @@ TEST_METAFITS = "tests/data/1451758560/1451758560_metafits.fits"
 
 # Filterbank
 TEST_FIL = [
-    "tests/data/test003/1451758560_1451758560_ch109_beam00",
-    "tests/data/test003/1451758560_1451758568_ch109_beam00",
-    "tests/data/test003/1451758560_1451758560_ch109_beam01",
-    "tests/data/test003/1451758560_1451758568_ch109_beam01",
+    "tests/data/1451758560/1451758560_1451758560_ch109_beam00",
+    "tests/data/1451758560/1451758560_1451758568_ch109_beam00",
+    "tests/data/1451758560/1451758560_1451758560_ch109_beam01",
+    "tests/data/1451758560/1451758560_1451758568_ch109_beam01",
 ]
 
 

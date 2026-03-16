@@ -126,7 +126,7 @@ def test_correlator_config_file():
     assert msd.cfg_archive_command_timeout_sec == 300
     assert msd.cfg_psrdada_timeout_sec == 32
     assert msd.cfg_copy_subfile_to_disk_timeout_sec == 120
-    assert msd.cfg_archiving_enabled == 1
+    assert msd.cfg_master_archiving_enabled == 1
 
     # correlator section
     assert msd.cfg_corr_input_ringbuffer_key == "0x1234"
@@ -139,7 +139,6 @@ def test_correlator_config_file():
     assert msd.cfg_corr_mwax_stats_dump_dir == os.path.join(base_dir, "mwax_stats_dump")
     assert msd.cfg_corr_mwax_stats_timeout_sec == 600
     assert msd.cfg_corr_calibrator_outgoing_path == os.path.join(base_dir, "visdata_cal_outgoing")
-    assert msd.cfg_corr_calibrator_destination_enabled == 1
     assert msd.cfg_corr_metafits_path == os.path.join(base_dir, "vulcan_metafits")
     assert not msd.cfg_corr_high_priority_correlator_projectids
     assert msd.cfg_corr_high_priority_vcs_projectids == ["D0006", "G0058"]

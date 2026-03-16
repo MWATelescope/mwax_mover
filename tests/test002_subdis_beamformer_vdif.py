@@ -16,10 +16,10 @@ TEST_METAFITS = "tests/data/1454343736/1454343736_metafits.fits"
 
 # VDIF
 TEST_VDIF = [
-    "tests/data/test002/1454343736_1454343736_ch109_beam00",
-    "tests/data/test002/1454343736_1454343744_ch109_beam00",
-    "tests/data/test002/1454343736_1454343736_ch109_beam01",
-    "tests/data/test002/1454343736_1454343744_ch109_beam01",
+    "tests/data/1454343736/1454343736_1454343736_ch109_beam00",
+    "tests/data/1454343736/1454343736_1454343744_ch109_beam00",
+    "tests/data/1454343736/1454343736_1454343736_ch109_beam01",
+    "tests/data/1454343736/1454343736_1454343744_ch109_beam01",
 ]
 
 

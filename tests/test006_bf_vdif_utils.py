@@ -3,12 +3,13 @@ from mwax_mover.mwax_bf_vdif_utils import stitch_vdif_files_and_write_hdr
 import pytest
 import os
 
+output_dir = "tests/data/test006"
+
 
 def test_stitch_zero_files():
     logger = logging.getLogger()
     filenames = []
     metafits_filename = ""
-    output_dir = "tests/data/test006"
 
     with pytest.raises(Exception):
         _, _ = stitch_vdif_files_and_write_hdr(logger, metafits_filename, filenames, output_dir)
@@ -17,20 +18,21 @@ def test_stitch_zero_files():
 def test_stitch_one_file():
     logger = logging.getLogger()
     filenames = [
-        "tests/data/vdif/1454361952_1454361952_ch109_beam00.vdif",
+        "tests/data/1454343736/1454343736_1454343736_ch109_beam00.vdif",
     ]
 
-    metafits_filename = "tests/data/vdif/1454361952_metafits.fits"
+    obs_id = os.path.basename(filenames[0])[0:10]
+
+    metafits_filename = f"tests/data/{obs_id}/{obs_id}_metafits.fits"
     output_vdif_filename = ""
     output_hdr_filename = ""
-    output_dir = "tests/data/test006"
 
     output_vdif_filename, output_hdr_filename = stitch_vdif_files_and_write_hdr(
         logger, metafits_filename, filenames, output_dir
     )
 
-    assert output_vdif_filename == "tests/data/vdif/1454361952_ch109_beam00.vdif"
-    assert output_hdr_filename == "tests/data/vdif/1454361952_ch109_beam00.hdr"
+    assert output_vdif_filename == f"{output_dir}/1454343736_ch109_beam00.vdif"
+    assert output_hdr_filename == f"{output_dir}/1454343736_ch109_beam00.hdr"
 
     assert os.path.exists(output_vdif_filename)
     assert os.path.exists(output_hdr_filename)
@@ -38,28 +40,24 @@ def test_stitch_one_file():
 
 def test_stitch_many_files2():
     logger = logging.getLogger()
-    filenames = [
-        "tests/data/vdif/1454361952_1454361952_ch109_beam00.vdif",
-        "tests/data/vdif/1454361952_1454361960_ch109_beam00.vdif",
-    ]
 
     filenames = [
-        "tests/data/vdif/1454343736_1454343736_ch109_beam00.vdif",
-        "tests/data/vdif/1454343736_1454343744_ch109_beam00.vdif",
-        "tests/data/vdif/1454343736_1454343752_ch109_beam00.vdif",
-        "tests/data/vdif/1454343736_1454343760_ch109_beam00.vdif",
+        "tests/data/1454343736/1454343736_1454343736_ch109_beam01.vdif",
+        "tests/data/1454343736/1454343736_1454343744_ch109_beam01.vdif",
     ]
 
     obs_id = os.path.basename(filenames[0])[0:10]
 
-    metafits_filename = f"tests/data/vdif/{obs_id}_metafits.fits"
+    metafits_filename = f"tests/data/{obs_id}/{obs_id}_metafits.fits"
     output_vdif_filename = ""
     output_hdr_filename = ""
 
-    output_vdif_filename, output_hdr_filename = stitch_vdif_files_and_write_hdr(logger, metafits_filename, filenames)
+    output_vdif_filename, output_hdr_filename = stitch_vdif_files_and_write_hdr(
+        logger, metafits_filename, filenames, output_dir
+    )
 
-    assert output_vdif_filename == f"tests/data/vdif/{obs_id}_ch109_beam00.vdif"
-    assert output_hdr_filename == f"tests/data/vdif/{obs_id}_ch109_beam00.hdr"
+    assert output_vdif_filename == f"{output_dir}/{obs_id}_ch109_beam01.vdif"
+    assert output_hdr_filename == f"{output_dir}/{obs_id}_ch109_beam01.hdr"
 
     assert os.path.exists(output_vdif_filename)
     assert os.path.exists(output_hdr_filename)

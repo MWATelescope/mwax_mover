@@ -541,7 +541,7 @@ def test_config_get_bool_false():
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    false_bool = utils.read_config_bool(logger, config, "correlator", "calibrator_destination_enabled")
+    false_bool = utils.read_config_bool(logger, config, "beamformer", "bf_keep_original_files_after_stitching")
 
     assert false_bool is False
 

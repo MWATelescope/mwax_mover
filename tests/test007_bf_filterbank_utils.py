@@ -7,6 +7,8 @@ from mwax_mover.mwax_bf_filterbank_utils import (
 import pytest
 import os
 
+output_dir = "tests/data/test007"
+
 
 def test_get_stitched_filename():
     filename = "/test/1234567890_1234567898_ch123_beam00.fil"
@@ -24,18 +26,18 @@ def test_stitch_zero_files():
     filenames = []
 
     with pytest.raises(Exception):
-        stitch_filterbank_files(logger, filenames)
+        stitch_filterbank_files(logger, filenames, output_dir)
 
 
 def test_stitch_one_file():
     logger = logging.getLogger()
     filenames = [
-        "tests/data/filterbank/1451758560_1451758560_ch109_beam00.fil",
+        "tests/data/1451758560/1451758560_1451758560_ch109_beam00.fil",
     ]
 
-    output_filterbank_filename = stitch_filterbank_files(logger, filenames)
+    output_filterbank_filename = stitch_filterbank_files(logger, filenames, output_dir)
 
-    assert output_filterbank_filename == "tests/data/filterbank/1451758560_ch109_beam00.fil"
+    assert output_filterbank_filename == "tests/data/test007/1451758560_ch109_beam00.fil"
 
     assert os.path.exists(output_filterbank_filename)
 
@@ -43,8 +45,8 @@ def test_stitch_one_file():
 def test_stitch_many_files():
     logger = logging.getLogger()
     filenames = [
-        "tests/data/filterbank/1451758560_1451758560_ch109_beam00.fil",
-        "tests/data/filterbank/1451758560_1451758568_ch109_beam00.fil",
+        "tests/data/1451758560/1451758560_1451758560_ch109_beam00.fil",
+        "tests/data/1451758560/1451758560_1451758568_ch109_beam00.fil",
     ]
 
     _, data1_start_index = get_filterbank_components(filenames[0])
@@ -53,9 +55,9 @@ def test_stitch_many_files():
     _, data2_start_index = get_filterbank_components(filenames[1])
     file2_datalen = os.path.getsize(filenames[1]) - data2_start_index
 
-    output_filterbank_filename = stitch_filterbank_files(logger, filenames)
+    output_filterbank_filename = stitch_filterbank_files(logger, filenames, output_dir)
 
-    assert output_filterbank_filename == "tests/data/filterbank/1451758560_ch109_beam00.fil"
+    assert output_filterbank_filename == "tests/data/test007/1451758560_ch109_beam00.fil"
     assert os.path.exists(output_filterbank_filename)
 
     # Get new data len- check it is the same as 1+2

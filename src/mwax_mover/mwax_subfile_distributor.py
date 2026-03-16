@@ -73,7 +73,7 @@ class MWAXSubfileDistributor:
         self.cfg_archive_command_timeout_sec: int = 0
         self.cfg_psrdada_timeout_sec: int = 0
         self.cfg_copy_subfile_to_disk_timeout_sec: int = 0
-        self.cfg_archiving_enabled: bool = False
+        self.cfg_master_archiving_enabled: bool = False
         self.cfg_health_multicast_interface_ip: str = ""
         self.cfg_health_multicast_interface_name: str = ""
         self.cfg_health_multicast_ip: str = ""
@@ -108,7 +108,6 @@ class MWAXSubfileDistributor:
         self.cfg_corr_visdata_processing_stats_path: str = ""
         # calibration config
         self.cfg_corr_calibrator_outgoing_path: str = ""
-        self.cfg_corr_calibrator_destination_enabled: int = 0
         self.cfg_corr_metafits_path: str = ""
 
         # Connection info for metadata db
@@ -380,14 +379,6 @@ class MWAXSubfileDistributor:
             "correlator",
             "calibrator_outgoing_path",
         )
-        self.cfg_corr_calibrator_destination_enabled = int(
-            utils.read_config(
-                self.logger,
-                self.config,
-                "correlator",
-                "calibrator_destination_enabled",
-            )
-        )
 
         self.cfg_corr_metafits_path = utils.read_config(self.logger, self.config, "correlator", "metafits_path")
 
@@ -583,7 +574,7 @@ class MWAXSubfileDistributor:
         )
 
         # Read master archiving enabled option
-        self.cfg_archiving_enabled = (
+        self.cfg_master_archiving_enabled = (
             int(
                 utils.read_config(
                     self.logger,
@@ -597,14 +588,13 @@ class MWAXSubfileDistributor:
 
         # If master archiving is disabled, then disable the corr and bf
         # archiving settings otherwise just use those settings as necessary
-        if not self.cfg_archiving_enabled:
+        if not self.cfg_master_archiving_enabled:
             self.logger.warning(
                 "Master archving ('archiving_enabled') is set to FALSE."
                 " Nothing will be archived and nothing will be sent for"
                 " calibration."
             )
             self.cfg_corr_archive_destination_enabled = False
-            self.cfg_corr_calibrator_destination_enabled = False
 
         # Create and start web server
         self.logger.info(f"Starting http server on port {self.cfg_webserver_port}...")
@@ -791,40 +781,6 @@ class MWAXSubfileDistributor:
                         "Exiting."
                     )
                     sys.exit(-2)
-
-        # self.archive_processor = mwax_archive_processor.MWAXArchiveProcessor(
-        #     self,
-        #     self.hostname,
-        #     self.cfg_corr_archive_destination_enabled,
-        #     self.cfg_corr_archive_command_numa_node,
-        #     self.cfg_corr_archive_destination_host,
-        #     self.cfg_corr_archive_destination_port,
-        #     self.cfg_archive_command_timeout_sec,
-        #     self.cfg_corr_mwax_stats_binary_dir,
-        #     self.cfg_corr_mwax_stats_dump_dir,
-        #     self.cfg_corr_mwax_stats_timeout_sec,
-        #     self.db_handler,
-        #     self.cfg_voltdata_incoming_path,
-        #     self.cfg_voltdata_outgoing_path,
-        #     self.cfg_corr_visdata_incoming_path,
-        #     self.cfg_corr_visdata_processing_stats_path,
-        #     self.cfg_corr_visdata_outgoing_path,
-        #     self.cfg_corr_calibrator_outgoing_path,
-        #     self.cfg_corr_calibrator_destination_enabled,
-        #     self.cfg_corr_metafits_path,
-        #     self.cfg_corr_visdata_dont_archive_path,
-        #     self.cfg_voltdata_dont_archive_path,
-        #     self.cfg_corr_high_priority_correlator_projectids,
-        #     self.cfg_corr_high_priority_vcs_projectids,
-        #     self.cfg_bf_incoming_path,
-        #     self.cfg_bf_stitching_path,
-        #     self.cfg_bf_outgoing_path,
-        #     self.cfg_bf_dont_archive_path,
-        #     self.cfg_bf_keep_original_files_after_stitching,
-        # )
-
-        # # Add this processor to list of processors we manage
-        # self.processors.append(self.archive_processor)
 
         # Make sure we can Ctrl-C / kill out of this
         self.logger.info("Initialising signal handlers")
@@ -1124,11 +1080,8 @@ class MWAXSubfileDistributor:
             "version": version.get_mwax_mover_version_string(),
             "host": self.hostname,
             "running": self.running,
-            "beamformer": False,
-            "beamformer archiving": False,
-            "correlator": True,
-            "correlator archiving": self.cfg_corr_archive_destination_enabled,
-            "cal sending:": self.cfg_corr_calibrator_destination_enabled,
+            "mode": self.subfile_dist_mode.value,
+            "archiving": self.cfg_corr_archive_destination_enabled,
             "cmdline": " ".join(sys.argv[1:]),
         }
 
