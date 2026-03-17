@@ -32,6 +32,8 @@ def setup_test_directories(test_filename: str) -> str:
         "/visdata/processing_stats",
         "/visdata/outgoing",
         "/visdata/cal_outgoing",
+        "/volume1/incoming",
+        "/volume1/outgoing",
         "/vulcan/packet_stats_dump",
         "/vulcan/packet_stats_destination",
         "/vulcan/mwax_stats_dump",
@@ -90,7 +92,7 @@ def get_test_db_handler(logger: logging.Logger):
     user = config.get("test database", "user")
     password = config.get("test database", "pass")
 
-    return MWAXDBHandler(logger, host, port, db_name, user, password)
+    return MWAXDBHandler(host, port, db_name, user, password)
 
 
 def run_create_test_db_object_script(logger: logging.Logger, creation_sql_filename):

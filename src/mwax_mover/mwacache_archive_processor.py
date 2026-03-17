@@ -5,9 +5,7 @@ from configparser import ConfigParser
 from glob import glob
 import json
 import logging
-import logging.handlers
 import os
-import queue
 import signal
 import sys
 import threading
@@ -16,16 +14,13 @@ from typing import Optional
 import astropy
 
 from mwax_mover import (
-    mwax_mover,
     mwax_db,
-    mwa_archiver,
     utils,
     version,
 )
-from mwax_mover.mwax_priority_queue_worker import PriorityQueueWorker
-from mwax_mover.mwax_priority_watcher import PriorityWatcher
-from mwax_mover.utils import ValidationData, ArchiveLocation
-from mwax_mover.mwax_db import DataFileRow
+from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
+from mwax_mover.mwax_wqw_pawsey_outgoing import PawseyOutgoingProcessor
+from mwax_mover.utils import ArchiveLocation
 
 # Setup root logger
 handler = logging.StreamHandler()
@@ -43,12 +38,16 @@ class MWACacheArchiveProcessor:
     """
 
     def __init__(self):
-        self.hostname: str = ""
+        if utils.running_under_pytest():
+            # pretend I am mwacache99
+            self.hostname = "mwacache99"
+        else:
+            self.hostname: str = utils.get_hostname()
+
         self.metafits_path: str = ""
         self.archive_to_location: ArchiveLocation = ArchiveLocation.Unknown
         self.concurrent_archive_workers: int = 0
         self.archive_command_timeout_sec: int = 0
-        self.recursive: bool = False
 
         # database config
         self.remote_metadatadb_db: str = ""
@@ -77,39 +76,37 @@ class MWACacheArchiveProcessor:
         self.high_priority_vcs_projectids: list[str] = []
 
         # MWAX servers will copy in a temp file, then rename once it is good
-        self.mwax_mover_mode: str = mwax_mover.MODE_WATCH_DIR_FOR_RENAME
         self.archiving_paused: bool = False
         self.running: bool = False
 
         self.mro_db_handler_object: mwax_db.MWAXDBHandler
         self.remote_db_handler_object: mwax_db.MWAXDBHandler
 
-        self.watcher_threads: list[threading.Thread] = []
-        self.worker_threads: list[threading.Thread] = []
-
         self.watch_dirs: list[str] = []
-        self.queue: queue.PriorityQueue = queue.PriorityQueue()
-        self.watchers: list[PriorityWatcher] = []
-        self.queue_workers: list[PriorityQueueWorker] = []
+
+        # This list helps us keep track of all the workers
+        self.workers: list[MWAXPriorityWatchQueueWorker] = list()
 
     def start(self):
         """This method is used to start the processor"""
         self.running = True
 
         # creating database connection pool(s)
-        logger.info("Starting MRO database connection pool...")
-        self.mro_db_handler_object.start_database_pool()
+        if self.mro_metadatadb_host != "dummy":
+            logger.info("Starting MRO database connection pool...")
+            self.mro_db_handler_object.start_database_pool()
 
-        logger.info("Starting remotedb database connection pool...")
-        self.remote_db_handler_object.start_database_pool()
+        if self.remote_metadatadb_host != "dummy":
+            logger.info("Starting remotedb database connection pool...")
+            self.remote_db_handler_object.start_database_pool()
 
         # create a health thread
         logger.info("Starting health_thread...")
         health_thread = threading.Thread(name="health_thread", target=self.health_handler, daemon=True)
         health_thread.start()
 
-        logger.info("Creating watchers...")
-        for watcher_no, watch_dir in enumerate(self.watch_dirs):
+        logger.info("Cleaning up old temp files...")
+        for watch_dir in self.watch_dirs:
             #
             # Remove any partial files first if they are old
             #
@@ -137,224 +134,52 @@ class MWACacheArchiveProcessor:
                         " removed this time"
                     )
 
-            # Create watcher for each data path queue
-            new_watcher = PriorityWatcher(
-                name=f"incoming_watcher{watcher_no}",
-                path=watch_dir,
-                dest_queue=self.queue,
-                pattern=".*",
-                mode=self.mwax_mover_mode,
-                recursive=self.recursive,
-                metafits_path=self.metafits_path,
-                list_of_correlator_high_priority_projects=self.high_priority_correlator_projectids,
-                list_of_vcs_high_priority_projects=self.high_priority_vcs_projectids,
-                exclude_pattern=".part*",
-            )
-            self.watchers.append(new_watcher)
-
-        # Create queueworker archive queue
-        logger.info("Creating workers...")
-
-        for archive_worker in range(0, self.concurrent_archive_workers):
-            new_worker = PriorityQueueWorker(
-                name=f"Archiver{archive_worker}",
-                source_queue=self.queue,
-                executable_path=None,
-                event_handler=self.archive_handler,
-                requeue_to_eoq_on_failure=True,
-                exit_once_queue_empty=False,
-            )
-            self.queue_workers.append(new_worker)
-
-        logger.info("Starting watchers...")
-        # Setup thread for watching filesystem
-        for i, watcher in enumerate(self.watchers):
-            watcher_thread = threading.Thread(name=f"watch_thread{i}", target=watcher.start, daemon=True)
-            self.watcher_threads.append(watcher_thread)
-            watcher_thread.start()
-
-        logger.info("Waiting for all watchers to finish scanning....")
-
-        count_of_watchers_still_scanning = len(self.watchers)
-        while count_of_watchers_still_scanning > 0:
-            count_of_watchers_still_scanning = 0
-            for watcher in self.watchers:
-                if not watcher.scan_completed:
-                    count_of_watchers_still_scanning += 1
-            time.sleep(1)  # hold off for another second
-        logger.info("Watchers are finished scanning.")
-
         logger.info("Starting workers...")
-        # Setup thread for processing items
-        for i, worker in enumerate(self.queue_workers):
-            queue_worker_thread = threading.Thread(name=f"worker_thread{i}", target=worker.start, daemon=True)
-            self.worker_threads.append(queue_worker_thread)
-            queue_worker_thread.start()
+
+        for w in self.workers:
+            w.start()
 
         logger.info("Started...")
 
+        time.sleep(1)  # give things time to start!
+
+        logger.info("Entering main loop...")
+
         while self.running:
-            for worker_thread in self.worker_threads:
-                if worker_thread:
-                    if worker_thread.is_alive():
-                        time.sleep(1)
-                    else:
+            for w in self.workers:
+                if self.running:
+                    if not w.is_running():
+                        logger.error(f"Worker {w.name} has stopped unexpectedly.")
                         self.running = False
                         break
 
-        #
-        # Finished- do some clean up
-        #
+            time.sleep(0.1)
 
         # Final log message
         logger.info("Completed Successfully")
 
-    def archive_handler(self, item: str) -> bool:
-        """Handles sending files to Pawsey"""
-        logger.info(f"{item}- archive_handler() Started...")
-
-        # validate the filename
-        val: ValidationData = utils.validate_filename(item, self.metafits_path)
-
-        # do some sanity checks!
-        if val.valid:
-            # Get the file size
-            actual_file_size = os.stat(item).st_size
-            logger.debug(f"{item}- archive_handler() file size on disk is {actual_file_size} bytes")
-
-            # Lookup file from db
-            data_files_row: DataFileRow = mwax_db.get_data_file_row(self.remote_db_handler_object, item, val.obs_id)
-            database_file_size = data_files_row.size
-
-            # Check for 0 size
-            if actual_file_size == 0:
-                # File size is 0- lets just blow it away
-                logger.warning(f"{item}- archive_handler() File size is 0 bytes. Deleting file")
-                utils.remove_file(item, raise_error=False)
-
-                # even though its a problem,we return true as we are finished
-                # with the item and it should not be requeued
-                return True
-            elif actual_file_size != database_file_size:
-                # File size is incorrect- lets just blow it away
-                logger.warning(
-                    f"{item}- archive_handler() File size"
-                    f" {actual_file_size} does not match {database_file_size}."
-                    " Deleting file"
-                )
-                utils.remove_file(item, raise_error=False)
-
-                # even though its a problem,we return true as we are finished
-                # with the item and it should not be requeued
-                return True
-
-            logger.debug(f"{item}- archive_handler() File size matches metadata. Checking md5sum... database")
-
-            # Check md5sum
-            actual_checksum = utils.do_checksum_md5(item, None, 600)
-
-            # Compare
-            if actual_checksum != data_files_row.checksum:
-                logger.warning(
-                    f"{item}- archive_handler() checksum {actual_checksum} does not match {data_files_row.checksum}."
-                )
-                return False
-
-            logger.debug(f"{item}- archive_handler() md5 checksum matches")
-
-            # Determine where to archive it
-            bucket = utils.determine_bucket(
-                item,
-                self.archive_to_location,
-            )
-
-            archive_success = False
-
-            if (
-                self.archive_to_location == ArchiveLocation.AcaciaIngest
-                or self.archive_to_location == ArchiveLocation.Banksia
-                or self.archive_to_location == ArchiveLocation.AcaciaMWA
-            ):  # Acacia or Banksia
-                archive_success = mwa_archiver.archive_file_rclone(
-                    self.s3_profile,
-                    self.s3_ceph_endpoints,
-                    item,
-                    bucket,
-                    data_files_row.checksum,
-                )
-            else:
-                raise NotImplementedError(f"Location {self.archive_to_location.value} not implemented")
-
-            if archive_success:
-                # Update record in metadata database
-                if not mwax_db.update_data_file_row_as_archived(
-                    self.mro_db_handler_object,
-                    val.obs_id,
-                    item,
-                    self.archive_to_location,
-                    bucket,
-                    None,
-                ):
-                    # if something went wrong, requeue
-                    return False
-
-                # If all is well, we have the file safely archived and the
-                # database updated, so remove the file
-                logger.debug(f"{item}- archive_handler() Deleting file")
-                utils.remove_file(item, raise_error=False)
-
-                logger.info(f"{item}- archive_handler() Finished")
-                return True
-            else:
-                return False
-        else:
-            # The filename was not valid
-            logger.error(f"{item}- archive_handler() {val.validation_message}")
-            return False
-
     def pause_archiving(self, paused: bool):
-        """Pauses all processes"""
+        """Pauses archiving"""
         if self.archiving_paused != paused:
             if paused:
                 logger.info("Pausing archiving")
             else:
                 logger.info("Resuming archiving")
 
-            if len(self.queue_workers) > 0:
-                for queue_worker in self.queue_workers:
-                    queue_worker.pause(paused)
+            for worker in self.workers:
+                if worker:
+                    worker.pause(paused)
 
             self.archiving_paused = paused
 
     def stop(self):
         """Stops all processes"""
-        for watcher in self.watchers:
-            watcher.stop()
+        self.running = False
 
-        if len(self.queue_workers) > 0:
-            for queue_worker in self.queue_workers:
-                queue_worker.stop()
-
-        # Wait for threads to finish
-        for watcher_thread in self.watcher_threads:
-            if watcher_thread:
-                thread_name = watcher_thread.name
-                logger.debug(f"Watcher {thread_name} Stopping...")
-                if watcher_thread.is_alive():
-                    watcher_thread.join()
-                logger.debug(f"Watcher {thread_name} Stopped")
-
-        for worker_thread in self.worker_threads:
-            if worker_thread:
-                thread_name = worker_thread.name
-                logger.debug(f"QueueWorker {thread_name} Stopping...")
-                if worker_thread.is_alive():
-                    worker_thread.join()
-                logger.debug(f"QueueWorker {thread_name} Stopped")
-
-        # Close all database connections
-        self.remote_db_handler_object.stop_database_pool()
-        self.mro_db_handler_object.stop_database_pool()
+        # Stop any Processors
+        for w in self.workers:
+            if w.is_running():
+                w.stop()
 
     def health_handler(self):
         """Send multicast health data"""
@@ -382,52 +207,27 @@ class MWACacheArchiveProcessor:
 
     def get_status(self) -> dict:
         """Returns status of all process as a dictionary"""
-        if self.archiving_paused:
-            archiving = "paused"
-        else:
-            archiving = "running"
-
         main_status = {
             "Unix timestamp": time.time(),
             "process": type(self).__name__,
             "version": version.get_mwax_mover_version_string(),
             "host": self.hostname,
             "running": self.running,
-            "archiving": archiving,
             "cmdline": " ".join(sys.argv[1:]),
         }
 
-        watcher_list = []
+        worker_status_list = []
 
-        for watcher in self.watchers:
-            status = dict({"name": "data_watcher"})
-            status.update(watcher.get_status())
-            watcher_list.append(status)
+        for w in self.workers:
+            worker_status_list.append(w.get_status())
 
-        worker_list = []
-
-        if len(self.queue_workers) > 0:
-            for i, worker in enumerate(self.queue_workers):
-                status = dict({"name": f"archiver{i}"})
-                status.update(worker.get_status())
-                worker_list.append(status)
-
-        processor_status_list = []
-        processor = {
-            "type": type(self).__name__,
-            "watchers": watcher_list,
-            "workers": worker_list,
-        }
-        processor_status_list.append(processor)
-
-        status = {"main": main_status, "processors": processor_status_list}
+        status = {"main": main_status, "workers": worker_status_list}
 
         return status
 
     def signal_handler(self, _signum, _frame):
         """Catches SIG INT and SIG TERM then stops the processor"""
         logger.warning("Interrupted. Shutting down processor...")
-        self.running = False
 
         # Stop any Processors
         self.stop()
@@ -451,9 +251,6 @@ class MWACacheArchiveProcessor:
 
         logger.info(f"Starting mwacache_archive_processor processor...v{version.get_mwax_mover_version_string()}")
 
-        # Get this hosts hostname
-        if self.hostname == "":
-            self.hostname = utils.get_hostname()
         logger.info(f"hostname: {self.hostname}")
 
         # Dump some diagnostic info
@@ -568,7 +365,11 @@ class MWACacheArchiveProcessor:
 
         self.mro_metadatadb_db = utils.read_config(config, "mro metadata database", "db")
         self.mro_metadatadb_user = utils.read_config(config, "mro metadata database", "user")
-        self.mro_metadatadb_pass = utils.read_config(config, "mro metadata database", "pass", True)
+
+        self.mro_metadatadb_pass = utils.read_config(
+            config, "mro metadata database", "pass", self.mro_metadatadb_host != "dummy"
+        )
+
         self.mro_metadatadb_port = int(utils.read_config(config, "mro metadata database", "port"))
 
         # Initiate database connection for rmo metadata db
@@ -588,7 +389,9 @@ class MWACacheArchiveProcessor:
 
         self.remote_metadatadb_db = utils.read_config(config, "remote metadata database", "db")
         self.remote_metadatadb_user = utils.read_config(config, "remote metadata database", "user")
-        self.remote_metadatadb_pass = utils.read_config(config, "remote metadata database", "pass", True)
+        self.remote_metadatadb_pass = utils.read_config(
+            config, "remote metadata database", "pass", self.remote_metadatadb_db != "dummy"
+        )
         self.remote_metadatadb_port = int(utils.read_config(config, "remote metadata database", "port"))
 
         # Initiate database connection for remote metadata db
@@ -599,6 +402,23 @@ class MWACacheArchiveProcessor:
             user=self.remote_metadatadb_user,
             password=self.remote_metadatadb_pass,
         )
+
+        # Assemble paths and extensions
+        paths_and_exts = [(s, ".*") for s in self.watch_dirs]
+
+        # Create watch queue worker
+        worker = PawseyOutgoingProcessor(
+            self.metafits_path,
+            paths_and_exts,
+            self.high_priority_correlator_projectids,
+            self.high_priority_vcs_projectids,
+            self.mro_db_handler_object,
+            self.remote_db_handler_object,
+            self.s3_profile,
+            self.s3_ceph_endpoints,
+            self.archive_to_location,
+        )
+        self.workers.append(worker)
 
         # Make sure we can Ctrl-C / kill out of this
         logger.info("Initialising signal handlers")

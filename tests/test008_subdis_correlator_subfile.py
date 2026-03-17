@@ -5,6 +5,9 @@ config correctly from a "correlator" config file.
 
 import os
 import shutil
+import signal
+import threading
+import time
 from mwax_mover.utils import MWAXSubfileDistirbutorMode
 from tests_common import create_observation_subfiles, setup_test_directories
 from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
@@ -89,5 +92,19 @@ def test_process_correlator_subfile():
     shutil.copyfile(TEST_METAFITS, metafits)
 
     create_observation_subfiles(
-        1454743816, 2, "MWAX_BEAMFORMER", 109, 0, os.path.join(base_dir, "tmp"), sd.cfg_subfile_incoming_path
+        1369821496, 2, "MWAX_CORRELATOR", 109, 0, os.path.join(base_dir, "tmp"), sd.cfg_subfile_incoming_path
     )
+
+    # start processor
+    # Create and start a thread for the processor
+    thrd = threading.Thread(name="msd_thread", target=sd.start, daemon=True)
+
+    # Start the processor
+    thrd.start()
+
+    # allow things to start
+    time.sleep(20)
+
+    # Quit
+    # Ok time's up! Stop the processor
+    sd.signal_handler(signal.SIGINT, 0)
