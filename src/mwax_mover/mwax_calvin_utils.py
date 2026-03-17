@@ -34,6 +34,8 @@ from typing import NamedTuple, List, Tuple, Optional  # noqa: F401
 # from nptyping import NDArray, Shape
 import sys
 
+logger = logging.getLogger(__name__)
+
 V_LIGHT_M_S = 299792458.0
 AOCAL_INTRO = "MWAOCAL\0".encode("utf8")
 AOCAL_FILE_TYPE = 0
@@ -592,7 +594,7 @@ class HyperfitsSolutionGroup:
             soln_tiles["flag_soln"] = soln.tile_flags
             soln_tiles["flag"] = np.logical_or(soln_tiles["flag_soln"], soln_tiles["flag_metafits"])
             soln_tiles.drop(columns=["flag_metafits", "flag_soln"], inplace=True)
-            # self.logger.debug(f"{soln.filename} - tiles:\n{soln_tiles.to_string(max_rows=999)}")
+
             if refant_name is not None:
                 _ref_tiles = soln_tiles[soln_tiles["name"] == refant_name]
                 if not len(_ref_tiles):
@@ -611,7 +613,6 @@ class HyperfitsSolutionGroup:
 
                 if not ref_tile_idx:
                     ref_tile_idx = _ref_tile_idx
-                    # self.logger.debug(f"{soln.filename} - ref tile found at index {ref_tile_idx}")
                 elif ref_tile_idx != _ref_tile_idx:
                     raise RuntimeError(
                         f"{soln.filename} - reference tile in solution file does not match previous solution files"
@@ -621,7 +622,6 @@ class HyperfitsSolutionGroup:
             # _tile_ids, _ref_tile_idx = soln.validate_tiles(tiles_by_name, refant)
             if soln_tile_ids is None or not len(soln_tile_ids):
                 soln_tile_ids = soln_tiles["id"].to_numpy()
-                # self.logger.debug(f"{soln.filename} - found {len(soln_tile_ids)} matching tiles")  # type: ignore
             elif not np.array_equal(soln_tile_ids, _tile_ids):
                 raise RuntimeError(
                     f"{soln.filename} - tile selection in solution file"
@@ -1399,7 +1399,6 @@ def get_convergence_summary(solutions_fits_file: str):
 
 
 def write_stats(
-    logger,
     obs_id,
     stats_filename,
     hyperdrive_solution_filename,
@@ -1427,7 +1426,7 @@ def write_stats(
             f" {metafits_filename} {hyperdrive_solution_filename}"
         )
 
-        return_value, _ = run_command_ext(logger, cmd, -1, timeout=10, use_shell=False)
+        return_value, _ = run_command_ext(cmd, -1, timeout=10, use_shell=False)
 
         logger.info(
             f"{obs_id} Finished running hyperdrive stats on {hyperdrive_solution_filename}. Return={return_value}"
@@ -1463,7 +1462,7 @@ def write_stats(
     return True, ""
 
 
-def write_readme_file(logger, filename, cmd, exit_code, stdout, stderr):
+def write_readme_file(filename, cmd, exit_code, stdout, stderr):
     """This will create a small readme.txt file which will
     hopefully help whoever poor sap is checking why birli
     or hyperdrive or the upload_handler did or did not work!"""
@@ -1486,7 +1485,6 @@ def write_readme_file(logger, filename, cmd, exit_code, stdout, stderr):
 
 
 def run_birli(
-    logger: logging.Logger,
     input_data_path: str,
     metafits_filename: str,
     uvfits_filename: str,
@@ -1556,15 +1554,13 @@ def run_birli(
             f" {avg_arg} {data_file_arg}"
         )
 
-        birli_popen_process = run_command_popen(logger, cmdline, -1, False, False)
+        birli_popen_process = run_command_popen(cmdline, -1, False, False)
 
         exit_code, stdout, stderr = check_popen_finished(
-            logger,
             birli_popen_process,
             birli_timeout,
         )
 
-        # return_val, stdout = run_command_ext(logger, cmdline, -1, timeout, False)
         elapsed = time.time() - start_time
 
         if exit_code == 0:
@@ -1576,7 +1572,6 @@ def run_birli(
             # Write out a useful file of command line info
             readme_filename = os.path.join(job_output_path, f"{obs_id}_birli_readme.txt")
             write_readme_file(
-                logger,
                 readme_filename,
                 cmdline,
                 exit_code,
@@ -1604,7 +1599,6 @@ def run_birli(
         # Write out a useful file of error and command line info
         readme_filename = os.path.join(job_output_path, "readme_error.txt")
         write_readme_file(
-            logger,
             readme_filename,
             cmdline,
             exit_code,
@@ -1616,7 +1610,6 @@ def run_birli(
 
 
 def run_hyperdrive(
-    logger: logging.Logger,
     input_uvfits_files: List[str],
     metafits_filename: str,
     job_output_path: str,
@@ -1670,15 +1663,13 @@ def run_hyperdrive(
 
             # run hyperdrive
             logger.info(f"{obs_id}: Running hyperdrive on {uvfits_file}...")
-            hyperdrive_popen_process = run_command_popen(logger, cmdline, -1, False, False)
+            hyperdrive_popen_process = run_command_popen(cmdline, -1, False, False)
 
             exit_code, stdout, stderr = check_popen_finished(
-                logger,
                 hyperdrive_popen_process,
                 hyperdrive_timeout,
             )
 
-            # return_val, stdout = run_command_ext(logger, cmdline, -1, timeout, False)
             elapsed = time.time() - start_time
 
             if exit_code == 0:
@@ -1693,7 +1684,6 @@ def run_hyperdrive(
                 readme_filename = f"{obsid_and_band}_hyperdrive_readme.txt"
 
                 write_readme_file(
-                    logger,
                     readme_filename,
                     cmdline,
                     exit_code,
@@ -1736,7 +1726,6 @@ def run_hyperdrive(
         # Write out a useful file of error and command line info
         readme_filename = os.path.join(job_output_path, "readme_error.txt")
         write_readme_file(
-            logger,
             readme_filename,
             cmdline,
             exit_code,
@@ -1749,7 +1738,6 @@ def run_hyperdrive(
 
 
 def run_hyperdrive_stats(
-    logger: logging.Logger,
     input_uvfits_files,
     metafits_filename: str,
     obs_id: int,
@@ -1781,7 +1769,6 @@ def run_hyperdrive_stats(
             stats_success,
             stats_error,
         ) = write_stats(
-            logger,
             obs_id,
             stats_filename,
             hyperdrive_solution_filename,
@@ -1807,7 +1794,7 @@ def run_hyperdrive_stats(
 
 
 def process_phase_fits(
-    logger, output_path, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
+    output_path, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
 ):
     """
     Fit a line to each tile phase solution, return a dataframe of phase fit parameters for each
@@ -1835,9 +1822,7 @@ def process_phase_fits(
     return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])
 
 
-def process_gain_fits(
-    logger, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, chanblocks_per_coarse
-):
+def process_gain_fits(tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, chanblocks_per_coarse):
     """
     for each tile, pol, fit a GainFitInfo to the gains
     """
@@ -1920,7 +1905,7 @@ exit $?
     return job_script
 
 
-def submit_sbatch(logger: logging.Logger, script_path: str, script: str, obs_id: int) -> Tuple[bool, Optional[int]]:
+def submit_sbatch(script_path: str, script: str, obs_id: int) -> Tuple[bool, Optional[int]]:
     # Submits the provided sbatch script to SLURM
     # Returns (success, jobid or None if failed)
     try:
@@ -1938,7 +1923,7 @@ def submit_sbatch(logger: logging.Logger, script_path: str, script: str, obs_id:
     return_val: bool = False
     stdout = ""
     try:
-        return_val, stdout = run_command_ext(logger, cmdline, None, 60, True)
+        return_val, stdout = run_command_ext(cmdline, None, 60, True)
 
         # remove crlf from stdout
         stdout = stdout.replace("\n", " ")

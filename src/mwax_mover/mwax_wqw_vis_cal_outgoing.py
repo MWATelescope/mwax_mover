@@ -1,18 +1,18 @@
 from mwax_mover.mwax_watch_queue_worker import MWAXWatchQueueWorker
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
-from logging import Logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class VisCalOutgoingProcessor(MWAXWatchQueueWorker):
     def __init__(
         self,
-        logger: Logger,
         visdata_outgoing_cal_path: str,
         outgoing_cal_list: list[str],
     ):
         super().__init__(
             "VisSCalOutgoingProcessor",
-            logger,
             [(visdata_outgoing_cal_path, ".fits")],
             mode=MODE_WATCH_DIR_FOR_RENAME,
             requeue_to_eoq_on_failure=False,

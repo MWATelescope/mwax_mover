@@ -2,22 +2,23 @@ from mwax_mover.mwax_calvin_utils import get_partial_aocal_filename
 from mwax_mover.mwax_watch_queue_worker import MWAXWatchQueueWorker
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
 from mwax_mover import utils
-from logging import Logger
 import os
 import glob
 import shutil
 import sys
 import time
-
+import logging
 
 METAFITS_EXPOSURE = "EXPOSURE"
 COMMAND_DADA_DISKDB = "dada_diskdb"
 
 
+logger = logging.getLogger(__name__)
+
+
 class SubfileIncomingProcessor(MWAXWatchQueueWorker):
     def __init__(
         self,
-        logger: Logger,
         sd_ctx,
         subfile_incoming_path: str,
         subfile_ext: str,
@@ -41,7 +42,6 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
     ):
         super().__init__(
             "SubfileIncomingProcessor",
-            logger,
             [
                 (subfile_incoming_path, ".sub"),
             ],
@@ -78,7 +78,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         """When subfile detected this handles it"""
         success = False
 
-        self.logger.info(f"{item}- SubfileIncomingProcessor.subfile_handler is handling {item}...")
+        logger.info(f"{item}- SubfileIncomingProcessor.subfile_handler is handling {item}...")
 
         handler_starttime = time.time()
 
@@ -134,9 +134,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         if self.packet_stats_dump_dir != "":
             # For all subfiles we need to extract the packet stats:
             # Ignore failures
-            utils.run_mwax_packet_stats(
-                self.logger, self.mwax_stats_binary_dir, item, self.packet_stats_dump_dir, -1, 3
-            )
+            utils.run_mwax_packet_stats(self.mwax_stats_binary_dir, item, self.packet_stats_dump_dir, -1, 3)
 
         try:
             #
@@ -151,7 +149,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
             ):
                 # We ARE in voltage dump and so we go and do a VCS capture instead
                 # of whatever else we were doing
-                self.logger.info(
+                logger.info(
                     f"{item}- ignoring existing mode: {subfile_mode} as we"
                     f" are within a voltage dump ({self.sd_ctx.dump_start_gps} <"
                     f" {self.sd_ctx.dump_end_gps}) for trigger {self.sd_ctx.dump_trigger_id}."
@@ -166,13 +164,12 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                 # don't overwrite it. We must have overlapping triggers happening
                 if not utils.read_subfile_trigger_value(item):
                     # No TRIGGER_ID yet, so add it
-                    self.logger.info(
+                    logger.info(
                         f"{item}- injecting {utils.PSRDADA_TRIGGER_ID} {self.sd_ctx.dump_trigger_id} into subfile..."
                     )
                     utils.inject_subfile_header(item, f"{utils.PSRDADA_TRIGGER_ID} {self.sd_ctx.dump_trigger_id}\n")
 
                 success = utils.copy_subfile_to_disk_dd(
-                    self.logger,
                     item,
                     self.corr_devshm_numa_node,
                     self.voltdata_incoming_path,
@@ -202,7 +199,6 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                             self.sd_ctx.pause_archiving(False)  # pylint: disable=line-too-long
 
                         success = utils.load_psrdada_ringbuffer(
-                            self.logger,
                             item,
                             self.corr_ringbuffer_key,
                             -1,
@@ -213,7 +209,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                             keep_subfiles_path = self.voltdata_incoming_path
                     else:
                         # Ignore
-                        self.logger.warning(
+                        logger.warning(
                             f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor NOT running in CORRELATOR mode"
                         )
                         success = True  # It's True because that signals the caller to keep going and don't retry
@@ -226,7 +222,6 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                             self.sd_ctx.pause_archiving(True)  # pylint: disable=line-too-long
 
                         success = utils.copy_subfile_to_disk_dd(
-                            self.logger,
                             item,
                             self.corr_devshm_numa_node,
                             self.voltdata_incoming_path,
@@ -236,7 +231,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                         )
                     else:
                         # Ignore
-                        self.logger.warning(
+                        logger.warning(
                             f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor NOT running in CORRELATOR mode"
                         )
                         success = True  # It's True because that signals the caller to keep going and don't retry
@@ -261,7 +256,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                                 metafits_filename, METAFITS_CALIBDATA_HDU, METAFITS_CALOBSID
                             )
                         except Exception:
-                            self.logger.warning(
+                            logger.warning(
                                 f"{item} key {METAFITS_CALOBSID} not found in metafits file {metafits_filename} hdu {METAFITS_CALIBDATA_HDU}"
                             )
                             cal_obs_id_str = "0"
@@ -269,7 +264,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                         try:
                             cal_obs_id: int = int(cal_obs_id_str)
                         except Exception:
-                            self.logger.warning(
+                            logger.warning(
                                 f"{item}: value {cal_obs_id_str} for key {METAFITS_CALOBSID} in {metafits_filename} hdu {METAFITS_CALIBDATA_HDU} is not a number"
                             )
                             cal_obs_id = 0
@@ -277,7 +272,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                         success = self.signal_beamformer(item, cal_obs_id, rec_chan_no)
                     else:
                         # Ignore
-                        self.logger.warning(
+                        logger.warning(
                             f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor NOT running in BEAMFORMER mode"
                         )
                         success = True  # It's True because that signals the caller to keep going and don't retry
@@ -285,7 +280,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                 elif utils.CorrelatorMode.is_no_capture(subfile_mode) or utils.CorrelatorMode.is_voltage_buffer(
                     subfile_mode
                 ):
-                    self.logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
+                    logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
 
                     #
                     # This is our opportunity to write any "keep" files to disk
@@ -307,7 +302,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                     success = True
 
                 else:
-                    self.logger.error(f"{item}- Unknown subfile mode {subfile_mode}, ignoring.")
+                    logger.error(f"{item}- Unknown subfile mode {subfile_mode}, ignoring.")
                     success = True
 
                 # There is a semi-rare case where in between the top of this code and now
@@ -343,7 +338,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                     self.sd_ctx.dump_trigger_id = None
 
         except Exception as handler_exception:  # pylint: disable=broad-except
-            self.logger.error(f"{item} {handler_exception}")
+            logger.error(f"{item} {handler_exception}")
             success = False
 
         finally:
@@ -354,7 +349,6 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                     # we use -1 for numa node for now as this is really for
                     # debug so it does not matter
                     utils.copy_subfile_to_disk_dd(
-                        self.logger,
                         item,
                         self.corr_devshm_numa_node,
                         keep_subfiles_path,
@@ -384,14 +378,12 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                             pass
 
                     except Exception as move_exception:  # pylint: disable=broad-except
-                        self.logger.error(
-                            f"{item}- Could not rename {item} back to {free_filename}. Error {move_exception}"
-                        )
+                        logger.error(f"{item}- Could not rename {item} back to {free_filename}. Error {move_exception}")
                         sys.exit(2)
 
             handler_elapsed = time.time() - handler_starttime
 
-            self.logger.info(
+            logger.info(
                 f"{item}- SubfileIncomingProcessor.subfile_handler finished handling in {handler_elapsed:.3f} secs."
             )
 
@@ -407,26 +399,24 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         try:
             found_files = glob.glob(partial_aocal_filename)
             if not found_files:
-                self.logger.warning(f"{item}- No aocal file found matching pattern {partial_aocal_filename}.")
+                logger.warning(f"{item}- No aocal file found matching pattern {partial_aocal_filename}.")
             else:
                 aocal_filename = found_files[0]
-                self.logger.info(f"{item}- Found aocal file {aocal_filename} for pattern {partial_aocal_filename}.")
+                logger.info(f"{item}- Found aocal file {aocal_filename} for pattern {partial_aocal_filename}.")
         except Exception as e:
-            self.logger.error(
-                f"{item}- Error searching for aocal file with pattern {partial_aocal_filename}. Error: {e}"
-            )
+            logger.error(f"{item}- Error searching for aocal file with pattern {partial_aocal_filename}. Error: {e}")
 
         signal_value = {"subfile": item, "aocalfile": aocal_filename}
-        self.logger.info(f"{item}- Signalling beamformer with ({signal_value}) via redis {self.bf_redis_host}...")
+        logger.info(f"{item}- Signalling beamformer with ({signal_value}) via redis {self.bf_redis_host}...")
         try:
             # Write the signal value- if reader disconnects it will auto-reopen unless timeout is hit
             utils.push_message_to_redis(self.bf_redis_host, self.bf_redis_queue_key, signal_value)
             # Success
-            self.logger.info(f"{item}- Signalling beamformer success")
+            logger.info(f"{item}- Signalling beamformer success")
             return True
 
         except Exception:
-            self.logger.exception(f"{item}- signal_beamformer failed.")
+            logger.exception(f"{item}- signal_beamformer failed.")
             exit(3)
 
     def handle_next_keep_file(self) -> bool:
@@ -436,7 +426,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         # Get next keep file off the queue
         keep_filename = self.sd_ctx.dump_keep_file_queue.get()
 
-        self.logger.info(f"SubfileProcessor.handle_next_keep_file is handling {keep_filename}...")
+        logger.info(f"SubfileProcessor.handle_next_keep_file is handling {keep_filename}...")
 
         # Read TRANSFER_SIZE from subfile header
         # We only use this when writing a subfile to disk in case the subfile is
@@ -451,7 +441,6 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         # Copy the .keep file to the voltdata incoming dir
         # and ensure it is named as a ".sub" file
         copy_success = utils.copy_subfile_to_disk_dd(
-            self.logger,
             keep_filename,
             self.corr_diskdb_numa_node,
             self.voltdata_incoming_path,
@@ -467,14 +456,14 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
             try:
                 shutil.move(keep_filename, free_filename)
             except Exception as move_exception:  # pylint: disable=broad-except
-                self.logger.error(f"Could not rename {keep_filename} back to {free_filename}. Error {move_exception}")
+                logger.error(f"Could not rename {keep_filename} back to {free_filename}. Error {move_exception}")
                 sys.exit(2)
 
         else:
             # Reqeuue file to try again later
             self.sd_ctx.dump_keep_file_queue.put(keep_filename)
 
-        self.logger.info(
+        logger.info(
             "SubfileProcessor.handle_next_keep_file finished handling"
             f" {keep_filename}. Remaining .keep files:"
             f" {self.sd_ctx.dump_keep_file_queue.qsize()}."

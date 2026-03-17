@@ -27,6 +27,8 @@ import requests
 from mwax_mover import mwax_command
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
 
+logger = logging.getLogger(__name__)
+
 # number of lines of the PSRDADA header to read looking for keywords
 PSRDADA_HEADER_BYTES = 4096
 
@@ -144,7 +146,7 @@ class ArchiveLocation(Enum):
     AcaciaMWA = 4
 
 
-def download_metafits_file(logger: logging.Logger, obs_id: int, metafits_path: str):
+def download_metafits_file(obs_id: int, metafits_path: str):
     """
     For a given obs_id, get the metafits file from webservices
     """
@@ -157,7 +159,7 @@ def download_metafits_file(logger: logging.Logger, obs_id: int, metafits_path: s
     ]
 
     # On failure of all urls and retries it will raise an exception
-    response = call_webservice(logger, obs_id, urls, None)
+    response = call_webservice(obs_id, urls, None)
 
     metafits = response.content
     with open(metafits_file_path, "wb") as handler:
@@ -165,7 +167,6 @@ def download_metafits_file(logger: logging.Logger, obs_id: int, metafits_path: s
 
 
 def validate_filename(
-    logger,
     filename: str,
     metafits_path: str,
 ) -> ValidationData:
@@ -332,7 +333,7 @@ def validate_filename(
             if not os.path.exists(metafits_filename):
                 logger.info(f"Metafits file {metafits_filename} not found. Atempting to download it")
                 try:
-                    download_metafits_file(logger, obs_id, metafits_path)
+                    download_metafits_file(obs_id, metafits_path)
                 except Exception as catch_all_exception:  # pylint: disable=broad-except
                     valid = False
                     validation_error = (
@@ -447,7 +448,7 @@ def get_metafits_values(metafits_filename: str) -> Tuple[bool, str, str]:
         ) from catch_all_exception
 
 
-def read_config(logger, config: ConfigParser, section: str, key: str, b64encoded=False):
+def read_config(config: ConfigParser, section: str, key: str, b64encoded=False):
     """Reads a value from a config file"""
     raw_value = config.get(section, key)
 
@@ -462,7 +463,7 @@ def read_config(logger, config: ConfigParser, section: str, key: str, b64encoded
     return value
 
 
-def read_optional_config(logger, config: ConfigParser, section: str, key: str, b64encoded=False) -> Optional[str]:
+def read_optional_config(config: ConfigParser, section: str, key: str, b64encoded=False) -> Optional[str]:
     """Reads an optional value from a config file as Optional[str]
     Optional can mean:
     1. Key does not exist
@@ -493,9 +494,9 @@ def read_optional_config(logger, config: ConfigParser, section: str, key: str, b
     return value
 
 
-def read_config_list(logger, config: ConfigParser, section: str, key: str):
+def read_config_list(config: ConfigParser, section: str, key: str):
     """Reads a string from a config file, returning a list"""
-    string_value = read_config(logger, config, section, key, False)
+    string_value = read_config(config, section, key, False)
 
     # Ensure we trim string_value
     string_value = string_value.rstrip().lstrip()
@@ -511,7 +512,7 @@ def read_config_list(logger, config: ConfigParser, section: str, key: str):
     return return_list
 
 
-def read_config_bool(logger, config: ConfigParser, section: str, key: str):
+def read_config_bool(config: ConfigParser, section: str, key: str):
     """Read a bool from a config file"""
     value = config.getboolean(section, key)
 
@@ -530,7 +531,6 @@ def get_hostname() -> str:
 
 
 def process_mwax_stats(
-    logger,
     mwax_stats_dir: str,
     full_filename: str,
     numa_node: Optional[int],
@@ -549,7 +549,7 @@ def process_mwax_stats(
     logger.debug(f"{full_filename}- attempting to run stats: {cmd}")
 
     start_time = time.time()
-    return_value, stdout = mwax_command.run_command_ext(logger, cmd, numa_node, timeout)
+    return_value, stdout = mwax_command.run_command_ext(cmd, numa_node, timeout)
     elapsed = time.time() - start_time
 
     if return_value:
@@ -560,7 +560,7 @@ def process_mwax_stats(
     return return_value
 
 
-def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, numa_node, timeout: int) -> bool:
+def load_psrdada_ringbuffer(full_filename: str, ringbuffer_key: str, numa_node, timeout: int) -> bool:
     """Loads a subfile into a PSRDADA ringbuffer"""
     logger.debug(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
 
@@ -569,7 +569,7 @@ def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, num
     size = os.path.getsize(full_filename)
 
     start_time = time.time()
-    return_value, stdout = mwax_command.run_command_ext(logger, cmd, numa_node, timeout)
+    return_value, stdout = mwax_command.run_command_ext(cmd, numa_node, timeout)
     elapsed = time.time() - start_time
 
     size_gigabytes = size / (1000 * 1000 * 1000)
@@ -587,16 +587,14 @@ def load_psrdada_ringbuffer(logger, full_filename: str, ringbuffer_key: str, num
     return return_value
 
 
-def run_mwax_packet_stats(
-    logger, mwax_stats_dir: str, full_filename: str, output_dir: str, numa_node, timeout: int
-) -> bool:
+def run_mwax_packet_stats(mwax_stats_dir: str, full_filename: str, output_dir: str, numa_node, timeout: int) -> bool:
     """Runs the rust mwax_packet_stats binary against the subfile to generate packet stats"""
     logger.debug(f"{full_filename}- attempting to execute mwax_packet_stats")
 
     cmd = f"{mwax_stats_dir}/mwax_packet_stats -o {output_dir} -s {full_filename}"
 
     start_time = time.time()
-    return_value, stdout = mwax_command.run_command_ext(logger, cmd, numa_node, timeout)
+    return_value, stdout = mwax_command.run_command_ext(cmd, numa_node, timeout)
     elapsed = time.time() - start_time
 
     if return_value:
@@ -608,7 +606,6 @@ def run_mwax_packet_stats(
 
 
 def scan_for_existing_files_and_add_to_queue(
-    logger,
     watch_dir: str,
     pattern: str,
     recursive: bool,
@@ -619,7 +616,7 @@ def scan_for_existing_files_and_add_to_queue(
     Scans a directory for a file pattern and then enqueues all items into
     a regular queue
     """
-    files = scan_directory(logger, watch_dir, pattern, recursive, exclude_pattern)
+    files = scan_directory(watch_dir, pattern, recursive, exclude_pattern)
     files = sorted(files)
     logger.info(f"{watch_dir}: Found {len(files)} files")
 
@@ -629,7 +626,6 @@ def scan_for_existing_files_and_add_to_queue(
 
 
 def scan_for_existing_files_and_add_to_priority_queue(
-    logger,
     metafits_path: str,
     watch_dir: str,
     pattern: str,
@@ -643,13 +639,12 @@ def scan_for_existing_files_and_add_to_priority_queue(
     Scans a directory for a file pattern and then enqueues all items into
     a priority queue
     """
-    files = scan_directory(logger, watch_dir, pattern, recursive, exclude_pattern)
+    files = scan_directory(watch_dir, pattern, recursive, exclude_pattern)
     files = sorted(files)
     logger.info(f"{watch_dir}: Found {len(files)} files")
 
     for filename in files:
         priority = get_priority(
-            logger,
             filename,
             metafits_path,
             list_of_correlator_high_priority_projects,
@@ -659,7 +654,7 @@ def scan_for_existing_files_and_add_to_priority_queue(
         logger.info(f"{watch_dir}: {os.path.basename(filename)} added to queue with priority {priority}")
 
 
-def scan_directory(logger, watch_dir: str, pattern: str, recursive: bool, exclude_pattern) -> list:
+def scan_directory(watch_dir: str, pattern: str, recursive: bool, exclude_pattern) -> list:
     """Scan a directory based on a pattern and adds the files into a list"""
     # Watch dir must end in a slash for the iglob to work
     # Just loop through all files and add them to the queue
@@ -746,7 +741,7 @@ def get_disk_space_bytes(path: str) -> typing.Tuple[int, int, int]:
     return shutil.disk_usage(path)
 
 
-def do_checksum_md5(logger, full_filename: str, numa_node: Optional[int], timeout: int) -> str:
+def do_checksum_md5(full_filename: str, numa_node: Optional[int], timeout: int) -> str:
     """Return an md5 checksum of a file"""
 
     # default output of md5 hash command is:
@@ -762,7 +757,7 @@ def do_checksum_md5(logger, full_filename: str, numa_node: Optional[int], timeou
     size = os.path.getsize(full_filename)
 
     start_time = time.time()
-    return_value, md5output = mwax_command.run_command_ext(logger, cmdline, numa_node, timeout, False)
+    return_value, md5output = mwax_command.run_command_ext(cmdline, numa_node, timeout, False)
     elapsed = time.time() - start_time
 
     size_megabytes = size / (1000 * 1000)
@@ -788,7 +783,6 @@ def do_checksum_md5(logger, full_filename: str, numa_node: Optional[int], timeou
 
 
 def get_priority(
-    logger,
     filename: str,
     metafits_path: str,
     list_of_correlator_high_priority_projects: list,
@@ -815,7 +809,7 @@ def get_priority(
     return_priority = 100  # default if we don't do anything else
 
     # get info about this file
-    val: ValidationData = validate_filename(logger, filename, metafits_path)
+    val: ValidationData = validate_filename(filename, metafits_path)
 
     if val.valid:
         if val.filetype_id == MWADataFileType.MWAX_VISIBILITIES.value:
@@ -1042,11 +1036,9 @@ def should_project_be_archived(project_id: str) -> bool:
         return True
 
 
-def call_webservice(
-    logger: logging.Logger, obs_id: int, url_list: list[str], data, max_retries: int = 10, wait: int = 30
-) -> requests.Response:
+def call_webservice(obs_id: int, url_list: list[str], data, max_retries: int = 10, wait: int = 30) -> requests.Response:
     @retry(stop=stop_after_attempt(max_retries), wait=wait_fixed(wait), retry=retry_if_not_exception_type((ValueError)))
-    def call_webservice_inner(logger: logging.Logger, obs_id: int, url_list: list[str], data) -> requests.Response:
+    def call_webservice_inner(obs_id: int, url_list: list[str], data) -> requests.Response:
         """Call each url in the list until: a response of
         200 (in which case return the response)
         """
@@ -1090,11 +1082,10 @@ def call_webservice(
         logger.error(f"{obs_id}: call_webservice() - failed after trying {len(url_list)} urls.")
         raise Exception(f"{obs_id}: call_webservice()- failed after trying {len(url_list)} urls.")
 
-    return call_webservice_inner(logger, obs_id, url_list, data)
+    return call_webservice_inner(obs_id, url_list, data)
 
 
 def get_data_files_for_obsid_from_webservice(
-    logger,
     obs_id: int,
 ) -> list[str]:
     """Calls an MWA webservice, passing in an obsid and returning a list of filenames
@@ -1105,7 +1096,7 @@ def get_data_files_for_obsid_from_webservice(
     data = {"obs_id": obs_id, "terse": False, "all_files": True}
 
     # On failure of all urls and retries it will raise an exception
-    result = call_webservice(logger, obs_id, urls, data)
+    result = call_webservice(obs_id, urls, data)
 
     files = json.loads(result.text)
     file_list = [
@@ -1119,7 +1110,6 @@ def get_data_files_for_obsid_from_webservice(
 
 
 def get_data_files_with_hostname_for_obsid_from_webservice(
-    logger,
     obs_id: int,
 ) -> list[tuple[str, str]]:
     """Calls an MWA webservice, passing in an obsid and returning a list of tuples of filenames and hostnames
@@ -1132,7 +1122,7 @@ def get_data_files_with_hostname_for_obsid_from_webservice(
     data = {"obs_id": obs_id, "terse": False, "all_files": True}
 
     # On failure of all urls and retries it will raise an exception
-    result = call_webservice(logger, obs_id, urls, data)
+    result = call_webservice(obs_id, urls, data)
 
     files = json.loads(result.text)
     file_list = [
@@ -1146,7 +1136,7 @@ def get_data_files_with_hostname_for_obsid_from_webservice(
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_fixed(10))
-def remove_file(logger, filename: str, raise_error: bool) -> bool:
+def remove_file(filename: str, raise_error: bool) -> bool:
     """Deletes a file from the filesystem"""
     try:
         os.remove(filename)
@@ -1295,7 +1285,6 @@ def push_message_to_redis(redis_host: str, redis_queue_key: str, message_data):
 
 
 def copy_subfile_to_disk_cp(
-    logger: logging.Logger,
     filename: str,
     numa_node: int,
     destination_path: str,
@@ -1309,7 +1298,7 @@ def copy_subfile_to_disk_cp(
     command = f"cp {filename} {destination_path}/{destination_filename}"
 
     start_time = time.time()
-    retval, stdout = mwax_command.run_command_ext(logger, command, numa_node, timeout, False)
+    retval, stdout = mwax_command.run_command_ext(command, numa_node, timeout, False)
     elapsed = time.time() - start_time
 
     if retval:
@@ -1327,7 +1316,6 @@ def copy_subfile_to_disk_cp(
 
 
 def copy_subfile_to_disk_dd(
-    logger: logging.Logger,
     filename: str,
     numa_node: int,
     destination_path: str,
@@ -1350,7 +1338,7 @@ def copy_subfile_to_disk_dd(
     command = f"dd if={filename} of={destination_path}/{destination_filename} bs=4M oflag=direct iflag=count_bytes count={bytes_to_write}"
 
     start_time = time.time()
-    retval, stdout = mwax_command.run_command_ext(logger, command, numa_node, timeout, False)
+    retval, stdout = mwax_command.run_command_ext(command, numa_node, timeout, False)
 
     if retval:
         elapsed = time.time() - start_time

@@ -10,6 +10,8 @@ import time
 from typing import List, Optional
 from mwax_mover.mwax_command import run_command_ext
 
+logger = logging.getLogger(__name__)
+
 
 class GiantSquidException(Exception):
     """Raised when an unknown exception is thrown when running giant-squid"""
@@ -106,9 +108,6 @@ class MWAASVOHelper:
     """
 
     def __init__(self):
-        # Logger object
-        self.logger: logging.Logger
-
         # Where is giant-squid binary?
         self.path_to_giant_squid_binary: str = ""
 
@@ -125,13 +124,11 @@ class MWAASVOHelper:
 
     def initialise(
         self,
-        logger: logging.Logger,
         path_to_giant_squid_binary: str,
         giant_squid_list_timeout_seconds: int,
         giant_squid_submitvis_timeout_seconds: int,
     ):
         # Set class variables
-        self.logger = logger
         self.path_to_giant_squid_binary = path_to_giant_squid_binary
         self.giant_squid_list_timeout_seconds = giant_squid_list_timeout_seconds
         self.giant_squid_submitvis_timeout_seconds = giant_squid_submitvis_timeout_seconds
@@ -163,7 +160,7 @@ class MWAASVOHelper:
             Returns:
                 New populated MWAASVO job class: raises exceptions on error (from called functions)
         """
-        self.logger.info(f"{obs_id}: Submitting MWA ASVO job to dowload for request {request_id}")
+        logger.info(f"{obs_id}: Submitting MWA ASVO job to dowload for request {request_id}")
 
         try:
             stdout = self._run_giant_squid(
@@ -173,13 +170,13 @@ class MWAASVOHelper:
             # If submitted successfully, get the new job id from stdout
             job_id: int = get_job_id_from_giant_squid_stdout(stdout)
 
-            self.logger.info(f"{obs_id}: MWA ASVO job {job_id} submitted successfully")
+            logger.info(f"{obs_id}: MWA ASVO job {job_id} submitted successfully")
 
         except GiantSquidJobAlreadyExistsException as already_exists_exception:
             # Job already exists in queued, processing or ready state, get the job id
             job_id: int = already_exists_exception.job_id
 
-            self.logger.info(f"{obs_id}: MWA ASVO job {job_id} already exists.")
+            logger.info(f"{obs_id}: MWA ASVO job {job_id} already exists.")
 
         except GiantSquidMWAASVOOutageException:
             self.mwa_asvo_outage_datetime = datetime.now()
@@ -203,7 +200,7 @@ class MWAASVOHelper:
             #     if job.submitted_datetime is None:
             #         job.submitted_datetime = datetime.now(timezone.utc)
 
-            #     self.logger.info(
+            #     logger.info(
             #         f"{obs_id}: Added RequestID {request_id} to JobID {job_id} as this ObsID is already tracked."
             #         f"Tracking {len(self.current_asvo_jobs)} MWA ASVO jobs"
             #     )
@@ -212,7 +209,7 @@ class MWAASVOHelper:
         job = MWAASVOJob(request_id=request_id, obs_id=obs_id, job_id=job_id)
         job.submitted_datetime = datetime.now(timezone.utc)
         self.current_asvo_jobs.append(job)
-        self.logger.info(f"{obs_id}: Added JobID {job_id}. Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs")
+        logger.info(f"{obs_id}: Added JobID {job_id}. Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs")
 
         return job
 
@@ -237,7 +234,7 @@ class MWAASVOHelper:
         # Convert stdout into json
         json_stdout = json.loads(stdout)
 
-        self.logger.debug(f"giant-squid list returned {len(json_stdout)} jobs")
+        logger.debug(f"giant-squid list returned {len(json_stdout)} jobs")
 
         # We'll set all the jobs we see to this exact datetime so
         # we can figure out if one of our in memory jobs is no longer
@@ -266,7 +263,7 @@ class MWAASVOHelper:
                     job.last_seen_datetime = update_datetime
 
                     if changed:
-                        self.logger.info(f"{job}: updated - {job.job_state.value} {job.download_url}")
+                        logger.info(f"{job}: updated - {job.job_state.value} {job.download_url}")
                     break
 
         # Finally, we need to check for any jobs in memory which were not seen anymore
@@ -278,7 +275,7 @@ class MWAASVOHelper:
             if job.last_seen_datetime != update_datetime:
                 # We didn't see this job
                 # We should log it and remove it
-                self.logger.warning(
+                logger.warning(
                     f"{job}: removed - {job.job_state.value} {job.download_url} as it was no longer "
                     f"seen by giant-squid-list. {update_datetime} vs {job.last_seen_datetime}"
                 )
@@ -293,11 +290,11 @@ class MWAASVOHelper:
 
         # run giant-squid. We don't care about running on a specific numa
         # node so we pass -1 for that
-        success, stdout = run_command_ext(self.logger, cmdline, None, timeout_seconds, True)
+        success, stdout = run_command_ext(cmdline, None, timeout_seconds, True)
 
         elapsed = time.time() - start_time
 
-        self.logger.debug(f"_run_giant_squid: completed in {elapsed:.3f} seconds [Success={success}]")
+        logger.debug(f"_run_giant_squid: completed in {elapsed:.3f} seconds [Success={success}]")
 
         if success:
             return stdout

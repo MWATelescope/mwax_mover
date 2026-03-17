@@ -1,10 +1,13 @@
 """Module for the QueueWorker class"""
 
+import logging
 import os
 import queue
 import time
 import threading
 from mwax_mover import mwax_mover, mwax_command
+
+logger = logging.getLogger(__name__)
 
 
 class QueueWorker(object):
@@ -28,7 +31,6 @@ class QueueWorker(object):
         name: str,
         source_queue: queue.Queue,
         executable_path,
-        log,
         event_handler,
         exit_once_queue_empty,
         requeue_to_eoq_on_failure: bool = True,
@@ -51,7 +53,6 @@ class QueueWorker(object):
         self._paused = False
         self.exit_once_queue_empty = exit_once_queue_empty
         self.requeue_to_eoq_on_failure = requeue_to_eoq_on_failure
-        self.logger = log
         self.current_item = None
         self.consecutive_error_count = 0
         self.backoff_initial_seconds = backoff_initial_seconds
@@ -63,7 +64,7 @@ class QueueWorker(object):
 
     def start(self):
         """Start working on the queue"""
-        self.logger.info(f"QueueWorker {self.name} starting...")
+        logger.info(f"QueueWorker {self.name} starting...")
         self._running = True
         self.current_item = None
         self.consecutive_error_count = 0
@@ -76,7 +77,7 @@ class QueueWorker(object):
 
                     if self.current_item is None:
                         self.current_item = self.source_queue.get(block=True, timeout=0.5)
-                    self.logger.info(f"Processing {self.current_item}...")
+                    logger.info(f"Processing {self.current_item}...")
 
                     start_time = time.time()
 
@@ -94,7 +95,7 @@ class QueueWorker(object):
                             self.current_item = None
                     else:
                         # Dequeue the item
-                        self.logger.warning(
+                        logger.warning(
                             f"Processing {self.current_item} Complete... file"
                             " was moved or deleted. Queue size:"
                             f" {self.source_queue.qsize()}"
@@ -104,7 +105,7 @@ class QueueWorker(object):
                         continue
 
                     elapsed = time.time() - start_time
-                    self.logger.info(f"Complete. Queue size: {self.source_queue.qsize()} Elapsed: {elapsed:.2f} sec")
+                    logger.info(f"Complete. Queue size: {self.source_queue.qsize()} Elapsed: {elapsed:.2f} sec")
 
                     if success:
                         # reset our error count and backoffs
@@ -116,7 +117,7 @@ class QueueWorker(object):
                             if backoff > self.backoff_limit_seconds:
                                 backoff = self.backoff_limit_seconds
 
-                            self.logger.info(
+                            logger.info(
                                 f"{self.consecutive_error_count} consecutive"
                                 " failures. Backing off for"
                                 f" {backoff} seconds."
@@ -139,7 +140,7 @@ class QueueWorker(object):
                 except queue.Empty:
                     if self.exit_once_queue_empty:
                         # Queue is complete. Stop now
-                        self.logger.info("Finished processing queue.")
+                        logger.info("Finished processing queue.")
                         self.stop()
                         return
 
@@ -163,7 +164,7 @@ class QueueWorker(object):
         filename_no_ext = os.path.splitext(filename)[0]
         command = command.replace(mwax_mover.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext)
 
-        return_value, _ = mwax_command.run_command_ext(self.logger, command, -1, 60, True)
+        return_value, _ = mwax_command.run_command_ext(command, -1, 60, True)
 
         return return_value
 

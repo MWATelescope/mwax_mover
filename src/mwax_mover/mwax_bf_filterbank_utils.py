@@ -4,6 +4,8 @@ import os
 import re
 import shutil
 
+logger = logging.getLogger(__name__)
+
 HEADER_END = "HEADER_END"
 HEADER_END_BYTES = b"HEADER_END"
 KEY_DATALEN = "datalen"
@@ -65,7 +67,7 @@ def set_filterbank_key_value_int(header: bytearray, key: str, value: int) -> byt
 
 
 # Stitches filterbank files together and writes an output file- output filename is returned
-def stitch_filterbank_files(logger: logging.Logger, files: List[str], output_dir: str) -> str:
+def stitch_filterbank_files(files: List[str], output_dir: str) -> str:
     if len(files) == 0:
         raise Exception("No filterbank files to stitch")
 

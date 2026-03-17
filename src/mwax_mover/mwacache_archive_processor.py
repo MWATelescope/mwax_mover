@@ -27,6 +27,13 @@ from mwax_mover.mwax_priority_watcher import PriorityWatcher
 from mwax_mover.utils import ValidationData, ArchiveLocation
 from mwax_mover.mwax_db import DataFileRow
 
+# Setup root logger
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+logger.addHandler(handler)
+
 
 class MWACacheArchiveProcessor:
     """
@@ -36,10 +43,7 @@ class MWACacheArchiveProcessor:
     """
 
     def __init__(self):
-        self.logger = logging.getLogger(__name__)
-
         self.hostname: str = ""
-        self.log_level: str = ""
         self.metafits_path: str = ""
         self.archive_to_location: ArchiveLocation = ArchiveLocation.Unknown
         self.concurrent_archive_workers: int = 0
@@ -93,18 +97,18 @@ class MWACacheArchiveProcessor:
         self.running = True
 
         # creating database connection pool(s)
-        self.logger.info("Starting MRO database connection pool...")
+        logger.info("Starting MRO database connection pool...")
         self.mro_db_handler_object.start_database_pool()
 
-        self.logger.info("Starting remotedb database connection pool...")
+        logger.info("Starting remotedb database connection pool...")
         self.remote_db_handler_object.start_database_pool()
 
         # create a health thread
-        self.logger.info("Starting health_thread...")
+        logger.info("Starting health_thread...")
         health_thread = threading.Thread(name="health_thread", target=self.health_handler, daemon=True)
         health_thread.start()
 
-        self.logger.info("Creating watchers...")
+        logger.info("Creating watchers...")
         for watcher_no, watch_dir in enumerate(self.watch_dirs):
             #
             # Remove any partial files first if they are old
@@ -119,15 +123,15 @@ class MWACacheArchiveProcessor:
                 min_partial_purge_age_secs = 3600
 
                 if time.time() - os.path.getmtime(partial_file) > min_partial_purge_age_secs:
-                    self.logger.warning(
+                    logger.warning(
                         f"Partial file {partial_file} is older than"
                         f" {min_partial_purge_age_secs} seconds and will be"
                         " removed..."
                     )
                     os.remove(partial_file)
-                    self.logger.warning(f"Partial file {partial_file} deleted")
+                    logger.warning(f"Partial file {partial_file} deleted")
                 else:
-                    self.logger.warning(
+                    logger.warning(
                         f"Partial file {partial_file} is newer than"
                         f" {min_partial_purge_age_secs} seconds so will NOT be"
                         " removed this time"
@@ -139,7 +143,6 @@ class MWACacheArchiveProcessor:
                 path=watch_dir,
                 dest_queue=self.queue,
                 pattern=".*",
-                log=self.logger,
                 mode=self.mwax_mover_mode,
                 recursive=self.recursive,
                 metafits_path=self.metafits_path,
@@ -150,7 +153,7 @@ class MWACacheArchiveProcessor:
             self.watchers.append(new_watcher)
 
         # Create queueworker archive queue
-        self.logger.info("Creating workers...")
+        logger.info("Creating workers...")
 
         for archive_worker in range(0, self.concurrent_archive_workers):
             new_worker = PriorityQueueWorker(
@@ -158,20 +161,19 @@ class MWACacheArchiveProcessor:
                 source_queue=self.queue,
                 executable_path=None,
                 event_handler=self.archive_handler,
-                log=self.logger,
                 requeue_to_eoq_on_failure=True,
                 exit_once_queue_empty=False,
             )
             self.queue_workers.append(new_worker)
 
-        self.logger.info("Starting watchers...")
+        logger.info("Starting watchers...")
         # Setup thread for watching filesystem
         for i, watcher in enumerate(self.watchers):
             watcher_thread = threading.Thread(name=f"watch_thread{i}", target=watcher.start, daemon=True)
             self.watcher_threads.append(watcher_thread)
             watcher_thread.start()
 
-        self.logger.info("Waiting for all watchers to finish scanning....")
+        logger.info("Waiting for all watchers to finish scanning....")
 
         count_of_watchers_still_scanning = len(self.watchers)
         while count_of_watchers_still_scanning > 0:
@@ -180,16 +182,16 @@ class MWACacheArchiveProcessor:
                 if not watcher.scan_completed:
                     count_of_watchers_still_scanning += 1
             time.sleep(1)  # hold off for another second
-        self.logger.info("Watchers are finished scanning.")
+        logger.info("Watchers are finished scanning.")
 
-        self.logger.info("Starting workers...")
+        logger.info("Starting workers...")
         # Setup thread for processing items
         for i, worker in enumerate(self.queue_workers):
             queue_worker_thread = threading.Thread(name=f"worker_thread{i}", target=worker.start, daemon=True)
             self.worker_threads.append(queue_worker_thread)
             queue_worker_thread.start()
 
-        self.logger.info("Started...")
+        logger.info("Started...")
 
         while self.running:
             for worker_thread in self.worker_threads:
@@ -205,20 +207,20 @@ class MWACacheArchiveProcessor:
         #
 
         # Final log message
-        self.logger.info("Completed Successfully")
+        logger.info("Completed Successfully")
 
     def archive_handler(self, item: str) -> bool:
         """Handles sending files to Pawsey"""
-        self.logger.info(f"{item}- archive_handler() Started...")
+        logger.info(f"{item}- archive_handler() Started...")
 
         # validate the filename
-        val: ValidationData = utils.validate_filename(self.logger, item, self.metafits_path)
+        val: ValidationData = utils.validate_filename(item, self.metafits_path)
 
         # do some sanity checks!
         if val.valid:
             # Get the file size
             actual_file_size = os.stat(item).st_size
-            self.logger.debug(f"{item}- archive_handler() file size on disk is {actual_file_size} bytes")
+            logger.debug(f"{item}- archive_handler() file size on disk is {actual_file_size} bytes")
 
             # Lookup file from db
             data_files_row: DataFileRow = mwax_db.get_data_file_row(self.remote_db_handler_object, item, val.obs_id)
@@ -227,38 +229,38 @@ class MWACacheArchiveProcessor:
             # Check for 0 size
             if actual_file_size == 0:
                 # File size is 0- lets just blow it away
-                self.logger.warning(f"{item}- archive_handler() File size is 0 bytes. Deleting file")
-                utils.remove_file(self.logger, item, raise_error=False)
+                logger.warning(f"{item}- archive_handler() File size is 0 bytes. Deleting file")
+                utils.remove_file(item, raise_error=False)
 
                 # even though its a problem,we return true as we are finished
                 # with the item and it should not be requeued
                 return True
             elif actual_file_size != database_file_size:
                 # File size is incorrect- lets just blow it away
-                self.logger.warning(
+                logger.warning(
                     f"{item}- archive_handler() File size"
                     f" {actual_file_size} does not match {database_file_size}."
                     " Deleting file"
                 )
-                utils.remove_file(self.logger, item, raise_error=False)
+                utils.remove_file(item, raise_error=False)
 
                 # even though its a problem,we return true as we are finished
                 # with the item and it should not be requeued
                 return True
 
-            self.logger.debug(f"{item}- archive_handler() File size matches metadata. Checking md5sum... database")
+            logger.debug(f"{item}- archive_handler() File size matches metadata. Checking md5sum... database")
 
             # Check md5sum
-            actual_checksum = utils.do_checksum_md5(self.logger, item, None, 600)
+            actual_checksum = utils.do_checksum_md5(item, None, 600)
 
             # Compare
             if actual_checksum != data_files_row.checksum:
-                self.logger.warning(
+                logger.warning(
                     f"{item}- archive_handler() checksum {actual_checksum} does not match {data_files_row.checksum}."
                 )
                 return False
 
-            self.logger.debug(f"{item}- archive_handler() md5 checksum matches")
+            logger.debug(f"{item}- archive_handler() md5 checksum matches")
 
             # Determine where to archive it
             bucket = utils.determine_bucket(
@@ -274,7 +276,6 @@ class MWACacheArchiveProcessor:
                 or self.archive_to_location == ArchiveLocation.AcaciaMWA
             ):  # Acacia or Banksia
                 archive_success = mwa_archiver.archive_file_rclone(
-                    self.logger,
                     self.s3_profile,
                     self.s3_ceph_endpoints,
                     item,
@@ -299,25 +300,25 @@ class MWACacheArchiveProcessor:
 
                 # If all is well, we have the file safely archived and the
                 # database updated, so remove the file
-                self.logger.debug(f"{item}- archive_handler() Deleting file")
-                utils.remove_file(self.logger, item, raise_error=False)
+                logger.debug(f"{item}- archive_handler() Deleting file")
+                utils.remove_file(item, raise_error=False)
 
-                self.logger.info(f"{item}- archive_handler() Finished")
+                logger.info(f"{item}- archive_handler() Finished")
                 return True
             else:
                 return False
         else:
             # The filename was not valid
-            self.logger.error(f"{item}- archive_handler() {val.validation_message}")
+            logger.error(f"{item}- archive_handler() {val.validation_message}")
             return False
 
     def pause_archiving(self, paused: bool):
         """Pauses all processes"""
         if self.archiving_paused != paused:
             if paused:
-                self.logger.info("Pausing archiving")
+                logger.info("Pausing archiving")
             else:
-                self.logger.info("Resuming archiving")
+                logger.info("Resuming archiving")
 
             if len(self.queue_workers) > 0:
                 for queue_worker in self.queue_workers:
@@ -338,18 +339,18 @@ class MWACacheArchiveProcessor:
         for watcher_thread in self.watcher_threads:
             if watcher_thread:
                 thread_name = watcher_thread.name
-                self.logger.debug(f"Watcher {thread_name} Stopping...")
+                logger.debug(f"Watcher {thread_name} Stopping...")
                 if watcher_thread.is_alive():
                     watcher_thread.join()
-                self.logger.debug(f"Watcher {thread_name} Stopped")
+                logger.debug(f"Watcher {thread_name} Stopped")
 
         for worker_thread in self.worker_threads:
             if worker_thread:
                 thread_name = worker_thread.name
-                self.logger.debug(f"QueueWorker {thread_name} Stopping...")
+                logger.debug(f"QueueWorker {thread_name} Stopping...")
                 if worker_thread.is_alive():
                     worker_thread.join()
-                self.logger.debug(f"QueueWorker {thread_name} Stopped")
+                logger.debug(f"QueueWorker {thread_name} Stopped")
 
         # Close all database connections
         self.remote_db_handler_object.stop_database_pool()
@@ -374,7 +375,7 @@ class MWACacheArchiveProcessor:
                     self.health_multicast_hops,
                 )
             except Exception as catch_all_exception:  # pylint: disable=broad-except
-                self.logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
+                logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
 
             # Sleep for a second
             time.sleep(1)
@@ -425,7 +426,7 @@ class MWACacheArchiveProcessor:
 
     def signal_handler(self, _signum, _frame):
         """Catches SIG INT and SIG TERM then stops the processor"""
-        self.logger.warning("Interrupted. Shutting down processor...")
+        logger.warning("Interrupted. Shutting down processor...")
         self.running = False
 
         # Stop any Processors
@@ -442,57 +443,41 @@ class MWACacheArchiveProcessor:
         config.read_file(open(config_filename, "r", encoding="utf-8"))
 
         # Read log level
-        config_file_log_level: Optional[str] = utils.read_optional_config(
-            self.logger, config, "mwax mover", "log_level"
-        )
-        if config_file_log_level is None:
-            self.log_level = "DEBUG"
-            self.logger.warning(f"log_level not set in config file. Defaulting to {self.log_level} level logging.")
-        else:
-            self.log_level = config_file_log_level
+        config_file_log_level: Optional[str] = utils.read_optional_config(config, "mwax mover", "log_level")
+        if config_file_log_level:
+            # It's now safe to start logging
+            # start logging
+            logger.setLevel(config_file_log_level)
 
-        # It's now safe to start logging
-        # start logging
-        self.logger.setLevel(self.log_level)
-        console_log = logging.StreamHandler()
-        console_log.setLevel(self.log_level)
-        console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
-        self.logger.addHandler(console_log)
-
-        self.logger.info(f"Starting mwacache_archive_processor processor...v{version.get_mwax_mover_version_string()}")
+        logger.info(f"Starting mwacache_archive_processor processor...v{version.get_mwax_mover_version_string()}")
 
         # Get this hosts hostname
         if self.hostname == "":
             self.hostname = utils.get_hostname()
-        self.logger.info(f"hostname: {self.hostname}")
+        logger.info(f"hostname: {self.hostname}")
 
         # Dump some diagnostic info
         py_version = sys.version  # contains a \n, so get rid of it
         py_version = py_version.replace("\n", " ")
-        self.logger.info(f"Python v{py_version}")
-        self.logger.info(f"astropy v{astropy.__version__}")
+        logger.info(f"Python v{py_version}")
+        logger.info(f"astropy v{astropy.__version__}")
 
-        self.logger.info(f"Reading config file: {config_filename}")
+        logger.info(f"Reading config file: {config_filename}")
 
         i = 1
         self.watch_dirs = []
 
         # Common config options
-        self.metafits_path = utils.read_config(self.logger, config, "mwax mover", "metafits_path")
+        self.metafits_path = utils.read_config(config, "mwax mover", "metafits_path")
 
         if not os.path.exists(self.metafits_path):
-            self.logger.error(f"Metafits file location  {self.metafits_path} does not exist. Quitting.")
+            logger.error(f"Metafits file location  {self.metafits_path} does not exist. Quitting.")
             sys.exit(1)
 
-        self.archive_to_location = ArchiveLocation(
-            int(utils.read_config(self.logger, config, "mwax mover", "archive_to_location"))
-        )
-        self.concurrent_archive_workers = int(
-            utils.read_config(self.logger, config, "mwax mover", "concurrent_archive_workers")
-        )
+        self.archive_to_location = ArchiveLocation(int(utils.read_config(config, "mwax mover", "archive_to_location")))
+        self.concurrent_archive_workers = int(utils.read_config(config, "mwax mover", "concurrent_archive_workers"))
         self.archive_command_timeout_sec = int(
             utils.read_config(
-                self.logger,
                 config,
                 "mwax mover",
                 "archive_command_timeout_sec",
@@ -502,31 +487,28 @@ class MWACacheArchiveProcessor:
         # Get list of projectids which are to be given
         # high priority when archiving
         self.high_priority_correlator_projectids = utils.read_config_list(
-            self.logger,
             config,
             "mwax mover",
             "high_priority_correlator_projectids",
         )
         self.high_priority_vcs_projectids = utils.read_config_list(
-            self.logger,
             config,
             "mwax mover",
             "high_priority_vcs_projectids",
         )
 
         # health
-        self.health_multicast_ip = utils.read_config(self.logger, config, "mwax mover", "health_multicast_ip")
-        self.health_multicast_port = int(utils.read_config(self.logger, config, "mwax mover", "health_multicast_port"))
-        self.health_multicast_hops = int(utils.read_config(self.logger, config, "mwax mover", "health_multicast_hops"))
+        self.health_multicast_ip = utils.read_config(config, "mwax mover", "health_multicast_ip")
+        self.health_multicast_port = int(utils.read_config(config, "mwax mover", "health_multicast_port"))
+        self.health_multicast_hops = int(utils.read_config(config, "mwax mover", "health_multicast_hops"))
         self.health_multicast_interface_name = utils.read_config(
-            self.logger,
             config,
             "mwax mover",
             "health_multicast_interface_name",
         )
         # get this hosts primary network interface ip
         self.health_multicast_interface_ip = utils.get_ip_address(self.health_multicast_interface_name)
-        self.logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
+        logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
 
         # We set different s3 options based on the location
         # 2 == Acacia Ingest
@@ -544,10 +526,9 @@ class MWACacheArchiveProcessor:
             )
 
         # s3 options
-        self.s3_profile = utils.read_config(self.logger, config, s3_section, "profile")
+        self.s3_profile = utils.read_config(config, s3_section, "profile")
 
         self.s3_ceph_endpoints = utils.read_config_list(
-            self.logger,
             config,
             s3_section,
             "ceph_endpoints",
@@ -559,9 +540,9 @@ class MWACacheArchiveProcessor:
 
         # Look for data_path1.. data_pathN
         while config.has_option(self.hostname, f"incoming_path{i}"):
-            new_incoming_path = utils.read_config(self.logger, config, self.hostname, f"incoming_path{i}")
+            new_incoming_path = utils.read_config(config, self.hostname, f"incoming_path{i}")
             if not os.path.exists(new_incoming_path):
-                self.logger.error(
+                logger.error(
                     f"incoming file location in incoming_path{i} - {new_incoming_path} does not exist. Quitting."
                 )
                 sys.exit(1)
@@ -569,7 +550,7 @@ class MWACacheArchiveProcessor:
             i += 1
 
         if len(self.watch_dirs) == 0:
-            self.logger.error(
+            logger.error(
                 "No incoming data file locations were not present in config"
                 " file. Use incoming_path1 .. incoming_pathN in the"
                 " [<hostname>] section (where <hostname> is the lowercase"
@@ -578,21 +559,20 @@ class MWACacheArchiveProcessor:
             )
             sys.exit(1)
 
-        self.recursive = utils.read_config_bool(self.logger, config, self.hostname, "recursive")
+        self.recursive = utils.read_config_bool(config, self.hostname, "recursive")
 
         #
         # MRO database - this is one we will update
         #
-        self.mro_metadatadb_host = utils.read_config(self.logger, config, "mro metadata database", "host")
+        self.mro_metadatadb_host = utils.read_config(config, "mro metadata database", "host")
 
-        self.mro_metadatadb_db = utils.read_config(self.logger, config, "mro metadata database", "db")
-        self.mro_metadatadb_user = utils.read_config(self.logger, config, "mro metadata database", "user")
-        self.mro_metadatadb_pass = utils.read_config(self.logger, config, "mro metadata database", "pass", True)
-        self.mro_metadatadb_port = int(utils.read_config(self.logger, config, "mro metadata database", "port"))
+        self.mro_metadatadb_db = utils.read_config(config, "mro metadata database", "db")
+        self.mro_metadatadb_user = utils.read_config(config, "mro metadata database", "user")
+        self.mro_metadatadb_pass = utils.read_config(config, "mro metadata database", "pass", True)
+        self.mro_metadatadb_port = int(utils.read_config(config, "mro metadata database", "port"))
 
         # Initiate database connection for rmo metadata db
         self.mro_db_handler_object = mwax_db.MWAXDBHandler(
-            logger=self.logger,
             host=self.mro_metadatadb_host,
             port=self.mro_metadatadb_port,
             db_name=self.mro_metadatadb_db,
@@ -604,16 +584,15 @@ class MWACacheArchiveProcessor:
         # Remote metadata db is ready only- just used to query file size and
         # date info
         #
-        self.remote_metadatadb_host = utils.read_config(self.logger, config, "remote metadata database", "host")
+        self.remote_metadatadb_host = utils.read_config(config, "remote metadata database", "host")
 
-        self.remote_metadatadb_db = utils.read_config(self.logger, config, "remote metadata database", "db")
-        self.remote_metadatadb_user = utils.read_config(self.logger, config, "remote metadata database", "user")
-        self.remote_metadatadb_pass = utils.read_config(self.logger, config, "remote metadata database", "pass", True)
-        self.remote_metadatadb_port = int(utils.read_config(self.logger, config, "remote metadata database", "port"))
+        self.remote_metadatadb_db = utils.read_config(config, "remote metadata database", "db")
+        self.remote_metadatadb_user = utils.read_config(config, "remote metadata database", "user")
+        self.remote_metadatadb_pass = utils.read_config(config, "remote metadata database", "pass", True)
+        self.remote_metadatadb_port = int(utils.read_config(config, "remote metadata database", "port"))
 
         # Initiate database connection for remote metadata db
         self.remote_db_handler_object = mwax_db.MWAXDBHandler(
-            logger=self.logger,
             host=self.remote_metadatadb_host,
             port=self.remote_metadatadb_port,
             db_name=self.remote_metadatadb_db,
@@ -622,10 +601,10 @@ class MWACacheArchiveProcessor:
         )
 
         # Make sure we can Ctrl-C / kill out of this
-        self.logger.info("Initialising signal handlers")
+        logger.info("Initialising signal handlers")
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
-        self.logger.info("Ready to start...")
+        logger.info("Ready to start...")
 
     def initialise_from_command_line(self):
         """Initialise if initiated from command line"""
@@ -660,10 +639,7 @@ def main():
         processor.start()
         sys.exit(0)
     except Exception as catch_all_exception:  # pylint: disable=broad-except
-        if processor.logger:
-            processor.logger.exception(str(catch_all_exception))
-        else:
-            print(str(catch_all_exception))
+        logger.exception(str(catch_all_exception))
 
 
 if __name__ == "__main__":

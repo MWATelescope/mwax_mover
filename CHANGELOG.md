@@ -3,6 +3,7 @@
 # 1.5.3 16-Feb-2026
 
 * subfile_distributor: Removed the calibration_destination_enabled option as it wasn't being used.
+* all: Removed passing loggers everywhere anti-pattern
 
 # 1.5.2 12-Feb-2026
 

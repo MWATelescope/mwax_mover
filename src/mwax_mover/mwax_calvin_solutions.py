@@ -22,9 +22,10 @@ from mwax_mover.mwax_calvin_utils import (
 )
 from mwax_mover.version import get_mwax_mover_version_string
 
+logger = logging.getLogger(__name__)
+
 
 def process_solutions(
-    logger: logging.Logger,
     db_handler_object: MWAXDBHandler,
     obs_id: int,
     input_data_path: str,
@@ -92,7 +93,6 @@ def process_solutions(
         weights = soln_group.weights
 
         phase_fits = process_phase_fits(
-            logger,
             output_data_path,
             unflagged_tiles,
             all_chanblocks_hz,
@@ -103,7 +103,6 @@ def process_solutions(
             phase_fit_niter,
         )
         gain_fits = process_gain_fits(
-            logger,
             unflagged_tiles,
             all_chanblocks_hz,
             all_xx_solns_noref,
@@ -237,7 +236,6 @@ def process_solutions(
 
         # Write an error readme
         write_readme_file(
-            logger,
             os.path.join(output_data_path, "readme_error.txt"),
             "upload_handler()",
             -999,

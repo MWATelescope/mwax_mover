@@ -3,14 +3,15 @@ from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
 from mwax_mover import utils
 from mwax_mover.utils import ValidationData, MWADataFileType
 from mwax_mover.mwax_db import MWAXDBHandler, insert_data_file_row
-from logging import Logger
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 
 class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
     def __init__(
         self,
-        logger: Logger,
         metafits_path: str,
         visdata_incoming_path: str,
         visdata_processing_stats_path: str,
@@ -29,7 +30,6 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
     ):
         super().__init__(
             "ChecksumAndDBProcessor",
-            logger,
             metafits_path,
             [
                 (visdata_incoming_path, ".fits"),
@@ -59,10 +59,10 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
 
     def handler(self, item: str) -> bool:
         """This is the first handler executed when we start to archive a new file"""
-        self.logger.info(f"{item}: checksum_and_db_handler() Started")
+        logger.info(f"{item}: checksum_and_db_handler() Started")
 
         # validate the filename
-        val: ValidationData = utils.validate_filename(self.logger, item, self.metafits_path)
+        val: ValidationData = utils.validate_filename(item, self.metafits_path)
 
         if val.valid:
             if self.archiving_enabled:
@@ -73,7 +73,7 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
                     # checksum then add this file to the db so we insert a record into
                     # metadata data_files table
                     checksum_type_id: int = 1  # MD5
-                    checksum: str = utils.do_checksum_md5(self.logger, item, None, 180)
+                    checksum: str = utils.do_checksum_md5(item, None, 180)
 
                     # if file is a VCS subfile, check if it is from a trigger and
                     # grab the trigger_id as an int
@@ -84,7 +84,7 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
                         trigger_id = None
                 except FileNotFoundError:
                     # The filename was not valid
-                    self.logger.warning(f"{item}- checksum_and_db_handler() file was removed while processing.")
+                    logger.warning(f"{item}- checksum_and_db_handler() file was removed while processing.")
                     return True
 
                 # Insert record into metadata database
@@ -121,10 +121,10 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
                     # output path
                     outgoing_filename = os.path.join(self.voltdata_outgoing_path, os.path.basename(item))
 
-                    self.logger.debug(f"{item}- checksum_and_db_handler() moving subfile to volt outgoing dir")
+                    logger.debug(f"{item}- checksum_and_db_handler() moving subfile to volt outgoing dir")
                     os.rename(item, outgoing_filename)
 
-                    self.logger.info(
+                    logger.info(
                         f"{item}- checksum_and_db_handler() moved subfile to volt"
                         " outgoing dir Queue size:"
                         f" {self.pqueue.qsize()}"
@@ -135,12 +135,12 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
                     # output path
                     outgoing_filename = os.path.join(self.visdata_processing_stats_path, os.path.basename(item))
 
-                    self.logger.debug(
+                    logger.debug(
                         f"{item}- checksum_and_db_handler() moving visibility file to vis processing stats dir"
                     )
                     os.rename(item, outgoing_filename)
 
-                    self.logger.info(
+                    logger.info(
                         f"{item}- checksum_and_db_handler() moved visibility file"
                         " to vis processing stats dir. Queue size:"
                         f" {self.pqueue.qsize()}"
@@ -152,10 +152,10 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
                     # output path
                     outgoing_filename = os.path.join(self.visdata_outgoing_path, os.path.basename(item))
 
-                    self.logger.debug(f"{item}- checksum_and_db_handler() moving metafits file to vis outgoing dir")
+                    logger.debug(f"{item}- checksum_and_db_handler() moving metafits file to vis outgoing dir")
                     os.rename(item, outgoing_filename)
 
-                    self.logger.info(
+                    logger.info(
                         f"{item}- checksum_and_db_handler() moved metafits file to"
                         " vis outgoing dir. Queue size:"
                         f" {self.pqueue.qsize()}"
@@ -169,18 +169,16 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
                     # output path
                     outgoing_filename = os.path.join(self.bf_outgoing_path, os.path.basename(item))
 
-                    self.logger.debug(
-                        f"{item}- checksum_and_db_handler() moving beamformer data file to bf outgoing dir"
-                    )
+                    logger.debug(f"{item}- checksum_and_db_handler() moving beamformer data file to bf outgoing dir")
                     os.rename(item, outgoing_filename)
 
-                    self.logger.info(
+                    logger.info(
                         f"{item}- checksum_and_db_handler() moved beamformer data file to"
                         " bf outgoing dir. Queue size:"
                         f" {self.pqueue.qsize()}"
                     )
                 else:
-                    self.logger.error(
+                    logger.error(
                         f"{item}- checksum_and_db_handler() - not a valid file"
                         f" extension {val.filetype_id} / {val.file_ext}"
                     )
@@ -194,12 +192,12 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
                     # We still want to produce stats
                     outgoing_filename = os.path.join(self.visdata_processing_stats_path, os.path.basename(item))
 
-                    self.logger.debug(
+                    logger.debug(
                         f"{item}- checksum_and_db_handler() moving visibility file to vis processing stats dir"
                     )
                     os.rename(item, outgoing_filename)
 
-                    self.logger.info(
+                    logger.info(
                         f"{item}- checksum_and_db_handler() moved visibility file"
                         " to vis processing stats dir Queue size:"
                         f" {self.pqueue.qsize()}"
@@ -208,34 +206,30 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
                     # archvive any do not archive projects
                 elif val.filetype_id == MWADataFileType.MWAX_VOLTAGES.value:
                     outgoing_filename = os.path.join(self.voltdata_dont_archive_path, os.path.basename(item))
-                    self.logger.debug(
-                        f"{item}- checksum_and_db_handler() moving file to {self.voltdata_dont_archive_path}"
-                    )
+                    logger.debug(f"{item}- checksum_and_db_handler() moving file to {self.voltdata_dont_archive_path}")
                     os.rename(item, outgoing_filename)
 
                 elif val.filetype_id == MWADataFileType.MWA_PPD_FILE.value:
                     outgoing_filename = os.path.join(self.visdata_dont_archive_path, os.path.basename(item))
-                    self.logger.debug(
-                        f"{item}- checksum_and_db_handler() moving file to {self.visdata_dont_archive_path}"
-                    )
+                    logger.debug(f"{item}- checksum_and_db_handler() moving file to {self.visdata_dont_archive_path}")
                     os.rename(item, outgoing_filename)
                 elif (
                     val.filetype_id == MWADataFileType.VDIF.value or val.filetype_id == MWADataFileType.FILTERBANK.value
                 ):
                     outgoing_filename = os.path.join(self.bf_dont_archive_path, os.path.basename(item))
-                    self.logger.debug(f"{item}- checksum_and_db_handler() moving file to {self.bf_dont_archive_path}")
+                    logger.debug(f"{item}- checksum_and_db_handler() moving file to {self.bf_dont_archive_path}")
 
                     os.rename(item, outgoing_filename)
                 else:
-                    self.logger.error(
+                    logger.error(
                         f"{item}- checksum_and_db_handler() - not a valid file"
                         f" extension {val.filetype_id} / {val.file_ext}"
                     )
                     return False
         else:
             # The filename was not valid
-            self.logger.error(f"{item}- checksum_and_db_handler() {val.validation_message}")
+            logger.error(f"{item}- checksum_and_db_handler() {val.validation_message}")
             return False
 
-        self.logger.info(f"{item}- checksum_and_db_handler() Finished")
+        logger.info(f"{item}- checksum_and_db_handler() Finished")
         return True

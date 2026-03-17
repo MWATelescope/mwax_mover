@@ -7,6 +7,8 @@ import os
 import re
 import shutil
 
+logger = logging.getLogger(__name__)
+
 
 class VDIFHeader:
     def __init__(self):
@@ -32,7 +34,7 @@ class VDIFHeader:
         self.bw: float = 0.0
         self.tsamp: float = 0.0
 
-    def populate(self, logger: logging.Logger, metafits_filename: str, rec_chan: int, beam_no: int):
+    def populate(self, metafits_filename: str, rec_chan: int, beam_no: int):
         mc = MetafitsContext(metafits_filename)
         self.mjd_start = mc.sched_start_mjd
         self.mjd_epoch = mc.sched_start_mjd
@@ -175,9 +177,7 @@ def get_stitched_filename(filename: str) -> str:
     return os.path.join(file_path, f"{obsid}_ch{chan:03d}_beam{beam:02d}.vdif")
 
 
-def stitch_vdif_files_and_write_hdr(
-    logger: logging.Logger, metafits_filename: str, files: List[str], output_dir: str
-) -> tuple[str, str]:
+def stitch_vdif_files_and_write_hdr(metafits_filename: str, files: List[str], output_dir: str) -> tuple[str, str]:
     if len(files) == 0:
         raise Exception("No VDIF files to stitch")
 
@@ -213,7 +213,7 @@ def stitch_vdif_files_and_write_hdr(
 
     # Write the header file
     hdr = VDIFHeader()
-    hdr.populate(logger, metafits_filename, rec_chan, beam_no)
+    hdr.populate(metafits_filename, rec_chan, beam_no)
     hdr.write(output_hdr_filename)
 
     logger.info(f"Successfully wrote VDIF header file into {output_hdr_filename}")

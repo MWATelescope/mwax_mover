@@ -2,13 +2,14 @@ from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
 from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
 from mwax_mover.mwa_archiver import archive_file_xrootd
 from mwax_mover.utils import remove_file
-from logging import Logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class OutgoingProcessor(MWAXPriorityWatchQueueWorker):
     def __init__(
         self,
-        logger: Logger,
         metafits_path: str,
         visdata_outgoing_path: str,
         voltdata_outgoing_path: str,
@@ -21,7 +22,6 @@ class OutgoingProcessor(MWAXPriorityWatchQueueWorker):
     ):
         super().__init__(
             "OutgoingProcessor",
-            logger,
             metafits_path,
             [
                 (visdata_outgoing_path, ".fits"),
@@ -41,11 +41,10 @@ class OutgoingProcessor(MWAXPriorityWatchQueueWorker):
         """This is called whenever a file is moved into the
         outgoing_vis or outgoing_volt directories. For each file attempt to
         send to the mwacache boxes then remove the file"""
-        self.logger.info(f"{item}- archive_handler() Started...")
+        logger.info(f"{item}- archive_handler() Started...")
 
         if (
             archive_file_xrootd(
-                self.logger,
                 item,
                 int(self.archive_command_numa_node),
                 self.archive_destination_host,
@@ -55,8 +54,8 @@ class OutgoingProcessor(MWAXPriorityWatchQueueWorker):
         ):
             return False
 
-        self.logger.debug(f"{item}- archive_handler() Deleting file")
-        remove_file(self.logger, item, raise_error=False)
+        logger.debug(f"{item}- archive_handler() Deleting file")
+        remove_file(item, raise_error=False)
 
-        self.logger.info(f"{item}- archive_handler() Finished")
+        logger.info(f"{item}- archive_handler() Finished")
         return True

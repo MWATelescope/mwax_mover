@@ -1,11 +1,14 @@
 """Module to watch a folder for file events and add file to a queue"""
 
+import logging
 import os
 import queue
 import time
 import inotify.constants
 import inotify.adapters
 from mwax_mover import mwax_mover, utils
+
+logger = logging.getLogger(__name__)
 
 
 class Watcher(object):
@@ -17,12 +20,10 @@ class Watcher(object):
         path: str,
         dest_queue: queue.Queue,
         pattern: str,
-        log,
         mode,
         recursive,
         exclude_pattern=None,
     ):
-        self.logger = log
         self.name = name
         self.inotify_tree: inotify.adapters.Inotify | inotify.adapters.InotifyTree
         self.recursive = recursive
@@ -48,22 +49,22 @@ class Watcher(object):
     def start(self):
         """Begins watching the directory"""
         if self.recursive:
-            self.logger.info(f"Watcher starting on {self.path}/*{self.pattern} and all subdirectories...")
+            logger.info(f"Watcher starting on {self.path}/*{self.pattern} and all subdirectories...")
             self.inotify_tree = inotify.adapters.InotifyTree(self.path, mask=self.mask)
         else:
-            self.logger.info(f"Watcher starting on {self.path}/*{self.pattern}...")
+            logger.info(f"Watcher starting on {self.path}/*{self.pattern}...")
             self.inotify_tree = inotify.adapters.Inotify()
             self.inotify_tree.add_watch(self.path, mask=self.mask)
 
         if self.exclude_pattern:
-            self.logger.info(f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}")
+            logger.info(f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}")
 
         self.watching = True
         self.do_watch_loop()
 
     def stop(self):
         """Stop watching the directory"""
-        self.logger.info(f"Watcher stopping on {self.path}/*{self.pattern}...")
+        logger.info(f"Watcher stopping on {self.path}/*{self.pattern}...")
 
         self.watching = False
 
@@ -82,7 +83,6 @@ class Watcher(object):
             or self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW
         ):
             utils.scan_for_existing_files_and_add_to_queue(
-                self.logger,
                 self.path,
                 self.pattern,
                 self.recursive,
@@ -105,7 +105,7 @@ class Watcher(object):
                         )[1] != self.exclude_pattern:
                             dest_filename = os.path.join(path, filename)
                             self.dest_queue.put(dest_filename)
-                            self.logger.info(f"{dest_filename} added to queue ({self.dest_queue.qsize()})")
+                            logger.info(f"{dest_filename} added to queue ({self.dest_queue.qsize()})")
 
     def get_status(self) -> dict:
         """Returns a dictionary describing status of this watcher"""

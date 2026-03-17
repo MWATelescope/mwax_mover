@@ -1,4 +1,3 @@
-import logging
 from mwax_mover.mwax_bf_vdif_utils import stitch_vdif_files_and_write_hdr
 import pytest
 import os
@@ -7,16 +6,16 @@ output_dir = "tests/data/test006"
 
 
 def test_stitch_zero_files():
-    logger = logging.getLogger()
+
     filenames = []
     metafits_filename = ""
 
     with pytest.raises(Exception):
-        _, _ = stitch_vdif_files_and_write_hdr(logger, metafits_filename, filenames, output_dir)
+        _, _ = stitch_vdif_files_and_write_hdr(metafits_filename, filenames, output_dir)
 
 
 def test_stitch_one_file():
-    logger = logging.getLogger()
+
     filenames = [
         "tests/data/1454343736/1454343736_1454343736_ch109_beam00.vdif",
     ]
@@ -28,7 +27,7 @@ def test_stitch_one_file():
     output_hdr_filename = ""
 
     output_vdif_filename, output_hdr_filename = stitch_vdif_files_and_write_hdr(
-        logger, metafits_filename, filenames, output_dir
+        metafits_filename, filenames, output_dir
     )
 
     assert output_vdif_filename == f"{output_dir}/1454343736_ch109_beam00.vdif"
@@ -39,7 +38,6 @@ def test_stitch_one_file():
 
 
 def test_stitch_many_files2():
-    logger = logging.getLogger()
 
     filenames = [
         "tests/data/1454343736/1454343736_1454343736_ch109_beam01.vdif",
@@ -53,7 +51,7 @@ def test_stitch_many_files2():
     output_hdr_filename = ""
 
     output_vdif_filename, output_hdr_filename = stitch_vdif_files_and_write_hdr(
-        logger, metafits_filename, filenames, output_dir
+        metafits_filename, filenames, output_dir
     )
 
     assert output_vdif_filename == f"{output_dir}/{obs_id}_ch109_beam01.vdif"

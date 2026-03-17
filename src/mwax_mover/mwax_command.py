@@ -1,17 +1,19 @@
 """Module to execute arbitrary commands"""
 
+import logging
 import os
 import subprocess
 import shlex
 import typing
 from typing import Optional
 
+logger = logging.getLogger(__name__)
+
 
 # This will return true/false plus the output from stdout
 # use shell should be used when you are using wildcards and other shell
 # features
 def run_command_ext(
-    logger,
     command: str,
     numa_node: typing.Optional[int],
     timeout: int = 60,
@@ -90,7 +92,6 @@ def run_command_ext(
 # use shell should be used when you are using wildcards and other shell
 # features
 def run_command_popen(
-    logger,
     command: str,
     numa_node: int,
     use_shell: bool = False,
@@ -132,7 +133,7 @@ def run_command_popen(
     return popen_process
 
 
-def check_popen_finished(logger, popen_process, timeout: int = 60) -> typing.Tuple[int, str, str]:
+def check_popen_finished(popen_process, timeout: int = 60) -> typing.Tuple[int, str, str]:
     """Given a running popen_process object
     wait for it to finish and return the exit code
     and output stdout & stderr"""

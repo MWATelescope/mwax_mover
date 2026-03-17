@@ -9,9 +9,10 @@ import logging
 
 from mwax_mover.mwax_command import run_command_ext
 
+logger = logging.getLogger(__name__)
+
 
 def copy_file_rsync(
-    logger: logging.Logger,
     source_filename: str,
     destination_dir: str,
     timeout: int,
@@ -31,7 +32,7 @@ def copy_file_rsync(
     start_time = time.time()
 
     # run rsync
-    return_val, stdout = run_command_ext(logger, cmdline, None, timeout, False)
+    return_val, stdout = run_command_ext(cmdline, None, timeout, False)
 
     if return_val:
         try:
@@ -57,7 +58,6 @@ def copy_file_rsync(
 
 
 def archive_file_xrootd(
-    logger: logging.Logger,
     full_filename: str,
     archive_numa_node: int,
     archive_destination_host: str,
@@ -100,7 +100,7 @@ def archive_file_xrootd(
     start_time = time.time()
 
     # run xrdcp
-    return_val, stdout = run_command_ext(logger, cmdline, archive_numa_node, timeout, False)
+    return_val, stdout = run_command_ext(cmdline, archive_numa_node, timeout, False)
 
     if return_val:
         elapsed = time.time() - start_time
@@ -122,7 +122,7 @@ def archive_file_xrootd(
 
         # run the mv command to rename the temp file to the final file
         # If this works, then mwacache will actually do its thing
-        return_val, stdout = run_command_ext(logger, cmdline, archive_numa_node, timeout, False)
+        return_val, stdout = run_command_ext(cmdline, archive_numa_node, timeout, False)
 
         if return_val:
             logger.info(
@@ -141,7 +141,6 @@ def archive_file_xrootd(
 
 
 def archive_file_rclone(
-    logger,
     rclone_profile: str,
     endpoints: list,
     full_filename: str,
@@ -181,7 +180,7 @@ def archive_file_rclone(
             cmdline = f'/usr/bin/rclone copyto -M --metadata-set "md5={md5hash}" --s3-endpoint={endpoint_url} {full_filename} {rclone_profile}:/{bucket_name}/{filename}'
 
             # run rclone copyto
-            return_val, stdout = run_command_ext(logger, cmdline, None, 600, False)
+            return_val, stdout = run_command_ext(cmdline, None, 600, False)
 
             if return_val:
                 elapsed = time.time() - start_time
@@ -195,7 +194,7 @@ def archive_file_rclone(
                 cmdline = f"/usr/bin/rclone check --s3-endpoint={endpoint_url} {full_filename} {rclone_profile}:/{bucket_name}"
 
                 # run rclone check
-                return_val, stdout = run_command_ext(logger, cmdline, None, 600, False)
+                return_val, stdout = run_command_ext(cmdline, None, 600, False)
 
                 if return_val:
                     # If checksums match then rclone returns exit code 0. Otherwise !=0.

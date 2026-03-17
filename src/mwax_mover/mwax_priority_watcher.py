@@ -3,6 +3,7 @@ Module to watch a folder for file events and add file to a
 priority queue
 """
 
+import logging
 import os
 import queue
 import time
@@ -11,6 +12,8 @@ import inotify.adapters
 from typing import Optional
 from mwax_mover import mwax_mover, utils
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
+
+logger = logging.getLogger(__name__)
 
 
 class PriorityWatcher(object):
@@ -22,7 +25,6 @@ class PriorityWatcher(object):
         path: str,
         dest_queue: queue.PriorityQueue,
         pattern: str,
-        log,
         mode,
         recursive,
         metafits_path,
@@ -30,7 +32,6 @@ class PriorityWatcher(object):
         list_of_vcs_high_priority_projects: list[str],
         exclude_pattern: Optional[str] = None,
     ):
-        self.logger = log
         self.name = name
         self.inotify_tree: Optional[inotify.adapters.InotifyTree | inotify.adapters.Inotify] = None
         self.recursive = recursive
@@ -65,22 +66,22 @@ class PriorityWatcher(object):
     def start(self):
         """Begins watching the directory"""
         if self.recursive:
-            self.logger.info(f"PriorityWatcher starting on {self.path}/*{self.pattern} and all subdirectories...")
+            logger.info(f"PriorityWatcher starting on {self.path}/*{self.pattern} and all subdirectories...")
             self.inotify_tree = inotify.adapters.InotifyTree(self.path, mask=self.mask)
         else:
-            self.logger.info(f"PriorityWatcher starting on {self.path}/*{self.pattern}...")
+            logger.info(f"PriorityWatcher starting on {self.path}/*{self.pattern}...")
             self.inotify_tree = inotify.adapters.Inotify()
             self.inotify_tree.add_watch(self.path, mask=self.mask)
 
         if self.exclude_pattern:
-            self.logger.info(f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}")
+            logger.info(f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}")
 
         self.watching = True
         self.do_watch_loop()
 
     def stop(self):
         """Stop watching the directory"""
-        self.logger.info(f"PriorityWatcher stopping on {self.path}/*{self.pattern}...")
+        logger.info(f"PriorityWatcher stopping on {self.path}/*{self.pattern}...")
 
         self.watching = False
 
@@ -100,7 +101,6 @@ class PriorityWatcher(object):
             or self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW
         ):
             utils.scan_for_existing_files_and_add_to_priority_queue(
-                self.logger,
                 self.metafits_path,
                 self.path,
                 self.pattern,
@@ -120,7 +120,7 @@ class PriorityWatcher(object):
                         (header, _, path, filename) = event
 
                         # debug (uncomment if needed)
-                        # self.logger.debug(f"Event {path} {filename}")
+                        # logger.debug(f"Event {path} {filename}")
 
                         # check event is one we care about
                         if header.mask | self.mask == self.mask:
@@ -132,7 +132,6 @@ class PriorityWatcher(object):
 
                                 # We need to determine the priority
                                 priority = utils.get_priority(
-                                    self.logger,
                                     dest_filename,
                                     self.metafits_path,
                                     self.list_of_correlator_high_priority_projects,
@@ -145,7 +144,7 @@ class PriorityWatcher(object):
                                 )
 
                                 self.dest_queue.put(new_queue_item)
-                                self.logger.info(
+                                logger.info(
                                     f"{dest_filename} added to queue with priority {priority} ({self.dest_queue.qsize()})"
                                 )
 

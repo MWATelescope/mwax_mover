@@ -7,7 +7,6 @@ tested is the filename and metafits file (which is included).
 """
 
 from configparser import ConfigParser
-import logging
 import os
 import pytest
 import queue
@@ -51,7 +50,6 @@ def test_correlator_mode_class():
 def test_validate_filename_valid1():
     """Test that validate_filename() correctly identifies attributes based on filename"""
     metafits_path = "tests/data/1244973688"
-    logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -62,7 +60,7 @@ def test_validate_filename_valid1():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(logger, filename, metafits_path)
+    val: utils.ValidationData = utils.validate_filename(filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1244973688
@@ -75,7 +73,6 @@ def test_validate_filename_valid1():
 def test_validate_filename_valid2():
     """Test that validate_filename() correctly identifies attributes based on filename"""
     metafits_path = os.path.join(os.getcwd(), "tests/data/1347318488")
-    logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -86,7 +83,7 @@ def test_validate_filename_valid2():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(logger, filename, metafits_path)
+    val: utils.ValidationData = utils.validate_filename(filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1347318488
@@ -99,7 +96,6 @@ def test_validate_filename_valid2():
 def test_validate_filename_valid3():
     """Test that validate_filename() correctly identifies attributes based on filename"""
     metafits_path = os.path.join(os.getcwd(), "tests/data/1220738720")
-    logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -110,7 +106,7 @@ def test_validate_filename_valid3():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(logger, filename, metafits_path)
+    val: utils.ValidationData = utils.validate_filename(filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1220738720
@@ -123,7 +119,6 @@ def test_validate_filename_valid3():
 def test_validate_filename_valid4():
     """Test that validate_filename() correctly identifies attributes based on filename"""
     metafits_path = os.path.join(os.getcwd(), "tests/data/1220738720")
-    logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -134,7 +129,7 @@ def test_validate_filename_valid4():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(logger, filename, metafits_path)
+    val: utils.ValidationData = utils.validate_filename(filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1220738720
@@ -147,7 +142,6 @@ def test_validate_filename_valid4():
 def test_validate_filename_valid5():
     """Test that validate_filename() correctly identifies attributes based on filename"""
     metafits_path = os.path.join(os.getcwd(), "tests/data/1220738720")
-    logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -158,7 +152,7 @@ def test_validate_filename_valid5():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(logger, filename, metafits_path)
+    val: utils.ValidationData = utils.validate_filename(filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1220738720
@@ -171,7 +165,6 @@ def test_validate_filename_valid5():
 def test_validate_filename_valid6():
     """Test that validate_filename() correctly identifies attributes based on filename"""
     metafits_path = os.path.join(os.getcwd(), "tests/data/1328239120")
-    logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -182,7 +175,7 @@ def test_validate_filename_valid6():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(logger, filename, metafits_path)
+    val: utils.ValidationData = utils.validate_filename(filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1328239120
@@ -195,7 +188,6 @@ def test_validate_filename_valid6():
 def test_validate_filename_valid7():
     """Test that validate_filename() correctly identifies attributes based on filename"""
     metafits_path = os.path.join(os.getcwd(), "tests/data/1328239120")
-    logger = logging.getLogger("test")
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -206,7 +198,7 @@ def test_validate_filename_valid7():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(logger, filename, metafits_path)
+    val: utils.ValidationData = utils.validate_filename(filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1328239120
@@ -248,12 +240,11 @@ def test_scan_for_existing_files_and_add_to_queue():
     watch_dir = "tests/data/1244973688"
     pattern = ".fits"
     recursive = False
-    logger = logging.getLogger("test")
 
     #
     # Run test
     #
-    utils.scan_for_existing_files_and_add_to_queue(logger, watch_dir, pattern, recursive, queue_target)
+    utils.scan_for_existing_files_and_add_to_queue(watch_dir, pattern, recursive, queue_target)
 
     assert queue_target.qsize() == 2
     assert queue_target.get() == os.path.join(
@@ -270,13 +261,11 @@ def test_scan_for_existing_files_and_add_to_priority_queue():
     pattern = ".fits"
     recursive = False
     metafits_path = watch_dir
-    logger = logging.getLogger("test")
 
     #
     # Run test
     #
     utils.scan_for_existing_files_and_add_to_priority_queue(
-        logger,
         metafits_path,
         watch_dir,
         pattern,
@@ -309,12 +298,11 @@ def test_scan_directory():
     watch_dir = "tests/data/1244973688"
     pattern = ".fits"
     recursive = False
-    logger = logging.getLogger("test")
 
     #
     # Run test
     #
-    list_of_files = utils.scan_directory(logger, watch_dir, pattern, recursive, exclude_pattern=None)
+    list_of_files = utils.scan_directory(watch_dir, pattern, recursive, exclude_pattern=None)
 
     assert len(list_of_files) == 2
     assert (
@@ -332,10 +320,8 @@ def test_get_priority_correlator_calibrator():
     #
     # Run test
     #
-    logger = logging.getLogger("test")
 
     priority = utils.get_priority(
-        logger,
         "tests/data/1347318488/1347318488_20190619100110_ch101_000.fits",
         "tests/data/1347318488/",
         ["D0006"],
@@ -352,10 +338,8 @@ def test_get_priority_correlator_high_priority_list():
     #
     # Run test
     #
-    logger = logging.getLogger("test")
 
     priority = utils.get_priority(
-        logger,
         "tests/data/1122979144/1122979144_20190619100110_ch101_000.fits",
         "tests/data/1122979144/",
         ["D0006"],
@@ -369,10 +353,8 @@ def test_get_priority_vcs_c001():
     #
     # Run test
     #
-    logger = logging.getLogger("test")
 
     priority = utils.get_priority(
-        logger,
         "tests/data/1347063304/1347063304_1347063304_114.sub",
         "tests/data/1347063304/",
         ["D0006"],
@@ -386,10 +368,8 @@ def test_get_priority_correlator_c001():
     #
     # Run test
     #
-    logger = logging.getLogger("test")
 
     priority = utils.get_priority(
-        logger,
         "tests/data/1244973688/1244973688_20190619100110_ch114_000.fits",
         "tests/data/1244973688/",
         ["D0006"],
@@ -403,10 +383,8 @@ def test_get_priority_vcs_g0024():
     #
     # Run test
     #
-    logger = logging.getLogger("test")
 
     priority = utils.get_priority(
-        logger,
         "tests/data/1220738720/1220738720_1220738720_123.sub",
         "tests/data/1220738720/",
         ["D0006"],
@@ -420,10 +398,8 @@ def test_get_priority_metafits_ppd():
     #
     # Run test
     #
-    logger = logging.getLogger("test")
 
     priority = utils.get_priority(
-        logger,
         "tests/data/1328239120/1328239120_metafits_ppds.fits",
         "tests/data/1328239120/",
         ["D0006"],
@@ -435,7 +411,6 @@ def test_get_priority_metafits_ppd():
 def test_do_checksum_md5():
     """Tests that we can correctly get the MD5 of a file"""
 
-    logger = logging.getLogger("test")
     filename = os.path.join(
         os.getcwd(),
         "tests/data/1244973688/1244973688_20190619100110_ch114_000.fits",
@@ -447,7 +422,7 @@ def test_do_checksum_md5():
     #
     # Run test
     #
-    md5sum = utils.do_checksum_md5(logger, filename, numa_node, timeout)
+    md5sum = utils.do_checksum_md5(filename, numa_node, timeout)
 
     assert md5sum == "c1024dd2184887bc293cffe07406046f"
 
@@ -513,35 +488,34 @@ def test_config_get_list_valid():
     e.g. abc,def,ghi would result in ["abc", "def", "ghi"]
     An empty string would result in and empty list []
     """
-    logger = logging.getLogger("test")
+
     config_filename = os.path.join(os.getcwd(), "tests/data/test005/test005.cfg")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    return_list = utils.read_config_list(logger, config, "correlator", "high_priority_vcs_projectids")
+    return_list = utils.read_config_list(config, "correlator", "high_priority_vcs_projectids")
 
     assert return_list == ["D0006", "G0058"]
 
 
 def test_config_get_bool_true():
-    logger = logging.getLogger("test")
 
     config_filename = os.path.join(os.getcwd(), "tests/data/test005/test005.cfg")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    true_bool = utils.read_config_bool(logger, config, "mwax mover", "archiving_enabled")
+    true_bool = utils.read_config_bool(config, "mwax mover", "archiving_enabled")
 
     assert true_bool is True
 
 
 def test_config_get_bool_false():
-    logger = logging.getLogger("test")
+
     config_filename = os.path.join(os.getcwd(), "tests/data/test005/test005.cfg")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    false_bool = utils.read_config_bool(logger, config, "beamformer", "bf_keep_original_files_after_stitching")
+    false_bool = utils.read_config_bool(config, "beamformer", "bf_keep_original_files_after_stitching")
 
     assert false_bool is False
 
@@ -552,12 +526,12 @@ def test_config_get_list_empty():
     e.g. abc,def,ghi would result in ["abc", "def", "ghi"]
     An empty string would result in and empty list []
     """
-    logger = logging.getLogger("test")
+
     config_filename = os.path.join(os.getcwd(), "tests/data/test005/test005.cfg")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    return_list = utils.read_config_list(logger, config, "correlator", "high_priority_correlator_projectids")
+    return_list = utils.read_config_list(config, "correlator", "high_priority_correlator_projectids")
 
     assert return_list == []
 
@@ -565,16 +539,16 @@ def test_config_get_list_empty():
 def test_config_get_optional_value():
     """Read an empty string from a config file and ensure it gets
     treated as None. Also test an non empty gets read right too"""
-    logger = logging.getLogger("test")
+
     config_filename = os.path.join(os.getcwd(), "tests/data/test005/test005.cfg")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    empty_return_val = utils.read_optional_config(logger, config, "correlator", "high_priority_correlator_projectids")
+    empty_return_val = utils.read_optional_config(config, "correlator", "high_priority_correlator_projectids")
 
-    non_empty_return_val = utils.read_optional_config(logger, config, "correlator", "mwax_stats_timeout_sec")
+    non_empty_return_val = utils.read_optional_config(config, "correlator", "mwax_stats_timeout_sec")
 
-    non_existing_key = utils.read_optional_config(logger, config, "correlator", "non_existant_key")
+    non_existing_key = utils.read_optional_config(config, "correlator", "non_existant_key")
 
     assert empty_return_val is None
     assert non_empty_return_val is not None
@@ -582,18 +556,18 @@ def test_config_get_optional_value():
 
     # Section that doesn't exist raises error
     with pytest.raises(KeyError):
-        non_existing_key = utils.read_optional_config(logger, config, "non_existant_section", "non_existant_key")
+        non_existing_key = utils.read_optional_config(config, "non_existant_section", "non_existant_key")
 
 
 def test_config_get_optional_value_spaces_not_empty_string():
     """Read an empty string which has spaces in it from a config file and ensure it gets
     treated as None."""
-    logger = logging.getLogger("test")
+
     config_filename = os.path.join(os.getcwd(), "tests/data/test005/test005.cfg")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    empty_return_val = utils.read_optional_config(logger, config, "correlator", "test_with_spaces")
+    empty_return_val = utils.read_optional_config(config, "correlator", "test_with_spaces")
 
     assert empty_return_val is None
 
@@ -601,12 +575,12 @@ def test_config_get_optional_value_spaces_not_empty_string():
 def test_download_metafits_file():
     """Test that we can download a metafits file by obsid
     from the web service"""
-    logger = logging.getLogger("test")
+
     obs_id = 1244973688
     metafits_path = "/tmp"
     metafits_filename = os.path.join(metafits_path, f"{obs_id}_metafits.fits")
 
-    utils.download_metafits_file(logger, obs_id, metafits_path)
+    utils.download_metafits_file(obs_id, metafits_path)
 
     assert os.path.exists(metafits_filename)
 
@@ -833,18 +807,16 @@ def test_should_project_be_archived():
 
 
 def test_get_data_files_for_obsid_from_webservice_404():
-    logger = logging.getLogger("test")
 
     # Uknown obsid- raises exception
     with pytest.raises(Exception):
-        utils.get_data_files_for_obsid_from_webservice(logger, 1234567890)
+        utils.get_data_files_for_obsid_from_webservice(1234567890)
 
 
 def test_get_data_files_for_obsid_from_webservice_200():
-    logger = logging.getLogger("test")
 
     # Good obsid with 24 gpubox files and 1 flags and 1 metafits. Only return the 24 gpubox files
-    file_list = utils.get_data_files_for_obsid_from_webservice(logger, 1157306584)
+    file_list = utils.get_data_files_for_obsid_from_webservice(1157306584)
     assert len(file_list) == 24
 
     assert file_list == [

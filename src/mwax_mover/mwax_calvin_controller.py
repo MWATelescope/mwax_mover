@@ -41,6 +41,13 @@ from mwax_mover.mwax_db import (
 )
 from mwax_mover.mwax_calvin_utils import submit_sbatch, create_sbatch_script, CalvinJobType
 
+# Setup root logger
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+logger.addHandler(handler)
+
 
 class CalibrationRequest:
     def __init__(self):
@@ -64,9 +71,7 @@ class MWAXCalvinController:
         self,
     ):
         # General
-        self.logger = logging.getLogger(__name__)
         self.log_path: str = ""
-        self.log_level: str = ""
         self.hostname: str = ""
         self.db_handler_object: MWAXDBHandler
         self.config_filename: str = ""
@@ -108,15 +113,15 @@ class MWAXCalvinController:
         self.running = True
 
         # creating database connection pool(s)
-        self.logger.info("Starting database connection pool...")
+        logger.info("Starting database connection pool...")
         self.db_handler_object.start_database_pool()
 
         # create a health thread
-        self.logger.info("Starting health_thread...")
+        logger.info("Starting health_thread...")
         health_thread = threading.Thread(name="health_thread", target=self.health_loop, daemon=True)
         health_thread.start()
 
-        self.logger.info("Started...")
+        logger.info("Started...")
 
         # Main loop
         while self.running:
@@ -126,14 +131,14 @@ class MWAXCalvinController:
             for job in self.mwax_asvo_helper.current_asvo_jobs:
                 if job.download_slurm_job_submitted is False and job.download_error_datetime is None:
                     tracked_asvo_job_count += 1
-                    self.logger.debug(
+                    logger.debug(
                         f"{job} {job.job_state}; "
                         f"elapsed: {job.elapsed_time_seconds()} s; "
                         f"last_seen={job.last_seen_datetime}"
                     )
 
             # Dump out the counters
-            self.logger.debug(
+            logger.debug(
                 "Counters:\n"
                 f"Tracked MWA ASVO jobs        : {tracked_asvo_job_count}\n"
                 f"realtime_slurm_jobs_submitted: {self.realtime_slurm_jobs_submitted}\n"
@@ -146,7 +151,7 @@ class MWAXCalvinController:
 
             # If we're still running, wait before we do the next loop
             if self.running:
-                self.logger.debug(f"Sleeping for {self.check_interval_seconds} seconds")
+                logger.debug(f"Sleeping for {self.check_interval_seconds} seconds")
                 self.sleep(self.check_interval_seconds)
         #
         # Finished- do some clean up
@@ -155,14 +160,14 @@ class MWAXCalvinController:
             self.sleep(1)
 
         # Final log message
-        self.logger.info("Completed Successfully")
+        logger.info("Completed Successfully")
 
     def main_loop_handler(self):
         # Look at the schedule and create cal requests for any unattempted calibrator observations
         try:
             self.realtime_create_requests_for_unattempted_cal_obs()
         except Exception:
-            self.logger.exception("Error creating requests for unattempted cal obs")
+            logger.exception("Error creating requests for unattempted cal obs")
             self.database_errors += 1
 
         # get new requests
@@ -188,11 +193,11 @@ class MWAXCalvinController:
                 try:
                     self.mwa_asvo_add_new_asvo_job(cal_request.request_id, cal_request.obs_id)
                 except Exception:
-                    self.logger.exception("Error submitting asvo slurm job")
+                    logger.exception("Error submitting asvo slurm job")
                     self.slurm_errors += 1
 
         except Exception:
-            self.logger.exception("Error retrieving new calibration requests")
+            logger.exception("Error retrieving new calibration requests")
             self.database_errors += 1
 
         # For mwa_asvo requests, if we're not in an MWA ASVO outage, update jobs check for ready ones
@@ -227,7 +232,7 @@ class MWAXCalvinController:
 
         # submit sbatch script
         try:
-            (success, slurm_job_id) = submit_sbatch(self.logger, self.script_path, script, realtime_request.obs_id)
+            (success, slurm_job_id) = submit_sbatch(self.script_path, script, realtime_request.obs_id)
 
             if success:
                 self.realtime_slurm_jobs_submitted += 1
@@ -235,7 +240,7 @@ class MWAXCalvinController:
                 self.slurm_errors += 1
 
         except Exception:
-            self.logger.exception(
+            logger.exception(
                 f"{str(realtime_request.obs_id)}: Unable to submit a realtime calibration "
                 "sbatch job. Will retry next loop"
             )
@@ -257,13 +262,13 @@ class MWAXCalvinController:
                     None,
                 )
             except Exception:
-                self.logger.exception("Unable to update calibration_request table")
+                logger.exception("Unable to update calibration_request table")
                 self.database_errors += 1
         else:
             error_message = (
                 f"Unable to submit {realtime_request.obs_id} to SLURM for realtime calibration. Will retry next loop"
             )
-            self.logger.error(error_message)
+            logger.error(error_message)
 
     def mwa_asvo_submit_ready_asvo_jobs_to_slurm(self):
         """This code will check for any jobs which can be downloaded and submit
@@ -276,7 +281,7 @@ class MWAXCalvinController:
                 if job.job_state == mwax_asvo_helper.MWAASVOJobState.Error:
                     # MWA ASVO completed this job with error
                     error_message = "MWA ASVO completed this job with an Error state"
-                    self.logger.warning(f"{job}: {error_message}")
+                    logger.warning(f"{job}: {error_message}")
 
                     self.mwa_asvo_errors += 1
 
@@ -294,12 +299,12 @@ class MWAXCalvinController:
                             job.download_error_message,
                         )
                     except Exception:
-                        self.logger.exception("Unable to update calibration_request table")
+                        logger.exception("Unable to update calibration_request table")
                         self.database_errors += 1
 
                 elif job.job_state == mwax_asvo_helper.MWAASVOJobState.Ready:
                     try:
-                        self.logger.info(f"{job}: Submitting slurm job")
+                        logger.info(f"{job}: Submitting slurm job")
 
                         script = create_sbatch_script(
                             self.worker_config_filename,
@@ -314,14 +319,14 @@ class MWAXCalvinController:
                         success = False
                         slurm_job_id = None
                         try:
-                            (success, slurm_job_id) = submit_sbatch(self.logger, self.script_path, script, job.obs_id)
+                            (success, slurm_job_id) = submit_sbatch(self.script_path, script, job.obs_id)
 
                             if success:
                                 self.mwa_asvo_slurm_jobs_submitted += 1
                             else:
                                 self.slurm_errors += 1
                         except Exception:
-                            self.logger.exception("Unable to submit MWA ASVO slurm job")
+                            logger.exception("Unable to submit MWA ASVO slurm job")
                             self.slurm_errors += 1
 
                         # all is good
@@ -341,14 +346,12 @@ class MWAXCalvinController:
                                     None,
                                 )
                             except Exception:
-                                self.logger.exception("Unable to update calibration_request table")
+                                logger.exception("Unable to update calibration_request table")
                                 self.database_errors += 1
 
                     except Exception:
                         # Something went wrong!
-                        self.logger.exception(
-                            f"{job}: Exception submitting sbtach to SLURM, will try again in next loop"
-                        )
+                        logger.exception(f"{job}: Exception submitting sbtach to SLURM, will try again in next loop")
                         self.slurm_errors += 1
 
     def stop(self):
@@ -380,7 +383,7 @@ class MWAXCalvinController:
                     self.health_multicast_hops,
                 )
             except Exception as catch_all_exception:  # pylint: disable=broad-except
-                self.logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
+                logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
 
             # Sleep for a second
             self.sleep(1)
@@ -407,7 +410,7 @@ class MWAXCalvinController:
 
     def signal_handler(self, _signum, _frame):
         """Handles SIGINT and SIGTERM"""
-        self.logger.warning("Interrupted. Shutting down processor...")
+        logger.warning("Interrupted. Shutting down processor...")
 
         # Stop any Processors
         self.stop()
@@ -423,7 +426,7 @@ class MWAXCalvinController:
         return_list_asvo: list[CalibrationRequest] = []
 
         if self.running:
-            self.logger.debug("Querying database for unattempted calsolution_requests...")
+            logger.debug("Querying database for unattempted calsolution_requests...")
 
             # 1. Get the an outstanding calibration_requests from the db
             # 2. Also update the database to prevent the next call from picking up the same
@@ -490,7 +493,7 @@ class MWAXCalvinController:
         #                 None,
         #             )
         #         except Exception:
-        #             self.logger.exception("Unable to update calibration_request table")
+        #             logger.exception("Unable to update calibration_request table")
         #             self.database_errors += 1
         #     else:
         #         # We already are tracking this request- nothing to do
@@ -514,19 +517,19 @@ class MWAXCalvinController:
                         None,
                     )
                 except Exception:
-                    self.logger.exception("Unable to update calibration_request table")
+                    logger.exception("Unable to update calibration_request table")
                     self.database_errors += 1
 
             except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
                 # Handle me!
-                self.logger.warning(
+                logger.warning(
                     f"RequestID: {request_id} ObsID: {obs_id} Cannot submit new download job: MWA ASVO has an outage"
                 )
                 return
             except Exception as e:
                 # Some other fatal error occurred, let's log it and update the db
                 error_message = f"Error submitting job for ObsID {obs_id} RequestID {request_id}."
-                self.logger.exception(error_message)
+                logger.exception(error_message)
                 error_message = error_message + f" {str(e)}"
                 update_calsolution_request_submit_mwa_asvo_job_status(
                     self.db_handler_object,
@@ -547,15 +550,15 @@ class MWAXCalvinController:
         # If we find a job in giant-squid which we don't know about,
         # DON'T include it in the list we track
         if self.running:
-            self.logger.debug("Getting latest MWA ASVO job statuses...")
+            logger.debug("Getting latest MWA ASVO job statuses...")
             try:
                 self.mwax_asvo_helper.update_all_job_status()
 
             except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
-                self.logger.warning("Cannot update MWA ASVO job states: MWA ASVO has an outage")
+                logger.warning("Cannot update MWA ASVO job states: MWA ASVO has an outage")
 
             except Exception:
-                self.logger.exception("Error in update_all_job_status. Will retry next loop")
+                logger.exception("Error in update_all_job_status. Will retry next loop")
                 self.giant_squid_errors += 1
 
     def initialise(self, config_filename: str):
@@ -586,33 +589,18 @@ class MWAXCalvinController:
             sys.exit(1)
 
         # Read log level
-        config_file_log_level: Optional[str] = utils.read_optional_config(
-            self.logger, config, "mwax mover", "log_level"
-        )
-        if config_file_log_level is None:
-            self.log_level = "DEBUG"
-            self.logger.warning(f"log_level not set in config file. Defaulting to {self.log_level} level logging.")
-        else:
-            self.log_level = config_file_log_level
+        config_file_log_level: Optional[str] = utils.read_optional_config(config, "mwax mover", "log_level")
+        if config_file_log_level:
+            logger.setLevel(config_file_log_level)
 
-        # It's now safe to start logging
-        # start logging
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(self.log_level)
-        console_log = logging.StreamHandler()
-        console_log.setLevel(self.log_level)
-        console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
-        self.logger.addHandler(console_log)
-
-        self.logger.info(f"Starting mwax_calvin_controller...v{version.get_mwax_mover_version_string()}")
-        self.logger.info(f"Reading config file: {config_filename}")
+        logger.info(f"Starting mwax_calvin_controller...v{version.get_mwax_mover_version_string()}")
+        logger.info(f"Reading config file: {config_filename}")
 
         # health
-        self.health_multicast_ip = utils.read_config(self.logger, config, "mwax mover", "health_multicast_ip")
-        self.health_multicast_port = int(utils.read_config(self.logger, config, "mwax mover", "health_multicast_port"))
-        self.health_multicast_hops = int(utils.read_config(self.logger, config, "mwax mover", "health_multicast_hops"))
+        self.health_multicast_ip = utils.read_config(config, "mwax mover", "health_multicast_ip")
+        self.health_multicast_port = int(utils.read_config(config, "mwax mover", "health_multicast_port"))
+        self.health_multicast_hops = int(utils.read_config(config, "mwax mover", "health_multicast_hops"))
         self.health_multicast_interface_name = utils.read_config(
-            self.logger,
             config,
             "mwax mover",
             "health_multicast_interface_name",
@@ -620,20 +608,19 @@ class MWAXCalvinController:
 
         # get this hosts primary network interface ip
         self.health_multicast_interface_ip = utils.get_ip_address(self.health_multicast_interface_name)
-        self.logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
+        logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
 
         #
         # MRO database
         #
-        self.mro_metadatadb_host = utils.read_config(self.logger, config, "mro metadata database", "host")
-        self.mro_metadatadb_db = utils.read_config(self.logger, config, "mro metadata database", "db")
-        self.mro_metadatadb_user = utils.read_config(self.logger, config, "mro metadata database", "user")
-        self.mro_metadatadb_pass = utils.read_config(self.logger, config, "mro metadata database", "pass", True)
-        self.mro_metadatadb_port = int(utils.read_config(self.logger, config, "mro metadata database", "port"))
+        self.mro_metadatadb_host = utils.read_config(config, "mro metadata database", "host")
+        self.mro_metadatadb_db = utils.read_config(config, "mro metadata database", "db")
+        self.mro_metadatadb_user = utils.read_config(config, "mro metadata database", "user")
+        self.mro_metadatadb_pass = utils.read_config(config, "mro metadata database", "pass", True)
+        self.mro_metadatadb_port = int(utils.read_config(config, "mro metadata database", "port"))
 
         # Initiate database connection for rmo metadata db
         self.db_handler_object = MWAXDBHandler(
-            logger=self.logger,
             host=self.mro_metadatadb_host,
             port=self.mro_metadatadb_port,
             db_name=self.mro_metadatadb_db,
@@ -645,7 +632,7 @@ class MWAXCalvinController:
         # calvin config
         #
         # How long between iterations of the main loop (in seconds)
-        self.check_interval_seconds = int(utils.read_config(self.logger, config, "calvin", "check_interval_seconds"))
+        self.check_interval_seconds = int(utils.read_config(config, "calvin", "check_interval_seconds"))
 
         # script path (path for keeping all sbatch scripts)
         self.script_path = config.get("calvin", "script_path")
@@ -664,41 +651,37 @@ class MWAXCalvinController:
         # How many seconds do we wait before rechecking when giant squid says
         # MWA ASVO has an outage?
         self.mwa_asvo_outage_check_seconds = int(
-            utils.read_config(self.logger, config, "giant squid", "mwa_asvo_outage_check_seconds")
+            utils.read_config(config, "giant squid", "mwa_asvo_outage_check_seconds")
         )
 
         # How many secs do we wait for MWA ASVO to get us a completed job??
         self.mwa_asvo_longest_wait_time_seconds = int(
-            utils.read_config(self.logger, config, "giant squid", "mwa_asvo_longest_wait_time_seconds")
+            utils.read_config(config, "giant squid", "mwa_asvo_longest_wait_time_seconds")
         )
 
         # Get the giant squid binary
         self.giant_squid_binary_path = utils.read_config(
-            self.logger,
             config,
             "giant squid",
             "giant_squid_binary_path",
         )
 
         if not os.path.exists(self.giant_squid_binary_path):
-            self.logger.error(
-                f"giant_squid_binary_path location  {self.giant_squid_binary_path} does not exist. Quitting."
-            )
+            logger.error(f"giant_squid_binary_path location  {self.giant_squid_binary_path} does not exist. Quitting.")
             sys.exit(1)
 
         # How long do we wait for giant-squid to execute a list subcommand
         self.giant_squid_list_timeout_seconds = int(
-            utils.read_config(self.logger, config, "giant squid", "giant_squid_list_timeout_seconds")
+            utils.read_config(config, "giant squid", "giant_squid_list_timeout_seconds")
         )
 
         # How long do we wait for giant-squid to execute a submit-vis subcommand
         self.giant_squid_submitvis_timeout_seconds = int(
-            utils.read_config(self.logger, config, "giant squid", "giant_squid_submitvis_timeout_seconds")
+            utils.read_config(config, "giant squid", "giant_squid_submitvis_timeout_seconds")
         )
 
         # Setup the MWA ASVO Helper
         self.mwax_asvo_helper.initialise(
-            self.logger,
             self.giant_squid_binary_path,
             self.giant_squid_list_timeout_seconds,
             self.giant_squid_submitvis_timeout_seconds,
@@ -752,11 +735,8 @@ def main():
         processor.initialise_from_command_line()
         processor.start()
         sys.exit(0)
-    except Exception as catch_all_exception:  # pylint: disable=broad-except
-        if processor.logger:
-            processor.logger.exception("Exception in main()")
-        else:
-            print(str(catch_all_exception))
+    except Exception:  # pylint: disable=broad-except
+        logger.exception("Exception in main()")
 
 
 if __name__ == "__main__":
