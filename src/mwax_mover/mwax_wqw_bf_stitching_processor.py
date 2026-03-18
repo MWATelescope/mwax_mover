@@ -32,6 +32,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
                 (bf_incoming_path, ".*"),
             ],
             mode=MODE_WATCH_DIR_FOR_RENAME,
+            exclude_pattern=".tmp",
             corr_hi_priority_projects=list_of_corr_hi_priority_projects,
             vcs_hi_priority_projects=list_of_vcs_hi_priority_projects,
             requeue_to_eoq_on_failure=False,

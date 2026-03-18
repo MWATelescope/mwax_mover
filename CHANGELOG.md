@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.5.5 18-Feb-2026
+
+* BfStitchingProcessor: Fix bug where bf_stitching watcher picks up files other than .fil and .vdif
+
 # 1.5.4 18-Feb-2026
 
 * watchers: Suppress iNotify logging unless critical
