@@ -274,7 +274,7 @@ options:
         }
       ],
       "queue_worker": {
-        "name": "PawseyOutgoingProcessor_worker",
+        "name": "PawseyOutgoingProcessor1_worker",
         "current_item": "/volume1/incoming/1234567890_20260317090000_109_000.fits",
         "queue_size": 11
       }
