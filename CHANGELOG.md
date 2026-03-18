@@ -1,5 +1,10 @@
 # Changelog
 
+# 1.5.4 18-Feb-2026
+
+* watchers: Suppress iNotify logging unless critical
+* update tests
+
 # 1.5.3 18-Feb-2026
 
 * subfile_distributor: Removed the calibration_destination_enabled option as it wasn't being used.

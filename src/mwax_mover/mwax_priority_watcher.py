@@ -64,6 +64,9 @@ class PriorityWatcher(object):
 
     def start(self):
         """Begins watching the directory"""
+        # supress all but most critical inotify logs
+        logging.getLogger("inotify.adapters").setLevel(logging.CRITICAL)
+
         if self.recursive:
             logger.info(f"PriorityWatcher starting on {self.path}/*{self.pattern} and all subdirectories...")
             self.inotify_tree = inotify.adapters.InotifyTree(self.path, mask=self.mask)

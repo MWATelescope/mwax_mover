@@ -13,14 +13,14 @@ from mwax_mover.utils import MWAXSubfileDistirbutorMode
 from tests_common import create_observation_subfiles, setup_test_directories
 from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
 
-TEST_CONFIG_FILE = "tests/data/test008/test008.cfg"
+TEST_CONFIG_FILE = "tests/data/test010/test010.cfg"
 TEST_METAFITS = "tests/data/1369821496/1369821496_metafits.fits"
 
 
 def test_correlator_config_file():
     """Tests that SubfileDistributor reads a correlator config file ok"""
     # Setup all the paths
-    base_dir = setup_test_directories("test008")
+    base_dir = setup_test_directories("test010")
 
     # Start mwax_subfile_distributor using our test config
     sd = MWAXSubfileDistributor()
@@ -46,7 +46,7 @@ def test_correlator_config_file():
     assert sd.cfg_archive_command_timeout_sec == 300
     assert sd.cfg_psrdada_timeout_sec == 32
     assert sd.cfg_copy_subfile_to_disk_timeout_sec == 120
-    assert sd.cfg_master_archiving_enabled == 1
+    assert sd.cfg_master_archiving_enabled == 0
 
     # correlator section
     assert sd.cfg_corr_input_ringbuffer_key == "0x1234"
@@ -73,14 +73,14 @@ def test_correlator_config_file():
     # test_server section
     assert sd.cfg_corr_archive_destination_host == "host1.destination.com://dest/path"
     assert sd.cfg_corr_archive_destination_port == 1094
-    assert sd.cfg_corr_archive_destination_enabled is True
+    assert sd.cfg_corr_archive_destination_enabled is False
     assert sd.cfg_corr_diskdb_numa_node == -1
     assert sd.cfg_corr_archive_command_numa_node == -1
 
 
-def test_process_correlator_subfile():
+def test_process_vcs_subfile():
     # Setup all the paths
-    base_dir = setup_test_directories("test008")
+    base_dir = setup_test_directories("test010")
 
     # Start mwax_subfile_distributor using our test config
     sd = MWAXSubfileDistributor()
@@ -92,10 +92,6 @@ def test_process_correlator_subfile():
     metafits = os.path.join(sd.cfg_corr_metafits_path, os.path.basename(TEST_METAFITS))
     shutil.copyfile(TEST_METAFITS, metafits)
 
-    create_observation_subfiles(
-        1369821496, 3, "MWAX_CORRELATOR", 109, 0, os.path.join(base_dir, "tmp"), sd.cfg_subfile_incoming_path
-    )
-
     # start processor
     # Create and start a thread for the processor
     thrd = threading.Thread(name="msd_thread", target=sd.start, daemon=True)
@@ -104,7 +100,22 @@ def test_process_correlator_subfile():
     thrd.start()
 
     # allow things to start
-    time.sleep(20)
+    time.sleep(15)
+
+    # throw some subfiles in!
+    create_observation_subfiles(
+        1369821488, 1, "MWAX_VCS", 109, 0, os.path.join(base_dir, "tmp"), sd.cfg_subfile_incoming_path
+    )
+
+    # allow things to process
+    time.sleep(8)
+
+    create_observation_subfiles(
+        1369821496, 1, "MWAX_VCS", 109, 0, os.path.join(base_dir, "tmp"), sd.cfg_subfile_incoming_path
+    )
+
+    # allow things to process
+    time.sleep(8)
 
     # Quit
     # Ok time's up! Stop the processor
