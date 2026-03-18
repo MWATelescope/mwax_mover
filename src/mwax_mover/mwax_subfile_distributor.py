@@ -107,7 +107,7 @@ class MWAXSubfileDistributor:
         # Archiving settings for correlator
         self.cfg_corr_archive_destination_host: str = ""
         self.cfg_corr_archive_destination_port: int = 0
-        self.cfg_corr_archive_destination_enabled: int = 0
+        self.cfg_corr_archive_destination_enabled: bool = False
         # processing_stats config
         self.cfg_corr_mwax_stats_timeout_sec: int = 0
         self.cfg_corr_mwax_stats_dump_dir: str = ""
@@ -608,7 +608,7 @@ class MWAXSubfileDistributor:
             self.cfg_corr_high_priority_correlator_projectids,
             self.cfg_corr_high_priority_vcs_projectids,
             self.db_handler,
-            self.cfg_corr_archive_destination_enabled == 1,
+            self.cfg_corr_archive_destination_enabled,
         )
         self.workers.append(self.checksum_and_db_processor)
 
@@ -624,7 +624,7 @@ class MWAXSubfileDistributor:
             self.cfg_corr_mwax_stats_binary_dir,
             self.cfg_corr_mwax_stats_timeout_sec,
             self.cfg_corr_mwax_stats_dump_dir,
-            self.cfg_corr_archive_destination_enabled == 1,
+            self.cfg_corr_archive_destination_enabled,
             self.cfg_corr_visdata_outgoing_path,
             self.cfg_corr_calibrator_outgoing_path,
             self.cfg_corr_visdata_dont_archive_path,
@@ -645,12 +645,12 @@ class MWAXSubfileDistributor:
             self.cfg_bf_dont_archive_path,
             self.cfg_corr_high_priority_correlator_projectids,
             self.cfg_corr_high_priority_vcs_projectids,
-            self.cfg_corr_archive_destination_enabled == 1,
+            self.cfg_corr_archive_destination_enabled,
             self.cfg_bf_keep_original_files_after_stitching,
         )
         self.workers.append(self.bf_stitching_processor)
 
-        if self.cfg_corr_archive_destination_enabled == 1:
+        if self.cfg_corr_archive_destination_enabled:
             # Only start these processors if we are archiving
 
             # Watch:
@@ -734,7 +734,7 @@ class MWAXSubfileDistributor:
                 # Does the file exist?
                 if os.path.exists(item):
                     # Is this host doing archiving?
-                    if self.cfg_corr_archive_destination_enabled == 1:
+                    if self.cfg_corr_archive_destination_enabled:
                         # Validate and get info about the obs
                         obs_info: utils.ValidationData = utils.validate_filename(item, self.cfg_corr_metafits_path)
 

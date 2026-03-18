@@ -191,6 +191,8 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                 #       Ignore the subfile
                 # 3. Rename .sub file to .free so that udpgrab can reuse it
 
+                logger.debug(f"{item}: MODE is {subfile_mode}")
+
                 if utils.CorrelatorMode.is_correlator(subfile_mode):
                     # Check if we're in the right mwax_subfile_distributor mode
                     if self.subfile_dist_mode == utils.MWAXSubfileDistirbutorMode.CORRELATOR:
