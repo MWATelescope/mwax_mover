@@ -143,10 +143,9 @@ class MWAXSubfileDistributor:
         parser.description = (
             "mwax_subfile_distributor: a command line tool which is part of"
             " the mwax suite for the MWA. It will perform different tasks"
-            " based on the configuration file.\nIn addition, it will"
+            " based on the configuration file. In addition, it will"
             " automatically archive files in /voltdata and /visdata to the"
-            " mwacache servers at the Curtin Data Centre. (mwax_mover"
-            f" v{version.get_mwax_mover_version_string()})\n"
+            " mwacache servers at the Curtin Data Centre."
         )
 
         parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
@@ -984,7 +983,7 @@ class MWAXSubfileDistributor:
     def get_status(self) -> dict:
         """Returns processor status as a dictionary"""
         main_status = {
-            "Unix timestamp": time.time(),
+            "unix_timestamp": time.time(),
             "process": type(self).__name__,
             "version": version.get_mwax_mover_version_string(),
             "host": self.hostname,
@@ -1125,8 +1124,8 @@ def main():
 
         processor.start()
         sys.exit(0)
-    except Exception as catch_all_exception:  # pylint: disable=broad-except
-        logger.exception(str(catch_all_exception))
+    except Exception:
+        logger.exception("Exited with error")
 
 
 if __name__ == "__main__":

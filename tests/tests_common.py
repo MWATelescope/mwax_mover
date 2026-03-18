@@ -1,4 +1,3 @@
-import logging
 from configparser import ConfigParser
 import os
 from pathlib import Path
@@ -76,7 +75,7 @@ def setup_test_directories(test_filename: str) -> str:
     return base
 
 
-def get_test_db_handler(logger: logging.Logger):
+def get_test_db_handler():
     #
     # For these tests to work, please create a config file
     # which has details to a local TEST database.
@@ -95,14 +94,14 @@ def get_test_db_handler(logger: logging.Logger):
     return MWAXDBHandler(host, port, db_name, user, password)
 
 
-def run_create_test_db_object_script(logger: logging.Logger, creation_sql_filename):
+def run_create_test_db_object_script(creation_sql_filename):
     # Connect to test db, drop and then recreate the database objects
     # expects:
     # * db mwax_mover_test must already exist
     # * Database name should NOT be "mwa" - just in case we accidently run this in prod!
     # * Ditto for hostname- should be localhost - just in case!
 
-    test_db_handler = get_test_db_handler(logger)
+    test_db_handler = get_test_db_handler()
     test_db_handler.start_database_pool()
 
     assert test_db_handler.db_name == "mwax_mover_test"

@@ -5,6 +5,7 @@ import os
 import queue
 import time
 import threading
+from typing import Optional
 from mwax_mover import mwax_mover, mwax_command
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ class QueueWorker(object):
         self._paused = False
         self.exit_once_queue_empty = exit_once_queue_empty
         self.requeue_to_eoq_on_failure = requeue_to_eoq_on_failure
-        self.current_item = None
+        self.current_item: Optional[str] = None
         self.consecutive_error_count = 0
         self.backoff_initial_seconds = backoff_initial_seconds
         self.backoff_factor = backoff_factor
@@ -77,6 +78,12 @@ class QueueWorker(object):
 
                     if self.current_item is None:
                         self.current_item = self.source_queue.get(block=True, timeout=0.5)
+
+                    # Because we block in the above get, we should always have a value for current_item
+                    # but this gate ensure the type checker is satisfied that current_item is not None.
+                    if self.current_item is None:
+                        continue
+
                     logger.info(f"Processing {self.current_item}...")
 
                     start_time = time.time()
@@ -171,7 +178,7 @@ class QueueWorker(object):
     def get_status(self) -> dict:
         """Return the status as a dictionary"""
         return {
-            "Unix timestamp": time.time(),
-            "current": self.current_item,
+            "name": self.name,
+            "current_item": self.current_item,
             "queue_size": self.source_queue.qsize(),
         }

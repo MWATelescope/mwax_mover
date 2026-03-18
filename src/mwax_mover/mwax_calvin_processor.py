@@ -785,7 +785,7 @@ class MWAXCalvinProcessor:
         requests = ",".join(str(r) for r in self.request_id_list)
 
         main_status = {
-            "Unix timestamp": time.time(),
+            "unix_timestamp": time.time(),
             "process": type(self).__name__,
             "version": version.get_mwax_mover_version_string(),
             "host": self.hostname,
@@ -1118,12 +1118,11 @@ class MWAXCalvinProcessor:
         # Get command line args
         parser = argparse.ArgumentParser()
         parser.description = (
-            "mwax_calvin_processor: a command line tool which is part of the"
-            " MWA correlator for the MWA. It will be launched via sSLURM "
+            "A command line tool which is part of the"
+            " MWA correlator for the MWA. It will be launched via a SLURM "
             " job and either download a realtime calibrator obs from MWAX or "
             "download data from an MWA ASVO URL. Either way it will then run "
             "Birli and Hyperdrive and then upload the calibration solution."
-            f"mwax_mover v{version.get_mwax_mover_version_string()})\n"
         )
 
         parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
@@ -1243,8 +1242,8 @@ def main():
         processor.initialise_from_command_line()
         processor.start()
         sys.exit(0)
-    except Exception as catch_all_exception:  # pylint: disable=broad-except
-        logger.exception(str(catch_all_exception))
+    except Exception:
+        logger.exception("Exited with error")
 
 
 if __name__ == "__main__":

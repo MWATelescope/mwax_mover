@@ -8,6 +8,7 @@ import shutil
 import signal
 import threading
 import time
+
 from mwax_mover.utils import MWAXSubfileDistirbutorMode
 from tests_common import create_observation_subfiles, setup_test_directories
 from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor

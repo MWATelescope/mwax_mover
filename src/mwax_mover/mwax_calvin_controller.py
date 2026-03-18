@@ -391,7 +391,7 @@ class MWAXCalvinController:
     def get_status(self) -> dict:
         """Returns status of all process as a dictionary"""
         main_status = {
-            "Unix timestamp": time.time(),
+            "unix_timestamp": time.time(),
             "process": type(self).__name__,
             "version": version.get_mwax_mover_version_string(),
             "host": self.hostname,
@@ -404,9 +404,7 @@ class MWAXCalvinController:
             "slurm_errors": self.slurm_errors,
         }
 
-        status = {"main": main_status}
-
-        return status
+        return {"main": main_status}
 
     def signal_handler(self, _signum, _frame):
         """Handles SIGINT and SIGTERM"""
@@ -695,8 +693,7 @@ class MWAXCalvinController:
         parser.description = (
             "mwax_calvin_controller: a command line tool which is part of the "
             "MWA correlator for the MWA. It will submit SBATCH jobs as needed "
-            "to process real time calibration jobs."
-            f"(mwax_mover v{version.get_mwax_mover_version_string()})\n"
+            "to process real time or MWA ASVO calibration jobs."
         )
 
         parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
@@ -735,8 +732,8 @@ def main():
         processor.initialise_from_command_line()
         processor.start()
         sys.exit(0)
-    except Exception:  # pylint: disable=broad-except
-        logger.exception("Exception in main()")
+    except Exception:
+        logger.exception("Exited with error")
 
 
 if __name__ == "__main__":

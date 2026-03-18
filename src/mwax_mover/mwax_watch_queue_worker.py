@@ -1,5 +1,4 @@
 import logging
-import os
 from queue import PriorityQueue, Queue
 from mwax_mover.mwax_watcher import Watcher
 from mwax_mover.mwax_queue_worker import QueueWorker
@@ -65,7 +64,7 @@ class MWAXWatchQueueWorker(ABC):
             pattern = p[1]
 
             new_watcher = Watcher(
-                f"{name}_{os.path.basename(watch_path)}",
+                f"{name}_{watch_path.replace('/', '_')}",
                 watch_path,
                 self.queue,
                 pattern,
@@ -135,7 +134,6 @@ class MWAXWatchQueueWorker(ABC):
     def get_status(self) -> dict:
         status = {
             "name": self.name,
-            "hostname": utils.get_hostname(),
             "watchers": [],
             "queue_worker": self.queue_worker.get_status(),
         }
@@ -208,7 +206,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
             pattern = p[1]
 
             new_watcher = PriorityWatcher(
-                f"{name}_{os.path.basename(watch_path)}",
+                f"{name}_{watch_path.replace('/', '_')}",
                 watch_path,
                 self.pqueue,
                 pattern,
@@ -278,7 +276,6 @@ class MWAXPriorityWatchQueueWorker(ABC):
     def get_status(self) -> dict:
         status = {
             "name": self.name,
-            "hostname": utils.get_hostname(),
             "watchers": [],
             "queue_worker": self.pqueue_worker.get_status(),
         }

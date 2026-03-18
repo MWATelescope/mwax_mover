@@ -24,7 +24,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
         archive_to_location: ArchiveLocation,
     ):
         super().__init__(
-            "OutgoingProcessor",
+            "PawseyOutgoingProcessor",
             metafits_path,
             watch_paths_and_exts,
             mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,

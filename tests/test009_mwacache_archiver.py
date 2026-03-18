@@ -9,6 +9,7 @@ import signal
 import threading
 import time
 
+
 from mwax_mover.mwacache_archive_processor import MWACacheArchiveProcessor
 from mwax_mover.utils import ArchiveLocation
 from tests_common import setup_test_directories
@@ -72,7 +73,7 @@ def test_mwacache_archiver_metafits_file():
     TEST_METAFITS = "tests/data/1122979144/1122979144_metafits.fits"
 
     # Setup all the paths
-    base_dir = setup_test_directories("test009")
+    base_dir = setup_test_directories(__file__)
 
     # Start mwax_subfile_distributor using our test config
     mcap = MWACacheArchiveProcessor()
@@ -81,8 +82,6 @@ def test_mwacache_archiver_metafits_file():
     config_filename = "tests/data/test009/test009.cfg"
 
     # setup data
-    metafits = os.path.join(mcap.metafits_path, os.path.basename(TEST_METAFITS))
-    shutil.copyfile(TEST_METAFITS, metafits)
     incoming = os.path.join(os.path.join(base_dir, "volume1/incoming"), os.path.basename(TEST_METAFITS))
     shutil.copyfile(TEST_METAFITS, incoming)
 

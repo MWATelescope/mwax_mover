@@ -5,6 +5,7 @@ import os
 import queue
 import time
 import threading
+from typing import Optional
 from mwax_mover import mwax_mover, mwax_command
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
 
@@ -57,7 +58,7 @@ class PriorityQueueWorker(object):
         self._paused = False
         self.exit_once_queue_empty = exit_once_queue_empty
         self.requeue_to_eoq_on_failure = requeue_to_eoq_on_failure
-        self.current_item = None
+        self.current_item: Optional[str] = None
         self.consecutive_error_count = 0
         self.backoff_initial_seconds = backoff_initial_seconds
         self.backoff_factor = backoff_factor
@@ -80,11 +81,20 @@ class PriorityQueueWorker(object):
 
                     if self.current_item is None:
                         self.current_item = self.source_queue.get(block=True, timeout=0.5)
+
+                    # Because we block in the above get, we should always have a value for current_item
+                    # but this gate ensure the type checker is satisfied that current_item is not None.
+                    if self.current_item is None:
+                        continue
+
                     logger.info(f"Processing {self.current_item}...")
 
                     start_time = time.time()
 
-                    filename_priority = self.current_item[0]
+                    if self.current_item[0] is None:
+                        filename_priority = 99
+                    else:
+                        filename_priority = int(self.current_item[0])
                     filename = str(self.current_item[1])
 
                     # Check file exists (maybe someone deleted it?)
@@ -178,8 +188,14 @@ class PriorityQueueWorker(object):
 
     def get_status(self) -> dict:
         """Return the status as a dictionary"""
+        current: Optional[str] = None
+
+        if self.current_item:
+            if self.current_item[1]:
+                current = str(self.current_item[1])
+
         return {
-            "Unix timestamp": time.time(),
-            "current item": "" if self.current_item is None else str(self.current_item[1]),
-            "priority_queue_size": self.source_queue.qsize(),
+            "name": self.name,
+            "current item": current,
+            "queue_size": self.source_queue.qsize(),
         }

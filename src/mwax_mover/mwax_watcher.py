@@ -3,7 +3,6 @@
 import logging
 import os
 import queue
-import time
 import inotify.constants
 import inotify.adapters
 from mwax_mover import mwax_mover, utils
@@ -73,6 +72,12 @@ class Watcher(object):
         else:
             self.inotify_tree.remove_watch(self.path)  # type: ignore
 
+        # Destroy the inotify adpater
+        try:
+            del self.inotify_tree
+        except Exception:
+            pass
+
     def do_watch_loop(self):
         """ "Initiate watching"""
         # If we're in NEW or RENAME mode, then scan the folder once we have
@@ -109,14 +114,7 @@ class Watcher(object):
 
     def get_status(self) -> dict:
         """Returns a dictionary describing status of this watcher"""
-        _, used_bytes, free_bytes = utils.get_disk_space_bytes(self.path)
-
         return {
-            "Unix timestamp": time.time(),
-            "watching": self.watching,
-            "mode": self.mode,
+            "name": self.name,
             "watch_path": self.path,
-            "watch_pattern": self.pattern,
-            "watch_used_bytes": used_bytes,
-            "watch_free_bytes": free_bytes,
         }

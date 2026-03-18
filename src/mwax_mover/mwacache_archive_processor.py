@@ -208,7 +208,7 @@ class MWACacheArchiveProcessor:
     def get_status(self) -> dict:
         """Returns status of all process as a dictionary"""
         main_status = {
-            "Unix timestamp": time.time(),
+            "unix_timestamp": time.time(),
             "process": type(self).__name__,
             "version": version.get_mwax_mover_version_string(),
             "host": self.hostname,
@@ -436,8 +436,7 @@ class MWACacheArchiveProcessor:
             " the MWA correlator for the MWA. It will monitor various"
             " directories on each mwacache server and, upon detecting a file,"
             " send it to Pawsey's LTS. It will then remove the file from the"
-            " local disk. (mwax_mover"
-            f" v{version.get_mwax_mover_version_string()})\n"
+            " local disk."
         )
 
         parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
@@ -458,8 +457,8 @@ def main():
         processor.initialise_from_command_line()
         processor.start()
         sys.exit(0)
-    except Exception as catch_all_exception:  # pylint: disable=broad-except
-        logger.exception(str(catch_all_exception))
+    except Exception:
+        logger.exception("Exited with error")
 
 
 if __name__ == "__main__":
