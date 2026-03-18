@@ -60,7 +60,7 @@ def test_mwacache_archiver_config_file():
     assert mcap.mro_metadatadb_user == "dummy"
     assert mcap.mro_metadatadb_pass == "dummy"
 
-    assert len(mcap.watch_dirs) == 1
+    assert len(mcap.watch_dirs) == 3
     assert mcap.watch_dirs[0] == "/mnt/c/data/mwax_mover_testing/test009/volume1/incoming"
 
     # test list of projects
@@ -73,7 +73,7 @@ def test_mwacache_archiver_metafits_file():
     TEST_METAFITS = "tests/data/1122979144/1122979144_metafits.fits"
 
     # Setup all the paths
-    base_dir = setup_test_directories(__file__)
+    base_dir = setup_test_directories("test009")
 
     # Start mwax_subfile_distributor using our test config
     mcap = MWACacheArchiveProcessor()

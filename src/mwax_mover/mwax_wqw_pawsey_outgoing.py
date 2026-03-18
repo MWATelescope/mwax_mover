@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
     def __init__(
         self,
+        name: str,
         metafits_path: str,
         watch_paths_and_exts: list[tuple[str, str]],
         list_of_corr_hi_priority_projects: list[str],
@@ -23,6 +24,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
         s3_ceph_endpoints: list[str],
         archive_to_location: ArchiveLocation,
     ):
+        self.name = name
         super().__init__(
             "PawseyOutgoingProcessor",
             metafits_path,

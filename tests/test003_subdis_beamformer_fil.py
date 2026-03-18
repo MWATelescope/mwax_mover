@@ -29,7 +29,7 @@ def test_beamformer_archiver_fil():
     # This test will test how the mwax_archive_processor handles new fil files
     #
     # Setup dirs
-    setup_test_directories(__file__)
+    setup_test_directories("test003")
 
     # Create a subfile distributor
     sd = MWAXSubfileDistributor()

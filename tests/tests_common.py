@@ -7,14 +7,14 @@ from mwax_mover.mwax_db import MWAXDBHandler
 from mwax_mover.utils import write_mock_subfile
 
 
-def setup_test_directories(test_filename: str) -> str:
+def setup_test_directories(test_code: str) -> str:
     """
     Ensure all configured directories exist. If a directory already exists,
     clear its contents (files/subdirectories) but keep the directory itself.
     """
     # The directories we create will be based on the test file name
     # e.g. /data/mwax_mover_testing/test001
-    base = f"/mnt/c/data/mwax_mover_testing/{os.path.splitext(os.path.basename(test_filename))[0]}/"
+    base = f"/mnt/c/data/mwax_mover_testing/{test_code}/"
 
     paths = [
         "/tmp",
@@ -33,6 +33,10 @@ def setup_test_directories(test_filename: str) -> str:
         "/visdata/cal_outgoing",
         "/volume1/incoming",
         "/volume1/outgoing",
+        "/volume2/incoming",
+        "/volume2/outgoing",
+        "/volume3/incoming",
+        "/volume3/outgoing",
         "/vulcan/packet_stats_dump",
         "/vulcan/packet_stats_destination",
         "/vulcan/mwax_stats_dump",

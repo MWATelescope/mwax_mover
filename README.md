@@ -266,24 +266,44 @@ options:
   },
   "workers": [
     {
-      "name": "PawseyOutgoingProcessor",
+      "name": "PawseyOutgoingProcessor1",
       "watchers": [
         {
-          "name": "PawseyOutgoingProcessor_volume1_incoming",
+          "name": "PawseyOutgoingProcessor1_volume1_incoming",
           "watch_path": "/volume1/incoming"
-        },
+        }
+      ],
+      "queue_worker": {
+        "name": "PawseyOutgoingProcessor_worker",
+        "current_item": "/volume1/incoming/1234567890_20260317090000_109_000.fits",
+        "queue_size": 11
+      }
+    },
+    {
+      "name": "PawseyOutgoingProcessor2",
+      "watchers": [        
         {
-          "name": "PawseyOutgoingProcessor_volume2_incoming",
+          "name": "PawseyOutgoingProcessor2_volume2_incoming",
           "watch_path": "/volume2/incoming"
-        },
+        },        
+      ],
+      "queue_worker": {
+        "name": "PawseyOutgoingProcessor2_worker",
+        "current_item": "/volume2/incoming/1234567890_20260317090000_111_000.fits",
+        "queue_size": 9
+      }
+    },
+    {
+      "name": "PawseyOutgoingProcessor3",
+      "watchers": [        
         {
-          "name": "PawseyOutgoingProcessor_volume3_incoming",
+          "name": "PawseyOutgoingProcessor3_volume3_incoming",
           "watch_path": "/volume3/incoming"
         },
       ],
       "queue_worker": {
-        "name": "PawseyOutgoingProcessor_worker",
-        "current_item": "/volume1/incoming/1234567890_20260317090000_123_000.fits",
+        "name": "PawseyOutgoingProcessor3_worker",
+        "current_item": "/volume3/incoming/1234567890_20260317090000_120_000.fits",
         "queue_size": 10
       }
     }

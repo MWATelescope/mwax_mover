@@ -30,7 +30,7 @@ def test_beamformer_archiver_vdif():
     #
 
     # Setup dirs
-    setup_test_directories(__file__)
+    setup_test_directories("test002")
 
     # Create a subfile distributor
     sd = MWAXSubfileDistributor()

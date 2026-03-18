@@ -23,7 +23,7 @@ def test_beamformer_subfile():
     #
 
     # Setup dirs
-    base_dir = setup_test_directories(__file__)
+    base_dir = setup_test_directories("test001")
 
     # Create a subfile distributor
     sd = MWAXSubfileDistributor()

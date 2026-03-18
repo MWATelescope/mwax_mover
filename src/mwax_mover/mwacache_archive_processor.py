@@ -407,18 +407,20 @@ class MWACacheArchiveProcessor:
         paths_and_exts = [(s, ".*") for s in self.watch_dirs]
 
         # Create watch queue worker
-        worker = PawseyOutgoingProcessor(
-            self.metafits_path,
-            paths_and_exts,
-            self.high_priority_correlator_projectids,
-            self.high_priority_vcs_projectids,
-            self.mro_db_handler_object,
-            self.remote_db_handler_object,
-            self.s3_profile,
-            self.s3_ceph_endpoints,
-            self.archive_to_location,
-        )
-        self.workers.append(worker)
+        for i, p_and_e in enumerate(paths_and_exts):
+            worker = PawseyOutgoingProcessor(
+                f"PawseyOutgoingProcessor{i}",
+                self.metafits_path,
+                [p_and_e],
+                self.high_priority_correlator_projectids,
+                self.high_priority_vcs_projectids,
+                self.mro_db_handler_object,
+                self.remote_db_handler_object,
+                self.s3_profile,
+                self.s3_ceph_endpoints,
+                self.archive_to_location,
+            )
+            self.workers.append(worker)
 
         # Make sure we can Ctrl-C / kill out of this
         logger.info("Initialising signal handlers")
