@@ -68,7 +68,7 @@ class VisStatsProcessor(MWAXWatchQueueWorker):
         # move the file into visdata_outgoing so it can be archived.
 
         # Is this host doing archiving?
-        if self.archiving_enabled == 1:
+        if self.archiving_enabled:
             # Validate and get info about the obs
             obs_info: ValidationData = utils.validate_filename(item, self.metafits_path)
 

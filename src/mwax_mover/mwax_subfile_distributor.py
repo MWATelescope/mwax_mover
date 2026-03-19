@@ -785,11 +785,23 @@ class MWAXSubfileDistributor:
             else:
                 logger.info("Resuming archiving")
 
-            for worker in self.workers:
-                if worker:
-                    worker.pause(paused)
-
             self.archiving_paused = paused
+
+            # Only pause/resume specific workers
+            if self.checksum_and_db_processor:
+                self.checksum_and_db_processor.pause(paused)
+
+            if self.vis_stats_processor:
+                self.vis_stats_processor.pause(paused)
+
+            if self.bf_stitching_processor:
+                self.bf_stitching_processor.pause(paused)
+
+            if self.vis_cal_outgoing_processor:
+                self.vis_cal_outgoing_processor.pause(paused)
+
+            if self.outgoing_processor:
+                self.outgoing_processor.pause(paused)
 
     def endpoint_shutdown(self):
         self.stop()

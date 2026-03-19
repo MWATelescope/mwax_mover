@@ -1,5 +1,12 @@
 # Changelog
 
+# 1.5.7 19-Feb-2026
+
+* Subfile_distributor: Fixed bug where pausing archiving at the start of a VCS obs breaks things
+* Queueworkers: Added a small sleep in the while loop if paused
+* VisStatsProcessor: Fixed archiving==1 vs archiving == True
+* VDIF: Fixed retrieval of target_name from VOLTAGEBEAMS HDU in metafits
+
 # 1.5.6 19-Feb-2026
 
 * PriorityQueueWorker: fix inconsistent statuses.

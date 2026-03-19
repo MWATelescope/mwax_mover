@@ -84,10 +84,13 @@ class VDIFHeader:
             VOLTAGE_BEAMS_HDU = "VOLTAGEBEAMS"
             try:
                 voltagebeams_hdu = hdul[VOLTAGE_BEAMS_HDU]
-                target_name = voltagebeams_hdu.header["target_name"]  # type: ignore[reportAttributeAccessIssue]
+                target_name = voltagebeams_hdu.data["target_name"][beam_no].strip()  # type: ignore[reportAttributeAccessIssue]
 
+                # Did we get a value?s
                 if target_name is not None:
-                    self.source = target_name
+                    # Check for empty string
+                    if target_name != "":
+                        self.source = target_name
 
             except KeyError:
                 logger.warning(f"Unable to read {VOLTAGE_BEAMS_HDU} values")

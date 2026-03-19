@@ -75,7 +75,10 @@ class PriorityQueueWorker(object):
         backoff = 0
 
         while self._running:
-            if not self._paused:
+            if self._paused:
+                # if paused, put in a sleep to slow the wheel spinning
+                time.sleep(0.1)
+            else:
                 try:
                     success = False
 
