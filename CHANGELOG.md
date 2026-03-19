@@ -1,5 +1,10 @@
 # Changelog
 
+# 1.5.6 19-Feb-2026
+
+* PriorityQueueWorker: fix inconsistent statuses.
+* All: fix clean shutdown of psycopg pool.
+
 # 1.5.5 18-Feb-2026
 
 * BfStitchingProcessor: Fix bug where bf_stitching watcher picks up files other than .fil and .vdif

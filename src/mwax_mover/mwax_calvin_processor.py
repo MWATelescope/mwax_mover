@@ -752,7 +752,8 @@ class MWAXCalvinProcessor:
     def stop(self):
         """Shutdown all processes"""
         # Close all database connections
-        self.db_handler_object.stop_database_pool()
+        if self.db_handler_object:
+            self.db_handler_object.close()
         self.running = False
         sys.exit(0)
 

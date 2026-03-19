@@ -37,7 +37,7 @@ class MWAXDBHandler:
         self.db_name = db_name
         self.user = user
         self.password = password
-
+        self.pool: ConnectionPool
         if self.host != "dummy":
             self.pool = ConnectionPool(
                 min_size=1,
@@ -46,6 +46,19 @@ class MWAXDBHandler:
                 check=ConnectionPool.check_connection,
                 conninfo=f"postgresql://{user}:{password}@{host}:{port}/{db_name}",
             )
+
+    def close(self):
+        # This set of 3 ifs covers all cases where the pool may not be instantiated or open
+        if getattr(self, "pool", None) is None:
+            return
+        if self.pool is None:
+            return
+        if self.pool.closed:
+            return
+        self.pool.close()
+
+    def __del__(self):
+        self.close()
 
     def start_database_pool(self):
         # Check we are not already started

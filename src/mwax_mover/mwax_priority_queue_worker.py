@@ -196,6 +196,6 @@ class PriorityQueueWorker(object):
 
         return {
             "name": self.name,
-            "current item": current,
+            "current_item": current,
             "queue_size": self.source_queue.qsize(),
         }

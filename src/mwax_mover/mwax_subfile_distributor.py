@@ -1061,6 +1061,10 @@ class MWAXSubfileDistributor:
             if w.is_running():
                 w.stop()
 
+        # Close database connections
+        if self.db_handler:
+            self.db_handler.close()
+
     def start_flask_web_server(self):
         # Create and start web server
         if utils.running_under_pytest():

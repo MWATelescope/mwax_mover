@@ -360,7 +360,8 @@ class MWAXCalvinController:
         self.running = False
 
         # Close all database connections
-        self.db_handler_object.stop_database_pool()
+        if self.db_handler_object:
+            self.db_handler_object.close()
 
         self.ready_to_exit = True
 

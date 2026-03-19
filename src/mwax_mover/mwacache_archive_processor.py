@@ -181,6 +181,13 @@ class MWACacheArchiveProcessor:
             if w.is_running():
                 w.stop()
 
+        # Close database connections
+        if self.mro_db_handler_object:
+            self.mro_db_handler_object.close()
+
+        if self.remote_db_handler_object:
+            self.remote_db_handler_object.close()
+
     def health_handler(self):
         """Send multicast health data"""
         while self.running:
