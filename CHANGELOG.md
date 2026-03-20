@@ -1,5 +1,10 @@
 # Changelog
 
+# 1.5.9 20-Feb-2026
+
+* calvin_processor: Fixed bug which caused the aocal splitting to fail.
+* mwacache_archiver: Fixed naming of outgoing workers so you can tell them apart in logs.
+
 # 1.5.8 20-Feb-2026
 
 * More unit tests

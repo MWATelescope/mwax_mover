@@ -700,6 +700,7 @@ class MWAXCalvinProcessor:
                             self.obs_id,
                             aocal_file,
                             [c.rec_chan_number for c in self.metafits_context.metafits_coarse_chans],
+                            self.job_output_path,
                         )
 
                     for f in out_aocal_files:

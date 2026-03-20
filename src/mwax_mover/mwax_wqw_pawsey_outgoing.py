@@ -24,9 +24,8 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
         s3_ceph_endpoints: list[str],
         archive_to_location: ArchiveLocation,
     ):
-        self.name = name
         super().__init__(
-            "PawseyOutgoingProcessor",
+            name,
             metafits_path,
             watch_paths_and_exts,
             mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
