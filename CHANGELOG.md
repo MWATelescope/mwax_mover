@@ -5,6 +5,7 @@
 * More unit tests
 * calvin/subfile_distributor: renamed aocal_export_dir to cal_export_dir as it is now for aocal and FITS solutions
 * calvin: Now copying in FITS solution files to cal_export dir
+* subfile_dist: Added new key / value for solution files to be passed to redis queue
 * mwax_calvin_utils: Fixing linter errors
 
 # 1.5.7 19-Feb-2026

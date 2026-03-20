@@ -1,4 +1,4 @@
-from mwax_mover.mwax_calvin_utils import get_partial_aocal_filename
+from mwax_mover.mwax_calvin_utils import get_partial_aocal_filename, get_solution_fits_filename
 from mwax_mover.mwax_watch_queue_worker import MWAXWatchQueueWorker
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
 from mwax_mover import utils
@@ -25,7 +25,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         freefile_ext: str,
         keepfile_ext: str,
         voltdata_incoming_path: str,
-        bf_aocal_path: str,
+        bf_cal_path: str,
         bf_redis_host: str,
         bf_redis_queue_key: str,
         packet_stats_dump_dir: str,
@@ -59,7 +59,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         self.packet_stats_dump_dir = packet_stats_dump_dir
         self.mwax_stats_binary_dir = mwax_stats_binary_dir
 
-        self.bf_aocal_path = bf_aocal_path
+        self.bf_cal_path = bf_cal_path
         self.bf_redis_host = bf_redis_host
         self.bf_redis_queue_key = bf_redis_queue_key
 
@@ -392,12 +392,12 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         return success
 
     def signal_beamformer(self, item: str, cal_obs_id: int, rec_chan_no: int) -> bool:
-        # Send obs_subobs info to beamformer via named pipe
+        # Send obs_subobs info to beamformer via redis message
 
         # We don't know the exact aocal filename as we dont have num_fine_chans
         # so we'll use a wildcard
         aocal_filename = ""
-        partial_aocal_filename = os.path.join(self.bf_aocal_path, get_partial_aocal_filename(cal_obs_id, rec_chan_no))
+        partial_aocal_filename = os.path.join(self.bf_cal_path, get_partial_aocal_filename(cal_obs_id, rec_chan_no))
         try:
             found_files = glob.glob(partial_aocal_filename)
             if not found_files:
@@ -408,7 +408,14 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         except Exception as e:
             logger.error(f"{item}- Error searching for aocal file with pattern {partial_aocal_filename}. Error: {e}")
 
-        signal_value = {"subfile": item, "aocalfile": aocal_filename}
+        # Get the fits solution file too
+        sol_fits_filename = get_solution_fits_filename(self.bf_cal_path, cal_obs_id, rec_chan_no)
+
+        if not sol_fits_filename:
+            sol_fits_filename = ""
+
+        # Now signal with what we got
+        signal_value = {"subfile": item, "aocalfile": aocal_filename, "calsolfile": sol_fits_filename}
         logger.info(f"{item}- Signalling beamformer with ({signal_value}) via redis {self.bf_redis_host}...")
         try:
             # Write the signal value- if reader disconnects it will auto-reopen unless timeout is hit
