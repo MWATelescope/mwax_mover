@@ -213,6 +213,49 @@ class MWAXDBHandler:
             logger.exception("execute_dml(): postgres Exception")
             raise
 
+    def execute_dml_row_within_transaction(self, sql, parm_list, transaction_cursor: psycopg.Cursor):
+        """This executes an INSERT, UPDATE or DELETE that should only affect
+        one row.
+
+        NOTES: it is up to the caller to supply a cursor which all of the operations
+        within the transaction share. Also it is up to the caller to call:
+        1. conn = self.pool.getconn() # get a connection
+        2. curs = conn.cursor()
+        3. Call this method (possibly multiple times), passing in "curs"
+        4. conn.rollback() # On exception or failure
+        5. conn.commit() # On success
+        6. self.pool.putconn(conn)
+
+        We don't retry on FK or UK exceptions because, well, retrying won't fix anything!
+        """
+
+        # Assuming we have a connection, try to do the database operation
+        # using our cursor
+        try:
+            # Run the sql
+            transaction_cursor.execute(sql, parm_list)
+
+            # Check how many rows we affected
+            rows_affected = transaction_cursor.rowcount
+
+            if rows_affected != 1:
+                # An exception in here will trigger a rollback
+                # which is good
+                logger.error(
+                    "execute_dml_row_within_transaction(): Error- query"
+                    f" affected {rows_affected} rows, expected 1."
+                    f" SQL={sql}"
+                )
+                raise Exception(
+                    "execute_dml_row_within_transaction(): Error- query"
+                    f" affected {rows_affected} rows, expected 1."
+                    f" SQL={sql}"
+                )
+
+        except Exception:
+            logger.exception("execute_single_dml_row_within_transaction(): postgres Exception")
+            raise
+
 
 #
 # High level functions to do what we want specifically
@@ -472,8 +515,8 @@ def insert_calibration_fits_row(
 
 
 def insert_calibration_solutions_row(
-    db_handler_object,
-    transaction_cursor: Optional[psycopg.Cursor],
+    db_handler_object: MWAXDBHandler,
+    transaction_cursor: psycopg.Cursor,
     fit_id: int,
     obs_id: int,
     tile_id: int,

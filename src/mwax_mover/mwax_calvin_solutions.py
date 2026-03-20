@@ -136,7 +136,6 @@ def process_solutions(
         success = True
 
         # get a database connection, unless we are using dummy connection (for testing)
-        transaction_cursor = None
         with db_handler_object.pool.connection() as conn:
             # Start a transaction
             with conn.transaction():

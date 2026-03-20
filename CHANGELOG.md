@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.5.10 20-Feb-2026
+
+* calvin_processor: Fixed AttributeError: 'MWAXDBHandler' object has no attribute 'execute_dml_row_within_transaction'
+
 # 1.5.9 20-Feb-2026
 
 * calvin_processor: Fixed bug which caused the aocal splitting to fail.
