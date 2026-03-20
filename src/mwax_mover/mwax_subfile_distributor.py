@@ -454,14 +454,14 @@ class MWAXSubfileDistributor:
             "bf_redis_queue_key",
         )
 
-        self.cfg_bf_aocal_path = utils.read_config(
+        self.cfg_bf_cal_path = utils.read_config(
             self.config,
             "beamformer",
-            "bf_aocal_path",
+            "bf_cal_path",
         )
 
-        if not os.path.exists(self.cfg_bf_aocal_path):
-            logger.error(f"bf_aocal_path location {self.cfg_bf_aocal_path} does not exist. Quitting.")
+        if not os.path.exists(self.cfg_bf_cal_path):
+            logger.error(f"bf_cal_path location {self.cfg_bf_cal_path} does not exist. Quitting.")
             sys.exit(1)
 
         self.cfg_bf_incoming_path = utils.read_config(
@@ -558,7 +558,7 @@ class MWAXSubfileDistributor:
             ".free",
             ".keep",
             self.cfg_voltdata_incoming_path,
-            self.cfg_bf_aocal_path,
+            self.cfg_bf_cal_path,
             self.cfg_bf_redis_host,
             bf_redis_queue_key,
             self.cfg_packet_stats_dump_dir,

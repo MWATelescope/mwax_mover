@@ -16,26 +16,30 @@ from mwax_mover.mwax_calvin_utils import (
     AOCAL_POLS,
     AOCAL_STRUCTURE_TYPE,
     AOCAL_VALUES,
+    get_solution_fits_filename,
 )
 import numpy as np
+from tests_common import setup_test_directories
 
 
-def test_estimate_birli_output_GB():
-    test_metafits = "tests/data/correlator_C001/1244973688_metafits.fits"
+def test_estimate_birli_output_bytes():
+    test_metafits = "tests/data/1244973688/1244973688_metafits.fits"
 
     metafits_context = mwalib.MetafitsContext(test_metafits, None)
 
     calc_bytes: float = mwax_mover.mwax_calvin_utils.estimate_birli_output_bytes(metafits_context, 40, 2.0)
 
     # Manually calculate the gigabytes
-    # manual = baselines * coarse_channels * fine_channels * pols * values * bytes_per_value * timesteps
-    manual_bytes: float = 8256 * 24 * 32 * 4 * 2 * 4 * 60
+    # manual = timesteps * baselines * coarse_channels * fine_channels * pols * bytes_per_r_i (from Birli)
+    manual_bytes: float = 60 * 8256 * 24 * 32 * 4 * 13
 
     assert calc_bytes == manual_bytes
 
 
 def test_split_aocal_file_into_coarse_channels_24_per_file():
-    in_filename = "tests/data/aocal_split/1451758560_solutions.bin"
+    in_filename = "tests/data/1451758560/1451758560_solutions.bin"
+    base_dir = setup_test_directories("test0014")
+    out_dir = os.path.join(base_dir, "data/calvin/out_jobs")
 
     chans = [
         109,
@@ -65,41 +69,42 @@ def test_split_aocal_file_into_coarse_channels_24_per_file():
     ]
 
     out_files = mwax_mover.mwax_calvin_utils.split_aocal_file_into_coarse_channels(
-        1451758560,
-        in_filename,
-        chans,
+        1451758560, in_filename, chans, out_dir
     )
 
     for c_idx, c in enumerate(chans):
-        assert out_files[c_idx] == f"tests/data/aocal_split/1451758560_ch{chans[c_idx]}_aocal.bin"
+        assert out_files[c_idx] == os.path.join(out_dir, f"1451758560_256_0032_{chans[c_idx]}_calfile.bin")
 
 
 def test_split_aocal_file_into_coarse_channels_1_per_file():
+    base_dir = setup_test_directories("test0014")
+    out_dir = os.path.join(base_dir, "data/calvin/out_jobs")
+
     in_filenames = [
-        "tests/data/aocal_split/1450212840_ch101_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch107_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch113_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch120_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch127_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch134_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch142_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch150_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch158_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch167_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch177_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch187_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch210_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch226_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch58_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch61_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch65_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch69_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch73_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch77_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch81_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch86_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch91_solutions.bin",
-        "tests/data/aocal_split/1450212840_ch96_solutions.bin",
+        "tests/data/1450212840/1450212840_ch101_solutions.bin",
+        "tests/data/1450212840/1450212840_ch107_solutions.bin",
+        "tests/data/1450212840/1450212840_ch113_solutions.bin",
+        "tests/data/1450212840/1450212840_ch120_solutions.bin",
+        "tests/data/1450212840/1450212840_ch127_solutions.bin",
+        "tests/data/1450212840/1450212840_ch134_solutions.bin",
+        "tests/data/1450212840/1450212840_ch142_solutions.bin",
+        "tests/data/1450212840/1450212840_ch150_solutions.bin",
+        "tests/data/1450212840/1450212840_ch158_solutions.bin",
+        "tests/data/1450212840/1450212840_ch167_solutions.bin",
+        "tests/data/1450212840/1450212840_ch177_solutions.bin",
+        "tests/data/1450212840/1450212840_ch187_solutions.bin",
+        "tests/data/1450212840/1450212840_ch210_solutions.bin",
+        "tests/data/1450212840/1450212840_ch226_solutions.bin",
+        "tests/data/1450212840/1450212840_ch58_solutions.bin",
+        "tests/data/1450212840/1450212840_ch61_solutions.bin",
+        "tests/data/1450212840/1450212840_ch65_solutions.bin",
+        "tests/data/1450212840/1450212840_ch69_solutions.bin",
+        "tests/data/1450212840/1450212840_ch73_solutions.bin",
+        "tests/data/1450212840/1450212840_ch77_solutions.bin",
+        "tests/data/1450212840/1450212840_ch81_solutions.bin",
+        "tests/data/1450212840/1450212840_ch86_solutions.bin",
+        "tests/data/1450212840/1450212840_ch91_solutions.bin",
+        "tests/data/1450212840/1450212840_ch96_solutions.bin",
     ]
 
     chans = [
@@ -138,16 +143,19 @@ def test_split_aocal_file_into_coarse_channels_1_per_file():
             [
                 chans[f_idx],
             ],
+            out_dir,
         )
 
         for of in out_files:
             all_files.append(of)
 
     for c_idx, c in enumerate(chans):
-        assert f"tests/data/aocal_split/1450212840_ch{chans[c_idx]}_aocal.bin" in all_files[c_idx]
+        assert os.path.join(out_dir, f"1450212840_256_0032_{chans[c_idx]:03}_calfile.bin") in all_files[c_idx]
 
 
 def test_split_aocal_file_into_coarse_channels_data():
+    base_dir = setup_test_directories("test0014")
+
     # In this test we ensure that actual data is good
     obs_id = 1234567890
     num_ants = 2
@@ -181,7 +189,10 @@ def test_split_aocal_file_into_coarse_channels_data():
     num_coarse_chans = len(coarse_chans)
     start_time = 0
     end_time = 0
-    test_filename = os.path.join("tests/data/aocal_split", f"{obs_id}_aocal.bin")
+
+    out_dir = os.path.join(base_dir, "data/calvin/out_jobs")
+
+    test_filename = os.path.join(out_dir, f"{obs_id}_aocal.bin")
 
     # Create a test aocal file containing 24 channels worth of data
     with open(test_filename, "wb") as out_file:
@@ -219,13 +230,11 @@ def test_split_aocal_file_into_coarse_channels_data():
 
     # Ok, so we've produced our 24 channel test file. Lets split it and check we get the right numbers!
     out_files = mwax_mover.mwax_calvin_utils.split_aocal_file_into_coarse_channels(
-        obs_id,
-        test_filename,
-        coarse_chans,
+        obs_id, test_filename, coarse_chans, out_dir
     )
 
     assert out_files[0] == os.path.join(
-        "tests/data/aocal_split/",
+        out_dir,
         mwax_mover.mwax_calvin_utils.get_aocal_filename(obs_id, num_ants, num_fine_chans, coarse_chans[0]),
     )
 
@@ -358,3 +367,125 @@ def test_get_aocal_filename():
         mwax_mover.mwax_calvin_utils.get_aocal_filename(1234567890, 64, 6400, 123)
         == "1234567890_064_6400_123_calfile.bin"
     )
+
+
+def test_get_solution_fits_filename_flavour1_all_channels(tmp_path):
+    """Flavour 1: obsid_solutions.fits matches any rec_chan"""
+    fits = tmp_path / "1234567890_solutions.fits"
+    fits.touch()
+
+    for chan in [1, 12, 24]:
+        result = get_solution_fits_filename(str(tmp_path), 1234567890, chan)
+        assert result == str(fits)
+
+
+def test_get_solution_fits_filename_flavour2_single_channel(tmp_path):
+    """Flavour 2: obsid_chN_solutions.fits matches exact channel"""
+    fits = tmp_path / "1234567890_ch5_solutions.fits"
+    fits.touch()
+
+    result = get_solution_fits_filename(str(tmp_path), 1234567890, 5)
+    assert result == str(fits)
+
+
+def test_get_solution_fits_filename_flavour2_single_channel_no_match(tmp_path):
+    """Flavour 2: obsid_chN_solutions.fits does not match a different channel"""
+    fits = tmp_path / "1234567890_ch5_solutions.fits"
+    fits.touch()
+
+    result = get_solution_fits_filename(str(tmp_path), 1234567890, 6)
+    assert result is None
+
+
+def test_get_solution_fits_filename_flavour2_no_zero_padding(tmp_path):
+    """Flavour 2: channel numbers are not zero-padded"""
+    fits = tmp_path / "1234567890_ch007_solutions.fits"
+    fits.touch()
+
+    # ch007 should NOT match rec_chan=7 (not zero-padded)
+    result = get_solution_fits_filename(str(tmp_path), 1234567890, 7)
+    assert result is None
+
+
+def test_get_solution_fits_filename_flavour3_range_channel_within(tmp_path):
+    """Flavour 3: rec_chan within range [N, M] matches"""
+    fits = tmp_path / "1234567890_ch1-12_solutions.fits"
+    fits.touch()
+
+    for chan in [1, 6, 12]:
+        result = get_solution_fits_filename(str(tmp_path), 1234567890, chan)
+        assert result == str(fits)
+
+
+def test_get_solution_fits_filename_flavour3_range_channel_outside(tmp_path):
+    """Flavour 3: rec_chan outside range [N, M] does not match"""
+    fits = tmp_path / "1234567890_ch1-12_solutions.fits"
+    fits.touch()
+
+    for chan in [0, 13, 24]:
+        result = get_solution_fits_filename(str(tmp_path), 1234567890, chan)
+        assert result is None
+
+
+def test_get_solution_fits_filename_flavour3_range_boundary_values(tmp_path):
+    """Flavour 3: rec_chan at exact boundaries matches"""
+    fits = tmp_path / "1234567890_ch5-10_solutions.fits"
+    fits.touch()
+
+    assert get_solution_fits_filename(str(tmp_path), 1234567890, 5) == str(fits)
+    assert get_solution_fits_filename(str(tmp_path), 1234567890, 10) == str(fits)
+    assert get_solution_fits_filename(str(tmp_path), 1234567890, 4) is None
+    assert get_solution_fits_filename(str(tmp_path), 1234567890, 11) is None
+
+
+def test_get_solution_fits_filename_flavour3_multi_digit_channels(tmp_path):
+    """Flavour 3: multi-digit channel numbers (e.g. ch13-24) work correctly"""
+    fits = tmp_path / "1234567890_ch13-24_solutions.fits"
+    fits.touch()
+
+    assert get_solution_fits_filename(str(tmp_path), 1234567890, 13) == str(fits)
+    assert get_solution_fits_filename(str(tmp_path), 1234567890, 24) == str(fits)
+    assert get_solution_fits_filename(str(tmp_path), 1234567890, 12) is None
+
+
+def test_get_solution_fits_filename_flavour1_takes_priority_over_flavour2(tmp_path):
+    """Flavour 1 is returned first if both flavour 1 and 2 exist"""
+    f1 = tmp_path / "1234567890_solutions.fits"
+    f1.touch()
+    f2 = tmp_path / "1234567890_ch5_solutions.fits"
+    f2.touch()
+
+    result = get_solution_fits_filename(str(tmp_path), 1234567890, 5)
+    assert result == str(f1)
+
+
+def test_get_solution_fits_filename_flavour1_takes_priority_over_flavour3(tmp_path):
+    """Flavour 1 is returned first if both flavour 1 and 3 exist"""
+    f1 = tmp_path / "1234567890_solutions.fits"
+    f1.touch()
+    f3 = tmp_path / "1234567890_ch1-12_solutions.fits"
+    f3.touch()
+
+    result = get_solution_fits_filename(str(tmp_path), 1234567890, 6)
+    assert result == str(f1)
+
+
+def test_get_solution_fits_filename_no_files_returns_none(tmp_path):
+    """Empty directory returns None"""
+    result = get_solution_fits_filename(str(tmp_path), 1234567890, 5)
+    assert result is None
+
+
+def test_get_solution_fits_filename_wrong_obsid_ignored(tmp_path):
+    """Files for a different obs_id are not matched"""
+    fits = tmp_path / "9999999999_solutions.fits"
+    fits.touch()
+
+    result = get_solution_fits_filename(str(tmp_path), 1234567890, 1)
+    assert result is None
+
+
+def test_get_solution_fits_filename_directory_does_not_exist():
+    """Non-existent directory returns None without raising"""
+    result = get_solution_fits_filename("/nonexistent/path", 1234567890, 5)
+    assert result is None

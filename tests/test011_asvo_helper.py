@@ -9,6 +9,8 @@ from mwax_mover.mwax_asvo_helper import (
     MWAASVOHelper,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def test_get_jobid_from_giant_squid_stdout():
     with pytest.raises(Exception) as excinfo:
@@ -115,15 +117,13 @@ def test_get_status_from_giant_squid_stdout_invalid():
 
 def test_mwax_asvo_helper():
     asvo: MWAASVOHelper = MWAASVOHelper()
-    logger = logging.getLogger(__name__)
 
     asvo.initialise(
-        logger,
         "../giant-squid/target/release/giant-squid",
         10,
         10,
     )
-    asvo.submit_download_job(0, 1354865168)
+    asvo.submit_download_job(0, 1115977528)
 
     asvo.update_all_job_status()
 
@@ -132,7 +132,7 @@ def test_mwax_asvo_helper():
     time.sleep(5)
 
     for job in asvo.current_asvo_jobs:
-        if job.obs_id == 1354865168:
+        if job.obs_id == 1115977528:
             job_found = True
 
-    assert job_found == True
+    assert job_found

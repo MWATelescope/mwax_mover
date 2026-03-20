@@ -4,17 +4,7 @@ env/
 build/
 dist/
 mwax_mover.egg-info/
-*.sub
 *.free
-tests/mock_mwacache_archiver
-tests/mock_mwax
-tests/mock_mwax_bf
-tests/mock_mwax_dump
-tests/data/solution_handler_*
-tests/data/1119683928/
-tests/data/1184928224/
-tests/data/aocal_split/1234567890*
-tests/data/aocal_split/1451758560_ch*
 logs
 .coverage
 .pylintrc
@@ -22,3 +12,5 @@ logs
 .vscode/
 .pytest_cache
 .venv
+tests/data/1119683928/
+tests/data/1184928224/

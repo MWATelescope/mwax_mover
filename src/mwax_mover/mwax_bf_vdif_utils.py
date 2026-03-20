@@ -65,8 +65,8 @@ class VDIFHeader:
             # Get the start RA and DEC
             try:
                 beamaltaz_hdu = hdul[BEAM_ALT_AZ_HDU]
-                s_ra = beamaltaz_hdu.header[f"B{beam_no:02d}_SRA"]  # type: ignore[reportAttributeAccessIssue]
-                s_dec = beamaltaz_hdu.header[f"B{beam_no:02d}_SDEC"]  # type: ignore[reportAttributeAccessIssue]
+                s_ra = beamaltaz_hdu.header[f"B{beam_no:02d}_SRA"]
+                s_dec = beamaltaz_hdu.header[f"B{beam_no:02d}_SDEC"]
 
                 if s_ra is not None:
                     self.ra = s_ra
@@ -84,7 +84,7 @@ class VDIFHeader:
             VOLTAGE_BEAMS_HDU = "VOLTAGEBEAMS"
             try:
                 voltagebeams_hdu = hdul[VOLTAGE_BEAMS_HDU]
-                target_name = voltagebeams_hdu.data["target_name"][beam_no].strip()  # type: ignore[reportAttributeAccessIssue]
+                target_name = voltagebeams_hdu.data["target_name"][beam_no].strip()
 
                 # Did we get a value?s
                 if target_name is not None:

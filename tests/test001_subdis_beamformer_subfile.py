@@ -38,7 +38,7 @@ def test_beamformer_subfile():
     )
 
     for c in TEST_AOCAL_FILES:
-        shutil.copyfile(c, os.path.join(sd.cfg_bf_aocal_path, os.path.basename(c)))
+        shutil.copyfile(c, os.path.join(sd.cfg_bf_cal_path, os.path.basename(c)))
 
     # start processor
     # Create and start a thread for the processor

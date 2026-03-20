@@ -2,6 +2,7 @@
 
 import datetime
 import glob
+import re
 import logging
 import os
 import shutil
@@ -11,7 +12,7 @@ import numpy as np
 from enum import Enum
 from astropy.io import fits
 from astropy import units as u
-from astropy.constants import c
+from astropy.constants import c  # type: ignore[attr-defined]
 from scipy.optimize import minimize
 import pandas as pd
 from pandas import DataFrame
@@ -106,7 +107,7 @@ class Metafits:
         """Get tile info from metafits, sorted by index"""
 
         with fits.open(self.filename) as hdus:
-            metafits_inputs = hdus["TILEDATA"].data  # type: ignore
+            metafits_inputs = hdus["TILEDATA"].data
 
         # using a set here to avoid duplicates (pol=X,Y)
         tiles = set(
@@ -129,7 +130,7 @@ class Metafits:
         """Get tile info from metafits, sorted by index"""
 
         with fits.open(self.filename) as hdus:
-            metafits_inputs = hdus["TILEDATA"].data  # type: ignore
+            metafits_inputs = hdus["TILEDATA"].data
 
         inputs = set(
             Input(
@@ -177,7 +178,7 @@ class Metafits:
         """
         with fits.open(self.filename) as hdus:
             hdu = hdus["PRIMARY"]
-            header: fits.header.Header = hdu.header  # type: ignore
+            header: fits.header.Header = hdu.header
 
             # coarse channels
             coarse_chans = parse_csv_header(header["CHANNELS"], int)
@@ -189,11 +190,11 @@ class Metafits:
             coarse_chans = np.sort(coarse_chans)
 
             # fine channel width
-            fine_chan_width_hz = int(float(header["FINECHAN"]) * 1000)  # type: ignore
+            fine_chan_width_hz = int(float(header["FINECHAN"]) * 1000)
             # total observation bandwidth
-            total_bandwidth_hz = int(float(header["BANDWDTH"]) * 1000000)  # type: ignore
+            total_bandwidth_hz = int(float(header["BANDWDTH"]) * 1000000)
             # number of fine channels in observation
-            obs_num_fine_chans = int(header["NCHANS"])  # type: ignore
+            obs_num_fine_chans = int(header["NCHANS"])
 
         # sanity checks
         if total_bandwidth_hz != fine_chan_width_hz * obs_num_fine_chans:
@@ -241,7 +242,7 @@ class Metafits:
     def calibrator(self):
         with fits.open(self.filename) as hdus:
             hdu = hdus["PRIMARY"]
-            header = hdu.header  # type: ignore
+            header = hdu.header
             if header.get("CALIBSRC"):
                 return header["CALIBSRC"]
 
@@ -249,7 +250,7 @@ class Metafits:
     def obsid(self):
         with fits.open(self.filename) as hdus:
             hdu = hdus["PRIMARY"]
-            header = hdu.header  # type: ignore
+            header = hdu.header
             if header.get("GPSTIME"):
                 return header["GPSTIME"]
 
@@ -291,7 +292,7 @@ class HyperfitsSolution:
     # def tile_names_flags(self) -> List[Tuple[str, bool]]:
     #     """Get the tile names and flags ordered by index"""
     #     with fits.open(self.filename) as hdus:
-    #         tile_data = hdus['TILES'].data  # type: ignore
+    #         tile_data = hdus['TILES'].data
     #     return [
     #         (tile["TileName"], tile["Flag"])
     #         for tile in tile_data
@@ -301,7 +302,7 @@ class HyperfitsSolution:
     def tile_flags(self) -> List[bool]:
         """Get the tile flags ordered by Antenna index"""
         with fits.open(self.filename) as hdus:
-            tile_data = hdus["TILES"].data  # type: ignore
+            tile_data = hdus["TILES"].data
         return tile_data["Flag"]
 
     def get_average_times(self) -> List[float]:
@@ -310,13 +311,13 @@ class HyperfitsSolution:
         Raises KeyError if TIMEBLOCKS not present
         """
         with fits.open(self.filename) as hdus:
-            time_data = hdus["TIMEBLOCKS"].data  # type: ignore
+            time_data = hdus["TIMEBLOCKS"].data
             return [time["Average"] for time in time_data]
 
     def get_solutions(self) -> List[NDArray[np.complex128]]:
         """Get solutions as a complex array for each pol: [time, tile, chan]"""
         with fits.open(self.filename) as hdus:
-            solutions = hdus["SOLUTIONS"].data  # type: ignore
+            solutions = hdus["SOLUTIONS"].data
         return [
             solutions[:, :, :, 0] + 1j * solutions[:, :, :, 1],
             solutions[:, :, :, 2] + 1j * solutions[:, :, :, 3],
@@ -330,13 +331,13 @@ class HyperfitsSolution:
         if ref_tile_idx is None:
             return solutions
         # divide solutions by reference
-        ref_solutions = [solution[:, ref_tile_idx, :] for solution in solutions]  # type: ignore
+        ref_solutions = [solution[:, ref_tile_idx, :] for solution in solutions]
         # divide solutions jones matrix by reference jones matrix, via inverse determinant
         ref_inv_det = np.divide(
             1 + 0j,
-            ref_solutions[0] * ref_solutions[3] - ref_solutions[1] * ref_solutions[2],  # type: ignore
+            ref_solutions[0] * ref_solutions[3] - ref_solutions[1] * ref_solutions[2],
         )
-        return [  # type: ignore
+        return [
             (solutions[0] * ref_solutions[3] - solutions[1] * ref_solutions[2]) * ref_inv_det,
             (solutions[1] * ref_solutions[0] - solutions[0] * ref_solutions[1]) * ref_inv_det,
             (solutions[2] * ref_solutions[3] - solutions[3] * ref_solutions[2]) * ref_inv_det,
@@ -347,7 +348,7 @@ class HyperfitsSolution:
     def results(self) -> NDArray[np.float64]:
         """Code adapted from Chris Jordan's scripts"""
         with fits.open(self.filename) as hdus:
-            return hdus["RESULTS"].data.flatten()  # type: ignore
+            return hdus["RESULTS"].data.flatten()
 
         # Not sure why I need flatten!
 
@@ -411,7 +412,7 @@ class HyperfitsSolutionGroup:
     @classmethod
     def get_soln_chan_info(
         cls, metafits_chan_info: ChanInfo, solns: List[HyperfitsSolution]
-    ) -> Tuple[int, List[NDArray[np.int_]]]:
+    ) -> Tuple[Optional[int], List[NDArray[np.int_]]]:
         """
         Get the chanblocks_per_coarse and chanblocks_hz array for provided solutions
 
@@ -432,7 +433,7 @@ class HyperfitsSolutionGroup:
             if len(chanblocks_hz) < 2:
                 raise RuntimeError(f"{soln.filename} - not enough chanblocks found ({chanblocks_hz=})")
 
-            chanblock_width_hz = chanblocks_hz[1] - chanblocks_hz[0]  # type: ignore
+            chanblock_width_hz = chanblocks_hz[1] - chanblocks_hz[0]
             if chanblock_width_hz % metafits_fine_chan_width_hz != 0:
                 raise RuntimeError(
                     f"{soln.filename} - chanblock width in solution file ({chanblock_width_hz})"
@@ -530,12 +531,12 @@ class HyperfitsSolutionGroup:
     @property
     def calibrator(self):
         calibrators = set(filter(None, [meta.calibrator for meta in self.metafits]))
-        return " ".join(calibrators)  # type: ignore
+        return " ".join(calibrators)
 
     @property
     def obsids(self):
         obsids = set(filter(None, [meta.obsid for meta in self.metafits]))
-        return [*obsids]  # type: ignore
+        return [*obsids]
 
     @property
     def results(self) -> NDArray[np.float64]:
@@ -742,7 +743,7 @@ def ensure_system_byte_order(arr):
     return arr
 
 
-def parse_csv_header(value: str, dtype: type) -> ArrayLike:
+def parse_csv_header(value: str, dtype: type) -> np.ndarray:
     """
     parse comma separated values (in metafits header)
     """
@@ -806,7 +807,7 @@ def fit_phase_line(
     # Now we want to "adjust" the solution data so that it
     #   - is roughly centered on the DC bin
     #   - has a large amount of zero padding on either side
-    ν = freqs_hz * u.Hz  # type: ignore
+    ν = freqs_hz * u.Hz
     bins = np.round((ν / dν).decompose().value).astype(int)
     ctr_bin = (np.min(bins) + np.max(bins)) // 2
     shifted_bins = bins - ctr_bin  # Now "bins" represents where I want to put the solution values
@@ -814,9 +815,9 @@ def fit_phase_line(
     # ...except that ~1/2 of them are negative, so I'll have to add a certain amount
     # once I decide how much zero padding to include.
     # This is set by the resolution I want in delay space (Nyquist rate)
-    # type: ignore
-    dm = 0.01 * u.m  # type: ignore
-    dt = dm / c  # type: ignore The target time resolution
+
+    dm = 0.01 * u.m
+    dt = dm / c  # The target time resolution
     νmax = 0.5 / dt  # The Nyquist rate
     N = 2 * int(np.round(νmax / dν))  # The number of bins to use during the FFTs
 
@@ -926,7 +927,7 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse) -> GainFitInf
     pol1 = np.full(n_coarse, np.nan)
     sigma_resid = np.full(n_coarse, np.nan)
 
-    residuals = np.full(n_freqs, np.nan)
+    _residuals = np.full(n_freqs, np.nan)
 
     # Initialise other variables
     quality: float = np.nan
@@ -1173,22 +1174,22 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fi
         for ax in axs.flatten():
             ax.axis("off")
         for _, fit in phase_fits_pivot.iterrows():
-            signal = soln[fit["soln_idx"]]  # type: ignore
+            signal = soln[fit["soln_idx"]]
             if fit["flag"] or np.isnan(signal).all():
                 continue
             mask = np.where(np.logical_and(np.isfinite(signal), weights2 > 0))[0]
-            angle = np.angle(signal)  # type: ignore
-            mask_freq: ArrayLike = freqs[mask]  # type: ignore
-            model_freqs = np.linspace(mask_freq.min(), mask_freq.max(), len(freqs))  # type: ignore
+            angle = np.angle(signal)
+            mask_freq: ArrayLike = freqs[mask]
+            model_freqs = np.linspace(mask_freq.min(), mask_freq.max(), len(freqs))
             rx_idx = np.where(rxs == fit["rx"])[0][0]
             slot_idx = np.where(slots == fit["slot"])[0][0]
-            ax = axs[rx_idx][slot_idx]  # type: ignore
+            ax = axs[rx_idx][slot_idx]
             ax.axis("on")
             gradient = (2 * np.pi * u.rad * (fit[f"length_{pol}"] * u.m) / c).to(u.rad / u.Hz).value
             intercept = fit[f"intercept_{pol}"]
             model = gradient * model_freqs + intercept
             ax.scatter(model_freqs, wrap_angle(model), c="red", s=0.5)
-            mask_weights: ArrayLike = weights2[mask]  # type: ignore
+            mask_weights: ArrayLike = weights2[mask]
             ax.scatter(mask_freq, wrap_angle(angle[mask]), c=mask_weights, cmap=cmap, s=2)
             outlier = fit[f"outlier_{pol}"]
             color = "red" if outlier else "black"
@@ -1277,7 +1278,7 @@ def plot_phase_residual(freqs, soln_xx, soln_yy, weights, prefix, title, plot_re
         soln_idxs: pd.Series, pols: pd.Series, flavs: pd.Series, lengths: pd.Series, intercepts: pd.Series, **kwargs
     ):
         gradients = (2 * np.pi * u.rad * (lengths.to_numpy() * u.m) / c).to(u.rad / u.Hz).value
-        intercepts = intercepts.to_numpy()
+        intercepts_arr = intercepts.to_numpy()
         pol = pols.iloc[0]
         flav = flavs.iloc[0]
         if pol == "XX":
@@ -1286,7 +1287,7 @@ def plot_phase_residual(freqs, soln_xx, soln_yy, weights, prefix, title, plot_re
             solns = soln_yy[soln_idxs.values]
         else:
             raise RuntimeError(f"wut pol? {pol}")
-        models = gradients[:, np.newaxis] * freqs[np.newaxis, :] + intercepts[:, np.newaxis]
+        models = gradients[:, np.newaxis] * freqs[np.newaxis, :] + intercepts_arr[:, np.newaxis]
         resids = wrap_angle(np.angle(solns) - models)
         medians = np.nanmedian(resids, axis=0)
         min_mse = np.inf
@@ -1953,8 +1954,14 @@ def submit_sbatch(script_path: str, script: str, obs_id: int) -> Tuple[bool, Opt
 
 
 def estimate_birli_output_bytes(
-    metafits_context: MetafitsContext, birli_freq_res_khz: int, birli_int_time_res_sec: float
+    metafits_context: MetafitsContext,
+    birli_freq_res_khz: int,
+    birli_int_time_res_sec: float,
+    bytes_per_r_and_i: int = 13,
 ) -> int:
+    #
+    # bytes_per_visibility comes from Birli
+    #
     # baselines = (tiles * tiles + 1)
     # timesteps = duration / birli_int_time_res_sec
     # coarse_chans = 24
@@ -1973,16 +1980,15 @@ def estimate_birli_output_bytes(
         metafits_context.coarse_chan_width_hz / (birli_freq_res_khz * 1000.0)
     )  # 1280000 / 80000 == 16
     pols: int = metafits_context.num_visibility_pols  # (XX,XY,YX,YY) # 4
-    bytes_per_visibility: int = 13  # based on Birli
 
     # Uncomment for debug
     # print(f"{timesteps}ts * {coarse_channels * fine_channels}ch * {baselines}bl * {pols}pol * {bytes_per_visibility} bytes")
 
-    return timesteps * coarse_channels * fine_channels * baselines * pols * bytes_per_visibility
+    return timesteps * coarse_channels * fine_channels * baselines * pols * bytes_per_r_and_i
 
 
 def split_aocal_file_into_coarse_channels(
-    obs_id: int, input_aocal_filename: str, input_rec_chans: list[int]
+    obs_id: int, input_aocal_filename: str, input_rec_chans: list[int], output_dir: str
 ) -> list[str]:
     # Given any aocal file which may have 1 - 24 coarse channels of data within, split it into 1 file per coarse channel
     # Since aocal files have minimal metadata in the file, give the function input_rec_chans which is a hint as to how many
@@ -2095,7 +2101,7 @@ def split_aocal_file_into_coarse_channels(
 
     for c_idx, rec_chan_no in enumerate(input_rec_chans):
         out_filename = os.path.join(
-            f"{os.path.split(input_aocal_filename)[0]}",
+            output_dir,
             get_aocal_filename(obs_id, antenna_count, fine_chans_per_coarse, rec_chan_no),
         )
 
@@ -2139,3 +2145,37 @@ def get_aocal_filename(obsid: int, num_tiles: int, num_fine_chans: int, rec_chan
 def get_partial_aocal_filename(obsid: int, rec_chan_no: int) -> str:
     # Provides a string with the correct partial aocal filename to use
     return f"{obsid}_*_{rec_chan_no:03}_calfile.bin"
+
+
+def get_solution_fits_filename(solutions_dir: str, obs_id: int, rec_chan: int) -> Optional[str]:
+    #
+    # Returns one or none full file paths from the solutions_dir for the solution file matching the obsid and rec_chan number.
+    #
+    # Hyperdrive solutions files come in these flavours:
+    # 1. obsid_solutions.fits  <- contains all 24 channels
+    # 2. obsid_chNNN_solutions.fits <- contains 1 channel (NOT zero padded) e.g. N, NN, NNN are all valid
+    # 3. obsid_chNNN-MMM_solutions.fits <- contains >1 and <=12 channels (NOT zero padded) e.g. M, MM, MMM and N, NN, NNN are all valid
+    #
+    # Flavour 1: obsid_solutions.fits — covers all 24 channels
+    flavour1 = os.path.join(solutions_dir, f"{obs_id}_solutions.fits")
+    if os.path.exists(flavour1):
+        return flavour1
+
+    # Flavour 2: obsid_chNNN_solutions.fits — single channel, no zero padding
+    flavour2 = os.path.join(solutions_dir, f"{obs_id}_ch{rec_chan}_solutions.fits")
+    if os.path.exists(flavour2):
+        return flavour2
+
+    # Flavour 3: obsid_chNNN-MMM_solutions.fits — range of channels
+    # Scan for all matching range files and check if rec_chan falls within [N, M]
+    pattern = os.path.join(solutions_dir, f"{obs_id}_ch*-*_solutions.fits")
+    for filepath in glob.glob(pattern):
+        filename = os.path.basename(filepath)
+        match = re.match(rf"^{obs_id}_ch(\d+)-(\d+)_solutions\.fits$", filename)
+        if match:
+            chan_start = int(match.group(1))
+            chan_end = int(match.group(2))
+            if chan_start <= rec_chan <= chan_end:
+                return filepath
+
+    return None

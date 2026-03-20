@@ -19,6 +19,14 @@ def setup_test_directories(test_code: str) -> str:
     paths = [
         "/tmp",
         "/dev/shm/mwax",
+        "/logs",
+        "/logs/scripts",
+        "/data",
+        "/data/calvin",
+        "/data/calvin/in_jobs",
+        "/data/calvin/out_jobs",
+        "tmp/jobs",
+        "tmp/cal",
         "/voltdata/incoming",
         "/voltdata/outgoing",
         "/voltdata/dont_archive",
@@ -116,7 +124,7 @@ def run_create_test_db_object_script(creation_sql_filename):
         creation_sql_script = file.read()
 
     with test_db_handler.pool.getconn() as conn:
-        conn.execute(creation_sql_script)  # type: ignore
+        conn.execute(creation_sql_script)
 
 
 def create_observation_subfiles(

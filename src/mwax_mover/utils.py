@@ -402,7 +402,7 @@ def get_metafits_value(metafits_filename: str, key: str):
     try:
         with fits.open(metafits_filename) as hdul:
             # Read key from primary HDU
-            return hdul[0].header[key]  # type: ignore # pylint: disable=no-member
+            return hdul[0].header[key]
 
     except Exception as catch_all_exception:
         raise Exception(
@@ -417,7 +417,7 @@ def get_metafits_value_from_hdu(metafits_filename: str, hdu_name: str, key: str)
     try:
         with fits.open(metafits_filename) as hdul:
             # Read key from primary HDU
-            return hdul[hdu_name].header[key]  # type: ignore # pylint: disable=no-member
+            return hdul[hdu_name].header[key]
 
     except Exception as catch_all_exception:
         raise Exception(
@@ -435,12 +435,12 @@ def get_metafits_values(metafits_filename: str) -> Tuple[bool, str, str]:
     try:
         with fits.open(metafits_filename) as hdul:
             # Read key from primary HDU- it is bool
-            is_calibrator = hdul[0].header["CALIBRAT"]  # type: ignore # pylint: disable=no-member
+            is_calibrator = hdul[0].header["CALIBRAT"]
             if is_calibrator:
-                calib_source = hdul[0].header["CALIBSRC"]  # type: ignore # pylint: disable=no-member
+                calib_source = hdul[0].header["CALIBSRC"]
             else:
                 calib_source = ""
-            project_id = hdul[0].header["PROJECT"]  # type: ignore # pylint: disable=no-member
+            project_id = hdul[0].header["PROJECT"]
             return is_calibrator, project_id, calib_source
     except Exception as catch_all_exception:
         raise Exception(
@@ -1156,7 +1156,7 @@ def remove_file(filename: str, raise_error: bool) -> bool:
 def get_gpstime_of_datetime(date_time: datetime.datetime) -> int:
     utc_datetime: astrotime.Time = astrotime.Time(date_time, scale="utc")
     current_gpstime = utc_datetime.gps
-    return int(current_gpstime)  # type: ignore
+    return int(current_gpstime)
 
 
 # Return the GPS seconds as an integer of Now

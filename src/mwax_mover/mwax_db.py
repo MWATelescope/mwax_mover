@@ -213,110 +213,6 @@ class MWAXDBHandler:
             logger.exception("execute_dml(): postgres Exception")
             raise
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_fixed(60),
-        retry=retry_if_exception_type(
-            (
-                psycopg.errors.ConnectionFailure,
-                psycopg.errors.ConnectionException,
-                psycopg.errors.ConnectionTimeout,
-                psycopg.errors.OperationalError,
-            )
-        ),
-    )
-    def select_postgres_within_transaction(self, sql: str, parm_list, expected_rows: None | int, transaction_cursor):
-        """Returns rows from postgres given SQL and params. If expected rows is passed
-        then it will check it returned the correct number of rows and riase exception
-        if not. If no rows result from the query, then an empty list is returned (by fetchall)"""
-        # Assuming we have a connection, try to do the database operation
-        try:
-            # Run the sql
-            transaction_cursor.execute(sql, parm_list)
-
-            # Fetch results as a list of tuples
-            rows = transaction_cursor.fetchall()
-
-            # Check how many rows we affected
-            rows_affected = len(rows)
-
-            if expected_rows:
-                # if we passed in how many rows we were expecting, check it!
-                if expected_rows == rows_affected:
-                    return rows
-                else:
-                    # Something went wrong
-                    logger.error(
-                        "select_postgres_within_transaction(): Error- queried"
-                        f" {rows_affected} rows, expected 1. SQL={sql}"
-                    )
-                    raise Exception(
-                        "select_postgres_within_transaction(): Error- queried"
-                        f" {rows_affected} rows, expected 1. SQL={sql}"
-                    )
-            else:
-                # We don't know how many rows, so cool, return them
-                return rows
-
-        except Exception:
-            logger.exception("select_postgres_within_transaction(): postgres exception")
-            raise
-
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_fixed(30),
-        retry=retry_if_exception_type(
-            (
-                psycopg.errors.ConnectionFailure,
-                psycopg.errors.ConnectionException,
-                psycopg.errors.ConnectionTimeout,
-                psycopg.errors.OperationalError,
-            )
-        ),
-    )
-    def execute_dml_row_within_transaction(self, sql, parm_list, transaction_cursor: psycopg.Cursor):
-        """This executes an INSERT, UPDATE or DELETE that should only affect
-        one row.
-
-        NOTES: it is up to the caller to supply a cursor which all of the operations
-        within the transaction share. Also it is up to the caller to call:
-        1. conn = self.pool.getconn() # get a connection
-        2. curs = conn.cursor()
-        3. Call this method (possibly multiple times), passing in "curs"
-        4. conn.rollback() # On exception or failure
-        5. conn.commit() # On success
-        6. self.pool.putconn(conn)
-
-        We don't retry on FK or UK exceptions because, well, retrying won't fix anything!
-        """
-
-        # Assuming we have a connection, try to do the database operation
-        # using our cursor
-        try:
-            # Run the sql
-            transaction_cursor.execute(sql, parm_list)
-
-            # Check how many rows we affected
-            rows_affected = transaction_cursor.rowcount
-
-            if rows_affected != 1:
-                # An exception in here will trigger a rollback
-                # which is good
-                logger.error(
-                    "execute_dml_row_within_transaction(): Error- query"
-                    f" affected {rows_affected} rows, expected 1."
-                    f" SQL={sql}"
-                )
-                raise Exception(
-                    "execute_dml_row_within_transaction(): Error- query"
-                    f" affected {rows_affected} rows, expected 1."
-                    f" SQL={sql}"
-                )
-
-        except Exception:
-            logger.exception("execute_single_dml_row_within_transaction(): postgres Exception")
-            raise
-
 
 #
 # High level functions to do what we want specifically
@@ -362,7 +258,7 @@ def get_data_file_row(db_handler_object: MWAXDBHandler, full_filename: str, obs_
         )
         return data_files_row
 
-    except Exception as select_exception:  # pylint: disable=broad-except
+    except Exception as select_exception:
         logger.error(
             f"{full_filename} get_data_file_row() error selecting data_files"
             f" record in data_files table: {select_exception}. SQL was {sql}"
@@ -441,7 +337,7 @@ def insert_data_file_row(
         # but we need the caller to check if the file still exists- otherwise we may archive it!
         return True
 
-    except Exception as upsert_exception:  # pylint: disable=broad-except
+    except Exception as upsert_exception:
         logger.exception(
             upsert_exception,
             f"{filename} insert_data_file_row() error inserting data_files record in data_files table. SQL was {sql}",
@@ -489,7 +385,7 @@ def update_data_file_row_as_archived(
         logger.info(f"{filename} update_data_file_row_as_archived() Successfully updated data_files table")
         return True
 
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         logger.exception(
             f"{filename} update_data_file_row_as_archived() error updating"
             f" data_files record in data_files table. SQL"
@@ -518,7 +414,7 @@ def insert_calibration_request_row(db_handler_object: MWAXDBHandler, obs_id: int
         logger.info(f"{obs_id}: insert_calibration_request_row() Successfully inserted into calibration_request table.")
         return True
 
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         logger.exception(
             f"{obs_id}: insert_calibration_request_row() error inserting"
             f" calibration_request record in table. SQL was"
@@ -564,7 +460,7 @@ def insert_calibration_fits_row(
         )
         return (True, fit_id)
 
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         logger.exception(
             f"{obs_id}: insert_calibration_fits_row() error inserting"
             f" calibration_fits record in table. SQL was"
@@ -663,7 +559,7 @@ def insert_calibration_solutions_row(
         )
         return True
 
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         logger.exception(
             f"{obs_id}: insert_calibration_solutions_row() error inserting"
             f" insert_calibration_solutions record in table. SQL was {sql} Values {sql_values}"
@@ -778,29 +674,23 @@ def get_unattempted_calsolution_requests(db_handler_object: MWAXDBHandler) -> li
     return_list: list[Tuple[int, int, bool]] = []
 
     try:
-        # get the connection
-        with db_handler_object.pool.connection() as conn:
-            # Create a cursor
-            with conn.cursor() as cursor:
-                # Get the next request, if any
-                results_rows = db_handler_object.select_many_rows_postgres(
-                    sql_get,
-                    parm_list=[],
-                )
+        # Get the next request, if any
+        results_rows = db_handler_object.select_many_rows_postgres(
+            sql_get,
+            parm_list=[],
+        )
 
-                if len(results_rows) == 0:
-                    logger.debug("get_unattempted_calsolution_requests(): No requests to process.")
-                    return None
+        if len(results_rows) == 0:
+            logger.debug("get_unattempted_calsolution_requests(): No requests to process.")
+            return None
 
-                cursor.row_factory = dict_row
+        for row in results_rows:
+            # We got one!
+            request_id: int = int(row["request_id"])
+            obs_id: int = int(row["obs_id"])
+            realtime: bool = bool(row["realtime"])
 
-                for row in results_rows:
-                    # We got one!
-                    request_id: int = int(row["request_id"])
-                    obs_id: int = int(row["obs_id"])
-                    realtime: bool = bool(row["realtime"])
-
-                    return_list.append((request_id, obs_id, realtime))
+            return_list.append((request_id, obs_id, realtime))
 
         return return_list
 
@@ -853,7 +743,7 @@ def update_calsolution_request_submit_mwa_asvo_job_status(
             "update_calsolution_request_submit_mwa_asvo_job_status(): Successfully updated calibration_request table."
         )
 
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         logger.exception(
             "update_calsolution_request_submit_mwa_asvo_job_status(): error updating calibration_request record. SQL"
             f" was {sql}, params were: {params}"
@@ -896,7 +786,7 @@ def update_calibration_request_slurm_status(
             "update_calsolution_request_download_complete_status(): Successfully updated calibration_request table."
         )
 
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         logger.exception(
             "update_calsolution_request_download_complete_status(): error updating calibration_request "
             f"record. SQL was {sql}, params were: {params}"
@@ -966,7 +856,7 @@ def update_calsolution_request_download_complete_status(
             "update_calsolution_request_download_complete_status(): Successfully updated calibration_request table."
         )
 
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         logger.exception(
             "update_calsolution_request_download_complete_status(): error updating calibration_request "
             f"record. SQL was {sql}, params were: {params}"
@@ -1002,7 +892,7 @@ def update_calibration_request_assign_hostname_start_download(
             "calibration_request table."
         )
 
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         logger.exception(
             "update_calibration_request_assign_hostname_start_download(): error updating calibration_request "
             f"record. SQL was {sql}, params were: {params}"
@@ -1053,7 +943,7 @@ def update_calsolution_request_calibration_started_status(
             "update_calsolution_request_calibration_started_status(): Successfully updated calibration_request table."
         )
 
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         logger.exception(
             "update_calsolution_request_calibration_started_status(): error updating calibration_request "
             f"record. SQL was {sql}, params were: {params}"

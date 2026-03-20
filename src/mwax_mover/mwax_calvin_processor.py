@@ -92,15 +92,14 @@ class MWAXCalvinProcessor:
             ""  # where does Birli write to? /data/calvin/jobs/SLURM_JOB_ID_OBSID or /tmp if the obs is small enough
         )
         self.job_output_path: str = ""  # e.g. /data/calvin/jobs/SLURM_JOB_ID_OBSID
-        self.processing_error_path: str = ""
         self.source_list_filename: str = ""
         self.source_list_type: str = ""
         self.phase_fit_niter: int = 0
         self.num_sources: int = 0
         self.produce_debug_plots: bool = True  # default to true- for now only off if running via pytest
         self.keep_completed_visibility_files: bool = False
-        self.aocal_export_path: Optional[str] = None
-        self.aocal_max_age_hours: int = 24  # default to 24 hours
+        self.cal_export_path: Optional[str] = None
+        self.cal_export_max_age_hours: int = 24  # default to 24 hours
 
         # birli
         self.birli_timeout: int = 0
@@ -668,8 +667,24 @@ class MWAXCalvinProcessor:
                 self.job_output_path,
             )
 
-            # if aocal_export_path is set then split the aocal files into coarse chan files and try to clean up old files
-            if self.aocal_export_path is not None:
+            # if cal_export_path is set then:
+            # 1. copy the solution FITS files to the export dir
+            # 2. split the aocal files into coarse chan files
+            # 3. copy the split aocal files to the export dir
+            # 4. try to clean up old files
+            if self.cal_export_path is not None:
+                #
+                # copy the solution.fits file(s) to the export directory
+                fitscal_files = glob.glob(os.path.join(self.job_output_path, "*solutions.fits"))
+                logger.info(f"Found {len(fitscal_files)} solution FITS files in {self.job_output_path}.")
+
+                for f in fitscal_files:
+                    # Copy solution fits files to the cal_export directory
+                    cal_dest = os.path.join(self.cal_export_path, os.path.basename(f))
+                    logger.info(f"Copying solution FITS file {f} to {cal_dest}")
+                    shutil.copy(f, cal_dest)
+
+                #
                 # re-export aocal into 1 file per coarse channel
                 aocal_files = glob.glob(os.path.join(self.job_output_path, "*.bin"))
                 out_aocal_files = []
@@ -689,7 +704,7 @@ class MWAXCalvinProcessor:
 
                     for f in out_aocal_files:
                         # Copy aocal files to the aocal_export directory
-                        aocal_dest = os.path.join(self.aocal_export_path, os.path.split(f)[1])
+                        aocal_dest = os.path.join(self.cal_export_path, os.path.basename(f))
                         logger.info(f"Copying split aocal file {f} to {aocal_dest}")
                         shutil.copy(f, aocal_dest)
                 else:
@@ -725,7 +740,7 @@ class MWAXCalvinProcessor:
                             rec_chan_number,
                         )
 
-                        aocal_dest = os.path.join(self.aocal_export_path, aocal_dest)
+                        aocal_dest = os.path.join(self.cal_export_path, aocal_dest)
 
                         logger.info(f"Copying aocal file {aocal_file} to {aocal_dest}")
                         shutil.copy(aocal_file, aocal_dest)
@@ -733,15 +748,15 @@ class MWAXCalvinProcessor:
                 # Clean up old files
                 ext_list = ["fits", "bin"]
                 files_removed = utils.delete_files_older_than(
-                    self.aocal_export_path, self.aocal_max_age_hours * 3600, ext_list
+                    self.cal_export_path, self.cal_export_max_age_hours * 3600, ext_list
                 )
                 if len(files_removed) > 0:
                     logger.debug(
-                        f"Removed the following files from {self.aocal_export_path} as they were older than {self.aocal_max_age_hours} hours: {files_removed}"
+                        f"Removed the following files from {self.cal_export_path} as they were older than {self.cal_export_max_age_hours} hours: {files_removed}"
                     )
                 else:
                     logger.debug(
-                        f"No files older than {self.aocal_max_age_hours} hours found in {self.aocal_export_path} to remove."
+                        f"No files older than {self.cal_export_max_age_hours} hours found in {self.cal_export_path} to remove."
                     )
 
         if hyperdrive_success:
@@ -879,7 +894,10 @@ class MWAXCalvinProcessor:
         self.mro_metadatadb_host = utils.read_config(config, "mro metadata database", "host")
         self.mro_metadatadb_db = utils.read_config(config, "mro metadata database", "db")
         self.mro_metadatadb_user = utils.read_config(config, "mro metadata database", "user")
-        self.mro_metadatadb_pass = utils.read_config(config, "mro metadata database", "pass", True)
+        # Don't require base64 encoded password if running a pytest
+        self.mro_metadatadb_pass = utils.read_config(
+            config, "mro metadata database", "pass", not utils.running_under_pytest()
+        )
         self.mro_metadatadb_port = int(utils.read_config(config, "mro metadata database", "port"))
 
         # Initiate database connection for rmo metadata db
@@ -1086,25 +1104,25 @@ class MWAXCalvinProcessor:
                 "keep_completed_visibility_files",
             )
 
-            # Get the aocal_export_path dir
-            self.aocal_export_path = utils.read_optional_config(
+            # Get the cal_export_path dir
+            self.cal_export_path = utils.read_optional_config(
                 config,
                 "processing",
-                "aocal_export_path",
+                "cal_export_path",
             )
 
-            if self.aocal_export_path is None:
-                logger.warning("aocal_export_path not set. Will not be exporting aocal bin files.")
+            if self.cal_export_path is None:
+                logger.warning("cal_export_path not set. Will not be exporting calibration solution files.")
             else:
-                if not os.path.exists(self.aocal_export_path):
-                    logger.error(f"aocal_export_path location  {self.aocal_export_path} does not exist. Quitting.")
+                if not os.path.exists(self.cal_export_path):
+                    logger.error(f"cal_export_path location  {self.cal_export_path} does not exist. Quitting.")
                     sys.exit(1)
 
-            self.aocal_max_age_hours: int = int(
+            self.cal_export_max_age_hours: int = int(
                 utils.read_config(
                     config,
                     "processing",
-                    "aocal_max_age_hours",
+                    "cal_export_max_age_hours",
                 )
             )
 

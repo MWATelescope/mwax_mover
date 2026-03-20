@@ -1,5 +1,12 @@
 # Changelog
 
+# 1.5.8 20-Feb-2026
+
+* More unit tests
+* calvin/subfile_distributor: renamed aocal_export_dir to cal_export_dir as it is now for aocal and FITS solutions
+* calvin: Now copying in FITS solution files to cal_export dir
+* mwax_calvin_utils: Fixing linter errors
+
 # 1.5.7 19-Feb-2026
 
 * Subfile_distributor: Fixed bug where pausing archiving at the start of a VCS obs breaks things
