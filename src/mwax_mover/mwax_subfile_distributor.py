@@ -683,36 +683,6 @@ class MWAXSubfileDistributor:
             )
             self.workers.append(self.outgoing_processor)
 
-        else:
-            # We have disabled archiving, so use a different
-            # handler for incoming data
-            # which just moves the files elsewhere
-
-            # First check to ensure there are no existing unarchived files on
-            # our watching dirs
-            if utils.running_under_pytest:
-                # Ignore this check if we're testing
-                pass
-            else:
-                if (
-                    len(next(os.walk(self.cfg_voltdata_incoming_path))[2]) > 0
-                    or len(next(os.walk(self.cfg_corr_visdata_incoming_path))[2]) > 0
-                    or len(next(os.walk(self.cfg_voltdata_outgoing_path))[2]) > 0
-                    or len(next(os.walk(self.cfg_corr_visdata_outgoing_path))[2]) > 0
-                    or len(next(os.walk(self.cfg_corr_calibrator_outgoing_path))[2]) > 0
-                    or len(next(os.walk(self.cfg_corr_visdata_processing_stats_path))[2]) > 0
-                    or len(next(os.walk(self.cfg_bf_incoming_path))[2]) > 0
-                    or len(next(os.walk(self.cfg_bf_outgoing_path))[2]) > 0
-                ):
-                    logger.error(
-                        "Error- voltage incoming/outgoing and/or visibility "
-                        "incoming/processing/outgoing/cal/bf dirs are not empty! "
-                        "Watched paths must be empty before starting with  "
-                        "archiving disabled to prevent inadvertent data loss. "
-                        "Exiting."
-                    )
-                    sys.exit(-2)
-
         # Make sure we can Ctrl-C / kill out of this
         logger.info("Initialising signal handlers")
         signal.signal(signal.SIGINT, self.signal_handler)
