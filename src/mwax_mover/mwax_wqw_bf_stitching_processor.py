@@ -161,7 +161,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
 
                     return True
                 else:
-                    raise Exception(f"{item} Extension {ext} is not supported")
+                    raise Exception(f"{item}: Extension {ext} is not supported")
             else:
                 # Nothing to do
                 logger.debug(

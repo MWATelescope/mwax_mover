@@ -111,7 +111,7 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
                 trigger_id = None
 
         except FileNotFoundError:
-            logger.warning(f"{item}- file was removed while processing.")
+            logger.warning(f"{item}: file was removed while processing.")
             return True
 
         if not insert_data_file_row(
@@ -185,7 +185,7 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
         val: ValidationData = utils.validate_filename(item, self.metafits_path)
 
         if not val.valid:
-            logger.error(f"{item}- {val.validation_message}")
+            logger.error(f"{item}: {val.validation_message}")
             return False
 
         if self.archiving_enabled:
@@ -197,17 +197,12 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
         dest = self._get_destination(item, val, archive=should_archive)
 
         if dest is None:
-            logger.error(
-                f"{item}- not a valid file extension {val.filetype_id} / {val.file_ext}"
-            )
+            logger.error(f"{item}: not a valid file extension {val.filetype_id} / {val.file_ext}")
             return False
 
-        logger.debug(f"{item}- moving file to {os.path.dirname(dest)}")
+        logger.debug(f"{item}: moving file to {os.path.dirname(dest)}")
         os.rename(item, dest)
-        logger.info(
-            f"{item}- moved file to"
-            f" {os.path.dirname(dest)}. Queue size: {self.pqueue.qsize()}"
-        )
+        logger.info(f"{item}: moved file to {os.path.dirname(dest)}. Queue size: {self.pqueue.qsize()}")
 
-        logger.info(f"{item}- Finished")
+        logger.info(f"{item}: Finished")
         return True

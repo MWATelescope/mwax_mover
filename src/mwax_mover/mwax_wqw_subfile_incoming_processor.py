@@ -88,7 +88,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         """When subfile detected this handles it"""
         success = False
 
-        logger.info(f"{item}- SubfileIncomingProcessor.subfile_handler is handling {item}...")
+        logger.info(f"{item}: SubfileIncomingProcessor.subfile_handler is handling {item}...")
 
         handler_starttime = time.time()
 
@@ -160,7 +160,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                 # We ARE in voltage dump and so we go and do a VCS capture instead
                 # of whatever else we were doing
                 logger.info(
-                    f"{item}- ignoring existing mode: {subfile_mode} as we"
+                    f"{item}: ignoring existing mode: {subfile_mode} as we"
                     f" are within a voltage dump ({self.sd_ctx.dump_start_gps} <"
                     f" {self.sd_ctx.dump_end_gps}) for trigger {self.sd_ctx.dump_trigger_id}."
                     " Doing VCS instead."
@@ -175,7 +175,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                 if not utils.read_subfile_trigger_value(item):
                     # No TRIGGER_ID yet, so add it
                     logger.info(
-                        f"{item}- injecting {utils.PSRDADA_TRIGGER_ID} {self.sd_ctx.dump_trigger_id} into subfile..."
+                        f"{item}: injecting {utils.PSRDADA_TRIGGER_ID} {self.sd_ctx.dump_trigger_id} into subfile..."
                     )
                     utils.inject_subfile_header(item, f"{utils.PSRDADA_TRIGGER_ID} {self.sd_ctx.dump_trigger_id}\n")
 
@@ -222,7 +222,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                     else:
                         # Ignore
                         logger.warning(
-                            f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor NOT running in CORRELATOR mode"
+                            f"{item}: ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor NOT running in CORRELATOR mode"
                         )
                         success = True  # It's True because that signals the caller to keep going and don't retry
 
@@ -244,7 +244,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                     else:
                         # Ignore
                         logger.warning(
-                            f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor NOT running in CORRELATOR mode"
+                            f"{item}: ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor NOT running in CORRELATOR mode"
                         )
                         success = True  # It's True because that signals the caller to keep going and don't retry
 
@@ -269,7 +269,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                             )
                         except Exception:
                             logger.warning(
-                                f"{item} key {METAFITS_CALOBSID} not found in metafits file {metafits_filename} hdu {METAFITS_CALIBDATA_HDU}"
+                                f"{item}: key {METAFITS_CALOBSID} not found in metafits file {metafits_filename} hdu {METAFITS_CALIBDATA_HDU}"
                             )
                             cal_obs_id_str = "0"
 
@@ -285,14 +285,14 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                     else:
                         # Ignore
                         logger.warning(
-                            f"{item}- ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor NOT running in BEAMFORMER mode"
+                            f"{item}: ignoring subfile as it's MODE {subfile_mode} is not compatible with mwax_subfiledistributor NOT running in BEAMFORMER mode"
                         )
                         success = True  # It's True because that signals the caller to keep going and don't retry
 
                 elif utils.CorrelatorMode.is_no_capture(subfile_mode) or utils.CorrelatorMode.is_voltage_buffer(
                     subfile_mode
                 ):
-                    logger.info(f"{item}- ignoring due to mode: {subfile_mode}")
+                    logger.info(f"{item}: ignoring due to mode: {subfile_mode}")
 
                     #
                     # This is our opportunity to write any "keep" files to disk
@@ -314,7 +314,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                     success = True
 
                 else:
-                    logger.error(f"{item}- Unknown subfile mode {subfile_mode}, ignoring.")
+                    logger.error(f"{item}: Unknown subfile mode {subfile_mode}, ignoring.")
                     success = True
 
                 # There is a semi-rare case where in between the top of this code and now
@@ -350,7 +350,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                     self.sd_ctx.dump_trigger_id = None
 
         except Exception as handler_exception:  # pylint: disable=broad-except
-            logger.error(f"{item} {handler_exception}")
+            logger.error(f"{item}: {handler_exception}")
             success = False
 
         finally:
@@ -390,13 +390,13 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                             pass
 
                     except Exception as move_exception:  # pylint: disable=broad-except
-                        logger.error(f"{item}- Could not rename {item} back to {free_filename}. Error {move_exception}")
+                        logger.error(f"{item}: Could not rename {item} back to {free_filename}. Error {move_exception}")
                         sys.exit(2)
 
             handler_elapsed = time.time() - handler_starttime
 
             logger.info(
-                f"{item}- SubfileIncomingProcessor.subfile_handler finished handling in {handler_elapsed:.3f} secs."
+                f"{item}: SubfileIncomingProcessor.subfile_handler finished handling in {handler_elapsed:.3f} secs."
             )
 
         return success
@@ -411,12 +411,12 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         try:
             found_files = glob.glob(partial_aocal_filename)
             if not found_files:
-                logger.warning(f"{item}- No aocal file found matching pattern {partial_aocal_filename}.")
+                logger.warning(f"{item}: No aocal file found matching pattern {partial_aocal_filename}.")
             else:
                 aocal_filename = found_files[0]
-                logger.info(f"{item}- Found aocal file {aocal_filename} for pattern {partial_aocal_filename}.")
+                logger.info(f"{item}: Found aocal file {aocal_filename} for pattern {partial_aocal_filename}.")
         except Exception as e:
-            logger.error(f"{item}- Error searching for aocal file with pattern {partial_aocal_filename}. Error: {e}")
+            logger.error(f"{item}: Error searching for aocal file with pattern {partial_aocal_filename}. Error: {e}")
 
         # Get the fits solution file too
         sol_fits_filename = get_solution_fits_filename(self.bf_cal_path, cal_obs_id, rec_chan_no)
@@ -426,16 +426,16 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
 
         # Now signal with what we got
         signal_value = {"subfile": item, "aocalfile": aocal_filename, "calsolfile": sol_fits_filename}
-        logger.info(f"{item}- Signalling beamformer with ({signal_value}) via redis {self.bf_redis_host}...")
+        logger.info(f"{item}: Signalling beamformer with ({signal_value}) via redis {self.bf_redis_host}...")
         try:
             # Write the signal value- if reader disconnects it will auto-reopen unless timeout is hit
             utils.push_message_to_redis(self.bf_redis_host, self.bf_redis_queue_key, signal_value)
             # Success
-            logger.info(f"{item}- Signalling beamformer success")
+            logger.info(f"{item}: Signalling beamformer success")
             return True
 
         except Exception:
-            logger.exception(f"{item}- signal_beamformer failed.")
+            logger.exception(f"{item}: signal_beamformer failed.")
             exit(3)
 
     def handle_next_keep_file(self) -> bool:

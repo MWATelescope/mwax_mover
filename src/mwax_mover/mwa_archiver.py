@@ -28,7 +28,7 @@ def copy_file_rsync(
     timeout: int,
 ):
     """Copies a file via rsync"""
-    logger.debug(f"{source_filename} attempting copy_file_rsync...")
+    logger.debug(f"{source_filename}: attempting copy_file_rsync...")
 
     # Build final command line
     # --no-compress ensures we don't try to compress (it's going to be quite
@@ -47,8 +47,8 @@ def copy_file_rsync(
     if return_val:
         try:
             file_size = os.path.getsize(os.path.join(destination_dir, os.path.basename(source_filename)))
-        except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
-            logger.error(f"{source_filename}: Error determining destination file size. Error {catch_all_exceptiion}")
+        except Exception:
+            logger.exception(f"{source_filename}: Error determining destination file size.")
             return False
 
         elapsed = time.time() - start_time
@@ -57,13 +57,11 @@ def copy_file_rsync(
         gbps_per_sec = (size_gigabytes * 8) / elapsed
 
         logger.info(
-            f"{source_filename} copy_file_rsync success"
-            f" ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at"
-            f" {gbps_per_sec:.3f} Gbps)"
+            f"{source_filename}: copy_file_rsync success ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at {gbps_per_sec:.3f} Gbps)"
         )
         return True
     else:
-        logger.error(f"{source_filename} copy_file_rsync failed. Error {stdout}")
+        logger.error(f"{source_filename}: copy_file_rsync failed. Error {stdout}")
         return False
 
 
@@ -74,13 +72,13 @@ def archive_file_xrootd(
     timeout: int,
 ):
     """Archive a file via xrootd"""
-    logger.debug(f"{full_filename} attempting archive_file_xrootd...")
+    logger.debug(f"{full_filename}: attempting archive_file_xrootd...")
 
     # get file size
     try:
         file_size = os.path.getsize(full_filename)
-    except Exception as catch_all_exceptiion:  # pylint: disable=broad-except
-        logger.error(f"{full_filename}: Error determining file size. Error {catch_all_exceptiion}")
+    except Exception:
+        logger.exception(f"{full_filename}: Error determining file size.")
         return False
 
     # Gather some info for later
@@ -119,7 +117,7 @@ def archive_file_xrootd(
         gbps_per_sec = (size_gigabytes * 8) / elapsed
 
         logger.info(
-            f"{full_filename} archive_file_xrootd success"
+            f"{full_filename}: archive_file_xrootd success"
             f" ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at"
             f" {gbps_per_sec:.3f} Gbps)"
         )
@@ -136,17 +134,17 @@ def archive_file_xrootd(
 
         if return_val:
             logger.info(
-                f"{full_filename} archive_file_xrootd successfully renamed"
+                f"{full_filename}: archive_file_xrootd successfully renamed"
                 f" {full_destination_temp_filename} to"
                 f" {full_destination_final_filename} on the remote host"
                 f" {destination_host}"
             )
             return True
         else:
-            logger.error(f"{full_filename} archive_file_xrootd rename failed. Error {stdout}")
+            logger.error(f"{full_filename}: archive_file_xrootd rename failed. Error {stdout}")
             return False
     else:
-        logger.error(f"{full_filename} archive_file_xrootd failed. Error {stdout}")
+        logger.error(f"{full_filename}: archive_file_xrootd failed. Error {stdout}")
         return False
 
 
@@ -158,7 +156,7 @@ def archive_file_rclone(
     md5hash: str,
 ):
     """Archive file via rclone"""
-    logger.debug(f"{full_filename} attempting archive_file_rclone...")
+    logger.debug(f"{full_filename}: attempting archive_file_rclone...")
 
     # Get just the filename
     filename = os.path.basename(full_filename)
@@ -179,7 +177,7 @@ def archive_file_rclone(
         endpoint_url = random.choice(endpoints)
 
         # rclone will create bucket if required
-        logger.debug(f"{full_filename} attempting upload to {rclone_profile} {endpoint_url} bucket {bucket_name}...")
+        logger.debug(f"{full_filename}: attempting upload to {rclone_profile} {endpoint_url} bucket {bucket_name}...")
 
         # Do upload
         #
@@ -199,7 +197,7 @@ def archive_file_rclone(
 
                 # Success - now verify the file at the remote
                 logger.debug(
-                    f"{full_filename} attempting check against {rclone_profile} {endpoint_url} bucket {bucket_name}..."
+                    f"{full_filename}: attempting check against {rclone_profile} {endpoint_url} bucket {bucket_name}..."
                 )
                 cmdline = f"/usr/bin/rclone check --s3-endpoint={endpoint_url} {full_filename} {rclone_profile}:/{bucket_name}"
 
@@ -212,7 +210,7 @@ def archive_file_rclone(
                     check_elapsed = time.time() - start_time
 
                     logger.info(
-                        f"{full_filename} archive_file_rclone success."
+                        f"{full_filename}: archive_file_rclone success."
                         f"Copied ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at"
                         f" {gbps_per_sec:.3f} Gbps). Check took {check_elapsed:.3f} seconds."
                     )
@@ -236,11 +234,13 @@ def archive_file_rclone(
             continue
 
     if len(endpoints) > 0:
-        raise Exception(f"Transfer failed but some endpoints ({len(endpoints)}) are unused. This should not happen!")
+        raise Exception(
+            f"{full_filename}: Transfer failed but some endpoints ({len(endpoints)}) are unused. This should not happen!"
+        )
     else:
         # We tried with all available endpoints but still did not succeed
         logger.warning(
-            f"{full_filename} could not be archived via rclone after trying all {len(endpoints)} endpoint(s)."
+            f"{full_filename}: could not be archived via rclone after trying all {len(endpoints)} endpoint(s)."
         )
         return False
 
