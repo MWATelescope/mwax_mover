@@ -44,9 +44,7 @@ from mwax_mover.mwax_wqw_vis_stats import VisStatsProcessor
 
 # Setup root logger
 handler = logging.StreamHandler()
-handler.setFormatter(
-    logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(threadName)s, %(message)s")
-)
+handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(message)s"))
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)

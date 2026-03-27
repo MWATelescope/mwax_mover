@@ -20,10 +20,35 @@ from abc import ABC, abstractmethod
 import time
 from typing import Optional
 from threading import Thread
+from pathlib import Path
 
 THREAD_JOIN_WAIT_TIMEOUT = 10
 
 logger = logging.getLogger(__name__)
+
+
+#
+# Returns the last 2 dirs from a path.
+#
+# e.g.
+# get_last_two_dirs("/a/b/c")    # 'b/c'
+# get_last_two_dirs("/a/b/c/")   # 'b/c'
+# get_last_two_dirs("/a/")       # 'a'
+#
+def get_last_two_dirs(path: str) -> str:
+    n = 2
+    parts = [p for p in Path(path).parts if p != "/"]
+    return "/".join(parts[-n:])
+
+
+#
+# Generates a sensible, short(ish) name for a watcher
+#
+def get_watcher_name(watch_path: str, pattern: str) -> str:
+    try:
+        return f"watch_{get_last_two_dirs(watch_path).replace('/', '_')}_{pattern.replace('.', '')}"
+    except Exception:
+        return "unknown_watcher"
 
 
 class MWAXWatchQueueWorker(ABC):
@@ -64,9 +89,7 @@ class MWAXWatchQueueWorker(ABC):
             requeue_to_eoq_on_failure,
         )
 
-        self.queue_worker_thread = Thread(
-            name=f"{self.queue_worker.name}_thread", target=self.queue_worker.start, daemon=True
-        )
+        self.queue_worker_thread = Thread(name="worker_thread", target=self.queue_worker.start, daemon=True)
         self.threads.append(self.queue_worker_thread)
 
         # Create a watcher and watcher thread for each path we're watching
@@ -75,7 +98,7 @@ class MWAXWatchQueueWorker(ABC):
             pattern = p[1]
 
             new_watcher = Watcher(
-                f"{name}_{watch_path.replace('/', '_')}",
+                get_watcher_name(watch_path, pattern),
                 watch_path,
                 self.queue,
                 pattern,
@@ -95,7 +118,7 @@ class MWAXWatchQueueWorker(ABC):
         for w in self.watcher_threads:
             w.start()
 
-        logger.info("Waiting for all watchers to finish scanning....")
+        logger.info(f"{self.name} Waiting for all watchers to finish scanning....")
         count_of_watchers_still_scanning = len(self.watchers)
         while count_of_watchers_still_scanning > 0:
             count_of_watchers_still_scanning = 0
@@ -104,11 +127,11 @@ class MWAXWatchQueueWorker(ABC):
                     logger.debug(f"{watcher.name} still scanning!")
                     count_of_watchers_still_scanning += 1
             time.sleep(1)  # hold off for another second
-        logger.info("Watchers are finished scanning.")
+        logger.info(f"{self.name} Watchers are finished scanning.")
 
         self.queue_worker_thread.start()
 
-        logger.info(f"MWAXWatchQueueWorker {self.name} started.")
+        logger.info(f"{self.name} started.")
 
     def is_running(self) -> bool:
         for thread in self.threads:
@@ -117,7 +140,7 @@ class MWAXWatchQueueWorker(ABC):
         return True
 
     def stop(self):
-        logger.info(f"MWAXWatchQueueWorker {self.name} stopping.")
+        logger.info(f"{self.name} stopping.")
         for w in self.watchers:
             w.stop()
         self.queue_worker.stop()
@@ -126,18 +149,18 @@ class MWAXWatchQueueWorker(ABC):
         for watcher_thread in self.watcher_threads:
             if watcher_thread:
                 thread_name = watcher_thread.name
-                logger.debug(f"Watcher {thread_name} Stopping...")
+                logger.debug(f"{thread_name} Stopping...")
                 if watcher_thread.is_alive():
                     watcher_thread.join(THREAD_JOIN_WAIT_TIMEOUT)
-                logger.debug(f"Watcher {thread_name} Stopped")
+                logger.debug(f"{thread_name} Stopped")
 
         if self.queue_worker_thread:
-            logger.debug(f"Queue Worker {self.queue_worker_thread.name} Stopping...")
+            logger.debug(f"{self.queue_worker_thread.name} Stopping...")
             if self.queue_worker_thread.is_alive():
                 self.queue_worker_thread.join(THREAD_JOIN_WAIT_TIMEOUT)
-            logger.debug(f"Queue Worker {self.queue_worker_thread.name} Stopped")
+            logger.debug(f"{self.queue_worker_thread.name} Stopped")
 
-        logger.info(f"MWAXWatchQueueWorker {self.name} stopped.")
+        logger.info(f"{self.name} stopped.")
 
     def pause(self, pause: bool):
         self.queue_worker.pause(pause)
@@ -206,9 +229,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
             requeue_to_eoq_on_failure,
         )
 
-        self.pqueue_worker_thread = Thread(
-            name=f"{self.pqueue_worker.name}_thread", target=self.pqueue_worker.start, daemon=True
-        )
+        self.pqueue_worker_thread = Thread(name="worker_thread", target=self.pqueue_worker.start, daemon=True)
         self.threads.append(self.pqueue_worker_thread)
 
         # Create a watcher and watcher thread for each path we're watching
@@ -217,7 +238,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
             pattern = p[1]
 
             new_watcher = PriorityWatcher(
-                f"{name}_{watch_path.replace('/', '_')}",
+                get_watcher_name(watch_path, pattern),
                 watch_path,
                 self.pqueue,
                 pattern,
@@ -232,7 +253,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
             self.pwatchers.append(new_watcher)
 
             # Create and store the new thread
-            new_thread = Thread(target=new_watcher.start, daemon=True)
+            new_thread = Thread(name=f"{new_watcher.name}_thread", target=new_watcher.start, daemon=True)
             self.pwatcher_threads.append(new_thread)
             self.threads.append(new_thread)
 
@@ -246,23 +267,23 @@ class MWAXPriorityWatchQueueWorker(ABC):
         for w in self.pwatcher_threads:
             w.start()
 
-        logger.info("Waiting for all watchers to finish scanning....")
+        logger.info(f"{self.name}: Waiting for all watchers to finish scanning....")
         count_of_watchers_still_scanning = len(self.pwatchers)
         while count_of_watchers_still_scanning > 0:
             count_of_watchers_still_scanning = 0
             for watcher in self.pwatchers:
                 if not watcher.scan_completed:
-                    logger.debug(f"{watcher.name} still scanning!")
+                    logger.debug(f"{watcher.name}: still scanning!")
                     count_of_watchers_still_scanning += 1
             time.sleep(1)  # hold off for another second
-        logger.info("Watchers are finished scanning.")
+        logger.info(f"{self.name}: Watchers are finished scanning.")
 
         self.pqueue_worker_thread.start()
 
-        logger.info(f"MWAXPriorityWatchQueueWorker {self.name} started.")
+        logger.info(f"{self.name} started.")
 
     def stop(self):
-        logger.info(f"MWAXPriorityWatchQueueWorker {self.name} stopping.")
+        logger.info(f"{self.name} stopping.")
         for w in self.pwatchers:
             w.stop()
         self.pqueue_worker.stop()
@@ -271,18 +292,18 @@ class MWAXPriorityWatchQueueWorker(ABC):
         for watcher_thread in self.pwatcher_threads:
             if watcher_thread:
                 thread_name = watcher_thread.name
-                logger.debug(f"Watcher {thread_name} Stopping...")
+                logger.debug(f"{thread_name} Stopping...")
                 if watcher_thread.is_alive():
                     watcher_thread.join(THREAD_JOIN_WAIT_TIMEOUT)
-                logger.debug(f"Watcher {thread_name} Stopped")
+                logger.debug(f"{thread_name} Stopped")
 
         if self.pqueue_worker_thread:
-            logger.debug(f"Queue Worker {self.pqueue_worker_thread.name} Stopping...")
+            logger.debug(f"{self.pqueue_worker_thread.name} Stopping...")
             if self.pqueue_worker_thread.is_alive():
                 self.pqueue_worker_thread.join(THREAD_JOIN_WAIT_TIMEOUT)
-            logger.debug(f"Queue Worker {self.pqueue_worker_thread.name} Stopped")
+            logger.debug(f"{self.pqueue_worker_thread.name} Stopped")
 
-        logger.info(f"MWAXPriorityWatchQueueWorker {self.name} stopped.")
+        logger.info(f"{self.name} stopped.")
 
     def get_status(self) -> dict:
         status = {

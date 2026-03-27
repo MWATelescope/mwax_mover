@@ -961,14 +961,14 @@ def scan_directory(watch_dir: str, pattern: str, recursive: bool, exclude_patter
         logger.info(f"{watch_dir}: Scanning recursively for files matching {find_pattern}...")
     else:
         find_pattern = os.path.join(os.path.abspath(watch_dir), "*" + pattern)
-        logger.info(f"{watch_dir}: Scanning for files matching {find_pattern}...")
+        logger.info(f"{watch_dir}: Scanning for files matching *{pattern}...")
 
     files = glob.glob(find_pattern, recursive=recursive)
 
     # Now exclude files if they match the exclude pattern
     if exclude_pattern:
         exclude_glob = os.path.join(os.path.abspath(watch_dir), "*" + exclude_pattern)
-        logger.info(f"{watch_dir}: Excluding files {exclude_glob}...")
+        logger.info(f"{watch_dir}: Excluding files *{exclude_pattern}...")
         return [fn for fn in files if fn not in glob.glob(exclude_glob)]
     else:
         return files
@@ -1577,17 +1577,13 @@ def call_webservice(obs_id: int, url_list: list[str], data, max_retries: int = 1
                     return response
 
                 elif response.status_code >= 400 and response.status_code < 500:
-                    error_message = (
-                        f"{obs_id}: returned {response.status_code} {response.text} (failure)"
-                    )
+                    error_message = f"{obs_id}: returned {response.status_code} {response.text} (failure)"
                     logger.error(error_message)
                     raise ValueError(error_message)
 
                 else:
                     # Non-200 status code- try next url
-                    logger.warning(
-                        f"{obs_id}: returned {response.status_code} {response.text} (failure)"
-                    )
+                    logger.warning(f"{obs_id}: returned {response.status_code} {response.text} (failure)")
             except ValueError:
                 raise
 

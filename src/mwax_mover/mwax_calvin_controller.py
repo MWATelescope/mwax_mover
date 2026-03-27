@@ -43,9 +43,7 @@ from mwax_mover.mwax_calvin_utils import submit_sbatch, create_sbatch_script, Ca
 
 # Setup root logger
 handler = logging.StreamHandler()
-handler.setFormatter(
-    logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(threadName)s, %(message)s")
-)
+handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(message)s"))
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
