@@ -6,8 +6,8 @@ calibration form the calvin HPC cluster
 1. Detect new calibration observation completed
 2. Create SBATCH script:
    * Copy data from all MWAX boxes for all files of the observation
-   * Let MWAX boxes know they can release the files
    * Process and upload the solution
+   * Let MWAX boxes know they can release the files
    * Clean up
 
 * MWA ASVO Calibration Jobs

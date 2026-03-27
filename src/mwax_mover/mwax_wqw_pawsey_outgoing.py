@@ -1,3 +1,11 @@
+"""Watch-queue-worker that validates and archives mwacache files to Pawsey Long-Term Storage.
+
+Runs on the mwacache servers at Curtin. For each file, validates the filename,
+verifies its size and MD5 checksum against the remote metadata database, archives
+it to Acacia or Banksia via rclone, updates the MRO metadata database to record
+the archive location and bucket, then deletes the local copy.
+"""
+
 import os
 
 from mwax_mover import mwax_db

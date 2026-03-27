@@ -1,3 +1,10 @@
+"""Watch-queue-worker that copies packet statistics dump files to a remote destination host.
+
+Monitors a local packet statistics dump directory for new files and copies each
+one to a configured remote destination (e.g. vulcan) using shutil.copy2(), then
+deletes the local source file on success.
+"""
+
 from mwax_mover.mwax_watch_queue_worker import MWAXWatchQueueWorker
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_NEW
 import os

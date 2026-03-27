@@ -1,3 +1,11 @@
+"""Utilities for reading, modifying, and stitching Sigproc filterbank (.fil) files.
+
+Provides functions to parse the variable-length binary header, read and write
+integer key-value pairs within it, and concatenate multiple per-subobservation
+filterbank files produced by the MWAX beamformer into a single complete
+observation output file.
+"""
+
 from typing import List
 import logging
 import os

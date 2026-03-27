@@ -14,7 +14,7 @@ from tests_common import setup_test_directories, create_observation_subfiles
 
 TEST_CONFIG_FILE = "tests/data/test001/test001.cfg"
 TEST_METAFITS = "tests/data/1454743816/1454743816_metafits.fits"
-TEST_AOCAL_FILES = [f"tests/data/test001/1454343616_256_32_{c}_calfile.bin" for c in range(109, 109 + 24)]
+TEST_AOCAL_FILES = [f"tests/data/1454343616/1454343616_256_0032_{c}_calfile.bin" for c in range(109, 109 + 24)]
 
 
 def test_beamformer_subfile():

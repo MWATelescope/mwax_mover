@@ -1,3 +1,11 @@
+"""Watch-queue-worker that checksums incoming files, records them in the metadata DB, and routes them onward.
+
+Computes the MD5 checksum of each arriving file, inserts a data_files record into
+the MWA metadata database, then moves the file to the appropriate outgoing or
+dont_archive directory based on file type (visibilities, voltages, PPD, VDIF,
+filterbank) and whether the observation's project should be archived.
+"""
+
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
 from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
 from mwax_mover import utils

@@ -1,4 +1,10 @@
-"""Module for database operations"""
+"""PostgreSQL database connection pooling and query utilities for the MWA metadata database.
+
+Provides MWAXDBHandler, which wraps a psycopg / psycopg_pool connection pool with
+retry logic (via tenacity) for transient connection failures. Also contains all
+domain-specific query and DML functions used across the package, including file
+record insertion, calibration request management, and archive status updates.
+"""
 
 import datetime
 import logging

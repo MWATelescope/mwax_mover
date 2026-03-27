@@ -1,3 +1,13 @@
+"""Watch-queue-worker that processes incoming PSRDADA subfiles and routes them based on operating mode.
+
+Reads the PSRDADA header from each .sub subfile to determine the observation mode
+(CORRELATOR, VCS, BEAMFORMER, NO_CAPTURE, VOLTAGE_BUFFER) and routes accordingly:
+loads into the PSRDADA ring buffer for correlation, copies to voltdata for VCS or
+voltage dumps, or signals the beamformer via Redis. Also handles FREDDA-triggered
+voltage dump windows, packet statistics extraction, and the always_keep_subfiles
+mode. Renames processed subfiles to .free so the ringbuffer slot can be reused.
+"""
+
 from mwax_mover.mwax_calvin_utils import get_partial_aocal_filename, get_solution_fits_filename
 from mwax_mover.mwax_watch_queue_worker import MWAXWatchQueueWorker
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME

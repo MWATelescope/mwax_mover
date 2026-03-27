@@ -1,4 +1,14 @@
-"""Contains various methods dealing with archiving"""
+"""Stateless file transfer utilities for archiving MWA data to remote storage.
+
+Provides three transfer backends:
+- copy_file_rsync(): copies a file to a remote host over SSH/rsync (AES128-CTR).
+- archive_file_xrootd(): uploads to an xrootd server with atomic temp-file rename.
+- archive_file_rclone(): uploads to Pawsey S3 (Acacia/Banksia) via rclone, with
+  checksum verification and multi-endpoint retry.
+
+Also provides ceph_get_s3_md5_etag() to compute the Ceph multipart ETag for S3
+integrity verification.
+"""
 
 import os
 import hashlib

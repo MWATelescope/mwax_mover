@@ -1,5 +1,11 @@
-"""This class and functions automates the downloading of data
-from MWA ASVO. It calls the MWATelescope/giant-squid CLI"""
+"""Helper classes for managing MWA ASVO download jobs via the giant-squid CLI.
+
+MWAASVOHelper maintains a list of in-flight MWA ASVO jobs, submitting new download
+requests via giant-squid submitvis and polling their status via giant-squid list.
+MWAASVOJob tracks a single job including its state, request IDs, submission
+timestamp, and download URL. MWAASVOJobState enumerates the possible ASVO job
+states. Typed exceptions are raised for outages and duplicate submissions.
+"""
 
 from datetime import datetime, timezone
 from enum import Enum

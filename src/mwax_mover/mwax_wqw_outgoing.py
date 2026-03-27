@@ -1,3 +1,10 @@
+"""Watch-queue-worker that archives outgoing MWAX files to the mwacache servers via xrootd.
+
+Watches the vis, volt, and beamformer outgoing directories on an MWAX box. For
+each file, transfers it to the designated mwacache host using archive_file_xrootd(),
+then deletes the local copy on success.
+"""
+
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
 from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
 from mwax_mover.mwa_archiver import archive_file_xrootd

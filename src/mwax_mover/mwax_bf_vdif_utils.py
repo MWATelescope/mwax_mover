@@ -1,3 +1,11 @@
+"""Utilities for reading, constructing, and stitching VDIF beamformer output files.
+
+Provides the VDIFHeader class, which populates VDIF header metadata (pointing,
+frequency, timing) from a metafits file, and functions to concatenate multiple
+per-subobservation VDIF files produced by the MWAX beamformer into a single
+complete observation output file.
+"""
+
 from typing import List
 import logging
 from astropy.io import fits

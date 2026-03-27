@@ -1,4 +1,11 @@
-"""Utility Functions to support mwax_calvin processor"""
+"""Calibration support utilities for the Calvin pipeline.
+
+Provides data structures (Tile, Metafits, HyperfitsSolution, HyperfitsSolutionGroup,
+GainFitInfo, PhaseFitInfo), the CalvinJobType enum (realtime / mwa_asvo), AOCAL
+binary format constants and read/write helpers, SBATCH script generation
+(create_sbatch_script) and submission (submit_sbatch), phase and gain fitting
+functions, and estimate_birli_output_bytes() for storage pre-checks.
+"""
 
 import datetime
 import glob

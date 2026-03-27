@@ -1,4 +1,10 @@
-"""Module to watch a folder for file events and add file to a queue"""
+"""inotify-based directory watcher that enqueues detected file paths.
+
+The Watcher class monitors a directory (recursively or flat) for inotify events
+(IN_CLOSE_WRITE, IN_MOVED_TO, or both) and deposits matching file paths into a
+plain queue.Queue. On startup it performs a one-shot scan of pre-existing files
+before entering the live event loop.
+"""
 
 import logging
 import os

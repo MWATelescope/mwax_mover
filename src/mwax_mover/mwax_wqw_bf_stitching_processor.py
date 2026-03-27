@@ -1,3 +1,12 @@
+"""Watch-queue-worker that stitches per-subobservation beamformer files into a single output file.
+
+Monitors the beamformer incoming directory for .vdif and .fil subobservation files.
+Once the final expected subobs for an observation arrives, globs all matching files
+and stitches them into a complete observation file using the appropriate format
+utility (mwax_bf_vdif_utils or mwax_bf_filterbank_utils). Optionally retains
+original subobs files before stitching.
+"""
+
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
 from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
 from mwax_mover import utils

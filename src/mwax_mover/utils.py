@@ -1,4 +1,11 @@
-"""Various utility functions used throughout the package"""
+"""Shared utility functions, enumerations, and helper classes for mwax_mover.
+
+Key enumerations: MWAXSubfileDistirbutorMode, CorrelatorMode, MWADataFileType,
+ArchiveLocation. Key classes: ValidationData (filename validation result).
+Key functions: validate_filename(), metafits creation/reading, MD5 checksumming,
+PSRDADA header parsing, Redis-based beamformer signalling, UDP multicast sending,
+and config file helpers (read_config, read_optional_config, read_config_list).
+"""
 
 import base64
 from astropy import time as astrotime
@@ -129,6 +136,19 @@ class ValidationData:
         calibrator: bool,
         validation_message: str,
     ):
+        """
+        Initialise a ValidationData result object.
+
+        Args:
+            valid: Whether the filename passed all validation checks.
+            obs_id: The 10-digit MWA observation ID parsed from the filename.
+            project_id: The MWA project ID read from the associated metafits file.
+            filetype_id: The numeric file type ID corresponding to a MWADataFileType value.
+            file_ext: The file extension including the leading dot (e.g. '.fits').
+            calibrator: True if the observation is a calibrator observation.
+            validation_message: Human-readable description of any validation failure,
+                or an empty string on success.
+        """
         self.valid = valid
         self.obs_id = obs_id
         self.project_id = project_id
@@ -148,7 +168,19 @@ class ArchiveLocation(Enum):
 
 def download_metafits_file(obs_id: int, metafits_path: str):
     """
-    For a given obs_id, get the metafits file from webservices
+    Download a metafits FITS file for the given observation ID from MWA web services
+    and write it to disk.
+
+    Tries the MRO-local web service first, falling back to the public web service.
+    Raises an exception if all URLs and retries are exhausted.
+
+    Args:
+        obs_id: The 10-digit MWA observation ID.
+        metafits_path: Directory path where the downloaded metafits file will be written.
+            The file will be named ``<obs_id>_metafits.fits``.
+
+    Raises:
+        Exception: If the file could not be downloaded from any URL after all retries.
     """
     metafits_file_path = os.path.join(metafits_path, f"{obs_id}_metafits.fits")
 
@@ -171,17 +203,26 @@ def validate_filename(
     metafits_path: str,
 ) -> ValidationData:
     """
-    Takes a filename and determines various
-    things about it.
+    Validate an MWA data filename and extract associated metadata.
+
+    Performs the following checks in order:
+    1. The filename has a recognised extension.
+    2. The first 10 characters of the base name form a valid integer observation ID.
+    3. The extension maps to a known MWADataFileType.
+    4. The base name length matches the expected format for the detected file type.
+    5. The associated metafits file exists (downloading it if necessary) and is
+       readable, yielding the project ID and calibrator flag.
+
+    Args:
+        filename: Full or relative path to the file to validate.
+        metafits_path: Directory containing (or to receive) the metafits file
+            for the observation. Used for all file types except metafits files
+            themselves.
+
     Returns:
-        (valid (bool) did validation succeed
-        ,obs_id (int) obs_id of file
-        ,project_id (int) project id of observation
-        ,filetype_id (int) file type id
-        ,file_ext (string) file extension
-        ,calibrator (bool) True if it's a calibrator
-        ,validation_error (string) validation error
-        )
+        A ValidationData instance. On success ``valid`` is True and all fields
+        are populated. On failure ``valid`` is False and ``validation_message``
+        describes the reason.
     """
 
     valid: bool = True
@@ -334,12 +375,12 @@ def validate_filename(
                 logger.info(f"Metafits file {metafits_filename} not found. Atempting to download it")
                 try:
                     download_metafits_file(obs_id, metafits_path)
-                except Exception as catch_all_exception:  # pylint: disable=broad-except
+                except requests.RequestException as download_exception:
                     valid = False
                     validation_error = (
                         f"Metafits file {metafits_filename} did not exist and"
                         " could not download one from web service."
-                        f" {catch_all_exception}"
+                        f" {download_exception}"
                     )
 
             if valid:
@@ -361,8 +402,24 @@ def validate_filename(
 
 
 def determine_bucket(full_filename: str, location: ArchiveLocation) -> str:
-    """Return the bucket and folder of the file to be archived,
-    based on location."""
+    """
+    Return the destination bucket name for a file given its target archive location.
+
+    Currently supports Acacia (ingest and MWA) and Banksia locations. DMF and
+    Versity are not yet implemented and will raise NotImplementedError.
+
+    Args:
+        full_filename: Full path to the file. Only the basename is used to
+            derive the bucket name.
+        location: The target ArchiveLocation for this file.
+
+    Returns:
+        The bucket name string derived from the observation ID in the filename.
+
+    Raises:
+        NotImplementedError: If ``location`` is not AcaciaIngest, AcaciaMWA,
+            or Banksia.
+    """
     filename = os.path.basename(full_filename)
 
     # acacia and banksia
@@ -381,13 +438,37 @@ def determine_bucket(full_filename: str, location: ArchiveLocation) -> str:
 
 
 def get_bucket_name_from_filename(filename: str) -> str:
-    """Generates a bucket name for a filename"""
+    """
+    Derive the archive bucket name from an MWA data filename.
+
+    Extracts the observation ID from the first 10 characters of the basename
+    and delegates to ``get_bucket_name_from_obs_id``.
+
+    Args:
+        filename: The MWA data filename (basename or full path). The first 10
+            characters of the basename must be a valid integer observation ID.
+
+    Returns:
+        The bucket name string (e.g. ``'mwaingest-12345'``).
+    """
     file_part = os.path.split(filename)[1]
     return get_bucket_name_from_obs_id(int(file_part[0:10]))
 
 
 def get_bucket_name_from_obs_id(obs_id: int) -> str:
-    """Generate bucket name given an obs_id"""
+    """
+    Generate an archive bucket name from an MWA observation ID.
+
+    Uses the first 5 digits of the observation ID as the bucket suffix.
+    This approach creates a new bucket roughly every 27 hours, reducing the
+    risk of VCS jobs filling a single bucket beyond the 100K-file limit.
+
+    Args:
+        obs_id: The 10-digit MWA observation ID (GPS seconds-based).
+
+    Returns:
+        A bucket name string of the form ``'mwaingest-NNNNN'``.
+    """
     # return the first 5 digits of the obsid
     # This means there will be a new bucket every ~27 hours
     # This is to reduce the chances of vcs jobs filling a bucket to more than
@@ -397,7 +478,19 @@ def get_bucket_name_from_obs_id(obs_id: int) -> str:
 
 def get_metafits_value(metafits_filename: str, key: str):
     """
-    Returns a metafits value based on key in primary HDU
+    Read a single keyword value from the primary HDU of a metafits FITS file.
+
+    Args:
+        metafits_filename: Path to the metafits FITS file.
+        key: The FITS header keyword to look up in the primary HDU.
+
+    Returns:
+        The value associated with ``key`` in the primary HDU header. The type
+        matches whatever astropy returns for the keyword (str, int, float, bool, etc.).
+
+    Raises:
+        Exception: If the file cannot be opened or the keyword is not found,
+            wrapping the underlying error with a descriptive message.
     """
     try:
         with fits.open(metafits_filename) as hdul:
@@ -412,7 +505,20 @@ def get_metafits_value(metafits_filename: str, key: str):
 
 def get_metafits_value_from_hdu(metafits_filename: str, hdu_name: str, key: str):
     """
-    Returns a metafits value based on key in the provided HDU
+    Read a single keyword value from a named HDU of a metafits FITS file.
+
+    Args:
+        metafits_filename: Path to the metafits FITS file.
+        hdu_name: The name of the HDU to read from (e.g. ``'TILEDATA'``).
+        key: The FITS header keyword to look up in the specified HDU.
+
+    Returns:
+        The value associated with ``key`` in the named HDU header. The type
+        matches whatever astropy returns for the keyword (str, int, float, bool, etc.).
+
+    Raises:
+        Exception: If the file cannot be opened, the HDU is not found, or the
+            keyword is missing, wrapping the underlying error with a descriptive message.
     """
     try:
         with fits.open(metafits_filename) as hdul:
@@ -427,10 +533,23 @@ def get_metafits_value_from_hdu(metafits_filename: str, hdu_name: str, key: str)
 
 def get_metafits_values(metafits_filename: str) -> Tuple[bool, str, str]:
     """
-    Returns a tuple of
-    is_calibrator (bool) and
-    project_id (string) and
-    calib_source (string) from a metafits file.
+    Read calibrator status, project ID, and calibrator source from a metafits file.
+
+    Args:
+        metafits_filename: Path to the metafits FITS file.
+
+    Returns:
+        A three-element tuple ``(is_calibrator, project_id, calib_source)`` where:
+
+        - ``is_calibrator`` (bool): True if the CALIBRAT keyword is set in the
+          primary HDU header.
+        - ``project_id`` (str): The value of the PROJECT keyword.
+        - ``calib_source`` (str): The value of the CALIBSRC keyword if
+          ``is_calibrator`` is True, otherwise an empty string.
+
+    Raises:
+        Exception: If the file cannot be opened or any expected keyword is missing,
+            wrapping the underlying error with a descriptive message.
     """
     try:
         with fits.open(metafits_filename) as hdul:
@@ -449,7 +568,27 @@ def get_metafits_values(metafits_filename: str) -> Tuple[bool, str, str]:
 
 
 def read_config(config: ConfigParser, section: str, key: str, b64encoded=False):
-    """Reads a value from a config file"""
+    """
+    Read a required string value from a ConfigParser object.
+
+    If ``b64encoded`` is True the stored value is treated as Base64-encoded
+    UTF-8 and decoded before being returned. The decoded value is masked in
+    log output.
+
+    Args:
+        config: A ConfigParser instance with the configuration already loaded.
+        section: The INI section name containing the key.
+        key: The key name within the section.
+        b64encoded: If True, Base64-decode the raw string value before
+            returning it. Defaults to False.
+
+    Returns:
+        The configuration value as a string, Base64-decoded if requested.
+
+    Raises:
+        configparser.NoSectionError: If the section does not exist.
+        configparser.NoOptionError: If the key does not exist within the section.
+    """
     raw_value = config.get(section, key)
 
     if b64encoded:
@@ -464,10 +603,30 @@ def read_config(config: ConfigParser, section: str, key: str, b64encoded=False):
 
 
 def read_optional_config(config: ConfigParser, section: str, key: str, b64encoded=False) -> Optional[str]:
-    """Reads an optional value from a config file as Optional[str]
-    Optional can mean:
-    1. Key does not exist
-    2. Key exists but has empty value"""
+    """
+    Read an optional string value from a ConfigParser object.
+
+    Returns None if the key is absent or its value is an empty string.
+    If ``b64encoded`` is True the stored value is treated as Base64-encoded
+    UTF-8 and decoded before being returned. The decoded value is masked in
+    log output.
+
+    Args:
+        config: A ConfigParser instance with the configuration already loaded.
+        section: The INI section name containing the key. The section must
+            exist or KeyError is raised.
+        key: The key name within the section. If absent, returns None.
+        b64encoded: If True, Base64-decode the raw string value before
+            returning it. Defaults to False. Has no effect if the value is
+            absent or empty.
+
+    Returns:
+        The configuration value as a string (Base64-decoded if requested),
+        or None if the key is missing or empty.
+
+    Raises:
+        KeyError: If ``section`` does not exist in the config.
+    """
     value = None
     value_to_log = ""
 
@@ -495,7 +654,25 @@ def read_optional_config(config: ConfigParser, section: str, key: str, b64encode
 
 
 def read_config_list(config: ConfigParser, section: str, key: str):
-    """Reads a string from a config file, returning a list"""
+    """
+    Read a comma-separated string value from a ConfigParser object and return it as a list.
+
+    Leading and trailing whitespace is stripped from the raw value before
+    splitting. An empty (or whitespace-only) value returns an empty list.
+
+    Args:
+        config: A ConfigParser instance with the configuration already loaded.
+        section: The INI section name containing the key.
+        key: The key name within the section whose value is a comma-separated list.
+
+    Returns:
+        A list of strings split on commas. Returns an empty list if the value
+        is blank.
+
+    Raises:
+        configparser.NoSectionError: If the section does not exist.
+        configparser.NoOptionError: If the key does not exist within the section.
+    """
     string_value = read_config(config, section, key, False)
 
     # Ensure we trim string_value
@@ -513,7 +690,26 @@ def read_config_list(config: ConfigParser, section: str, key: str):
 
 
 def read_config_bool(config: ConfigParser, section: str, key: str):
-    """Read a bool from a config file"""
+    """
+    Read a boolean value from a ConfigParser object.
+
+    Delegates to ConfigParser.getboolean(), which accepts the standard
+    truthy/falsy strings (``'1'``, ``'yes'``, ``'true'``, ``'on'`` and their
+    negatives).
+
+    Args:
+        config: A ConfigParser instance with the configuration already loaded.
+        section: The INI section name containing the key.
+        key: The key name within the section.
+
+    Returns:
+        The configuration value as a bool.
+
+    Raises:
+        configparser.NoSectionError: If the section does not exist.
+        configparser.NoOptionError: If the key does not exist within the section.
+        ValueError: If the value cannot be interpreted as a boolean.
+    """
     value = config.getboolean(section, key)
 
     logger.info(f"Read cfg [{section}].{key} == {value}")
@@ -521,7 +717,15 @@ def read_config_bool(config: ConfigParser, section: str, key: str):
 
 
 def get_hostname() -> str:
-    """Return the hostname of the running machine"""
+    """
+    Return the short hostname of the running machine in lowercase.
+
+    Any domain suffix (everything after the first ``.``) is stripped so that
+    the fully-qualified domain name is never returned.
+
+    Returns:
+        The lowercase short hostname string (e.g. ``'mwax01'``).
+    """
     hostname = socket.gethostname()
 
     # ensure we remove anything after a . in case we got the fqdn
@@ -538,7 +742,25 @@ def process_mwax_stats(
     stats_dump_dir: str,
     metafits_path: str,
 ) -> bool:
-    """Runs mwax_stats"""
+    """
+    Run the ``mwax_stats`` binary against an MWA visibility or voltage file.
+
+    Constructs and executes a shell command of the form::
+
+        <mwax_stats_dir>/mwax_stats -t <full_filename> -m <metafits_filename> -o <stats_dump_dir>
+
+    Args:
+        mwax_stats_dir: Directory containing the ``mwax_stats`` binary.
+        full_filename: Full path to the data file to analyse. The observation ID
+            is derived from the first 10 characters of the basename.
+        numa_node: NUMA node to pin the subprocess to, or None for no pinning.
+        timeout: Maximum number of seconds to wait for the command to complete.
+        stats_dump_dir: Directory where ``mwax_stats`` will write its output.
+        metafits_path: Directory containing the metafits file for the observation.
+
+    Returns:
+        True if ``mwax_stats`` exited successfully, False otherwise.
+    """
     # This code will execute the mwax stats command
     obs_id = str(os.path.basename(full_filename)[0:10])
 
@@ -561,7 +783,24 @@ def process_mwax_stats(
 
 
 def load_psrdada_ringbuffer(full_filename: str, ringbuffer_key: str, numa_node, timeout: int) -> bool:
-    """Loads a subfile into a PSRDADA ringbuffer"""
+    """
+    Load a subfile into a PSRDADA ring buffer using ``dada_diskdb``.
+
+    Constructs and executes a shell command of the form::
+
+        dada_diskdb -k <ringbuffer_key> -f <full_filename>
+
+    Logs the transfer rate in Gbps on success.
+
+    Args:
+        full_filename: Full path to the ``.sub`` subfile to load.
+        ringbuffer_key: Hexadecimal PSRDADA ring buffer key (e.g. ``'dada'``).
+        numa_node: NUMA node to pin the subprocess to, or None for no pinning.
+        timeout: Maximum number of seconds to wait for the command to complete.
+
+    Returns:
+        True if ``dada_diskdb`` exited successfully, False otherwise.
+    """
     logger.debug(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
 
     cmd = f"dada_diskdb -k {ringbuffer_key} -f {full_filename}"
@@ -588,7 +827,23 @@ def load_psrdada_ringbuffer(full_filename: str, ringbuffer_key: str, numa_node, 
 
 
 def run_mwax_packet_stats(mwax_stats_dir: str, full_filename: str, output_dir: str, numa_node, timeout: int) -> bool:
-    """Runs the rust mwax_packet_stats binary against the subfile to generate packet stats"""
+    """
+    Run the ``mwax_packet_stats`` Rust binary against a subfile to generate packet statistics.
+
+    Constructs and executes a shell command of the form::
+
+        <mwax_stats_dir>/mwax_packet_stats -o <output_dir> -s <full_filename>
+
+    Args:
+        mwax_stats_dir: Directory containing the ``mwax_packet_stats`` binary.
+        full_filename: Full path to the ``.sub`` subfile to analyse.
+        output_dir: Directory where ``mwax_packet_stats`` will write its output.
+        numa_node: NUMA node to pin the subprocess to, or None for no pinning.
+        timeout: Maximum number of seconds to wait for the command to complete.
+
+    Returns:
+        True if ``mwax_packet_stats`` exited successfully, False otherwise.
+    """
     logger.debug(f"{full_filename}- attempting to execute mwax_packet_stats")
 
     cmd = f"{mwax_stats_dir}/mwax_packet_stats -o {output_dir} -s {full_filename}"
@@ -613,8 +868,18 @@ def scan_for_existing_files_and_add_to_queue(
     exclude_pattern=None,
 ):
     """
-    Scans a directory for a file pattern and then enqueues all items into
-    a regular queue
+    Scan a directory for files matching a pattern and add them to a regular Queue.
+
+    Files are sorted before being enqueued to provide a deterministic ordering.
+
+    Args:
+        watch_dir: Root directory to scan.
+        pattern: Glob suffix pattern to match (e.g. ``'.fits'``). Prepended
+            with ``'*'`` internally.
+        recursive: If True, scan all subdirectories recursively.
+        queue_target: The ``queue.Queue`` instance to add matched filenames to.
+        exclude_pattern: Optional glob suffix pattern. Files matching this
+            pattern are excluded from the results. Defaults to None (no exclusion).
     """
     files = scan_directory(watch_dir, pattern, recursive, exclude_pattern)
     files = sorted(files)
@@ -636,8 +901,27 @@ def scan_for_existing_files_and_add_to_priority_queue(
     exclude_pattern=None,
 ):
     """
-    Scans a directory for a file pattern and then enqueues all items into
-    a priority queue
+    Scan a directory for files matching a pattern and add them to a PriorityQueue.
+
+    Each file's priority is determined by ``get_priority()``. Files are sorted
+    before priority assignment to provide a deterministic ordering when multiple
+    files share the same priority.
+
+    Args:
+        metafits_path: Directory containing metafits files, passed through to
+            ``get_priority()`` for file type and project ID resolution.
+        watch_dir: Root directory to scan.
+        pattern: Glob suffix pattern to match (e.g. ``'.fits'``). Prepended
+            with ``'*'`` internally.
+        recursive: If True, scan all subdirectories recursively.
+        queue_target: The ``queue.PriorityQueue`` instance to add
+            ``(priority, MWAXPriorityQueueData)`` tuples to.
+        list_of_correlator_high_priority_projects: Project IDs that should
+            receive elevated priority for correlator observations.
+        list_of_vcs_high_priority_projects: Project IDs that should receive
+            elevated priority for VCS observations.
+        exclude_pattern: Optional glob suffix pattern. Files matching this
+            pattern are excluded from the results. Defaults to None (no exclusion).
     """
     files = scan_directory(watch_dir, pattern, recursive, exclude_pattern)
     files = sorted(files)
@@ -655,7 +939,21 @@ def scan_for_existing_files_and_add_to_priority_queue(
 
 
 def scan_directory(watch_dir: str, pattern: str, recursive: bool, exclude_pattern) -> list:
-    """Scan a directory based on a pattern and adds the files into a list"""
+    """
+    Scan a directory for files matching a glob pattern and return them as a list.
+
+    Args:
+        watch_dir: Root directory to scan. Resolved to an absolute path internally.
+        pattern: Glob suffix pattern to match (e.g. ``'.fits'``). Prepended
+            with ``'*'`` (and ``'**/'`` for recursive scans) internally.
+        recursive: If True, search all subdirectories using ``**`` glob syntax.
+        exclude_pattern: Glob suffix pattern for files to exclude. Files whose
+            paths match ``<watch_dir>/*<exclude_pattern>`` are removed from
+            the results. Pass None (or a falsy value) to skip exclusion.
+
+    Returns:
+        A list of absolute path strings for all matched (and non-excluded) files.
+    """
     # Watch dir must end in a slash for the iglob to work
     # Just loop through all files and add them to the queue
     if recursive:
@@ -683,7 +981,28 @@ def send_multicast(
     message: bytes,
     ttl_hops: int,
 ):
-    """Send data to an IP and port via multicast"""
+    """
+    Send a UDP datagram to an IP multicast group.
+
+    Creates a UDP socket, configures the outbound multicast interface and
+    TTL, then transmits ``message`` to the specified group address and port.
+    The socket is closed in a finally block regardless of outcome.
+
+    Args:
+        multicast_interface_ip: IP address of the local network interface to
+            use for outbound multicast traffic. Must be associated with a
+            multicast-capable interface.
+        dest_multicast_ip: Destination multicast group IP address
+            (e.g. ``'239.255.0.1'``).
+        dest_multicast_port: Destination UDP port number.
+        message: The raw bytes payload to transmit.
+        ttl_hops: IP multicast TTL / hop limit. Controls how many router hops
+            the datagram may traverse.
+
+    Raises:
+        Exception: If ``sendto`` sends zero bytes, or if any socket operation
+            raises an unexpected error.
+    """
 
     # Create the datagram socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
@@ -719,7 +1038,21 @@ def send_multicast(
 
 
 def get_ip_address(ifname: str) -> str:
-    """Gets an IP address from an interface name"""
+    """
+    Return the IPv4 address assigned to a named network interface.
+
+    Uses the ``SIOCGIFADDR`` ioctl to query the kernel directly.
+
+    Args:
+        ifname: The network interface name (e.g. ``'eth0'``, ``'bond0'``).
+            Only the first 15 characters are used.
+
+    Returns:
+        The IPv4 address as a dotted-decimal string (e.g. ``'192.168.1.10'``).
+
+    Raises:
+        OSError: If the ioctl call fails (e.g. the interface does not exist).
+    """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     return socket.inet_ntoa(
         fcntl.ioctl(
@@ -731,18 +1064,49 @@ def get_ip_address(ifname: str) -> str:
 
 
 def get_primary_ip_address() -> str:
-    """Get primary IP of this host"""
+    """
+    Return the primary IPv4 address of this host.
+
+    Resolves the fully-qualified domain name of the host and returns the
+    corresponding IP address.
+
+    Returns:
+        The primary IPv4 address as a dotted-decimal string.
+    """
     return socket.gethostbyname(socket.getfqdn())
 
 
 def get_disk_space_bytes(path: str) -> typing.Tuple[int, int, int]:
-    """Gets the total, used and free bytes from a path"""
+    """
+    Return disk usage statistics for the filesystem containing ``path``.
+
+    Args:
+        path: Any path on the filesystem to query (file or directory).
+
+    Returns:
+        A named tuple ``(total, used, free)`` with values in bytes, as
+        returned by ``shutil.disk_usage``.
+    """
     # Get disk space: total, used and free
     return shutil.disk_usage(path)
 
 
 def do_checksum_md5(full_filename: str, numa_node: Optional[int], timeout: int) -> str:
-    """Return an md5 checksum of a file"""
+    """
+    Compute the MD5 checksum of a file by running the system ``md5sum`` command.
+
+    Args:
+        full_filename: Full path to the file to checksum.
+        numa_node: NUMA node to pin the subprocess to, or None for no pinning.
+        timeout: Maximum number of seconds to wait for the command to complete.
+
+    Returns:
+        The 32-character lowercase hexadecimal MD5 digest string.
+
+    Raises:
+        Exception: If ``md5sum`` returns a non-zero exit code, or if the parsed
+            checksum is not exactly 32 characters.
+    """
 
     # default output of md5 hash command is:
     # "5ce49e5ebd72c41a1d70802340613757
@@ -764,9 +1128,10 @@ def do_checksum_md5(full_filename: str, numa_node: Optional[int], timeout: int) 
     mb_per_sec = size_megabytes / elapsed
 
     if return_value:
-        # the return value will contain a few spaces and then the filename
-        # So remove the filename and then remove any whitespace
-        checksum = md5output.replace(full_filename, "").rstrip()
+        # md5sum output format is: "<hash>  <filename>"
+        # Split on whitespace and take the first token to avoid any risk of
+        # the filename appearing in the hash field if it contains unusual characters.
+        checksum = md5output.split()[0]
 
         # MD5 hash is ALWAYS 32 characters
         if len(checksum) == 32:
@@ -789,22 +1154,37 @@ def get_priority(
     list_of_vcs_high_priority_projects: list,
 ) -> int:
     """
-    metafits_path is the directory where all the current
-    metafits files exist.
+    Determine the archive priority integer for a given MWA data file.
 
-    Determines the priority to assign this file.
-    The returned integer has is used by a PriorityQueue
-    to determine priority. The lowest priority number
-    in the queue gets returned first when q.get() is
-    called.
+    A lower integer means higher priority (i.e. the file will be dequeued
+    first from a ``PriorityQueue``). The priority scheme is:
 
-    Priority order is:
-    1 metafits_ppds (small and can be quickly archived)
-    2 Calibrator correlator observations
-    3 reserved for correlator high prioriry projects
-    20 reserved for vcs high prioriry projects
-    30 normal correlator observations
-    90 vcs observations
+    ====  ==========================================================
+    1     Metafits / PPD files (small, quick to archive)
+    2     Calibrator correlator observations
+    3     Correlator observations for high-priority projects
+    5     VDIF / filterbank files for high-priority VCS projects
+    10    VDIF / filterbank files for normal VCS projects
+    20    VCS voltage files for high-priority projects
+    30    Normal correlator observations
+    90    Normal VCS voltage observations
+    100   Default / unrecognised (should not occur for valid files)
+    ====  ==========================================================
+
+    Args:
+        filename: Full path to the MWA data file.
+        metafits_path: Directory containing metafits files, used by
+            ``validate_filename`` to resolve project ID and calibrator status.
+        list_of_correlator_high_priority_projects: Project IDs that receive
+            elevated priority (level 3) for correlator observations.
+        list_of_vcs_high_priority_projects: Project IDs that receive elevated
+            priority (levels 5 and 20) for VCS / beamformer observations.
+
+    Returns:
+        An integer priority value. Lower values are higher priority.
+
+    Raises:
+        Exception: If ``validate_filename`` reports the file as invalid.
     """
     return_priority = 100  # default if we don't do anything else
 
@@ -840,10 +1220,29 @@ def get_priority(
 
 
 def inject_subfile_header(subfile_filename: str, key_value_pairs: str):
-    """Appends the key_value_pair setting to the existing subfile header
-    Multiple key value pairs should have a \n to split each setting.
-    Each key_value_pair should be space separated: 'KEY VALUE' and
-    end with a \n newline"""
+    """
+    Overwrite the last line of a PSRDADA subfile header with new key-value pairs.
+
+    Reads the first ``PSRDADA_HEADER_BYTES`` (4096) bytes of the subfile,
+    replaces the final line with ``key_value_pairs`` (padded with null bytes
+    to preserve the exact header size), and writes the modified header back
+    in place.
+
+    Multiple key-value pairs should be separated by ``'\\n'``. Each pair
+    must be space-separated (``'KEY VALUE'``) and end with a newline.
+
+    Args:
+        subfile_filename: Path to the ``.sub`` subfile to modify in place.
+        key_value_pairs: String of one or more ``'KEY VALUE\\n'`` pairs to
+            write into the last line of the header. Must not exceed the
+            length of the existing last line.
+
+    Raises:
+        ValueError: If ``key_value_pairs`` is longer than the available space
+            in the last line of the header.
+        Exception: If the resulting header byte array is not exactly
+            ``PSRDADA_HEADER_BYTES`` bytes long.
+    """
     data = []
 
     # Read the psrdada header data in to a list (one line per item)
@@ -854,6 +1253,14 @@ def inject_subfile_header(subfile_filename: str, key_value_pairs: str):
     last_row_len = len(data[last_line_index])
 
     new_settings_len = len(key_value_pairs)
+
+    if new_settings_len > last_row_len:
+        raise ValueError(
+            f"inject_subfile_header(): key_value_pairs length ({new_settings_len})"
+            f" exceeds the available space in the last header line ({last_row_len})."
+            " Cannot inject without corrupting the header."
+        )
+
     null_trail = "\0" * (last_row_len - new_settings_len)
     data[last_line_index] = key_value_pairs + null_trail
 
@@ -875,12 +1282,35 @@ def inject_subfile_header(subfile_filename: str, key_value_pairs: str):
 
 
 def inject_beamformer_headers(subfile_filename: str, beamformer_settings: str):
-    """Appends the beamformer settings to the existing subfile header"""
+    """
+    Append beamformer settings to the existing PSRDADA subfile header.
+
+    A thin wrapper around ``inject_subfile_header`` for the beamformer use case.
+
+    Args:
+        subfile_filename: Path to the ``.sub`` subfile to modify in place.
+        beamformer_settings: String of one or more ``'KEY VALUE\\n'`` pairs
+            representing the beamformer configuration to inject.
+    """
     inject_subfile_header(subfile_filename, beamformer_settings)
 
 
 def read_subfile_value(filename: str, key: str) -> typing.Union[str, None]:
-    """Returns key as a string from a subfile header"""
+    """
+    Read a single keyword value from a PSRDADA subfile header.
+
+    Reads the first ``PSRDADA_HEADER_BYTES`` (4096) bytes of the file and
+    searches line-by-line for a line with exactly two whitespace-separated
+    tokens whose first token matches ``key``.
+
+    Args:
+        filename: Path to the ``.sub`` subfile to read.
+        key: The PSRDADA header keyword to look up (case-sensitive).
+
+    Returns:
+        The value string associated with ``key``, or None if the keyword is
+        not found in the header.
+    """
     subfile_value = None
 
     with open(filename, "rb") as subfile:
@@ -903,7 +1333,21 @@ def read_subfile_value(filename: str, key: str) -> typing.Union[str, None]:
 
 
 def read_subfile_values(filename: str, keys: list[str]) -> dict:
-    """Returns values of keys as a list of strings (or none) from a subfile header"""
+    """
+    Read multiple keyword values from a PSRDADA subfile header in a single pass.
+
+    Reads the first ``PSRDADA_HEADER_BYTES`` (4096) bytes of the file and
+    searches line-by-line for lines with exactly two whitespace-separated
+    tokens. Stops early once all requested keys have been found.
+
+    Args:
+        filename: Path to the ``.sub`` subfile to read.
+        keys: A list of PSRDADA header keywords to look up (case-sensitive).
+
+    Returns:
+        A dict mapping each key in ``keys`` to its value string, or None for
+        any keyword not found in the header.
+    """
     subfile_values = dict()
     found = 0
 
@@ -935,8 +1379,19 @@ def read_subfile_values(filename: str, keys: list[str]) -> dict:
 
 
 def read_subfile_trigger_value(subfile_filename: str):
-    """Reads the TRIGGER_ID values from a subfile header
-    Returns trigger_id as an INT or None if not found"""
+    """
+    Read the ``TRIGGER_ID`` value from a PSRDADA subfile header.
+
+    A convenience wrapper around ``read_subfile_value`` that casts the
+    result to an integer.
+
+    Args:
+        subfile_filename: Path to the ``.sub`` subfile to read.
+
+    Returns:
+        The trigger ID as an int, or None if the ``TRIGGER_ID`` keyword is
+        not present in the header.
+    """
     value = read_subfile_value(subfile_filename, PSRDADA_TRIGGER_ID)
 
     if value:
@@ -946,9 +1401,17 @@ def read_subfile_trigger_value(subfile_filename: str):
 
 
 def write_mock_subfile_from_header(output_filename, header):
-    """This is a utility so that tests
-    can write subfiles! It will append some dummy data after the header and
-    ensure the header is 4096 bytes padded by nuls"""
+    """
+    Write a mock PSRDADA subfile from a pre-built header string (for use in tests).
+
+    Pads the header to exactly 4096 bytes with null bytes, then appends 256
+    bytes of incrementing data (0x00–0xFF) to simulate a minimal subfile payload.
+
+    Args:
+        output_filename: Path to write the mock subfile to.
+        header: ASCII string containing the PSRDADA header content. Must be
+            shorter than 4096 bytes to leave room for null padding.
+    """
 
     # Append the remainder of the 4096 bytes
     remainder_len = 4096 - len(header)
@@ -977,9 +1440,23 @@ def write_mock_subfile(
     rec_channel,
     corr_channel,
 ):
-    """This is a utility so that tests
-    can write subfiles! It will append some dummy data after the header and
-    ensure the header is 4096 bytes padded by nuls"""
+    """
+    Write a complete mock PSRDADA subfile for use in tests.
+
+    Constructs a realistic PSRDADA ASCII header using the supplied parameters,
+    pads it to 4096 bytes, and appends a 256-byte dummy data payload.
+
+    Args:
+        output_filename: Path to write the mock subfile to.
+        obs_id: MWA observation ID to embed in the header (``OBS_ID``).
+        subobs_id: Sub-observation ID to embed in the header (``SUBOBS_ID``).
+        mode: Correlator mode string to embed in the header (``MODE``).
+        obs_offset: Offset in seconds from the start of the observation
+            (``OBS_OFFSET``).
+        rec_channel: Receiver coarse channel number (``COARSE_CHANNEL``).
+        corr_channel: Correlator coarse channel number
+            (``CORR_COARSE_CHANNEL``).
+    """
     # Create ascii header
     header = (
         "HDR_SIZE 4096\n"
@@ -1027,9 +1504,20 @@ def write_mock_subfile(
 
 
 def should_project_be_archived(project_id: str) -> bool:
-    """If the project code is C123 then do not archive the data!
-    If we ever get more codes or they change more often this should
-    move into the config file"""
+    """
+    Determine whether data for a given project ID should be archived.
+
+    Project ``C123`` is a test/commissioning project whose data should not
+    be archived. If this list grows or changes frequently it should be moved
+    into a configuration file.
+
+    Args:
+        project_id: The MWA project ID string (case-insensitive).
+
+    Returns:
+        False if ``project_id`` is ``'C123'`` (case-insensitive), True for
+        all other project IDs.
+    """
     if project_id.upper() == "C123":
         return False
     else:
@@ -1037,6 +1525,38 @@ def should_project_be_archived(project_id: str) -> bool:
 
 
 def call_webservice(obs_id: int, url_list: list[str], data, max_retries: int = 10, wait: int = 30) -> requests.Response:
+    """
+    Call a list of MWA web service URLs in order, retrying on transient failures.
+
+    Iterates through ``url_list`` on each attempt, returning immediately on an
+    HTTP 200 response. HTTP 4xx responses are treated as permanent failures and
+    are not retried (``ValueError`` is raised and excluded from tenacity retries).
+    All other failures (non-200 status codes, network exceptions) cause the next
+    URL to be tried; if all URLs are exhausted the attempt fails and tenacity
+    will retry the entire sequence up to ``max_retries`` times with a fixed
+    ``wait``-second delay between attempts.
+
+    Note: With the default arguments (``max_retries=10``, ``wait=30``) this
+    function may block for up to ~5 minutes before raising.
+
+    Args:
+        obs_id: The MWA observation ID, used only for log messages.
+        url_list: Ordered list of URLs to try. Each must accept a GET request
+            with optional ``data`` parameters.
+        data: Query parameters to pass to ``requests.get()``, or None.
+        max_retries: Maximum number of retry attempts via tenacity. Defaults to 10.
+        wait: Seconds to wait between tenacity retry attempts. Defaults to 30.
+
+    Returns:
+        The first successful ``requests.Response`` object (HTTP status 200).
+
+    Raises:
+        Exception: If any URL returns an HTTP 4xx response (permanent error,
+            not retried).
+        requests.RequestException: If all URLs fail on every attempt across
+            all retries.
+    """
+
     @retry(stop=stop_after_attempt(max_retries), wait=wait_fixed(wait), retry=retry_if_not_exception_type((ValueError)))
     def call_webservice_inner(obs_id: int, url_list: list[str], data) -> requests.Response:
         """Call each url in the list until: a response of
@@ -1080,7 +1600,7 @@ def call_webservice(obs_id: int, url_list: list[str], data, max_retries: int = 1
 
         # We tried all urls without success- up to tenacity to retry X times now
         logger.error(f"{obs_id}: call_webservice() - failed after trying {len(url_list)} urls.")
-        raise Exception(f"{obs_id}: call_webservice()- failed after trying {len(url_list)} urls.")
+        raise requests.RequestException(f"{obs_id}: call_webservice()- failed after trying {len(url_list)} urls.")
 
     return call_webservice_inner(obs_id, url_list, data)
 
@@ -1088,10 +1608,23 @@ def call_webservice(obs_id: int, url_list: list[str], data, max_retries: int = 1
 def get_data_files_for_obsid_from_webservice(
     obs_id: int,
 ) -> list[str]:
-    """Calls an MWA webservice, passing in an obsid and returning a list of filenames
-    of all the data_files (MWAX_VISIBILITIES or HW_LFILES) of the given filetype or None if there was an error.
-    metadata_webservice_url is the base url - e.g. http://ws.mwatelescope.org
-    - all_files: True means to get all files whether they are archived at Pawsey or not"""
+    """
+    Retrieve a list of data filenames for an observation from the MWA web service.
+
+    Queries the ``metadata/data_files`` endpoint (MRO-local first, then public)
+    for the given observation ID and returns filenames whose file type is
+    ``MWAX_VISIBILITIES`` or ``HW_LFILES``. Results are sorted alphabetically.
+
+    Args:
+        obs_id: The 10-digit MWA observation ID to query.
+
+    Returns:
+        A sorted list of filename strings for all matching data files,
+        regardless of whether they have been archived at Pawsey.
+
+    Raises:
+        Exception: If the web service cannot be reached after all retries.
+    """
     urls = ["http://mro.mwa128t.org/metadata/data_files", "http://ws.mwatelescope.org/metadata/data_files"]
     data = {"obs_id": obs_id, "terse": False, "all_files": True}
 
@@ -1112,12 +1645,24 @@ def get_data_files_for_obsid_from_webservice(
 def get_data_files_with_hostname_for_obsid_from_webservice(
     obs_id: int,
 ) -> list[tuple[str, str]]:
-    """Calls an MWA webservice, passing in an obsid and returning a list of tuples of filenames and hostnames
-    of all the data_files (MWAX_VISIBILITIES or HW_LFILES) of the given filetype or None if there was an error.
-    metadata_webservice_url is the base url - e.g. http://ws.mwatelescope.org
-    - all_files: True means to get all files whether they are archived at Pawsey or not
+    """
+    Retrieve data filenames and their host locations for an observation from the MWA web service.
 
-    each tuple is [filename, hostname]"""
+    Queries the ``metadata/data_files`` endpoint (MRO-local first, then public)
+    for the given observation ID and returns ``(filename, hostname)`` tuples
+    for files whose type is ``MWAX_VISIBILITIES`` or ``HW_LFILES``. Results
+    are sorted alphabetically by filename.
+
+    Args:
+        obs_id: The 10-digit MWA observation ID to query.
+
+    Returns:
+        A sorted list of ``(filename, hostname)`` tuples for all matching data
+        files, regardless of whether they have been archived at Pawsey.
+
+    Raises:
+        Exception: If the web service cannot be reached after all retries.
+    """
     urls = ["http://mro.mwa128t.org/metadata/data_files", "http://ws.mwatelescope.org/metadata/data_files"]
     data = {"obs_id": obs_id, "terse": False, "all_files": True}
 
@@ -1137,7 +1682,33 @@ def get_data_files_with_hostname_for_obsid_from_webservice(
 
 @retry(stop=stop_after_attempt(5), wait=wait_fixed(10))
 def remove_file(filename: str, raise_error: bool) -> bool:
-    """Deletes a file from the filesystem"""
+    """
+    Delete a file from the filesystem, with up to 5 automatic retries.
+
+    Retries are handled by tenacity with a 10-second fixed wait between
+    attempts. Retries only occur when ``raise_error`` is True and the deletion
+    raises an exception; when ``raise_error`` is False a failed deletion is
+    logged as a warning and True is returned without retrying.
+
+    Note: When ``raise_error`` is False this function returns True even if the
+    file was not successfully deleted (e.g. because it had already been moved
+    or removed by another process). Callers that require confirmation of
+    deletion should pass ``raise_error=True``.
+
+    Args:
+        filename: Full path to the file to delete.
+        raise_error: If True, log an error and re-raise the exception on
+            failure (triggering a tenacity retry). If False, log a warning
+            and return True without raising.
+
+    Returns:
+        True if the file was deleted, or if ``raise_error`` is False and the
+        deletion failed (assumed already gone).
+
+    Raises:
+        Exception: The underlying OS exception, if ``raise_error`` is True and
+            all retry attempts are exhausted.
+    """
     try:
         os.remove(filename)
         logger.info(f"{filename}- file deleted")
@@ -1154,6 +1725,16 @@ def remove_file(filename: str, raise_error: bool) -> bool:
 
 # For a given datetime, return the GPS seconds as an integer
 def get_gpstime_of_datetime(date_time: datetime.datetime) -> int:
+    """
+    Convert a UTC datetime to an integer GPS time (seconds since GPS epoch).
+
+    Args:
+        date_time: A timezone-aware or naive UTC ``datetime.datetime`` object.
+
+    Returns:
+        The GPS time as an integer number of seconds since the GPS epoch
+        (6 January 1980 00:00:00 UTC).
+    """
     utc_datetime: astrotime.Time = astrotime.Time(date_time, scale="utc")
     current_gpstime = utc_datetime.gps
     return int(current_gpstime)
@@ -1161,10 +1742,27 @@ def get_gpstime_of_datetime(date_time: datetime.datetime) -> int:
 
 # Return the GPS seconds as an integer of Now
 def get_gpstime_of_now() -> int:
+    """
+    Return the current time as an integer GPS time (seconds since GPS epoch).
+
+    Returns:
+        The current GPS time as an integer number of seconds since the GPS
+        epoch (6 January 1980 00:00:00 UTC).
+    """
     return get_gpstime_of_datetime(datetime.datetime.now(datetime.timezone.utc))
 
 
 def is_int(value) -> bool:
+    """
+    Check whether ``value`` can be interpreted as an integer.
+
+    Args:
+        value: Any value to test. Typically a string.
+
+    Returns:
+        True if ``int(value)`` succeeds without raising ``ValueError``,
+        False otherwise.
+    """
     try:
         int(value)
     except ValueError:
@@ -1174,29 +1772,42 @@ def is_int(value) -> bool:
 
 
 def gigabyte_to_gibibyte(gigabytes: float) -> float:
+    """
+    Convert a size in gigabytes (SI, base-10) to gibibytes (IEC, base-2).
+
+    Args:
+        gigabytes: Size in gigabytes (1 GB = 10^9 bytes).
+
+    Returns:
+        Equivalent size in gibibytes (1 GiB = 2^30 bytes), as a float.
+    """
     return gigabytes / 1.07374
 
 
 def delete_files_older_than(path: str, older_than_seconds: int, extensions: list[str]) -> list[str]:
     """
-    Delete files in `path` that:
-      1) are older than `older_than_seconds` (based on modification time), and
-      2) have an extension that matches any in `extensions`.
+    Delete files in a directory that are older than a threshold and match given extensions.
+
+    Scans ``path`` non-recursively and deletes any regular file whose
+    modification time is at least ``older_than_seconds`` seconds in the past
+    and whose extension (case-insensitive) is in ``extensions``. Files that
+    cannot be stat-ed or deleted (e.g. due to permissions) are silently skipped.
 
     Args:
-        path (str): Directory to scan (non-recursive).
-        older_than_seconds (int): Age threshold in seconds. Files with (now - mtime) >= threshold are deleted.
-        extensions (list[str]): List of extensions to match. Each can be with or without leading dot, case-insensitive.
-                                Examples: ["log", ".tmp", ".TXT"]
-
-                                NOTE: The default `list[str]` in the signature is a type placeholder.
-                                You should pass an explicit list at call time, e.g., ["log", "tmp"].
+        path: Directory to scan. Must exist and be a directory.
+        older_than_seconds: Age threshold in seconds (based on ``mtime``).
+            Files with ``(now - mtime) >= older_than_seconds`` are candidates
+            for deletion. Must be non-negative.
+        extensions: List of file extensions to match, with or without a
+            leading dot, case-insensitive (e.g. ``['log', '.tmp', '.TXT']``).
+            An empty list matches nothing and no files will be deleted.
 
     Returns:
-        List[str]: Absolute paths of files successfully deleted.
+        A list of absolute path strings for every file successfully deleted.
 
     Raises:
-        ValueError: If `path` is not a directory or `older_than_seconds` is negative.
+        ValueError: If ``path`` is not an existing directory, or if
+            ``older_than_seconds`` is negative.
     """
     # --- Validate inputs ---
     p = Path(path)
@@ -1254,34 +1865,44 @@ def delete_files_older_than(path: str, older_than_seconds: int, extensions: list
 
 
 def push_message_to_redis(redis_host: str, redis_queue_key: str, message_data):
-    """Push a message to Redis list as JSON
-    message is any data that can be serialised into json.
-    Raises exception if we fail more than MAX_RETRIES times
+    """
+    Push a message onto a Redis list as a JSON-serialised string.
+
+    Connects to Redis on port 6379 of ``redis_host``, serialises
+    ``message_data`` to JSON, and pushes it onto the left end of the list at
+    ``redis_queue_key`` using ``LPUSH``. Retries up to ``MAX_RETRIES`` (3)
+    times with a 1-second delay on ``RedisError``.
+
+    Args:
+        redis_host: Hostname or IP address of the Redis server.
+        redis_queue_key: The Redis list key to push the message onto.
+        message_data: Any JSON-serialisable Python object to push as the message.
+
+    Raises:
+        redis.RedisError: If the push fails on all retry attempts.
     """
     MAX_RETRIES = 3
 
     json_message = json.dumps(message_data)
 
     # Connect to Redis
-    attempt = 0
+    attempt = 1
     while attempt <= MAX_RETRIES:
-        attempt += 1
-
         try:
             with redis.Redis(host=redis_host, port=6379, decode_responses=True) as r:
                 r.lpush(redis_queue_key, json_message)
                 return
 
         except redis.RedisError as e:
-            # wait 1 rec between retries
+            # wait 1 second between retries
             time.sleep(1)
 
-            if attempt == MAX_RETRIES:
+            if attempt >= MAX_RETRIES:
                 raise redis.RedisError(
                     f"Could not push message to Redis host {redis_host} [{redis_queue_key}] after {attempt} tries: {e}"
                 ) from e
-            else:
-                continue
+
+        attempt += 1
 
 
 def copy_subfile_to_disk_cp(
@@ -1291,8 +1912,23 @@ def copy_subfile_to_disk_cp(
     timeout: int,
     destination_filename: str = ".",
 ) -> bool:
-    """Copies the given filename to the destination path
-    DEPRECATED FOR NOW- replaced with copy_subfile_to_disk_dd()"""
+    """
+    Copy a subfile to a destination directory using the system ``cp`` command.
+
+    .. deprecated::
+        Replaced by ``copy_subfile_to_disk_dd()``. Retained for reference.
+
+    Args:
+        filename: Full path to the source subfile.
+        numa_node: NUMA node to pin the subprocess to, or None for no pinning.
+        destination_path: Destination directory path.
+        timeout: Maximum number of seconds to wait for the command to complete.
+        destination_filename: Destination filename within ``destination_path``.
+            Defaults to ``'.'`` (i.e. preserve the source filename).
+
+    Returns:
+        True if ``cp`` exited successfully, False otherwise.
+    """
     logger.info(f"{filename}- Copying file into {destination_path}")
 
     command = f"cp {filename} {destination_path}/{destination_filename}"
@@ -1323,16 +1959,32 @@ def copy_subfile_to_disk_dd(
     destination_filename: str,
     bytes_to_write: int,
 ) -> bool:
-    """Copies the given filename to the destination path, trimming X bytes off the end of the file
-    This is for the case where the subfiles are sized for e.g. 144T but the observation is only
-    128T. When copied, dd will only copy the 128T worth of data (u2s would have already ensured
-    that the data written is only 128T worth and that the remaining space is 'empty')
+    """
+    Copy the first N bytes of a subfile to disk using the system ``dd`` command.
 
-    filename: Abs or relative path and filename
-    destination_path: Just the destination directory
-    destination_filename: Just the destination filename (no path)- note- unlike with cp it cannot
-                        be just a "."! dd doesn't like that - it has to be a real filename.
-    bytes_to_write: only write the first N bytes"""
+    Used when subfiles are pre-allocated for a larger tile count than the
+    observation actually uses (e.g. allocated for 144T but the observation is
+    128T). The ``u2s`` process writes only the relevant data, so only the first
+    ``bytes_to_write`` bytes need to be copied; the rest of the file is empty.
+
+    Uses ``oflag=direct`` and ``iflag=count_bytes`` for efficient I/O, and logs
+    the transfer rate in GB/sec on success.
+
+    Note: Unlike ``copy_subfile_to_disk_cp``, ``destination_filename`` must be
+    an actual filename — ``dd`` does not accept ``'.'`` as a destination.
+
+    Args:
+        filename: Full (or relative) path to the source subfile.
+        numa_node: NUMA node to pin the subprocess to, or None for no pinning.
+        destination_path: Destination directory path (no trailing slash needed).
+        timeout: Maximum number of seconds to wait for the command to complete.
+        destination_filename: Destination filename only (no path component).
+            Must be a real filename, not ``'.'``.
+        bytes_to_write: Number of bytes to copy from the start of the source file.
+
+    Returns:
+        True if ``dd`` exited successfully, False otherwise.
+    """
     logger.debug(f"{filename}- Copying first {bytes_to_write} bytes of file into {destination_path}")
 
     command = f"dd if={filename} of={destination_path}/{destination_filename} bs=4M oflag=direct iflag=count_bytes count={bytes_to_write}"
@@ -1360,5 +2012,14 @@ def copy_subfile_to_disk_dd(
 
 
 def running_under_pytest() -> bool:
+    """
+    Detect whether the current process is running under pytest.
+
+    Checks for the presence of the ``PYTEST_CURRENT_TEST`` environment variable,
+    which pytest sets automatically during test execution.
+
+    Returns:
+        True if running inside a pytest session, False otherwise.
+    """
     # Returns True if we are running as part of pytest
     return "PYTEST_CURRENT_TEST" in os.environ

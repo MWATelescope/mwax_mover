@@ -1,4 +1,10 @@
-"""Module for the QueueWorker class"""
+"""Queue worker that processes file paths from a plain FIFO queue.
+
+QueueWorker dequeues file paths and calls either a provided event_handler callable
+or runs a shell command with __FILE__ / __FILENOEXT__ token substitution. Supports
+three failure strategies: requeue to the end of the queue, keep retrying the same
+item, or drop the item entirely. Implements configurable exponential backoff.
+"""
 
 import logging
 import os

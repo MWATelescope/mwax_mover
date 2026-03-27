@@ -1,4 +1,11 @@
-"""Module file for MWACacheArchiveProcessor"""
+"""Entry point and main class for the mwacache_archive_processor daemon.
+
+MWACacheArchiveProcessor runs on the mwacache servers at Curtin. It monitors one
+or more incoming directories for files sent from MWAX boxes, validates their size
+and checksum against the remote metadata database, archives them to Pawsey Long-Term
+Storage (Acacia or Banksia) via rclone, updates the MRO metadata database to
+confirm successful archival, then deletes the local copy.
+"""
 
 import argparse
 from configparser import ConfigParser

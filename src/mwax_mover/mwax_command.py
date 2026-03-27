@@ -1,4 +1,10 @@
-"""Module to execute arbitrary commands"""
+"""Thin wrappers around subprocess for executing external commands.
+
+Provides run_command_ext() for synchronous execution (with optional NUMA node
+pinning, timeout, and shell mode), run_command_popen() for asynchronous execution
+returning a Popen handle, and check_popen_finished() to wait for a Popen process
+and retrieve its exit code and output.
+"""
 
 import logging
 import os

@@ -1,3 +1,11 @@
+"""Post-processing of hyperdrive calibration solutions for the Calvin pipeline.
+
+Provides process_solutions(), which loads hyperfits solution files and metafits,
+determines a reference antenna, fits phases and gains per coarse channel, and
+inserts the resulting calibration fit and solution records into the MWA metadata
+database.
+"""
+
 import glob
 import logging
 import os

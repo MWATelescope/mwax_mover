@@ -1,3 +1,14 @@
+"""Abstract base classes composing a directory watcher with a queue worker.
+
+MWAXWatchQueueWorker combines one or more Watcher instances (plain queue) with a
+QueueWorker. MWAXPriorityWatchQueueWorker does the same using PriorityWatcher and
+PriorityQueueWorker, so that high-priority MWA project files are processed first.
+
+On start(), all watcher threads perform their initial directory scan before the
+queue worker thread begins, ensuring the full backlog is prioritised before any
+processing starts. Concrete subclasses implement only the handler() method.
+"""
+
 import logging
 from queue import PriorityQueue, Queue
 from mwax_mover.mwax_watcher import Watcher

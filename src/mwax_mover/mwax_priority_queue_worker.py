@@ -1,4 +1,11 @@
-"""Module for the QueueWorker class"""
+"""Priority queue worker that processes files in order of assigned priority.
+
+PriorityQueueWorker dequeues (priority, MWAXPriorityQueueData) tuples and calls
+either a provided event_handler callable or runs a shell command with token
+substitution. Implements exponential backoff on failure; when requeueing a failed
+item to the end of the queue, increments its priority number so it sinks toward
+the back.
+"""
 
 import logging
 import os

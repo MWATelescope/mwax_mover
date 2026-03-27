@@ -1,6 +1,11 @@
-"""
-Module hosting the MWAXCalvinProcessor for near-realtime
-calibration
+"""Entry point and main class for the mwax_calvin_processor SLURM job.
+
+MWAXCalvinProcessor is launched on a Calvin HPC node by a SLURM job submitted by
+mwax_calvin_controller. It downloads calibrator observation data (either by rsyncing
+from MWAX boxes for realtime jobs, or downloading from MWA ASVO), preprocesses with
+Birli, calibrates with hyperdrive, uploads the resulting solution to the MWA
+metadata database via process_solutions(), then signals each MWAX host to release
+the calibrator visibility files for archiving or discard.
 """
 
 import argparse

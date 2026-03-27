@@ -1,4 +1,13 @@
-"""Module for mwax_subfile_distributor"""
+"""Entry point and main class for the mwax_subfile_distributor daemon.
+
+MWAXSubfileDistributor is the central real-time data handling engine of the MWAX
+correlator and beamformer. It orchestrates a pipeline of watch-queue-workers that
+route raw PSRDADA subfiles to the correlator or beamformer, checksum and record
+output files in the MWA metadata database, stitch beamformer subobservations, run
+visibility statistics, and archive data to the mwacache servers via xrootd. It
+also exposes a Flask web service for health reporting, archiving pause/resume, and
+calibration observation release.
+"""
 
 import argparse
 from configparser import ConfigParser
@@ -131,6 +140,7 @@ class MWAXSubfileDistributor:
         # into this list so we can easily remove them when release_cal_obs is called
         # by a calvin
         self.outgoing_cal_list: list[str] = list()
+        self.outgoing_cal_list_lock: threading.Lock = threading.Lock()
 
         # Database handler for metadata db
         self.db_handler: mwax_db.MWAXDBHandler
@@ -659,8 +669,7 @@ class MWAXSubfileDistributor:
             #   Add to the outgoing cal list so that when release_cal_obs is called by calvin, we can remove the file from the list and archive the file
             #
             self.vis_cal_outgoing_processor = VisCalOutgoingProcessor(
-                self.cfg_corr_calibrator_outgoing_path,
-                self.outgoing_cal_list,
+                self.cfg_corr_calibrator_outgoing_path, self.outgoing_cal_list, self.outgoing_cal_list_lock
             )
             self.workers.append(self.vis_cal_outgoing_processor)
 
@@ -740,7 +749,9 @@ class MWAXSubfileDistributor:
 
                 # Remove item from queue
                 try:
-                    self.outgoing_cal_list.remove(item)
+                    with self.outgoing_cal_list_lock:
+                        self.outgoing_cal_list.remove(item)
+
                 except Exception:
                     # Don't want an exception if file is already gone from list
                     pass
