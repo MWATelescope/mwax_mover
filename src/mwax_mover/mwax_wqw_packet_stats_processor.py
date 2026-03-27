@@ -48,5 +48,5 @@ class PacketStatsProcessor(MWAXWatchQueueWorker):
             return True
         except Exception:
             # Something went wrong- log it and requeue
-            logger.exception(f"Unable to copy/delete {item} to {destination_filename}")
+            logger.exception(f"{item}: Unable to copy/delete to {destination_filename}")
             return False

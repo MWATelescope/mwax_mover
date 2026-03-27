@@ -44,7 +44,9 @@ from mwax_mover.mwax_wqw_vis_stats import VisStatsProcessor
 
 # Setup root logger
 handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
+handler.setFormatter(
+    logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(threadName)s, %(message)s")
+)
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
@@ -706,7 +708,7 @@ class MWAXSubfileDistributor:
             obs_files = glob.glob(os.path.join(self.cfg_corr_calibrator_outgoing_path, f"{obs_id}*.fits"))
 
             if len(obs_files) == 0:
-                logger.debug(f"{obs_id}: release_cal_obs()- no files found for this obs_id")
+                logger.debug(f"{obs_id}: no files found for this obs_id")
 
             # For file in the cal_outgoing dir for this obs_id
             for item in obs_files:
@@ -724,28 +726,24 @@ class MWAXSubfileDistributor:
                             outgoing_filename = os.path.join(
                                 self.cfg_corr_visdata_outgoing_path, os.path.basename(item)
                             )
-                            logger.debug(f"{obs_id}- release_cal_obs() moving {item} to outgoing vis dir")
+                            logger.debug(f"{obs_id}- moving {item} to outgoing vis dir")
                             os.rename(item, outgoing_filename)
                         else:
                             # No this project doesn't get archived
                             outgoing_filename = os.path.join(
                                 self.cfg_corr_visdata_dont_archive_path, os.path.basename(item)
                             )
-                            logger.debug(
-                                f"{item}- release_cal_obs() moving file to {self.cfg_corr_visdata_dont_archive_path}"
-                            )
+                            logger.debug(f"{item}- moving file to {self.cfg_corr_visdata_dont_archive_path}")
                             os.rename(item, outgoing_filename)
                     else:
                         # This host is not doing any archiving
                         outgoing_filename = os.path.join(
                             self.cfg_corr_visdata_dont_archive_path, os.path.basename(item)
                         )
-                        logger.debug(
-                            f"{item}- release_cal_obs() moving file to {self.cfg_corr_visdata_dont_archive_path}"
-                        )
+                        logger.debug(f"{item}- moving file to {self.cfg_corr_visdata_dont_archive_path}")
                         os.rename(item, outgoing_filename)
                 else:
-                    logger.exception(f"{obs_id}: release_cal_obs()- failed to archive {item}- file does not exist")
+                    logger.exception(f"{obs_id}: failed to archive {item}- file does not exist")
 
                 # Remove item from queue
                 try:
@@ -756,7 +754,7 @@ class MWAXSubfileDistributor:
                     # Don't want an exception if file is already gone from list
                     pass
         except Exception:
-            logger.exception(f"{obs_id}: release_cal_obs()- something went wrong when releasing this obs_id")
+            logger.exception(f"{obs_id}: something went wrong when releasing this obs_id")
 
     def pause_archiving(self, paused: bool):
         """Pauses archiving"""

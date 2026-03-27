@@ -131,17 +131,17 @@ class MWAXDBHandler:
                         else:
                             # Something went wrong
                             logger.error(
-                                f"select_postgres(): Error- queried {rows_affected} rows, expected 1. SQL={sql}"
+                                f"Error- queried {rows_affected} rows, expected 1. SQL={sql}"
                             )
                             raise Exception(
-                                f"select_postgres(): Error- queried {rows_affected} rows, expected 1. SQL={sql}"
+                                f"Error- queried {rows_affected} rows, expected 1. SQL={sql}"
                             )
                     else:
                         # We don't know how many rows, so cool, return them
                         return rows
 
         except Exception:
-            logger.exception("select_postgres(): postgres exception")
+            logger.exception("postgres exception")
             raise
 
     @retry(
@@ -195,12 +195,12 @@ class MWAXDBHandler:
                             # An exception in here will trigger a rollback
                             # which is good
                             logger.error(
-                                "execute_dml(): Error- query"
+                                "Error- query"
                                 f" affected {rows_affected} rows, expected {expected_rows}."
                                 f" SQL={sql}"
                             )
                             raise Exception(
-                                "execute_dml(): Error- query"
+                                "Error- query"
                                 f" affected {rows_affected} rows, expected {expected_rows}."
                                 f" SQL={sql}"
                             )
@@ -209,14 +209,14 @@ class MWAXDBHandler:
             # Trying to insert or update but a value of a field violates the FK constraint-
             # e.g. insert into data_files fails due to observation_num not existing in mwa_setting.starttime
             # We need to reraise the error so our caller can handle in this "insert_data_file_row" case!
-            logger.exception("execute_dml(): postgres ForeignKeyViolation")
+            logger.exception("postgres ForeignKeyViolation")
             # Reraise error
             raise
 
         except Exception:
             # Any other error- likely to be a database error rather than
             # connection based
-            logger.exception("execute_dml(): postgres Exception")
+            logger.exception("postgres Exception")
             raise
 
     def execute_dml_row_within_transaction(self, sql, parm_list, transaction_cursor: psycopg.Cursor):
@@ -248,18 +248,18 @@ class MWAXDBHandler:
                 # An exception in here will trigger a rollback
                 # which is good
                 logger.error(
-                    "execute_dml_row_within_transaction(): Error- query"
+                    "Error- query"
                     f" affected {rows_affected} rows, expected 1."
                     f" SQL={sql}"
                 )
                 raise Exception(
-                    "execute_dml_row_within_transaction(): Error- query"
+                    "Error- query"
                     f" affected {rows_affected} rows, expected 1."
                     f" SQL={sql}"
                 )
 
         except Exception:
-            logger.exception("execute_single_dml_row_within_transaction(): postgres Exception")
+            logger.exception("postgres Exception")
             raise
 
 
@@ -303,13 +303,13 @@ def get_data_file_row(db_handler_object: MWAXDBHandler, full_filename: str, obs_
         data_files_row.checksum = row["checksum"]
 
         logger.info(
-            f"{full_filename} get_data_file_row() Successfully read from data_files table {vars(data_files_row)}"
+            f"{full_filename} Successfully read from data_files table {vars(data_files_row)}"
         )
         return data_files_row
 
     except Exception as select_exception:
         logger.error(
-            f"{full_filename} get_data_file_row() error selecting data_files"
+            f"{full_filename} error selecting data_files"
             f" record in data_files table: {select_exception}. SQL was {sql}"
         )
         raise Exception from select_exception
@@ -369,7 +369,7 @@ def insert_data_file_row(
             ),
         )
 
-        logger.info(f"{filename} insert_data_file_row() Successfully wrote into data_files table")
+        logger.info(f"{filename} Successfully wrote into data_files table")
         return True
 
     except psycopg.errors.ForeignKeyViolation:
@@ -377,7 +377,7 @@ def insert_data_file_row(
         # so mwax_u2s et al. thought it was still a real observation
         # we should just delete this file and move on
         logger.warning(
-            f"{filename} insert_data_file_row() observation_num {obsid} has been deleted by M&C."
+            f"{filename} observation_num {obsid} has been deleted by M&C."
             "Deleting this data file."
         )
         os.remove(archive_filename)
@@ -389,7 +389,7 @@ def insert_data_file_row(
     except Exception as upsert_exception:
         logger.exception(
             upsert_exception,
-            f"{filename} insert_data_file_row() error inserting data_files record in data_files table. SQL was {sql}",
+            f"{filename} error inserting data_files record in data_files table. SQL was {sql}",
         )
         return False
 
@@ -431,12 +431,12 @@ def update_data_file_row_as_archived(
             ),
         )
 
-        logger.info(f"{filename} update_data_file_row_as_archived() Successfully updated data_files table")
+        logger.info(f"{filename} Successfully updated data_files table")
         return True
 
     except Exception:
         logger.exception(
-            f"{filename} update_data_file_row_as_archived() error updating"
+            f"{filename} error updating"
             f" data_files record in data_files table. SQL"
             f" was {sql}"
         )
@@ -460,12 +460,12 @@ def insert_calibration_request_row(db_handler_object: MWAXDBHandler, obs_id: int
     try:
         db_handler_object.execute_dml(sql, sql_values, 1)
 
-        logger.info(f"{obs_id}: insert_calibration_request_row() Successfully inserted into calibration_request table.")
+        logger.info(f"{obs_id}: Successfully inserted into calibration_request table.")
         return True
 
     except Exception:
         logger.exception(
-            f"{obs_id}: insert_calibration_request_row() error inserting"
+            f"{obs_id}: error inserting"
             f" calibration_request record in table. SQL was"
             f" {sql} Values: {sql_values}"
         )
@@ -505,13 +505,13 @@ def insert_calibration_fits_row(
         db_handler_object.execute_dml_row_within_transaction(sql, sql_values, transaction_cursor)
 
         logger.info(
-            f"{obs_id}: insert_calibration_fits_row() Successfully wrote into calibration_fits table. fit_id={fit_id}"
+            f"{obs_id}: Successfully wrote into calibration_fits table. fit_id={fit_id}"
         )
         return (True, fit_id)
 
     except Exception:
         logger.exception(
-            f"{obs_id}: insert_calibration_fits_row() error inserting"
+            f"{obs_id}: error inserting"
             f" calibration_fits record in table. SQL was"
             f" {sql} Values: {sql_values}"
         )
@@ -603,15 +603,14 @@ def insert_calibration_solutions_row(
         db_handler_object.execute_dml_row_within_transaction(sql, sql_values, transaction_cursor)
 
         logger.info(
-            f"{obs_id} tile {tile_id}: insert_calibration_solutions_row()"
-            " Successfully wrote into insert_calibration_solutions table"
+            f"{obs_id} tile {tile_id}: Successfully wrote into calibration_solutions table"
         )
         return True
 
     except Exception:
         logger.exception(
-            f"{obs_id}: insert_calibration_solutions_row() error inserting"
-            f" insert_calibration_solutions record in table. SQL was {sql} Values {sql_values}"
+            f"{obs_id}: error inserting"
+            f" calibration_solutions record in table. SQL was {sql} Values {sql_values}"
         )
         return False
 
@@ -730,7 +729,7 @@ def get_unattempted_calsolution_requests(db_handler_object: MWAXDBHandler) -> li
         )
 
         if len(results_rows) == 0:
-            logger.debug("get_unattempted_calsolution_requests(): No requests to process.")
+            logger.debug("No requests to process.")
             return None
 
         for row in results_rows:
@@ -744,7 +743,7 @@ def get_unattempted_calsolution_requests(db_handler_object: MWAXDBHandler) -> li
         return return_list
 
     except Exception:
-        logger.exception("get_unattempted_calsolution_requests(): Exception")
+        logger.exception("Exception")
         raise
 
 
@@ -789,12 +788,12 @@ def update_calsolution_request_submit_mwa_asvo_job_status(
     try:
         db_handler_object.execute_dml(sql, params, len(request_ids))
         logger.debug(
-            "update_calsolution_request_submit_mwa_asvo_job_status(): Successfully updated calibration_request table."
+            "Successfully updated calibration_request table."
         )
 
     except Exception:
         logger.exception(
-            "update_calsolution_request_submit_mwa_asvo_job_status(): error updating calibration_request record. SQL"
+            "error updating calibration_request record. SQL"
             f" was {sql}, params were: {params}"
         )
 
@@ -832,12 +831,12 @@ def update_calibration_request_slurm_status(
         # Update the rows
         db_handler_object.execute_dml(sql, params, len(request_ids))
         logger.debug(
-            "update_calsolution_request_download_complete_status(): Successfully updated calibration_request table."
+            "Successfully updated calibration_request table."
         )
 
     except Exception:
         logger.exception(
-            "update_calsolution_request_download_complete_status(): error updating calibration_request "
+            "error updating calibration_request "
             f"record. SQL was {sql}, params were: {params}"
         )
 
@@ -902,12 +901,12 @@ def update_calsolution_request_download_complete_status(
     try:
         db_handler_object.execute_dml(sql, params, None)
         logger.debug(
-            "update_calsolution_request_download_complete_status(): Successfully updated calibration_request table."
+            "Successfully updated calibration_request table."
         )
 
     except Exception:
         logger.exception(
-            "update_calsolution_request_download_complete_status(): error updating calibration_request "
+            "error updating calibration_request "
             f"record. SQL was {sql}, params were: {params}"
         )
 
@@ -937,13 +936,12 @@ def update_calibration_request_assign_hostname_start_download(
         db_handler_object.execute_dml(sql, params, None)
 
         logger.debug(
-            "update_calibration_request_assign_hostname_start_download(): Successfully updated "
-            "calibration_request table."
+            "Successfully updated calibration_request table."
         )
 
     except Exception:
         logger.exception(
-            "update_calibration_request_assign_hostname_start_download(): error updating calibration_request "
+            "error updating calibration_request "
             f"record. SQL was {sql}, params were: {params}"
         )
 
@@ -989,12 +987,12 @@ def update_calsolution_request_calibration_started_status(
 
         db_handler_object.execute_dml(sql, params, None)
         logger.debug(
-            "update_calsolution_request_calibration_started_status(): Successfully updated calibration_request table."
+            "Successfully updated calibration_request table."
         )
 
     except Exception:
         logger.exception(
-            "update_calsolution_request_calibration_started_status(): error updating calibration_request "
+            "error updating calibration_request "
             f"record. SQL was {sql}, params were: {params}"
         )
 
@@ -1065,12 +1063,12 @@ def update_calsolution_request_calibration_complete_status(
 
         db_handler_object.execute_dml(sql, params, None)
         logger.debug(
-            "update_calsolution_request_calibration_complete_status(): Successfully updated calibration_request table."
+            "Successfully updated calibration_request table."
         )
 
     except Exception:  # pylint: disable=broad-except
         logger.exception(
-            "update_calsolution_request_calibration_complete_status(): error updating "
+            "error updating "
             f"calibration_request record. SQL was {sql}, params were: {params}"
         )
 

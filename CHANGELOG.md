@@ -5,8 +5,10 @@
 * subfile_dist: Subfile distributor doesn't exit when there are leftover files.
 * utils: refactor to fix a few corner cases.
 * All: module docstrings added.
+* All: updated logging to include module/fun names. Removed hardcoded module/fun names from logging.
 * README.md: updated.
 * Old broken tests removed.
+* mwax_wqw_checksum_and_db: refactored to simplify handler logic. Added tests.
 
 # 1.5.10 20-Mar-2026
 

@@ -33,10 +33,10 @@ class VisCalOutgoingProcessor(MWAXWatchQueueWorker):
         self.outgoing_cal_list_lock = outgoing_cal_list_lock
 
     def handler(self, item: str) -> bool:
-        logger.info(f"{item}- VisCalOutgoingProcessor.handler() Started")
+        logger.info(f"{item}- Started")
 
         with self.outgoing_cal_list_lock:
             self.outgoing_cal_list.append(item)
 
-        logger.info(f"{item}- VisCalOutgoingProcessor.handler() Finished")
+        logger.info(f"{item}- Finished")
         return True

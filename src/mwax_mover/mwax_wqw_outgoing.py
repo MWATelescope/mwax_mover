@@ -48,7 +48,7 @@ class OutgoingProcessor(MWAXPriorityWatchQueueWorker):
         """This is called whenever a file is moved into the
         outgoing_vis or outgoing_volt directories. For each file attempt to
         send to the mwacache boxes then remove the file"""
-        logger.info(f"{item}- archive_handler() Started...")
+        logger.info(f"{item}- Started...")
 
         if (
             archive_file_xrootd(
@@ -61,8 +61,8 @@ class OutgoingProcessor(MWAXPriorityWatchQueueWorker):
         ):
             return False
 
-        logger.debug(f"{item}- archive_handler() Deleting file")
+        logger.debug(f"{item}- Deleting file")
         remove_file(item, raise_error=False)
 
-        logger.info(f"{item}- archive_handler() Finished")
+        logger.info(f"{item}- Finished")
         return True

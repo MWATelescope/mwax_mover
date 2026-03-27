@@ -50,7 +50,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
 
     def handler(self, item: str) -> bool:
         """Handles sending files to Pawsey"""
-        logger.info(f"{item}- archive_handler() Started...")
+        logger.info(f"{item}- Started...")
 
         # validate the filename
         val: utils.ValidationData = utils.validate_filename(item, self.metafits_path)
@@ -59,7 +59,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
         if val.valid:
             # Get the file size
             actual_file_size = os.stat(item).st_size
-            logger.debug(f"{item}- archive_handler() file size on disk is {actual_file_size} bytes")
+            logger.debug(f"{item}- file size on disk is {actual_file_size} bytes")
 
             # Lookup file from db
             data_files_row: DataFileRow = get_data_file_row(self.remote_db_handler_object, item, val.obs_id)
@@ -68,7 +68,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             # Check for 0 size
             if actual_file_size == 0:
                 # File size is 0- lets just blow it away
-                logger.warning(f"{item}- archive_handler() File size is 0 bytes. Deleting file")
+                logger.warning(f"{item}- File size is 0 bytes. Deleting file")
                 utils.remove_file(item, raise_error=False)
 
                 # even though its a problem,we return true as we are finished
@@ -77,7 +77,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             elif actual_file_size != database_file_size:
                 # File size is incorrect- lets just blow it away
                 logger.warning(
-                    f"{item}- archive_handler() File size"
+                    f"{item}- File size"
                     f" {actual_file_size} does not match {database_file_size}."
                     " Deleting file"
                 )
@@ -87,7 +87,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
                 # with the item and it should not be requeued
                 return True
 
-            logger.debug(f"{item}- archive_handler() File size matches metadata. Checking md5sum... database")
+            logger.debug(f"{item}- File size matches metadata. Checking md5sum... database")
 
             # Check md5sum
             actual_checksum = utils.do_checksum_md5(item, None, 600)
@@ -95,11 +95,11 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             # Compare
             if actual_checksum != data_files_row.checksum:
                 logger.warning(
-                    f"{item}- archive_handler() checksum {actual_checksum} does not match {data_files_row.checksum}."
+                    f"{item}- checksum {actual_checksum} does not match {data_files_row.checksum}."
                 )
                 return False
 
-            logger.debug(f"{item}- archive_handler() md5 checksum matches")
+            logger.debug(f"{item}- md5 checksum matches")
 
             # Determine where to archive it
             bucket = utils.determine_bucket(
@@ -139,14 +139,14 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
 
                 # If all is well, we have the file safely archived and the
                 # database updated, so remove the file
-                logger.debug(f"{item}- archive_handler() Deleting file")
+                logger.debug(f"{item}- Deleting file")
                 utils.remove_file(item, raise_error=False)
 
-                logger.info(f"{item}- archive_handler() Finished")
+                logger.info(f"{item}- Finished")
                 return True
             else:
                 return False
         else:
             # The filename was not valid
-            logger.error(f"{item}- archive_handler() {val.validation_message}")
+            logger.error(f"{item}- {val.validation_message}")
             return False

@@ -1567,18 +1567,18 @@ def call_webservice(obs_id: int, url_list: list[str], data, max_retries: int = 1
         while i < len(url_list):
             url = url_list[i]
 
-            logger.debug(f"{obs_id}: call_webservice() trying with {url} with data ({'' if data is None else data})")
+            logger.debug(f"{obs_id}: trying with {url} with data ({'' if data is None else data})")
 
             try:
                 response = requests.get(url, data, timeout=30)
 
                 if response.status_code == 200:
-                    logger.debug(f"{obs_id}: call_webservice() returned 200 (success)")
+                    logger.debug(f"{obs_id}: returned 200 (success)")
                     return response
 
                 elif response.status_code >= 400 and response.status_code < 500:
                     error_message = (
-                        f"{obs_id}: call_webservice() returned {response.status_code} {response.text} (failure)"
+                        f"{obs_id}: returned {response.status_code} {response.text} (failure)"
                     )
                     logger.error(error_message)
                     raise ValueError(error_message)
@@ -1586,20 +1586,20 @@ def call_webservice(obs_id: int, url_list: list[str], data, max_retries: int = 1
                 else:
                     # Non-200 status code- try next url
                     logger.warning(
-                        f"{obs_id}: call_webservice() returned {response.status_code} {response.text} (failure)"
+                        f"{obs_id}: returned {response.status_code} {response.text} (failure)"
                     )
             except ValueError:
                 raise
 
             except Exception as e:
                 # Exception raised- try next url
-                logger.exception(f"{obs_id}: call_webservice() exception", e)
+                logger.exception(f"{obs_id}: exception", e)
 
             # try next url
             i += 1
 
         # We tried all urls without success- up to tenacity to retry X times now
-        logger.error(f"{obs_id}: call_webservice() - failed after trying {len(url_list)} urls.")
+        logger.error(f"{obs_id}: failed after trying {len(url_list)} urls.")
         raise requests.RequestException(f"{obs_id}: call_webservice()- failed after trying {len(url_list)} urls.")
 
     return call_webservice_inner(obs_id, url_list, data)
