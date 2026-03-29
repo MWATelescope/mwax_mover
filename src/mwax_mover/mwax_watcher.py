@@ -29,6 +29,20 @@ class Watcher(object):
         recursive,
         exclude_pattern=None,
     ):
+        """Initialize a directory watcher.
+
+        Args:
+            name: A descriptive name for this watcher instance.
+            path: The directory path to monitor.
+            dest_queue: The queue to deposit detected file paths into.
+            pattern: File extension to match (e.g., ".ext" or ".*").
+            mode: The watch mode (NEW, RENAME, or RENAME_OR_NEW).
+            recursive: Whether to watch subdirectories recursively.
+            exclude_pattern: File extension to exclude from matching. Defaults to None.
+
+        Raises:
+            FileNotFoundError: If the specified path does not exist.
+        """
         self.name = name
         self.inotify_tree: inotify.adapters.Inotify | inotify.adapters.InotifyTree
         self.recursive = recursive
@@ -52,7 +66,11 @@ class Watcher(object):
             raise FileNotFoundError(self.path)
 
     def start(self):
-        """Begins watching the directory"""
+        """Start watching the directory for inotify events.
+
+        Sets up the inotify adapter based on the recursive setting and initiates
+        the watch loop to monitor for file events.
+        """
         # supress all but most critical inotify logs
         logging.getLogger("inotify.adapters").setLevel(logging.CRITICAL)
 
@@ -71,7 +89,7 @@ class Watcher(object):
         self.do_watch_loop()
 
     def stop(self):
-        """Stop watching the directory"""
+        """Stop watching the directory and clean up inotify resources."""
         logger.info(f"Watcher stopping on {self.path}/*{self.pattern}...")
 
         self.watching = False
@@ -88,7 +106,12 @@ class Watcher(object):
             pass
 
     def do_watch_loop(self):
-        """ "Initiate watching"""
+        """Perform initial scan and enter the inotify event monitoring loop.
+
+        Scans for pre-existing files first, then continuously monitors for inotify
+        events that match the configured pattern and mode, adding matching files
+        to the destination queue.
+        """
         # If we're in NEW or RENAME mode, then scan the folder once we have
         # enqueued any waiting items
         if (
@@ -122,7 +145,11 @@ class Watcher(object):
                             logger.info(f"{dest_filename} added to queue ({self.dest_queue.qsize()})")
 
     def get_status(self) -> dict:
-        """Returns a dictionary describing status of this watcher"""
+        """Get the current status of the watcher.
+
+        Returns:
+            A dictionary containing the watcher name and watch path.
+        """
         return {
             "name": self.name,
             "watch_path": self.path,

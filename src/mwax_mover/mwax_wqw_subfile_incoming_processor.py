@@ -50,6 +50,30 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         metafits_path: str,
         subfile_dist_mode: utils.MWAXSubfileDistirbutorMode,
     ):
+        """Initialise the PSRDADA subfile incoming processor.
+
+        Args:
+            sd_ctx: Shared state context for dump management and archiving control.
+            subfile_incoming_path: Directory watched for incoming PSRDADA subfiles (.sub).
+            subfile_ext: Extension for subfile files (typically .sub).
+            freefile_ext: Extension for freed subfiles (typically .free).
+            keepfile_ext: Extension for kept subfiles during voltage dumps (typically .keep).
+            voltdata_incoming_path: Directory where voltage data files are written.
+            bf_cal_path: Directory containing beamformer calibration files.
+            bf_redis_host: Redis host for beamformer signalling.
+            bf_redis_queue_key: Redis queue key for beamformer messages.
+            packet_stats_dump_dir: Directory where packet statistics are written.
+            mwax_stats_binary_dir: Directory containing mwax utilities binaries.
+            corr_devshm_numa_node: NUMA node for correlator shared memory.
+            copy_subfile_to_disk_timeout_sec: Timeout in seconds for disk copy operations.
+            corr_ringbuffer_key: PSRDADA key for correlator ring buffer.
+            corr_diskdb_numa_node: NUMA node for disk database operations.
+            psrdada_timeout_sec: Timeout in seconds for PSRDADA operations.
+            always_keep_subfiles: Whether to always keep subfiles to voltdata.
+            archive_destination_enabled: Whether archive destination is enabled.
+            metafits_path: Directory containing metafits files.
+            subfile_dist_mode: Operating mode (CORRELATOR or BEAMFORMER).
+        """
         super().__init__(
             "SubfileIncomingProcessor",
             [
@@ -85,7 +109,20 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         self.subfile_dist_mode = subfile_dist_mode
 
     def handler(self, item: str) -> bool:
-        """When subfile detected this handles it"""
+        """Process incoming PSRDADA subfiles and route by observation mode.
+
+        Reads the PSRDADA header to determine observation mode and routes accordingly:
+        loads into ring buffer for correlation, copies to voltdata for VCS or voltage
+        dumps, or signals beamformer via Redis. Handles FREDDA-triggered voltage dump
+        windows, extracts packet statistics, and renames processed files to .free.
+
+        Args:
+            item: Full path of the PSRDADA subfile (.sub) to process.
+
+        Returns:
+            True if subfile was successfully processed.
+            False if an error occurred during processing.
+        """
         success = False
 
         logger.info(f"{item}: SubfileIncomingProcessor.subfile_handler is handling {item}...")
@@ -402,7 +439,22 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         return success
 
     def signal_beamformer(self, item: str, cal_obs_id: int, rec_chan_no: int) -> bool:
-        # Send obs_subobs info to beamformer via redis message
+        """Signal the beamformer with calibration data via Redis.
+
+        Searches for the appropriate aocal calibration file and solution FITS file,
+        then pushes a message to Redis with subfile path and calibration details.
+
+        Args:
+            item: Full path of the subfile being processed.
+            cal_obs_id: Calibration observation ID from metafits.
+            rec_chan_no: Receiver channel (coarse channel) number.
+
+        Returns:
+            True if beamformer signalling succeeded.
+
+        Raises:
+            SystemExit: Exits with code 3 if Redis communication fails.
+        """
 
         # We don't know the exact aocal filename as we dont have num_fine_chans
         # so we'll use a wildcard
@@ -439,7 +491,18 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
             exit(3)
 
     def handle_next_keep_file(self) -> bool:
-        """When we need to offload a keep file, this handles it"""
+        """Process and write a kept voltage dump subfile to disk.
+
+        Retrieves the next kept subfile from the dump queue, copies it to the
+        voltdata incoming directory as a .sub file, then renames it to .free.
+
+        Returns:
+            True if the file was successfully copied and renamed.
+            False if an error occurred (file is requeued).
+
+        Raises:
+            SystemExit: Exits with code 2 if file rename fails.
+        """
         success = True
 
         # Get next keep file off the queue

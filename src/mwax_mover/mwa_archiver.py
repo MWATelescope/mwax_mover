@@ -27,7 +27,19 @@ def copy_file_rsync(
     destination_dir: str,
     timeout: int,
 ):
-    """Copies a file via rsync"""
+    """Copy a file to a remote host using rsync over SSH.
+
+    Uses rsync with AES128-CTR encryption and compression disabled.
+    Logs transfer speed and file size on success.
+
+    Args:
+        source_filename: Path to the source file to copy.
+        destination_dir: Remote destination directory (host:/path format).
+        timeout: Maximum time in seconds to wait for the transfer.
+
+    Returns:
+        True if transfer succeeded, False otherwise.
+    """
     logger.debug(f"{source_filename}: attempting copy_file_rsync...")
 
     # Build final command line
@@ -71,7 +83,20 @@ def archive_file_xrootd(
     archive_destination_host: str,
     timeout: int,
 ):
-    """Archive a file via xrootd"""
+    """Upload a file to an xrootd server with atomic temp-file rename.
+
+    Uploads to a temporary file first, then renames it atomically on the
+    remote host. Logs transfer speed and validates checksums.
+
+    Args:
+        full_filename: Path to the file to archive.
+        archive_numa_node: NUMA node for command execution.
+        archive_destination_host: Destination in format "host://path".
+        timeout: Maximum time in seconds to wait for the transfer.
+
+    Returns:
+        True if transfer and rename succeeded, False otherwise.
+    """
     logger.debug(f"{full_filename}: attempting archive_file_xrootd...")
 
     # get file size
@@ -155,7 +180,22 @@ def archive_file_rclone(
     bucket_name: str,
     md5hash: str,
 ):
-    """Archive file via rclone"""
+    """Upload a file to Pawsey S3 (Acacia/Banksia) via rclone with retry.
+
+    Attempts upload to random endpoints from the provided list with checksum
+    verification. Retries on failure with remaining endpoints until all are
+    exhausted.
+
+    Args:
+        rclone_profile: The rclone profile/remote name to use.
+        endpoints: List of S3 endpoint URLs to try.
+        full_filename: Path to the file to archive.
+        bucket_name: S3 bucket name for the upload.
+        md5hash: MD5 checksum hash for verification.
+
+    Returns:
+        True if upload succeeded and checksum verified, False after all endpoints exhausted.
+    """
     logger.debug(f"{full_filename}: attempting archive_file_rclone...")
 
     # Get just the filename
@@ -262,9 +302,17 @@ def archive_file_rclone(
 # /master/calculate_multipart_etag.py
 #
 def ceph_get_s3_md5_etag(filename: str, chunk_size_bytes: int) -> str:
-    """
-    Determine what a Ceph etag should be
-    given filename and chunk size
+    """Compute the Ceph multipart ETag for S3 integrity verification.
+
+    Calculates the expected S3 ETag for a file uploaded with multipart
+    transfers, based on chunk size. Used to verify files in Ceph storage.
+
+    Args:
+        filename: Path to the file to compute ETag for.
+        chunk_size_bytes: Size of each chunk in bytes.
+
+    Returns:
+        The computed ETag string in the format '"hexdigest-partcount"' or '""' for empty files.
     """
     md5s = []
 

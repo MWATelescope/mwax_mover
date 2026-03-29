@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 
 class VDIFHeader:
     def __init__(self):
+        """Initialize a VDIF header with default values and metadata.
+
+        Sets up all VDIF header fields with default values for telescope,
+        mode, instrument, and data format specifications.
+        """
         self.VDIF_HDR_VERSION: str = "0.2"
         self.MWA_CAPTURE_VERSION: str = mwax_mover.version.get_mwax_mover_version_string()
         self.MWA_SAMPLE_VERSION: str = "0.1"
@@ -43,6 +48,17 @@ class VDIFHeader:
         self.tsamp: float = 0.0
 
     def populate(self, metafits_filename: str, rec_chan: int, beam_no: int):
+        """Populate VDIF header fields from a metafits file.
+
+        Reads observation metadata including timing, pointing, frequency,
+        source name, and beam-specific information from the metafits file
+        and stores them in the header fields.
+
+        Args:
+            metafits_filename: Path to the metafits file.
+            rec_chan: Receiver channel number.
+            beam_no: Beam number index.
+        """
         mc = MetafitsContext(metafits_filename)
         self.mjd_start = mc.sched_start_mjd
         self.mjd_epoch = mc.sched_start_mjd
@@ -109,8 +125,13 @@ class VDIFHeader:
                 pass
 
     def write(self, vdif_hdr_filename: str):
-        """
-        Write an ASCII header file using the fields stored
+        """Write VDIF header fields to an ASCII header file.
+
+        Generates and writes all header metadata fields to the specified
+        file in a human-readable ASCII format with comments.
+
+        Args:
+            vdif_hdr_filename: Path where the header file will be written.
         """
         self.datafile = os.path.basename(vdif_hdr_filename.replace(".hdr", ".vdif"))
 
@@ -150,13 +171,19 @@ class VDIFHeader:
 
 
 def get_vdif_filename_components(filename: str) -> tuple[str, int, int, int, int]:
-    """
-    For 'obsid_subobs_chXXX_beamNN.vdif', return: filepath,obsid,subobsid,rec_chan,beam
+    """Parse filename components from a per-subobservation VDIF file path.
 
-    obsid  = 10 digits
-    subobs = 10 digits
-    XXX    = 3 digits (zero padded)
-    NN     = 2 digits (zero padded)
+    Extracts path, observation ID, sub-observation ID, receiver channel,
+    and beam from a filename matching: /path/obsid_subobs_chXXX_beamNN.vdif
+
+    Args:
+        filename: The VDIF filename to parse.
+
+    Returns:
+        A tuple of (path: str, obsid: int, subobs: int, rec_chan: int, beam: int).
+
+    Raises:
+        ValueError: If filename does not match the expected format.
     """
     pattern = r"^(?P<path>.*)/(?P<obsid>\d{10})_(?P<subobs>\d{10})_ch(?P<chan>\d{3})_beam(?P<beam>\d{2})\.vdif$"
     m = re.match(pattern, filename)
@@ -174,14 +201,19 @@ def get_vdif_filename_components(filename: str) -> tuple[str, int, int, int, int
 
 
 def get_stitched_filename(filename: str) -> str:
-    """
-    Convert 'obsid_subobs_chXXX_beamNN.vdif'
-    into    'obsid_chXXX_beamNN.vdif'.
+    """Generate output filename by removing sub-observation ID from input filename.
 
-    obsid  = 10 digits
-    subobs = 10 digits
-    XXX    = 3 digits (zero padded)
-    NN     = 2 digits (zero padded)
+    Converts a per-subobservation filename to a complete observation filename:
+    obsid_subobs_chXXX_beamNN.vdif -> obsid_chXXX_beamNN.vdif
+
+    Args:
+        filename: The per-subobservation VDIF filename.
+
+    Returns:
+        The output filename path with sub-observation ID removed.
+
+    Raises:
+        ValueError: If filename does not match the expected format.
     """
     file_path, obsid, _, chan, beam = get_vdif_filename_components(filename)
 
@@ -189,6 +221,23 @@ def get_stitched_filename(filename: str) -> str:
 
 
 def stitch_vdif_files_and_write_hdr(metafits_filename: str, files: List[str], output_dir: str) -> tuple[str, str]:
+    """Concatenate VDIF files and generate a header file with beam metadata.
+
+    Combines per-subobservation VDIF files produced by the MWAX beamformer
+    into a single complete observation file, then creates an ASCII header
+    file with all metadata extracted from the metafits file.
+
+    Args:
+        metafits_filename: Path to the metafits file for metadata.
+        files: List of VDIF file paths to stitch together.
+        output_dir: Directory where output VDIF and header files will be written.
+
+    Returns:
+        A tuple of (output_vdif_filename: str, output_hdr_filename: str).
+
+    Raises:
+        Exception: If the files list is empty.
+    """
     if len(files) == 0:
         raise Exception("No VDIF files to stitch")
 

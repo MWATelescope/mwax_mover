@@ -26,7 +26,23 @@ def run_command_ext(
     use_shell: bool = False,
     copy_user_env: bool = False,
 ) -> typing.Tuple[bool, str]:
-    """Runs a command and returns success or failure and stdout"""
+    """Execute a command synchronously with optional NUMA pinning.
+
+    Runs a command via subprocess with optional NUMA node binding,
+    timeout enforcement, and shell mode support. Returns the exit code
+    and combined stdout/stderr output.
+
+    Args:
+        command: The command to execute as a string.
+        numa_node: NUMA node to bind to, or None for no binding.
+        timeout: Maximum time in seconds to wait for command. Defaults to 60.
+        use_shell: Whether to execute via shell. Defaults to False.
+        copy_user_env: Whether to copy user's environment variables. Defaults to False.
+
+    Returns:
+        A tuple of (success: bool, output: str). Success is True if return code
+        is 0, False otherwise. Output is combined stdout and stderr.
+    """
     myenv: Optional[dict[str, str]] = None
 
     if copy_user_env:
@@ -103,7 +119,20 @@ def run_command_popen(
     use_shell: bool = False,
     copy_user_env: bool = False,
 ):
-    """Runs a command and returns success or failure and stdout"""
+    """Execute a command asynchronously with optional NUMA pinning.
+
+    Starts a command via subprocess.Popen with optional NUMA node binding
+    and shell mode support. Returns a Popen object for polling or waiting.
+
+    Args:
+        command: The command to execute as a string.
+        numa_node: NUMA node to bind to, or None for no binding.
+        use_shell: Whether to execute via shell. Defaults to False.
+        copy_user_env: Whether to copy user's environment variables. Defaults to False.
+
+    Returns:
+        A subprocess.Popen object that can be polled or waited on.
+    """
     myenv: Optional[dict[str, str]] = None
 
     if copy_user_env:
@@ -140,9 +169,18 @@ def run_command_popen(
 
 
 def check_popen_finished(popen_process, timeout: int = 60) -> typing.Tuple[int, str, str]:
-    """Given a running popen_process object
-    wait for it to finish and return the exit code
-    and output stdout & stderr"""
+    """Wait for a Popen process to finish and return its exit code and output.
+
+    Blocks until the process terminates or the timeout is exceeded. Handles
+    timeout and exception cases gracefully.
+
+    Args:
+        popen_process: A subprocess.Popen object to wait for.
+        timeout: Maximum time in seconds to wait. Defaults to 60.
+
+    Returns:
+        A tuple of (exit_code: int, stdout: str, stderr: str).
+    """
     stderror = ""
     stdout = ""
     exit_code = -1

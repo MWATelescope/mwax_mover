@@ -30,6 +30,19 @@ class VisStatsProcessor(MWAXWatchQueueWorker):
         visdata_outgoing_cal_path: str,
         visdata_dont_archive_path: str,
     ):
+        """Initialise the visibility statistics processor.
+
+        Args:
+            metafits_path: Directory containing metafits files for validation.
+            visdata_processing_stats_path: Directory watched for FITS files needing stats processing.
+            mwax_stats_binary_dir: Directory containing the mwax_stats binary.
+            mwax_stats_timeout_sec: Timeout in seconds for mwax_stats execution.
+            mwax_stats_dump_dir: Directory where mwax_stats output is written.
+            archiving_enabled: Whether archiving is enabled for this host.
+            visdata_outgoing_path: Destination for archivable visibility files.
+            visdata_outgoing_cal_path: Destination for calibrator visibility files.
+            visdata_dont_archive_path: Destination for non-archivable visibility files.
+        """
         super().__init__(
             "VisStatsProcessor",
             [(visdata_processing_stats_path, ".fits")],
@@ -48,7 +61,18 @@ class VisStatsProcessor(MWAXWatchQueueWorker):
         self.visdata_dont_archive_path = visdata_dont_archive_path
 
     def handler(self, item: str) -> bool:
-        """This runs stats against mwax FITS files"""
+        """Process visibility FITS files through statistics and route to archive or calibration.
+
+        Runs mwax_stats on the first file of each observation (ending in _000.fits),
+        then routes files based on archiving status and whether the observation is
+        a calibrator.
+
+        Args:
+            item: Full path of the visibility FITS file to process.
+
+        Returns:
+            True if file was successfully processed and routed.
+        """
         logger.info(f"{item}: Started...")
 
         # This is a normal mwax fits file.

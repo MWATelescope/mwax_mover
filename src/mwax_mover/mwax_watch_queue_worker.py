@@ -27,34 +27,58 @@ THREAD_JOIN_WAIT_TIMEOUT = 10
 logger = logging.getLogger(__name__)
 
 
-#
-# Returns the last 2 dirs from a path.
-#
-# e.g.
-# get_last_two_dirs("/a/b/c")    # 'b/c'
-# get_last_two_dirs("/a/b/c/")   # 'b/c'
-# get_last_two_dirs("/a/")       # 'a'
-#
 def get_last_two_dirs(path: str) -> str:
+    """Get the last two directory components from a path.
+
+    Args:
+        path: The filesystem path.
+
+    Returns:
+        The last two directory components joined with '/'. If fewer than two
+        components exist, returns all available components.
+
+    Examples:
+        >>> get_last_two_dirs("/a/b/c")
+        'b/c'
+        >>> get_last_two_dirs("/a/b/c/")
+        'b/c'
+        >>> get_last_two_dirs("/a/")
+        'a'
+    """
     n = 2
     parts = [p for p in Path(path).parts if p != "/"]
     return "/".join(parts[-n:])
 
 
-#
-# Generates a sensible, short(ish) name for a watcher
-#
 def get_watcher_name(wqw_name: str, watch_path: str, pattern: str) -> str:
+    """Generate a descriptive name for a watcher instance.
+
+    Args:
+        wqw_name: The base name of the watch queue worker.
+        watch_path: The path being watched.
+        pattern: The file extension pattern being matched.
+
+    Returns:
+        A formatted watcher name combining the base name and watch path.
+        Returns 'unknown_watcher' if name generation fails.
+    """
     try:
         return f"{wqw_name}_{watch_path.replace('/', '_')}".replace("__", "_")
     except Exception:
         return "unknown_watcher"
 
 
-#
-# Generates a sensible, short(ish) name for a watcher thread
-#
 def get_watcher_thread_name(watch_path: str, pattern: str) -> str:
+    """Generate a descriptive name for a watcher thread.
+
+    Args:
+        watch_path: The path being watched.
+        pattern: The file extension pattern being matched.
+
+    Returns:
+        A formatted thread name derived from the watch path and pattern.
+        Returns 'unknown_watcher_thread' if name generation fails.
+    """
     try:
         return f"watch_{get_last_two_dirs(watch_path).replace('/', '_')}_{pattern.replace('.', '')}_thread"
     except Exception:
@@ -79,6 +103,17 @@ class MWAXWatchQueueWorker(ABC):
         exit_once_queue_empty: bool = False,
         requeue_to_eoq_on_failure: bool = True,
     ):
+        """Initialize a watch queue worker with watchers and a queue worker.
+
+        Args:
+            name: A descriptive name for this worker instance.
+            watch_paths_exts: List of (path, extension_pattern) tuples to watch.
+            mode: The watch mode (NEW, RENAME, or RENAME_OR_NEW).
+            exclude_pattern: File extension to exclude from matching. Defaults to None.
+            recursive: Whether to watch subdirectories recursively. Defaults to False.
+            exit_once_queue_empty: Exit the worker once the queue is empty. Defaults to False.
+            requeue_to_eoq_on_failure: Requeue failed items to end of queue. Defaults to True.
+        """
         self.name = name
         self.threads: list[Thread] = []
 
@@ -127,6 +162,12 @@ class MWAXWatchQueueWorker(ABC):
             self.threads.append(new_thread)
 
     def start(self):
+        """Start all watcher and worker threads.
+
+        Waits for all watchers to complete their initial directory scan before
+        starting the queue worker thread. This ensures all existing files are
+        enqueued before processing begins.
+        """
         for w in self.watcher_threads:
             w.start()
 
@@ -146,12 +187,22 @@ class MWAXWatchQueueWorker(ABC):
         logger.info(f"{self.name} started.")
 
     def is_running(self) -> bool:
+        """Check if all threads are running.
+
+        Returns:
+            True if all threads are alive, False otherwise.
+        """
         for thread in self.threads:
             if not thread.is_alive():
                 return False
         return True
 
     def stop(self):
+        """Stop all watcher and worker threads gracefully.
+
+        Signals all watchers and the queue worker to stop, then waits for their
+        threads to finish execution.
+        """
         logger.info(f"{self.name} stopping.")
         for w in self.watchers:
             w.stop()
@@ -175,9 +226,19 @@ class MWAXWatchQueueWorker(ABC):
         logger.info(f"{self.name} stopped.")
 
     def pause(self, pause: bool):
+        """Pause or resume queue processing.
+
+        Args:
+            pause: True to pause processing, False to resume.
+        """
         self.queue_worker.pause(pause)
 
     def get_status(self) -> dict:
+        """Get the current status of all watchers and the queue worker.
+
+        Returns:
+            A dictionary containing worker name, watcher statuses, and queue worker status.
+        """
         status = {
             "name": self.name,
             "watchers": [],
@@ -188,6 +249,11 @@ class MWAXWatchQueueWorker(ABC):
         return status
 
     def scan_completed(self) -> bool:
+        """Check if all watchers have completed their initial directory scan.
+
+        Returns:
+            True if all watchers have completed scanning, False otherwise.
+        """
         for watcher in self.watchers:
             if not watcher.scan_completed:
                 return False
@@ -195,6 +261,16 @@ class MWAXWatchQueueWorker(ABC):
 
     @abstractmethod
     def handler(self, item: str) -> bool:
+        """Handle a dequeued item.
+
+        Subclasses must implement this method to process items from the queue.
+
+        Args:
+            item: The item from the queue to process.
+
+        Returns:
+            True if processing succeeded, False otherwise.
+        """
         pass
 
 
@@ -219,6 +295,20 @@ class MWAXPriorityWatchQueueWorker(ABC):
         exit_once_queue_empty: bool = False,
         requeue_to_eoq_on_failure: bool = True,
     ):
+        """Initialize a priority watch queue worker with priority watchers and queue worker.
+
+        Args:
+            name: A descriptive name for this worker instance.
+            metafits_path: Path to metafits files for priority determination.
+            watch_path_exts: List of (path, extension_pattern) tuples to watch.
+            mode: The watch mode (NEW, RENAME, or RENAME_OR_NEW).
+            corr_hi_priority_projects: Correlator projects with high priority.
+            vcs_hi_priority_projects: VCS projects with high priority.
+            exclude_pattern: File extension to exclude from matching. Defaults to None.
+            recursive: Whether to watch subdirectories recursively. Defaults to False.
+            exit_once_queue_empty: Exit the worker once the queue is empty. Defaults to False.
+            requeue_to_eoq_on_failure: Requeue failed items to end of queue. Defaults to True.
+        """
         self.name = name
         self.metafits_path = metafits_path
         self.hostname = utils.get_hostname()
@@ -272,12 +362,23 @@ class MWAXPriorityWatchQueueWorker(ABC):
             self.threads.append(new_thread)
 
     def is_running(self) -> bool:
+        """Check if all threads are running.
+
+        Returns:
+            True if all threads are alive, False otherwise.
+        """
         for thread in self.threads:
             if not thread.is_alive():
                 return False
         return True
 
     def start(self):
+        """Start all priority watcher and worker threads.
+
+        Waits for all watchers to complete their initial directory scan before
+        starting the priority queue worker thread. This ensures all existing files
+        are enqueued with correct priorities before processing begins.
+        """
         for w in self.pwatcher_threads:
             w.start()
 
@@ -297,6 +398,11 @@ class MWAXPriorityWatchQueueWorker(ABC):
         logger.info(f"{self.name} started.")
 
     def stop(self):
+        """Stop all priority watcher and worker threads gracefully.
+
+        Signals all priority watchers and the queue worker to stop, then waits
+        for their threads to finish execution.
+        """
         logger.info(f"{self.name} stopping.")
         for w in self.pwatchers:
             w.stop()
@@ -320,6 +426,11 @@ class MWAXPriorityWatchQueueWorker(ABC):
         logger.info(f"{self.name} stopped.")
 
     def get_status(self) -> dict:
+        """Get the current status of all priority watchers and the queue worker.
+
+        Returns:
+            A dictionary containing worker name, watcher statuses, and queue worker status.
+        """
         status = {
             "name": self.name,
             "watchers": [],
@@ -330,14 +441,34 @@ class MWAXPriorityWatchQueueWorker(ABC):
         return status
 
     def scan_completed(self) -> bool:
+        """Check if all priority watchers have completed their initial directory scan.
+
+        Returns:
+            True if all watchers have completed scanning, False otherwise.
+        """
         for watcher in self.pwatchers:
             if not watcher.scan_completed:
                 return False
         return True
 
     def pause(self, pause: bool):
+        """Pause or resume queue processing.
+
+        Args:
+            pause: True to pause processing, False to resume.
+        """
         self.pqueue_worker.pause(pause)
 
     @abstractmethod
     def handler(self, item: str) -> bool:
+        """Handle a dequeued item.
+
+        Subclasses must implement this method to process items from the priority queue.
+
+        Args:
+            item: The item from the queue to process.
+
+        Returns:
+            True if processing succeeded, False otherwise.
+        """
         pass

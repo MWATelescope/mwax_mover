@@ -17,6 +17,13 @@ logger = logging.getLogger(__name__)
 
 class PacketStatsProcessor(MWAXWatchQueueWorker):
     def __init__(self, packet_stats_dump_dir: str, packet_stats_file_ext: str, packet_stats_destination_dir: str):
+        """Initialize the PacketStatsProcessor.
+
+        Args:
+            packet_stats_dump_dir: Directory where packet statistics dump files are created.
+            packet_stats_file_ext: File extension to monitor (e.g., '.dump').
+            packet_stats_destination_dir: Remote destination directory to copy files to.
+        """
         super().__init__(
             "PacketStatsProcessor",
             [(packet_stats_dump_dir, packet_stats_file_ext)],
@@ -27,6 +34,17 @@ class PacketStatsProcessor(MWAXWatchQueueWorker):
         self.packet_stats_destination_dir = packet_stats_destination_dir
 
     def handler(self, item: str) -> bool:
+        """Copy a packet statistics dump file to the remote destination and delete the local source.
+
+        Processes packet statistics dump files by copying them to the configured remote
+        destination directory and deleting the local source file on success.
+
+        Args:
+            item: Full path to the packet statistics dump file.
+
+        Returns:
+            True if the file was successfully copied and deleted, False otherwise.
+        """
         # This gets called by the queueworker who had put an "item"
         # on the queue from a watcher of the filesystem.
         # The "item" is the full path and filename of a packet stats data file

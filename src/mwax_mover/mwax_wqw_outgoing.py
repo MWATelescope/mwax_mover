@@ -27,6 +27,19 @@ class OutgoingProcessor(MWAXPriorityWatchQueueWorker):
         archive_destination_host: str,
         archive_command_timeout_sec: int,
     ):
+        """Initialize the OutgoingProcessor.
+
+        Args:
+            metafits_path: Path to the metafits file for priority detection.
+            visdata_outgoing_path: Path to the visibility data outgoing directory.
+            voltdata_outgoing_path: Path to the voltage data outgoing directory.
+            bf_outgoing_path: Path to the beamformer data outgoing directory.
+            list_of_corr_hi_priority_projects: List of high-priority correlator project IDs.
+            list_of_vcs_hi_priority_projects: List of high-priority VCS project IDs.
+            archive_command_numa_node: NUMA node to use for archive commands.
+            archive_destination_host: Destination hostname for archiving via xrootd.
+            archive_command_timeout_sec: Timeout in seconds for archive operations.
+        """
         super().__init__(
             "OutgoingProcessor",
             metafits_path,
@@ -45,9 +58,18 @@ class OutgoingProcessor(MWAXPriorityWatchQueueWorker):
         self.archive_command_timeout_sec = archive_command_timeout_sec
 
     def handler(self, item: str) -> bool:
-        """This is called whenever a file is moved into the
-        outgoing_vis or outgoing_volt directories. For each file attempt to
-        send to the mwacache boxes then remove the file"""
+        """Archive an outgoing visibility, voltage, or beamformer file via xrootd.
+
+        Processes .fits visibility, .sub voltage, and beamformer data files by archiving
+        them to the designated mwacache host using xrootd, then deletes the local source
+        file on success.
+
+        Args:
+            item: Full path to the outgoing data file.
+
+        Returns:
+            True if the file was successfully archived and deleted, False otherwise.
+        """
         logger.info(f"{item}: Started...")
 
         if (

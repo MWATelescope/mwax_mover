@@ -34,6 +34,18 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
         archiving_enabled: bool,
         keep_original_files_after_stitching: bool,
     ):
+        """Initialise the beamformer stitching processor.
+
+        Args:
+            metafits_path: Directory containing metafits files for observation metadata.
+            bf_incoming_path: Directory watched for incoming beamformer subobservation files.
+            bf_stitching_path: Directory where stitched beamformer files are written.
+            bf_dont_archive_path: Directory for non-archivable beamformer files or originals.
+            list_of_corr_hi_priority_projects: Correlator project IDs with elevated priority.
+            list_of_vcs_hi_priority_projects: VCS project IDs with elevated priority.
+            archiving_enabled: Whether archiving is enabled for this host.
+            keep_original_files_after_stitching: Whether to keep original subobs files after stitching.
+        """
         super().__init__(
             "BfStitchingProcessor",
             metafits_path,
@@ -55,11 +67,19 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
         self.keep_original_files_after_stitching = keep_original_files_after_stitching
 
     def handler(self, item: str) -> bool:
-        #
-        # Each time we get a new filterbank or vdif file
-        # We *may* need to kick off stitching things together.
-        # Once stitched, we send to the checksum+db queue
-        #
+        """Stitch VDIF and filterbank subobservation files into complete observation files.
+
+        Monitors VDIF and filterbank subobservation files. When the final expected
+        subobservation arrives, stitches all matching files into a complete observation
+        file using the appropriate format utility, optionally retaining original subobs files.
+
+        Args:
+            item: Full path of the beamformer subobservation file (.vdif or .fil).
+
+        Returns:
+            True if file was processed or skipped.
+            False if filename format is invalid.
+        """
         filename = os.path.basename(item)
         ext = os.path.splitext(filename)[1]
 

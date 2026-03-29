@@ -51,6 +51,11 @@ logger.addHandler(handler)
 
 class CalibrationRequest:
     def __init__(self):
+        """Initialize a CalibrationRequest instance.
+
+        Stores information about a calibration request including observation ID,
+        request ID, and job type.
+        """
         self.obs_id: int = 0
         self.request_id: int = 0
         self.type: CalvinJobType
@@ -70,6 +75,11 @@ class MWAXCalvinController:
     def __init__(
         self,
     ):
+        """Initialize MWAXCalvinController with default values.
+
+        Sets up instance variables for managing realtime and MWA ASVO calibration
+        requests, database connections, and health monitoring.
+        """
         # General
         self.log_path: str = ""
         self.hostname: str = ""
@@ -109,7 +119,11 @@ class MWAXCalvinController:
         self.mwax_asvo_helper: mwax_asvo_helper.MWAASVOHelper = mwax_asvo_helper.MWAASVOHelper()
 
     def start(self):
-        """Start the controller"""
+        """Start the controller and main event loop.
+
+        Initializes database connection pool, starts health monitoring thread,
+        and enters main loop to process calibration requests.
+        """
         self.running = True
 
         # creating database connection pool(s)
@@ -163,6 +177,11 @@ class MWAXCalvinController:
         logger.info("Completed Successfully")
 
     def main_loop_handler(self):
+        """Handle a single iteration of the main control loop.
+
+        Creates calibration requests for unattempted observations, retrieves new
+        requests, and submits them to SLURM. Also updates MWA ASVO job statuses.
+        """
         # Look at the schedule and create cal requests for any unattempted calibrator observations
         try:
             self.realtime_create_requests_for_unattempted_cal_obs()
@@ -206,6 +225,11 @@ class MWAXCalvinController:
             self.mwa_asvo_submit_ready_asvo_jobs_to_slurm()
 
     def realtime_create_requests_for_unattempted_cal_obs(self):
+        """Create calibration requests for unattempted calibrator observations.
+
+        Queries the database for calibrator observations that don't have requests
+        yet and creates requests for them.
+        """
         # First get the obs's which need requests created
         obs_ids_to_request: Optional[list[int]] = get_unattempted_unrequested_cal_obsids(
             self.db_handler_object, self.oldest_cal_obs_id
@@ -217,6 +241,15 @@ class MWAXCalvinController:
                 insert_calibration_request_row(self.db_handler_object, obs_id, True)
 
     def realtime_submit_to_slurm(self, realtime_request: CalibrationRequest):
+        """Submit a realtime calibration request to SLURM.
+
+        Creates an SBATCH script for the request and submits it to SLURM for
+        processing. Updates the database with submission status.
+
+        Args:
+            realtime_request: CalibrationRequest object containing the observation ID
+                and request ID to submit.
+        """
         # Create a sbatch script
         script = create_sbatch_script(
             self.worker_config_filename,
@@ -271,9 +304,12 @@ class MWAXCalvinController:
             logger.error(error_message)
 
     def mwa_asvo_submit_ready_asvo_jobs_to_slurm(self):
-        """This code will check for any jobs which can be downloaded and submit
-        sbatch script to SLURM for them to be handled/downloaded/processed by
-        the calvin processor"""
+        """Submit ready MWA ASVO jobs to SLURM for download and processing.
+
+        Checks for any MWA ASVO jobs that are in Ready state and submits SBATCH
+        scripts to SLURM for them to be downloaded and processed by the calvin
+        processor. Handles error states appropriately.
+        """
         error_message: str = ""
 
         for job in self.mwax_asvo_helper.current_asvo_jobs:
@@ -355,7 +391,11 @@ class MWAXCalvinController:
                         self.slurm_errors += 1
 
     def stop(self):
-        """Shutsdown all processes"""
+        """Shutdown the controller and close all connections.
+
+        Sets running flag to false and closes database connections to initiate
+        graceful shutdown.
+        """
 
         self.running = False
 
@@ -366,7 +406,11 @@ class MWAXCalvinController:
         self.ready_to_exit = True
 
     def health_loop(self):
-        """Send health information via UDP multicast"""
+        """Periodically send health status via UDP multicast.
+
+        Runs in a separate thread and sends status information every second while
+        the controller is running.
+        """
         while self.running:
             # Code to run by the health thread
             status_dict = self.get_status()
@@ -390,7 +434,12 @@ class MWAXCalvinController:
             self.sleep(1)
 
     def get_status(self) -> dict:
-        """Returns status of all process as a dictionary"""
+        """Return status of all processes as a dictionary.
+
+        Returns:
+            A dictionary containing process status information including running
+            state, job counters, and error counts.
+        """
         main_status = {
             "unix_timestamp": time.time(),
             "process": type(self).__name__,
@@ -408,18 +457,27 @@ class MWAXCalvinController:
         return {"main": main_status}
 
     def signal_handler(self, _signum, _frame):
-        """Handles SIGINT and SIGTERM"""
+        """Handle SIGINT and SIGTERM signals for graceful shutdown.
+
+        Args:
+            _signum: Signal number (unused).
+            _frame: Stack frame (unused).
+        """
         logger.warning("Interrupted. Shutting down processor...")
 
         # Stop any Processors
         self.stop()
 
     def get_new_calibration_requests(self) -> tuple[list[CalibrationRequest], list[CalibrationRequest]]:
-        """This code checks for any unassigned requests and assigns them to this host.
-        For mwaasvo jobs, it also adds them to our tracked jobs in
-        self.mwa_asvo_helper.current_asvo_jobs
+        """Retrieve new calibration requests from database and separate by type.
 
-        returns a tuple of realtime requests and asvo requests respectively"""
+        Checks for unassigned calibration requests from the database and assigns
+        them to this host. MWA ASVO jobs are also added to tracked jobs.
+
+        Returns:
+            A tuple of (realtime_requests, asvo_requests), each a list of
+            CalibrationRequest objects.
+        """
 
         return_list_realtime: list[CalibrationRequest] = []
         return_list_asvo: list[CalibrationRequest] = []
@@ -455,15 +513,15 @@ class MWAXCalvinController:
         return return_list_realtime, return_list_asvo
 
     def mwa_asvo_add_new_asvo_job(self, request_id: int, obs_id: int):
-        """Starts tracking a new MWAASVOJob and, if not submitted already,
-        submits the job to MWA ASVO
+        """Add and track a new MWA ASVO job, submitting if not already submitted.
 
-        Parameters:
-            request_id (int): the request_id for this job
-            obs_id (int): the obs_id for this job
+        Args:
+            request_id: The request ID for this job.
+            obs_id: The observation ID for this job.
 
-        Returns:
-            Nothing. Exceptions can be raised though
+        Raises:
+            GiantSquidMWAASVOOutageException: If MWA ASVO is experiencing an outage.
+            Exception: For other errors during job submission.
         """
 
         #
@@ -544,6 +602,11 @@ class MWAXCalvinController:
                 return
 
     def mwa_asvo_update_tracked_jobs(self):
+        """Update the status of all tracked MWA ASVO jobs.
+
+        Queries MWA ASVO via giant-squid to get the latest job statuses and
+        populates current_asvo_jobs with results.
+        """
         # Find out the status of all this user's jobs in MWA ASVO
         # Get the job list from giant-squid, populating current_asvo_jobs
         # If we find a job in giant-squid which we don't know about,
@@ -561,7 +624,11 @@ class MWAXCalvinController:
                 self.giant_squid_errors += 1
 
     def initialise(self, config_filename: str):
-        """Initialise the processor from the command line"""
+        """Initialize the controller from a configuration file.
+
+        Args:
+            config_filename: Path to the configuration file.
+        """
         self.config_filename = config_filename
         self.worker_config_filename = config_filename.replace("calvin_controller", "calvin_processor")
 
@@ -687,7 +754,11 @@ class MWAXCalvinController:
         )
 
     def initialise_from_command_line(self):
-        """Initialise if initiated from command line"""
+        """Initialize the controller from command-line arguments.
+
+        Parses command-line arguments and calls initialise() with the configuration
+        file path.
+        """
 
         # Get command line args
         parser = argparse.ArgumentParser()
@@ -707,8 +778,14 @@ class MWAXCalvinController:
         self.initialise(config_filename)
 
     def sleep(self, seconds):
-        """This sleep function keeps an eye on self.running so that if we are in a long wait
-        we will still respond to shutdown directives"""
+        """Sleep for a specified duration while remaining responsive to shutdown.
+
+        Breaks long sleeps into intervals to remain responsive to the running
+        flag and shutdown directives.
+
+        Args:
+            seconds: Duration to sleep in seconds.
+        """
         SECS_PER_INTERVAL: int = 5
 
         if self.running:
@@ -726,7 +803,7 @@ class MWAXCalvinController:
 
 
 def main():
-    """Mainline function"""
+    """Main entry point for the MWA Calvin controller process."""
     processor = MWAXCalvinController()
 
     try:

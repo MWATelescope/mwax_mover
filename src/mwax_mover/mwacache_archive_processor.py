@@ -45,6 +45,11 @@ class MWACacheArchiveProcessor:
     """
 
     def __init__(self):
+        """Initialize MWACacheArchiveProcessor with default values.
+
+        Sets up instance variables for database connections, archiving configuration,
+        health monitoring, and worker management.
+        """
         if utils.running_under_pytest():
             # pretend I am mwacache99
             self.hostname = "mwacache99"
@@ -95,7 +100,11 @@ class MWACacheArchiveProcessor:
         self.workers: list[MWAXPriorityWatchQueueWorker] = list()
 
     def start(self):
-        """This method is used to start the processor"""
+        """Start the processor and begin monitoring for archive operations.
+
+        Initializes database connection pools, starts health monitoring and worker
+        threads, and enters main monitoring loop.
+        """
         self.running = True
 
         # creating database connection pool(s)
@@ -166,7 +175,11 @@ class MWACacheArchiveProcessor:
         logger.info("Completed Successfully")
 
     def pause_archiving(self, paused: bool):
-        """Pauses archiving"""
+        """Pause or resume archiving operations across all workers.
+
+        Args:
+            paused: True to pause archiving, False to resume.
+        """
         if self.archiving_paused != paused:
             if paused:
                 logger.info("Pausing archiving")
@@ -180,7 +193,10 @@ class MWACacheArchiveProcessor:
             self.archiving_paused = paused
 
     def stop(self):
-        """Stops all processes"""
+        """Stop the processor and shutdown all workers and connections.
+
+        Stops worker threads and closes database connections.
+        """
         self.running = False
 
         # Stop any Processors
@@ -196,7 +212,11 @@ class MWACacheArchiveProcessor:
             self.remote_db_handler_object.close()
 
     def health_handler(self):
-        """Send multicast health data"""
+        """Periodically send health status via UDP multicast.
+
+        Runs in a separate thread and sends status information every second while
+        the processor is running.
+        """
         while self.running:
             # Code to run by the health thread
             status_dict = self.get_status()
@@ -220,7 +240,11 @@ class MWACacheArchiveProcessor:
             time.sleep(1)
 
     def get_status(self) -> dict:
-        """Returns status of all process as a dictionary"""
+        """Return status of the processor and all workers as a dictionary.
+
+        Returns:
+            A dictionary containing main processor status and individual worker statuses.
+        """
         main_status = {
             "unix_timestamp": time.time(),
             "process": type(self).__name__,
@@ -240,14 +264,23 @@ class MWACacheArchiveProcessor:
         return status
 
     def signal_handler(self, _signum, _frame):
-        """Catches SIG INT and SIG TERM then stops the processor"""
+        """Handle SIGINT and SIGTERM signals for graceful shutdown.
+
+        Args:
+            _signum: Signal number (unused).
+            _frame: Stack frame (unused).
+        """
         logger.warning("Interrupted. Shutting down processor...")
 
         # Stop any Processors
         self.stop()
 
     def initialise(self, config_filename):
-        """Do initial setup"""
+        """Initialize the processor from a configuration file.
+
+        Args:
+            config_filename: Path to the configuration file.
+        """
         if not os.path.exists(config_filename):
             print(f"Configuration file location {config_filename} does not exist. Quitting.")
             sys.exit(1)
@@ -443,7 +476,11 @@ class MWACacheArchiveProcessor:
         logger.info("Ready to start...")
 
     def initialise_from_command_line(self):
-        """Initialise if initiated from command line"""
+        """Initialize the processor from command-line arguments.
+
+        Parses command-line arguments and calls initialise() with the configuration
+        file path.
+        """
 
         # Get command line args
         parser = argparse.ArgumentParser()
@@ -466,7 +503,7 @@ class MWACacheArchiveProcessor:
 
 
 def main():
-    """Mainline function"""
+    """Main entry point for the MWA cache archive processor."""
     processor = MWACacheArchiveProcessor()
 
     try:

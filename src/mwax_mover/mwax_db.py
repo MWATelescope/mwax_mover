@@ -38,6 +38,15 @@ class MWAXDBHandler:
         user: str,
         password: str,
     ):
+        """Initialize the MWAXDBHandler with database connection parameters.
+
+        Args:
+            host: The database host address.
+            port: The database port number.
+            db_name: The database name.
+            user: The database user.
+            password: The database password.
+        """
         self.host = host
         self.port = port
         self.db_name = db_name
@@ -54,6 +63,7 @@ class MWAXDBHandler:
             )
 
     def close(self):
+        """Close the database connection pool if it is open."""
         # This set of 3 ifs covers all cases where the pool may not be instantiated or open
         if getattr(self, "pool", None) is None:
             return
@@ -67,11 +77,13 @@ class MWAXDBHandler:
         self.close()
 
     def start_database_pool(self):
+        """Open the database connection pool if it is closed."""
         # Check we are not already started
         if self.pool.closed:
             self.pool.open(wait=True)
 
     def stop_database_pool(self):
+        """Gracefully close the database connection pool."""
         # Gracefully close the connections in the pool
         if self.pool:
             try:
@@ -80,7 +92,15 @@ class MWAXDBHandler:
                 pass
 
     def select_one_row_postgres(self, sql: str, parm_list):
-        """Returns a single row from postgres given SQL and params"""
+        """Retrieve a single row from the database.
+
+        Args:
+            sql: SQL query string.
+            parm_list: Parameter list for the SQL query.
+
+        Returns:
+            A dictionary representing the single row from the query result.
+        """
         # Assuming we have a connection, try to do the database operation
         rows = self.select_postgres(sql, parm_list, 1)
 
@@ -88,7 +108,15 @@ class MWAXDBHandler:
         return rows[0]
 
     def select_many_rows_postgres(self, sql: str, parm_list):
-        """Returns a single row from postgres given SQL and params"""
+        """Retrieve multiple rows from the database.
+
+        Args:
+            sql: SQL query string.
+            parm_list: Parameter list for the SQL query.
+
+        Returns:
+            A list of dictionaries representing rows from the query result.
+        """
         # Assuming we have a connection, try to do the database operation
         rows = self.select_postgres(sql, parm_list, None)
 
@@ -108,9 +136,20 @@ class MWAXDBHandler:
         ),
     )
     def select_postgres(self, sql, parm_list, expected_rows: None | int):
-        """Returns rows from postgres given SQL and params. If expected rows is passed
-        then it will check it returned the correct number of rows and riase exception
-        if not"""
+        """Execute a SELECT query against the database with retry logic.
+
+        Args:
+            sql: SQL query string.
+            parm_list: Parameter list for the SQL query.
+            expected_rows: Expected number of rows. If None, any number is accepted.
+                If specified, raises an exception if the actual count doesn't match.
+
+        Returns:
+            A list of dictionaries representing rows from the query result.
+
+        Raises:
+            Exception: If expected_rows is specified and the row count doesn't match.
+        """
         # Assuming we have a connection, try to do the database operation
         try:
             with self.pool.connection() as conn:
@@ -157,9 +196,19 @@ class MWAXDBHandler:
         ),
     )
     def execute_single_dml_row(self, sql: str, parm_list):
-        """This executes an INSERT, UPDATE or DELETE that should affect 1
-        row only. Since this is all in a with (context) block, rollback is
-        called on failure and commit on success. Exceptions are raised on error."""
+        """Execute an INSERT, UPDATE, or DELETE statement affecting exactly one row.
+
+        Automatically commits on success and rolls back on failure within
+        a transaction context.
+
+        Args:
+            sql: SQL DML statement.
+            parm_list: Parameter list for the SQL statement.
+
+        Raises:
+            Exception: If the statement doesn't affect exactly one row or
+                if a database error occurs.
+        """
         self.execute_dml(sql, parm_list, expected_rows=1)
 
     @retry(
@@ -175,9 +224,22 @@ class MWAXDBHandler:
         ),
     )
     def execute_dml(self, sql, parm_list, expected_rows: None | int):
-        """This executes an INSERT, UPDATE or DELETE that should affect 0,1 or many
-        rows. Since this is all in a with (context) block, rollback is
-        called on failure and commit on success. Exceptions are raised on error."""
+        """Execute an INSERT, UPDATE, or DELETE statement with retry logic.
+
+        Automatically commits on success and rolls back on failure within
+        a transaction context.
+
+        Args:
+            sql: SQL DML statement.
+            parm_list: Parameter list for the SQL statement.
+            expected_rows: Expected number of rows affected. If None, any number is accepted.
+                If specified, raises an exception if the actual count doesn't match.
+
+        Raises:
+            Exception: If expected_rows is specified and the row count doesn't match,
+                or if a database error occurs.
+            psycopg.errors.ForeignKeyViolation: If a foreign key constraint is violated.
+        """
 
         # Assuming we have a connection, try to do the database operation
         try:
@@ -220,19 +282,20 @@ class MWAXDBHandler:
             raise
 
     def execute_dml_row_within_transaction(self, sql, parm_list, transaction_cursor: psycopg.Cursor):
-        """This executes an INSERT, UPDATE or DELETE that should only affect
-        one row.
+        """Execute an INSERT, UPDATE, or DELETE statement within a transaction.
 
-        NOTES: it is up to the caller to supply a cursor which all of the operations
-        within the transaction share. Also it is up to the caller to call:
-        1. conn = self.pool.getconn() # get a connection
-        2. curs = conn.cursor()
-        3. Call this method (possibly multiple times), passing in "curs"
-        4. conn.rollback() # On exception or failure
-        5. conn.commit() # On success
-        6. self.pool.putconn(conn)
+        This method does not handle commit/rollback - those are the caller's responsibility.
+        The caller must obtain a connection and cursor, call this method (potentially
+        multiple times), and then commit or rollback the transaction.
 
-        We don't retry on FK or UK exceptions because, well, retrying won't fix anything!
+        Args:
+            sql: SQL DML statement.
+            parm_list: Parameter list for the SQL statement.
+            transaction_cursor: A psycopg.Cursor object from an active transaction.
+
+        Raises:
+            Exception: If the statement doesn't affect exactly one row or
+                if a database error occurs.
         """
 
         # Assuming we have a connection, try to do the database operation
@@ -270,13 +333,26 @@ class DataFileRow:
     """A class that abstracts the key fields of a MWA data_files row"""
 
     def __init__(self):
+        """Initialize a DataFileRow with default values."""
         self.observation_num: int = 0
         self.size = -1
         self.checksum = ""
 
 
 def get_data_file_row(db_handler_object: MWAXDBHandler, full_filename: str, obs_id: int) -> DataFileRow:
-    """Return a data file row instance on success or None on Failure"""
+    """Retrieve a data file record from the database.
+
+    Args:
+        db_handler_object: MWAXDBHandler instance.
+        full_filename: Full path to the data file.
+        obs_id: The observation ID.
+
+    Returns:
+        A DataFileRow instance containing the file's metadata.
+
+    Raises:
+        Exception: If the database query fails.
+    """
     # Prepare the fields
     # immediately add this file to the db so we insert a record into metadata
     # data_files table

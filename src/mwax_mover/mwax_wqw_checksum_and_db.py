@@ -87,15 +87,22 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
         self.archiving_enabled = archiving_enabled
 
     def _checksum_and_insert_db(self, item: str, val: ValidationData) -> Optional[bool]:
-        """Compute the MD5 checksum of *item* and insert a record in the metadata DB.
+        """Compute the MD5 checksum and insert a metadata database record.
+
+        Computes the MD5 checksum of the file and inserts a data_files record into
+        the metadata database. For VCS subfiles, also retrieves the trigger_id.
+
+        Args:
+            item: Full path of the file to checksum and record.
+            val: Validated filename metadata including filetype_id and obs_id.
 
         Returns:
-            ``True``  — the file disappeared before or after the DB insert; the caller
-                        should treat the item as done and return ``True``.
-            ``False`` — the DB insert failed; the caller should return ``False`` so the
-                        item is not re-queued (``requeue_to_eoq_on_failure=False``).
-            ``None``  — checksum and DB insert both succeeded and the file still exists;
-                        the caller should proceed to routing.
+            True if the file disappeared before or after DB insert.
+            False if the DB insert failed.
+            None if checksum and DB insert both succeeded and file still exists.
+
+        Raises:
+            FileNotFoundError: Caught and logged; returns True to continue processing.
         """
         try:
             file_size = os.stat(item).st_size
@@ -134,20 +141,18 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
         return None
 
     def _get_destination(self, item: str, val: ValidationData, archive: bool) -> Optional[str]:
-        """Return the full destination path for *item* based on its file type and archive flag.
+        """Determine the destination directory for the file.
 
-        Visibilities always go to ``visdata_processing_stats`` regardless of the archive
-        flag (stats must be generated even for no-archive projects).
+        Routes files based on type and archive flag. Visibilities always go to
+        visdata_processing_stats regardless of archive flag (stats required for all projects).
 
         Args:
-            item: Full path of the file being processed (used to extract the basename).
-            val: Validated filename metadata including ``filetype_id``.
-            archive: ``True`` if the file should be routed toward the archive
-                     (outgoing paths); ``False`` routes to dont_archive paths.
+            item: Full path of the file being processed.
+            val: Validated filename metadata including filetype_id.
+            archive: True to route to archive outgoing paths, False for dont_archive paths.
 
         Returns:
-            The destination file path string, or ``None`` if ``val.filetype_id`` is
-            not a recognised ``MWADataFileType``.
+            The destination file path string, or None if filetype_id is not recognised.
         """
         basename = os.path.basename(item)
 
@@ -166,19 +171,18 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
         return os.path.join(dest_dir, basename)
 
     def handler(self, item: str) -> bool:
-        """Checksum, record in the DB, then route the file to its next destination.
+        """Process visibility, voltage, and beamformer files through checksumming and routing.
 
-        This is the first handler executed when a new file arrives. It:
-        1. Validates the filename and extracts metadata.
-        2. (When archiving is enabled) Computes the MD5 checksum and inserts a
-           ``data_files`` record into the MWA metadata database.
-        3. Determines the destination directory based on file type and whether the
-           project should be archived, then moves the file there.
+        Validates the filename, computes MD5 checksum and records in the metadata database
+        when archiving is enabled, then routes the file to its destination based on type
+        and archive status.
+
+        Args:
+            item: Full path of the file to process.
 
         Returns:
-            ``True`` if the file was successfully handled (or had already been removed).
-            ``False`` if validation failed, the DB insert failed, or the filetype was
-            not recognised.
+            True if file was successfully handled or already removed.
+            False if validation failed, DB insert failed, or filetype not recognised.
         """
         logger.info(f"{item}: Started")
 

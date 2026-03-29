@@ -74,12 +74,26 @@ class CorrelatorMode(Enum):
 
     @staticmethod
     def is_no_capture(mode_string: str) -> bool:
-        """Returns true if mode is a no capture or mode change- i.e. don't do anything"""
+        """Check if the mode indicates no capture or mode change.
+
+        Args:
+            mode_string: The correlator mode string to check.
+
+        Returns:
+            True if the mode is NO_CAPTURE or CORR_MODE_CHANGE, False otherwise.
+        """
         return mode_string in [CorrelatorMode.NO_CAPTURE.value, CorrelatorMode.CORR_MODE_CHANGE.value]
 
     @staticmethod
     def is_correlator(mode_string: str) -> bool:
-        """Returns true if mode is a correlator obs"""
+        """Check if the mode indicates a correlator observation.
+
+        Args:
+            mode_string: The correlator mode string to check.
+
+        Returns:
+            True if the mode is MWAX_CORRELATOR or MWAX_CORR_BF, False otherwise.
+        """
         return mode_string in [
             CorrelatorMode.MWAX_CORRELATOR.value,
             CorrelatorMode.MWAX_CORR_BF.value,
@@ -87,19 +101,40 @@ class CorrelatorMode(Enum):
 
     @staticmethod
     def is_vcs(mode_string: str) -> bool:
-        """Returns true if mode is a vcs obs"""
+        """Check if the mode indicates a VCS observation.
+
+        Args:
+            mode_string: The correlator mode string to check.
+
+        Returns:
+            True if the mode is MWAX_VCS, False otherwise.
+        """
         return mode_string in [
             CorrelatorMode.MWAX_VCS.value,
         ]
 
     @staticmethod
     def is_voltage_buffer(mode_string: str) -> bool:
-        """Returns true if mode is voltage buffer"""
+        """Check if the mode indicates a voltage buffer observation.
+
+        Args:
+            mode_string: The correlator mode string to check.
+
+        Returns:
+            True if the mode is MWAX_BUFFER, False otherwise.
+        """
         return mode_string == CorrelatorMode.MWAX_BUFFER.value
 
     @staticmethod
     def is_beamformer(mode_string: str) -> bool:
-        """Returns true if mode is beamformer"""
+        """Check if the mode indicates a beamformer observation.
+
+        Args:
+            mode_string: The correlator mode string to check.
+
+        Returns:
+            True if the mode is MWAX_BEAMFORMER or MWAX_CORR_BF, False otherwise.
+        """
         return mode_string in [CorrelatorMode.MWAX_BEAMFORMER.value, CorrelatorMode.MWAX_CORR_BF.value]
 
 

@@ -56,6 +56,11 @@ class MWAXCalvinProcessor:
     def __init__(
         self,
     ):
+        """Initialize MWAXCalvinProcessor with default values.
+
+        Sets up instance variables for job parameters, data paths, processing
+        configuration, and status tracking.
+        """
         # General
         self.log_path: str = ""
         self.hostname: str = ""
@@ -119,7 +124,11 @@ class MWAXCalvinProcessor:
         self.hyperdrive_binary_path: str = ""
 
     def start(self):
-        """Start the processor"""
+        """Start the processor and execute calibration workflow.
+
+        Downloads visibility data, runs Birli and Hyperdrive, processes solutions,
+        and manages job lifecycle including error handling and MWAX file release.
+        """
         self.current_task_name = "Initialising"
         self.running = True
 
@@ -351,6 +360,11 @@ class MWAXCalvinProcessor:
                 self.fail_job_downloading(error_message)
 
     def release_mwax_files(self):
+        """Release visibility files from MWAX boxes after processing.
+
+        Calls webservices on each MWAX host to signal they can release the
+        calibration observation files.
+        """
         hostnames = set()
         # Loop through all the hosts and filenames and just get the set of hostnames
         for mwax_host_and_filename in self.mwax_download_filenames:
@@ -395,6 +409,13 @@ class MWAXCalvinProcessor:
                 hostnames.remove(hostname)
 
     def fail_job_downloading(self, error_message: str):
+        """Mark a job as failed during the download phase.
+
+        Updates the database with error information and stops the processor.
+
+        Args:
+            error_message: Description of the error that occurred.
+        """
         error_datetime = datetime.datetime.now().astimezone()
         # Update database
         try:
@@ -424,6 +445,13 @@ class MWAXCalvinProcessor:
             logger.info("Completed with downloading errors")
 
     def fail_job_processing(self, error_message: str):
+        """Mark a job as failed during the processing phase.
+
+        Updates the database with error information and stops the processor.
+
+        Args:
+            error_message: Description of the error that occurred.
+        """
         error_datetime = datetime.datetime.now().astimezone()
 
         # Update database
@@ -454,12 +482,27 @@ class MWAXCalvinProcessor:
             logger.info("Completed with processing errors")
 
     def succeed_job_processing(self, fit_id: int):
+        """Mark a job as successfully completed.
+
+        Updates the database with the completed status and fit_id.
+
+        Args:
+            fit_id: The ID of the fit/solution that was created.
+        """
         # Update database
         update_calsolution_request_calibration_complete_status(
             self.db_handler_object, self.slurm_job_id, datetime.datetime.now().astimezone(), fit_id, None, None
         )
 
     def get_observation_file_list(self) -> tuple[bool, str]:
+        """Get list of data files for the observation from the webservice.
+
+        Waits for the observation to complete and then queries the webservice
+        for the list of visibility files and their host locations.
+
+        Returns:
+            A tuple of (success, error_message). If successful, error_message is empty.
+        """
         # Get the duration of the obs from the metafits and only proceed
         # if the current gps time is > the obs_id + duration + a constant
         exp_time = int(self.metafits_context.sched_duration_ms / 1000.0)
@@ -510,6 +553,14 @@ class MWAXCalvinProcessor:
             return False, "get_observation_file_list cancelled due to processor shutdown"
 
     def download_mwa_asvo_data(self) -> tuple[bool, str]:
+        """Download and extract MWA ASVO observation data from URL.
+
+        Downloads a tarball from the MWA ASVO download URL and extracts it to
+        the job input path.
+
+        Returns:
+            A tuple of (success, error_message). If successful, error_message is empty.
+        """
         # Given the URL from command line args, download and untar the MWA ASVO data
         try:
             stdout = ""
@@ -549,6 +600,14 @@ class MWAXCalvinProcessor:
             return False, error_message
 
     def download_realtime_data(self) -> tuple[bool, str]:
+        """Download realtime visibility files from MWAX boxes via rsync.
+
+        Performs parallel rsync operations to download files from multiple MWAX
+        hosts using a worker pool.
+
+        Returns:
+            A tuple of (success, error_message). If successful, error_message is empty.
+        """
         # In parallel download all the files
 
         # Now download the files
@@ -582,9 +641,14 @@ class MWAXCalvinProcessor:
             return False, error_message
 
     def check_obs_is_ready_to_process(self) -> tuple[bool, str]:
-        """This routine checks to see if an observation is ready to be processed and
-        also sums up the total size and determines if there is enough RAM to write
-        the uvfits file to RAM or not"""
+        """Verify that all expected data files are present and ready to process.
+
+        Checks that the number of downloaded visibility files matches the expected
+        count from the webservice file list.
+
+        Returns:
+            A tuple of (success, message). Message contains diagnostic information.
+        """
         # we need a list of files from the work dir
         # this first list has the full path
         # put a basic UNIX pattern so we don't pick up the metafits
@@ -609,7 +673,14 @@ class MWAXCalvinProcessor:
             return False, f"Exception in check_obs_is_ready_to_process: {str(e)}"
 
     def run_birli(self) -> tuple[bool, str]:
-        """Run birli to produce uvfits file(s)"""
+        """Execute Birli preprocessing to produce UVFITS file(s).
+
+        Runs Birli with appropriate parameters to preprocess visibility data
+        and create UVFITS output files.
+
+        Returns:
+            A tuple of (success, error_message). If successful, error_message is empty.
+        """
         birli_success: bool = False
 
         # Determine if the obs is oversampled
@@ -638,7 +709,14 @@ class MWAXCalvinProcessor:
             return False, "Birli run failed. See logs"
 
     def run_hyperdrive(self) -> tuple[bool, str]:
-        """Run hyperdrive to produce solutions"""
+        """Execute Hyperdrive calibration to produce calibration solutions.
+
+        Runs Hyperdrive calibration on preprocessed UVFITS files, generates
+        statistics and plots, and exports solutions to configured directories.
+
+        Returns:
+            A tuple of (success, error_message). If successful, error_message is empty.
+        """
         hyperdrive_success = False
 
         # If all good run hyperdrive- once per uvfits file created
@@ -771,7 +849,10 @@ class MWAXCalvinProcessor:
             return False, "Hyperdrive run failed. See logs"
 
     def stop(self):
-        """Shutdown all processes"""
+        """Shutdown the processor and close all connections.
+
+        Closes database connections and terminates the processor.
+        """
         # Close all database connections
         if self.db_handler_object:
             self.db_handler_object.close()
@@ -779,7 +860,11 @@ class MWAXCalvinProcessor:
         sys.exit(0)
 
     def health_loop(self):
-        """Send health information via UDP multicast"""
+        """Periodically send health status via UDP multicast.
+
+        Runs in a separate thread and sends status information every second while
+        the processor is running.
+        """
         while self.running:
             # Code to run by the health thread
             status_dict = self.get_status()
@@ -803,7 +888,12 @@ class MWAXCalvinProcessor:
             self.sleep(1)
 
     def get_status(self) -> dict:
-        """Returns status of all process as a dictionary"""
+        """Return status of the processor as a dictionary.
+
+        Returns:
+            A dictionary containing process status information including running
+            state, job parameters, and current task.
+        """
         requests = ",".join(str(r) for r in self.request_id_list)
 
         main_status = {
@@ -824,7 +914,12 @@ class MWAXCalvinProcessor:
         return status
 
     def signal_handler(self, signum, _frame):
-        """Handles SIGINT, SIGTERM, USR1"""
+        """Handle SIGINT, SIGTERM, and SIGUSR1 signals for graceful shutdown.
+
+        Args:
+            signum: The signal number received.
+            _frame: Stack frame (unused).
+        """
         # Update the database that this job has been cancelled
         if signum == signal.SIGUSR1:
             signal_message = "Slurm hit walltime"
@@ -854,7 +949,16 @@ class MWAXCalvinProcessor:
         mwa_asvo_download_url: str,
         request_ids: list[int],
     ):
-        """Initialise the processor from the command line"""
+        """Initialize the processor from configuration and job parameters.
+
+        Args:
+            config_filename: Path to the configuration file.
+            obs_id: The observation ID to process.
+            slurm_job_id: The SLURM job ID of this job.
+            job_type: Type of job (realtime or mwa_asvo).
+            mwa_asvo_download_url: Download URL for MWA ASVO jobs (empty for realtime).
+            request_ids: List of request IDs associated with this job.
+        """
         # Get this hosts hostname
         self.hostname = utils.get_hostname()
         self.job_type = job_type
@@ -1138,7 +1242,10 @@ class MWAXCalvinProcessor:
             exit(-1)
 
     def initialise_from_command_line(self):
-        """Initialise if initiated from command line"""
+        """Initialize the processor from command-line arguments.
+
+        Parses command-line arguments and calls initialise() with extracted parameters.
+        """
 
         # Get command line args
         parser = argparse.ArgumentParser()
@@ -1241,8 +1348,14 @@ class MWAXCalvinProcessor:
         )
 
     def sleep(self, seconds):
-        """This sleep function keeps an eye on self.running so that if we are in a long wait
-        we will still respond to shutdown directives"""
+        """Sleep for a specified duration while remaining responsive to shutdown.
+
+        Breaks long sleeps into intervals to remain responsive to the running
+        flag and shutdown directives.
+
+        Args:
+            seconds: Duration to sleep in seconds.
+        """
         SECS_PER_INTERVAL: int = 5
 
         if self.running:
@@ -1260,7 +1373,7 @@ class MWAXCalvinProcessor:
 
 
 def main():
-    """Mainline function"""
+    """Main entry point for the MWA Calvin processor process."""
     processor = MWAXCalvinProcessor()
 
     try:

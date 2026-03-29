@@ -107,11 +107,16 @@ class Metafits:
     """MWA Metadata file in FITS format"""
 
     def __init__(self, filename: str):
+        """Initialize a Metafits file reader.
+
+        Args:
+            filename: Path to the FITS metafits file.
+        """
         self.filename = filename
 
     @property
     def tiles(self) -> List[Tile]:
-        """Get tile info from metafits, sorted by index"""
+        """Get tile information from metafits, sorted by ID."""
 
         with fits.open(self.filename) as hdus:
             metafits_inputs = hdus["TILEDATA"].data
@@ -134,7 +139,7 @@ class Metafits:
 
     @property
     def inputs(self) -> List[Input]:
-        """Get tile info from metafits, sorted by index"""
+        """Get input information from metafits, sorted by ID."""
 
         with fits.open(self.filename) as hdus:
             metafits_inputs = hdus["TILEDATA"].data
@@ -159,7 +164,7 @@ class Metafits:
 
     @property
     def tiles_df(self) -> pd.DataFrame:
-        """Get reference antenna (unflagged tile with lowest id) and tiles as df"""
+        """Get tiles as a pandas DataFrame."""
         # determine array configuration (compact or extended)
         # config = Config.from_tiles(tiles)
         tiles = self.tiles
@@ -172,17 +177,12 @@ class Metafits:
 
     @property
     def inputs_df(self) -> pd.DataFrame:
+        """Get inputs as a pandas DataFrame."""
         return pd.DataFrame(self.inputs, columns=Input._fields)
 
     @property
     def chan_info(self) -> ChanInfo:
-        """
-        Get coarse channels from metafits, sorted
-
-        Assumptions:
-        - fine_chan_width is a multiple of 200Hz (or 10kHz), so is an integer
-        - total_bandwidth is a multiple of fine_chan_width, so is an integer
-        """
+        """Get coarse channel information from metafits."""
         with fits.open(self.filename) as hdus:
             hdu = hdus["PRIMARY"]
             header: fits.header.Header = hdu.header
@@ -230,9 +230,7 @@ class Metafits:
 
     @property
     def time_info(self) -> TimeInfo:
-        """
-        Get time info from metafits
-        """
+        """Get time information from metafits."""
         with fits.open(self.filename) as hdus:
             hdu = hdus["PRIMARY"]
             header = hdu.header
@@ -247,6 +245,7 @@ class Metafits:
 
     @property
     def calibrator(self):
+        """Get calibrator source name from metafits header."""
         with fits.open(self.filename) as hdus:
             hdu = hdus["PRIMARY"]
             header = hdu.header
@@ -255,6 +254,7 @@ class Metafits:
 
     @property
     def obsid(self):
+        """Get observation ID (GPS time) from metafits header."""
         with fits.open(self.filename) as hdus:
             hdu = hdus["PRIMARY"]
             header = hdu.header
@@ -266,21 +266,16 @@ class HyperfitsSolution:
     """A single calibration solution in hyperdrive FITS format"""
 
     def __init__(self, filename) -> None:
+        """Initialize a HyperfitsSolution file reader.
+
+        Args:
+            filename: Path to the hyperdrive FITS solution file.
+        """
         self.filename = filename
 
     @property
     def chanblocks_hz(self) -> NDArray[np.int_]:
-        """
-        Get channels from solution file
-
-        Validate:
-        - channels are contiguous
-        - channels are in ascending order
-
-        Assumptions:
-        - channel frequencies are multiples of 200Hz, so are integer Hz values
-
-        """
+        """Get channel block frequencies from the solution file."""
         with fits.open(self.filename) as hdus:
             freq_data = hdus["CHANBLOCKS"].data["Freq"].astype(np.int_)
         result = np.array(ensure_system_byte_order(freq_data))
@@ -307,22 +302,27 @@ class HyperfitsSolution:
 
     @property
     def tile_flags(self) -> List[bool]:
-        """Get the tile flags ordered by Antenna index"""
+        """Get tile flags ordered by antenna index."""
         with fits.open(self.filename) as hdus:
             tile_data = hdus["TILES"].data
         return tile_data["Flag"]
 
     def get_average_times(self) -> List[float]:
-        """Get the average time for each timeblock
+        """Get the average time for each timeblock.
 
-        Raises KeyError if TIMEBLOCKS not present
+        Raises:
+            KeyError: If TIMEBLOCKS HDU is not present.
         """
         with fits.open(self.filename) as hdus:
             time_data = hdus["TIMEBLOCKS"].data
             return [time["Average"] for time in time_data]
 
     def get_solutions(self) -> List[NDArray[np.complex128]]:
-        """Get solutions as a complex array for each pol: [time, tile, chan]"""
+        """Get solutions as complex arrays.
+
+        Returns:
+            A list of four complex arrays (XX, XY, YX, YY) each with shape [time, tile, chan].
+        """
         with fits.open(self.filename) as hdus:
             solutions = hdus["SOLUTIONS"].data
         return [
@@ -333,7 +333,15 @@ class HyperfitsSolution:
         ]
 
     def get_ref_solutions(self, ref_tile_idx=None) -> List[NDArray[np.complex128]]:
-        """Get solutions divided by reference tile as a complex array for each pol: [time, tile, chan]"""
+        """Get solutions divided by reference tile.
+
+        Args:
+            ref_tile_idx: Index of the reference tile. If None, returns raw solutions.
+
+        Returns:
+            A list of four complex arrays (XX, XY, YX, YY) each with shape [time, tile, chan],
+            or raw solutions if ref_tile_idx is None.
+        """
         solutions = self.get_solutions()
         if ref_tile_idx is None:
             return solutions
@@ -353,7 +361,7 @@ class HyperfitsSolution:
 
     @property
     def results(self) -> NDArray[np.float64]:
-        """Code adapted from Chris Jordan's scripts"""
+        """Get convergence results from the solution file."""
         with fits.open(self.filename) as hdus:
             return hdus["RESULTS"].data.flatten()
 
@@ -361,11 +369,18 @@ class HyperfitsSolution:
 
 
 class HyperfitsSolutionGroup:
-    """
-    A group of Hyperdrive .fits calibration solutions and corresponding metafits files
-    """
+    """A group of Hyperdrive FITS calibration solutions and corresponding metafits files."""
 
     def __init__(self, metafits: List[Metafits], solns: List[HyperfitsSolution]):
+        """Initialize a solution group with metafits and solution files.
+
+        Args:
+            metafits: List of Metafits file readers.
+            solns: List of HyperfitsSolution file readers.
+
+        Raises:
+            RuntimeError: If no metafits or solution files are provided.
+        """
         if not len(metafits):
             raise RuntimeError("no metafits files provided")
         self.metafits = metafits
@@ -380,10 +395,18 @@ class HyperfitsSolutionGroup:
 
     @classmethod
     def get_metafits_chan_info(cls, metafits: List[Metafits]) -> ChanInfo:
-        """
-        Get the combined ChanInfo, chanblocks_per_coarse and chanblocks_hz array for all provided metafits
+        """Get combined channel information from all metafits files.
 
-        Validate that chan ranges do not overlap, and that channel info is consistent
+        Validates that channel ranges do not overlap and that channel info is consistent.
+
+        Args:
+            metafits: List of Metafits file readers.
+
+        Returns:
+            Combined ChanInfo object.
+
+        Raises:
+            RuntimeError: If channel info is inconsistent or ranges overlap.
         """
         first_chan_info = metafits[0].chan_info
         all_ranges = [*first_chan_info.coarse_chan_ranges]
@@ -420,11 +443,19 @@ class HyperfitsSolutionGroup:
     def get_soln_chan_info(
         cls, metafits_chan_info: ChanInfo, solns: List[HyperfitsSolution]
     ) -> Tuple[Optional[int], List[NDArray[np.int_]]]:
-        """
-        Get the chanblocks_per_coarse and chanblocks_hz array for provided solutions
+        """Get channel block information for provided solutions.
 
-        Validate that channel info from metafits is consistent with solutions:
-            - should all have the same chanblocks_per_coarse
+        Validates that channel info from metafits is consistent with solutions.
+
+        Args:
+            metafits_chan_info: Channel information from metafits files.
+            solns: List of solution files.
+
+        Returns:
+            A tuple of (chanblocks_per_coarse, list of chanblocks_hz arrays).
+
+        Raises:
+            RuntimeError: If channel info is inconsistent between solution and metafits.
         """
 
         chanblocks_per_coarse = None
@@ -500,8 +531,16 @@ class HyperfitsSolutionGroup:
 
     @classmethod
     def get_metafits_tiles_df(cls, metafits) -> pd.DataFrame:
-        """
-        Get tiles dataframe, assert that all metafits have the same tiles
+        """Get tiles dataframe, verifying all metafits have the same tiles.
+
+        Args:
+            metafits: List of Metafits file readers.
+
+        Returns:
+            DataFrame containing tile information.
+
+        Raises:
+            RuntimeError: If tile information differs between metafits files.
         """
         columns = list(set(Tile._fields) - set(["flag"]))
         tiles_df = metafits[0].tiles_df
@@ -519,8 +558,15 @@ class HyperfitsSolutionGroup:
 
     @property
     def refant(self) -> pd.Series:
-        """
-        Get reference antenna (unflagged tile with lowest id) which is not flagged in solutions
+        """Get reference antenna (unflagged tile with lowest ID).
+
+        Returns the first unflagged tile in the solutions and metafits.
+
+        Returns:
+            A pandas Series representing the reference antenna row.
+
+        Raises:
+            ValueError: If no unflagged tiles are found.
         """
         tiles_df = self.metafits_tiles_df.copy()
         # flag tiles_df with solution flags
@@ -537,21 +583,19 @@ class HyperfitsSolutionGroup:
 
     @property
     def calibrator(self):
+        """Get calibrator source name(s) from all metafits files."""
         calibrators = set(filter(None, [meta.calibrator for meta in self.metafits]))
         return " ".join(calibrators)
 
     @property
     def obsids(self):
+        """Get observation IDs from all metafits files."""
         obsids = set(filter(None, [meta.obsid for meta in self.metafits]))
         return [*obsids]
 
     @property
     def results(self) -> NDArray[np.float64]:
-        """
-        Get the combined results array for all solutions
-
-        Pad results if edge channels have been removed
-        """
+        """Get the combined results array from all solutions."""
         for soln, chanblocks_hz in zip(self.solns, self.all_chanblocks_hz):
             if len(chanblocks_hz) != len(soln.results):
                 raise RuntimeError(
@@ -566,9 +610,7 @@ class HyperfitsSolutionGroup:
 
     @property
     def weights(self) -> NDArray[np.float64]:
-        """
-        Generate an array of weights for each solution, based on results
-        """
+        """Generate weights for each solution based on convergence results."""
         try:
             results = self.results
             results[results < 0] = np.nan
@@ -581,9 +623,16 @@ class HyperfitsSolutionGroup:
             return np.full(len(self.all_chanblocks_hz[0]), 1.0)
 
     def get_solns(self, refant_name=None) -> Tuple[NDArray[np.int_], NDArray[np.complex128], NDArray[np.complex128]]:
-        """
-        Get the tile ids in the order they appear in the solutions, as well as xx and yy solutions
-        for the reference antenna
+        """Get tile IDs and XX/YY solutions for the reference antenna.
+
+        Args:
+            refant_name: Name of the reference antenna. If None, no reference normalization is applied.
+
+        Returns:
+            A tuple of (tile_ids, xx_solutions, yy_solutions).
+
+        Raises:
+            RuntimeError: If reference antenna is not found or flagged in solutions.
         """
         soln_tile_ids = None
         ref_tile_idx = None
@@ -744,6 +793,14 @@ class GainFitInfo(NamedTuple):
 
 
 def ensure_system_byte_order(arr):
+    """Convert array to system byte order if needed.
+
+    Args:
+        arr: Input numpy array.
+
+    Returns:
+        Array converted to system byte order, or original if already correct.
+    """
     system_byte_order = ">" if sys.byteorder == "big" else "<"
     if arr.dtype.byteorder not in f"{system_byte_order}|=":
         return arr.newbyteorder(system_byte_order)
@@ -751,13 +808,27 @@ def ensure_system_byte_order(arr):
 
 
 def parse_csv_header(value: str, dtype: type) -> np.ndarray:
-    """
-    parse comma separated values (in metafits header)
+    """Parse comma-separated values from FITS header.
+
+    Args:
+        value: Comma-separated string values.
+        dtype: Data type for the output array.
+
+    Returns:
+        Parsed array with the specified data type.
     """
     return np.array(value.split(","), dtype=dtype)
 
 
 def wrap_angle(angle):
+    """Wrap angle to the range [-π, π].
+
+    Args:
+        angle: Input angle(s) in radians.
+
+    Returns:
+        Wrapped angle(s) in the range [-π, π].
+    """
     return np.mod(angle + np.pi, 2 * np.pi) - np.pi
 
 
@@ -771,13 +842,22 @@ def fit_phase_line(
     # bin_size: int = 10,
     # typical_thickness: float = 3.9,
 ) -> PhaseFitInfo:
-    """
-    Linear fit phases
-        - freqs: array of frequencies in Hz
-        - solution: complex array of solutions
-        - niter: number of iterations to perform
+    """Fit a linear phase ramp to calibration solutions.
 
     Credit: Dr. Sammy McSweeny
+
+    Args:
+        freqs_hz: Array of frequencies in Hz.
+        solution: Complex array of calibration solutions.
+        weights: Array of weights for each solution.
+        niter: Number of fitting iterations.
+        fit_iono: Whether to fit ionospheric dispersion (currently unused).
+
+    Returns:
+        PhaseFitInfo object containing fitted parameters and quality metrics.
+
+    Raises:
+        RuntimeError: If not enough valid phases are available to fit.
     """
 
     # original number of frequencies
@@ -916,8 +996,16 @@ def fit_phase_line(
 
 
 def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse) -> GainFitInfo:
-    """
-    Fit gain solutions
+    """Fit gain solutions across frequency channels.
+
+    Args:
+        chanblocks_hz: Frequency of each channel block in Hz.
+        solns: Gain solutions (amplitudes).
+        weights: Weights for each solution.
+        chanblocks_per_coarse: Number of channel blocks per coarse channel.
+
+    Returns:
+        GainFitInfo object containing fitted gains and quality metrics.
     """
     # length check- should be the number of fine channels
     n_freqs = len(chanblocks_hz)
@@ -990,14 +1078,14 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse) -> GainFitInf
 
 
 def poly_str(coeffs, independent_var="x"):
-    """
-    Given a dataframe of [tile, pol, fit...]:
-    - plot intercepts
-    - save fits to tsv
-    - plot fits
-    - save residuals to tsv
-    - plot residuals
-    - return pivoted dataframe
+    """Format polynomial coefficients as a string expression.
+
+    Args:
+        coeffs: Polynomial coefficients (highest order first).
+        independent_var: Name of the independent variable (default: 'x').
+
+    Returns:
+        Formatted polynomial expression string.
     """
 
     def xpow(i):
@@ -1014,6 +1102,15 @@ def poly_str(coeffs, independent_var="x"):
 
 
 def textwrap(s, width=70):
+    """Wrap text to a specified width.
+
+    Args:
+        s: Input string to wrap.
+        width: Maximum line width in characters (default: 70).
+
+    Returns:
+        Wrapped text with lines joined by newlines.
+    """
     words = s.split()
     lines = []
     current_line = []
@@ -1045,14 +1142,26 @@ def debug_phase_fits(
     plot_residual: bool = False,
     residual_vmax=None,
 ) -> Optional[pd.DataFrame]:
-    """
-    Given a dataframe of [tile, pol, fit...]:
-    - plot intercepts
-    - save fits to tsv
-    - plot fits
-    - save residuals to tsv
-    - plot residuals
-    - return pivoted dataframe
+    """Generate debug plots and analysis for phase fits.
+
+    Produces plots and TSV files for phase fit intercepts, residuals, and RX lengths,
+    and returns a pivoted dataframe with per-antenna fit information.
+
+    Args:
+        phase_fits: DataFrame with phase fit results per tile and polarization.
+        tiles: DataFrame with tile metadata.
+        freqs: Array of frequency values in Hz.
+        soln_xx: XX polarization solutions.
+        soln_yy: YY polarization solutions.
+        weights: Weight values for each frequency channel.
+        prefix: Output directory prefix for saving plots (default: './').
+        show: Whether to display plots (default: False).
+        title: Title for plots (default: '').
+        plot_residual: Whether to plot residuals (default: False).
+        residual_vmax: Maximum value for residual plot y-axis (default: None).
+
+    Returns:
+        Pivoted DataFrame with combined fit data, or None if no valid fits.
     """
     n_total = len(phase_fits)
     if n_total == 0:
@@ -1110,6 +1219,16 @@ def debug_phase_fits(
 
 
 def reject_outliers(data, quality_key, nstd=3.0):
+    """Mark outliers in a DataFrame based on a quality metric.
+
+    Args:
+        data: Input DataFrame with a 'pol' column and quality column.
+        quality_key: Name of the column to use for outlier detection.
+        nstd: Number of standard deviations for outlier threshold (default: 3.0).
+
+    Returns:
+        DataFrame with an 'outlier' column added/updated marking outliers.
+    """
     if nstd == 0:
         return data
     if "outlier" not in data.columns:
@@ -1126,6 +1245,17 @@ def reject_outliers(data, quality_key, nstd=3.0):
 
 
 def plot_rx_lengths(flavor_fits, prefix, show, title):
+    """Plot and save cable length distribution by receiver.
+
+    Args:
+        flavor_fits: DataFrame with fit results per receiver.
+        prefix: Output directory prefix for saving plot.
+        show: Whether to display the plot.
+        title: Title for the plot.
+
+    Returns:
+        Series with mean cable lengths per receiver.
+    """
     good_fits = flavor_fits[~flavor_fits["outlier"]]
     rxs = sorted(good_fits["rx"].unique())
     means = good_fits.groupby(["rx"])["length"].mean()
@@ -1163,6 +1293,19 @@ def plot_rx_lengths(flavor_fits, prefix, show, title):
 
 
 def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fits_pivot, weights2):
+    """Plot phase fits for XX and YY polarizations.
+
+    Args:
+        freqs: Array of frequency values.
+        soln_xx: XX polarization solutions.
+        soln_yy: YY polarization solutions.
+        prefix: Output directory prefix for saving plots.
+        show: Whether to display plots.
+        title: Title for plots.
+        cmap: Colormap for weighted data.
+        phase_fits_pivot: DataFrame with pivoted phase fit results.
+        weights2: Squared weight values.
+    """
     rxs = np.sort(np.unique(phase_fits_pivot["rx"]))
     slots = np.sort(np.unique(phase_fits_pivot["slot"]))
     figsize = (np.clip(len(slots) * 2.5, 5, 20), np.clip(len(rxs) * 3, 5, 30))
@@ -1239,6 +1382,14 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fi
 
 
 def plot_phase_intercepts(prefix, show, title, flavor_fits):
+    """Plot phase intercepts in polar coordinates.
+
+    Args:
+        prefix: Output directory prefix for saving plot.
+        show: Whether to display the plot.
+        title: Title for the plot.
+        flavor_fits: DataFrame with phase fit results.
+    """
     plt.clf()
     g = sns.FacetGrid(
         flavor_fits,
@@ -1268,6 +1419,19 @@ def plot_phase_intercepts(prefix, show, title, flavor_fits):
 
 
 def plot_phase_residual(freqs, soln_xx, soln_yy, weights, prefix, title, plot_res, residual_vmax, flavor_fits):
+    """Plot and analyze phase residuals across frequencies.
+
+    Args:
+        freqs: Array of frequency values in Hz.
+        soln_xx: XX polarization solutions.
+        soln_yy: YY polarization solutions.
+        weights: Weight values for each frequency.
+        prefix: Output directory prefix for saving plots and data.
+        title: Title for plots.
+        plot_res: Whether to plot residuals.
+        residual_vmax: Maximum value for residual plot y-axis.
+        flavor_fits: DataFrame with phase fit results per receiver flavor.
+    """
     plt.clf()
     g = sns.FacetGrid(flavor_fits, row="flavor", col="pol", hue="flavor", sharex=True, sharey=False)
 
@@ -1354,11 +1518,14 @@ def pivot_phase_fits(
     phase_fits: pd.DataFrame,
     tiles: pd.DataFrame,
 ) -> pd.DataFrame:
-    """
-    Given two dataframes:
-    - per-pol phase fits - [tile, pol, fit...]:
-    - tile metadata - [soln_idx, name, tile_id, rx, slot, flavor]
-    pivot the dataframe to [tile, fit_xx, fit_yy, ...]
+    """Pivot per-polarization phase fits to per-tile format.
+
+    Args:
+        phase_fits: DataFrame with phase fits per tile and polarization.
+        tiles: DataFrame with tile metadata.
+
+    Returns:
+        Pivoted DataFrame with fits separated into XX and YY columns.
     """
     phase_fits = pd.merge(
         phase_fits[phase_fits["pol"] == "XX"].drop(columns=["pol"]),
@@ -1377,8 +1544,14 @@ def pivot_phase_fits(
 
 
 def get_convergence_summary(solutions_fits_file: str):
-    """Returns a list of tuples which represent a summary
-    of the convergence of the solutions"""
+    """Get a convergence summary from a solution file.
+
+    Args:
+        solutions_fits_file: Path to the solutions FITS file.
+
+    Returns:
+        List of tuples with convergence statistics.
+    """
     soln = HyperfitsSolution(solutions_fits_file)
     results = soln.results
     converged_channel_indices = np.where(~np.isnan(results))
@@ -1413,10 +1586,18 @@ def write_stats(
     hyperdrive_binary_path,
     metafits_filename,
 ) -> Tuple[bool, str]:
-    """This method produces convergence stats and plots
+    """Write convergence statistics and generate solution plots.
+
+    Args:
+        obs_id: Observation ID.
+        stats_filename: Path to write statistics to.
+        hyperdrive_solution_filename: Path to the hyperdrive solution FITS file.
+        hyperdrive_binary_path: Path to the hyperdrive executable.
+        metafits_filename: Path to the metafits file.
+
     Returns:
-    bool = Success/fail
-    str  = Error message if fail"""
+        A tuple of (success: bool, error_message: str).
+    """
     logger.info(f"{obs_id} Writing stats for {hyperdrive_solution_filename} to {stats_filename}...")
 
     try:
@@ -1471,9 +1652,15 @@ def write_stats(
 
 
 def write_readme_file(filename, cmd, exit_code, stdout, stderr):
-    """This will create a small readme.txt file which will
-    hopefully help whoever poor sap is checking why birli
-    or hyperdrive or the upload_handler did or did not work!"""
+    """Write a readme file documenting the execution of a command.
+
+    Args:
+        filename: Path to write the readme file to.
+        cmd: The command that was executed.
+        exit_code: The exit code returned by the command.
+        stdout: Standard output from the command.
+        stderr: Standard error from the command.
+    """
     try:
         with open(filename, "w", encoding="UTF-8") as readme:
             if exit_code == 0:
@@ -1506,7 +1693,25 @@ def run_birli(
     birli_int_time_res_sec: float,
     birli_edge_width_hz: int,
 ) -> bool:
-    """Execute Birli, returning true on success, false on failure"""
+    """Execute Birli to process visibility data.
+
+    Args:
+        input_data_path: Path to input visibility FITS files.
+        metafits_filename: Path to the metafits file.
+        uvfits_filename: Output path for UV FITS file.
+        job_output_path: Output directory for Birli.
+        obs_id: Observation ID.
+        oversampled: Whether the observation is oversampled.
+        birli_binary_path: Path to the Birli executable.
+        birli_max_mem_gib: Maximum memory in GiB for Birli.
+        birli_timeout: Timeout in seconds for Birli execution.
+        birli_freq_res_hz: Frequency resolution in Hz.
+        birli_int_time_res_sec: Integration time resolution in seconds.
+        birli_edge_width_hz: Edge width in Hz to flag.
+
+    Returns:
+        True if execution succeeded, False otherwise.
+    """
     birli_success: bool = False
     start_time = time.time()
     stderr = ""
@@ -1628,7 +1833,22 @@ def run_hyperdrive(
     num_sources: int,
     hyperdrive_timeout: int,
 ) -> bool:
-    """Runs hyperdrive N times and returns true on success or false if not all runs worked"""
+    """Run hyperdrive calibration on UV FITS files.
+
+    Args:
+        input_uvfits_files: List of input UV FITS files (one per coarse channel).
+        metafits_filename: Path to the metafits file.
+        job_output_path: Output directory for hyperdrive.
+        obs_id: Observation ID.
+        hyperdrive_binary_path: Path to the hyperdrive executable.
+        source_list_filename: Path to the source list file.
+        source_list_type: Type of source list (e.g., 'gleam').
+        num_sources: Number of sources in the list.
+        hyperdrive_timeout: Timeout in seconds for hyperdrive execution.
+
+    Returns:
+        True if all runs succeeded, False if any failed.
+    """
     logger.info(
         f"{obs_id}: {len(input_uvfits_files)} contiguous bands detected."
         f" Running hyperdrive {len(input_uvfits_files)} times...."
@@ -1752,7 +1972,18 @@ def run_hyperdrive_stats(
     hyperdrive_binary_path: str,
     hyperdrive_output_path: str,
 ) -> bool:
-    """Call hyperdrive again but just to produce plots and stats"""
+    """Generate statistics and plots from hyperdrive solution files.
+
+    Args:
+        input_uvfits_files: List of input UV FITS files.
+        metafits_filename: Path to the metafits file.
+        obs_id: Observation ID.
+        hyperdrive_binary_path: Path to the hyperdrive executable.
+        hyperdrive_output_path: Directory containing hyperdrive outputs.
+
+    Returns:
+        True if all stats generation succeeded, False otherwise.
+    """
 
     # produce stats/plots
     stats_successful: int = 0
@@ -1804,9 +2035,20 @@ def run_hyperdrive_stats(
 def process_phase_fits(
     output_path, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
 ):
-    """
-    Fit a line to each tile phase solution, return a dataframe of phase fit parameters for each
-    tile and pol
+    """Fit linear phase ramps to each tile and polarization.
+
+    Args:
+        output_path: Output directory path.
+        tiles: DataFrame with tile information.
+        chanblocks_hz: Array of channel block frequencies in Hz.
+        all_xx_solns: XX polarization solutions for all tiles.
+        all_yy_solns: YY polarization solutions for all tiles.
+        weights: Weight values for each solution.
+        soln_tile_ids: Tile IDs in the solutions.
+        phase_fit_niter: Number of iterations for fitting.
+
+    Returns:
+        DataFrame with phase fit parameters for each tile and polarization.
     """
     fits = []
 
@@ -1831,8 +2073,19 @@ def process_phase_fits(
 
 
 def process_gain_fits(tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, chanblocks_per_coarse):
-    """
-    for each tile, pol, fit a GainFitInfo to the gains
+    """Fit gain solutions to each tile and polarization.
+
+    Args:
+        tiles: DataFrame with tile information.
+        chanblocks_hz: Array of channel block frequencies in Hz.
+        all_xx_solns: XX polarization solutions for all tiles.
+        all_yy_solns: YY polarization solutions for all tiles.
+        weights: Weight values for each solution.
+        soln_tile_ids: Tile IDs in the solutions.
+        chanblocks_per_coarse: Number of channel blocks per coarse channel.
+
+    Returns:
+        DataFrame with gain fit parameters for each tile and polarization.
     """
     fits = []
     for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
@@ -1863,6 +2116,19 @@ def create_sbatch_script(
     request_ids: list[str],
     processor_args: str,
 ) -> str:
+    """Create a Slurm batch script for Calvin processing.
+
+    Args:
+        config_file_path: Path to the Calvin configuration file.
+        obs_id: Observation ID.
+        jobtype: Type of Calvin job (realtime or mwa_asvo).
+        log_path: Global log directory path.
+        request_ids: List of request IDs.
+        processor_args: Extra command-line arguments for the processor.
+
+    Returns:
+        The generated batch script as a string.
+    """
     # log_path is the global log path e.g. /home/mwa/logs
     # processor_args is to allow the caller to add extra processor cmd line args.
     # E.g. MWA ASVO requires --mwa-asvo-download-url=URL
@@ -1914,8 +2180,16 @@ exit $?
 
 
 def submit_sbatch(script_path: str, script: str, obs_id: int) -> Tuple[bool, Optional[int]]:
-    # Submits the provided sbatch script to SLURM
-    # Returns (success, jobid or None if failed)
+    """Submit an sbatch script to Slurm.
+
+    Args:
+        script_path: Directory to write the script to.
+        script: The batch script content.
+        obs_id: Observation ID (for naming).
+
+    Returns:
+        A tuple of (success: bool, slurm_job_id: int or None).
+    """
     try:
         script_filename: str = os.path.join(script_path, datetime.datetime.now().strftime(f"%Y%m%d-%H%M%S-{obs_id}.sh"))
         cmdline = f"sbatch {script_filename}"
@@ -1966,6 +2240,17 @@ def estimate_birli_output_bytes(
     birli_int_time_res_sec: float,
     bytes_per_r_and_i: int = 13,
 ) -> int:
+    """Estimate the output file size from Birli processing.
+
+    Args:
+        metafits_context: Metafits context with observation parameters.
+        birli_freq_res_khz: Frequency resolution in kHz.
+        birli_int_time_res_sec: Integration time resolution in seconds.
+        bytes_per_r_and_i: Bytes per visibility (default: 13).
+
+    Returns:
+        Estimated output size in bytes.
+    """
     #
     # bytes_per_visibility comes from Birli
     #
@@ -1997,6 +2282,20 @@ def estimate_birli_output_bytes(
 def split_aocal_file_into_coarse_channels(
     obs_id: int, input_aocal_filename: str, input_rec_chans: list[int], output_dir: str
 ) -> list[str]:
+    """Split an AOCAL file into one file per coarse channel.
+
+    Args:
+        obs_id: Observation ID.
+        input_aocal_filename: Path to the input AOCAL binary file.
+        input_rec_chans: List of receiver channel numbers in the file.
+        output_dir: Directory to write the split AOCAL files to.
+
+    Returns:
+        List of output AOCAL filenames written.
+
+    Raises:
+        ValueError: If the AOCAL file format is invalid.
+    """
     # Given any aocal file which may have 1 - 24 coarse channels of data within, split it into 1 file per coarse channel
     # Since aocal files have minimal metadata in the file, give the function input_rec_chans which is a hint as to how many
     # and what the coarse chans are in the aocal file and what their receiver chan numbers are.
@@ -2145,19 +2444,49 @@ def split_aocal_file_into_coarse_channels(
 
 
 def get_aocal_filename(obsid: int, num_tiles: int, num_fine_chans: int, rec_chan_no: int) -> str:
-    # Provides a string with the correct aocal filename to use
+    """Generate the standard AOCAL filename.
+
+    Args:
+        obsid: Observation ID.
+        num_tiles: Number of tiles in the array.
+        num_fine_chans: Total number of fine channels.
+        rec_chan_no: Receiver channel number.
+
+    Returns:
+        The AOCAL filename string.
+    """
     return f"{obsid}_{num_tiles:03}_{num_fine_chans:04}_{rec_chan_no:03}_calfile.bin"
 
 
 def get_partial_aocal_filename(obsid: int, rec_chan_no: int) -> str:
-    # Provides a string with the correct partial aocal filename to use
+    """Generate a partial AOCAL filename pattern for globbing.
+
+    Args:
+        obsid: Observation ID.
+        rec_chan_no: Receiver channel number.
+
+    Returns:
+        The AOCAL filename pattern string with wildcards.
+    """
     return f"{obsid}_*_{rec_chan_no:03}_calfile.bin"
 
 
 def get_solution_fits_filename(solutions_dir: str, obs_id: int, rec_chan: int) -> Optional[str]:
-    #
-    # Returns one or none full file paths from the solutions_dir for the solution file matching the obsid and rec_chan number.
-    #
+    """Find a hyperdrive solution FITS file for a specific channel.
+
+    Searches for solution files in multiple formats:
+    1. obsid_solutions.fits (all 24 channels)
+    2. obsid_chNNN_solutions.fits (single channel)
+    3. obsid_chNNN-MMM_solutions.fits (channel range)
+
+    Args:
+        solutions_dir: Directory containing solution files.
+        obs_id: Observation ID.
+        rec_chan: Receiver channel number to find.
+
+    Returns:
+        Full path to matching solution file, or None if not found.
+    """
     # Hyperdrive solutions files come in these flavours:
     # 1. obsid_solutions.fits  <- contains all 24 channels
     # 2. obsid_chNNN_solutions.fits <- contains 1 channel (NOT zero padded) e.g. N, NN, NNN are all valid

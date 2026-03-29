@@ -21,6 +21,13 @@ class VisCalOutgoingProcessor(MWAXWatchQueueWorker):
         outgoing_cal_list: list[str],
         outgoing_cal_list_lock: threading.Lock,
     ):
+        """Initialize the VisCalOutgoingProcessor.
+
+        Args:
+            visdata_outgoing_cal_path: Path to the visibility calibrator outgoing directory.
+            outgoing_cal_list: Shared list to store outgoing calibrator file paths.
+            outgoing_cal_list_lock: Thread-safe lock for accessing the outgoing_cal_list.
+        """
         super().__init__(
             "VisCalOutgoingProcessor",
             [(visdata_outgoing_cal_path, ".fits")],
@@ -33,6 +40,17 @@ class VisCalOutgoingProcessor(MWAXWatchQueueWorker):
         self.outgoing_cal_list_lock = outgoing_cal_list_lock
 
     def handler(self, item: str) -> bool:
+        """Process a renamed .fits calibrator visibility file.
+
+        Appends the file path to the shared outgoing calibrator list for consumption
+        by the Calvin calibration pipeline.
+
+        Args:
+            item: Path to the renamed .fits file.
+
+        Returns:
+            True if the file was successfully added to the list.
+        """
         logger.info(f"{item}: Started")
 
         with self.outgoing_cal_list_lock:

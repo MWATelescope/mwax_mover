@@ -54,6 +54,11 @@ class MWAXSubfileDistributor:
     """Class for MWAXSubfileDistributor- the main engine of MWAX"""
 
     def __init__(self):
+        """Initialize MWAXSubfileDistributor with default values.
+
+        Sets up instance variables for configuration, workers, Flask web server,
+        archiving, and database connections.
+        """
         self.subfile_dist_mode: utils.MWAXSubfileDistirbutorMode = utils.MWAXSubfileDistirbutorMode.UNKNOWN
 
         # Config parser
@@ -146,7 +151,11 @@ class MWAXSubfileDistributor:
         self.db_handler: mwax_db.MWAXDBHandler
 
     def initialise_from_command_line(self):
-        """Called if run from command line"""
+        """Initialize the distributor from command-line arguments.
+
+        Parses command-line arguments (config file and mode) and calls initialise()
+        with the extracted parameters.
+        """
 
         # Get command line args
         parser = argparse.ArgumentParser()
@@ -185,7 +194,12 @@ class MWAXSubfileDistributor:
         self.initialise(config_filename, config_mode)
 
     def initialise(self, config_filename: str, config_mode: utils.MWAXSubfileDistirbutorMode):
-        """Initialise common code"""
+        """Initialize the distributor from configuration file and mode.
+
+        Args:
+            config_filename: Path to the configuration file.
+            config_mode: Mode of operation (CORRELATOR or BEAMFORMER).
+        """
         if not os.path.exists(config_filename):
             logger.error(f"Configuration file location {config_filename} does not exist. Quitting.")
             sys.exit(1)
@@ -700,6 +714,14 @@ class MWAXSubfileDistributor:
         logger.info("Ready to start...")
 
     def release_cal_obs(self, obs_id: int):
+        """Release calibration observation files for archiving or cleanup.
+
+        Moves calibration solution files from the outgoing directory to either
+        the archiving queue or the don't-archive directory based on project configuration.
+
+        Args:
+            obs_id: The observation ID of the calibration observation to release.
+        """
         try:
             # Release any cal_outgoing files- this is triggered by a calvin server finishing processing
             # and calling the release_cal_obs web service endpoint on this host
@@ -755,7 +777,11 @@ class MWAXSubfileDistributor:
             logger.exception(f"{obs_id}: something went wrong when releasing this obs_id")
 
     def pause_archiving(self, paused: bool):
-        """Pauses archiving"""
+        """Pause or resume archiving operations across all workers.
+
+        Args:
+            paused: True to pause archiving, False to resume.
+        """
         if self.archiving_paused != paused:
             if paused:
                 logger.info("Pausing archiving")
@@ -781,22 +807,27 @@ class MWAXSubfileDistributor:
                 self.outgoing_processor.pause(paused)
 
     def endpoint_shutdown(self):
+        """Web service endpoint to shutdown the processor."""
         self.stop()
         return b"OK", 200
 
     def endpoint_status(self):
+        """Web service endpoint to retrieve processor status."""
         data = json.dumps(self.get_status())
         return data.encode("utf-8"), 200
 
     def endpoint_pause_archiving(self):
+        """Web service endpoint to pause archiving operations."""
         self.pause_archiving(paused=True)
         return b"OK", 200
 
     def endpoint_resume_archiving(self):
+        """Web service endpoint to resume archiving operations."""
         self.pause_archiving(paused=False)
         return b"OK", 200
 
     def endpoint_release_cal_obs(self):
+        """Web service endpoint to release calibration observation files."""
         try:
             logger.info("Recieved call to release_cal_obs()")
 
@@ -816,6 +847,10 @@ class MWAXSubfileDistributor:
             return f"ERROR: {ws_exception}".encode("utf-8"), 500
 
     def endpoint_dump_voltages(self):
+        """Web service endpoint to request voltage buffer dump.
+
+        Validates parameters and initiates a voltage buffer dump operation.
+        """
         # Check for correct params
         try:
             starttime = request.args.get("start")
@@ -876,7 +911,19 @@ class MWAXSubfileDistributor:
             return f"ERROR: {dump_voltages_exception}".encode("utf-8"), 500
 
     def dump_voltages(self, start_gps_time: int, end_gps_time: int, trigger_id: int) -> bool:
-        """Dump whatever subfiles we have from /dev/shm to disk"""
+        """Dump voltage buffer subfiles from shared memory to disk.
+
+        Finds subfiles within the specified time range and marks them for retention
+        by moving them from .free to .keep state.
+
+        Args:
+            start_gps_time: Start GPS timestamp for the dump (0 for earliest).
+            end_gps_time: End GPS timestamp for the dump.
+            trigger_id: Trigger ID to inject into subfile headers.
+
+        Returns:
+            True if the dump was processed successfully.
+        """
         # Set module level variables
         self.dump_start_gps = start_gps_time  # note, this may be 0! meaning 'earliest'
         self.dump_end_gps = end_gps_time
@@ -946,7 +993,11 @@ class MWAXSubfileDistributor:
         return True
 
     def health_handler(self):
-        """Sends health data via UDP multicast"""
+        """Periodically send health status via UDP multicast.
+
+        Runs in a separate thread and sends status information every second while
+        the distributor is running.
+        """
         while self.running:
             # Code to run by the health thread
             status_dict = self.get_status()
@@ -970,7 +1021,11 @@ class MWAXSubfileDistributor:
             time.sleep(1)
 
     def get_status(self) -> dict:
-        """Returns processor status as a dictionary"""
+        """Return processor status and worker statuses as a dictionary.
+
+        Returns:
+            A dictionary containing main processor status and individual worker statuses.
+        """
         main_status = {
             "unix_timestamp": time.time(),
             "process": type(self).__name__,
@@ -992,12 +1047,21 @@ class MWAXSubfileDistributor:
         return status
 
     def signal_handler(self, _signum, _frame):
-        """Handle SIGINT, SIGTERM"""
+        """Handle SIGINT and SIGTERM signals for graceful shutdown.
+
+        Args:
+            _signum: Signal number (unused).
+            _frame: Stack frame (unused).
+        """
         logger.warning(f"Interrupted. Shutting down {len(self.workers)} workers...")
         self.stop()
 
     def start(self):
-        """Start the processor"""
+        """Start the distributor and begin monitoring with all workers.
+
+        Initializes database connection pool, starts health monitoring and worker
+        threads, and enters main monitoring loop.
+        """
         self.running = True
 
         # creating database connection pool(s)
@@ -1037,6 +1101,10 @@ class MWAXSubfileDistributor:
         logger.info("Completed Successfully")
 
     def stop(self):
+        """Stop the distributor and shutdown all workers and servers.
+
+        Stops the web server, stops all worker threads, and closes database connections.
+        """
         #
         # Finished
         #
@@ -1055,6 +1123,11 @@ class MWAXSubfileDistributor:
             self.db_handler.close()
 
     def start_flask_web_server(self):
+        """Start the Flask web server for health reporting and control endpoints.
+
+        Creates and starts a threaded Flask server with endpoints for shutdown,
+        status, archiving control, and calibration operations.
+        """
         # Create and start web server
         if utils.running_under_pytest():
             # Randomise the port - ugly but pytest is too quick to reuse the port
@@ -1090,6 +1163,7 @@ class MWAXSubfileDistributor:
         logger.info(f"Web server started on http://{host}:{port}")
 
     def stop_flask_web_server(self):
+        """Stop the Flask web server and wait for the thread to finish."""
         if self.flask_server:
             if self.flask_thread:
                 self.flask_server.shutdown()  # stops serve_forever()
@@ -1102,7 +1176,7 @@ class MWAXSubfileDistributor:
 
 
 def main():
-    """Main function"""
+    """Main entry point for the MWA subfile distributor."""
 
     processor = MWAXSubfileDistributor()
 

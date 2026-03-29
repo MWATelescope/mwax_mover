@@ -32,6 +32,20 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
         s3_ceph_endpoints: list[str],
         archive_to_location: ArchiveLocation,
     ):
+        """Initialize the PawseyOutgoingProcessor.
+
+        Args:
+            name: Processor name for logging and identification.
+            metafits_path: Path to the metafits file for priority detection.
+            watch_paths_and_exts: List of (directory, file_extension) tuples to monitor.
+            list_of_corr_hi_priority_projects: List of high-priority correlator project IDs.
+            list_of_vcs_hi_priority_projects: List of high-priority VCS project IDs.
+            mro_db_handler_object: Database handler for the MRO metadata database.
+            remote_db_handler_object: Database handler for the remote metadata database.
+            s3_profile: AWS/S3 profile name for Ceph access.
+            s3_ceph_endpoints: List of Ceph S3 endpoint URLs.
+            archive_to_location: Target archive location (Acacia, Banksia, or AcaciaMWA).
+        """
         super().__init__(
             name,
             metafits_path,
@@ -49,7 +63,21 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
         self.archive_to_location = archive_to_location
 
     def handler(self, item: str) -> bool:
-        """Handles sending files to Pawsey"""
+        """Validate and archive a mwacache file to Pawsey Long-Term Storage.
+
+        Validates the filename, verifies file size and MD5 checksum against remote
+        metadata, archives to Acacia or Banksia via rclone, updates the MRO metadata
+        database with archive location, and deletes the local source file.
+
+        Args:
+            item: Full path to the mwacache file to archive.
+
+        Returns:
+            True if the file was successfully archived and deleted, False otherwise.
+
+        Raises:
+            NotImplementedError: If the archive location is not Acacia, Banksia, or AcaciaMWA.
+        """
         logger.info(f"{item}: Started...")
 
         # validate the filename

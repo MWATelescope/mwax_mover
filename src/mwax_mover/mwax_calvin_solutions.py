@@ -43,11 +43,28 @@ def process_solutions(
     num_sources: int,
     produce_debug_plots: bool,
 ) -> tuple[bool, str, Optional[int]]:
-    """Will deal with completed hyperdrive solutions
-    by getting them into a format we can insert into
-    the calibration database
+    """Process hyperdrive calibration solutions and insert into the database.
 
-    Returns Success (t/f), error_message (or "" if none) and fit_id or None"""
+    Loads hyperfits solution files and metafits, determines a reference antenna,
+    fits phases and gains per coarse channel, and inserts the resulting calibration
+    fit and solution records into the MWA metadata database.
+
+    Args:
+        db_handler_object: Database handler for inserting calibration data.
+        obs_id: The observation ID.
+        input_data_path: Path to input metafits files.
+        output_data_path: Path to output solution files and results.
+        phase_fit_niter: Number of iterations for phase fitting.
+        source_list: Source list identifier used for the calibration.
+        num_sources: Number of sources in the calibration.
+        produce_debug_plots: Whether to produce debug plots.
+
+    Returns:
+        A tuple containing:
+        - success (bool): True if processing completed successfully.
+        - error_message (str): Error message if unsuccessful, empty string otherwise.
+        - fit_id (int|None): The calibration fit ID if successful, None otherwise.
+    """
 
     conn = None
     try:

@@ -46,6 +46,26 @@ class QueueWorker(object):
         backoff_limit_seconds: int = 60,
         requeue_on_error: bool = True,
     ):
+        """Initialize a queue worker to process items from a queue.
+
+        Args:
+            name: A descriptive name for this worker instance.
+            source_queue: The queue to dequeue items from.
+            executable_path: Path to an executable to run on each item. Required if
+                event_handler is None. Supports __FILE__ and __FILENOEXT__ tokens.
+            event_handler: A callable to process each item. Required if executable_path
+                is None.
+            exit_once_queue_empty: Whether to exit after the queue becomes empty.
+            requeue_to_eoq_on_failure: If True, requeue failed items to the end of
+                the queue. Defaults to True.
+            backoff_initial_seconds: Initial backoff time in seconds. Defaults to 1.
+            backoff_factor: Multiplier for exponential backoff. Defaults to 2.
+            backoff_limit_seconds: Maximum backoff time in seconds. Defaults to 60.
+            requeue_on_error: Whether to requeue or retry failed items. Defaults to True.
+
+        Raises:
+            Exception: If both or neither of executable_path and event_handler are provided.
+        """
         self.name = name
         self.source_queue = source_queue
 
@@ -70,7 +90,12 @@ class QueueWorker(object):
         self.event = threading.Event()
 
     def start(self):
-        """Start working on the queue"""
+        """Start dequeuing and processing items from the queue.
+
+        Continuously dequeues items and processes them using the configured handler
+        or executable. Implements configurable backoff and failure handling strategies.
+        Exits when the exit_once_queue_empty flag is set and the queue is empty.
+        """
         logger.info(f"QueueWorker {self.name} starting...")
         self._running = True
         self.current_item = None
@@ -161,17 +186,31 @@ class QueueWorker(object):
                         return
 
     def pause(self, paused: bool):
-        """Pause the processing"""
+        """Pause or resume queue processing.
+
+        Args:
+            paused: True to pause processing, False to resume.
+        """
         self._paused = paused
 
     def stop(self):
-        """Stop the queue worker"""
+        """Stop the queue worker and cancel any backoff wait."""
         self._running = False
         # cancel a wait if we are in one
         self.event.set()
 
     def run_command(self, filename: str) -> bool:
-        """Execute a command"""
+        """Execute the configured command with file token substitution.
+
+        Replaces __FILE__ with the filename and __FILENOEXT__ with the filename
+        without extension in the command string before execution.
+
+        Args:
+            filename: The file path to substitute into the command.
+
+        Returns:
+            True if the command succeeds, False otherwise.
+        """
         command = f"{self._executable_path}"
 
         # Substitute the filename into the command
@@ -185,7 +224,11 @@ class QueueWorker(object):
         return return_value
 
     def get_status(self) -> dict:
-        """Return the status as a dictionary"""
+        """Get the current status of the queue worker.
+
+        Returns:
+            A dictionary containing the worker name, current item, and queue size.
+        """
         return {
             "name": self.name,
             "current_item": self.current_item,
