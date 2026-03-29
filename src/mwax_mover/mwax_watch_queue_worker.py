@@ -44,11 +44,21 @@ def get_last_two_dirs(path: str) -> str:
 #
 # Generates a sensible, short(ish) name for a watcher
 #
-def get_watcher_name(watch_path: str, pattern: str) -> str:
+def get_watcher_name(wqw_name: str, watch_path: str, pattern: str) -> str:
     try:
-        return f"watch_{get_last_two_dirs(watch_path).replace('/', '_')}_{pattern.replace('.', '')}"
+        return f"{wqw_name}_{watch_path.replace('/', '_')}".replace("__", "_")
     except Exception:
         return "unknown_watcher"
+
+
+#
+# Generates a sensible, short(ish) name for a watcher thread
+#
+def get_watcher_thread_name(watch_path: str, pattern: str) -> str:
+    try:
+        return f"watch_{get_last_two_dirs(watch_path).replace('/', '_')}_{pattern.replace('.', '')}_thread"
+    except Exception:
+        return "unknown_watcher_thread"
 
 
 class MWAXWatchQueueWorker(ABC):
@@ -98,7 +108,7 @@ class MWAXWatchQueueWorker(ABC):
             pattern = p[1]
 
             new_watcher = Watcher(
-                get_watcher_name(watch_path, pattern),
+                get_watcher_name(self.name, watch_path, pattern),
                 watch_path,
                 self.queue,
                 pattern,
@@ -110,7 +120,9 @@ class MWAXWatchQueueWorker(ABC):
             self.watchers.append(new_watcher)
 
             # Create and store the new thread
-            new_thread = Thread(name=f"{new_watcher.name}_thread", target=new_watcher.start, daemon=True)
+            new_thread = Thread(
+                name=get_watcher_thread_name(watch_path, pattern), target=new_watcher.start, daemon=True
+            )
             self.watcher_threads.append(new_thread)
             self.threads.append(new_thread)
 
@@ -238,7 +250,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
             pattern = p[1]
 
             new_watcher = PriorityWatcher(
-                get_watcher_name(watch_path, pattern),
+                get_watcher_name(self.name, watch_path, pattern),
                 watch_path,
                 self.pqueue,
                 pattern,
@@ -253,7 +265,9 @@ class MWAXPriorityWatchQueueWorker(ABC):
             self.pwatchers.append(new_watcher)
 
             # Create and store the new thread
-            new_thread = Thread(name=f"{new_watcher.name}_thread", target=new_watcher.start, daemon=True)
+            new_thread = Thread(
+                name=get_watcher_thread_name(watch_path, pattern), target=new_watcher.start, daemon=True
+            )
             self.pwatcher_threads.append(new_thread)
             self.threads.append(new_thread)
 
