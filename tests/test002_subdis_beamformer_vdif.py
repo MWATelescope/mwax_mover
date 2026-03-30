@@ -11,6 +11,7 @@ import time
 from mwax_mover.utils import MWAXSubfileDistirbutorMode
 from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
 from tests_common import setup_test_directories
+from tests_fakedb import FakeMWAXDBHandler
 
 TEST_CONFIG_FILE = "tests/data/test002/test002.cfg"
 TEST_METAFITS = "tests/data/1454343736/1454343736_metafits.fits"
@@ -34,7 +35,12 @@ def test_beamformer_archiver_vdif():
 
     # Create a subfile distributor
     sd = MWAXSubfileDistributor()
-    sd.initialise(TEST_CONFIG_FILE, MWAXSubfileDistirbutorMode.BEAMFORMER)
+    # Override db_handler with a fake one
+    fake_db_handler = FakeMWAXDBHandler()
+    # Add any select results (in order in the code below-or keep commented if none)
+    # e.g. fake_db_handler.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
+
+    sd.initialise(TEST_CONFIG_FILE, MWAXSubfileDistirbutorMode.BEAMFORMER, fake_db_handler)
 
     # setup test data (metafits file and cal files)
     metafits = os.path.join(sd.cfg_corr_metafits_path, os.path.basename(TEST_METAFITS))

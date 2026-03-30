@@ -7,6 +7,8 @@ Storage (Acacia or Banksia) via rclone, updates the MRO metadata database to
 confirm successful archival, then deletes the local copy.
 """
 
+from mwax_mover.mwax_db import MWAXDBHandler
+
 import argparse
 from configparser import ConfigParser
 from glob import glob
@@ -91,8 +93,8 @@ class MWACacheArchiveProcessor:
         self.archiving_paused: bool = False
         self.running: bool = False
 
-        self.mro_db_handler_object: mwax_db.MWAXDBHandler
-        self.remote_db_handler_object: mwax_db.MWAXDBHandler
+        self.mro_db_handler: mwax_db.MWAXDBHandler
+        self.remote_db_handler: mwax_db.MWAXDBHandler
 
         self.watch_dirs: list[str] = []
 
@@ -110,11 +112,11 @@ class MWACacheArchiveProcessor:
         # creating database connection pool(s)
         if self.mro_metadatadb_host != "dummy":
             logger.info("Starting MRO database connection pool...")
-            self.mro_db_handler_object.start_database_pool()
+            self.mro_db_handler.start_database_pool()
 
         if self.remote_metadatadb_host != "dummy":
             logger.info("Starting remotedb database connection pool...")
-            self.remote_db_handler_object.start_database_pool()
+            self.remote_db_handler.start_database_pool()
 
         # create a health thread
         logger.info("Starting health_thread...")
@@ -205,11 +207,11 @@ class MWACacheArchiveProcessor:
                 w.stop()
 
         # Close database connections
-        if self.mro_db_handler_object:
-            self.mro_db_handler_object.close()
+        if self.mro_db_handler:
+            self.mro_db_handler.close()
 
-        if self.remote_db_handler_object:
-            self.remote_db_handler_object.close()
+        if self.remote_db_handler:
+            self.remote_db_handler.close()
 
     def health_handler(self):
         """Periodically send health status via UDP multicast.
@@ -275,11 +277,18 @@ class MWACacheArchiveProcessor:
         # Stop any Processors
         self.stop()
 
-    def initialise(self, config_filename):
+    def initialise(
+        self,
+        config_filename,
+        override_mro_db_handler: Optional[MWAXDBHandler] = None,
+        override_remote_db_handler: Optional[MWAXDBHandler] = None,
+    ):
         """Initialize the processor from a configuration file.
 
         Args:
             config_filename: Path to the configuration file.
+            override_mro_db_handler: If present, this will override the default MWAXDBHandler (this is used for testing via tests/tests_fakedb.py FakeMWAXDBHandler). Defaults to None.
+            override_remote_db_handler: If present, this will override the default MWAXDBHandler (this is used for testing via tests/tests_fakedb.py FakeMWAXDBHandler). Defaults to None.
         """
         if not os.path.exists(config_filename):
             print(f"Configuration file location {config_filename} does not exist. Quitting.")
@@ -419,14 +428,17 @@ class MWACacheArchiveProcessor:
 
         self.mro_metadatadb_port = int(utils.read_config(config, "mro metadata database", "port"))
 
-        # Initiate database connection for rmo metadata db
-        self.mro_db_handler_object = mwax_db.MWAXDBHandler(
-            host=self.mro_metadatadb_host,
-            port=self.mro_metadatadb_port,
-            db_name=self.mro_metadatadb_db,
-            user=self.mro_metadatadb_user,
-            password=self.mro_metadatadb_pass,
-        )
+        # Initiate database connection for mro metadata db
+        if override_mro_db_handler:
+            self.mro_db_handler = override_mro_db_handler
+        else:
+            self.mro_db_handler = mwax_db.MWAXDBHandler(
+                host=self.mro_metadatadb_host,
+                port=self.mro_metadatadb_port,
+                db_name=self.mro_metadatadb_db,
+                user=self.mro_metadatadb_user,
+                password=self.mro_metadatadb_pass,
+            )
 
         #
         # Remote metadata db is ready only- just used to query file size and
@@ -442,13 +454,16 @@ class MWACacheArchiveProcessor:
         self.remote_metadatadb_port = int(utils.read_config(config, "remote metadata database", "port"))
 
         # Initiate database connection for remote metadata db
-        self.remote_db_handler_object = mwax_db.MWAXDBHandler(
-            host=self.remote_metadatadb_host,
-            port=self.remote_metadatadb_port,
-            db_name=self.remote_metadatadb_db,
-            user=self.remote_metadatadb_user,
-            password=self.remote_metadatadb_pass,
-        )
+        if override_remote_db_handler:
+            self.remote_db_handler = override_remote_db_handler
+        else:
+            self.remote_db_handler = mwax_db.MWAXDBHandler(
+                host=self.remote_metadatadb_host,
+                port=self.remote_metadatadb_port,
+                db_name=self.remote_metadatadb_db,
+                user=self.remote_metadatadb_user,
+                password=self.remote_metadatadb_pass,
+            )
 
         # Assemble paths and extensions
         paths_and_exts = [(s, ".*") for s in self.watch_dirs]
@@ -461,8 +476,8 @@ class MWACacheArchiveProcessor:
                 [p_and_e],
                 self.high_priority_correlator_projectids,
                 self.high_priority_vcs_projectids,
-                self.mro_db_handler_object,
-                self.remote_db_handler_object,
+                self.mro_db_handler,
+                self.remote_db_handler,
                 self.s3_profile,
                 self.s3_ceph_endpoints,
                 self.archive_to_location,

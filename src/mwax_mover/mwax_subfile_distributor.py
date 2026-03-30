@@ -9,6 +9,8 @@ also exposes a Flask web service for health reporting, archiving pause/resume, a
 calibration observation release.
 """
 
+from mwax_mover.mwax_db import MWAXDBHandler
+
 import argparse
 from configparser import ConfigParser
 import queue
@@ -193,12 +195,18 @@ class MWAXSubfileDistributor:
 
         self.initialise(config_filename, config_mode)
 
-    def initialise(self, config_filename: str, config_mode: utils.MWAXSubfileDistirbutorMode):
+    def initialise(
+        self,
+        config_filename: str,
+        config_mode: utils.MWAXSubfileDistirbutorMode,
+        override_db_handler: Optional[MWAXDBHandler] = None,
+    ):
         """Initialize the distributor from configuration file and mode.
 
         Args:
             config_filename: Path to the configuration file.
             config_mode: Mode of operation (CORRELATOR or BEAMFORMER).
+            override_db_handler: If present, this will override the default MWAXDBHandler (this is used for testing via tests/tests_fakedb.py FakeMWAXDBHandler). Defaults to None.
         """
         if not os.path.exists(config_filename):
             logger.error(f"Configuration file location {config_filename} does not exist. Quitting.")
@@ -532,13 +540,16 @@ class MWAXSubfileDistributor:
         )
 
         # Initiate database connection pool for metadata db
-        self.db_handler = mwax_db.MWAXDBHandler(
-            host=self.cfg_metadatadb_host,
-            port=self.cfg_metadatadb_port,
-            db_name=self.cfg_metadatadb_db,
-            user=self.cfg_metadatadb_user,
-            password=self.cfg_metadatadb_pass,
-        )
+        if override_db_handler:
+            self.db_handler = override_db_handler
+        else:
+            self.db_handler = mwax_db.MWAXDBHandler(
+                host=self.cfg_metadatadb_host,
+                port=self.cfg_metadatadb_port,
+                db_name=self.cfg_metadatadb_db,
+                user=self.cfg_metadatadb_user,
+                password=self.cfg_metadatadb_pass,
+            )
 
         # Read master archiving enabled option
         self.cfg_master_archiving_enabled = (

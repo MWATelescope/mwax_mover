@@ -13,6 +13,7 @@ import time
 from mwax_mover.mwacache_archive_processor import MWACacheArchiveProcessor
 from mwax_mover.utils import ArchiveLocation
 from tests_common import setup_test_directories
+from tests_fakedb import FakeMWAXDBHandler
 
 
 def test_mwacache_archiver_config_file():
@@ -28,6 +29,13 @@ def test_mwacache_archiver_config_file():
 
     # Call to read config <-- this is what we're testing!
     mcap.initialise(config_filename)
+    # Override db_handler with a fake one
+    mcap.mro_db_handler = FakeMWAXDBHandler()
+    # Add any select results (in order in the code below-or keep commented if none)
+    # e.g. mcap.mro_db_handler_object.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
+    mcap.remote_db_handler = FakeMWAXDBHandler()
+    # Add any select results (in order in the code below-or keep commented if none)
+    # e.g. mcap.remote_db_handler_object.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
 
     #
     # Now confirm the params all match the config file
@@ -46,7 +54,7 @@ def test_mwacache_archiver_config_file():
     assert mcap.archive_command_timeout_sec == 1800
 
     assert mcap.s3_profile == "gsleap4"
-    assert mcap.s3_ceph_endpoints == ["https://mwa-data.pawsey.org.au"]
+    assert mcap.s3_ceph_endpoints == ["https://test-mwa-data.mwa128t.org"]
 
     assert mcap.remote_metadatadb_host == "dummy"
     assert mcap.remote_metadatadb_db == "dummy"
@@ -85,8 +93,18 @@ def test_mwacache_archiver_metafits_file():
     incoming = os.path.join(os.path.join(base_dir, "volume1/incoming"), os.path.basename(TEST_METAFITS))
     shutil.copyfile(TEST_METAFITS, incoming)
 
+    # Override db_handler with a fake one
+    fake_mro_db_handler = FakeMWAXDBHandler()
+    # Add any select results (in order in the code below-or keep commented if none)
+    # e.g. mcap.mro_db_handler.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
+    fake_remote_db_handler = FakeMWAXDBHandler()
+    # Add any select results (in order in the code below-or keep commented if none)
+    fake_remote_db_handler.select_results = [
+        [{"observation_num": 1122979144, "size": 74880, "checksum": "428e7e38ca40ff9cb473e5d78a0f9879"}],
+    ]
+
     # Call to read config <-- this is what we're testing!
-    mcap.initialise(config_filename)
+    mcap.initialise(config_filename, fake_mro_db_handler, fake_remote_db_handler)
 
     # start processor
     # Create and start a thread for the processor

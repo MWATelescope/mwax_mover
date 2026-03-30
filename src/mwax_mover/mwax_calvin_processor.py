@@ -64,7 +64,7 @@ class MWAXCalvinProcessor:
         # General
         self.log_path: str = ""
         self.hostname: str = ""
-        self.db_handler_object: MWAXDBHandler
+        self.db_handler: MWAXDBHandler
 
         # health
         self.health_multicast_interface_ip: str = ""
@@ -145,14 +145,14 @@ class MWAXCalvinProcessor:
 
             # creating database connection pool(s)
             logger.info("Starting database connection pool...")
-            self.db_handler_object.start_database_pool()
+            self.db_handler.start_database_pool()
 
             logger.info("Started process...")
 
             # Update this request with the slurm job_id
             logger.info(f"Assigning request to this host {self.hostname}")
             update_calibration_request_assign_hostname_start_download(
-                self.db_handler_object, self.slurm_job_id, self.hostname, datetime.datetime.now().astimezone()
+                self.db_handler, self.slurm_job_id, self.hostname, datetime.datetime.now().astimezone()
             )
 
             # Set the data path and metadata
@@ -271,7 +271,7 @@ class MWAXCalvinProcessor:
             # Update database that we are processing this obsid and we finished the download
             if result:
                 update_calsolution_request_calibration_started_status(
-                    self.db_handler_object, self.slurm_job_id, datetime.datetime.now().astimezone()
+                    self.db_handler, self.slurm_job_id, datetime.datetime.now().astimezone()
                 )
             else:
                 self.fail_job_downloading(error_message)
@@ -297,7 +297,7 @@ class MWAXCalvinProcessor:
             self.current_task_name = "Processing"
             logger.info("Processing solutions...")
             result, error_message, fit_id = process_solutions(
-                self.db_handler_object,
+                self.db_handler,
                 self.obs_id,
                 self.job_input_path,
                 self.job_output_path,
@@ -420,7 +420,7 @@ class MWAXCalvinProcessor:
         # Update database
         try:
             update_calsolution_request_download_complete_status(
-                self.db_handler_object,
+                self.db_handler,
                 self.slurm_job_id,
                 self.request_id_list,
                 None,
@@ -457,7 +457,7 @@ class MWAXCalvinProcessor:
         # Update database
         try:
             update_calsolution_request_calibration_complete_status(
-                self.db_handler_object,
+                self.db_handler,
                 self.slurm_job_id,
                 None,
                 None,
@@ -491,7 +491,7 @@ class MWAXCalvinProcessor:
         """
         # Update database
         update_calsolution_request_calibration_complete_status(
-            self.db_handler_object, self.slurm_job_id, datetime.datetime.now().astimezone(), fit_id, None, None
+            self.db_handler, self.slurm_job_id, datetime.datetime.now().astimezone(), fit_id, None, None
         )
 
     def get_observation_file_list(self) -> tuple[bool, str]:
@@ -854,8 +854,8 @@ class MWAXCalvinProcessor:
         Closes database connections and terminates the processor.
         """
         # Close all database connections
-        if self.db_handler_object:
-            self.db_handler_object.close()
+        if self.db_handler:
+            self.db_handler.close()
         self.running = False
         sys.exit(0)
 
@@ -948,6 +948,7 @@ class MWAXCalvinProcessor:
         job_type: CalvinJobType,
         mwa_asvo_download_url: str,
         request_ids: list[int],
+        override_db_handler: Optional[MWAXDBHandler] = None,
     ):
         """Initialize the processor from configuration and job parameters.
 
@@ -958,6 +959,7 @@ class MWAXCalvinProcessor:
             job_type: Type of job (realtime or mwa_asvo).
             mwa_asvo_download_url: Download URL for MWA ASVO jobs (empty for realtime).
             request_ids: List of request IDs associated with this job.
+            override_db_handler: If present, this will override the default MWAXDBHandler (this is used for testing via tests/tests_fakedb.py FakeMWAXDBHandler). Defaults to None.
         """
         # Get this hosts hostname
         self.hostname = utils.get_hostname()
@@ -1010,14 +1012,17 @@ class MWAXCalvinProcessor:
         )
         self.mro_metadatadb_port = int(utils.read_config(config, "mro metadata database", "port"))
 
-        # Initiate database connection for rmo metadata db
-        self.db_handler_object = MWAXDBHandler(
-            host=self.mro_metadatadb_host,
-            port=self.mro_metadatadb_port,
-            db_name=self.mro_metadatadb_db,
-            user=self.mro_metadatadb_user,
-            password=self.mro_metadatadb_pass,
-        )
+        # Initiate database connection for mro metadata db
+        if override_db_handler:
+            self.db_handler = override_db_handler
+        else:
+            self.db_handler = MWAXDBHandler(
+                host=self.mro_metadatadb_host,
+                port=self.mro_metadatadb_port,
+                db_name=self.mro_metadatadb_db,
+                user=self.mro_metadatadb_user,
+                password=self.mro_metadatadb_pass,
+            )
 
         #
         # Any errors after here can be recorded in the db

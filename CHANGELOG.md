@@ -1,14 +1,18 @@
 # Changelog
 
-# 1.5.11 27-Mar-2026
+# 1.5.11 27-Mar-2026-30-Mar-2026
 
 * subfile_dist: Subfile distributor doesn't exit when there are leftover files.
 * utils: refactor to fix a few corner cases.
 * All: module docstrings added.
+* All: function docstrings added.
 * All: updated logging to include module/fun names. Removed hardcoded module/fun names from logging.
 * README.md: updated.
 * Old broken tests removed.
 * mwax_wqw_checksum_and_db: refactored to simplify handler logic. Added tests.
+* Added FakeMWAXDBHandler to allow tests to mock SQL SELECTs and INSERTs.
+* Added hacky check for archive_file_rclone to know if it is running under pytest and if so, just return true. This should be replaced by a proper Mock pattern in the future.
+* Added tests for mwax_calvin_controller.
 
 # 1.5.10 20-Mar-2026
 

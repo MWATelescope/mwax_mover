@@ -83,7 +83,7 @@ class MWAXCalvinController:
         # General
         self.log_path: str = ""
         self.hostname: str = ""
-        self.db_handler_object: MWAXDBHandler
+        self.db_handler: MWAXDBHandler
         self.config_filename: str = ""
         self.worker_config_filename: str = ""
         self.running: bool = False
@@ -128,7 +128,7 @@ class MWAXCalvinController:
 
         # creating database connection pool(s)
         logger.info("Starting database connection pool...")
-        self.db_handler_object.start_database_pool()
+        self.db_handler.start_database_pool()
 
         # create a health thread
         logger.info("Starting health_thread...")
@@ -232,13 +232,13 @@ class MWAXCalvinController:
         """
         # First get the obs's which need requests created
         obs_ids_to_request: Optional[list[int]] = get_unattempted_unrequested_cal_obsids(
-            self.db_handler_object, self.oldest_cal_obs_id
+            self.db_handler, self.oldest_cal_obs_id
         )
 
         if obs_ids_to_request:
             # Insert them all as requests
             for obs_id in obs_ids_to_request:
-                insert_calibration_request_row(self.db_handler_object, obs_id, True)
+                insert_calibration_request_row(self.db_handler, obs_id, True)
 
     def realtime_submit_to_slurm(self, realtime_request: CalibrationRequest):
         """Submit a realtime calibration request to SLURM.
@@ -285,7 +285,7 @@ class MWAXCalvinController:
             # i.e. we have already submitted it, so don't do it again!
             try:
                 update_calibration_request_slurm_status(
-                    self.db_handler_object,
+                    self.db_handler,
                     [
                         realtime_request.request_id,
                     ],
@@ -327,7 +327,7 @@ class MWAXCalvinController:
                     # Update database
                     try:
                         update_calsolution_request_submit_mwa_asvo_job_status(
-                            self.db_handler_object,
+                            self.db_handler,
                             job.request_ids,
                             job.job_id,
                             None,
@@ -374,7 +374,7 @@ class MWAXCalvinController:
                             # Now update the database with the jobid
                             try:
                                 update_calibration_request_slurm_status(
-                                    self.db_handler_object,
+                                    self.db_handler,
                                     job.request_ids,
                                     slurm_job_id,
                                     job.download_slurm_job_submitted_datetime,
@@ -400,8 +400,8 @@ class MWAXCalvinController:
         self.running = False
 
         # Close all database connections
-        if self.db_handler_object:
-            self.db_handler_object.close()
+        if self.db_handler:
+            self.db_handler.close()
 
         self.ready_to_exit = True
 
@@ -490,7 +490,7 @@ class MWAXCalvinController:
             # request(s)
             #
             # returned fields: list[Tuple[id, calid, realtime]] or None (the obsid we are calibrating)
-            results = get_unattempted_calsolution_requests(self.db_handler_object)
+            results = get_unattempted_calsolution_requests(self.db_handler)
 
             if results:
                 for result in results:
@@ -542,7 +542,7 @@ class MWAXCalvinController:
         #         # we should "catch them up" to the current status in the database
         #         try:
         #             update_calsolution_request_submit_mwa_asvo_job_status(
-        #                 self.db_handler_object,
+        #                 self.db_handler,
         #                 asvo_job.request_ids,
         #                 asvo_job.job_id,
         #                 asvo_job.submitted_datetime,
@@ -566,7 +566,7 @@ class MWAXCalvinController:
                 # Update database
                 try:
                     update_calsolution_request_submit_mwa_asvo_job_status(
-                        self.db_handler_object,
+                        self.db_handler,
                         new_job.request_ids,
                         new_job.job_id,
                         new_job.submitted_datetime,
@@ -589,7 +589,7 @@ class MWAXCalvinController:
                 logger.exception(error_message)
                 error_message = error_message + f" {str(e)}"
                 update_calsolution_request_submit_mwa_asvo_job_status(
-                    self.db_handler_object,
+                    self.db_handler,
                     [
                         request_id,
                     ],
@@ -623,11 +623,16 @@ class MWAXCalvinController:
                 logger.exception("Error in update_all_job_status. Will retry next loop")
                 self.giant_squid_errors += 1
 
-    def initialise(self, config_filename: str):
+    def initialise(
+        self,
+        config_filename: str,
+        override_db_handler: Optional[MWAXDBHandler] = None,
+    ):
         """Initialize the controller from a configuration file.
 
         Args:
             config_filename: Path to the configuration file.
+            override_db_handler: If present, this will override the default MWAXDBHandler (this is used for testing via tests/tests_fakedb.py FakeMWAXDBHandler). Defaults to None.
         """
         self.config_filename = config_filename
         self.worker_config_filename = config_filename.replace("calvin_controller", "calvin_processor")
@@ -682,17 +687,22 @@ class MWAXCalvinController:
         self.mro_metadatadb_host = utils.read_config(config, "mro metadata database", "host")
         self.mro_metadatadb_db = utils.read_config(config, "mro metadata database", "db")
         self.mro_metadatadb_user = utils.read_config(config, "mro metadata database", "user")
-        self.mro_metadatadb_pass = utils.read_config(config, "mro metadata database", "pass", True)
+        self.mro_metadatadb_pass = utils.read_config(
+            config, "mro metadata database", "pass", not utils.running_under_pytest()
+        )
         self.mro_metadatadb_port = int(utils.read_config(config, "mro metadata database", "port"))
 
-        # Initiate database connection for rmo metadata db
-        self.db_handler_object = MWAXDBHandler(
-            host=self.mro_metadatadb_host,
-            port=self.mro_metadatadb_port,
-            db_name=self.mro_metadatadb_db,
-            user=self.mro_metadatadb_user,
-            password=self.mro_metadatadb_pass,
-        )
+        # Initiate database connection for mro metadata db
+        if override_db_handler:
+            self.db_handler = override_db_handler
+        else:
+            self.db_handler = MWAXDBHandler(
+                host=self.mro_metadatadb_host,
+                port=self.mro_metadatadb_port,
+                db_name=self.mro_metadatadb_db,
+                user=self.mro_metadatadb_user,
+                password=self.mro_metadatadb_pass,
+            )
 
         #
         # calvin config
