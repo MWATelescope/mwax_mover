@@ -1,5 +1,78 @@
 # Changelog
 
+# 1.5.11 27-Mar-2026-31-Mar-2026
+
+* subfile_dist: Subfile distributor doesn't exit when there are leftover files.
+* utils: refactor to fix a few corner cases.
+* All: module docstrings added.
+* All: function docstrings added.
+* All: updated logging to include module/func names. Removed hardcoded module/func names from logging.
+* mwax_bf_vdif_utils: Change to use mwalib >=2.0.3 to get target_name and start_ra and start_dec for voltage beams for the VDIF header.
+* README.md: updated.
+* Old broken tests removed.
+* mwax_wqw_checksum_and_db: refactored to simplify handler logic. Added tests.
+* Added FakeMWAXDBHandler to allow tests to mock SQL SELECTs and INSERTs.
+* Added hacky check for archive_file_rclone to know if it is running under pytest and if so, just return true. This should be replaced by a proper Mock pattern in the future.
+* Added tests for mwax_calvin_controller.
+
+# 1.5.10 20-Mar-2026
+
+* calvin_processor: Fixed AttributeError: 'MWAXDBHandler' object has no attribute 'execute_dml_row_within_transaction'
+
+# 1.5.9 20-Mar-2026
+
+* calvin_processor: Fixed bug which caused the aocal splitting to fail.
+* mwacache_archiver: Fixed naming of outgoing workers so you can tell them apart in logs.
+
+# 1.5.8 20-Mar-2026
+
+* More unit tests
+* calvin/subfile_distributor: renamed aocal_export_dir to cal_export_dir as it is now for aocal and FITS solutions
+* calvin: Now copying in FITS solution files to cal_export dir
+* subfile_dist: Added new key / value for solution files to be passed to redis queue
+* mwax_calvin_utils: Fixing linter errors
+
+# 1.5.7 19-Mar-2026
+
+* Subfile_distributor: Fixed bug where pausing archiving at the start of a VCS obs breaks things
+* Queueworkers: Added a small sleep in the while loop if paused
+* VisStatsProcessor: Fixed archiving==1 vs archiving == True
+* VDIF: Fixed retrieval of target_name from VOLTAGEBEAMS HDU in metafits
+
+# 1.5.6 19-Mar-2026
+
+* PriorityQueueWorker: fix inconsistent statuses.
+* All: fix clean shutdown of psycopg pool.
+
+# 1.5.5 18-Mar-2026
+
+* BfStitchingProcessor: Fix bug where bf_stitching watcher picks up files other than .fil and .vdif
+* SubfileDistributor: cfg_corr_archive_destination_enabled now is bool everywhere
+* SubfileDistributor: Added extra logging
+
+# 1.5.4 18-Mar-2026
+
+* watchers: Suppress iNotify logging unless critical
+* update tests
+
+# 1.5.3 18-Mar-2026
+
+* subfile_distributor: Removed the calibration_destination_enabled option as it wasn't being used.
+* all: Removed passing loggers everywhere anti-pattern.
+* mwacache_archiver: replaced individual workers, queues and watchers with a watch_queue_worker class.
+
+# 1.5.2 12-Mar-2026
+
+* calvin: Removed the "--max-amp 2" argument from hyperdrive plots
+
+# 1.5.1 11-Mar-2026
+
+* Unit tests and bug fixes for subfile distributor
+
+# 1.5.0 11-Mar-2026
+
+* Refactor to clean up all the watcher, queue and worker mess
+
 # 1.4.4 20-Feb-2026
 
 * archive_processor: Fix to ensure leftover files in bf/incoming don't crash subfile_distributor.

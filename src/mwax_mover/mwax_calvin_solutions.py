@@ -1,3 +1,11 @@
+"""Post-processing of hyperdrive calibration solutions for the Calvin pipeline.
+
+Provides process_solutions(), which loads hyperfits solution files and metafits,
+determines a reference antenna, fits phases and gains per coarse channel, and
+inserts the resulting calibration fit and solution records into the MWA metadata
+database.
+"""
+
 import glob
 import logging
 import os
@@ -22,9 +30,10 @@ from mwax_mover.mwax_calvin_utils import (
 )
 from mwax_mover.version import get_mwax_mover_version_string
 
+logger = logging.getLogger(__name__)
+
 
 def process_solutions(
-    logger: logging.Logger,
     db_handler_object: MWAXDBHandler,
     obs_id: int,
     input_data_path: str,
@@ -34,11 +43,28 @@ def process_solutions(
     num_sources: int,
     produce_debug_plots: bool,
 ) -> tuple[bool, str, Optional[int]]:
-    """Will deal with completed hyperdrive solutions
-    by getting them into a format we can insert into
-    the calibration database
+    """Process hyperdrive calibration solutions and insert into the database.
 
-    Returns Success (t/f), error_message (or "" if none) and fit_id or None"""
+    Loads hyperfits solution files and metafits, determines a reference antenna,
+    fits phases and gains per coarse channel, and inserts the resulting calibration
+    fit and solution records into the MWA metadata database.
+
+    Args:
+        db_handler_object: Database handler for inserting calibration data.
+        obs_id: The observation ID.
+        input_data_path: Path to input metafits files.
+        output_data_path: Path to output solution files and results.
+        phase_fit_niter: Number of iterations for phase fitting.
+        source_list: Source list identifier used for the calibration.
+        num_sources: Number of sources in the calibration.
+        produce_debug_plots: Whether to produce debug plots.
+
+    Returns:
+        A tuple containing:
+        - success (bool): True if processing completed successfully.
+        - error_message (str): Error message if unsuccessful, empty string otherwise.
+        - fit_id (int|None): The calibration fit ID if successful, None otherwise.
+    """
 
     conn = None
     try:
@@ -92,7 +118,6 @@ def process_solutions(
         weights = soln_group.weights
 
         phase_fits = process_phase_fits(
-            logger,
             output_data_path,
             unflagged_tiles,
             all_chanblocks_hz,
@@ -103,7 +128,6 @@ def process_solutions(
             phase_fit_niter,
         )
         gain_fits = process_gain_fits(
-            logger,
             unflagged_tiles,
             all_chanblocks_hz,
             all_xx_solns_noref,
@@ -137,7 +161,6 @@ def process_solutions(
         success = True
 
         # get a database connection, unless we are using dummy connection (for testing)
-        transaction_cursor = None
         with db_handler_object.pool.connection() as conn:
             # Start a transaction
             with conn.transaction():
@@ -237,7 +260,6 @@ def process_solutions(
 
         # Write an error readme
         write_readme_file(
-            logger,
             os.path.join(output_data_path, "readme_error.txt"),
             "upload_handler()",
             -999,

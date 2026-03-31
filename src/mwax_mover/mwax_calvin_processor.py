@@ -1,6 +1,11 @@
-"""
-Module hosting the MWAXCalvinProcessor for near-realtime
-calibration
+"""Entry point and main class for the mwax_calvin_processor SLURM job.
+
+MWAXCalvinProcessor is launched on a Calvin HPC node by a SLURM job submitted by
+mwax_calvin_controller. It downloads calibrator observation data (either by rsyncing
+from MWAX boxes for realtime jobs, or downloading from MWA ASVO), preprocesses with
+Birli, calibrates with hyperdrive, uploads the resulting solution to the MWA
+metadata database via process_solutions(), then signals each MWAX host to release
+the calibrator visibility files for archiving or discard.
 """
 
 import argparse
@@ -37,6 +42,13 @@ from mwax_mover.mwax_db import (
 )
 from mwalib import MetafitsContext
 
+# Setup root logger
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(message)s"))
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+logger.addHandler(handler)
+
 
 class MWAXCalvinProcessor:
     """The main class processing calibration solutions"""
@@ -44,12 +56,15 @@ class MWAXCalvinProcessor:
     def __init__(
         self,
     ):
+        """Initialize MWAXCalvinProcessor with default values.
+
+        Sets up instance variables for job parameters, data paths, processing
+        configuration, and status tracking.
+        """
         # General
-        self.logger = logging.getLogger(__name__)
         self.log_path: str = ""
-        self.log_level: str = ""
         self.hostname: str = ""
-        self.db_handler_object: MWAXDBHandler
+        self.db_handler: MWAXDBHandler
 
         # health
         self.health_multicast_interface_ip: str = ""
@@ -87,15 +102,14 @@ class MWAXCalvinProcessor:
             ""  # where does Birli write to? /data/calvin/jobs/SLURM_JOB_ID_OBSID or /tmp if the obs is small enough
         )
         self.job_output_path: str = ""  # e.g. /data/calvin/jobs/SLURM_JOB_ID_OBSID
-        self.processing_error_path: str = ""
         self.source_list_filename: str = ""
         self.source_list_type: str = ""
         self.phase_fit_niter: int = 0
         self.num_sources: int = 0
         self.produce_debug_plots: bool = True  # default to true- for now only off if running via pytest
         self.keep_completed_visibility_files: bool = False
-        self.aocal_export_path: Optional[str] = None
-        self.aocal_max_age_hours: int = 24  # default to 24 hours
+        self.cal_export_path: Optional[str] = None
+        self.cal_export_max_age_hours: int = 24  # default to 24 hours
 
         # birli
         self.birli_timeout: int = 0
@@ -110,31 +124,35 @@ class MWAXCalvinProcessor:
         self.hyperdrive_binary_path: str = ""
 
     def start(self):
-        """Start the processor"""
+        """Start the processor and execute calibration workflow.
+
+        Downloads visibility data, runs Birli and Hyperdrive, processes solutions,
+        and manages job lifecycle including error handling and MWAX file release.
+        """
         self.current_task_name = "Initialising"
         self.running = True
 
         try:
             # create a health thread
-            self.logger.info("Starting health_thread...")
+            logger.info("Starting health_thread...")
             health_thread = threading.Thread(name="health_thread", target=self.health_loop, daemon=True)
             health_thread.start()
 
             # Cleaning up /tmp in case there is a left over failed job that wasn't cleaned up
             if os.path.exists(self.temp_working_path):
-                self.logger.info(f"Cleaning old working path ({self.temp_working_path}/)")
+                logger.info(f"Cleaning old working path ({self.temp_working_path}/)")
                 shutil.rmtree(f"{self.temp_working_path}/")
 
             # creating database connection pool(s)
-            self.logger.info("Starting database connection pool...")
-            self.db_handler_object.start_database_pool()
+            logger.info("Starting database connection pool...")
+            self.db_handler.start_database_pool()
 
-            self.logger.info("Started process...")
+            logger.info("Started process...")
 
             # Update this request with the slurm job_id
-            self.logger.info(f"Assigning request to this host {self.hostname}")
+            logger.info(f"Assigning request to this host {self.hostname}")
             update_calibration_request_assign_hostname_start_download(
-                self.db_handler_object, self.slurm_job_id, self.hostname, datetime.datetime.now().astimezone()
+                self.db_handler, self.slurm_job_id, self.hostname, datetime.datetime.now().astimezone()
             )
 
             # Set the data path and metadata
@@ -143,38 +161,38 @@ class MWAXCalvinProcessor:
 
             # Ensure input data path exists
             os.makedirs(name=self.job_input_path, exist_ok=True)
-            self.logger.info(f"Job Input Data will be downloaded to: {self.job_input_path}")
+            logger.info(f"Job Input Data will be downloaded to: {self.job_input_path}")
 
             self.metafits_filename = os.path.join(self.job_input_path, f"{self.obs_id}_metafits.fits")
-            self.logger.info(f"Job metafits filename: {self.metafits_filename}")
+            logger.info(f"Job metafits filename: {self.metafits_filename}")
 
             # Output dirs
             self.job_output_path = os.path.join(self.job_output_path, f"{str(self.slurm_job_id)}_{str(self.obs_id)}")
 
             # Ensure output path exists
             os.makedirs(name=self.job_output_path, exist_ok=True)
-            self.logger.info(f"Job Output Data will be written to: {self.job_output_path}")
+            logger.info(f"Job Output Data will be written to: {self.job_output_path}")
 
             # Get metafits file
             self.current_task_name = "Get metafits"
-            self.logger.info(f"Downloading metafits file: {self.metafits_filename}")
+            logger.info(f"Downloading metafits file: {self.metafits_filename}")
             try:
-                utils.download_metafits_file(self.logger, self.obs_id, self.job_input_path)
+                utils.download_metafits_file(self.obs_id, self.job_input_path)
             except Exception as catch_all_exception:  # pylint: disable=broad-except
                 error_message = f"Metafits file {self.metafits_filename} did not exist and"
                 " could not download one from web service. Exiting."
                 f" {catch_all_exception}"
-                self.logger.exception(error_message)
+                logger.exception(error_message)
                 self.fail_job_downloading(error_message)
                 exit(-1)
 
             # Create metafits context
-            self.logger.info(f"Reading metafits file {self.metafits_filename} with mwalib...")
+            logger.info(f"Reading metafits file {self.metafits_filename} with mwalib...")
             self.metafits_context = MetafitsContext(self.metafits_filename, None)
 
             # Get list of expected files from web service- wait if obs is still in progress!
             self.current_task_name = "Get file list"
-            self.logger.info("Getting observation file list from web service...")
+            logger.info("Getting observation file list from web service...")
             result, error_message = self.get_observation_file_list()
             if not result:
                 self.fail_job_downloading(error_message)
@@ -185,7 +203,7 @@ class MWAXCalvinProcessor:
 
             while not self.data_downloaded and data_download_attempt <= self.download_retries:
                 self.current_task_name = f"Download ({data_download_attempt}/{self.download_retries})"
-                self.logger.info(f"Download attempt {data_download_attempt} of {self.download_retries}...")
+                logger.info(f"Download attempt {data_download_attempt} of {self.download_retries}...")
                 if self.job_type == CalvinJobType.realtime:
                     # Download from MWAX boxes
                     self.data_downloaded, error_message = self.download_realtime_data()
@@ -194,7 +212,7 @@ class MWAXCalvinProcessor:
                     self.data_downloaded, error_message = self.download_mwa_asvo_data()
                 else:
                     error_message = f"Error- unknown job_type {self.job_type}. Aborting"
-                    self.logger.error(error_message)
+                    logger.error(error_message)
                     self.fail_job_downloading(error_message)
                     exit(-1)
 
@@ -211,7 +229,7 @@ class MWAXCalvinProcessor:
                 exit(0)
 
             # Working path for Birli / uvfits output is determined by calculating the size of the output visibilites:
-            self.logger.info("Calculating observation output size...")
+            logger.info("Calculating observation output size...")
             self.estimated_uvfits_GB = int(
                 estimate_birli_output_bytes(self.metafits_context, self.birli_freq_res_khz, self.birli_int_time_res_sec)
                 / (1000**3)
@@ -220,7 +238,7 @@ class MWAXCalvinProcessor:
             if self.estimated_uvfits_GB < 1:
                 self.estimated_uvfits_GB = 1
 
-            self.logger.info(
+            logger.info(
                 f"Observation UVFITS output is estimated to be : {self.estimated_uvfits_GB} GB "
                 f"({int(utils.gigabyte_to_gibibyte(self.estimated_uvfits_GB))} GiB)"
             )
@@ -233,27 +251,27 @@ class MWAXCalvinProcessor:
 
                 # Override the birli allowed memory
                 self.birli_max_mem_gib -= int(utils.gigabyte_to_gibibyte(self.estimated_uvfits_GB))
-                self.logger.info(
+                logger.info(
                     f"Using temporary work dir {self.temp_working_path} for Birli output. Reduced "
                     f"allowed Birli memory to: {self.birli_max_mem_gib} GiB"
                 )
             else:
                 # Use output_dir
                 self.working_path = self.job_output_path
-                self.logger.info(f"Using work dir {self.working_path} for Birli output.")
+                logger.info(f"Using work dir {self.working_path} for Birli output.")
 
             # Set uvfits filename
             self.uvfits_filename = os.path.join(self.working_path, f"{self.obs_id}.uvfits")
-            self.logger.info(f"Job Output UVFITS file(s) will be created as: {self.uvfits_filename}")
+            logger.info(f"Job Output UVFITS file(s) will be created as: {self.uvfits_filename}")
 
             # All files we could get are now in the processing_path
-            self.logger.info("Ensuring all data is ready for processing...")
+            logger.info("Ensuring all data is ready for processing...")
             result, error_message = self.check_obs_is_ready_to_process()
 
             # Update database that we are processing this obsid and we finished the download
             if result:
                 update_calsolution_request_calibration_started_status(
-                    self.db_handler_object, self.slurm_job_id, datetime.datetime.now().astimezone()
+                    self.db_handler, self.slurm_job_id, datetime.datetime.now().astimezone()
                 )
             else:
                 self.fail_job_downloading(error_message)
@@ -277,10 +295,9 @@ class MWAXCalvinProcessor:
 
             # If that worked, process the solutions and insert into db
             self.current_task_name = "Processing"
-            self.logger.info("Processing solutions...")
+            logger.info("Processing solutions...")
             result, error_message, fit_id = process_solutions(
-                self.logger,
-                self.db_handler_object,
+                self.db_handler,
                 self.obs_id,
                 self.job_input_path,
                 self.job_output_path,
@@ -331,7 +348,7 @@ class MWAXCalvinProcessor:
 
             # Final log message
             self.current_task_name = "Complete"
-            self.logger.info("Completed Successfully")
+            logger.info("Completed Successfully")
             self.stop()
 
         except Exception as e:
@@ -343,6 +360,11 @@ class MWAXCalvinProcessor:
                 self.fail_job_downloading(error_message)
 
     def release_mwax_files(self):
+        """Release visibility files from MWAX boxes after processing.
+
+        Calls webservices on each MWAX host to signal they can release the
+        calibration observation files.
+        """
         hostnames = set()
         # Loop through all the hosts and filenames and just get the set of hostnames
         for mwax_host_and_filename in self.mwax_download_filenames:
@@ -357,14 +379,13 @@ class MWAXCalvinProcessor:
 
         # Do this while there are hosts to release and we have not exceeded our MAX_WAIT_FOR_MWAX_SECONDS
         while len(hostnames) > 0 and (datetime.datetime.now() - start_time).seconds < MAX_WAIT_FOR_MWAX_SECONDS:
-            self.logger.info(f"Attempting to release {len(hostnames)} files from MWAX boxes...")
+            logger.info(f"Attempting to release {len(hostnames)} files from MWAX boxes...")
             successful_hosts = set()
 
             for hostname in hostnames:
                 # call webservice for each host to release the obsid's files
                 try:
                     utils.call_webservice(
-                        self.logger,
                         self.obs_id,
                         [
                             f"http://{hostname}:9999/release_cal_obs?obs_id={str(self.obs_id)}",
@@ -388,11 +409,18 @@ class MWAXCalvinProcessor:
                 hostnames.remove(hostname)
 
     def fail_job_downloading(self, error_message: str):
+        """Mark a job as failed during the download phase.
+
+        Updates the database with error information and stops the processor.
+
+        Args:
+            error_message: Description of the error that occurred.
+        """
         error_datetime = datetime.datetime.now().astimezone()
         # Update database
         try:
             update_calsolution_request_download_complete_status(
-                self.db_handler_object,
+                self.db_handler,
                 self.slurm_job_id,
                 self.request_id_list,
                 None,
@@ -400,8 +428,8 @@ class MWAXCalvinProcessor:
                 error_message,
             )
         except Exception as e:
-            if self.logger:
-                self.logger.info(
+            if logger:
+                logger.info(
                     "Failed to update_calsolution_request_download_complete_status. "
                     f"Params: {self.request_id_list}, None, {error_datetime}, {error_message}. "
                     f"Error: {str(e)}"
@@ -410,19 +438,26 @@ class MWAXCalvinProcessor:
         try:
             self.stop()
         except Exception as e:
-            if self.logger:
-                self.logger.info(f"Failed to stop processor {str(e)}")
+            if logger:
+                logger.info(f"Failed to stop processor {str(e)}")
 
-        if self.logger:
-            self.logger.info("Completed with downloading errors")
+        if logger:
+            logger.info("Completed with downloading errors")
 
     def fail_job_processing(self, error_message: str):
+        """Mark a job as failed during the processing phase.
+
+        Updates the database with error information and stops the processor.
+
+        Args:
+            error_message: Description of the error that occurred.
+        """
         error_datetime = datetime.datetime.now().astimezone()
 
         # Update database
         try:
             update_calsolution_request_calibration_complete_status(
-                self.db_handler_object,
+                self.db_handler,
                 self.slurm_job_id,
                 None,
                 None,
@@ -430,8 +465,8 @@ class MWAXCalvinProcessor:
                 error_message,
             )
         except Exception as e:
-            if self.logger:
-                self.logger.info(
+            if logger:
+                logger.info(
                     "Failed to update_calsolution_request_calibration_complete_status. "
                     f"Params: {self.obs_id}, None,  None, None, {error_datetime}, {error_message}. "
                     f"Error: {str(e)}"
@@ -440,19 +475,34 @@ class MWAXCalvinProcessor:
         try:
             self.stop()
         except Exception as e:
-            if self.logger:
-                self.logger.info(f"Failed to stop processor {str(e)}")
+            if logger:
+                logger.info(f"Failed to stop processor {str(e)}")
 
-        if self.logger:
-            self.logger.info("Completed with processing errors")
+        if logger:
+            logger.info("Completed with processing errors")
 
     def succeed_job_processing(self, fit_id: int):
+        """Mark a job as successfully completed.
+
+        Updates the database with the completed status and fit_id.
+
+        Args:
+            fit_id: The ID of the fit/solution that was created.
+        """
         # Update database
         update_calsolution_request_calibration_complete_status(
-            self.db_handler_object, self.slurm_job_id, datetime.datetime.now().astimezone(), fit_id, None, None
+            self.db_handler, self.slurm_job_id, datetime.datetime.now().astimezone(), fit_id, None, None
         )
 
     def get_observation_file_list(self) -> tuple[bool, str]:
+        """Get list of data files for the observation from the webservice.
+
+        Waits for the observation to complete and then queries the webservice
+        for the list of visibility files and their host locations.
+
+        Returns:
+            A tuple of (success, error_message). If successful, error_message is empty.
+        """
         # Get the duration of the obs from the metafits and only proceed
         # if the current gps time is > the obs_id + duration + a constant
         exp_time = int(self.metafits_context.sched_duration_ms / 1000.0)
@@ -466,7 +516,7 @@ class MWAXCalvinProcessor:
             if not self.running:
                 return False, "get_observation_file_list cancelled due to processor shutdown"
 
-            self.logger.warning(
+            logger.warning(
                 f"{self.obs_id} Observation is still in progress:"
                 f" {current_gpstime} < ({self.obs_id} - {int(self.obs_id) + exp_time + OBS_FINISH_DELAY_SECONDS})"
                 f". Sleeping for {OBS_FINISH_WAIT_SECONDS} seconds..."
@@ -478,12 +528,12 @@ class MWAXCalvinProcessor:
         if self.running:
             try:
                 ws_filenames_and_hosts: list[tuple[str, str]] = (
-                    utils.get_data_files_with_hostname_for_obsid_from_webservice(self.logger, self.obs_id)
+                    utils.get_data_files_with_hostname_for_obsid_from_webservice(self.obs_id)
                 )
             except Exception:
                 # The previous call would have already logged tonnes of errors so no need to log anything specific here
                 error_message = f"{self.obs_id} No webservice was able to provide list of data files."
-                self.logger.error(error_message)
+                logger.error(error_message)
                 return False, error_message
 
             # Assemble the filenames
@@ -503,10 +553,18 @@ class MWAXCalvinProcessor:
             return False, "get_observation_file_list cancelled due to processor shutdown"
 
     def download_mwa_asvo_data(self) -> tuple[bool, str]:
+        """Download and extract MWA ASVO observation data from URL.
+
+        Downloads a tarball from the MWA ASVO download URL and extracts it to
+        the job input path.
+
+        Returns:
+            A tuple of (success, error_message). If successful, error_message is empty.
+        """
         # Given the URL from command line args, download and untar the MWA ASVO data
         try:
             stdout = ""
-            self.logger.info(
+            logger.info(
                 f"{self.obs_id}: Attempting to download MWA ASVO data"
                 f" {self.mwa_asvo_download_url} to {self.job_input_path}..."
             )
@@ -516,11 +574,11 @@ class MWAXCalvinProcessor:
             try:
                 # Submit the job
                 return_val, stdout = mwax_command.run_command_ext(
-                    self.logger, cmdline, None, self.mwaasvo_download_obs_timeout, True
+                    cmdline, None, self.mwaasvo_download_obs_timeout, True
                 )
 
                 if return_val:
-                    self.logger.info(
+                    logger.info(
                         f"{str(self.obs_id)} successfully downloaded "
                         f"from {self.mwa_asvo_download_url} into {self.job_input_path}"
                     )
@@ -530,7 +588,7 @@ class MWAXCalvinProcessor:
                     raise Exception(error_message)
 
             except Exception:
-                self.logger.exception(
+                logger.exception(
                     f"Failed to download and untar observation {self.obs_id} from {self.mwa_asvo_download_url} {stdout}"
                 )
                 raise
@@ -538,10 +596,18 @@ class MWAXCalvinProcessor:
         except Exception as e:
             error_message = f"Failed to download and untar observation {self.obs_id} from {self.mwa_asvo_download_url}"
             f" Error ({str(e)})"
-            self.logger.error(error_message)
+            logger.error(error_message)
             return False, error_message
 
     def download_realtime_data(self) -> tuple[bool, str]:
+        """Download realtime visibility files from MWAX boxes via rsync.
+
+        Performs parallel rsync operations to download files from multiple MWAX
+        hosts using a worker pool.
+
+        Returns:
+            A tuple of (success, error_message). If successful, error_message is empty.
+        """
         # In parallel download all the files
 
         # Now download the files
@@ -552,7 +618,6 @@ class MWAXCalvinProcessor:
                 results = pool.starmap(
                     copy_file_rsync,
                     zip(
-                        repeat(self.logger),
                         self.mwax_download_filenames,
                         repeat(self.job_input_path),
                         repeat(self.realtime_download_file_timeout),
@@ -566,19 +631,24 @@ class MWAXCalvinProcessor:
 
             if all_errors != "":
                 error_message = f"Error downloading files: {all_errors}"
-                self.logger.error(error_message)
+                logger.error(error_message)
                 return False, error_message
 
             return True, ""
         except Exception as e:
             error_message = f"Exception downloading files: {str(e)}"
-            self.logger.error(error_message)
+            logger.error(error_message)
             return False, error_message
 
     def check_obs_is_ready_to_process(self) -> tuple[bool, str]:
-        """This routine checks to see if an observation is ready to be processed and
-        also sums up the total size and determines if there is enough RAM to write
-        the uvfits file to RAM or not"""
+        """Verify that all expected data files are present and ready to process.
+
+        Checks that the number of downloaded visibility files matches the expected
+        count from the webservice file list.
+
+        Returns:
+            A tuple of (success, message). Message contains diagnostic information.
+        """
         # we need a list of files from the work dir
         # this first list has the full path
         # put a basic UNIX pattern so we don't pick up the metafits
@@ -595,7 +665,7 @@ class MWAXCalvinProcessor:
 
             message = f"{self.obs_id} check_obs_is_ready_to_process() == {return_value} (WS: {len(self.ws_filenames)}, data_dir: {len(data_dir_filenames)})"
 
-            self.logger.info(message)
+            logger.info(message)
 
             return return_value, message
 
@@ -603,16 +673,22 @@ class MWAXCalvinProcessor:
             return False, f"Exception in check_obs_is_ready_to_process: {str(e)}"
 
     def run_birli(self) -> tuple[bool, str]:
-        """Run birli to produce uvfits file(s)"""
+        """Execute Birli preprocessing to produce UVFITS file(s).
+
+        Runs Birli with appropriate parameters to preprocess visibility data
+        and create UVFITS output files.
+
+        Returns:
+            A tuple of (success, error_message). If successful, error_message is empty.
+        """
         birli_success: bool = False
 
         # Determine if the obs is oversampled
         oversampled = self.metafits_context.oversampled
 
         # Run Birli
-        self.logger.info(f"{self.obs_id}: Running Birli...")
+        logger.info(f"{self.obs_id}: Running Birli...")
         birli_success = mwax_calvin_utils.run_birli(
-            self.logger,
             self.job_input_path,
             self.metafits_filename,
             self.uvfits_filename,
@@ -633,7 +709,14 @@ class MWAXCalvinProcessor:
             return False, "Birli run failed. See logs"
 
     def run_hyperdrive(self) -> tuple[bool, str]:
-        """Run hyperdrive to produce solutions"""
+        """Execute Hyperdrive calibration to produce calibration solutions.
+
+        Runs Hyperdrive calibration on preprocessed UVFITS files, generates
+        statistics and plots, and exports solutions to configured directories.
+
+        Returns:
+            A tuple of (success, error_message). If successful, error_message is empty.
+        """
         hyperdrive_success = False
 
         # If all good run hyperdrive- once per uvfits file created
@@ -645,7 +728,6 @@ class MWAXCalvinProcessor:
 
         # Run hyperdrive (might be multiple times if picket fence)
         hyperdrive_success = mwax_calvin_utils.run_hyperdrive(
-            self.logger,
             uvfits_files,
             self.metafits_filename,
             self.job_output_path,
@@ -661,7 +743,6 @@ class MWAXCalvinProcessor:
         if hyperdrive_success:
             # Run hyperdrive and get plots and stats
             mwax_calvin_utils.run_hyperdrive_stats(
-                self.logger,
                 uvfits_files,
                 self.metafits_filename,
                 self.obs_id,
@@ -669,35 +750,52 @@ class MWAXCalvinProcessor:
                 self.job_output_path,
             )
 
-            # if aocal_export_path is set then split the aocal files into coarse chan files and try to clean up old files
-            if self.aocal_export_path is not None:
+            # if cal_export_path is set then:
+            # 1. copy the solution FITS files to the export dir
+            # 2. split the aocal files into coarse chan files
+            # 3. copy the split aocal files to the export dir
+            # 4. try to clean up old files
+            if self.cal_export_path is not None:
+                #
+                # copy the solution.fits file(s) to the export directory
+                fitscal_files = glob.glob(os.path.join(self.job_output_path, "*solutions.fits"))
+                logger.info(f"Found {len(fitscal_files)} solution FITS files in {self.job_output_path}.")
+
+                for f in fitscal_files:
+                    # Copy solution fits files to the cal_export directory
+                    cal_dest = os.path.join(self.cal_export_path, os.path.basename(f))
+                    logger.info(f"Copying solution FITS file {f} to {cal_dest}")
+                    shutil.copy(f, cal_dest)
+
+                #
                 # re-export aocal into 1 file per coarse channel
                 aocal_files = glob.glob(os.path.join(self.job_output_path, "*.bin"))
                 out_aocal_files = []
 
-                self.logger.info(f"Found {len(aocal_files)} aocal files in {self.job_output_path}.")
+                logger.info(f"Found {len(aocal_files)} aocal files in {self.job_output_path}.")
 
                 if len(aocal_files) < len(self.metafits_context.metafits_coarse_chans):
-                    self.logger.info("Splitting each into 1 aocal file per coarse channel.")
+                    logger.info("Splitting each into 1 aocal file per coarse channel.")
 
                     for aocal_file in aocal_files:
-                        self.logger.debug(f"Splitting {aocal_file}...")
+                        logger.debug(f"Splitting {aocal_file}...")
                         out_aocal_files = mwax_calvin_utils.split_aocal_file_into_coarse_channels(
                             self.obs_id,
                             aocal_file,
                             [c.rec_chan_number for c in self.metafits_context.metafits_coarse_chans],
+                            self.job_output_path,
                         )
 
                     for f in out_aocal_files:
                         # Copy aocal files to the aocal_export directory
-                        aocal_dest = os.path.join(self.aocal_export_path, os.path.split(f)[1])
-                        self.logger.info(f"Copying split aocal file {f} to {aocal_dest}")
+                        aocal_dest = os.path.join(self.cal_export_path, os.path.basename(f))
+                        logger.info(f"Copying split aocal file {f} to {aocal_dest}")
                         shutil.copy(f, aocal_dest)
                 else:
                     # We already have 1 per coarse channel
-                    self.logger.info("No spliting needed, we already have 1 aocal file per coarse channel.")
+                    logger.info("No spliting needed, we already have 1 aocal file per coarse channel.")
                     for aocal_file in aocal_files:
-                        self.logger.debug(f"Renaming {aocal_file}...")
+                        logger.debug(f"Renaming {aocal_file}...")
 
                         # determine rec_chan_number - we don't want to mess this up!
                         # The existing aocal filename will be in the form of
@@ -711,11 +809,9 @@ class MWAXCalvinProcessor:
 
                         # strip the directory then remove the first part of the filename
                         aocal_file_rec_chan_no_str: str = os.path.basename(aocal_file).replace(f"{self.obs_id}_ch", "")
-                        self.logger.debug(
-                            f"...Removed first bit of string from {aocal_file}: {aocal_file_rec_chan_no_str}"
-                        )
+                        logger.debug(f"...Removed first bit of string from {aocal_file}: {aocal_file_rec_chan_no_str}")
                         aocal_file_rec_chan_no_str: str = aocal_file_rec_chan_no_str.replace("_solutions.bin", "")
-                        self.logger.debug(
+                        logger.debug(
                             f"...Removed last bit of string: {aocal_file_rec_chan_no_str} and converting to int"
                         )
                         # Should be left with a 1,2 or 3 digit number
@@ -728,23 +824,23 @@ class MWAXCalvinProcessor:
                             rec_chan_number,
                         )
 
-                        aocal_dest = os.path.join(self.aocal_export_path, aocal_dest)
+                        aocal_dest = os.path.join(self.cal_export_path, aocal_dest)
 
-                        self.logger.info(f"Copying aocal file {aocal_file} to {aocal_dest}")
+                        logger.info(f"Copying aocal file {aocal_file} to {aocal_dest}")
                         shutil.copy(aocal_file, aocal_dest)
 
                 # Clean up old files
                 ext_list = ["fits", "bin"]
                 files_removed = utils.delete_files_older_than(
-                    self.aocal_export_path, self.aocal_max_age_hours * 3600, ext_list
+                    self.cal_export_path, self.cal_export_max_age_hours * 3600, ext_list
                 )
                 if len(files_removed) > 0:
-                    self.logger.debug(
-                        f"Removed the following files from {self.aocal_export_path} as they were older than {self.aocal_max_age_hours} hours: {files_removed}"
+                    logger.debug(
+                        f"Removed the following files from {self.cal_export_path} as they were older than {self.cal_export_max_age_hours} hours: {files_removed}"
                     )
                 else:
-                    self.logger.debug(
-                        f"No files older than {self.aocal_max_age_hours} hours found in {self.aocal_export_path} to remove."
+                    logger.debug(
+                        f"No files older than {self.cal_export_max_age_hours} hours found in {self.cal_export_path} to remove."
                     )
 
         if hyperdrive_success:
@@ -753,14 +849,22 @@ class MWAXCalvinProcessor:
             return False, "Hyperdrive run failed. See logs"
 
     def stop(self):
-        """Shutdown all processes"""
+        """Shutdown the processor and close all connections.
+
+        Closes database connections and terminates the processor.
+        """
         # Close all database connections
-        self.db_handler_object.stop_database_pool()
+        if self.db_handler:
+            self.db_handler.close()
         self.running = False
         sys.exit(0)
 
     def health_loop(self):
-        """Send health information via UDP multicast"""
+        """Periodically send health status via UDP multicast.
+
+        Runs in a separate thread and sends status information every second while
+        the processor is running.
+        """
         while self.running:
             # Code to run by the health thread
             status_dict = self.get_status()
@@ -778,17 +882,22 @@ class MWAXCalvinProcessor:
                     self.health_multicast_hops,
                 )
             except Exception as catch_all_exception:  # pylint: disable=broad-except
-                self.logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
+                logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
 
             # Sleep for a second
             self.sleep(1)
 
     def get_status(self) -> dict:
-        """Returns status of all process as a dictionary"""
+        """Return status of the processor as a dictionary.
+
+        Returns:
+            A dictionary containing process status information including running
+            state, job parameters, and current task.
+        """
         requests = ",".join(str(r) for r in self.request_id_list)
 
         main_status = {
-            "Unix timestamp": time.time(),
+            "unix_timestamp": time.time(),
             "process": type(self).__name__,
             "version": version.get_mwax_mover_version_string(),
             "host": self.hostname,
@@ -805,7 +914,12 @@ class MWAXCalvinProcessor:
         return status
 
     def signal_handler(self, signum, _frame):
-        """Handles SIGINT, SIGTERM, USR1"""
+        """Handle SIGINT, SIGTERM, and SIGUSR1 signals for graceful shutdown.
+
+        Args:
+            signum: The signal number received.
+            _frame: Stack frame (unused).
+        """
         # Update the database that this job has been cancelled
         if signum == signal.SIGUSR1:
             signal_message = "Slurm hit walltime"
@@ -816,14 +930,14 @@ class MWAXCalvinProcessor:
         else:
             signal_message = f"Received unknown signal {signum}"
 
-        self.logger.warning("Updating job to cancelled...")
+        logger.warning("Updating job to cancelled...")
         if self.data_downloaded:
             self.fail_job_processing(f"Cancelled: {signal_message}")
         else:
             self.fail_job_downloading(f"Cancelled: {signal_message}")
 
         # Stop any Processors
-        self.logger.warning(f"{signal_message}. Shutting down processor...")
+        logger.warning(f"{signal_message}. Shutting down processor...")
         self.stop()
 
     def initialise(
@@ -834,8 +948,19 @@ class MWAXCalvinProcessor:
         job_type: CalvinJobType,
         mwa_asvo_download_url: str,
         request_ids: list[int],
+        override_db_handler: Optional[MWAXDBHandler] = None,
     ):
-        """Initialise the processor from the command line"""
+        """Initialize the processor from configuration and job parameters.
+
+        Args:
+            config_filename: Path to the configuration file.
+            obs_id: The observation ID to process.
+            slurm_job_id: The SLURM job ID of this job.
+            job_type: Type of job (realtime or mwa_asvo).
+            mwa_asvo_download_url: Download URL for MWA ASVO jobs (empty for realtime).
+            request_ids: List of request IDs associated with this job.
+            override_db_handler: If present, this will override the default MWAXDBHandler (this is used for testing via tests/tests_fakedb.py FakeMWAXDBHandler). Defaults to None.
+        """
         # Get this hosts hostname
         self.hostname = utils.get_hostname()
         self.job_type = job_type
@@ -865,63 +990,49 @@ class MWAXCalvinProcessor:
             sys.exit(1)
 
         # Read log level
-        config_file_log_level: Optional[str] = utils.read_optional_config(
-            self.logger, config, "mwax mover", "log_level"
-        )
-        if config_file_log_level is None:
-            self.log_level = "DEBUG"
-            self.logger.warning(f"log_level not set in config file. Defaulting to {self.log_level} level logging.")
-        else:
-            self.log_level = config_file_log_level
-
-        # It's now safe to start logging
-        # start logging
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(self.log_level)
-        console_log = logging.StreamHandler()
-        console_log.setLevel(self.log_level)
-        console_log.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
-        self.logger.addHandler(console_log)
+        config_file_log_level: Optional[str] = utils.read_optional_config(config, "mwax mover", "log_level")
+        if config_file_log_level:
+            logger.setLevel(config_file_log_level)
 
         if config.getboolean("mwax mover", "coloredlogs", fallback=False):
-            coloredlogs.install(level="INFO", logger=self.logger)
+            coloredlogs.install(level="INFO", logger=logger)
 
-        self.logger.info(f"Starting mwax_calvin_processor processor...v{version.get_mwax_mover_version_string()}")
-        self.logger.info(f"Reading config file: {config_filename}")
+        logger.info(f"Starting mwax_calvin_processor processor...v{version.get_mwax_mover_version_string()}")
+        logger.info(f"Reading config file: {config_filename}")
 
         #
         # MRO database
         #
-        self.mro_metadatadb_host = utils.read_config(self.logger, config, "mro metadata database", "host")
-        self.mro_metadatadb_db = utils.read_config(self.logger, config, "mro metadata database", "db")
-        self.mro_metadatadb_user = utils.read_config(self.logger, config, "mro metadata database", "user")
-        self.mro_metadatadb_pass = utils.read_config(self.logger, config, "mro metadata database", "pass", True)
-        self.mro_metadatadb_port = int(utils.read_config(self.logger, config, "mro metadata database", "port"))
-
-        # Initiate database connection for rmo metadata db
-        self.db_handler_object = MWAXDBHandler(
-            logger=self.logger,
-            host=self.mro_metadatadb_host,
-            port=self.mro_metadatadb_port,
-            db_name=self.mro_metadatadb_db,
-            user=self.mro_metadatadb_user,
-            password=self.mro_metadatadb_pass,
+        self.mro_metadatadb_host = utils.read_config(config, "mro metadata database", "host")
+        self.mro_metadatadb_db = utils.read_config(config, "mro metadata database", "db")
+        self.mro_metadatadb_user = utils.read_config(config, "mro metadata database", "user")
+        # Don't require base64 encoded password if running a pytest
+        self.mro_metadatadb_pass = utils.read_config(
+            config, "mro metadata database", "pass", not utils.running_under_pytest()
         )
+        self.mro_metadatadb_port = int(utils.read_config(config, "mro metadata database", "port"))
+
+        # Initiate database connection for mro metadata db
+        if override_db_handler:
+            self.db_handler = override_db_handler
+        else:
+            self.db_handler = MWAXDBHandler(
+                host=self.mro_metadatadb_host,
+                port=self.mro_metadatadb_port,
+                db_name=self.mro_metadatadb_db,
+                user=self.mro_metadatadb_user,
+                password=self.mro_metadatadb_pass,
+            )
 
         #
         # Any errors after here can be recorded in the db
         #
         try:
             # health
-            self.health_multicast_ip = utils.read_config(self.logger, config, "mwax mover", "health_multicast_ip")
-            self.health_multicast_port = int(
-                utils.read_config(self.logger, config, "mwax mover", "health_multicast_port")
-            )
-            self.health_multicast_hops = int(
-                utils.read_config(self.logger, config, "mwax mover", "health_multicast_hops")
-            )
+            self.health_multicast_ip = utils.read_config(config, "mwax mover", "health_multicast_ip")
+            self.health_multicast_port = int(utils.read_config(config, "mwax mover", "health_multicast_port"))
+            self.health_multicast_hops = int(utils.read_config(config, "mwax mover", "health_multicast_hops"))
             self.health_multicast_interface_name = utils.read_config(
-                self.logger,
                 config,
                 "mwax mover",
                 "health_multicast_interface_name",
@@ -929,18 +1040,18 @@ class MWAXCalvinProcessor:
 
             # get this hosts primary network interface ip
             self.health_multicast_interface_ip = utils.get_ip_address(self.health_multicast_interface_name)
-            self.logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
+            logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
 
             #
             # Downloading
             #
-            self.download_retries = int(utils.read_config(self.logger, config, "downloading", "download_retries"))
-            self.download_retry_wait = int(utils.read_config(self.logger, config, "downloading", "download_retry_wait"))
+            self.download_retries = int(utils.read_config(config, "downloading", "download_retries"))
+            self.download_retry_wait = int(utils.read_config(config, "downloading", "download_retry_wait"))
             self.realtime_download_file_timeout = int(
-                utils.read_config(self.logger, config, "downloading", "realtime_download_file_timeout")
+                utils.read_config(config, "downloading", "realtime_download_file_timeout")
             )
             self.mwaasvo_download_obs_timeout = int(
-                utils.read_config(self.logger, config, "downloading", "mwaasvo_download_obs_timeout")
+                utils.read_config(config, "downloading", "mwaasvo_download_obs_timeout")
             )
 
             #
@@ -950,7 +1061,6 @@ class MWAXCalvinProcessor:
             # Birli timeout
             self.birli_timeout = int(
                 utils.read_config(
-                    self.logger,
                     config,
                     "birli",
                     "timeout",
@@ -960,7 +1070,6 @@ class MWAXCalvinProcessor:
             # Get Birli max mem
             self.birli_max_mem_gib = int(
                 utils.read_config(
-                    self.logger,
                     config,
                     "birli",
                     "max_mem_gib",
@@ -969,20 +1078,18 @@ class MWAXCalvinProcessor:
 
             # Get the Birli binary
             self.birli_binary_path = utils.read_config(
-                self.logger,
                 config,
                 "birli",
                 "binary_path",
             )
 
             if not os.path.exists(self.birli_binary_path):
-                self.logger.error(f"birli_binary_path location  {self.birli_binary_path} does not exist. Quitting.")
+                logger.error(f"birli_binary_path location  {self.birli_binary_path} does not exist. Quitting.")
                 sys.exit(1)
 
             # Get Birli freq res
             self.birli_freq_res_khz = int(
                 utils.read_config(
-                    self.logger,
                     config,
                     "birli",
                     "freq_res_khz",
@@ -992,7 +1099,6 @@ class MWAXCalvinProcessor:
             # Get Birli time res
             self.birli_int_time_res_sec = float(
                 utils.read_config(
-                    self.logger,
                     config,
                     "birli",
                     "int_time_res_sec",
@@ -1002,7 +1108,6 @@ class MWAXCalvinProcessor:
             # Get Birli edge width
             self.birli_edge_width_khz = int(
                 utils.read_config(
-                    self.logger,
                     config,
                     "birli",
                     "edge_width_khz",
@@ -1014,7 +1119,6 @@ class MWAXCalvinProcessor:
             #
             self.phase_fit_niter = int(
                 utils.read_config(
-                    self.logger,
                     config,
                     "hyperdrive",
                     "phase_fit_niter",
@@ -1023,7 +1127,6 @@ class MWAXCalvinProcessor:
 
             self.num_sources = int(
                 utils.read_config(
-                    self.logger,
                     config,
                     "hyperdrive",
                     "num_sources",
@@ -1031,20 +1134,16 @@ class MWAXCalvinProcessor:
             )
 
             self.source_list_filename = utils.read_config(
-                self.logger,
                 config,
                 "hyperdrive",
                 "source_list_filename",
             )
 
             if not os.path.exists(self.source_list_filename):
-                self.logger.error(
-                    f"source_list_filename location  {self.source_list_filename} does not exist. Quitting."
-                )
+                logger.error(f"source_list_filename location  {self.source_list_filename} does not exist. Quitting.")
                 sys.exit(1)
 
             self.source_list_type = utils.read_config(
-                self.logger,
                 config,
                 "hyperdrive",
                 "source_list_type",
@@ -1053,7 +1152,6 @@ class MWAXCalvinProcessor:
             # hyperdrive timeout
             self.hyperdrive_timeout = int(
                 utils.read_config(
-                    self.logger,
                     config,
                     "hyperdrive",
                     "timeout",
@@ -1062,14 +1160,13 @@ class MWAXCalvinProcessor:
 
             # Get the hyperdrive binary
             self.hyperdrive_binary_path = utils.read_config(
-                self.logger,
                 config,
                 "hyperdrive",
                 "binary_path",
             )
 
             if not os.path.exists(self.hyperdrive_binary_path):
-                self.logger.error(
+                logger.error(
                     f"hyperdrive_binary_path location  {self.hyperdrive_binary_path} does not exist. Quitting."
                 )
                 sys.exit(1)
@@ -1079,31 +1176,28 @@ class MWAXCalvinProcessor:
             #
             # Get the job_input_path dir
             self.job_input_path = utils.read_config(
-                self.logger,
                 config,
                 "processing",
                 "job_input_path",
             )
 
             if not os.path.exists(self.job_input_path):
-                self.logger.error(f"job_input_path location  {self.job_input_path} does not exist. Quitting.")
+                logger.error(f"job_input_path location  {self.job_input_path} does not exist. Quitting.")
                 sys.exit(1)
 
             # Get the job_output_path dir
             self.job_output_path = utils.read_config(
-                self.logger,
                 config,
                 "processing",
                 "job_output_path",
             )
 
             if not os.path.exists(self.job_output_path):
-                self.logger.error(f"job_output_path location  {self.job_output_path} does not exist. Quitting.")
+                logger.error(f"job_output_path location  {self.job_output_path} does not exist. Quitting.")
                 sys.exit(1)
 
             # Get the temp working dir
             self.temp_working_path = utils.read_config(
-                self.logger,
                 config,
                 "processing",
                 "temp_working_path",
@@ -1113,42 +1207,37 @@ class MWAXCalvinProcessor:
                 if self.temp_working_path.startswith("/tmp"):
                     # Create it (if it does not start with /tmp assume it is a permanent path in
                     # which case user has to create it
-                    self.logger.debug(
-                        f"temp_working_path location {self.temp_working_path} does not exist, creating it."
-                    )
+                    logger.debug(f"temp_working_path location {self.temp_working_path} does not exist, creating it.")
                     os.makedirs(self.temp_working_path)
                 else:
-                    self.logger.error(f"temp_working_path location  {self.temp_working_path} does not exist. Quitting.")
+                    logger.error(f"temp_working_path location  {self.temp_working_path} does not exist. Quitting.")
                     sys.exit(1)
 
             self.keep_completed_visibility_files = utils.read_config_bool(
-                self.logger,
                 config,
                 "processing",
                 "keep_completed_visibility_files",
             )
 
-            # Get the aocal_export_path dir
-            self.aocal_export_path = utils.read_optional_config(
-                self.logger,
+            # Get the cal_export_path dir
+            self.cal_export_path = utils.read_optional_config(
                 config,
                 "processing",
-                "aocal_export_path",
+                "cal_export_path",
             )
 
-            if self.aocal_export_path is None:
-                self.logger.warning("aocal_export_path not set. Will not be exporting aocal bin files.")
+            if self.cal_export_path is None:
+                logger.warning("cal_export_path not set. Will not be exporting calibration solution files.")
             else:
-                if not os.path.exists(self.aocal_export_path):
-                    self.logger.error(f"aocal_export_path location  {self.aocal_export_path} does not exist. Quitting.")
+                if not os.path.exists(self.cal_export_path):
+                    logger.error(f"cal_export_path location  {self.cal_export_path} does not exist. Quitting.")
                     sys.exit(1)
 
-            self.aocal_max_age_hours: int = int(
+            self.cal_export_max_age_hours: int = int(
                 utils.read_config(
-                    self.logger,
                     config,
                     "processing",
-                    "aocal_max_age_hours",
+                    "cal_export_max_age_hours",
                 )
             )
 
@@ -1158,17 +1247,19 @@ class MWAXCalvinProcessor:
             exit(-1)
 
     def initialise_from_command_line(self):
-        """Initialise if initiated from command line"""
+        """Initialize the processor from command-line arguments.
+
+        Parses command-line arguments and calls initialise() with extracted parameters.
+        """
 
         # Get command line args
         parser = argparse.ArgumentParser()
         parser.description = (
-            "mwax_calvin_processor: a command line tool which is part of the"
-            " MWA correlator for the MWA. It will be launched via sSLURM "
+            "A command line tool which is part of the"
+            " MWA correlator for the MWA. It will be launched via a SLURM "
             " job and either download a realtime calibrator obs from MWAX or "
             "download data from an MWA ASVO URL. Either way it will then run "
             "Birli and Hyperdrive and then upload the calibration solution."
-            f"mwax_mover v{version.get_mwax_mover_version_string()})\n"
         )
 
         parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
@@ -1262,8 +1353,14 @@ class MWAXCalvinProcessor:
         )
 
     def sleep(self, seconds):
-        """This sleep function keeps an eye on self.running so that if we are in a long wait
-        we will still respond to shutdown directives"""
+        """Sleep for a specified duration while remaining responsive to shutdown.
+
+        Breaks long sleeps into intervals to remain responsive to the running
+        flag and shutdown directives.
+
+        Args:
+            seconds: Duration to sleep in seconds.
+        """
         SECS_PER_INTERVAL: int = 5
 
         if self.running:
@@ -1281,18 +1378,15 @@ class MWAXCalvinProcessor:
 
 
 def main():
-    """Mainline function"""
+    """Main entry point for the MWA Calvin processor process."""
     processor = MWAXCalvinProcessor()
 
     try:
         processor.initialise_from_command_line()
         processor.start()
         sys.exit(0)
-    except Exception as catch_all_exception:  # pylint: disable=broad-except
-        if processor.logger:
-            processor.logger.exception(str(catch_all_exception))
-        else:
-            print(str(catch_all_exception))
+    except Exception:
+        logger.exception("Exited with error")
 
 
 if __name__ == "__main__":

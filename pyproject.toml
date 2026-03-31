@@ -1,6 +1,6 @@
 [project]
 name = "mwax_mover"
-version = "1.4.5"
+version = "1.5.11"
 description = "A module to manage input, archiving and calibration for the MWAX correlator"
 readme = "README.md"
 requires-python = ">=3.12, <3.15"
@@ -27,7 +27,7 @@ dependencies = [
     "importlib_metadata",
     "inotify",
     "matplotlib",
-    "mwalib>=2.0.0",
+    "mwalib>=2.0.3",
     "pandas",
     "psycopg[binary]",
     "psycopg[pool]",
@@ -60,6 +60,3 @@ target-version = ['py312']
 
 [tool.uv]
 package = true
-
-[tool.uv.sources]
-sigpyproc = { git = "https://github.com/FRBs/sigpyproc3" }

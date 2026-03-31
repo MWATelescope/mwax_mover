@@ -7,13 +7,24 @@ import importlib_metadata  # part of setuptools
 
 
 def get_mwax_mover_version_string() -> str:
-    """Returns the major, minor and patch version of mwax_mover as a string"""
+    """Get the version string of mwax_mover.
+
+    Returns:
+        The package version as a string (e.g., "1.2.3").
+    """
     package_version = importlib_metadata.version("mwax_mover")
     return package_version
 
 
 def get_pmwax_mover_version_number() -> typing.Tuple[int, int, int]:
-    """Returns a the major, minor and patch version of mwax_mover"""
+    """Get the version number of mwax_mover as a tuple.
+
+    Returns:
+        A tuple of (major, minor, patch) version numbers.
+
+    Raises:
+        Exception: If the version string cannot be parsed.
+    """
     version = get_mwax_mover_version_string()
     try:
         return (

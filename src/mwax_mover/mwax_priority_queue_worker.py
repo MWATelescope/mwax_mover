@@ -1,11 +1,22 @@
-"""Module for the QueueWorker class"""
+"""Priority queue worker that processes files in order of assigned priority.
 
+PriorityQueueWorker dequeues (priority, MWAXPriorityQueueData) tuples and calls
+either a provided event_handler callable or runs a shell command with token
+substitution. Implements exponential backoff on failure; when requeueing a failed
+item to the end of the queue, increments its priority number so it sinks toward
+the back.
+"""
+
+import logging
 import os
 import queue
 import time
 import threading
+from typing import Optional
 from mwax_mover import mwax_mover, mwax_command
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
+
+logger = logging.getLogger(__name__)
 
 
 class PriorityQueueWorker(object):
@@ -33,7 +44,6 @@ class PriorityQueueWorker(object):
         name: str,
         source_queue: queue.PriorityQueue,
         executable_path,
-        log,
         event_handler,
         exit_once_queue_empty,
         requeue_to_eoq_on_failure: bool = True,
@@ -41,6 +51,25 @@ class PriorityQueueWorker(object):
         backoff_factor: int = 2,
         backoff_limit_seconds: int = 60,
     ):
+        """Initialize a priority queue worker to process prioritized items.
+
+        Args:
+            name: A descriptive name for this worker instance.
+            source_queue: The priority queue to dequeue items from.
+            executable_path: Path to an executable to run on each item. Required if
+                event_handler is None. Supports __FILE__ and __FILENOEXT__ tokens.
+            event_handler: A callable to process each item. Required if executable_path
+                is None.
+            exit_once_queue_empty: Whether to exit after the queue becomes empty.
+            requeue_to_eoq_on_failure: If True, requeue failed items to the end of
+                the queue with incremented priority. Defaults to True.
+            backoff_initial_seconds: Initial backoff time in seconds. Defaults to 1.
+            backoff_factor: Multiplier for exponential backoff. Defaults to 2.
+            backoff_limit_seconds: Maximum backoff time in seconds. Defaults to 60.
+
+        Raises:
+            Exception: If both or neither of executable_path and event_handler are provided.
+        """
         self.name = name
         self.source_queue: queue.PriorityQueue = source_queue
 
@@ -55,8 +84,7 @@ class PriorityQueueWorker(object):
         self._paused = False
         self.exit_once_queue_empty = exit_once_queue_empty
         self.requeue_to_eoq_on_failure = requeue_to_eoq_on_failure
-        self.logger = log
-        self.current_item = None
+        self.current_item: Optional[str] = None
         self.consecutive_error_count = 0
         self.backoff_initial_seconds = backoff_initial_seconds
         self.backoff_factor = backoff_factor
@@ -65,25 +93,43 @@ class PriorityQueueWorker(object):
         self.event = threading.Event()
 
     def start(self):
-        """Start working on the queue"""
-        self.logger.info(f"PriorityQueueWorker {self.name} starting...")
+        """Start dequeuing and processing items from the priority queue.
+
+        Continuously dequeues (priority, item) tuples and processes items in priority
+        order using the configured handler or executable. Implements configurable
+        backoff and failure handling strategies. Failed items requeued are given
+        incremented priority to sink toward the back of the queue.
+        """
+        logger.info(f"PriorityQueueWorker {self.name} starting...")
         self._running = True
         self.current_item = None
         self.consecutive_error_count = 0
         backoff = 0
 
         while self._running:
-            if not self._paused:
+            if self._paused:
+                # if paused, put in a sleep to slow the wheel spinning
+                time.sleep(0.1)
+            else:
                 try:
                     success = False
 
                     if self.current_item is None:
                         self.current_item = self.source_queue.get(block=True, timeout=0.5)
-                    self.logger.info(f"Processing {self.current_item}...")
+
+                    # Because we block in the above get, we should always have a value for current_item
+                    # but this gate ensure the type checker is satisfied that current_item is not None.
+                    if self.current_item is None:
+                        continue
+
+                    logger.info(f"Processing {self.current_item}...")
 
                     start_time = time.time()
 
-                    filename_priority = self.current_item[0]
+                    if self.current_item[0] is None:
+                        filename_priority = 99
+                    else:
+                        filename_priority = int(self.current_item[0])
                     filename = str(self.current_item[1])
 
                     # Check file exists (maybe someone deleted it?)
@@ -100,7 +146,7 @@ class PriorityQueueWorker(object):
                             self.current_item = None
                     else:
                         # Dequeue the item
-                        self.logger.warning(
+                        logger.warning(
                             f"Processing {self.current_item} Complete... file"
                             " was moved or deleted. Queue size:"
                             f" {self.source_queue.qsize()}"
@@ -110,7 +156,7 @@ class PriorityQueueWorker(object):
                         continue
 
                     elapsed = time.time() - start_time
-                    self.logger.info(f"Complete. Queue size: {self.source_queue.qsize()} Elapsed: {elapsed:.2f} sec")
+                    logger.info(f"Complete. Queue size: {self.source_queue.qsize()} Elapsed: {elapsed:.2f} sec")
 
                     if success:
                         # reset our error count and backoffs
@@ -121,7 +167,7 @@ class PriorityQueueWorker(object):
                         if backoff > self.backoff_limit_seconds:
                             backoff = self.backoff_limit_seconds
 
-                        self.logger.info(
+                        logger.info(
                             f"{self.consecutive_error_count} consecutive failures. Backing off for {backoff} seconds."
                         )
                         self.event.wait(backoff)
@@ -147,22 +193,36 @@ class PriorityQueueWorker(object):
                 except queue.Empty:
                     if self.exit_once_queue_empty:
                         # Queue is complete. Stop now
-                        self.logger.info("Finished processing queue.")
+                        logger.info("Finished processing queue.")
                         self.stop()
                         return
 
     def pause(self, paused: bool):
-        """Pause the processing"""
+        """Pause or resume queue processing.
+
+        Args:
+            paused: True to pause processing, False to resume.
+        """
         self._paused = paused
 
     def stop(self):
-        """Stop the queue worker"""
+        """Stop the priority queue worker and cancel any backoff wait."""
         self._running = False
         # cancel a wait if we are in one
         self.event.set()
 
     def run_command(self, filename: str) -> bool:
-        """Execute a command"""
+        """Execute the configured command with file token substitution.
+
+        Replaces __FILE__ with the filename and __FILENOEXT__ with the filename
+        without extension in the command string before execution.
+
+        Args:
+            filename: The file path to substitute into the command.
+
+        Returns:
+            True if the command succeeds, False otherwise.
+        """
         command = f"{self._executable_path}"
 
         # Substitute the filename into the command
@@ -171,14 +231,24 @@ class PriorityQueueWorker(object):
         filename_no_ext = os.path.splitext(filename)[0]
         command = command.replace(mwax_mover.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext)
 
-        return_value, _ = mwax_command.run_command_ext(self.logger, command, -1, 60, True)
+        return_value, _ = mwax_command.run_command_ext(command, -1, 60, True)
 
         return return_value
 
     def get_status(self) -> dict:
-        """Return the status as a dictionary"""
+        """Get the current status of the priority queue worker.
+
+        Returns:
+            A dictionary containing the worker name, current item, and queue size.
+        """
+        current: Optional[str] = None
+
+        if self.current_item:
+            if self.current_item[1]:
+                current = str(self.current_item[1])
+
         return {
-            "Unix timestamp": time.time(),
-            "current item": "" if self.current_item is None else str(self.current_item[1]),
-            "priority_queue_size": self.source_queue.qsize(),
+            "name": self.name,
+            "current_item": current,
+            "queue_size": self.source_queue.qsize(),
         }

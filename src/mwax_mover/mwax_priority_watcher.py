@@ -3,14 +3,16 @@ Module to watch a folder for file events and add file to a
 priority queue
 """
 
+import logging
 import os
 import queue
-import time
 import inotify.constants
 import inotify.adapters
 from typing import Optional
 from mwax_mover import mwax_mover, utils
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
+
+logger = logging.getLogger(__name__)
 
 
 class PriorityWatcher(object):
@@ -22,7 +24,6 @@ class PriorityWatcher(object):
         path: str,
         dest_queue: queue.PriorityQueue,
         pattern: str,
-        log,
         mode,
         recursive,
         metafits_path,
@@ -30,7 +31,23 @@ class PriorityWatcher(object):
         list_of_vcs_high_priority_projects: list[str],
         exclude_pattern: Optional[str] = None,
     ):
-        self.logger = log
+        """Initialize a priority directory watcher.
+
+        Args:
+            name: A descriptive name for this watcher instance.
+            path: The directory path to monitor.
+            dest_queue: The priority queue to deposit detected files into.
+            pattern: File extension to match (e.g., ".ext" or ".*").
+            mode: The watch mode (NEW, RENAME, or RENAME_OR_NEW).
+            recursive: Whether to watch subdirectories recursively.
+            metafits_path: Path to metafits files for priority determination.
+            list_of_correlator_high_priority_projects: Projects with high priority.
+            list_of_vcs_high_priority_projects: VCS projects with high priority.
+            exclude_pattern: File extension to exclude from matching. Defaults to None.
+
+        Raises:
+            FileNotFoundError: If the specified path does not exist.
+        """
         self.name = name
         self.inotify_tree: Optional[inotify.adapters.InotifyTree | inotify.adapters.Inotify] = None
         self.recursive = recursive
@@ -63,24 +80,31 @@ class PriorityWatcher(object):
             raise FileNotFoundError(self.path)
 
     def start(self):
-        """Begins watching the directory"""
+        """Start watching the directory for inotify events.
+
+        Sets up the inotify adapter based on the recursive setting and initiates
+        the watch loop to monitor for file events with priority assignment.
+        """
+        # supress all but most critical inotify logs
+        logging.getLogger("inotify.adapters").setLevel(logging.CRITICAL)
+
         if self.recursive:
-            self.logger.info(f"PriorityWatcher starting on {self.path}/*{self.pattern} and all subdirectories...")
+            logger.info(f"PriorityWatcher starting on {self.path}/*{self.pattern} and all subdirectories...")
             self.inotify_tree = inotify.adapters.InotifyTree(self.path, mask=self.mask)
         else:
-            self.logger.info(f"PriorityWatcher starting on {self.path}/*{self.pattern}...")
+            logger.info(f"PriorityWatcher starting on {self.path}/*{self.pattern}...")
             self.inotify_tree = inotify.adapters.Inotify()
             self.inotify_tree.add_watch(self.path, mask=self.mask)
 
         if self.exclude_pattern:
-            self.logger.info(f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}")
+            logger.info(f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}")
 
         self.watching = True
         self.do_watch_loop()
 
     def stop(self):
-        """Stop watching the directory"""
-        self.logger.info(f"PriorityWatcher stopping on {self.path}/*{self.pattern}...")
+        """Stop watching the directory and clean up inotify resources."""
+        logger.info(f"PriorityWatcher stopping on {self.path}/*{self.pattern}...")
 
         self.watching = False
 
@@ -90,8 +114,19 @@ class PriorityWatcher(object):
             if isinstance(self.inotify_tree, inotify.adapters.Inotify):
                 self.inotify_tree.remove_watch(self.path)
 
+        # Destroy the inotify adpater
+        try:
+            del self.inotify_tree
+        except Exception:
+            pass
+
     def do_watch_loop(self):
-        """ "Initiate watching"""
+        """Perform initial scan and enter the inotify event monitoring loop.
+
+        Scans for pre-existing files with priority calculation, then continuously
+        monitors for inotify events that match the configured pattern and mode,
+        adding matching files to the priority queue with assigned priority.
+        """
         # If we're in NEW or RENAME mode, then scan the folder once we have
         # enqueued any waiting items
         if (
@@ -100,7 +135,6 @@ class PriorityWatcher(object):
             or self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW
         ):
             utils.scan_for_existing_files_and_add_to_priority_queue(
-                self.logger,
                 self.metafits_path,
                 self.path,
                 self.pattern,
@@ -120,7 +154,7 @@ class PriorityWatcher(object):
                         (header, _, path, filename) = event
 
                         # debug (uncomment if needed)
-                        # self.logger.debug(f"Event {path} {filename}")
+                        # logger.debug(f"Event {path} {filename}")
 
                         # check event is one we care about
                         if header.mask | self.mask == self.mask:
@@ -132,7 +166,6 @@ class PriorityWatcher(object):
 
                                 # We need to determine the priority
                                 priority = utils.get_priority(
-                                    self.logger,
                                     dest_filename,
                                     self.metafits_path,
                                     self.list_of_correlator_high_priority_projects,
@@ -145,20 +178,17 @@ class PriorityWatcher(object):
                                 )
 
                                 self.dest_queue.put(new_queue_item)
-                                self.logger.info(
+                                logger.info(
                                     f"{dest_filename} added to queue with priority {priority} ({self.dest_queue.qsize()})"
                                 )
 
     def get_status(self) -> dict:
-        """Returns a dictionary describing status of this watcher"""
-        _, used_bytes, free_bytes = utils.get_disk_space_bytes(self.path)
+        """Get the current status of the watcher.
 
+        Returns:
+            A dictionary containing the watcher name and watch path.
+        """
         return {
-            "Unix timestamp": time.time(),
-            "watching": self.watching,
-            "mode": self.mode,
+            "name": self.name,
             "watch_path": self.path,
-            "watch_pattern": self.pattern,
-            "watch_used_bytes": used_bytes,
-            "watch_free_bytes": free_bytes,
         }

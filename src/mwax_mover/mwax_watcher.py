@@ -1,11 +1,19 @@
-"""Module to watch a folder for file events and add file to a queue"""
+"""inotify-based directory watcher that enqueues detected file paths.
 
+The Watcher class monitors a directory (recursively or flat) for inotify events
+(IN_CLOSE_WRITE, IN_MOVED_TO, or both) and deposits matching file paths into a
+plain queue.Queue. On startup it performs a one-shot scan of pre-existing files
+before entering the live event loop.
+"""
+
+import logging
 import os
 import queue
-import time
 import inotify.constants
 import inotify.adapters
 from mwax_mover import mwax_mover, utils
+
+logger = logging.getLogger(__name__)
 
 
 class Watcher(object):
@@ -17,12 +25,24 @@ class Watcher(object):
         path: str,
         dest_queue: queue.Queue,
         pattern: str,
-        log,
         mode,
         recursive,
         exclude_pattern=None,
     ):
-        self.logger = log
+        """Initialize a directory watcher.
+
+        Args:
+            name: A descriptive name for this watcher instance.
+            path: The directory path to monitor.
+            dest_queue: The queue to deposit detected file paths into.
+            pattern: File extension to match (e.g., ".ext" or ".*").
+            mode: The watch mode (NEW, RENAME, or RENAME_OR_NEW).
+            recursive: Whether to watch subdirectories recursively.
+            exclude_pattern: File extension to exclude from matching. Defaults to None.
+
+        Raises:
+            FileNotFoundError: If the specified path does not exist.
+        """
         self.name = name
         self.inotify_tree: inotify.adapters.Inotify | inotify.adapters.InotifyTree
         self.recursive = recursive
@@ -46,24 +66,31 @@ class Watcher(object):
             raise FileNotFoundError(self.path)
 
     def start(self):
-        """Begins watching the directory"""
+        """Start watching the directory for inotify events.
+
+        Sets up the inotify adapter based on the recursive setting and initiates
+        the watch loop to monitor for file events.
+        """
+        # supress all but most critical inotify logs
+        logging.getLogger("inotify.adapters").setLevel(logging.CRITICAL)
+
         if self.recursive:
-            self.logger.info(f"Watcher starting on {self.path}/*{self.pattern} and all subdirectories...")
+            logger.info(f"Watcher starting on {self.path}/*{self.pattern} and all subdirectories...")
             self.inotify_tree = inotify.adapters.InotifyTree(self.path, mask=self.mask)
         else:
-            self.logger.info(f"Watcher starting on {self.path}/*{self.pattern}...")
+            logger.info(f"Watcher starting on {self.path}/*{self.pattern}...")
             self.inotify_tree = inotify.adapters.Inotify()
             self.inotify_tree.add_watch(self.path, mask=self.mask)
 
         if self.exclude_pattern:
-            self.logger.info(f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}")
+            logger.info(f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}")
 
         self.watching = True
         self.do_watch_loop()
 
     def stop(self):
-        """Stop watching the directory"""
-        self.logger.info(f"Watcher stopping on {self.path}/*{self.pattern}...")
+        """Stop watching the directory and clean up inotify resources."""
+        logger.info(f"Watcher stopping on {self.path}/*{self.pattern}...")
 
         self.watching = False
 
@@ -72,8 +99,19 @@ class Watcher(object):
         else:
             self.inotify_tree.remove_watch(self.path)  # type: ignore
 
+        # Destroy the inotify adpater
+        try:
+            del self.inotify_tree
+        except Exception:
+            pass
+
     def do_watch_loop(self):
-        """ "Initiate watching"""
+        """Perform initial scan and enter the inotify event monitoring loop.
+
+        Scans for pre-existing files first, then continuously monitors for inotify
+        events that match the configured pattern and mode, adding matching files
+        to the destination queue.
+        """
         # If we're in NEW or RENAME mode, then scan the folder once we have
         # enqueued any waiting items
         if (
@@ -82,7 +120,6 @@ class Watcher(object):
             or self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW
         ):
             utils.scan_for_existing_files_and_add_to_queue(
-                self.logger,
                 self.path,
                 self.pattern,
                 self.recursive,
@@ -105,18 +142,15 @@ class Watcher(object):
                         )[1] != self.exclude_pattern:
                             dest_filename = os.path.join(path, filename)
                             self.dest_queue.put(dest_filename)
-                            self.logger.info(f"{dest_filename} added to queue ({self.dest_queue.qsize()})")
+                            logger.info(f"{dest_filename} added to queue ({self.dest_queue.qsize()})")
 
     def get_status(self) -> dict:
-        """Returns a dictionary describing status of this watcher"""
-        _, used_bytes, free_bytes = utils.get_disk_space_bytes(self.path)
+        """Get the current status of the watcher.
 
+        Returns:
+            A dictionary containing the watcher name and watch path.
+        """
         return {
-            "Unix timestamp": time.time(),
-            "watching": self.watching,
-            "mode": self.mode,
+            "name": self.name,
             "watch_path": self.path,
-            "watch_pattern": self.pattern,
-            "watch_used_bytes": used_bytes,
-            "watch_free_bytes": free_bytes,
         }

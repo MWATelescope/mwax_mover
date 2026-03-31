@@ -1,24 +1,48 @@
-"""Module to execute arbitrary commands"""
+"""Thin wrappers around subprocess for executing external commands.
 
+Provides run_command_ext() for synchronous execution (with optional NUMA node
+pinning, timeout, and shell mode), run_command_popen() for asynchronous execution
+returning a Popen handle, and check_popen_finished() to wait for a Popen process
+and retrieve its exit code and output.
+"""
+
+import logging
 import os
 import subprocess
 import shlex
 import typing
 from typing import Optional
 
+logger = logging.getLogger(__name__)
+
 
 # This will return true/false plus the output from stdout
 # use shell should be used when you are using wildcards and other shell
 # features
 def run_command_ext(
-    logger,
     command: str,
     numa_node: typing.Optional[int],
     timeout: int = 60,
     use_shell: bool = False,
     copy_user_env: bool = False,
 ) -> typing.Tuple[bool, str]:
-    """Runs a command and returns success or failure and stdout"""
+    """Execute a command synchronously with optional NUMA pinning.
+
+    Runs a command via subprocess with optional NUMA node binding,
+    timeout enforcement, and shell mode support. Returns the exit code
+    and combined stdout/stderr output.
+
+    Args:
+        command: The command to execute as a string.
+        numa_node: NUMA node to bind to, or None for no binding.
+        timeout: Maximum time in seconds to wait for command. Defaults to 60.
+        use_shell: Whether to execute via shell. Defaults to False.
+        copy_user_env: Whether to copy user's environment variables. Defaults to False.
+
+    Returns:
+        A tuple of (success: bool, output: str). Success is True if return code
+        is 0, False otherwise. Output is combined stdout and stderr.
+    """
     myenv: Optional[dict[str, str]] = None
 
     if copy_user_env:
@@ -90,13 +114,25 @@ def run_command_ext(
 # use shell should be used when you are using wildcards and other shell
 # features
 def run_command_popen(
-    logger,
     command: str,
     numa_node: int,
     use_shell: bool = False,
     copy_user_env: bool = False,
 ):
-    """Runs a command and returns success or failure and stdout"""
+    """Execute a command asynchronously with optional NUMA pinning.
+
+    Starts a command via subprocess.Popen with optional NUMA node binding
+    and shell mode support. Returns a Popen object for polling or waiting.
+
+    Args:
+        command: The command to execute as a string.
+        numa_node: NUMA node to bind to, or None for no binding.
+        use_shell: Whether to execute via shell. Defaults to False.
+        copy_user_env: Whether to copy user's environment variables. Defaults to False.
+
+    Returns:
+        A subprocess.Popen object that can be polled or waited on.
+    """
     myenv: Optional[dict[str, str]] = None
 
     if copy_user_env:
@@ -132,10 +168,19 @@ def run_command_popen(
     return popen_process
 
 
-def check_popen_finished(logger, popen_process, timeout: int = 60) -> typing.Tuple[int, str, str]:
-    """Given a running popen_process object
-    wait for it to finish and return the exit code
-    and output stdout & stderr"""
+def check_popen_finished(popen_process, timeout: int = 60) -> typing.Tuple[int, str, str]:
+    """Wait for a Popen process to finish and return its exit code and output.
+
+    Blocks until the process terminates or the timeout is exceeded. Handles
+    timeout and exception cases gracefully.
+
+    Args:
+        popen_process: A subprocess.Popen object to wait for.
+        timeout: Maximum time in seconds to wait. Defaults to 60.
+
+    Returns:
+        A tuple of (exit_code: int, stdout: str, stderr: str).
+    """
     stderror = ""
     stdout = ""
     exit_code = -1

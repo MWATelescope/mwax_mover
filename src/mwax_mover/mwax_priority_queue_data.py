@@ -35,12 +35,27 @@ class MWAXPriorityQueueData:
     """
 
     def __init__(self, full_filename: str):
+        """Initialize a priority queue data item with a full file path.
+
+        Args:
+            full_filename: The full path and filename of the file.
+        """
         self.value: str = full_filename
 
     def __repr__(self):
+        """Return the official string representation of the object.
+
+        Returns:
+            The full filename/path.
+        """
         return self.value
 
     def __str__(self):
+        """Return the string representation of the object.
+
+        Returns:
+            The full filename/path.
+        """
         return self.value
 
     def __f(self, comparison_value):
@@ -48,25 +63,67 @@ class MWAXPriorityQueueData:
         return os.path.split(comparison_value)[1]
 
     def __lt__(self, obj):
-        """self < obj."""
+        """Check if this object is less than another (by filename only).
+
+        Args:
+            obj: Another MWAXPriorityQueueData instance to compare.
+
+        Returns:
+            True if this object's filename is less than obj's filename.
+        """
         return self.__f(self.value) < self.__f(obj.value)
 
     def __le__(self, obj):
-        """self <= obj."""
+        """Check if this object is less than or equal to another (by filename only).
+
+        Args:
+            obj: Another MWAXPriorityQueueData instance to compare.
+
+        Returns:
+            True if this object's filename is less than or equal to obj's filename.
+        """
         return self.__f(self.value) <= self.__f(obj.value)
 
     def __eq__(self, obj):
-        """self == obj."""
+        """Check if this object is equal to another (by filename only).
+
+        Args:
+            obj: Another MWAXPriorityQueueData instance to compare.
+
+        Returns:
+            True if both objects have the same filename.
+        """
         return self.__f(self.value) == self.__f(obj.value)
 
     def __ne__(self, obj):
-        """self != obj."""
+        """Check if this object is not equal to another (by filename only).
+
+        Args:
+            obj: Another MWAXPriorityQueueData instance to compare.
+
+        Returns:
+            True if the objects have different filenames.
+        """
         return self.__f(self.value) != self.__f(obj.value)
 
     def __gt__(self, obj):
-        """self > obj."""
+        """Check if this object is greater than another (by filename only).
+
+        Args:
+            obj: Another MWAXPriorityQueueData instance to compare.
+
+        Returns:
+            True if this object's filename is greater than obj's filename.
+        """
         return self.__f(self.value) > self.__f(obj.value)
 
     def __ge__(self, obj):
-        """self >= obj."""
+        """Check if this object is greater than or equal to another (by filename only).
+
+        Args:
+            obj: Another MWAXPriorityQueueData instance to compare.
+
+        Returns:
+            True if this object's filename is greater than or equal to obj's filename.
+        """
         return self.__f(self.value) >= self.__f(obj.value)

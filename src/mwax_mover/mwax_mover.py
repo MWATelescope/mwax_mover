@@ -1,4 +1,9 @@
-"""Common stuff for mwax_mover module"""
+"""Module-level constants shared across the mwax_mover package.
+
+Defines the __FILE__ and __FILENOEXT__ substitution tokens used when building
+executable command strings, and the three directory watch-mode string constants
+(WATCH_DIR_FOR_NEW, WATCH_DIR_FOR_RENAME, WATCH_DIR_FOR_RENAME_OR_NEW).
+"""
 
 # The full filename with path
 FILE_REPLACEMENT_TOKEN = "__FILE__"

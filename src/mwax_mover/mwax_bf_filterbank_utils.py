@@ -1,8 +1,18 @@
+"""Utilities for reading, modifying, and stitching Sigproc filterbank (.fil) files.
+
+Provides functions to parse the variable-length binary header, read and write
+integer key-value pairs within it, and concatenate multiple per-subobservation
+filterbank files produced by the MWAX beamformer into a single complete
+observation output file.
+"""
+
 from typing import List
 import logging
 import os
 import re
 import shutil
+
+logger = logging.getLogger(__name__)
 
 HEADER_END = "HEADER_END"
 HEADER_END_BYTES = b"HEADER_END"
@@ -11,7 +21,19 @@ CHUNK_SIZE = 8 * 1024 * 1024  # 8 MiB
 
 
 def get_filterbank_components(filename: str) -> tuple[bytearray, int]:
-    # Returns the (header, data_start) as bytearray and the start byte location respectively
+    """Parse a Sigproc filterbank file and return its header and data start position.
+
+    Args:
+        filename: Path to the filterbank (.fil) file.
+
+    Returns:
+        A tuple of (header: bytearray, data_start_index: int), where header contains
+        the complete header including HEADER_END marker, and data_start_index is the
+        byte offset where the raw binary data begins.
+
+    Raises:
+        RuntimeError: If file ends unexpectedly before HEADER_END marker is found.
+    """
     with open(filename, "rb") as f:
         header_bytes = bytearray()
         while True:
@@ -35,6 +57,18 @@ def get_filterbank_components(filename: str) -> tuple[bytearray, int]:
 
 
 def get_filterbank_key_value_int(header: bytearray, key: str) -> int:
+    """Retrieve an integer key-value pair from a filterbank file header.
+
+    Args:
+        header: The filterbank header as a bytearray.
+        key: The key name to look up.
+
+    Returns:
+        The integer value associated with the key.
+
+    Raises:
+        ValueError: If the key is not found in the header.
+    """
     key_bytes = key.encode("utf-8")
     cuml_bytes = bytearray()
     for b in header:
@@ -48,8 +82,20 @@ def get_filterbank_key_value_int(header: bytearray, key: str) -> int:
     raise ValueError(f"Key {key} not found in filterbank file")
 
 
-# Returns a new header after modifying a key's value
 def set_filterbank_key_value_int(header: bytearray, key: str, value: int) -> bytearray:
+    """Modify an integer key-value pair in a filterbank file header.
+
+    Args:
+        header: The filterbank header as a bytearray.
+        key: The key name to modify.
+        value: The new integer value to set.
+
+    Returns:
+        The modified header bytearray.
+
+    Raises:
+        ValueError: If the key is not found in the header.
+    """
     key_bytes = key.encode("utf-8")
     cuml_bytes = bytearray()
     for b in header:
@@ -64,12 +110,28 @@ def set_filterbank_key_value_int(header: bytearray, key: str, value: int) -> byt
     raise ValueError(f"Key {key} not found in filterbank file")
 
 
-# Stitches filterbank files together and writes an output file- output filename is returned
-def stitch_filterbank_files(logger: logging.Logger, files: List[str]) -> str:
+def stitch_filterbank_files(files: List[str], output_dir: str) -> str:
+    """Concatenate multiple filterbank files into a single observation output file.
+
+    Combines per-subobservation filterbank files produced by the MWAX beamformer
+    into a single complete observation file. Uses the header from the first file
+    and concatenates all data sections.
+
+    Args:
+        files: List of filterbank file paths to stitch together.
+        output_dir: Directory where the output stitched file will be written.
+
+    Returns:
+        Path to the output stitched filterbank file.
+
+    Raises:
+        Exception: If the files list is empty.
+    """
     if len(files) == 0:
         raise Exception("No filterbank files to stitch")
 
     output_filename: str = get_stitched_filename(files[0])
+    output_filename = os.path.join(output_dir, os.path.basename(output_filename))
 
     if len(files) == 1:
         # Nothing to stitch but we still need the output_filename to be created, so copy the file
@@ -118,14 +180,19 @@ def stitch_filterbank_files(logger: logging.Logger, files: List[str]) -> str:
 
 
 def get_filterbank_filename_components(filename: str) -> tuple[str, int, int, int, int]:
-    """
-    Convert '[path]/obsid_subobs_chXXX_beamNN.vdif'
-    into    '[path]/obsid_chXXX_beamNN.vdif'.
+    """Parse filename components from a per-subobservation filterbank file path.
 
-    obsid  = 10 digits
-    subobs = 10 digits
-    XXX    = 3 digits (zero padded)
-    NN     = 2 digits (zero padded)
+    Extracts path, observation ID, sub-observation ID, channel, and beam from
+    a filename matching the pattern: /path/obsid_subobs_chXXX_beamNN.fil
+
+    Args:
+        filename: The filterbank filename to parse.
+
+    Returns:
+        A tuple of (path: str, obsid: int, subobs: int, channel: int, beam: int).
+
+    Raises:
+        ValueError: If filename does not match the expected format.
     """
     pattern = r"^(?P<path>.*)/(?P<obsid>\d{10})_(?P<subobs>\d{10})_ch(?P<chan>\d{3})_beam(?P<beam>\d{2})\.fil$"
     m = re.match(pattern, filename)
@@ -143,14 +210,19 @@ def get_filterbank_filename_components(filename: str) -> tuple[str, int, int, in
 
 
 def get_stitched_filename(filename: str) -> str:
-    """
-    Convert '[path]/obsid_subobs_chXXX_beamNN.vdif'
-    into    '[path]/obsid_chXXX_beamNN.vdif'.
+    """Generate output filename by removing sub-observation ID from input filename.
 
-    obsid  = 10 digits
-    subobs = 10 digits
-    XXX    = 3 digits (zero padded)
-    NN     = 2 digits (zero padded)
+    Converts a per-subobservation filename to a complete observation filename:
+    /path/obsid_subobs_chXXX_beamNN.fil -> /path/obsid_chXXX_beamNN.fil
+
+    Args:
+        filename: The per-subobservation filterbank filename.
+
+    Returns:
+        The output filename path with sub-observation ID removed.
+
+    Raises:
+        ValueError: If filename does not match the expected format.
     """
     file_path, obsid, _, chan, beam = get_filterbank_filename_components(filename)
 
