@@ -27,7 +27,7 @@ dependencies = [
     "importlib_metadata",
     "inotify",
     "matplotlib",
-    "mwalib>=2.0.0",
+    "mwalib>=2.0.3",
     "pandas",
     "psycopg[binary]",
     "psycopg[pool]",

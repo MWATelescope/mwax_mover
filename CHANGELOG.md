@@ -1,12 +1,13 @@
 # Changelog
 
-# 1.5.11 27-Mar-2026-30-Mar-2026
+# 1.5.11 27-Mar-2026-31-Mar-2026
 
 * subfile_dist: Subfile distributor doesn't exit when there are leftover files.
 * utils: refactor to fix a few corner cases.
 * All: module docstrings added.
 * All: function docstrings added.
-* All: updated logging to include module/fun names. Removed hardcoded module/fun names from logging.
+* All: updated logging to include module/func names. Removed hardcoded module/func names from logging.
+* mwax_bf_vdif_utils: Change to use mwalib >=2.0.3 to get target_name and start_ra and start_dec for voltage beams for the VDIF header.
 * README.md: updated.
 * Old broken tests removed.
 * mwax_wqw_checksum_and_db: refactored to simplify handler logic. Added tests.
