@@ -369,10 +369,10 @@ def archive_file_rclone_haproxy(
     # Get file size
     try:
         file_size = os.path.getsize(full_filename)
-        size_gigabytes = bytes_to_gigabytes(file_size)
     except Exception:
         logger.exception(f"{full_filename}: Error determining file size.")
         return False
+    size_gigabytes = bytes_to_gigabytes(file_size)
 
     start_time = time.time()
     rclone_timeout = f"{rclone_timeout_mins}m"
@@ -410,6 +410,12 @@ def archive_file_rclone_haproxy(
         if return_val:
             elapsed = time.time() - start_time
 
+            # Success - in case haproxy uses a different endpoint for the below check, just wait a bit
+            # for the other vss nodes to "catch up" before we run the check
+            check_wait_secs = 15
+            logger.debug(f"{full_filename}: Waiting {check_wait_secs} seconds before running rclone check.")
+            time.sleep(check_wait_secs)
+
             # Success - now verify the file at the remote
             logger.debug(
                 f"{full_filename}: attempting check against {rclone_profile} bucket {bucket_name} via HAProxy..."
@@ -435,7 +441,8 @@ def archive_file_rclone_haproxy(
                 return True
             else:
                 # Checksum mismatch - unexpected, raise so caller sees it
-                raise Exception(f"rclone check failed: {stdout}")
+                logger.exception(f"{full_filename}: rclone check failed: {stdout}")
+                return False
         else:
             # rclone exhausted its retries - all endpoints likely down
             logger.warning(
@@ -446,7 +453,7 @@ def archive_file_rclone_haproxy(
 
     except Exception:
         logger.exception(f"{full_filename}: Error uploading to bucket {bucket_name} via rclone_haproxy.")
-        raise
+        return False
 
 
 #
