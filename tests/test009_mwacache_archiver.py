@@ -54,7 +54,6 @@ def test_mwacache_archiver_config_file():
     assert mcap.archive_command_timeout_sec == 1800
 
     assert mcap.s3_profile == "gsleap4"
-    assert mcap.s3_ceph_endpoints == ["https://test-mwa-data.mwa128t.org"]
 
     assert mcap.remote_metadatadb_host == "dummy"
     assert mcap.remote_metadatadb_db == "dummy"

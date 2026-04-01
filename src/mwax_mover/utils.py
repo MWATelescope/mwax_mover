@@ -1815,6 +1815,32 @@ def gigabyte_to_gibibyte(gigabytes: float) -> float:
     return gigabytes / 1.07374
 
 
+def gigabytes_to_gigabits(gigabytes: float) -> float:
+    """
+    Convert a size in gigabytes (SI, base-10) to gigabits.
+
+    Args:
+        gigabytes: Size in gigabytes (1 GB = 10^9 bytes).
+
+    Returns:
+        Equivalent size in gigabits, as a float.
+    """
+    return gigabytes * 8
+
+
+def bytes_to_gigabytes(num_bytes: int) -> float:
+    """
+    Convert a size in bytes to gigabytes (SI, base-10).
+
+    Args:
+        num_bytes: size in bytes
+
+    Returns:
+        Equivalent size in gigabytes: Size in gigabytes (1 GB = 10^9 bytes) as float.
+    """
+    return num_bytes / (1000.0 * 1000.0 * 1000.0)
+
+
 def delete_files_older_than(path: str, older_than_seconds: int, extensions: list[str]) -> list[str]:
     """
     Delete files in a directory that are older than a threshold and match given extensions.
@@ -2054,3 +2080,30 @@ def running_under_pytest() -> bool:
     """
     # Returns True if we are running as part of pytest
     return "PYTEST_CURRENT_TEST" in os.environ
+
+
+def get_gbps_from_elapsed(size_gigabytes: float, elapsed_seconds: float) -> float:
+    """Calculate throughput in Gbps.
+
+    Args:
+        size_gigabytes: Transfer size in gigabytes.
+        elapsed_seconds: Elapsed time in seconds.
+
+    Returns:
+        Throughput in Gbps, or 0.0 if elapsed time is zero.
+    """
+    return (size_gigabytes * 8) / elapsed_seconds if elapsed_seconds > 0 else 0.0
+
+
+def get_gbps(size_gigabytes: float, start_time: float) -> float:
+    """Calculate throughput in Gbps.
+
+    Args:
+        size_gigabytes: Transfer size in gigabytes.
+        start_time: Start time of the transfer.
+
+    Returns:
+        Throughput in Gbps, or 0.0 if elapsed time is zero.
+    """
+    elapsed_seconds = time.time() - start_time
+    return gigabytes_to_gigabits(size_gigabytes) / elapsed_seconds if elapsed_seconds > 0 else 0.0

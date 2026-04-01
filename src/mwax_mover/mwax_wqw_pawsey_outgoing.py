@@ -29,7 +29,6 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
         mro_db_handler_object: MWAXDBHandler,
         remote_db_handler_object: MWAXDBHandler,
         s3_profile: str,
-        s3_ceph_endpoints: list[str],
         archive_to_location: ArchiveLocation,
     ):
         """Initialize the PawseyOutgoingProcessor.
@@ -43,7 +42,6 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             mro_db_handler_object: Database handler for the MRO metadata database.
             remote_db_handler_object: Database handler for the remote metadata database.
             s3_profile: AWS/S3 profile name for Ceph access.
-            s3_ceph_endpoints: List of Ceph S3 endpoint URLs.
             archive_to_location: Target archive location (Acacia, Banksia, or AcaciaMWA).
         """
         super().__init__(
@@ -59,7 +57,6 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
         self.mro_db_handler_object = mro_db_handler_object
         self.remote_db_handler_object = remote_db_handler_object
         self.s3_profile = s3_profile
-        self.s3_ceph_endpoints = s3_ceph_endpoints
         self.archive_to_location = archive_to_location
 
     def handler(self, item: str) -> bool:
@@ -138,9 +135,8 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
                 or self.archive_to_location == ArchiveLocation.Banksia
                 or self.archive_to_location == ArchiveLocation.AcaciaMWA
             ):  # Acacia or Banksia
-                archive_success = mwa_archiver.archive_file_rclone(
+                archive_success = mwa_archiver.archive_file_rclone_haproxy(
                     self.s3_profile,
-                    self.s3_ceph_endpoints,
                     item,
                     bucket,
                     data_files_row.checksum,

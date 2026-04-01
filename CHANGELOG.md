@@ -1,5 +1,10 @@
 # Changelog
 
+# 1.5.12 01-Apr-2026
+
+* mwacache: now uses haproxy to try all available VSS endpoints.
+  * Removed `ceph_endpoints` from mwacache.cfg config file.
+
 # 1.5.11 27-Mar-2026-31-Mar-2026
 
 * subfile_dist: Subfile distributor doesn't exit when there are leftover files.

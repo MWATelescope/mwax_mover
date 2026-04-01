@@ -16,7 +16,7 @@ import random
 import time
 import uuid
 import logging
-from mwax_mover.utils import running_under_pytest
+from mwax_mover.utils import running_under_pytest, get_gbps, bytes_to_gigabytes
 from mwax_mover.mwax_command import run_command_ext
 
 logger = logging.getLogger(__name__)
@@ -301,6 +301,152 @@ def archive_file_rclone(
             f"{full_filename}: could not be archived via rclone after trying all {len(endpoints)} endpoint(s)."
         )
         return False
+
+
+# HAProxy client/server timeouts are configured at 60 minutes in haproxy.cfg.
+# rclone's effective maximum time per attempt is timeout * retries, which must
+# not exceed this limit or HAProxy may kill the connection before rclone finishes.
+_HAPROXY_MAX_TIMEOUT_MINS = 60
+
+
+def archive_file_rclone_haproxy(
+    rclone_profile: str,
+    full_filename: str,
+    bucket_name: str,
+    md5hash: str,
+    rclone_timeout_mins: int = 20,
+    rclone_retries: int = 3,
+) -> bool:
+    """Upload a file to Pawsey S3 (Acacia/Banksia) via rclone with HAProxy load balancing.
+
+    Uploads via a local HAProxy instance which handles endpoint selection,
+    health checking, and failover across all available S3 nodes transparently.
+    Checksum verification is performed after a successful upload.
+
+    If running under pytest, will automatically return True.
+
+    Note:
+        rclone_timeout_mins * rclone_retries must not exceed the HAProxy client/server
+        timeout (currently 60 minutes, configured in haproxy.cfg). A warning is emitted
+        if this limit is approached or exceeded.
+
+    Args:
+        rclone_profile: The rclone profile/remote name to use.
+        full_filename: Path to the file to archive.
+        bucket_name: S3 bucket name for the upload.
+        md5hash: MD5 checksum hash for verification.
+        rclone_timeout_mins: Inactivity timeout in minutes for rclone operations.
+            Resets whenever data is flowing; only triggers if the connection goes
+            silent for this duration. Defaults to 20 minutes.
+        rclone_retries: Number of times rclone will retry a failed transfer or
+            check before giving up. Handles transient errors on live endpoints.
+            Defaults to 3.
+
+    Returns:
+        True if upload succeeded and checksum verified.
+        False if all endpoints are down or upload failed after rclone retries.
+
+    Raises:
+        Exception: If an unexpected error occurs (not endpoint unavailability).
+    """
+    logger.debug(f"{full_filename}: attempting archive_file_rclone_haproxy...")
+
+    # Warn if rclone's worst-case duration could exceed HAProxy's timeout.
+    # Each retry can take up to rclone_timeout_mins before rclone gives up on it.
+    effective_max_mins = rclone_timeout_mins * rclone_retries
+    if effective_max_mins > _HAPROXY_MAX_TIMEOUT_MINS:
+        logger.warning(
+            f"rclone_timeout_mins ({rclone_timeout_mins}) * rclone_retries ({rclone_retries})"
+            f" = {effective_max_mins} minutes, which exceeds the HAProxy client/server timeout"
+            f" of {_HAPROXY_MAX_TIMEOUT_MINS} minutes. HAProxy may kill the connection before"
+            f" rclone finishes. To fix, increase 'timeout client', 'timeout server', and"
+            f" 'timeout server' in the backend block of /etc/haproxy/haproxy.cfg."
+        )
+
+    # Get just the filename
+    filename = os.path.basename(full_filename)
+
+    # Get file size
+    try:
+        file_size = os.path.getsize(full_filename)
+        size_gigabytes = bytes_to_gigabytes(file_size)
+    except Exception:
+        logger.exception(f"{full_filename}: Error determining file size.")
+        return False
+
+    start_time = time.time()
+    rclone_timeout = f"{rclone_timeout_mins}m"
+    # Subprocess wall-clock limit accounts for full retry cycle:
+    # each retry can take up to rclone_timeout_mins, plus a small buffer.
+    subprocess_timeout_secs = rclone_timeout_mins * rclone_retries * 60
+
+    #
+    # TODO: Ugly solution here for testing - should replace this with a Mock pattern
+    #
+    if running_under_pytest():
+        elapsed = 1.0
+        check_elapsed = 1.0
+        logger.info(
+            f"{full_filename}: archive_file_rclone_haproxy success."
+            f" Copied ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at"
+            f" {get_gbps(size_gigabytes, start_time):.3f} Gbps)."
+            f" Check took {check_elapsed:.3f} seconds."
+        )
+        return True
+
+    # HAProxy listens on localhost:8080 and routes to all configured S3 endpoints.
+    # No --s3-endpoint flag needed; the rclone profile's endpoint is set to
+    # http://127.0.0.1:8080 in rclone.conf.
+    try:
+        cmdline = (
+            f'/usr/bin/rclone copyto -M --metadata-set "md5={md5hash}"'
+            f" --retries {rclone_retries}"
+            f" --timeout {rclone_timeout} --contimeout 30s"
+            f" {full_filename} {rclone_profile}:/{bucket_name}/{filename}"
+        )
+
+        return_val, stdout = run_command_ext(cmdline, None, subprocess_timeout_secs, False)
+
+        if return_val:
+            elapsed = time.time() - start_time
+
+            # Success - now verify the file at the remote
+            logger.debug(
+                f"{full_filename}: attempting check against {rclone_profile} bucket {bucket_name} via HAProxy..."
+            )
+            cmdline = (
+                f"/usr/bin/rclone check"
+                f" --retries {rclone_retries}"
+                f" --timeout {rclone_timeout} --contimeout 30s"
+                f" {full_filename} {rclone_profile}:/{bucket_name}"
+            )
+
+            check_start = time.time()
+            return_val, stdout = run_command_ext(cmdline, None, subprocess_timeout_secs, False)
+
+            if return_val:
+                check_elapsed = time.time() - check_start
+                logger.info(
+                    f"{full_filename}: archive_file_rclone_haproxy success."
+                    f" Copied ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at"
+                    f" {get_gbps(size_gigabytes, start_time):.3f} Gbps)."
+                    f" Check took {check_elapsed:.3f} seconds."
+                )
+                return True
+            else:
+                # Checksum mismatch - unexpected, raise so caller sees it
+                raise Exception(f"rclone check failed: {stdout}")
+        else:
+            # rclone exhausted its retries - all endpoints likely down
+            logger.warning(
+                f"{full_filename}: could not be archived via rclone_haproxy."
+                f" All HAProxy backends may be down or transfer failed. rclone output: {stdout}"
+            )
+            return False
+
+    except Exception:
+        logger.exception(f"{full_filename}: Error uploading to bucket {bucket_name} via rclone_haproxy.")
+        raise
 
 
 #

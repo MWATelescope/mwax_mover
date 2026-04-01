@@ -78,7 +78,6 @@ class MWACacheArchiveProcessor:
 
         # s3 config
         self.s3_profile: str = ""
-        self.s3_ceph_endpoints: list[str] = []
 
         self.health_multicast_interface_ip: str = ""
         self.health_multicast_ip: str = ""
@@ -381,12 +380,6 @@ class MWACacheArchiveProcessor:
         # s3 options
         self.s3_profile = utils.read_config(config, s3_section, "profile")
 
-        self.s3_ceph_endpoints = utils.read_config_list(
-            config,
-            s3_section,
-            "ceph_endpoints",
-        )
-
         #
         # Options specified per host
         #
@@ -479,7 +472,6 @@ class MWACacheArchiveProcessor:
                 self.mro_db_handler,
                 self.remote_db_handler,
                 self.s3_profile,
-                self.s3_ceph_endpoints,
                 self.archive_to_location,
             )
             self.workers.append(worker)
