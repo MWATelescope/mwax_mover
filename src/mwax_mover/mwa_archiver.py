@@ -308,6 +308,12 @@ def archive_file_rclone(
 # not exceed this limit or HAProxy may kill the connection before rclone finishes.
 _HAPROXY_MAX_TIMEOUT_MINS = 60
 
+# Number of times to retry rclone check if it fails, and how long to wait between
+# retries. This handles the case where HAProxy routes copyto and check to different
+# VSS nodes and replication lag causes the check to fail transiently.
+_RCLONE_CHECK_RETRIES = 3
+_RCLONE_CHECK_RETRY_WAIT_SECS = 20
+
 
 def archive_file_rclone_haproxy(
     rclone_profile: str,
@@ -394,14 +400,21 @@ def archive_file_rclone_haproxy(
         )
         return True
 
-    # HAProxy listens on localhost:8080 and routes to all configured S3 endpoints.
+    # HAProxy listens on localhost:8080 (for Banksia) and 8081 for Acacia and
+    # routes to all configured S3 endpoints.
     # No --s3-endpoint flag needed; the rclone profile's endpoint is set to
-    # http://127.0.0.1:8080 in rclone.conf.
+    # http://127.0.0.1:8080/8081 in rclone.conf.
+    # NOTE: --no-checksum here is ok, because we do rclone check after
+    #
     try:
         cmdline = (
             f'/usr/bin/rclone copyto -M --metadata-set "md5={md5hash}"'
             f" --retries {rclone_retries}"
-            f" --timeout {rclone_timeout} --contimeout 30s"
+            f" --s3-upload-concurrency 32"
+            f" --s3-chunk-size 128M"
+            f" --no-checksum"
+            f" --timeout {rclone_timeout}"
+            f" --contimeout 30s"
             f" {full_filename} {rclone_profile}:/{bucket_name}/{filename}"
         )
 
@@ -410,25 +423,46 @@ def archive_file_rclone_haproxy(
         if return_val:
             elapsed = time.time() - start_time
 
-            # Success - in case haproxy uses a different endpoint for the below check, just wait a bit
-            # for the other vss nodes to "catch up" before we run the check
-            check_wait_secs = 15
-            logger.debug(f"{full_filename}: Waiting {check_wait_secs} seconds before running rclone check.")
-            time.sleep(check_wait_secs)
-
-            # Success - now verify the file at the remote
+            # Success - in case haproxy uses a different endpoint for the below check, wait
+            # briefly for VSS replication before running the check.
             logger.debug(
-                f"{full_filename}: attempting check against {rclone_profile} bucket {bucket_name} via HAProxy..."
+                f"{full_filename}: Waiting {_RCLONE_CHECK_RETRY_WAIT_SECS} seconds before running rclone check."
             )
+            time.sleep(_RCLONE_CHECK_RETRY_WAIT_SECS)
+
+            # Verify the file at the remote, retrying a few times to allow for
+            # replication lag across VSS nodes when HAProxy routes to a different
+            # node than the one that received the copyto.
             cmdline = (
                 f"/usr/bin/rclone check"
                 f" --retries {rclone_retries}"
-                f" --timeout {rclone_timeout} --contimeout 30s"
+                f" --timeout {rclone_timeout}"
+                f" --contimeout 30s"
+                f" --s3-checksum-algorithm md5"
+                f" --checkers 8"
                 f" {full_filename} {rclone_profile}:/{bucket_name}"
             )
 
             check_start = time.time()
-            return_val, stdout = run_command_ext(cmdline, None, subprocess_timeout_secs, False)
+            check_attempt = 0
+            return_val = False
+
+            while check_attempt < _RCLONE_CHECK_RETRIES and not return_val:
+                check_attempt += 1
+                logger.debug(
+                    f"{full_filename}: rclone check attempt {check_attempt}"
+                    f" of {_RCLONE_CHECK_RETRIES} against {rclone_profile}"
+                    f" bucket {bucket_name} via HAProxy..."
+                )
+                return_val, stdout = run_command_ext(cmdline, None, subprocess_timeout_secs, False)
+
+                if not return_val and check_attempt < _RCLONE_CHECK_RETRIES:
+                    logger.warning(
+                        f"{full_filename}: rclone check attempt {check_attempt}"
+                        f" of {_RCLONE_CHECK_RETRIES} failed, retrying in"
+                        f" {_RCLONE_CHECK_RETRY_WAIT_SECS} seconds. Output: {stdout}"
+                    )
+                    time.sleep(_RCLONE_CHECK_RETRY_WAIT_SECS)
 
             if return_val:
                 check_elapsed = time.time() - check_start
@@ -440,8 +474,11 @@ def archive_file_rclone_haproxy(
                 )
                 return True
             else:
-                # Checksum mismatch - unexpected, raise so caller sees it
-                logger.exception(f"{full_filename}: rclone check failed: {stdout}")
+                # All check attempts exhausted - treat as failure
+                logger.error(
+                    f"{full_filename}: rclone check failed after {_RCLONE_CHECK_RETRIES}"
+                    f" attempts. Last output: {stdout}"
+                )
                 return False
         else:
             # rclone exhausted its retries - all endpoints likely down

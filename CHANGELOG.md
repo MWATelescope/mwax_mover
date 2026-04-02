@@ -1,9 +1,10 @@
 # Changelog
 
-# 1.5.13 02-Apr-2026
+# 1.5.13-14 02-Apr-2026
 
 * mwacache: If rclone copy or check fails, just return false and it will requeue and retry
 * mwacache: Now that we're using haproxy, we need a small gap in time between rclone copy and rclone check since we may use different vss servers for both calls. So we just put in a small hold between copy and check.
+* mwacache: Tweaked some of rclone's settings to boost throughput and added a 3 retry loop for rclone check to take into account vss's syncing with each other.
 
 # 1.5.12 01-Apr-2026
 
