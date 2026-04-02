@@ -157,7 +157,7 @@ class PriorityWatcher(object):
                         # logger.debug(f"Event {path} {filename}")
 
                         # check event is one we care about
-                        if header.mask | self.mask == self.mask:
+                        if header.mask & self.mask:
                             # Check file extension is one we care about
                             if (
                                 os.path.splitext(filename)[1] == self.pattern or self.pattern == ".*"

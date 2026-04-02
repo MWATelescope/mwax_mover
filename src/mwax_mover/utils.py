@@ -7,6 +7,8 @@ PSRDADA header parsing, Redis-based beamformer signalling, UDP multicast sending
 and config file helpers (read_config, read_optional_config, read_config_list).
 """
 
+import sys
+
 import base64
 from astropy import time as astrotime
 from configparser import ConfigParser
@@ -836,17 +838,27 @@ def load_psrdada_ringbuffer(full_filename: str, ringbuffer_key: str, numa_node, 
     Returns:
         True if ``dada_diskdb`` exited successfully, False otherwise.
     """
-    logger.debug(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
 
     cmd = f"dada_diskdb -k {ringbuffer_key} -f {full_filename}"
 
     size = os.path.getsize(full_filename)
 
     start_time = time.time()
-    return_value, stdout = mwax_command.run_command_ext(cmd, numa_node, timeout)
+
+    if running_under_pytest():
+        logger.debug(
+            f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key} (mocked as running in pytest)"
+        )
+        time.sleep(2)
+        return_value = True
+        stdout = ""
+    else:
+        logger.debug(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
+        return_value, stdout = mwax_command.run_command_ext(cmd, numa_node, timeout)
+
     elapsed = time.time() - start_time
 
-    size_gigabytes = size / (1000 * 1000 * 1000)
+    size_gigabytes = bytes_to_gigabytes(size)
     gbps_per_sec = (size_gigabytes * 8) / elapsed
 
     if return_value:
@@ -2079,7 +2091,7 @@ def running_under_pytest() -> bool:
         True if running inside a pytest session, False otherwise.
     """
     # Returns True if we are running as part of pytest
-    return "PYTEST_CURRENT_TEST" in os.environ
+    return ("PYTEST_CURRENT_TEST" in os.environ) or ("pytest" in sys.modules)
 
 
 def get_gbps_from_elapsed(size_gigabytes: float, elapsed_seconds: float) -> float:

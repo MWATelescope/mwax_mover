@@ -135,7 +135,7 @@ class Watcher(object):
                     (header, _, path, filename) = event
 
                     # check event is one we care about
-                    if header.mask | self.mask == self.mask:
+                    if header.mask & self.mask:
                         # Check file extension is one we care about
                         if (os.path.splitext(filename)[1] == self.pattern or self.pattern == ".*") and os.path.splitext(
                             filename

@@ -34,6 +34,11 @@ class MWAXPriorityQueueData:
     data when interacting with a PriorityQueue
     """
 
+    # Unhashable by design: __eq__ is filename-only so instances must not be
+    # used as dict keys or set members (Python 3 would set this implicitly, but
+    # we make it explicit for clarity).
+    __hash__ = None
+
     def __init__(self, full_filename: str):
         """Initialize a priority queue data item with a full file path.
 
@@ -58,9 +63,16 @@ class MWAXPriorityQueueData:
         """
         return self.value
 
-    def __f(self, comparison_value):
-        # The sort key is the filename (without the path)
-        return os.path.split(comparison_value)[1]
+    def _sort_key(self, full_path: str) -> str:
+        """Return the sort key for a full path (filename only).
+
+        Args:
+            full_path: A full file path.
+
+        Returns:
+            The filename component of the path, without any directory prefix.
+        """
+        return os.path.split(full_path)[1]
 
     def __lt__(self, obj):
         """Check if this object is less than another (by filename only).
@@ -71,7 +83,7 @@ class MWAXPriorityQueueData:
         Returns:
             True if this object's filename is less than obj's filename.
         """
-        return self.__f(self.value) < self.__f(obj.value)
+        return self._sort_key(self.value) < self._sort_key(obj.value)
 
     def __le__(self, obj):
         """Check if this object is less than or equal to another (by filename only).
@@ -82,7 +94,7 @@ class MWAXPriorityQueueData:
         Returns:
             True if this object's filename is less than or equal to obj's filename.
         """
-        return self.__f(self.value) <= self.__f(obj.value)
+        return self._sort_key(self.value) <= self._sort_key(obj.value)
 
     def __eq__(self, obj):
         """Check if this object is equal to another (by filename only).
@@ -93,7 +105,7 @@ class MWAXPriorityQueueData:
         Returns:
             True if both objects have the same filename.
         """
-        return self.__f(self.value) == self.__f(obj.value)
+        return self._sort_key(self.value) == self._sort_key(obj.value)
 
     def __ne__(self, obj):
         """Check if this object is not equal to another (by filename only).
@@ -104,7 +116,7 @@ class MWAXPriorityQueueData:
         Returns:
             True if the objects have different filenames.
         """
-        return self.__f(self.value) != self.__f(obj.value)
+        return self._sort_key(self.value) != self._sort_key(obj.value)
 
     def __gt__(self, obj):
         """Check if this object is greater than another (by filename only).
@@ -115,7 +127,7 @@ class MWAXPriorityQueueData:
         Returns:
             True if this object's filename is greater than obj's filename.
         """
-        return self.__f(self.value) > self.__f(obj.value)
+        return self._sort_key(self.value) > self._sort_key(obj.value)
 
     def __ge__(self, obj):
         """Check if this object is greater than or equal to another (by filename only).
@@ -126,4 +138,4 @@ class MWAXPriorityQueueData:
         Returns:
             True if this object's filename is greater than or equal to obj's filename.
         """
-        return self.__f(self.value) >= self.__f(obj.value)
+        return self._sort_key(self.value) >= self._sort_key(obj.value)

@@ -46,7 +46,7 @@ from mwax_mover.mwax_wqw_vis_stats import VisStatsProcessor
 
 # Setup root logger
 handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(message)s"))
+handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(message)s"))
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
@@ -586,7 +586,7 @@ class MWAXSubfileDistributor:
         logger.debug(f"Using redis queue key: {bf_redis_queue_key}")
 
         # Create watch queue worker
-        subfile_incoming_worker = SubfileIncomingProcessor(
+        self.subfile_incoming_processor = SubfileIncomingProcessor(
             self,
             self.cfg_subfile_incoming_path,
             ".sub",
@@ -608,7 +608,7 @@ class MWAXSubfileDistributor:
             self.cfg_corr_metafits_path,
             self.subfile_dist_mode,
         )
-        self.workers.append(subfile_incoming_worker)
+        self.workers.append(self.subfile_incoming_processor)
 
         if self.cfg_packet_stats_destination_dir != "" and self.cfg_packet_stats_dump_dir != "":
             packet_stats_worker = PacketStatsProcessor(
@@ -716,6 +716,12 @@ class MWAXSubfileDistributor:
                 self.cfg_archive_command_timeout_sec,
             )
             self.workers.append(self.outgoing_processor)
+
+        try:
+            self.start_flask_web_server()
+        except Exception:
+            logger.exception("Unable to start web server. Exiting")
+            exit(1)
 
         # Make sure we can Ctrl-C / kill out of this
         logger.info("Initialising signal handlers")
@@ -1142,9 +1148,7 @@ class MWAXSubfileDistributor:
         # Create and start web server
         if utils.running_under_pytest():
             # Randomise the port - ugly but pytest is too quick to reuse the port
-            port = random.randint(10000, 60000)
-        else:
-            port = self.cfg_webserver_port
+            self.cfg_webserver_port = random.randint(10000, 60000)
 
         logger.info(f"Starting http server on port {self.cfg_webserver_port}...")
 
@@ -1165,13 +1169,13 @@ class MWAXSubfileDistributor:
         )
 
         host = "0.0.0.0"
-        self.flask_server = make_server(host, port=port, app=self.flask_app)
+        self.flask_server = make_server(host, port=self.cfg_webserver_port, app=self.flask_app)
         self.flask_server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
         self.flask_thread = threading.Thread(target=self.flask_server.serve_forever, name="webserver")
         self.flask_thread.start()
 
-        logger.info(f"Web server started on http://{host}:{port}")
+        logger.info(f"Web server started on http://{host}:{self.cfg_webserver_port}")
 
     def stop_flask_web_server(self):
         """Stop the Flask web server and wait for the thread to finish."""
@@ -1193,12 +1197,6 @@ def main():
 
     try:
         processor.initialise_from_command_line()
-
-        try:
-            processor.start_flask_web_server()
-        except Exception:
-            logger.exception("Unable to start web server. Exiting")
-            exit(1)
 
         processor.start()
         sys.exit(0)

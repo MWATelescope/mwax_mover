@@ -15,6 +15,10 @@ import time
 from mwax_mover import utils
 
 
+def test_running_under_pytest():
+    assert utils.running_under_pytest()
+
+
 def test_correlator_mode_class():
     assert utils.CorrelatorMode.is_no_capture("NO_CAPTURE")
     assert not utils.CorrelatorMode.is_correlator("NO_CAPTURE")

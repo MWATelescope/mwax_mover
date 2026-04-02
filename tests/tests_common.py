@@ -7,14 +7,14 @@ from mwax_mover.mwax_db import MWAXDBHandler
 from mwax_mover.utils import write_mock_subfile
 
 
-def setup_test_directories(test_code: str) -> str:
+def setup_test_directories(test_code: str, base_dir: str = "/home/gsleap/mwax_mover_testing/") -> str:
     """
     Ensure all configured directories exist. If a directory already exists,
     clear its contents (files/subdirectories) but keep the directory itself.
     """
     # The directories we create will be based on the test file name
     # e.g. /data/mwax_mover_testing/test001
-    base = f"/mnt/c/data/mwax_mover_testing/{test_code}/"
+    base = f"{base_dir}/{test_code}/"
 
     paths = [
         "/tmp",
@@ -135,6 +135,7 @@ def create_observation_subfiles(
     corr_chan: int,
     dev_shm_temp_dir: str,
     dev_shm_dir: str,
+    subfile_creation_delay: int = 0,
 ):
     """Creates some test subfiles for an obs"""
     sub_obs_id = obs_id
@@ -166,7 +167,7 @@ def create_observation_subfiles(
         os.rename(tmp_subfile_filename, subfile_filename)
 
         # simulate gap between subobs
-        time.sleep(2)
+        time.sleep(subfile_creation_delay)
 
         # Increment subobsid and offset
         sub_obs_id += 8
