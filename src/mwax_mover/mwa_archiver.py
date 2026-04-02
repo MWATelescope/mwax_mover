@@ -312,7 +312,7 @@ _HAPROXY_MAX_TIMEOUT_MINS = 60
 # retries. This handles the case where HAProxy routes copyto and check to different
 # VSS nodes and replication lag causes the check to fail transiently.
 _RCLONE_CHECK_RETRIES = 3
-_RCLONE_CHECK_RETRY_WAIT_SECS = 20
+_RCLONE_CHECK_RETRY_WAIT_SECS = 15
 
 
 def archive_file_rclone_haproxy(
@@ -400,19 +400,18 @@ def archive_file_rclone_haproxy(
         )
         return True
 
-    # HAProxy listens on localhost:8080 (for Banksia) and 8081 for Acacia and
-    # routes to all configured S3 endpoints.
+    # HAProxy listens on localhost:8080 and routes to all configured S3 endpoints.
     # No --s3-endpoint flag needed; the rclone profile's endpoint is set to
-    # http://127.0.0.1:8080/8081 in rclone.conf.
-    # NOTE: --no-checksum here is ok, because we do rclone check after
-    #
+    # http://127.0.0.1:8080 in rclone.conf.
+    # NOTE: --ignore-checksum skips the post-copy checksum verification in rclone
+    # itself, which is safe here because we run a separate rclone check afterwards.
     try:
         cmdline = (
             f'/usr/bin/rclone copyto -M --metadata-set "md5={md5hash}"'
             f" --retries {rclone_retries}"
             f" --s3-upload-concurrency 32"
             f" --s3-chunk-size 128M"
-            f" --no-checksum"
+            f" --ignore-checksum"
             f" --timeout {rclone_timeout}"
             f" --contimeout 30s"
             f" {full_filename} {rclone_profile}:/{bucket_name}/{filename}"
@@ -423,8 +422,9 @@ def archive_file_rclone_haproxy(
         if return_val:
             elapsed = time.time() - start_time
 
-            # Success - in case haproxy uses a different endpoint for the below check, wait
-            # briefly for VSS replication before running the check.
+            # Wait before checking to allow for VSS replication lag. HAProxy may
+            # route copyto and check to different VSS nodes, and the file may not
+            # yet be visible on all nodes immediately after the upload completes.
             logger.debug(
                 f"{full_filename}: Waiting {_RCLONE_CHECK_RETRY_WAIT_SECS} seconds before running rclone check."
             )
@@ -438,8 +438,6 @@ def archive_file_rclone_haproxy(
                 f" --retries {rclone_retries}"
                 f" --timeout {rclone_timeout}"
                 f" --contimeout 30s"
-                f" --s3-checksum-algorithm md5"
-                f" --checkers 8"
                 f" {full_filename} {rclone_profile}:/{bucket_name}"
             )
 
@@ -484,7 +482,7 @@ def archive_file_rclone_haproxy(
             # rclone exhausted its retries - all endpoints likely down
             logger.warning(
                 f"{full_filename}: could not be archived via rclone_haproxy."
-                f" All HAProxy backends may be down or transfer failed. rclone output: {stdout}"
+                f" All HAProxy backends may be down or transfer failed. rclone copy output: {stdout}"
             )
             return False
 
