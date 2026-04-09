@@ -6,12 +6,16 @@ inserts the resulting calibration fit and solution records into the MWA metadata
 database.
 """
 
+import re
+
 import glob
 import logging
 import os
 import traceback
 from typing import Optional
+
 import numpy as np
+
 from mwax_mover.mwax_db import (
     MWAXDBHandler,
     insert_calibration_fits_row,
@@ -65,16 +69,40 @@ def process_solutions(
         - error_message (str): Error message if unsuccessful, empty string otherwise.
         - fit_id (int|None): The calibration fit ID if successful, None otherwise.
     """
-
     conn = None
+
     try:
         metafits_files = glob.glob(os.path.join(input_data_path, "*_metafits.fits"))
-        # if len(metafits_files) > 1:
-        #     logger.warning(f"{item} - more than one metafits file found.")
 
         logger.debug(f"{input_data_path} - {metafits_files=}")
-        fits_solution_files = sorted(glob.glob(os.path.join(output_data_path, "*_solutions.fits")))
-        # _bin_solution_files = glob.glob(os.path.join(item, "*_solutions.bin"))
+
+        def _solution_sort_key(path: str) -> tuple[int, str]:
+            """Sort solution files numerically by channel number if present.
+
+            Handles filenames like:
+              obsid_solutions.fits          -> channel 0 (sorts first)
+              obsid_ch95_solutions.fits     -> channel 95
+              obsid_ch100-112_solutions.fits -> channel 100 (uses range start)
+            Falls back to lexicographic sort on the full path for any
+            unrecognised format.
+            """
+            fname = os.path.basename(path)
+            # Flavour 2: single channel  e.g. obsid_ch95_solutions.fits
+            m = re.search(r"_ch(\d+)_solutions\.fits$", fname)
+            if m:
+                return (int(m.group(1)), path)
+            # Flavour 3: channel range  e.g. obsid_ch100-112_solutions.fits
+            m = re.search(r"_ch(\d+)-\d+_solutions\.fits$", fname)
+            if m:
+                return (int(m.group(1)), path)
+            # Flavour 1: all-channel file  e.g. obsid_solutions.fits — sorts first
+            return (0, path)
+
+        fits_solution_files = sorted(
+            glob.glob(os.path.join(output_data_path, "*_solutions.fits")),
+            key=_solution_sort_key,
+        )
+
         logger.debug(f"{output_data_path} - uploading {fits_solution_files=}")
 
         soln_group = HyperfitsSolutionGroup(
@@ -87,6 +115,7 @@ def process_solutions(
 
         # determine refant
         unflagged_tiles = tiles[tiles.flag == 0]
+
         if not len(unflagged_tiles):
             # Even though this is a "failure" we want to return True
             # so we can release the obs if it is realtime- i.e. there's
@@ -108,8 +137,10 @@ def process_solutions(
             )
 
         chanblocks_per_coarse = soln_group.chanblocks_per_coarse
+
         # all_chanblocks_hz = soln_group.all_chanblocks_hz
         all_chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz)
+
         logger.debug(f"{chanblocks_per_coarse=}, {all_chanblocks_hz=}")
 
         soln_tile_ids, all_xx_solns_noref, all_yy_solns_noref = soln_group.get_solns()
@@ -127,6 +158,7 @@ def process_solutions(
             soln_tile_ids,
             phase_fit_niter,
         )
+
         gain_fits = process_gain_fits(
             unflagged_tiles,
             all_chanblocks_hz,
@@ -156,8 +188,10 @@ def process_solutions(
                 prefix=f"{output_data_path}/{obs_id}_",
                 plot_residual=True,
             )
+
         # phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
         # logger.debug(f"{item} - fits:\n{phase_fits_pivot.to_string(max_rows=512)}")
+
         success = True
 
         # get a database connection, unless we are using dummy connection (for testing)
@@ -181,12 +215,12 @@ def process_solutions(
 
                 if fit_id is None or not success:
                     logger.error("failed to insert calibration fit")
-
                     # This will trigger a rollback of the calibration_fit row
                     raise Exception("failed to insert calibration fit")
 
                 for tile_id in soln_tile_ids:
                     some_fits = False
+
                     try:
                         x_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "XX")].iloc[0]
                         some_fits = True
@@ -212,10 +246,12 @@ def process_solutions(
                         y_phase = PhaseFitInfo.nan()
 
                     if not some_fits:
-                        # we could `continue` here, which avoids inserting an empty row in the
-                        # database, however we want to stick to the old behaviour for now.
-                        # continue
-                        pass
+                        # We could `continue` here to avoid inserting an all-NaN row, but
+                        # we preserve the existing behaviour of inserting it for now.
+                        logger.warning(
+                            f"No phase or gain fits found for tile_id={tile_id} in obs_id={obs_id}. "
+                            "Inserting all-NaN calibration solution row."
+                        )
 
                     success = insert_calibration_solutions_row(
                         db_handler_object,
@@ -247,7 +283,6 @@ def process_solutions(
 
                     if not success:
                         logger.error(f"failed to insert calibration solution for tile {tile_id}")
-
                         # This will trigger a rollback of the calibration_fit row and any
                         # calibration_solutions child rows
                         raise Exception(f"failed to insert calibration solution for tile {tile_id}")

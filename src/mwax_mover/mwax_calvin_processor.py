@@ -21,7 +21,6 @@ import sys
 import threading
 import time
 from typing import Optional
-import coloredlogs
 from itertools import repeat
 from multiprocessing import Pool
 from mwax_mover import (
@@ -993,9 +992,6 @@ class MWAXCalvinProcessor:
         config_file_log_level: Optional[str] = utils.read_optional_config(config, "mwax mover", "log_level")
         if config_file_log_level:
             logger.setLevel(config_file_log_level)
-
-        if config.getboolean("mwax mover", "coloredlogs", fallback=False):
-            coloredlogs.install(level="INFO", logger=logger)
 
         logger.info(f"Starting mwax_calvin_processor processor...v{version.get_mwax_mover_version_string()}")
         logger.info(f"Reading config file: {config_filename}")

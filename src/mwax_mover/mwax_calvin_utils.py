@@ -14,12 +14,11 @@ import logging
 import os
 import shutil
 import time
-import traceback
 import numpy as np
 from enum import Enum
 from astropy.io import fits
 from astropy import units as u
-from astropy.constants import c  # type: ignore[attr-defined]
+from astropy.constants import c  # ty: ignore[unresolved-import]
 from scipy.optimize import minimize
 import pandas as pd
 from pandas import DataFrame
@@ -28,6 +27,7 @@ import struct
 import matplotlib as mpl
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
+
 from mwax_mover.mwax_command import (
     run_command_ext,
     run_command_popen,
@@ -40,11 +40,13 @@ from numpy.typing import ArrayLike, NDArray
 from typing import NamedTuple, List, Tuple, Optional  # noqa: F401
 
 # from nptyping import NDArray, Shape
+
 import sys
 
 logger = logging.getLogger(__name__)
 
 V_LIGHT_M_S = 299792458.0
+
 AOCAL_INTRO = "MWAOCAL\0".encode("utf8")
 AOCAL_FILE_TYPE = 0
 AOCAL_STRUCTURE_TYPE = 0
@@ -53,6 +55,9 @@ AOCAL_POLS = 4  # XX,XY,YX,YY
 AOCAL_VALUES = 2  # real and imaginary
 DOUBLE_SIZE = 8  # 8 bytes for a float64
 AOCAL_HEADER_FORMAT = "<8s6I2d"
+
+# Standard number of MWA coarse channels.
+MWA_NUM_COARSE_CHANS = 24
 
 
 class CalvinJobType(Enum):
@@ -117,50 +122,48 @@ class Metafits:
     @property
     def tiles(self) -> List[Tile]:
         """Get tile information from metafits, sorted by ID."""
-
         with fits.open(self.filename) as hdus:
             metafits_inputs = hdus["TILEDATA"].data
 
-        # using a set here to avoid duplicates (pol=X,Y)
-        tiles = set(
-            Tile(
-                name=metafits_input["TileName"],
-                id=metafits_input["Tile"],
-                flag=metafits_input["Flag"],
-                # index=metafits_input["Antenna"],
-                rx=metafits_input["Rx"],
-                slot=metafits_input["Slot"],
-                flavor=metafits_input["Receiver_Types"],
+            # using a set here to avoid duplicates (pol=X,Y)
+            tiles = set(
+                Tile(
+                    name=metafits_input["TileName"],
+                    id=metafits_input["Tile"],
+                    flag=metafits_input["Flag"],
+                    # index=metafits_input["Antenna"],
+                    rx=metafits_input["Rx"],
+                    slot=metafits_input["Slot"],
+                    flavor=metafits_input["Receiver_Types"],
+                )
+                for metafits_input in metafits_inputs
             )
-            for metafits_input in metafits_inputs
-        )
 
-        return sorted([*tiles], key=lambda tile: tile.id)
+            return sorted([*tiles], key=lambda tile: tile.id)
 
     @property
     def inputs(self) -> List[Input]:
         """Get input information from metafits, sorted by ID."""
-
         with fits.open(self.filename) as hdus:
             metafits_inputs = hdus["TILEDATA"].data
 
-        inputs = set(
-            Input(
-                id=metafits_input["Input"],
-                name=metafits_input["TileName"] + metafits_input["Pol"],
-                flag=metafits_input["Flag"],
-                pol=metafits_input["Pol"],
-                # index=metafits_input["Antenna"],
-                rx=metafits_input["Rx"],
-                slot=metafits_input["Slot"],
-                # flavor=metafits_input["Flavors"],
-                flavor=metafits_input["Receiver_Types"],
-                length=float(metafits_input["Length"][3:]),
+            inputs = set(
+                Input(
+                    id=metafits_input["Input"],
+                    name=metafits_input["TileName"] + metafits_input["Pol"],
+                    flag=metafits_input["Flag"],
+                    pol=metafits_input["Pol"],
+                    # index=metafits_input["Antenna"],
+                    rx=metafits_input["Rx"],
+                    slot=metafits_input["Slot"],
+                    # flavor=metafits_input["Flavors"],
+                    flavor=metafits_input["Receiver_Types"],
+                    length=float(metafits_input["Length"][3:]),
+                )
+                for metafits_input in metafits_inputs
             )
-            for metafits_input in metafits_inputs
-        )
 
-        return sorted([*inputs], key=lambda inp: inp.id)
+            return sorted([*inputs], key=lambda inp: inp.id)
 
     @property
     def tiles_df(self) -> pd.DataFrame:
@@ -169,6 +172,7 @@ class Metafits:
         # config = Config.from_tiles(tiles)
         tiles = self.tiles
         return pd.DataFrame(tiles, columns=Tile._fields)
+
         # unflagged = tiles[tiles.flag == 0]
         # if not len(unflagged):
         #     raise ValueError("No unflagged tiles found")
@@ -189,44 +193,49 @@ class Metafits:
 
             # coarse channels
             coarse_chans = parse_csv_header(header["CHANNELS"], int)
+
             # coarse channel selection
             chansel = parse_csv_header(header["CHANSEL"], int)
+
             if len(chansel) != len(coarse_chans):
                 raise RuntimeError(f"channel selection is not tested. {chansel=}")
+
             # coarse_chans = np.sort(coarse_chans[chansel])
             coarse_chans = np.sort(coarse_chans)
 
             # fine channel width
             fine_chan_width_hz = int(float(header["FINECHAN"]) * 1000)
+
             # total observation bandwidth
             total_bandwidth_hz = int(float(header["BANDWDTH"]) * 1000000)
+
             # number of fine channels in observation
             obs_num_fine_chans = int(header["NCHANS"])
 
-        # sanity checks
-        if total_bandwidth_hz != fine_chan_width_hz * obs_num_fine_chans:
-            raise ValueError(
-                f"{self.filename} - ({total_bandwidth_hz=}) != ({fine_chan_width_hz=}) * ({obs_num_fine_chans=})"
+            # sanity checks
+            if total_bandwidth_hz != fine_chan_width_hz * obs_num_fine_chans:
+                raise ValueError(
+                    f"{self.filename} - ({total_bandwidth_hz=}) != ({fine_chan_width_hz=}) * ({obs_num_fine_chans=})"
+                )
+
+            if obs_num_fine_chans % len(coarse_chans) != 0:
+                raise ValueError(
+                    f"Number of fine channels ({obs_num_fine_chans}) "
+                    f"not a multiple of the number of coarse channels ({len(coarse_chans)})"
+                )
+
+            # calculate number of fine channels per coarse channel
+            fine_chans_per_coarse = obs_num_fine_chans // len(coarse_chans)
+
+            coarse_chan_ranges = []
+            for _, g in enumerate(np.split(coarse_chans, np.where(np.diff(coarse_chans) != 1)[0] + 1)):
+                coarse_chan_ranges.append(g)
+
+            return ChanInfo(
+                coarse_chan_ranges=coarse_chan_ranges,
+                fine_chan_width_hz=fine_chan_width_hz,
+                fine_chans_per_coarse=fine_chans_per_coarse,
             )
-
-        if obs_num_fine_chans % len(coarse_chans) != 0:
-            raise ValueError(
-                f"Number of fine channels ({obs_num_fine_chans}) "
-                f"not a multiple of the number of coarse channels ({len(coarse_chans)})"
-            )
-
-        # calculate number of fine channels per coarse channel
-        fine_chans_per_coarse = obs_num_fine_chans // len(coarse_chans)
-
-        coarse_chan_ranges = []
-        for _, g in enumerate(np.split(coarse_chans, np.where(np.diff(coarse_chans) != 1)[0] + 1)):
-            coarse_chan_ranges.append(g)
-
-        return ChanInfo(
-            coarse_chan_ranges=coarse_chan_ranges,
-            fine_chan_width_hz=fine_chan_width_hz,
-            fine_chans_per_coarse=fine_chans_per_coarse,
-        )
 
     @property
     def time_info(self) -> TimeInfo:
@@ -234,14 +243,12 @@ class Metafits:
         with fits.open(self.filename) as hdus:
             hdu = hdus["PRIMARY"]
             header = hdu.header
-
             inttime = header["INTTIME"]
             nscans = header["NSCANS"]
-
-        return TimeInfo(
-            num_times=nscans,
-            int_time_s=inttime,
-        )
+            return TimeInfo(
+                num_times=nscans,
+                int_time_s=inttime,
+            )
 
     @property
     def calibrator(self):
@@ -278,34 +285,35 @@ class HyperfitsSolution:
         """Get channel block frequencies from the solution file."""
         with fits.open(self.filename) as hdus:
             freq_data = hdus["CHANBLOCKS"].data["Freq"].astype(np.int_)
-        result = np.array(ensure_system_byte_order(freq_data))
-        assert len(result), f"no chanblocks found in {self.filename}"
-        # if multiple chanblocks, validate they are in order
-        if len(result) > 1:
-            diff = np.diff(result)
-            if not np.all(diff >= 0):
-                raise RuntimeError(f"chanblocks are not in ascending order. {result=}")
-            if not np.all(diff[1:] == diff[0]):
-                raise RuntimeError(f"chanblocks are not contiguous. {result=}")
+            result = np.array(ensure_system_byte_order(freq_data))
+            assert len(result), f"no chanblocks found in {self.filename}"
 
-        return result
+            # if multiple chanblocks, validate they are in order
+            if len(result) > 1:
+                diff = np.diff(result)
+                if not np.all(diff >= 0):
+                    raise RuntimeError(f"chanblocks are not in ascending order. {result=}")
+                if not np.all(diff[1:] == diff[0]):
+                    raise RuntimeError(f"chanblocks are not contiguous. {result=}")
+
+            return result
 
     # @property
     # def tile_names_flags(self) -> List[Tuple[str, bool]]:
     #     """Get the tile names and flags ordered by index"""
     #     with fits.open(self.filename) as hdus:
     #         tile_data = hdus['TILES'].data
-    #     return [
-    #         (tile["TileName"], tile["Flag"])
-    #         for tile in tile_data
-    #     ]
+    #         return [
+    #             (tile["TileName"], tile["Flag"])
+    #             for tile in tile_data
+    #         ]
 
     @property
     def tile_flags(self) -> List[bool]:
         """Get tile flags ordered by antenna index."""
         with fits.open(self.filename) as hdus:
             tile_data = hdus["TILES"].data
-        return tile_data["Flag"]
+            return tile_data["Flag"]
 
     def get_average_times(self) -> List[float]:
         """Get the average time for each timeblock.
@@ -325,12 +333,12 @@ class HyperfitsSolution:
         """
         with fits.open(self.filename) as hdus:
             solutions = hdus["SOLUTIONS"].data
-        return [
-            solutions[:, :, :, 0] + 1j * solutions[:, :, :, 1],
-            solutions[:, :, :, 2] + 1j * solutions[:, :, :, 3],
-            solutions[:, :, :, 4] + 1j * solutions[:, :, :, 5],
-            solutions[:, :, :, 6] + 1j * solutions[:, :, :, 7],
-        ]
+            return [
+                solutions[:, :, :, 0] + 1j * solutions[:, :, :, 1],
+                solutions[:, :, :, 2] + 1j * solutions[:, :, :, 3],
+                solutions[:, :, :, 4] + 1j * solutions[:, :, :, 5],
+                solutions[:, :, :, 6] + 1j * solutions[:, :, :, 7],
+            ]
 
     def get_ref_solutions(self, ref_tile_idx=None) -> List[NDArray[np.complex128]]:
         """Get solutions divided by reference tile.
@@ -343,15 +351,19 @@ class HyperfitsSolution:
             or raw solutions if ref_tile_idx is None.
         """
         solutions = self.get_solutions()
+
         if ref_tile_idx is None:
             return solutions
+
         # divide solutions by reference
         ref_solutions = [solution[:, ref_tile_idx, :] for solution in solutions]
+
         # divide solutions jones matrix by reference jones matrix, via inverse determinant
         ref_inv_det = np.divide(
             1 + 0j,
             ref_solutions[0] * ref_solutions[3] - ref_solutions[1] * ref_solutions[2],
         )
+
         return [
             (solutions[0] * ref_solutions[3] - solutions[1] * ref_solutions[2]) * ref_inv_det,
             (solutions[1] * ref_solutions[0] - solutions[0] * ref_solutions[1]) * ref_inv_det,
@@ -361,11 +373,20 @@ class HyperfitsSolution:
 
     @property
     def results(self) -> NDArray[np.float64]:
-        """Get convergence results from the solution file."""
-        with fits.open(self.filename) as hdus:
-            return hdus["RESULTS"].data.flatten()
+        """Get convergence results from the solution file.
 
-        # Not sure why I need flatten!
+        Returns:
+            1-D float64 array of per-channel convergence values.
+
+        Raises:
+            KeyError: If the RESULTS HDU is not present. This is expected for
+                older hyperdrive solution files. Callers that can tolerate missing
+                results should catch KeyError and fall back to uniform weights.
+        """
+        with fits.open(self.filename) as hdus:
+            # flatten() is required because astropy returns a structured array
+            # from FITS binary table columns, not a plain ndarray.
+            return hdus["RESULTS"].data.flatten()
 
 
 class HyperfitsSolutionGroup:
@@ -384,9 +405,11 @@ class HyperfitsSolutionGroup:
         if not len(metafits):
             raise RuntimeError("no metafits files provided")
         self.metafits = metafits
+
         if not len(solns):
             raise RuntimeError("no solutions files provided")
         self.solns = solns
+
         self.metafits_tiles_df = HyperfitsSolutionGroup.get_metafits_tiles_df(self.metafits)
         self.metafits_chan_info = HyperfitsSolutionGroup.get_metafits_chan_info(self.metafits)
         self.chanblocks_per_coarse, self.all_chanblocks_hz = HyperfitsSolutionGroup.get_soln_chan_info(
@@ -413,18 +436,21 @@ class HyperfitsSolutionGroup:
 
         for metafits_ in metafits[1:]:
             chan_info = metafits_.chan_info
+
             if chan_info.fine_chans_per_coarse != first_chan_info.fine_chans_per_coarse:
                 raise RuntimeError(
                     f"fine channels per coarse mismatch between metafits files. "
                     f"{metafits[0].filename} ({first_chan_info.fine_chans_per_coarse}) != "
                     f"{metafits_.filename} ({chan_info.fine_chans_per_coarse})"
                 )
+
             if chan_info.fine_chan_width_hz != first_chan_info.fine_chan_width_hz:
                 raise RuntimeError(
                     f"fine channel width mismatch between metafits files. "
                     f"{metafits[0].filename} ({first_chan_info.fine_chan_width_hz}) != "
                     f"{metafits_.filename} ({chan_info.fine_chan_width_hz})"
                 )
+
             all_ranges.extend(chan_info.coarse_chan_ranges)
 
         all_ranges = sorted(all_ranges, key=lambda x: x[0])
@@ -433,6 +459,7 @@ class HyperfitsSolutionGroup:
         for left, right in zip(all_ranges[:-1], all_ranges[1:]):
             if left[0] == right[0] or left[-1] >= right[0]:
                 raise RuntimeError(f"coarse channel ranges from metafits overlap. {[left, right]}, {metafits=}")
+
         return ChanInfo(
             coarse_chan_ranges=all_ranges,
             fine_chan_width_hz=first_chan_info.fine_chan_width_hz,
@@ -457,9 +484,9 @@ class HyperfitsSolutionGroup:
         Raises:
             RuntimeError: If channel info is inconsistent between solution and metafits.
         """
-
         chanblocks_per_coarse = None
         all_chanblocks_hz = []
+
         metafits_coarse_chans = np.concatenate(metafits_chan_info.coarse_chan_ranges)
         metafits_fine_chan_width_hz = metafits_chan_info.fine_chan_width_hz
         metafits_fine_chans_per_coarse = metafits_chan_info.fine_chans_per_coarse
@@ -468,10 +495,12 @@ class HyperfitsSolutionGroup:
         for soln in solns:
             # coarse_chans = chaninfo.coarse_chan_ranges[coarse_chan_range_idx]
             chanblocks_hz = soln.chanblocks_hz
+
             if len(chanblocks_hz) < 2:
                 raise RuntimeError(f"{soln.filename} - not enough chanblocks found ({chanblocks_hz=})")
 
             chanblock_width_hz = chanblocks_hz[1] - chanblocks_hz[0]
+
             if chanblock_width_hz % metafits_fine_chan_width_hz != 0:
                 raise RuntimeError(
                     f"{soln.filename} - chanblock width in solution file ({chanblock_width_hz})"
@@ -480,6 +509,7 @@ class HyperfitsSolutionGroup:
 
             chans_per_block = int(chanblock_width_hz // metafits_fine_chan_width_hz)
             chanblocks_per_coarse_ = int(metafits_fine_chans_per_coarse // chans_per_block)
+
             if chanblocks_per_coarse is None:
                 chanblocks_per_coarse = chanblocks_per_coarse_
             else:
@@ -501,23 +531,28 @@ class HyperfitsSolutionGroup:
                             f"{soln.filename} - solution {coarse_bandwidth_hz=} > {metafits_coarse_bandwidth_hz=}"
                         )
                     coarse_centroid_hz = np.mean(coarse_chanblocks + chanblock_width_hz / 2)
+
                 coarse_chan_idx = np.round(coarse_centroid_hz // metafits_coarse_bandwidth_hz)
+
                 if coarse_chan_idx not in metafits_coarse_chans:
                     raise RuntimeError(
                         f"{soln.filename} - solution coarse centroid {coarse_centroid_hz}Hz ({coarse_chan_idx=}) "
                         "not found in metafits coarse channels"
                     )
+
                 if coarse_chan_idx in soln_coarse_chans:
                     raise RuntimeError(
                         f"{soln.filename} - solution coarse centroid {coarse_centroid_hz}Hz ({coarse_chan_idx=}) "
                         "already found in solution coarse channels"
                     )
+
                 soln_coarse_chans.append(coarse_chan_idx)
 
             range_ncoarse = len(soln_coarse_chans)
             soln_ncoarse = len(chanblocks_hz) // chanblocks_per_coarse
+
             if range_ncoarse != soln_ncoarse:
-                print(
+                logger.warning(
                     f"{soln.filename} - warning: number of coarse channels in solution file ({soln_ncoarse=})"
                     f" does not match number of coarse channels in metafits for this range ({range_ncoarse=})"
                     f" given {chanblocks_per_coarse=}, {chans_per_block=}"
@@ -527,6 +562,7 @@ class HyperfitsSolutionGroup:
 
         if all_chanblocks_hz is None:
             raise RuntimeError("No valid channels found")
+
         return (chanblocks_per_coarse, all_chanblocks_hz)
 
     @classmethod
@@ -544,6 +580,7 @@ class HyperfitsSolutionGroup:
         """
         columns = list(set(Tile._fields) - set(["flag"]))
         tiles_df = metafits[0].tiles_df
+
         for metafits_ in metafits[1:]:
             for column in columns:
                 if not tiles_df[column].equals(metafits_.tiles_df[column]):
@@ -569,15 +606,19 @@ class HyperfitsSolutionGroup:
             ValueError: If no unflagged tiles are found.
         """
         tiles_df = self.metafits_tiles_df.copy()
+
         # flag tiles_df with solution flags
         for soln in self.solns:
             tiles_df["flag_metafits"] = tiles_df["flag"]
             tiles_df["flag_soln"] = soln.tile_flags
             tiles_df["flag"] = np.logical_or(tiles_df["flag_metafits"], tiles_df["flag_soln"])
             tiles_df.drop(columns=["flag_metafits", "flag_soln"], inplace=True)
+
         tiles = tiles_df[tiles_df.flag == 0]
+
         if not len(tiles):
             raise ValueError("No unflagged tiles found")
+
         # tiles_by_id = sorted(tiles, key=lambda tile: tile.id)
         return tiles.sort_values(by=["id"]).take([0]).iloc[0]
 
@@ -604,15 +645,30 @@ class HyperfitsSolutionGroup:
                 )
 
         results = np.concatenate([soln.results for soln in self.solns])
+
         if results.size == 0:
             raise RuntimeError("No valid results found")
+
         return results
 
     @property
     def weights(self) -> NDArray[np.float64]:
-        """Generate weights for each solution based on convergence results."""
+        """Generate per-channel weights from hyperdrive convergence results.
+
+        Convergence values < 0 or > 1e-4 are treated as invalid (set to NaN)
+        and excluded from normalisation. The remaining values are transformed
+        via exp(-result) and normalised to [0, 1].
+
+        Returns:
+            Float64 array of weights in [0, 1], one per chanblock. Invalid
+            or NaN entries become 0.0 via np.nan_to_num.
+
+        Note:
+            Falls back to uniform weights of 1.0 if the solution file does
+            not contain a RESULTS HDU (older hyperdrive versions).
+        """
         try:
-            results = self.results
+            results = self.results.copy()  # copy so we can mutate safely
             results[results < 0] = np.nan
             results[results > 1e-4] = np.nan
             exp_results = np.exp(-results)
@@ -645,7 +701,6 @@ class HyperfitsSolutionGroup:
 
             # validate tile selection
             # join the tile dataframe on name, just in case order is different
-
             soln_tiles = self.metafits_tiles_df.copy()
             soln_tiles["flag_metafits"] = soln_tiles["flag"]
             soln_tiles["flag_soln"] = soln.tile_flags
@@ -654,21 +709,26 @@ class HyperfitsSolutionGroup:
 
             if refant_name is not None:
                 _ref_tiles = soln_tiles[soln_tiles["name"] == refant_name]
+
                 if not len(_ref_tiles):
                     raise RuntimeError(f"{soln.filename} - reference tile {refant_name} not found in solution file")
+
                 if len(_ref_tiles) > 1:
                     raise RuntimeError(
                         f"{soln.filename} - more than one tile with name {refant_name} found in solution file"
                     )
+
                 _ref_tile_idx = _ref_tiles.index[0]
                 _ref_tile_flag = _ref_tiles.iloc[0]["flag"]
+
                 if _ref_tile_flag:
                     raise RuntimeError(
                         f"{soln.filename} - reference tile {refant_name}"
                         f" is flagged in solutions file (index {_ref_tile_idx})"
                     )
 
-                if not ref_tile_idx:
+                # FIX 2: use `is None` instead of falsy check so that index 0 is handled correctly
+                if ref_tile_idx is None:
                     ref_tile_idx = _ref_tile_idx
                 elif ref_tile_idx != _ref_tile_idx:
                     raise RuntimeError(
@@ -676,6 +736,7 @@ class HyperfitsSolutionGroup:
                     )
 
             _tile_ids = soln_tiles["id"].to_numpy()
+
             # _tile_ids, _ref_tile_idx = soln.validate_tiles(tiles_by_name, refant)
             if soln_tile_ids is None or not len(soln_tile_ids):
                 soln_tile_ids = soln_tiles["id"].to_numpy()
@@ -699,21 +760,25 @@ class HyperfitsSolutionGroup:
             # TODO: support multiple timeblocks
             if len(avg_times) != 1:
                 raise RuntimeError(f"{soln.filename} - exactly 1 timeblock must be provided: ({len(avg_times)})")
+
             # TODO: compare with metafits times
 
             # validate solutions
             solutions = soln.get_ref_solutions(ref_tile_idx)
+
             for solution in solutions:
                 if (ntimes := solution.shape[0]) != 1:
                     raise RuntimeError(
                         f"{soln.filename} - number of timeblocks in SOLUTIONS HDU ({ntimes})"
                         f" does not match number of timeblocks in TIMEBLOCKS HDU ({len(avg_times)})"
                     )
+
                 if (ntiles := solution.shape[1]) != len(soln_tile_ids):
                     raise RuntimeError(
                         f"{soln.filename} - number of tiles in SOLUTIONS HDU ({ntiles})"
                         f" does not match number of tiles in TILES HDU ({len(soln_tile_ids)})"
                     )
+
                 if (nchans := solution.shape[2]) != len(chanblocks_hz):
                     raise RuntimeError(
                         f"{soln.filename} - number of channels in SOLUTIONS HDU ({nchans})"
@@ -726,6 +791,7 @@ class HyperfitsSolutionGroup:
                 all_xx_solns = solutions[0]
             else:
                 all_xx_solns = np.concatenate((all_xx_solns, solutions[0]), axis=2)
+
             if all_yy_solns is None:
                 all_yy_solns = solutions[3]
             else:
@@ -745,6 +811,7 @@ class PhaseFitInfo(NamedTuple):
     chi2dof: float
     quality: float
     stderr: float
+
     # median_thickness: float
 
     # def get_length(self) -> float:
@@ -772,23 +839,33 @@ class GainFitInfo(NamedTuple):
     sigma_resid: List[float]
 
     @staticmethod
-    def default():
+    def default(n_coarse: int = MWA_NUM_COARSE_CHANS) -> "GainFitInfo":
+        """Return a GainFitInfo with unit gains and zero offsets.
+
+        Args:
+            n_coarse: Number of coarse channels. Defaults to MWA_NUM_COARSE_CHANS (24).
+        """
         return GainFitInfo(
             quality=1.0,
-            gains=[1.0] * 24,
-            pol0=[0.0] * 24,
-            pol1=[0.0] * 24,
-            sigma_resid=[0.0] * 24,
+            gains=[1.0] * n_coarse,
+            pol0=[0.0] * n_coarse,
+            pol1=[0.0] * n_coarse,
+            sigma_resid=[0.0] * n_coarse,
         )
 
     @staticmethod
-    def nan():
+    def nan(n_coarse: int = MWA_NUM_COARSE_CHANS) -> "GainFitInfo":
+        """Return a GainFitInfo with all-NaN values.
+
+        Args:
+            n_coarse: Number of coarse channels. Defaults to MWA_NUM_COARSE_CHANS (24).
+        """
         return GainFitInfo(
             quality=np.nan,
-            gains=[np.nan] * 24,
-            pol0=[np.nan] * 24,
-            pol1=[np.nan] * 24,
-            sigma_resid=[np.nan] * 24,
+            gains=[np.nan] * n_coarse,
+            pol0=[np.nan] * n_coarse,
+            pol1=[np.nan] * n_coarse,
+            sigma_resid=[np.nan] * n_coarse,
         )
 
 
@@ -803,7 +880,7 @@ def ensure_system_byte_order(arr):
     """
     system_byte_order = ">" if sys.byteorder == "big" else "<"
     if arr.dtype.byteorder not in f"{system_byte_order}|=":
-        return arr.newbyteorder(system_byte_order)
+        return np.frombuffer(arr.tobytes(), dtype=arr.dtype.newbyteorder("="))
     return arr
 
 
@@ -850,7 +927,8 @@ def fit_phase_line(
         freqs_hz: Array of frequencies in Hz.
         solution: Complex array of calibration solutions.
         weights: Array of weights for each solution.
-        niter: Number of fitting iterations.
+        niter: Number of fitting iterations. Each iteration refits after
+            rejecting outliers beyond 2*stderr. Must be >= 1.
         fit_iono: Whether to fit ionospheric dispersion (currently unused).
 
     Returns:
@@ -859,7 +937,6 @@ def fit_phase_line(
     Raises:
         RuntimeError: If not enough valid phases are available to fit.
     """
-
     # original number of frequencies
     nfreqs = len(freqs_hz)
 
@@ -873,15 +950,16 @@ def fit_phase_line(
     # - Assume the frequencies are "quantised" (i.e. all integer multiples of some constant)
     # - Assume there is at least one example of a pair of consecutive bins present
     # - Do not assume the arrays are ordered in increasing frequency
-
     # Get the minimum difference between two (now-ordered) consecutive bins, and
     # declare this to be the bin width
     dν = np.min(np.diff(freqs_hz)) * u.Hz
 
     # remove nans and zero weights
     mask = np.where(np.logical_and(np.isfinite(solution), weights > 0))[0]
+
     if len(mask) < 2:
         raise RuntimeError(f"Not enough valid phases to fit ({len(mask)})")
+
     solution = solution[mask]
     freqs_hz = freqs_hz[mask]
     weights = weights[mask]
@@ -889,12 +967,14 @@ def fit_phase_line(
     # normalise
     solution /= np.abs(solution)
     solution *= weights
+
     # print(f"{np.angle(solution)[:4]=}, ")
 
     # Now we want to "adjust" the solution data so that it
-    #   - is roughly centered on the DC bin
-    #   - has a large amount of zero padding on either side
+    # - is roughly centered on the DC bin
+    # - has a large amount of zero padding on either side
     ν = freqs_hz * u.Hz
+
     bins = np.round((ν / dν).decompose().value).astype(int)
     ctr_bin = (np.min(bins) + np.max(bins)) // 2
     shifted_bins = bins - ctr_bin  # Now "bins" represents where I want to put the solution values
@@ -902,7 +982,6 @@ def fit_phase_line(
     # ...except that ~1/2 of them are negative, so I'll have to add a certain amount
     # once I decide how much zero padding to include.
     # This is set by the resolution I want in delay space (Nyquist rate)
-
     dm = 0.01 * u.m
     dt = dm / c  # The target time resolution
     νmax = 0.5 / dt  # The Nyquist rate
@@ -914,8 +993,8 @@ def fit_phase_line(
 
     # Create a zero-padded, shifted version of the spectrum, which I'll call sol0
     # sol0: This shifts the non-zero data down to a set of frequencies straddling the DC bin.
-    #       This makes the peak in delay space broad, and lets us hone in near the optimal solution by
-    #       finding the peak in delay space
+    # This makes the peak in delay space broad, and lets us hone in near the optimal solution by
+    # finding the peak in delay space
     sol0 = np.zeros((N,)).astype(complex)
     sol0[shifted_bins] = solution
 
@@ -928,13 +1007,17 @@ def fit_phase_line(
     # Find max peak, and the equivalent slope
     imax = np.argmax(np.abs(isol0))
     dmax = d[imax]
+
     # print(f"{dmax=:.02f}")
+
     slope = (2 * np.pi * u.rad * dmax / c).to(u.rad / u.Hz)
+
     # print(f"{slope=:.10f}")
 
     # Now that we're near a local minimum, get a better one by doing a standard minimisation
     # To get the y-intercept, divide the original data by the constructed data
     # and find the average phase of the result
+
     # if fit_iono:
     #     model = lambda ν, m, c, α: np.exp(1j * (m * ν + c + α / ν**2))
     #     y_int = np.angle(np.mean(solution / model(ν.to(u.Hz).value, slope.value, 0, 0)))
@@ -952,34 +1035,33 @@ def fit_phase_line(
         cost = np.sum(np.abs(residuals) ** 2)
         return cost
 
-    resid_std, chi2dof, stderr = None, None, None
-    # while len(mask) >= 2 and (niter:= niter - 1) <= 0:
-    while True:
+    if niter < 1:
+        raise ValueError(f"niter must be >= 1, got {niter}")
+
+    # Initialised to NaN so the type is always float/ndarray at the return site
+    # regardless of early-exit paths.  The loop is guaranteed to run at least
+    # once (niter >= 1), so these will always be overwritten before use.
+    resid_std: float = np.nan
+    chi2dof: float = np.nan
+    stderr: NDArray[np.float64] = np.array([np.nan])
+
+    while niter > 0:
+        niter -= 1
         res = minimize(objective, params, args=(ν.to(u.Hz).value, solution))
         params = res.x
-        # print(f"{params=}")
-        # print(f"{res.hess_inv=}")
-        # print(f"{np.angle(solution)[:3]=}")
+
         constructed = model(ν.to(u.Hz).value, *params)
-        # print(f"{constructed[:3]=}")
         residuals = wrap_angle(np.angle(solution) - np.angle(constructed))
-        # print(f"{residuals[:3]=}")
         chi2dof = np.sum(np.abs(residuals) ** 2) / (len(residuals) - len(params))
-        # print(f"{chi2dof=}")
         resid_std = residuals.std()
-        # print(f"{resid_std=}")
         resid_var = residuals.var(ddof=len(params))
-        # print(f"{resid_var=}")
         stderr = np.sqrt(np.diag(res.hess_inv * resid_var))
-        # print(f"{stderr=}")
+
         mask = np.where(np.abs(residuals) < 2 * stderr[0])[0]
+        if len(mask) < 2:
+            break
         solution = solution[mask]
         ν = ν[mask]
-        # TODO: iterations?
-        # niter = niter-1
-        # if len(mask) < 2 or niter <= 0:
-        #     break
-        break
 
     period = ((params[0] * u.rad / u.Hz) / (2 * np.pi * u.rad)).to(u.s)
     quality = len(mask) / nfreqs
@@ -1010,10 +1092,10 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse) -> GainFitInf
     # length check- should be the number of fine channels
     n_freqs = len(chanblocks_hz)
     assert n_freqs == len(solns) == len(weights)
-    # This is out output number of channels
+    # This is our output number of channels
     n_coarse = n_freqs // chanblocks_per_coarse
 
-    # Take the absolte value of the amplitudes
+    # Take the absolute value of the amplitudes
     amps = np.abs(solns)
 
     # Initialize output arrays
@@ -1044,8 +1126,6 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse) -> GainFitInf
         if len(coarse_mask) < 2:
             continue
 
-        print(f"Coarse amps: {coarse_amps}")
-
         # Apply mask to arrays to remove nans and zero weights
         # Remember these arrays are as big as the number of fine channels per coarse
         coarse_amps = coarse_amps[coarse_mask]
@@ -1054,8 +1134,6 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse) -> GainFitInf
 
         coarse_hz = coarse_hz[coarse_mask]
         coarse_weights = coarse_weights[coarse_mask]
-
-        print(f"coarse_idx={coarse_idx}, coarse_hz={coarse_hz}, coarse_amps={coarse_amps}")
 
         # Calculate the weighted mean of the amplitudes for this coarse channel
         gains[coarse_idx] = np.sum(coarse_amps * coarse_weights) / np.sum(coarse_weights)
@@ -1097,7 +1175,8 @@ def poly_str(coeffs, independent_var="x"):
             return f"×{independent_var}" + "⁰¹²³⁴⁵⁶⁷⁸⁹"[i]
 
     return " ".join(
-        filter(None, [f"{coeff:+.3}{xpow(i)}" for i, coeff in enumerate(coeffs[::-1])])  # if abs(coeff) > 1e-20 else ""
+        filter(None, [f"{coeff:+.3}{xpow(i)}" for i, coeff in enumerate(coeffs[::-1])])
+        # if abs(coeff) > 1e-20 else ""
     )
 
 
@@ -1177,8 +1256,8 @@ def debug_phase_fits(
     flavor_fits = pd.merge(phase_fits, tiles, left_on="tile_id", right_on="id")
     bad_fits = flavor_fits[flavor_fits["outlier"]]
     if len(bad_fits) > 0:
-        print(f"flagged {len(bad_fits)} of {n_total} fits as outliers:")
-        print(bad_fits[["name", "pol"]].to_string(index=False))
+        logger.debug(f"flagged {len(bad_fits)} of {n_total} fits as outliers:")
+        logger.debug(bad_fits[["name", "pol"]].to_string(index=False))
 
     # make a new colormap for weighted data
     half_blues = LinearSegmentedColormap.from_list(
@@ -1476,9 +1555,8 @@ def plot_phase_residual(freqs, soln_xx, soln_yy, weights, prefix, title, plot_re
                 try:
                     coeffs = np.polyfit(xs, medians[mask], order)
                 except ValueError:
-                    print(traceback.format_exc())
-                    print(
-                        f"Skipping polyfit({order=}, {indep_var=}) due to "
+                    logger.exception(
+                        f"plot_residual(): Error in np.polyfit. Skipping polyfit({order=}, {indep_var=}) due to "
                         f"ValueError for {flav=} {pol=}.\n{xs=}\n{medians[mask]=}"
                     )
                     continue
@@ -1500,7 +1578,7 @@ def plot_phase_residual(freqs, soln_xx, soln_yy, weights, prefix, title, plot_re
             ylim = float(residual_vmax)
             plt.ylim(-ylim, ylim)
 
-        print(f"{flav=} {pol=} {eqn=}")
+        # logger.debug(f"{flav=} {pol=} {eqn=}")
 
     g.map(plot_residual, "soln_idx", "pol", "flavor", "length", "intercept")
     g.set_axis_labels("freq", "phase")
@@ -1623,54 +1701,32 @@ def write_stats(
     except Exception as catch_all_exception:
         return False, str(catch_all_exception)
 
-    # try:
-    #     if return_value:
-    #         # Currently, hyperdrive writes the solution files to same dir as
-    #         # the current directory mwax_calvin_processor is run from
-    #         # Move them to the processing_complete dir
-    #         plot_filename_base = os.path.basename(f"{os.path.splitext(hyperdrive_solution_filename)[0]}")
-
-    #         amps_plot_filename = f"{plot_filename_base}_amps.png"
-    #         phase_plot_filename = f"{plot_filename_base}_phases.png"
-    #         shutil.move(
-    #             os.path.join(os.getcwd(), amps_plot_filename),
-    #             os.path.join(stats_path, f"{amps_plot_filename}"),
-    #         )
-    #         shutil.move(
-    #             os.path.join(os.getcwd(), phase_plot_filename),
-    #             os.path.join(stats_path, f"{phase_plot_filename}"),
-    #         )
-    #         logger.info(f"{obs_id} plots moved successfully to {stats_path}.")
-
-    #         logger.info(f"{obs_id} write_stats() complete successfully")
-    #     else:
-    #         logger.error(f"{obs_id} write_stats() failed")
-    # except Exception as catch_all_exception:
-    #     return False, str(catch_all_exception)
-
     return True, ""
 
 
-def write_readme_file(filename, cmd, exit_code, stdout, stderr):
-    """Write a readme file documenting the execution of a command.
+def write_readme_file(filename, cmd, exit_code, output, error):
+    """Write a readme file documenting the result of a command or operation.
+
+    Used both for subprocess results (birli, hyperdrive) and for recording
+    Python exception details on failure.
 
     Args:
         filename: Path to write the readme file to.
-        cmd: The command that was executed.
-        exit_code: The exit code returned by the command.
-        stdout: Standard output from the command.
-        stderr: Standard error from the command.
+        cmd: The command or operation that was executed.
+        exit_code: The exit code or error code (0 = success).
+        output: Standard output from the command, or empty string.
+        error: Standard error from the command, or exception traceback text.
     """
     try:
         with open(filename, "w", encoding="UTF-8") as readme:
             if exit_code == 0:
-                readme.write(f"This run succeded at: {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
+                readme.write(f"This run succeeded at: {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
             else:
                 readme.write(f"This run failed at: {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
             readme.write(f"Command: {cmd}\n")
             readme.write(f"Exit code: {exit_code}\n")
-            readme.write(f"stdout: {stdout}\n")
-            readme.write(f"stderr: {stderr}\n")
+            readme.write(f"output: {output}\n")
+            readme.write(f"error: {error}\n")
 
     except Exception:
         logger.warning(
@@ -1984,7 +2040,6 @@ def run_hyperdrive_stats(
     Returns:
         True if all stats generation succeeded, False otherwise.
     """
-
     # produce stats/plots
     stats_successful: int = 0
 
@@ -2099,10 +2154,12 @@ def process_gain_fits(tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights,
             name = tile.name
             try:
                 fit = fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse)
+
+                logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
+                logger.debug(f"gains: {fit.gains}")
             except Exception as exc:
                 logger.error(f"{tile_id=:4} {pol} ({name}) {exc}")
                 continue
-            logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
             fits.append([tile_id, soln_idx, pol, *fit])
 
     return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *GainFitInfo._fields])
@@ -2165,12 +2222,12 @@ export MWA_BEAM_FILE=/software/hyperdrive/mwa_full_embedded_element_pattern.h5
 export HYPERDRIVE_CUDA_COMPUTE=86
 
 # Process
-srun --nodes=1 --ntasks=1 --cpus-per-task=90 \
-mwax_calvin_processor \
---cfg={config_file_path} \
---job-type={jobtype.value} \
---obs-id={obs_id} \
---request-ids={",".join(request_ids)} \
+srun --nodes=1 --ntasks=1 --cpus-per-task=90 \\
+mwax_calvin_processor \\
+--cfg={config_file_path} \\
+--job-type={jobtype.value} \\
+--obs-id={obs_id} \\
+--request-ids={",".join(request_ids)} \\
 --slurm-job-id=$SLURM_JOBID {processor_args}
 
 exit $?
