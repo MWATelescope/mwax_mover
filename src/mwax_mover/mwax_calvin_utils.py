@@ -937,6 +937,22 @@ def fit_phase_line(
     Raises:
         RuntimeError: If not enough valid phases are available to fit.
     """
+    # Quality metrics for the phase fit:
+    #
+    # sigma_resid: Standard deviation of phase residuals (radians) after subtracting
+    #              the best-fit model. Lower is better.
+    #
+    # chi2dof:     Chi-squared per degree of freedom = sum(residuals²) / (N - 2).
+    #              Values near 1.0 indicate a good fit; much larger suggests poor fit
+    #              or RFI; much smaller suggests over-fitting or too few points.
+    #
+    # stderr:      Standard error on the fitted slope (rad/Hz), estimated from the
+    #              optimiser's inverse Hessian scaled by residual variance. Used above
+    #              to sigma-clip outlier channels (|residual| < 2 * stderr[0]).
+    #
+    # quality:     Fraction of original frequency channels surviving the sigma-clip
+    #              (len(mask) / nfreqs). Ranges 0–1; 1.0 means all channels were used.
+
     # original number of frequencies
     nfreqs = len(freqs_hz)
 
@@ -1104,9 +1120,8 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse) -> GainFitInf
     pol1 = np.full(n_coarse, np.nan)
     sigma_resid = np.full(n_coarse, np.nan)
 
-    _residuals = np.full(n_freqs, np.nan)
-
-    # Initialise other variables
+    # Initialise quality accumulator
+    n_within: int = 0
     quality: float = np.nan
 
     # split chans, solns, weights into chunks of chanblocks_per_coarse
@@ -1138,13 +1153,25 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse) -> GainFitInf
         # Calculate the weighted mean of the amplitudes for this coarse channel
         gains[coarse_idx] = np.sum(coarse_amps * coarse_weights) / np.sum(coarse_weights)
 
-        # TODO: calculate values for pol0, pol1, sigma_resid- the calibration web services don't use these anyway
-        pol0[coarse_idx] = 0.0
-        pol1[coarse_idx] = 0.0
-        sigma_resid[coarse_idx] = 0.0
+        # Fit 1st order polynomial to get pol0, pol1, sigma_resid
+        coeffs = np.polyfit(coarse_hz, coarse_amps, deg=1, w=coarse_weights)
+        pol1[coarse_idx] = coeffs[0]  # slope
+        pol0[coarse_idx] = coeffs[1]  # intercept
 
-    # TODO: Calculate quality
-    quality = 1.0
+        # Compute residuals from the polynomial fit
+        fitted = np.polyval(coeffs, coarse_hz)
+        residuals = coarse_amps - fitted
+        sigma_resid[coarse_idx] = residuals.std()
+
+        if sigma_resid[coarse_idx] < 1e-10:
+            # If sigma_resid is very small then we can say all are within 2 sigma
+            n_within += len(residuals)
+        else:
+            # Accumulate chanblocks within 2*sigma_resid of the fit for quality
+            n_within += int(np.sum(np.abs(residuals) < 2 * sigma_resid[coarse_idx]))
+
+    # Quality is the fraction of all chanblocks (including flagged) within 2*sigma_resid
+    quality = n_within / n_freqs
 
     return GainFitInfo(
         quality=quality,

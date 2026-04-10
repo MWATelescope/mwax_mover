@@ -913,16 +913,6 @@ def test_fit_phase_line_quality_partial_weights():
     assert result.quality < 1.0
 
 
-def test_fit_phase_line_too_few_valid_raises():
-    """Only 1 valid point should raise RuntimeError."""
-    solns = np.full(len(_FREQS_HZ), np.nan, dtype=np.complex128)
-    solns[0] = 1.0 + 0j
-    weights = np.ones(len(_FREQS_HZ))
-    weights[1:] = 0.0
-    with pytest.raises(RuntimeError, match="Not enough valid phases"):
-        fit_phase_line(_FREQS_HZ, solns, weights)
-
-
 def test_fit_phase_line_all_nan_raises():
     """All-NaN solutions should raise RuntimeError."""
     solns = np.full(len(_FREQS_HZ), np.nan, dtype=np.complex128)
@@ -1100,16 +1090,17 @@ def test_fit_gain_output_list_lengths():
 
 
 def test_fit_gain_pol0_pol1_sigma_resid_zero_for_valid_channels():
-    """Current implementation sets pol0, pol1, sigma_resid to 0.0 for valid channels."""
+    """pol0 should be the polynomial intercept (~1/amplitude), pol1 should be
+    ~0 (flat gains), and sigma_resid should be ~0 for perfectly flat data."""
     solns = np.full(_N_CHANBLOCKS, 1.0, dtype=np.complex128)
     weights = np.ones(_N_CHANBLOCKS)
     result = fit_gain(_GAIN_FREQS, solns, weights, _CHANBLOCKS_PER_COARSE)
     for v in result.pol0:
-        assert v == pytest.approx(0.0)
+        assert v == pytest.approx(1.0, rel=1e-5)  # intercept ~ 1/1.0
     for v in result.pol1:
-        assert v == pytest.approx(0.0)
+        assert v == pytest.approx(0.0, abs=1e-20)  # slope ~ 0 for flat data
     for v in result.sigma_resid:
-        assert v == pytest.approx(0.0)
+        assert v == pytest.approx(0.0, abs=1e-10)  # no residuals for perfect fit
 
 
 def test_fit_gain_length_mismatch_raises():
@@ -1240,3 +1231,247 @@ def test_write_readme_no_exception_on_bad_path(caplog):
     with caplog.at_level(logging.WARNING):
         write_readme_file(bad_path, cmd="cmd", exit_code=0, output="", error="")
     assert any("Could not write" in r.message or bad_path in r.message for r in caplog.records)
+
+
+# ============================================================
+# Tests for fit_gain
+# ============================================================
+
+
+def test_fit_gain_basic_weighted_mean():
+    """Gains should be the weighted mean of 1/amplitude per coarse channel."""
+    chanblocks_per_coarse = 4
+    n_coarse = 3
+    n_freqs = n_coarse * chanblocks_per_coarse
+
+    # Flat amplitudes of 2.0 -> inverted gains should all be 0.5
+    freqs_hz = np.linspace(100e6, 200e6, n_freqs)
+    solns = np.full(n_freqs, 2.0, dtype=complex)
+    weights = np.ones(n_freqs)
+
+    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
+
+    assert len(result.gains) == n_coarse
+    for g in result.gains:
+        assert g == pytest.approx(0.5, rel=1e-6)
+
+
+def test_fit_gain_pol0_pol1_flat_amps():
+    """With flat amplitudes, the polynomial slope (pol1) should be ~0 and
+    intercept (pol0) should be ~0.25 (the inverted amplitude)."""
+    chanblocks_per_coarse = 8
+    n_coarse = 2
+    n_freqs = n_coarse * chanblocks_per_coarse
+
+    freqs_hz = np.linspace(150e6, 170e6, n_freqs)
+    solns = np.full(n_freqs, 4.0, dtype=complex)
+    weights = np.ones(n_freqs)
+
+    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
+
+    for i in range(n_coarse):
+        assert result.pol0[i] == pytest.approx(0.25, rel=1e-5)  # intercept ~ 1/4.0
+        assert result.pol1[i] == pytest.approx(0.0, abs=1e-20)  # slope ~ 0
+
+
+def test_fit_gain_sigma_resid_flat_amps():
+    """With perfectly flat amplitudes, residuals from the poly fit should be ~0."""
+    chanblocks_per_coarse = 4
+    n_coarse = 3
+    n_freqs = n_coarse * chanblocks_per_coarse
+
+    freqs_hz = np.linspace(100e6, 200e6, n_freqs)
+    solns = np.full(n_freqs, 2.0, dtype=complex)
+    weights = np.ones(n_freqs)
+
+    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
+
+    for i in range(n_coarse):
+        assert result.sigma_resid[i] == pytest.approx(0.0, abs=1e-10)
+
+
+def test_fit_gain_quality_all_valid():
+    """With clean data and no outliers, quality should be 1.0."""
+    chanblocks_per_coarse = 4
+    n_coarse = 3
+    n_freqs = n_coarse * chanblocks_per_coarse
+
+    freqs_hz = np.linspace(100e6, 200e6, n_freqs)
+    solns = np.full(n_freqs, 2.0, dtype=complex)
+    weights = np.ones(n_freqs)
+
+    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
+
+    assert result.quality == pytest.approx(1.0, rel=1e-6)
+
+
+def test_fit_gain_quality_reduced_by_flagged_channels():
+    """Channels with zero weight are excluded from fitting; quality should
+    reflect the fraction of all channels within 2*sigma of the fit."""
+    chanblocks_per_coarse = 4
+    n_coarse = 2
+    n_freqs = n_coarse * chanblocks_per_coarse
+
+    freqs_hz = np.linspace(100e6, 200e6, n_freqs)
+    solns = np.full(n_freqs, 2.0, dtype=complex)
+    weights = np.ones(n_freqs)
+
+    # Flag one entire coarse channel by zeroing its weights
+    weights[:chanblocks_per_coarse] = 0.0
+
+    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
+
+    # Flagged coarse channel should produce nan gain
+    assert np.isnan(result.gains[0])
+    # quality should be < 1.0 since half the channels had no valid data
+    assert result.quality < 1.0
+    assert 0.0 <= result.quality <= 1.0
+
+
+def test_fit_gain_nan_solns_skipped():
+    """NaN solutions should be masked out; coarse channels with fewer than
+    2 valid points should produce nan gains."""
+    chanblocks_per_coarse = 4
+    n_coarse = 2
+    n_freqs = n_coarse * chanblocks_per_coarse
+
+    freqs_hz = np.linspace(100e6, 200e6, n_freqs)
+    solns = np.full(n_freqs, 2.0 + 0j)
+    solns[:chanblocks_per_coarse] = np.nan  # entire first coarse channel is NaN
+    weights = np.ones(n_freqs)
+
+    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
+
+    assert np.isnan(result.gains[0])
+    assert not np.isnan(result.gains[1])
+
+
+def test_fit_gain_output_lengths():
+    """All output arrays should have length == n_coarse."""
+    chanblocks_per_coarse = 8
+    n_coarse = 3
+    n_freqs = n_coarse * chanblocks_per_coarse
+
+    freqs_hz = np.linspace(100e6, 200e6, n_freqs)
+    solns = np.ones(n_freqs, dtype=complex)
+    weights = np.ones(n_freqs)
+
+    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
+
+    assert len(result.gains) == n_coarse
+    assert len(result.pol0) == n_coarse
+    assert len(result.pol1) == n_coarse
+    assert len(result.sigma_resid) == n_coarse
+
+
+# ============================================================
+# Tests for fit_phase_line
+# ============================================================
+
+
+def test_fit_phase_line_recovers_known_length():
+    """fit_phase_line should recover a known cable length from a synthetic phase ramp."""
+    known_length_m = 10.0
+    freqs_hz = np.linspace(100e6, 200e6, 64)
+    slope = 2 * np.pi * known_length_m / speed_of_light.value
+    phases = slope * freqs_hz + 0.3  # arbitrary intercept
+    solns = np.exp(1j * phases)
+    weights = np.ones(len(freqs_hz))
+
+    result = mwax_mover.mwax_calvin_utils.fit_phase_line(freqs_hz, solns, weights)
+
+    assert result.length == pytest.approx(known_length_m, rel=1e-3)
+
+
+def test_fit_phase_line_recovers_known_intercept():
+    """fit_phase_line should recover the phase intercept of a synthetic ramp."""
+    known_length_m = 5.0
+    known_intercept = 0.7  # radians
+    freqs_hz = np.linspace(100e6, 200e6, 64)
+    slope = 2 * np.pi * known_length_m / speed_of_light.value
+    phases = slope * freqs_hz + known_intercept
+    solns = np.exp(1j * phases)
+    weights = np.ones(len(freqs_hz))
+
+    result = mwax_mover.mwax_calvin_utils.fit_phase_line(freqs_hz, solns, weights)
+
+    assert result.intercept == pytest.approx(known_intercept, abs=1e-3)
+
+
+def test_fit_phase_line_sigma_resid_low_for_clean_data():
+    """sigma_resid should be near zero for a perfect synthetic phase ramp."""
+    freqs_hz = np.linspace(100e6, 200e6, 64)
+    slope = 2 * np.pi * 8.0 / speed_of_light.value
+    solns = np.exp(1j * (slope * freqs_hz + 0.1))
+    weights = np.ones(len(freqs_hz))
+
+    result = mwax_mover.mwax_calvin_utils.fit_phase_line(freqs_hz, solns, weights)
+
+    assert result.sigma_resid == pytest.approx(0.0, abs=1e-6)
+
+
+def test_fit_phase_line_chi2dof_near_one_for_noisy_data():
+    """chi2dof should be in a reasonable range for mildly noisy data."""
+    rng = np.random.default_rng(42)
+    freqs_hz = np.linspace(100e6, 200e6, 64)
+    slope = 2 * np.pi * 8.0 / speed_of_light.value
+    noise = rng.normal(0, 0.05, len(freqs_hz))
+    solns = np.exp(1j * (slope * freqs_hz + 0.1 + noise))
+    weights = np.ones(len(freqs_hz))
+
+    result = mwax_mover.mwax_calvin_utils.fit_phase_line(freqs_hz, solns, weights)
+
+    assert 0.0 < result.chi2dof < 10.0
+
+
+def test_fit_phase_line_sigma_resid_low_for_clean_data():
+    """sigma_resid should be near zero for a perfect synthetic phase ramp."""
+    freqs_hz = np.linspace(100e6, 200e6, 64)
+    slope = 2 * np.pi * 8.0 / speed_of_light.value
+    solns = np.exp(1j * (slope * freqs_hz + 0.1))
+    weights = np.ones(len(freqs_hz))
+
+    result = mwax_mover.mwax_calvin_utils.fit_phase_line(freqs_hz, solns, weights)
+
+    assert result.sigma_resid == pytest.approx(0.0, abs=1e-3)
+
+
+def test_fit_phase_line_quality_reduced_by_outliers():
+    """Injecting large phase outliers should reduce quality below 1.0."""
+    rng = np.random.default_rng(7)
+    freqs_hz = np.linspace(100e6, 200e6, 64)
+    slope = 2 * np.pi * 8.0 / speed_of_light.value
+    phases = slope * freqs_hz + 0.1
+    # Inject obvious outliers into ~25% of channels
+    outlier_idx = rng.choice(len(freqs_hz), size=16, replace=False)
+    phases[outlier_idx] += np.pi  # flip phase by 180 degrees
+    solns = np.exp(1j * phases)
+    weights = np.ones(len(freqs_hz))
+
+    result = mwax_mover.mwax_calvin_utils.fit_phase_line(freqs_hz, solns, weights)
+
+    assert result.quality < 1.0
+    assert 0.0 <= result.quality <= 1.0
+
+
+def test_fit_phase_line_stderr_is_positive():
+    """stderr should always be a positive finite value for valid input."""
+    freqs_hz = np.linspace(100e6, 200e6, 64)
+    slope = 2 * np.pi * 8.0 / speed_of_light.value
+    solns = np.exp(1j * (slope * freqs_hz + 0.2))
+    weights = np.ones(len(freqs_hz))
+
+    result = mwax_mover.mwax_calvin_utils.fit_phase_line(freqs_hz, solns, weights)
+
+    assert np.isfinite(result.stderr)
+    assert result.stderr > 0.0
+
+
+def test_fit_phase_line_too_few_valid_raises():
+    """fit_phase_line should raise RuntimeError if fewer than 2 valid phases exist."""
+    freqs_hz = np.linspace(100e6, 200e6, 64)
+    solns = np.full(64, np.nan + 0j)  # all NaN - no valid phases
+    weights = np.ones(64)
+
+    with pytest.raises(RuntimeError, match="Not enough valid phases"):
+        mwax_mover.mwax_calvin_utils.fit_phase_line(freqs_hz, solns, weights)

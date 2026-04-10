@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.6.1 10-Apr-2026
+
+* calvin: Finally populating the gains_quality fields.
+
 # 1.6.0 09,10-Apr-2026
 
 * Added tests for mwax_calvin_utils and mwax_calvin_solutions.
