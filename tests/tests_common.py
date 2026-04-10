@@ -7,7 +7,7 @@ from mwax_mover.mwax_db import MWAXDBHandler
 from mwax_mover.utils import write_mock_subfile
 
 
-def setup_test_directories(test_code: str, base_dir: str = "/home/gsleap/mwax_mover_testing/") -> str:
+def setup_test_directories(test_code: str, base_dir: str = "/home/gsleap/mwax_mover_testing") -> str:
     """
     Ensure all configured directories exist. If a directory already exists,
     clear its contents (files/subdirectories) but keep the directory itself.

@@ -1,5 +1,22 @@
 # Changelog
 
+# 1.6.0 09,10-Apr-2026
+
+* Added tests for mwax_calvin_utils and mwax_calvin_solutions.
+* Lots of fixes for tests
+* Removed coloredlogs from dependencies
+* conftest.py: Added pytest_configure hook that sets WARNING level on noisy third-party loggers (PIL, matplotlib, scipy, pandas, urllib3, asyncio, numexpr) so only mwax_mover output appears at DEBUG level during test runs
+* mwax_calvin_utils:
+  * fit_phase_line: now respects the niter parameter (TODO: needs testing!)
+  * get_solns: refant index 0 falsy check. if not ref_tile_idx: → if ref_tile_idx is None: so that refant at DataFrame index 0 is handled correctly and not treated as False.
+  * weights property: copy before mutating. results = self.results → results = self.results.copy() so the out-of-range filtering (< 0 and > 1e-4) actually takes effect on the weights calculation rather than being silently discarded.
+  * GainFitInfo: replace magic number 24. Added module-level constant MWA_NUM_COARSE_CHANS = 24. GainFitInfo.nan() and GainFitInfo.default() now accept n_coarse: int = MWA_NUM_COARSE_CHANS parameter.
+  * write_readme_file: rename misleading parameter names
+  * ensure_system_byte_order: fix incorrect numpy call. arr.newbyteorder(system_byte_order) → np.frombuffer(arr.tobytes(), dtype=arr.dtype.newbyteorder("=")) — .newbyteorder() is a dtype method, not an ndarray method; frombuffer correctly reinterprets the bytes as native order.
+* mwax_calvin_solutions:
+  * Fix picket fence calibration gains- solution files are now sorted by their correct channel number.
+  * Clean up of logging of NaNs
+
 # 1.5.13-15 02-Apr-2026
 
 * mwacache: If rclone copy or check fails, just return false and it will requeue and retry

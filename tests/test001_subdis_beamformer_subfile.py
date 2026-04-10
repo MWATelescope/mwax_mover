@@ -61,4 +61,4 @@ def test_beamformer_subfile():
     # Ok time's up! Stop the processor
     sd.signal_handler(signal.SIGINT, 0)
 
-    # Check the redis server for a message
+    thrd.join(30)

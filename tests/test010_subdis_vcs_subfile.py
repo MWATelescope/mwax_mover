@@ -114,14 +114,7 @@ def test_process_vcs_subfile():
 
     # throw some subfiles in!
     create_observation_subfiles(
-        1369821488, 1, "MWAX_VCS", 109, 0, os.path.join(base_dir, "tmp"), sd.cfg_subfile_incoming_path
-    )
-
-    # allow things to process
-    time.sleep(8)
-
-    create_observation_subfiles(
-        1369821496, 1, "MWAX_VCS", 109, 0, os.path.join(base_dir, "tmp"), sd.cfg_subfile_incoming_path
+        1369821496, 3, "MWAX_VCS", 109, 0, os.path.join(base_dir, "tmp"), sd.cfg_subfile_incoming_path
     )
 
     # allow things to process

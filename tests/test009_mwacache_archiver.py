@@ -42,7 +42,7 @@ def test_mwacache_archiver_config_file():
     #
 
     # mwax_mover section
-    assert mcap.metafits_path == "/mnt/c/data/mwax_mover_testing/test009/vulcan/metafits"
+    assert mcap.metafits_path == "/home/gsleap/mwax_mover_testing/test009/vulcan/metafits"
     assert mcap.archive_to_location == ArchiveLocation.AcaciaMWA
 
     assert mcap.health_multicast_interface_name == "eth0"
@@ -68,7 +68,7 @@ def test_mwacache_archiver_config_file():
     assert mcap.mro_metadatadb_pass == "dummy"
 
     assert len(mcap.watch_dirs) == 3
-    assert mcap.watch_dirs[0] == "/mnt/c/data/mwax_mover_testing/test009/volume1/incoming"
+    assert mcap.watch_dirs[0] == "/home/gsleap/mwax_mover_testing/test009/volume1/incoming"
 
     # test list of projects
     assert mcap.high_priority_correlator_projectids == ["D0006"]
@@ -118,3 +118,5 @@ def test_mwacache_archiver_metafits_file():
     # Quit
     # Ok time's up! Stop the processor
     mcap.signal_handler(signal.SIGINT, 0)
+
+    thrd.join(30)

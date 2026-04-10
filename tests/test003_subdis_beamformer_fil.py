@@ -72,3 +72,5 @@ def test_beamformer_archiver_fil():
     # Quit
     # Ok time's up! Stop the processor
     sd.signal_handler(signal.SIGINT, 0)
+
+    thrd.join(30)

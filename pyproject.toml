@@ -1,6 +1,6 @@
 [project]
 name = "mwax_mover"
-version = "1.5.15"
+version = "1.6.0"
 description = "A module to manage input, archiving and calibration for the MWAX correlator"
 readme = "README.md"
 requires-python = ">=3.12, <3.15"
@@ -22,7 +22,6 @@ classifiers = [
 
 dependencies = [
     "astropy",
-    "coloredlogs",
     "flask",
     "importlib_metadata",
     "inotify",
@@ -60,3 +59,11 @@ target-version = ['py312']
 
 [tool.uv]
 package = true
+
+[tool.pytest.ini_options]
+log_cli = true
+log_cli_level = "DEBUG"
+log_format = "%(asctime)s %(levelname)s %(name)s.%(funcName)s %(message)s"
+log_date_format = "%Y-%m-%d %H:%M:%S"
+addopts = "-vv -x" # --assert=plain"                                                         # Be more verbose and fail on first error and never truncate asserts
+testpaths = ["tests"]

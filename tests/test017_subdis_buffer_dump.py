@@ -34,8 +34,15 @@ def test_corr_buffer_dump():
 
     file_dict = do_buffer_dump(MWAXSubfileDistirbutorMode.CORRELATOR, obsid, obs_exp, dump_start, dump_end, trigger_id)
 
-    expected_dumped_files = int(((dump_end - dump_start) + 8) / 8)
+    expected_dumped_files = (
+        int(((dump_end - dump_start) + 8) / 8) - 2
+    )  # we subtract 2 because we always keep 2 to keep the correlator fed
 
+    assert (
+        len(file_dict["dev_shm_mwax_free_files"]) == 9
+    )  # 6 files for 1369821496 then 3 files for the next obs (NO_CAPTURE) to trigger handling of keep files
+    assert len(file_dict["dev_shm_mwax_keep_files"]) == 0
+    assert len(file_dict["dev_shm_mwax_sub_files"]) == 0
     assert len(file_dict["voltdata_dont_archive_sub_files"]) == expected_dumped_files
 
 
@@ -54,7 +61,7 @@ def do_buffer_dump(
     3. We ensure the metafits file for the passed in obsid is in the correct place
     4. We start SubfileDistributor
     5. Now we loop through from obsid to obsid+obs_exp_time and create new test subfiles.
-    7. At the end of the loops, we call the dump_voltages web service
+    6. At the end of the loops, we call the dump_voltages web service
     7. Then we stop SubfileDistributor
     8. We then collect all the files and return their names for the caller to analyse to see if the test succeeded.
 
@@ -84,8 +91,10 @@ def do_buffer_dump(
     # Start mwax_subfile_distributor using our test config
     sd = MWAXSubfileDistributor()
 
+    fakedb = FakeMWAXDBHandler()
+
     # Call to read config <-- this is what we're testing!
-    sd.initialise(TEST_CONFIG_FILE, config_mode)
+    sd.initialise(TEST_CONFIG_FILE, config_mode, fakedb)
 
     # Override db_handler with a fake one
     sd.db_handler = FakeMWAXDBHandler()
@@ -100,12 +109,6 @@ def do_buffer_dump(
     # start processor
     # Create and start a thread for the processor
     thrd = threading.Thread(name="msd_thread", target=sd.start, daemon=True)
-
-    # Start the processor
-    thrd.start()
-
-    # allow things to start
-    time.sleep(15)
 
     expected_subfiles = int(obs_exp_time / 8)
 
@@ -123,6 +126,12 @@ def do_buffer_dump(
 
     assert len(glob.glob(os.path.join(sd.cfg_subfile_incoming_path, "*.sub"))) == expected_subfiles
 
+    # Start the processor
+    thrd.start()
+
+    # allow things to start
+    time.sleep(20)
+
     print("Dump triggered!")
     # Now do a buffer dump!
     dump_success = call_dump_voltages(sd.cfg_webserver_port, dump_start, dump_end, dump_trigger_id)
@@ -132,21 +141,26 @@ def do_buffer_dump(
     # allow things to process
     time.sleep(8)
 
-    # We now need to wait a bit for all files to be moved to /voltdata/incoming
-    keep_files_left = 99
+    # We have to wait for another non VCS obs to come through to trigger doing things with the .keep files
+    create_observation_subfiles(
+        obs_id + 128,
+        3,
+        "NO_CAPTURE",
+        109,
+        0,
+        os.path.join(base_dir, "tmp"),
+        sd.cfg_subfile_incoming_path,
+        1,
+    )
 
-    while keep_files_left > 0:
-        keep_files_left = len(glob.glob(f"{sd.cfg_subfile_incoming_path}/*.keep"))
-        time.sleep(3)
-
-    # Ok just give a bit more leeway
-    time.sleep(5)
+    # allow things to process
+    time.sleep(32)
 
     # Quit
     # Ok time's up! Stop the processor
     sd.signal_handler(signal.SIGINT, 0)
 
-    time.sleep(20)
+    thrd.join(30)
 
     # Test!
     # We should have ((dump_end - dump_start)+ 8) / 8 dumped files, but specific tests are left to the caller
@@ -155,7 +169,7 @@ def do_buffer_dump(
         "dev_shm_mwax_free_files": glob.glob(f"{sd.cfg_subfile_incoming_path}/*.free"),
         "dev_shm_mwax_keep_files": glob.glob(f"{sd.cfg_subfile_incoming_path}/*.keep"),
         "dev_shm_mwax_sub_files": glob.glob(f"{sd.cfg_subfile_incoming_path}/*.sub"),
-        "voltdata_dont_archive_sub_files": glob.glob(f"{sd.cfg_voltdata_incoming_path}/*.sub"),
+        "voltdata_dont_archive_sub_files": glob.glob(f"{sd.cfg_voltdata_dont_archive_path}/*.sub"),
     }
 
 
