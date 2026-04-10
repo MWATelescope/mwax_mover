@@ -1,8 +1,9 @@
 # Changelog
 
-# 1.6.0 09-Apr-2026
+# 1.6.0 09,10-Apr-2026
 
 * Added tests for mwax_calvin_utils and mwax_calvin_solutions.
+* Lots of fixes for tests
 * Removed coloredlogs from dependencies
 * conftest.py: Added pytest_configure hook that sets WARNING level on noisy third-party loggers (PIL, matplotlib, scipy, pandas, urllib3, asyncio, numexpr) so only mwax_mover output appears at DEBUG level during test runs
 * mwax_calvin_utils:

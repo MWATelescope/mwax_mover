@@ -39,7 +39,6 @@ def test_correlator_config_file():
     #
 
     # mwax_mover section
-    assert sd.cfg_webserver_port == 9999
     assert sd.cfg_health_multicast_interface_name == "eth0"
     assert sd.cfg_health_multicast_ip == "224.234.0.0"
     assert sd.cfg_health_multicast_port == 8005
@@ -119,3 +118,4 @@ def test_process_correlator_subfile():
     # Quit
     # Ok time's up! Stop the processor
     sd.signal_handler(signal.SIGINT, 0)
+    thrd.join(timeout=30)

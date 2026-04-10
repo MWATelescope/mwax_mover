@@ -717,12 +717,6 @@ class MWAXSubfileDistributor:
             )
             self.workers.append(self.outgoing_processor)
 
-        try:
-            self.start_flask_web_server()
-        except Exception:
-            logger.exception("Unable to start web server. Exiting")
-            exit(1)
-
         # Make sure we can Ctrl-C / kill out of this
         logger.info("Initialising signal handlers")
         signal.signal(signal.SIGINT, self.signal_handler)
@@ -1080,6 +1074,13 @@ class MWAXSubfileDistributor:
         threads, and enters main monitoring loop.
         """
         self.running = True
+
+        # Start web server
+        try:
+            self.start_flask_web_server()
+        except Exception:
+            logger.exception("Unable to start web server. Exiting")
+            exit(1)
 
         # creating database connection pool(s)
         logger.info("Starting database connection pool...")

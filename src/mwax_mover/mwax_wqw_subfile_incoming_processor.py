@@ -204,8 +204,8 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                 )
 
                 # Pause archiving so we have the disk to ourselves
-                if self.archive_destination_enabled:  # pylint: disable=line-too-long
-                    self.sd_ctx.pause_archiving(True)  # pylint: disable=line-too-long
+                if self.archive_destination_enabled:
+                    self.sd_ctx.pause_archiving(True)
 
                 # See if there already is a TRIGGER_ID keyword in the subfile- if so
                 # don't overwrite it. We must have overlapping triggers happening
@@ -244,8 +244,8 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                     # Check if we're in the right mwax_subfile_distributor mode
                     if self.subfile_dist_mode == utils.MWAXSubfileDistirbutorMode.CORRELATOR:
                         # This is a normal MWAX_CORRELATOR obs, continue as normal
-                        if self.archive_destination_enabled:  # pylint: disable=line-too-long
-                            self.sd_ctx.pause_archiving(False)  # pylint: disable=line-too-long
+                        if self.archive_destination_enabled:
+                            self.sd_ctx.pause_archiving(False)
 
                         success = utils.load_psrdada_ringbuffer(
                             item,
@@ -267,8 +267,8 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                     # Check if we're in the right mwax_subfile_distributor mode
                     if self.subfile_dist_mode == utils.MWAXSubfileDistirbutorMode.CORRELATOR:
                         # Pause archiving so we have the disk to ourselves
-                        if self.archive_destination_enabled:  # pylint: disable=line-too-long
-                            self.sd_ctx.pause_archiving(True)  # pylint: disable=line-too-long
+                        if self.archive_destination_enabled:
+                            self.sd_ctx.pause_archiving(True)
 
                         success = utils.copy_subfile_to_disk_dd(
                             item,
@@ -288,7 +288,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                 elif utils.CorrelatorMode.is_beamformer(subfile_mode):
                     if self.subfile_dist_mode == utils.MWAXSubfileDistirbutorMode.BEAMFORMER:
                         # This is a beamformer obs, enable archiving as normal (if configured)
-                        if self.archive_destination_enabled:  # pylint: disable=line-too-long
+                        if self.archive_destination_enabled:
                             self.sd_ctx.pause_archiving(False)
 
                         # Get number of inputs and coarse channel from header
@@ -337,16 +337,16 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                     #
                     if self.sd_ctx.dump_keep_file_queue.qsize() > 0:
                         # Pause archiving
-                        if self.archive_destination_enabled:  # pylint: disable=line-too-long
-                            self.sd_ctx.pause_archiving(True)  # pylint: disable=line-too-long
+                        if self.archive_destination_enabled:
+                            self.sd_ctx.pause_archiving(True)
 
                         # Since we're not doing anything with this subfile we can
                         # try and handle any remaining keep files
                         self.handle_next_keep_file()
                     else:
                         # Unpause archiving
-                        if self.archive_destination_enabled:  # pylint: disable=line-too-long
-                            self.sd_ctx.pause_archiving(False)  # pylint: disable=line-too-long
+                        if self.archive_destination_enabled:
+                            self.sd_ctx.pause_archiving(False)
 
                     success = True
 

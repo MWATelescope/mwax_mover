@@ -34,8 +34,8 @@ def test_wqw():
     incoming_dir = os.path.join(base_dir, "visdata/incoming")
 
     shutil.copyfile(metafits_path, os.path.join(incoming_dir, "1369821482_metafits.fits"))
-    shutil.copyfile(metafits_path, os.path.join(incoming_dir, "1369821488_metafits.fits"))
-    shutil.copyfile(metafits_path, os.path.join(incoming_dir, "1369821496_metafits.fits"))
+    shutil.copyfile(metafits_path, os.path.join(incoming_dir, "1369821616_metafits.fits"))
+    shutil.copyfile(metafits_path, os.path.join(incoming_dir, "1369821736_metafits.fits"))
 
     wqw = MyWatchQueueWorker(
         "test_wqw",
@@ -67,8 +67,8 @@ def test_priority_wqw():
     incoming_dir = os.path.join(base_dir, "visdata/incoming")
 
     shutil.copyfile(metafits_path, os.path.join(incoming_dir, "1451758560_metafits.fits"))
-    shutil.copyfile(metafits_path, os.path.join(incoming_dir, "1451758568_metafits.fits"))
-    shutil.copyfile(metafits_path, os.path.join(incoming_dir, "1451758576_metafits.fits"))
+    shutil.copyfile(metafits_path, os.path.join(incoming_dir, "1451768432_metafits.fits"))
+    shutil.copyfile(metafits_path, os.path.join(incoming_dir, "1451768488_metafits.fits"))
 
     wqw = MyPriorityWatchQueueWorker(
         "test_priority_wqw",

@@ -36,7 +36,6 @@ OBS_ID = 1365977896
 DATA_DIR = os.path.join("tests", "data", str(OBS_ID))
 
 # The metafits file that accompanies the solutions file.
-# TODO: confirm exact filename - adjust if it differs (e.g. "1365977896.metafits")
 METAFITS_FILENAME = f"{OBS_ID}_metafits.fits"
 METAFITS_PATH = os.path.join(DATA_DIR, METAFITS_FILENAME)
 

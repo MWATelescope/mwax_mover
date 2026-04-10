@@ -65,3 +65,5 @@ log_cli = true
 log_cli_level = "DEBUG"
 log_format = "%(asctime)s %(levelname)s %(name)s.%(funcName)s %(message)s"
 log_date_format = "%Y-%m-%d %H:%M:%S"
+addopts = "-vv -x" # --assert=plain"                                                         # Be more verbose and fail on first error and never truncate asserts
+testpaths = ["tests"]
