@@ -45,3 +45,5 @@ def test_mwax_calvin_controller():
     assert mcal.health_multicast_ip == "127.0.0.1"
     assert mcal.health_multicast_port == 8012
     assert mcal.health_multicast_hops == 1
+
+    assert mcal.max_in_progress_asvo_jobs == 10

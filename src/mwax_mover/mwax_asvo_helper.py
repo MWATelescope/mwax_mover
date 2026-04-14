@@ -106,6 +106,18 @@ class MWAASVOJob:
         else:
             return 0
 
+    def is_in_progress(self) -> bool:
+        """Determine if a tracked MWA ASVO job is still in progress
+
+        Returns:
+            A bool indicating if the job is in progress (i.e. not complete or failed)
+        """
+        return (
+            self.job_state != MWAASVOJobState.Cancelled
+            and self.job_state != MWAASVOJobState.Error
+            and self.job_state != MWAASVOJobState.Ready
+        )
+
     def get_status(self) -> dict:
         """Get the current status of the job as a dictionary.
 
@@ -189,6 +201,13 @@ class MWAASVOHelper:
 
         # not found
         return False
+
+    def get_in_progress_asvo_job_count(self) -> int:
+        """A helper function to get the count of in progress ASVO jobs
+
+        Returns:
+            the number of ASVO jobs which are in progress"""
+        return sum(1 for item in self.current_asvo_jobs if item.is_in_progress())
 
     def submit_download_job(self, request_id: int, obs_id: int) -> MWAASVOJob:
         """Submit an MWA ASVO download job and track it internally.

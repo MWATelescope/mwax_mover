@@ -2219,11 +2219,15 @@ def create_sbatch_script(
     #
     if jobtype == CalvinJobType.realtime:
         job_name = f"real{obs_id}"
+        partition = "priority,gpu"
+        nice = ""  # ommiting nice keeps the priority high
     else:
         job_name = f"asvo{obs_id}"
+        partition = "gpu"
+        nice = "#SBATCH --nice=1000"  # lower priority than realtime jobs
 
     job_script = f"""#!/bin/bash
-#SBATCH --partition=gpu
+#SBATCH --partition={partition}
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=90
 #SBATCH --ntasks=1
@@ -2238,6 +2242,8 @@ def create_sbatch_script(
 #SBATCH --error={log_path}/%J.out
 #SBATCH --open-mode=append
 #SBATCH --parsable
+{nice}
+
 echo "Starting Calvin {jobtype.value} Job: $SLURM_JOBID";
 
 # Source the python environment
@@ -2316,6 +2322,24 @@ def submit_sbatch(script_path: str, script: str, obs_id: int) -> Tuple[bool, Opt
 
     if not return_val:
         return (False, None)
+
+
+def count_slurm_asvo_jobs() -> int:
+    """
+    Count all SLURM jobs in the queue with names starting with 'asvo'.
+
+    Returns:
+        The number of matching jobs, or -1 if the command failed.
+    """
+    success, output = run_command_ext(
+        command="squeue --format=%j --noheader",
+        numa_node=None,
+    )
+
+    if not success:
+        return -1
+
+    return sum(1 for line in output.splitlines() if line.startswith("asvo"))
 
 
 def estimate_birli_output_bytes(

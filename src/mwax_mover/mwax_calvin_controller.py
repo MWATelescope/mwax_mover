@@ -19,6 +19,8 @@ calibration form the calvin HPC cluster
    * Clean up
 """
 
+import mwax_mover.mwax_calvin_utils
+
 import argparse
 from configparser import ConfigParser
 from datetime import datetime, timedelta
@@ -107,6 +109,8 @@ class MWAXCalvinController:
         self.check_interval_seconds: int = 0
         self.script_path = ""
         self.oldest_cal_obs_id: int = 0
+        self.max_in_progress_asvo_jobs: int = 999
+        self.mwa_asvo_jobs_waiting = 0
 
         # giant-squid
         self.mwa_asvo_outage_check_seconds: int = 0
@@ -206,14 +210,24 @@ class MWAXCalvinController:
                     # Reset the MWA ASVO outage so we retry
                     self.mwax_asvo_helper.mwa_asvo_outage_datetime = None
 
+            # GO and add jobs up to the limit
+            mwa_asvo_jobs_waiting = 0
             for cal_request in asvo_requests_list:
-                # For mwa_asvo, if we are not already dealing with this obsid, add it!
+                # For mwa_asvo, if we are not already dealing with this obsid,
+                # AND we are below our asvo job limit add it!
                 # This prevents us pulling in dupes
-                try:
-                    self.mwa_asvo_add_new_asvo_job(cal_request.request_id, cal_request.obs_id)
-                except Exception:
-                    logger.exception("Error submitting asvo slurm job")
-                    self.slurm_errors += 1
+                if self.mwax_asvo_helper.get_in_progress_asvo_job_count() < self.max_in_progress_asvo_jobs:
+                    try:
+                        self.mwa_asvo_add_new_asvo_job(cal_request.request_id, cal_request.obs_id)
+                    except Exception:
+                        logger.exception("Error submitting asvo slurm job")
+                        self.slurm_errors += 1
+                else:
+                    # This job was passed over because we have too many in progress
+                    mwa_asvo_jobs_waiting += 1
+
+            # Now update the value in self- the health loop will report this number
+            self.mwa_asvo_jobs_waiting = mwa_asvo_jobs_waiting
 
         except Exception:
             logger.exception("Error retrieving new calibration requests")
@@ -446,6 +460,9 @@ class MWAXCalvinController:
             "version": version.get_mwax_mover_version_string(),
             "host": self.hostname,
             "running": self.running,
+            "slurm_queue": mwax_mover.mwax_calvin_utils.count_slurm_asvo_jobs(),
+            "mwa_asvo_jobs_waiting": self.mwa_asvo_jobs_waiting,
+            "mwa_asvo_jobs_in_progress": self.mwax_asvo_helper.get_in_progress_asvo_job_count(),
             "realtime_slurm_jobs_submitted": self.realtime_slurm_jobs_submitted,
             "mwa_asvo_slurm_jobs_submitted": self.mwa_asvo_slurm_jobs_submitted,
             "giant_squid_errors": self.giant_squid_errors,
@@ -485,11 +502,9 @@ class MWAXCalvinController:
         if self.running:
             logger.debug("Querying database for unattempted calsolution_requests...")
 
-            # 1. Get the an outstanding calibration_requests from the db
-            # 2. Also update the database to prevent the next call from picking up the same
-            # request(s)
+            # Get the an outstanding calibration_requests from the db
             #
-            # returned fields: list[Tuple[id, calid, realtime]] or None (the obsid we are calibrating)
+            # returned fields: list[Tuple[requestid, calid, realtime]] or None
             results = get_unattempted_calsolution_requests(self.db_handler)
 
             if results:
@@ -503,7 +518,8 @@ class MWAXCalvinController:
                     new_request.obs_id = result[1]
 
                     # Get the type
-                    if result[2]:
+                    request_type_is_realtime: bool = result[2]
+                    if request_type_is_realtime:
                         new_request.type = CalvinJobType.realtime
                         return_list_realtime.append(new_request)
                     else:
@@ -720,6 +736,8 @@ class MWAXCalvinController:
         # oldest calvin obsid (when looking for new calibrator obs in the schedule, don't
         # look before this obsid)
         self.oldest_cal_obs_id = int(config.get("calvin", "oldest_calibrator_obs_id"))
+
+        self.max_in_progress_asvo_jobs = int(config.get("calvin", "max_in_progress_asvo_jobs"))
 
         #
         # giant-squid config
