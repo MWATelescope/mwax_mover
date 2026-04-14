@@ -204,6 +204,10 @@ class MWAXCalvinController:
             logger.exception("Error retrieving new calibration requests")
             self.database_errors += 1
 
+        logger.info(
+            f"Found {len(realtime_requests_list)} realtime and {len(asvo_requests_list)} MWA ASVO requests to add."
+        )
+
         # Handle realtime requests first!
         for cal_request in realtime_requests_list:
             self.realtime_submit_to_slurm(cal_request)
@@ -219,7 +223,7 @@ class MWAXCalvinController:
 
         # We repeat this check here since above we might have reset the outage
         # GO and add jobs up to the limit
-        if self.mwax_asvo_helper.mwa_asvo_outage_datetime is not None:
+        if self.mwax_asvo_helper.mwa_asvo_outage_datetime is None:
             requests_queued = 0
             # we keep our own local var here so we don't go over the limit
             vis_jobs_in_progress = self.mwa_asvo_vis_jobs_in_progress
@@ -272,6 +276,8 @@ class MWAXCalvinController:
             realtime_request: CalibrationRequest object containing the observation ID
                 and request ID to submit.
         """
+        logger.debug(f"Attempting to submit {realtime_request.request_id} ({realtime_request.obs_id}) to SLURM...")
+
         # Create a sbatch script
         script = create_sbatch_script(
             self.worker_config_filename,
@@ -519,7 +525,7 @@ class MWAXCalvinController:
             # returned fields: list[Tuple[requestid, calid, realtime]] or None
             results = get_unattempted_calsolution_requests(self.db_handler)
             if results is not None:
-                logger.debug(f"...Query returned {len(results)} rows (First record: {results[0]})")
+                logger.debug(f"...Query returned {len(results)} rows")
             else:
                 logger.debug("...Query returned 0 rows")
 
@@ -593,6 +599,10 @@ class MWAXCalvinController:
         # else:
         #    # Not found
         if not self.mwax_asvo_helper.does_request_exist(request_id):
+            logger.debug(
+                f"Attempting to submit visibility download job for {obs_id} (request: {request_id}) to MWA ASVO..."
+            )
+
             try:
                 # Submit job and add to the ones we are tracking
                 new_job = self.mwax_asvo_helper.submit_download_job(request_id, obs_id)
