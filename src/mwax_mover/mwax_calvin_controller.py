@@ -236,8 +236,8 @@ class MWAXCalvinController:
                 # This prevents us pulling in dupes
                 if vis_jobs_in_progress < self.max_in_progress_asvo_jobs:
                     try:
-                        self.mwa_asvo_add_new_asvo_job(cal_request.request_id, cal_request.obs_id)
-                        vis_jobs_in_progress += 1
+                        if self.mwa_asvo_add_new_asvo_job(cal_request.request_id, cal_request.obs_id):
+                            vis_jobs_in_progress += 1
                     except Exception:
                         logger.exception("Error submitting asvo slurm job")
                         self.slurm_errors += 1
@@ -543,12 +543,15 @@ class MWAXCalvinController:
 
         return return_list_realtime, return_list_asvo
 
-    def mwa_asvo_add_new_asvo_job(self, request_id: int, obs_id: int):
+    def mwa_asvo_add_new_asvo_job(self, request_id: int, obs_id: int) -> bool:
         """Add and track a new MWA ASVO job, submitting if not already submitted.
 
         Args:
             request_id: The request ID for this job.
             obs_id: The observation ID for this job.
+
+        Returns:
+            bool: True on successful adding of a job, False if any issue occurred (or job not needed to be added)
 
         Raises:
             GiantSquidMWAASVOOutageException: If MWA ASVO is experiencing an outage.
@@ -604,16 +607,20 @@ class MWAXCalvinController:
                         None,
                         None,
                     )
+                    return True
+
                 except Exception:
                     logger.exception("Unable to update calibration_request table")
                     self.database_errors += 1
+                    return False
 
             except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
                 # Handle me!
                 logger.warning(
                     f"RequestID: {request_id} ObsID: {obs_id} Cannot submit new download job: MWA ASVO has an outage"
                 )
-                return
+                return False
+
             except Exception as e:
                 # Some other fatal error occurred, let's log it and update the db
                 error_message = f"Error submitting job for ObsID {obs_id} RequestID {request_id}."
@@ -630,7 +637,10 @@ class MWAXCalvinController:
                     error_message,
                 )
                 self.giant_squid_errors += 1
-                return
+                return False
+        else:
+            # This job didn't need to be added
+            return False
 
     def mwa_asvo_update_tracked_jobs(self):
         """Update the status of all tracked MWA ASVO jobs.
