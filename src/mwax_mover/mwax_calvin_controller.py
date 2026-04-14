@@ -187,6 +187,13 @@ class MWAXCalvinController:
         Creates calibration requests for unattempted observations, retrieves new
         requests, and submits them to SLURM. Also updates MWA ASVO job statuses.
         """
+        last_time: float = 0
+
+        # Every 20 seconds, update the slurm queue size. The mwa_asvo_vis_jobs_in_progress is upadted each loop as it is effectively a no op
+        if time.time() - last_time >= 20:
+            self.slurm_queue_size = count_slurm_asvo_jobs()
+        self.mwa_asvo_vis_jobs_in_progress = self.mwax_asvo_helper.get_in_progress_asvo_job_count()
+
         # Look at the schedule and create cal requests for any unattempted calibrator observations
         try:
             self.realtime_create_requests_for_unattempted_cal_obs()
@@ -195,31 +202,42 @@ class MWAXCalvinController:
             self.database_errors += 1
 
         # get new requests
+        realtime_requests_list: list[CalibrationRequest] = []
+        asvo_requests_list: list[CalibrationRequest] = []
+
         try:
             realtime_requests_list, asvo_requests_list = self.get_new_calibration_requests()
+        except Exception:
+            logger.exception("Error retrieving new calibration requests")
+            self.database_errors += 1
 
-            # Handle realtime requests first!
-            for cal_request in realtime_requests_list:
-                self.realtime_submit_to_slurm(cal_request)
+        # Handle realtime requests first!
+        for cal_request in realtime_requests_list:
+            self.realtime_submit_to_slurm(cal_request)
 
-            # now handle ASVO
-            if self.mwax_asvo_helper.mwa_asvo_outage_datetime:
-                # There was an outage at some point.
-                # If it's been long enough reset the outage and retry
-                elapsed: timedelta = datetime.now() - self.mwax_asvo_helper.mwa_asvo_outage_datetime
-                if elapsed.total_seconds() >= self.mwa_asvo_outage_check_seconds:
-                    # Reset the MWA ASVO outage so we retry
-                    self.mwax_asvo_helper.mwa_asvo_outage_datetime = None
+        # now handle ASVO if we don't have an outage
+        if self.mwax_asvo_helper.mwa_asvo_outage_datetime is not None:
+            # There was an outage at some point.
+            # If it's been long enough reset the outage and retry
+            elapsed: timedelta = datetime.now() - self.mwax_asvo_helper.mwa_asvo_outage_datetime
+            if elapsed.total_seconds() >= self.mwa_asvo_outage_check_seconds:
+                # Reset the MWA ASVO outage so we retry
+                self.mwax_asvo_helper.mwa_asvo_outage_datetime = None
 
-            # GO and add jobs up to the limit
+        # We repeat this check here since above we might have reset the outage
+        # GO and add jobs up to the limit
+        if self.mwax_asvo_helper.mwa_asvo_outage_datetime is not None:
             requests_queued = 0
+            # we keep our own local var here so we don't go over the limit
+            vis_jobs_in_progress = self.mwa_asvo_vis_jobs_in_progress
             for cal_request in asvo_requests_list:
                 # For mwa_asvo, if we are not already dealing with this obsid,
                 # AND we are below our asvo job limit add it!
                 # This prevents us pulling in dupes
-                if self.mwax_asvo_helper.get_in_progress_asvo_job_count() < self.max_in_progress_asvo_jobs:
+                if vis_jobs_in_progress < self.max_in_progress_asvo_jobs:
                     try:
                         self.mwa_asvo_add_new_asvo_job(cal_request.request_id, cal_request.obs_id)
+                        vis_jobs_in_progress += 1
                     except Exception:
                         logger.exception("Error submitting asvo slurm job")
                         self.slurm_errors += 1
@@ -230,12 +248,7 @@ class MWAXCalvinController:
             # Now update the value in self- the health loop will report this number
             self.mwa_asvo_calibration_requests_queued = requests_queued
 
-        except Exception:
-            logger.exception("Error retrieving new calibration requests")
-            self.database_errors += 1
-
-        # For mwa_asvo requests, if we're not in an MWA ASVO outage, update jobs check for ready ones
-        if self.mwax_asvo_helper.mwa_asvo_outage_datetime is None:
+            # For mwa_asvo requests, if we're not in an MWA ASVO outage, update jobs check for ready ones
             self.mwa_asvo_update_tracked_jobs()
             self.mwa_asvo_submit_ready_asvo_jobs_to_slurm()
 
@@ -426,16 +439,8 @@ class MWAXCalvinController:
         Runs in a separate thread and sends status information every second while
         the controller is running.
         """
-        last_time: float = 0.0
 
         while self.running:
-            now_time = time.time()
-            # Every 10 seconds update the slurm queue size and the asvo queue size
-            if now_time - last_time >= 10:
-                self.slurm_queue_size = count_slurm_asvo_jobs()
-                self.mwa_asvo_vis_jobs_in_progress = self.mwax_asvo_helper.get_in_progress_asvo_job_count()
-                last_time = now_time
-
             # Code to run by the health thread
             status_dict = self.get_status()
 
