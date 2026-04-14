@@ -187,13 +187,6 @@ class MWAXCalvinController:
         Creates calibration requests for unattempted observations, retrieves new
         requests, and submits them to SLURM. Also updates MWA ASVO job statuses.
         """
-        last_time: float = 0
-
-        # Every 20 seconds, update the slurm queue size. The mwa_asvo_vis_jobs_in_progress is upadted each loop as it is effectively a no op
-        if time.time() - last_time >= 20:
-            self.slurm_queue_size = count_slurm_asvo_jobs()
-        self.mwa_asvo_vis_jobs_in_progress = self.mwax_asvo_helper.get_in_progress_asvo_job_count()
-
         # Look at the schedule and create cal requests for any unattempted calibrator observations
         try:
             self.realtime_create_requests_for_unattempted_cal_obs()
@@ -441,6 +434,9 @@ class MWAXCalvinController:
         """
 
         while self.running:
+            # Update the jobs in progress
+            self.mwa_asvo_vis_jobs_in_progress = self.mwax_asvo_helper.get_in_progress_asvo_job_count()
+
             # Code to run by the health thread
             status_dict = self.get_status()
 
@@ -842,6 +838,10 @@ class MWAXCalvinController:
         SECS_PER_INTERVAL: int = 5
 
         if self.running:
+            # Poll slurm each time this is called (once per 120 seconds - based on current cfg file)
+            self.slurm_queue_size = count_slurm_asvo_jobs()
+            last_slurm_queue_update: float = time.time()
+
             if seconds <= SECS_PER_INTERVAL:
                 time.sleep(seconds)
             else:
@@ -850,6 +850,10 @@ class MWAXCalvinController:
                 while self.running and integer_intervals > 0:
                     time.sleep(SECS_PER_INTERVAL)
                     integer_intervals -= 1
+
+                    if time.time() - last_slurm_queue_update > 20:
+                        self.slurm_queue_size = count_slurm_asvo_jobs()
+                        last_slurm_queue_update = time.time()
 
                 if self.running and remainder_secs > 0:
                     time.sleep(remainder_secs)
