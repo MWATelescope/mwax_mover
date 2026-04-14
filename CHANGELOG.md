@@ -1,6 +1,6 @@
 # Changelog
 
-# 1.6.2-5 14-Apr-2026
+# 1.6.2-7 14-Apr-2026
 
 * calvin_controller: limit number of ASVO jobs pulled in based on comparing the in progress ASVO download jobs to the config file value (max_in_progress_asvo_jobs).
 * calvin_controller: send realtime jobs to the priority partition or if full, the gpu partition. Send ASVO jobs to the gpu partition with a higher nice value to lower priority.

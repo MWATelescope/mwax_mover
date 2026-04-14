@@ -251,6 +251,7 @@ class MWAXCalvinController:
         Queries the database for calibrator observations that don't have requests
         yet and creates requests for them.
         """
+        logger.debug("Querying mwa database for uncalibrated realtime observations ...")
         # First get the obs's which need requests created
         obs_ids_to_request: Optional[list[int]] = get_unattempted_unrequested_cal_obsids(
             self.db_handler, self.oldest_cal_obs_id
@@ -517,6 +518,10 @@ class MWAXCalvinController:
             #
             # returned fields: list[Tuple[requestid, calid, realtime]] or None
             results = get_unattempted_calsolution_requests(self.db_handler)
+            if results is not None:
+                logger.debug(f"...Query returned {len(results)} rows (First record: {results[0]})")
+            else:
+                logger.debug("...Query returned 0 rows")
 
             if results:
                 for result in results:
