@@ -19,8 +19,6 @@ calibration form the calvin HPC cluster
    * Clean up
 """
 
-import mwax_mover.mwax_calvin_utils
-
 import argparse
 from configparser import ConfigParser
 from datetime import datetime, timedelta
@@ -41,7 +39,7 @@ from mwax_mover.mwax_db import (
     get_unattempted_unrequested_cal_obsids,
     insert_calibration_request_row,
 )
-from mwax_mover.mwax_calvin_utils import submit_sbatch, create_sbatch_script, CalvinJobType
+from mwax_mover.mwax_calvin_utils import submit_sbatch, create_sbatch_script, CalvinJobType, count_slurm_asvo_jobs
 
 # Setup root logger
 handler = logging.StreamHandler()
@@ -97,6 +95,9 @@ class MWAXCalvinController:
         self.health_multicast_ip: str = ""
         self.health_multicast_port: int = 0
         self.health_multicast_hops: int = 0
+        # We update these two only every 10 seconds (in the health thread) to not hammer the server(s)
+        self.slurm_queue_size: int = 0
+        self.mwa_asvo_vis_jobs_in_progress: int = 0
 
         self.realtime_slurm_jobs_submitted: int = 0
         self.mwa_asvo_slurm_jobs_submitted: int = 0
@@ -110,7 +111,7 @@ class MWAXCalvinController:
         self.script_path = ""
         self.oldest_cal_obs_id: int = 0
         self.max_in_progress_asvo_jobs: int = 999
-        self.mwa_asvo_jobs_waiting = 0
+        self.mwa_asvo_calibration_requests_queued = 0
 
         # giant-squid
         self.mwa_asvo_outage_check_seconds: int = 0
@@ -211,7 +212,7 @@ class MWAXCalvinController:
                     self.mwax_asvo_helper.mwa_asvo_outage_datetime = None
 
             # GO and add jobs up to the limit
-            mwa_asvo_jobs_waiting = 0
+            requests_queued = 0
             for cal_request in asvo_requests_list:
                 # For mwa_asvo, if we are not already dealing with this obsid,
                 # AND we are below our asvo job limit add it!
@@ -224,10 +225,10 @@ class MWAXCalvinController:
                         self.slurm_errors += 1
                 else:
                     # This job was passed over because we have too many in progress
-                    mwa_asvo_jobs_waiting += 1
+                    requests_queued += 1
 
             # Now update the value in self- the health loop will report this number
-            self.mwa_asvo_jobs_waiting = mwa_asvo_jobs_waiting
+            self.mwa_asvo_calibration_requests_queued = requests_queued
 
         except Exception:
             logger.exception("Error retrieving new calibration requests")
@@ -425,7 +426,16 @@ class MWAXCalvinController:
         Runs in a separate thread and sends status information every second while
         the controller is running.
         """
+        last_time: float = 0.0
+
         while self.running:
+            now_time = time.time()
+            # Every 10 seconds update the slurm queue size and the asvo queue size
+            if now_time - last_time >= 10:
+                self.slurm_queue_size = count_slurm_asvo_jobs()
+                self.mwa_asvo_vis_jobs_in_progress = self.mwax_asvo_helper.get_in_progress_asvo_job_count()
+                last_time = now_time
+
             # Code to run by the health thread
             status_dict = self.get_status()
 
@@ -460,9 +470,9 @@ class MWAXCalvinController:
             "version": version.get_mwax_mover_version_string(),
             "host": self.hostname,
             "running": self.running,
-            "slurm_queue": mwax_mover.mwax_calvin_utils.count_slurm_asvo_jobs(),
-            "mwa_asvo_jobs_waiting": self.mwa_asvo_jobs_waiting,
-            "mwa_asvo_jobs_in_progress": self.mwax_asvo_helper.get_in_progress_asvo_job_count(),
+            "slurm_queue": self.slurm_queue_size,
+            "mwa_asvo_calibration_requests_queued": self.mwa_asvo_calibration_requests_queued,
+            "mwa_asvo_vis_jobs_in_progress": self.mwa_asvo_vis_jobs_in_progress,
             "realtime_slurm_jobs_submitted": self.realtime_slurm_jobs_submitted,
             "mwa_asvo_slurm_jobs_submitted": self.mwa_asvo_slurm_jobs_submitted,
             "giant_squid_errors": self.giant_squid_errors,

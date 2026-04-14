@@ -207,7 +207,11 @@ class MWAASVOHelper:
 
         Returns:
             the number of ASVO jobs which are in progress"""
-        return sum(1 for item in self.current_asvo_jobs if item.is_in_progress())
+        try:
+            return sum(1 for item in self.current_asvo_jobs if item.is_in_progress())
+        except Exception:
+            logger.exception("get_in_progress_asvo_job_count() failed")
+            return -1
 
     def submit_download_job(self, request_id: int, obs_id: int) -> MWAASVOJob:
         """Submit an MWA ASVO download job and track it internally.

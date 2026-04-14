@@ -2331,12 +2331,17 @@ def count_slurm_asvo_jobs() -> int:
     Returns:
         The number of matching jobs, or -1 if the command failed.
     """
-    success, output = run_command_ext(
-        command="squeue --format=%j --noheader",
-        numa_node=None,
-    )
+    try:
+        success, output = run_command_ext(
+            command="squeue --format=%j --noheader",
+            numa_node=None,
+        )
+    except Exception:
+        logger.exception("count_slurm_asvo_jobs() failed")
+        return -1
 
     if not success:
+        logger.error("count_slurm_asvo_jobs() retured -1")
         return -1
 
     return sum(1 for line in output.splitlines() if line.startswith("asvo"))

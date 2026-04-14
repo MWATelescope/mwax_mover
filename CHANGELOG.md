@@ -1,10 +1,13 @@
 # Changelog
 
-# 1.6.2 14-Apr-2026
+# 1.6.2-3 14-Apr-2026
 
 * calvin_controller: limit number of ASVO jobs pulled in based on comparing the in progress ASVO download jobs to the config file value (max_in_progress_asvo_jobs).
 * calvin_controller: send realtime jobs to the priority partition or if full, the gpu partition. Send ASVO jobs to the gpu partition with a higher nice value to lower priority.
-* calvin_controller: added 3 new health attributes: "slurm_queue" (the number of slurm jobs queued or running)"mwa_asvo_jobs_waiting" (the number of calvin MWA ASVO jobs which have been held back due to the configured mwax in progress job limit) and "mwa_asvo_jobs_in_progress" (the number of MWA ASVO jobs for calvin which are not completed, error or cancelled)
+* calvin_controller: added 3 new health attributes: 
+  * "slurm_queue" (the number of slurm jobs queued or running)
+  * "mwa_asvo_calibration_requests_queued" (the number of MWA ASVO calibration requests which have been held back due to the configured mwax in progress job limit)
+  * "mwa_asvo_vis_jobs_in_progress" (the number of MWA ASVO visibility jobs for calvin which are not completed, error or cancelled)
 
 # 1.6.1 10-Apr-2026
 
