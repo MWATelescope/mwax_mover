@@ -836,12 +836,10 @@ class MWAXCalvinController:
             seconds: Duration to sleep in seconds.
         """
         SECS_PER_INTERVAL: int = 5
+        SLURM_REFRESH_INTERVAL: int = 10
 
         if self.running:
-            # Poll slurm each time this is called (once per 120 seconds - based on current cfg file)
-            self.slurm_queue_size = count_slurm_asvo_jobs()
-            last_slurm_queue_update: float = time.time()
-
+            last_slurm_queue_update = 0
             if seconds <= SECS_PER_INTERVAL:
                 time.sleep(seconds)
             else:
@@ -851,7 +849,8 @@ class MWAXCalvinController:
                     time.sleep(SECS_PER_INTERVAL)
                     integer_intervals -= 1
 
-                    if time.time() - last_slurm_queue_update > 20:
+                    if time.time() - last_slurm_queue_update > SLURM_REFRESH_INTERVAL:
+                        # Only update the slurm jobs every 10 seconds so we don't kill the server
                         self.slurm_queue_size = count_slurm_asvo_jobs()
                         last_slurm_queue_update = time.time()
 
