@@ -901,7 +901,7 @@ class MWAXCalvinProcessor:
             "version": version.get_mwax_mover_version_string(),
             "host": self.hostname,
             "running": self.running,
-            "slurm job_id": self.slurm_job_id,
+            "slurm_job_id": self.slurm_job_id,
             "obs_id": self.obs_id,
             "job_type": self.job_type.value,
             "task": self.current_task_name,
