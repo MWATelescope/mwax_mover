@@ -30,7 +30,7 @@ from mwax_mover import (
     mwax_command,
 )
 from mwax_mover.mwa_archiver import copy_file_rsync
-from mwax_mover.mwax_calvin_utils import CalvinJobType, estimate_birli_output_bytes
+from mwax_mover.mwax_calvin_utils import CalvinJobType, estimate_birli_output_bytes, parse_solution_channels
 from mwax_mover.mwax_calvin_solutions import process_solutions
 from mwax_mover.mwax_db import (
     MWAXDBHandler,
@@ -776,14 +776,27 @@ class MWAXCalvinProcessor:
                 if len(aocal_files) < len(self.metafits_context.metafits_coarse_chans):
                     logger.info("Splitting each into 1 aocal file per coarse channel.")
 
+                    all_rec_chans = [ch.rec_chan_number for ch in self.metafits_context.metafits_coarse_chans]
+
                     for aocal_file in aocal_files:
+                        # Figure out which channels this file has
+                        result = parse_solution_channels(aocal_file)
+
+                        if result is None:
+                            this_band_chans = all_rec_chans
+                        else:
+                            this_band_chans = [ch for ch in all_rec_chans if result[0] <= ch <= result[1]]
+
                         logger.debug(f"Splitting {aocal_file}...")
-                        out_aocal_files = mwax_calvin_utils.split_aocal_file_into_coarse_channels(
+                        this_band_aocal_files = mwax_calvin_utils.split_aocal_file_into_coarse_channels(
                             self.obs_id,
                             aocal_file,
-                            [c.rec_chan_number for c in self.metafits_context.metafits_coarse_chans],
+                            this_band_chans,
                             self.job_output_path,
                         )
+
+                        for f in this_band_aocal_files:
+                            out_aocal_files.append(f)
 
                     for f in out_aocal_files:
                         # Copy aocal files to the aocal_export directory

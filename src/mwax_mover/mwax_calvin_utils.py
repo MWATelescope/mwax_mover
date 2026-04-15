@@ -2600,31 +2600,92 @@ def get_solution_fits_filename(solutions_dir: str, obs_id: int, rec_chan: int) -
     Returns:
         Full path to matching solution file, or None if not found.
     """
-    # Hyperdrive solutions files come in these flavours:
-    # 1. obsid_solutions.fits  <- contains all 24 channels
-    # 2. obsid_chNNN_solutions.fits <- contains 1 channel (NOT zero padded) e.g. N, NN, NNN are all valid
-    # 3. obsid_chNNN-MMM_solutions.fits <- contains >1 and <=12 channels (NOT zero padded) e.g. M, MM, MMM and N, NN, NNN are all valid
-    #
-    # Flavour 1: obsid_solutions.fits — covers all 24 channels
-    flavour1 = os.path.join(solutions_dir, f"{obs_id}_solutions.fits")
-    if os.path.exists(flavour1):
-        return flavour1
+    candidates = get_sorted_solution_files(solutions_dir, obs_id, "fits")
 
-    # Flavour 2: obsid_chNNN_solutions.fits — single channel, no zero padding
-    flavour2 = os.path.join(solutions_dir, f"{obs_id}_ch{rec_chan}_solutions.fits")
-    if os.path.exists(flavour2):
-        return flavour2
+    for filepath in candidates:
+        channels = parse_solution_channels(filepath)
 
-    # Flavour 3: obsid_chNNN-MMM_solutions.fits — range of channels
-    # Scan for all matching range files and check if rec_chan falls within [N, M]
-    pattern = os.path.join(solutions_dir, f"{obs_id}_ch*-*_solutions.fits")
-    for filepath in glob.glob(pattern):
-        filename = os.path.basename(filepath)
-        match = re.match(rf"^{obs_id}_ch(\d+)-(\d+)_solutions\.fits$", filename)
-        if match:
-            chan_start = int(match.group(1))
-            chan_end = int(match.group(2))
-            if chan_start <= rec_chan <= chan_end:
-                return filepath
+        if channels is None:
+            return filepath
+
+        chan_start, chan_end = channels
+        if chan_start <= rec_chan <= chan_end:
+            return filepath
 
     return None
+
+
+def parse_solution_channels(filename: str) -> Optional[tuple[int, int]]:
+    """Parse channel range from a hyperdrive solution filename.
+
+    Recognises these filename flavours (with .fits or .bin extension):
+    1. obsid_solutions.{ext}           -> None (all 24 channels)
+    2. obsid_chNNN_solutions.{ext}     -> (NNN, NNN)
+    3. obsid_chNNN-MMM_solutions.{ext} -> (NNN, MMM)
+
+    Channel numbers are not zero-padded.
+
+    Args:
+        filename: Filename or full path to a solution file.
+
+    Returns:
+        (start_channel, end_channel) tuple, or None if the file
+        covers all channels (flavour 1).
+
+    Raises:
+        ValueError: If the filename does not match any known flavour.
+    """
+    basename = os.path.basename(filename)
+
+    # Flavour 1: obsid_solutions.{fits,bin} — all 24 channels
+    if re.match(r"^\d+_solutions\.(?:fits|bin)$", basename):
+        return None
+
+    # Flavour 2: obsid_chNNN_solutions.{fits,bin} — single channel
+    match = re.match(r"^\d+_ch(\d+)_solutions\.(?:fits|bin)$", basename)
+    if match:
+        chan = int(match.group(1))
+        return (chan, chan)
+
+    # Flavour 3: obsid_chNNN-MMM_solutions.{fits,bin} — channel range
+    match = re.match(r"^\d+_ch(\d+)-(\d+)_solutions\.(?:fits|bin)$", basename)
+    if match:
+        return (int(match.group(1)), int(match.group(2)))
+
+    raise ValueError(f"The channels for {basename} could not be determined")
+
+
+def get_sorted_solution_files(directory: str, obs_id: int, extension: str = "fits") -> list[str]:
+    """Return solution files sorted numerically by channel number.
+
+    Sorting order:
+      obsid_solutions.{ext}             -> channel 0 (sorts first)
+      obsid_ch95_solutions.{ext}        -> channel 95
+      obsid_ch100-112_solutions.{ext}   -> channel 100 (uses range start)
+
+    Unrecognised filenames are sorted with channel 0.
+
+    Args:
+        directory: Directory to search for solution files.
+        obs_id: Observation ID to filter by.
+        extension: File extension to match ("fits" or "bin").
+
+    Returns:
+        List of full paths, sorted by channel number then path.
+    """
+
+    def _sort_key(path: str) -> tuple[int, str]:
+        try:
+            channels = parse_solution_channels(path)
+        except ValueError:
+            return (0, path)
+
+        if channels is None:
+            return (0, path)
+
+        return (channels[0], path)
+
+    return sorted(
+        glob.glob(os.path.join(directory, f"{obs_id}_*solutions.{extension}")),
+        key=_sort_key,
+    )

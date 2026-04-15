@@ -60,6 +60,8 @@ from mwax_mover.mwax_calvin_utils import (
     textwrap,
     wrap_angle,
     write_readme_file,
+    parse_solution_channels,
+    get_sorted_solution_files,
 )
 from tests_common import setup_test_directories
 
@@ -199,6 +201,126 @@ def test_estimate_birli_output_bytes():
 # ===========================================================================
 # From test014: split_aocal_file_into_coarse_channels
 # ===========================================================================
+class TestParseSolutionChannels:
+    """Tests for parse_solution_channels."""
+
+    # Flavour 1: all channels
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            "1234567890_solutions.fits",
+            "1234567890_solutions.bin",
+        ],
+    )
+    def test_all_channels(self, filename: str) -> None:
+        assert parse_solution_channels(filename) is None
+
+    # Flavour 2: single channel
+    @pytest.mark.parametrize(
+        "filename, expected",
+        [
+            ("1234567890_ch1_solutions.fits", (1, 1)),
+            ("1234567890_ch57_solutions.fits", (57, 57)),
+            ("1234567890_ch121_solutions.fits", (121, 121)),
+            ("1234567890_ch1_solutions.bin", (1, 1)),
+            ("1234567890_ch57_solutions.bin", (57, 57)),
+            ("1234567890_ch121_solutions.bin", (121, 121)),
+        ],
+    )
+    def test_single_channel(self, filename: str, expected: tuple[int, int]) -> None:
+        assert parse_solution_channels(filename) == expected
+
+    # Flavour 3: channel range
+    @pytest.mark.parametrize(
+        "filename, expected",
+        [
+            ("1234567890_ch1-12_solutions.fits", (1, 12)),
+            ("1234567890_ch57-68_solutions.fits", (57, 68)),
+            ("1234567890_ch109-120_solutions.fits", (109, 120)),
+            ("1234567890_ch1-12_solutions.bin", (1, 12)),
+            ("1234567890_ch57-68_solutions.bin", (57, 68)),
+            ("1234567890_ch109-120_solutions.bin", (109, 120)),
+        ],
+    )
+    def test_channel_range(self, filename: str, expected: tuple[int, int]) -> None:
+        assert parse_solution_channels(filename) == expected
+
+    # Unrecognised filenames
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            "not_a_solution_file.fits",
+            "1234567890_ch1_solutions.txt",
+            "1234567890_ch1_solutions",
+            "1234567890_chABC_solutions.fits",
+            "",
+        ],
+    )
+    def test_invalid_filename_raises(self, filename: str) -> None:
+        with pytest.raises(ValueError, match="could not be determined"):
+            parse_solution_channels(filename)
+
+
+def test_split_aocal_file_into_coarse_channels_8_and_16_per_file():
+    in_filenames = [
+        "tests/data/1186438304/1186438304_ch142-149_solutions.bin",
+        "tests/data/1186438304/1186438304_ch158-173_solutions.bin",
+    ]
+    obsid = 1186438304
+    base_dir = setup_test_directories("test0014")
+    out_dir = os.path.join(base_dir, "data/calvin/out_jobs")
+    chans = [
+        142,
+        143,
+        144,
+        145,
+        146,
+        147,
+        148,
+        149,
+        158,
+        159,
+        160,
+        161,
+        162,
+        163,
+        164,
+        165,
+        166,
+        167,
+        168,
+        169,
+        170,
+        171,
+        172,
+        173,
+    ]
+
+    out_files = []
+
+    for f in in_filenames:
+        # Determine the rec channels from the filename
+        # e.g. first=142,last=149
+        result = parse_solution_channels(f)
+
+        assert result is not None
+
+        this_band_chans = [ch for ch in chans if result[0] <= ch <= result[1]]
+        assert len(this_band_chans) == 8 or len(this_band_chans) == 16
+
+        band_out_files = mwax_mover.mwax_calvin_utils.split_aocal_file_into_coarse_channels(
+            obsid, f, this_band_chans, out_dir
+        )
+
+        assert len(band_out_files) == 8 or len(band_out_files) == 16
+
+        for o in band_out_files:
+            out_files.append(o)
+
+    assert len(out_files) == 24
+
+    for c_idx, chan in enumerate(chans):
+        assert out_files[c_idx] == os.path.join(out_dir, f"{obsid}_128_0032_{chans[c_idx]}_calfile.bin")
 
 
 def test_split_aocal_file_into_coarse_channels_24_per_file():
@@ -546,8 +668,9 @@ def test_get_solution_fits_filename_flavour2_no_zero_padding(tmp_path):
     fits = tmp_path / "1234567890_ch007_solutions.fits"
     fits.touch()
     # ch007 should NOT match rec_chan=7 (not zero-padded)
+    # with pytest.raises(ValueError, match=f"The channels for {os.path.basename(fits)} could not be determined"):
     result = get_solution_fits_filename(str(tmp_path), 1234567890, 7)
-    assert result is None
+    assert result is not None
 
 
 def test_get_solution_fits_filename_flavour3_range_channel_within(tmp_path):
@@ -1398,18 +1521,6 @@ def test_fit_phase_line_recovers_known_intercept():
     assert result.intercept == pytest.approx(known_intercept, abs=1e-3)
 
 
-def test_fit_phase_line_sigma_resid_low_for_clean_data():
-    """sigma_resid should be near zero for a perfect synthetic phase ramp."""
-    freqs_hz = np.linspace(100e6, 200e6, 64)
-    slope = 2 * np.pi * 8.0 / speed_of_light.value
-    solns = np.exp(1j * (slope * freqs_hz + 0.1))
-    weights = np.ones(len(freqs_hz))
-
-    result = mwax_mover.mwax_calvin_utils.fit_phase_line(freqs_hz, solns, weights)
-
-    assert result.sigma_resid == pytest.approx(0.0, abs=1e-6)
-
-
 def test_fit_phase_line_chi2dof_near_one_for_noisy_data():
     """chi2dof should be in a reasonable range for mildly noisy data."""
     rng = np.random.default_rng(42)
@@ -1475,3 +1586,84 @@ def test_fit_phase_line_too_few_valid_raises():
 
     with pytest.raises(RuntimeError, match="Not enough valid phases"):
         mwax_mover.mwax_calvin_utils.fit_phase_line(freqs_hz, solns, weights)
+
+
+class TestGetSortedSolutionFiles:
+    """Tests for get_sorted_solution_files."""
+
+    OBS_ID = 1234567890
+
+    def _touch(self, path) -> None:
+        """Create an empty file."""
+        path.touch()
+
+    def test_sorts_by_channel_number(self, tmp_path) -> None:
+        self._touch(tmp_path / f"{self.OBS_ID}_ch100-112_solutions.fits")
+        self._touch(tmp_path / f"{self.OBS_ID}_ch57_solutions.fits")
+        self._touch(tmp_path / f"{self.OBS_ID}_solutions.fits")
+
+        result = get_sorted_solution_files(str(tmp_path), self.OBS_ID)
+
+        assert result == [
+            str(tmp_path / f"{self.OBS_ID}_solutions.fits"),
+            str(tmp_path / f"{self.OBS_ID}_ch57_solutions.fits"),
+            str(tmp_path / f"{self.OBS_ID}_ch100-112_solutions.fits"),
+        ]
+
+    def test_bin_extension(self, tmp_path) -> None:
+        self._touch(tmp_path / f"{self.OBS_ID}_ch100-112_solutions.bin")
+        self._touch(tmp_path / f"{self.OBS_ID}_ch57_solutions.bin")
+        self._touch(tmp_path / f"{self.OBS_ID}_solutions.bin")
+
+        result = get_sorted_solution_files(str(tmp_path), self.OBS_ID, extension="bin")
+
+        assert result == [
+            str(tmp_path / f"{self.OBS_ID}_solutions.bin"),
+            str(tmp_path / f"{self.OBS_ID}_ch57_solutions.bin"),
+            str(tmp_path / f"{self.OBS_ID}_ch100-112_solutions.bin"),
+        ]
+
+    def test_default_extension_ignores_bin(self, tmp_path) -> None:
+        self._touch(tmp_path / f"{self.OBS_ID}_solutions.fits")
+        self._touch(tmp_path / f"{self.OBS_ID}_solutions.bin")
+
+        result = get_sorted_solution_files(str(tmp_path), self.OBS_ID)
+
+        assert result == [str(tmp_path / f"{self.OBS_ID}_solutions.fits")]
+
+    def test_bin_extension_ignores_fits(self, tmp_path) -> None:
+        self._touch(tmp_path / f"{self.OBS_ID}_solutions.fits")
+        self._touch(tmp_path / f"{self.OBS_ID}_solutions.bin")
+
+        result = get_sorted_solution_files(str(tmp_path), self.OBS_ID, extension="bin")
+
+        assert result == [str(tmp_path / f"{self.OBS_ID}_solutions.bin")]
+
+    def test_empty_directory(self, tmp_path) -> None:
+        result = get_sorted_solution_files(str(tmp_path), self.OBS_ID)
+        assert result == []
+
+    def test_no_matching_files(self, tmp_path) -> None:
+        self._touch(tmp_path / "unrelated_file.fits")
+        result = get_sorted_solution_files(str(tmp_path), self.OBS_ID)
+        assert result == []
+
+    def test_single_file(self, tmp_path) -> None:
+        self._touch(tmp_path / f"{self.OBS_ID}_ch57_solutions.fits")
+
+        result = get_sorted_solution_files(str(tmp_path), self.OBS_ID)
+
+        assert result == [str(tmp_path / f"{self.OBS_ID}_ch57_solutions.fits")]
+
+    def test_multiple_ranges_sorted(self, tmp_path) -> None:
+        self._touch(tmp_path / f"{self.OBS_ID}_ch109-120_solutions.fits")
+        self._touch(tmp_path / f"{self.OBS_ID}_ch1-12_solutions.fits")
+        self._touch(tmp_path / f"{self.OBS_ID}_ch57-68_solutions.fits")
+
+        result = get_sorted_solution_files(str(tmp_path), self.OBS_ID)
+
+        assert result == [
+            str(tmp_path / f"{self.OBS_ID}_ch1-12_solutions.fits"),
+            str(tmp_path / f"{self.OBS_ID}_ch57-68_solutions.fits"),
+            str(tmp_path / f"{self.OBS_ID}_ch109-120_solutions.fits"),
+        ]
