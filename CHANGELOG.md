@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.6.10 15-Apr-2026
+
+* calvin_controller: Fixed bug where asvo helper was removing old jobs from a list while iterating over it causing issues.
+
 # 1.6.2-9 14-Apr-2026
 
 * calvin_controller: limit number of ASVO jobs pulled in based on comparing the in progress ASVO download jobs to the config file value (max_in_progress_asvo_jobs).

@@ -338,6 +338,8 @@ class MWAASVOHelper:
         #
         # TODO: hmm we may want to update the database to say it's failed?
         #
+        jobs_to_delete: list[MWAASVOJob] = []
+
         for job in self.current_asvo_jobs:
             if job.last_seen_datetime != update_datetime:
                 # We didn't see this job
@@ -346,7 +348,17 @@ class MWAASVOHelper:
                     f"{job}: removed - {job.job_state.value} {job.download_url} as it was no longer "
                     f"seen by giant-squid-list. {update_datetime} vs {job.last_seen_datetime}"
                 )
-                self.current_asvo_jobs.remove(job)
+                jobs_to_delete.append(job)
+
+        # Now do the delete/removal
+        for job_to_delete in jobs_to_delete:
+            # We didn't see this job
+            # We should log it and remove it
+            logger.warning(
+                f"{job}: removed - {job.job_state.value} {job.download_url} as it was no longer "
+                f"seen by giant-squid-list. {update_datetime} vs {job.last_seen_datetime}"
+            )
+            self.current_asvo_jobs.remove(job_to_delete)
 
     def _run_giant_squid(self, subcommand: str, args: str, timeout_seconds: int) -> str:
         """Execute a giant-squid command and return its output.
