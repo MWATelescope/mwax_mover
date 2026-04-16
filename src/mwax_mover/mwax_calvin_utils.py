@@ -2221,10 +2221,12 @@ def create_sbatch_script(
         job_name = f"real{obs_id}"
         partition = "priority,gpu"
         nice = ""  # ommiting nice keeps the priority high
+        wall_time = "04:00:00"
     else:
         job_name = f"asvo{obs_id}"
         partition = "gpu"
         nice = "#SBATCH --nice=1000"  # lower priority than realtime jobs
+        wall_time = "08:00:00"  # allow extra time for downloading from ASVO
 
     job_script = f"""#!/bin/bash
 #SBATCH --partition={partition}
@@ -2234,7 +2236,7 @@ def create_sbatch_script(
 #SBATCH --gpus-per-task=1
 #SBATCH --exclusive # use all cpus
 #SBATCH --mem=900G
-#SBATCH --time=04:00:00
+#SBATCH --time={wall_time}
 #SBATCH --account=mwa
 #SBATCH --job-name={job_name}
 #SBATCH --signal=USR1@360
@@ -2672,7 +2674,11 @@ def get_sorted_solution_files(directory: str, obs_id: int, extension: str = "fit
 
     Returns:
         List of full paths, sorted by channel number then path.
+        Or raises ValueError exception if extension doesn't match ("fits" or "bin")
     """
+    # Check that the extension doesn't include a "."
+    if extension != "fits" and extension != "bin":
+        raise ValueError("get_sorted_solution_files() extension should be 'fits' or 'bin'")
 
     def _sort_key(path: str) -> tuple[int, str]:
         try:

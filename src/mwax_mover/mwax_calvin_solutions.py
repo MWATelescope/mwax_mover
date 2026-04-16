@@ -6,8 +6,6 @@ inserts the resulting calibration fit and solution records into the MWA metadata
 database.
 """
 
-import re
-
 import glob
 import logging
 import os
@@ -31,6 +29,7 @@ from mwax_mover.mwax_calvin_utils import (
     process_phase_fits,
     process_gain_fits,
     write_readme_file,
+    get_sorted_solution_files,
 )
 from mwax_mover.version import get_mwax_mover_version_string
 
@@ -76,32 +75,7 @@ def process_solutions(
 
         logger.debug(f"{input_data_path} - {metafits_files=}")
 
-        def _solution_sort_key(path: str) -> tuple[int, str]:
-            """Sort solution files numerically by channel number if present.
-
-            Handles filenames like:
-              obsid_solutions.fits          -> channel 0 (sorts first)
-              obsid_ch95_solutions.fits     -> channel 95
-              obsid_ch100-112_solutions.fits -> channel 100 (uses range start)
-            Falls back to lexicographic sort on the full path for any
-            unrecognised format.
-            """
-            fname = os.path.basename(path)
-            # Flavour 2: single channel  e.g. obsid_ch95_solutions.fits
-            m = re.search(r"_ch(\d+)_solutions\.fits$", fname)
-            if m:
-                return (int(m.group(1)), path)
-            # Flavour 3: channel range  e.g. obsid_ch100-112_solutions.fits
-            m = re.search(r"_ch(\d+)-\d+_solutions\.fits$", fname)
-            if m:
-                return (int(m.group(1)), path)
-            # Flavour 1: all-channel file  e.g. obsid_solutions.fits — sorts first
-            return (0, path)
-
-        fits_solution_files = sorted(
-            glob.glob(os.path.join(output_data_path, "*_solutions.fits")),
-            key=_solution_sort_key,
-        )
+        fits_solution_files = get_sorted_solution_files(output_data_path, obs_id, "fits")
 
         logger.debug(f"{output_data_path} - uploading {fits_solution_files=}")
 

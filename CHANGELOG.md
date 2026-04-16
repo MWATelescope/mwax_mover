@@ -1,9 +1,10 @@
 # Changelog
 
-# 1.6.10-11 15-Apr-2026
+# 1.6.10-12 15-Apr-2026
 
 * calvin_controller: Fixed bug where asvo helper was removing old jobs from a list while iterating over it causing issues.
 * calvin_processor: Fixed Unhandled Exception: cannot reshape array of size 524288 into shape (1,128,24,21,4,2)- code was not handling picket fence correctly
+* calvin_controller: Give asvo jobs more wall time as they have to download large files from Pawsey
 
 # 1.6.2-9 14-Apr-2026
 
