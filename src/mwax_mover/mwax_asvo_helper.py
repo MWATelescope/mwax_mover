@@ -7,41 +7,16 @@ timestamp, and download URL. MWAASVOJobState enumerates the possible ASVO job
 states. Typed exceptions are raised for outages and duplicate submissions.
 """
 
+from mwax_mover.utils import run_giant_squid, GiantSquidMWAASVOOutageException, GiantSquidJobAlreadyExistsException
+
 from datetime import datetime, timezone
 from enum import Enum
 import json
 import logging
 import re
-import time
 from typing import List, Optional
-from mwax_mover.mwax_command import run_command_ext
 
 logger = logging.getLogger(__name__)
-
-
-class GiantSquidException(Exception):
-    """Raised when an unknown exception is thrown when running giant-squid"""
-
-
-class GiantSquidMWAASVOOutageException(Exception):
-    """Raised when giant-squid reports that MWA ASVO is in an outage"""
-
-
-class GiantSquidJobAlreadyExistsException(Exception):
-    """Raised when giant-squid reports that an obs_id already exists in
-    the MWA ASVO queue in queued, processing or ready state"""
-
-    def __init__(self, message, job_id: int):
-        """Initialize the exception with a message and job ID.
-
-        Args:
-            message: Error message describing the exception.
-            job_id: The ID of the existing ASVO job.
-        """
-        # Call the base class constructor with the parameters it needs, but add job id
-        # for us to use!
-        super().__init__(message)
-        self.job_id: int = job_id
 
 
 class MWAASVOJobState(Enum):
@@ -230,8 +205,11 @@ class MWAASVOHelper:
         logger.info(f"{obs_id}: Submitting MWA ASVO job to dowload for request {request_id}")
 
         try:
-            stdout = self._run_giant_squid(
-                "submit-vis", f"--delivery acacia {obs_id}", self.giant_squid_submitvis_timeout_seconds
+            stdout = run_giant_squid(
+                self.path_to_giant_squid_binary,
+                "submit-vis",
+                f"--delivery acacia {obs_id}",
+                self.giant_squid_submitvis_timeout_seconds,
             )
 
             # If submitted successfully, get the new job id from stdout
@@ -292,7 +270,9 @@ class MWAASVOHelper:
         """
         # Get list of jobs with status info
         try:
-            stdout = self._run_giant_squid("list", "--json", self.giant_squid_list_timeout_seconds)
+            stdout = run_giant_squid(
+                self.path_to_giant_squid_binary, "list", "--json", self.giant_squid_list_timeout_seconds
+            )
         except GiantSquidMWAASVOOutageException:
             self.mwa_asvo_outage_datetime = datetime.now()
             # Re-raise this error
@@ -359,71 +339,6 @@ class MWAASVOHelper:
                 f"seen by giant-squid-list. {update_datetime} vs {job.last_seen_datetime}"
             )
             self.current_asvo_jobs.remove(job_to_delete)
-
-    def _run_giant_squid(self, subcommand: str, args: str, timeout_seconds: int) -> str:
-        """Execute a giant-squid command and return its output.
-
-        Args:
-            subcommand: The giant-squid subcommand (e.g., 'submit-vis', 'list').
-            args: Arguments to pass to the giant-squid command.
-            timeout_seconds: Maximum time in seconds to wait for command completion.
-
-        Returns:
-            The stdout output from the giant-squid command.
-
-        Raises:
-            GiantSquidMWAASVOOutageException: If the ASVO service is down.
-            GiantSquidException: If the command fails or returns an error code.
-        """
-        cmdline: str = f"{self.path_to_giant_squid_binary} {subcommand} {args}"
-
-        start_time = time.time()
-
-        # run giant-squid. We don't care about running on a specific numa
-        # node so we pass -1 for that
-        success, stdout = run_command_ext(cmdline, None, timeout_seconds, True)
-
-        elapsed = time.time() - start_time
-
-        logger.debug(f"_run_giant_squid: completed in {elapsed:.3f} seconds [Success={success}]")
-
-        if success:
-            return stdout
-        else:
-            # Bad return code, failure!
-
-            # Known errors have error codes:
-            # These exist in manta-ray/asvo_server/views_dispatch.py
-            # 0 = Invalid input, outage_in_progress
-            # 1 = job_limit_reached
-            # 2 = job_running_or_complete
-            # 3 = job_not_found
-            # Error code looks like this in StdOut:  "error_code": 2
-            regex_match = re.search(r'"error_code": (\d+)', stdout)
-
-            if regex_match:
-                # We found an error code in the stdout
-                error_code_str = regex_match.group(1)
-
-                raise GiantSquidException(
-                    f"_run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. "
-                    f"Error code: {error_code_str} {stdout}"
-                )
-            elif "Your job cannot be submitted as the archive location of the observation is down" in stdout:
-                raise GiantSquidMWAASVOOutageException(
-                    "Unable to communicate with MWA ASVO- the archive location is down"
-                )
-
-            elif "outage" in stdout:
-                # Outage message looks like this:
-                # 'Error: The server responded with status code 0, message:
-                # Your job cannot be submitted as there is a full outage in progress.'"
-                raise GiantSquidMWAASVOOutageException("Unable to communicate with MWA ASVO- an outage is in progress")
-            else:
-                # There was no "error_code" in stdout, so just report the whole stdout error message
-                raise GiantSquidException(
-                    f"_run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. Error: {stdout}"
-                )
 
 
 def get_job_id_from_giant_squid_stdout(stdout: str) -> int:

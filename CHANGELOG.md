@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.6.13 23-Apr-2026
+
+* calvin_processor: Get giant-squid to do the downloading (not wget) and use the retryable option (--keep-tar) which also means we need to run tar to untar it and delete the tar file when done.
+
 # 1.6.10-12 15-Apr-2026
 
 * calvin_controller: Fixed bug where asvo helper was removing old jobs from a list while iterating over it causing issues.

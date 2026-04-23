@@ -7,6 +7,13 @@ PSRDADA header parsing, Redis-based beamformer signalling, UDP multicast sending
 and config file helpers (read_config, read_optional_config, read_config_list).
 """
 
+from urllib.parse import unquote, urlparse
+
+import tarfile
+
+from mwax_mover.mwax_command import run_command_ext
+import re
+
 import sys
 
 import base64
@@ -24,11 +31,11 @@ import redis
 import shutil
 import socket
 import struct
-from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_not_exception_type
+from tenacity import retry, stop_after_attempt, wait_fixed
 import threading
 import time
 import typing
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import List
 from typing import Tuple, Optional
 import astropy.io.fits as fits
@@ -53,6 +60,31 @@ PSRDADA_COARSE_CHANNEL = "COARSE_CHANNEL"
 # This is global mutex so we don't try to create the same metafits
 # file with multiple threads
 metafits_file_lock = threading.Lock()
+
+
+class GiantSquidException(Exception):
+    """Raised when an unknown exception is thrown when running giant-squid"""
+
+
+class GiantSquidMWAASVOOutageException(Exception):
+    """Raised when giant-squid reports that MWA ASVO is in an outage"""
+
+
+class GiantSquidJobAlreadyExistsException(Exception):
+    """Raised when giant-squid reports that an obs_id already exists in
+    the MWA ASVO queue in queued, processing or ready state"""
+
+    def __init__(self, message, job_id: int):
+        """Initialize the exception with a message and job ID.
+
+        Args:
+            message: Error message describing the exception.
+            job_id: The ID of the existing ASVO job.
+        """
+        # Call the base class constructor with the parameters it needs, but add job id
+        # for us to use!
+        super().__init__(message)
+        self.job_id: int = job_id
 
 
 class MWAXSubfileDistirbutorMode(Enum):
@@ -1571,17 +1603,18 @@ def should_project_be_archived(project_id: str) -> bool:
         return True
 
 
-def call_webservice(obs_id: int, url_list: list[str], data, max_retries: int = 10, wait: int = 30) -> requests.Response:
+def call_webservice(
+    obs_id: int, url_list: list[str], data, max_retries: int = 3, timeout: int = 30
+) -> requests.Response:
     """
     Call a list of MWA web service URLs in order, retrying on transient failures.
 
     Iterates through ``url_list`` on each attempt, returning immediately on an
     HTTP 200 response. HTTP 4xx responses are treated as permanent failures and
-    are not retried (``ValueError`` is raised and excluded from tenacity retries).
+    are not retried.
     All other failures (non-200 status codes, network exceptions) cause the next
     URL to be tried; if all URLs are exhausted the attempt fails and tenacity
-    will retry the entire sequence up to ``max_retries`` times with a fixed
-    ``wait``-second delay between attempts.
+    will retry the entire sequence up to ``max_retries`` times.
 
     Note: With the default arguments (``max_retries=10``, ``wait=30``) this
     function may block for up to ~5 minutes before raising.
@@ -1592,7 +1625,7 @@ def call_webservice(obs_id: int, url_list: list[str], data, max_retries: int = 1
             with optional ``data`` parameters.
         data: Query parameters to pass to ``requests.get()``, or None.
         max_retries: Maximum number of retry attempts via tenacity. Defaults to 10.
-        wait: Seconds to wait between tenacity retry attempts. Defaults to 30.
+        timeout: Timeout to get a response from the server. Defaults to 30.
 
     Returns:
         The first successful ``requests.Response`` object (HTTP status 200).
@@ -1604,7 +1637,6 @@ def call_webservice(obs_id: int, url_list: list[str], data, max_retries: int = 1
             all retries.
     """
 
-    @retry(stop=stop_after_attempt(max_retries), wait=wait_fixed(wait), retry=retry_if_not_exception_type((ValueError)))
     def call_webservice_inner(obs_id: int, url_list: list[str], data) -> requests.Response:
         """Call each url in the list until: a response of
         200 (in which case return the response)
@@ -1612,40 +1644,54 @@ def call_webservice(obs_id: int, url_list: list[str], data, max_retries: int = 1
         i = 0
 
         while i < len(url_list):
-            url = url_list[i]
+            url: str = url_list[i]
+
+            # we increment i here so the next pass of the loop gets the other url
+            # try next url
+            i += 1
 
             logger.debug(f"{obs_id}: trying with {url} with data ({'' if data is None else data})")
 
             try:
-                response = requests.get(url, data, timeout=30)
+                response = requests.get(url, data, timeout=timeout)
 
                 if response.status_code == 200:
                     logger.debug(f"{obs_id}: returned 200 (success)")
                     return response
 
-                elif response.status_code >= 400 and response.status_code < 500:
+                elif response.status_code >= 400 and response.status_code <= 599:
+                    # 400 - 500 status code- try next url
                     error_message = f"{obs_id}: returned {response.status_code} {response.text} (failure)"
                     logger.error(error_message)
-                    raise ValueError(error_message)
 
                 else:
                     # Non-200 status code- try next url
                     logger.warning(f"{obs_id}: returned {response.status_code} {response.text} (failure)")
-            except ValueError:
-                raise
 
-            except Exception as e:
+            except Exception:
                 # Exception raised- try next url
-                logger.exception(f"{obs_id}: exception", e)
-
-            # try next url
-            i += 1
+                logger.exception(f"{obs_id}: exception")
 
         # We tried all urls without success- up to tenacity to retry X times now
         logger.error(f"{obs_id}: failed after trying {len(url_list)} urls.")
         raise requests.RequestException(f"{obs_id}: call_webservice()- failed after trying {len(url_list)} urls.")
 
-    return call_webservice_inner(obs_id, url_list, data)
+    if max_retries <= 0:
+        raise ValueError("max_retries must be >=1")
+    attempt = 0
+    err: Exception = Exception()
+
+    while attempt <= max_retries:
+        attempt += 1
+        try:
+            return_value = call_webservice_inner(obs_id, url_list, data)
+            return return_value
+        except Exception as e:
+            # Store the exception in case this is the last attempt
+            err = e
+
+    # If we got here we ran out of attempts
+    raise err
 
 
 def get_data_files_for_obsid_from_webservice(
@@ -1723,7 +1769,7 @@ def get_data_files_with_hostname_for_obsid_from_webservice(
     return file_list
 
 
-@retry(stop=stop_after_attempt(5), wait=wait_fixed(10))
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
 def remove_file(filename: str, raise_error: bool) -> bool:
     """
     Delete a file from the filesystem, with up to 5 automatic retries.
@@ -1759,7 +1805,7 @@ def remove_file(filename: str, raise_error: bool) -> bool:
 
     except Exception as delete_exception:  # pylint: disable=broad-except
         if raise_error:
-            logger.error(f"{filename}- Error deleting: {delete_exception}. Retrying up to 5 times.")
+            logger.error(f"{filename}- Error deleting: {delete_exception}. Retrying up to 3 times.")
             raise delete_exception
         else:
             logger.warning(f"{filename}- Error deleting: {delete_exception}. File may have been moved or removed.")
@@ -2119,3 +2165,131 @@ def get_gbps(size_gigabytes: float, start_time: float) -> float:
     """
     elapsed_seconds = time.time() - start_time
     return gigabytes_to_gigabits(size_gigabytes) / elapsed_seconds if elapsed_seconds > 0 else 0.0
+
+
+def run_giant_squid(path_to_giant_squid_binary: str, subcommand: str, args: str, timeout_seconds: int) -> str:
+    """Execute a giant-squid command and return its output.
+
+    Args:
+        path_to_giant_squid_binary: The fully qualiified path to giant-squid binary.
+        subcommand: The giant-squid subcommand (e.g., 'submit-vis', 'list').
+        args: Arguments to pass to the giant-squid command.
+        timeout_seconds: Maximum time in seconds to wait for command completion.
+
+    Returns:
+        The stdout output from the giant-squid command.
+
+    Raises:
+        GiantSquidMWAASVOOutageException: If the ASVO service is down.
+        GiantSquidException: If the command fails or returns an error code.
+    """
+    cmdline: str = f"{path_to_giant_squid_binary} {subcommand} {args}"
+
+    start_time = time.time()
+
+    # run giant-squid. We don't care about running on a specific numa
+    # node so we pass -1 for that
+    success, stdout = run_command_ext(cmdline, None, timeout_seconds, True)
+
+    elapsed = time.time() - start_time
+
+    logger.debug(f"run_giant_squid: completed in {elapsed:.3f} seconds [Success={success}]")
+
+    if success:
+        return stdout
+    else:
+        # Bad return code, failure!
+
+        # Known errors have error codes:
+        # These exist in manta-ray/asvo_server/views_dispatch.py
+        # 0 = Invalid input, outage_in_progress
+        # 1 = job_limit_reached
+        # 2 = job_running_or_complete
+        # 3 = job_not_found
+        # Error code looks like this in StdOut:  "error_code": 2
+        regex_match = re.search(r'"error_code": (\d+)', stdout)
+
+        if regex_match:
+            # We found an error code in the stdout
+            error_code_str = regex_match.group(1)
+
+            raise GiantSquidException(
+                f"_run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. "
+                f"Error code: {error_code_str} {stdout}"
+            )
+        elif "Your job cannot be submitted as the archive location of the observation is down" in stdout:
+            raise GiantSquidMWAASVOOutageException("Unable to communicate with MWA ASVO- the archive location is down")
+
+        elif "outage" in stdout:
+            # Outage message looks like this:
+            # 'Error: The server responded with status code 0, message:
+            # Your job cannot be submitted as there is a full outage in progress.'"
+            raise GiantSquidMWAASVOOutageException("Unable to communicate with MWA ASVO- an outage is in progress")
+        else:
+            # There was no "error_code" in stdout, so just report the whole stdout error message
+            raise GiantSquidException(
+                f"_run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. Error: {stdout}"
+            )
+
+
+def extract_tar(tar_filename: str, dest_path: str) -> None:
+    """Extract a tar archive to the specified destination.
+
+    Opens the given tar archive and extracts all members to dest_path,
+    using the 'data' filter to reject unsafe paths (absolute paths,
+    '../' traversal, symlinks pointing outside the destination).
+
+    NOTE: tar.extractall() sliently overwrites existing files.
+
+    For our purposes this is fine so I don't care, but be warned!
+
+    Args:
+        tar_filename: Path to the tar archive to extract.
+        dest_path: Directory to extract the archive contents into.
+            Must already exist.
+
+    Raises:
+        FileNotFoundError: If tar_filename does not exist.
+        NotADirectoryError: If dest_path does not exist or is not a directory.
+        RuntimeError: If extraction fails due to a malformed, truncated,
+            or otherwise invalid archive.
+    """
+    if not os.path.isfile(tar_filename):
+        raise FileNotFoundError(f"tar archive not found: {tar_filename}")
+
+    if not os.path.isdir(dest_path):
+        raise NotADirectoryError(f"Destination directory does not exist: {dest_path}")
+
+    try:
+        with tarfile.open(tar_filename) as tf:
+            members = tf.getmembers()
+            total = len(members)
+            for i, member in enumerate(members, start=1):
+                tf.extract(member, path=dest_path, filter="data")
+                logger.debug(f"Extracted ({i}/{total}): {os.path.join(dest_path, member.name)}")
+    except tarfile.TarError as e:
+        raise RuntimeError(f"Failed to extract {tar_filename}: {e}") from e
+
+
+def get_filename_from_url(url: str) -> str:
+    """Extract the filename component from a URL, ignoring query parameters.
+
+    Parses the URL path and returns only the final filename portion,
+    with any percent-encoded characters decoded.
+
+    Args:
+        url: The full URL to extract the filename from.
+
+    Returns:
+        The decoded filename (e.g. '1444927824_1021186_vis.tar').
+
+    Raises:
+        ValueError: If the URL has no path or the path has no filename.
+    """
+    path = urlparse(url).path
+    filename = PurePosixPath(unquote(path)).name
+
+    if not filename:
+        raise ValueError(f"No filename found in URL: {url}")
+
+    return filename

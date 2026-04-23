@@ -2226,7 +2226,7 @@ def create_sbatch_script(
         job_name = f"asvo{obs_id}"
         partition = "gpu"
         nice = "#SBATCH --nice=1000"  # lower priority than realtime jobs
-        wall_time = "08:00:00"  # allow extra time for downloading from ASVO
+        wall_time = "08:00:00"  # allow extra time for downloading from ASVO (6 hours + 2 for processing)
 
     job_script = f"""#!/bin/bash
 #SBATCH --partition={partition}

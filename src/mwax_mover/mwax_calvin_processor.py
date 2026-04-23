@@ -8,6 +8,8 @@ metadata database via process_solutions(), then signals each MWAX host to releas
 the calibrator visibility files for archiving or discard.
 """
 
+from mwax_mover.utils import run_giant_squid, extract_tar, get_filename_from_url
+
 import argparse
 from configparser import ConfigParser
 import datetime
@@ -27,7 +29,6 @@ from mwax_mover import (
     utils,
     version,
     mwax_calvin_utils,
-    mwax_command,
 )
 from mwax_mover.mwa_archiver import copy_file_rsync
 from mwax_mover.mwax_calvin_utils import CalvinJobType, estimate_birli_output_bytes, parse_solution_channels
@@ -92,6 +93,7 @@ class MWAXCalvinProcessor:
         self.download_retry_wait: int = 0
         self.realtime_download_file_timeout: int = 0
         self.mwaasvo_download_obs_timeout: int = 0
+        self.giant_squid_binary_path: str = ""
 
         # processing
         self.job_input_path: str = (
@@ -391,7 +393,7 @@ class MWAXCalvinProcessor:
                         ],
                         None,
                         max_retries=1,
-                        wait=60,
+                        timeout=60,
                     )
                     # success
                     successful_hosts.add(hostname)
@@ -552,7 +554,7 @@ class MWAXCalvinProcessor:
             return False, "get_observation_file_list cancelled due to processor shutdown"
 
     def download_mwa_asvo_data(self) -> tuple[bool, str]:
-        """Download and extract MWA ASVO observation data from URL.
+        """Download and extract MWA ASVO observation data from URL. The caller will try this X times.
 
         Downloads a tarball from the MWA ASVO download URL and extracts it to
         the job input path.
@@ -568,34 +570,45 @@ class MWAXCalvinProcessor:
                 f" {self.mwa_asvo_download_url} to {self.job_input_path}..."
             )
 
-            cmdline = f'wget -q -O - "{self.mwa_asvo_download_url}" | tar -x -C {self.job_input_path}'
-
+            # old was: cmdline = f'wget -q -O - "{self.mwa_asvo_download_url}" | tar -x -C {self.job_input_path}'
+            #
+            # Do the download
+            #
             try:
-                # Submit the job
-                return_val, stdout = mwax_command.run_command_ext(
-                    cmdline, None, self.mwaasvo_download_obs_timeout, True
-                )
+                subcmd = "download"
+                args = f"--keep-tar {self.obs_id} -d {self.job_output_path}"
+                # On success we just return some stdout, otherwise an exception is raised
+                stdout = run_giant_squid(self.giant_squid_binary_path, subcmd, args, self.mwaasvo_download_obs_timeout)
 
-                if return_val:
-                    logger.info(
-                        f"{str(self.obs_id)} successfully downloaded "
-                        f"from {self.mwa_asvo_download_url} into {self.job_input_path}"
-                    )
-                    return True, ""
-                else:
-                    error_message = f"{str(self.obs_id)} failed when running {cmdline} Error {stdout}"
-                    raise Exception(error_message)
+                logger.info(
+                    f"{str(self.obs_id)} successfully downloaded "
+                    f"from {self.mwa_asvo_download_url} into {self.job_input_path}"
+                )
 
             except Exception:
                 logger.exception(
-                    f"Failed to download and untar observation {self.obs_id} from {self.mwa_asvo_download_url} {stdout}"
+                    f"Failed to download observation {self.obs_id} from {self.mwa_asvo_download_url} {stdout}"
                 )
                 raise
 
-        except Exception as e:
-            error_message = f"Failed to download and untar observation {self.obs_id} from {self.mwa_asvo_download_url}"
-            f" Error ({str(e)})"
-            logger.error(error_message)
+        except Exception:
+            error_message = f"Failed to download observation {self.obs_id} from {self.mwa_asvo_download_url}. Stdout from giant-squid: {stdout}"
+            logger.exception(error_message)
+            return False, error_message
+
+        # now extract the tar
+        try:
+            tar_filename = get_filename_from_url(self.mwa_asvo_download_url)
+            extract_tar(tar_filename, self.job_input_path)
+
+            # delete the tar file
+            utils.remove_file(tar_filename, raise_error=False)
+
+            return True, ""
+
+        except Exception:
+            error_message = f"Failed to untar {tar_filename}."
+            logger.exception(error_message)
             return False, error_message
 
     def download_realtime_data(self) -> tuple[bool, str]:
@@ -1062,6 +1075,18 @@ class MWAXCalvinProcessor:
             self.mwaasvo_download_obs_timeout = int(
                 utils.read_config(config, "downloading", "mwaasvo_download_obs_timeout")
             )
+            # Get the giant squid binary
+            self.giant_squid_binary_path = utils.read_config(
+                config,
+                "giant squid",
+                "giant_squid_binary_path",
+            )
+
+            if not os.path.exists(self.giant_squid_binary_path):
+                logger.error(
+                    f"giant_squid_binary_path location  {self.giant_squid_binary_path} does not exist. Quitting."
+                )
+                sys.exit(1)
 
             #
             # Birli

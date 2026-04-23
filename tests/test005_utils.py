@@ -6,6 +6,11 @@ which do not exist in the git repo. This is fine as the main thing being
 tested is the filename and metafits file (which is included).
 """
 
+from pathlib import Path
+import tarfile
+
+from mwax_mover.utils import run_giant_squid, extract_tar, get_filename_from_url
+
 from configparser import ConfigParser
 import os
 import pytest
@@ -912,3 +917,62 @@ def test_delete_files_older_than():
 
     # Clean up
     shutil.rmtree(test_path)
+
+
+def test_run_giant_squid():
+    timeout_secs = 4
+    path_to_binary = "../giant-squid/target/release/giant-squid"
+    subcmd = "list"
+    args = ""
+
+    stdout = run_giant_squid(path_to_binary, subcmd, args, timeout_secs)
+    assert stdout != ""
+
+
+def test_extract_tar():
+    #
+    # 1. tar does not exist
+    #
+    with pytest.raises(FileNotFoundError):
+        extract_tar("some_nonexistant_file", "/tmp")
+
+    #
+    # 2. destination does not exist
+    #
+    with pytest.raises(NotADirectoryError):
+        extract_tar(__file__, "/some_nonexistent_path")
+
+    #
+    # 3. Successful tar
+    #
+    # create one first
+    hello_world_text = "hello world"
+    filename = "hello_world.txt"
+    tmp_file: Path = Path(f"/tmp/{filename}")
+    tmp_file.write_text(hello_world_text)
+    tmp_tar: Path = Path("/tmp/test.tar")
+
+    with tarfile.open(tmp_tar, mode="w") as tf:
+        tf.add(tmp_file, arcname=filename)
+
+    # Remove the tmp_file
+    tmp_file.unlink(missing_ok=False)
+
+    # now see is we extract it ok
+    extract_tar(str(tmp_tar), "/tmp")
+
+    # see if the file exists
+    tmp_file: Path = Path(f"/tmp/{filename}")
+
+    assert tmp_file.exists()
+    assert hello_world_text == tmp_file.read_text()
+
+
+def test_get_filename_from_url():
+    filename_in_url = "https://projects.pawsey org au/mwa-asvo/1444927824_1021186_vis.tar?AWSAccessKeyId=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX&Signature=YYYYYYYYYYYYYYYYY%3D&Expires=1777533409"
+
+    assert get_filename_from_url(filename_in_url) == "1444927824_1021186_vis.tar"
+
+    no_filename_url = "https://something.com"
+    with pytest.RaisesExc(ValueError):
+        get_filename_from_url(no_filename_url)
