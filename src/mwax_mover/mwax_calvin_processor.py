@@ -597,19 +597,21 @@ class MWAXCalvinProcessor:
             return False, error_message
 
         # now extract the tar
+        exit_error_message = ""
+        tar_filename = get_filename_from_url(self.mwa_asvo_download_url)
         try:
-            tar_filename = get_filename_from_url(self.mwa_asvo_download_url)
             extract_tar(tar_filename, self.job_input_path)
+            exit_bool = True
 
+        except Exception:
+            exit_error_message = f"Failed to untar {tar_filename}."
+            logger.exception(exit_error_message)
+            exit_bool = False
+        finally:
             # delete the tar file
             utils.remove_file(tar_filename, raise_error=False)
 
-            return True, ""
-
-        except Exception:
-            error_message = f"Failed to untar {tar_filename}."
-            logger.exception(error_message)
-            return False, error_message
+        return exit_bool, exit_error_message
 
     def download_realtime_data(self) -> tuple[bool, str]:
         """Download realtime visibility files from MWAX boxes via rsync.

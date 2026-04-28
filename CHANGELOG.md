@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.6.14 29-Apr-2026
+
+* calvin_processor: Minor fix for giant-squid download and untar to ensure tar file is always cleaned up.
+
 # 1.6.13 23-Apr-2026
 
 * calvin_processor: Get giant-squid to do the downloading (not wget) and use the retryable option (--keep-tar) which also means we need to run tar to untar it and delete the tar file when done.
