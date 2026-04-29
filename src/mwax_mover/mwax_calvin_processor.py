@@ -228,6 +228,8 @@ class MWAXCalvinProcessor:
                     # Wait before trying again if we failed
                     if not self.data_downloaded:
                         self.sleep(self.download_retry_wait)
+                else:
+                    break
 
             if not self.data_downloaded:
                 self.fail_job_downloading(
@@ -585,29 +587,26 @@ class MWAXCalvinProcessor:
             #
             # Do the download
             #
-            try:
-                subcmd = "download"
-                args = f"--keep-tar {self.obs_id} -d {self.job_output_path}"
-                # On success we just return some stdout, otherwise an exception is raised
-                stdout = run_giant_squid(self.giant_squid_binary_path, subcmd, args, self.mwaasvo_download_obs_timeout)
+            subcmd = "download"
+            args = f"--keep-tar {self.obs_id} -d {self.job_output_path}"
+            # On success we just return some stdout, otherwise an exception is raised
+            stdout = run_giant_squid(self.giant_squid_binary_path, subcmd, args, self.mwaasvo_download_obs_timeout)
 
-                # It's possible to have a successful run, but the obsid or jobid doesn't exist or some other problem. Let's check stdout
-                # success message is like: "08:19:20 [INFO] Job ID 1028014 (obsid: 1422444512) [1/1]: Completed download of 1.4 MiB in 0.002 s (717.8 MiB/s)"
-                if "Completed download" in stdout:
-                    logger.info(
-                        f"{str(self.obs_id)} successfully downloaded "
-                        f"from {self.mwa_asvo_download_url} into {self.job_input_path}"
-                    )
-                elif f"Obsid {self.obs_id} wasn't found in your list of jobs" in stdout:
-                    retry_download = False
-                    raise Exception(
-                        "The MWA ASVO job download has expired. This calibration request will be readded to the table and retried"
-                    )
-                else:
-                    # We didn't get that message, so something went wrong
-                    raise Exception("giant-squid returned success but file was not downloaded")
-            except Exception:
-                raise
+            # It's possible to have a successful run, but the obsid or jobid doesn't exist or some other problem. Let's check stdout
+            # success message is like: "08:19:20 [INFO] Job ID 1028014 (obsid: 1422444512) [1/1]: Completed download of 1.4 MiB in 0.002 s (717.8 MiB/s)"
+            if "Completed download" in stdout:
+                logger.info(
+                    f"{str(self.obs_id)} successfully downloaded "
+                    f"from {self.mwa_asvo_download_url} into {self.job_input_path}"
+                )
+            elif f"Obsid {self.obs_id} wasn't found in your list of jobs" in stdout:
+                retry_download = False
+                raise Exception(
+                    "The MWA ASVO job download has expired. This calibration request will be readded to the table and retried"
+                )
+            else:
+                # We didn't get that message, so something went wrong
+                raise Exception("giant-squid returned success but file was not downloaded")
 
         except Exception:
             error_message = f"Failed to download observation {self.obs_id} from {self.mwa_asvo_download_url}. Stdout from giant-squid: {stdout}"
