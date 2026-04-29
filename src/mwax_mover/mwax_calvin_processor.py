@@ -8,6 +8,8 @@ metadata database via process_solutions(), then signals each MWAX host to releas
 the calibrator visibility files for archiving or discard.
 """
 
+import mwax_mover.mwax_db
+
 from mwax_mover.utils import run_giant_squid, extract_tar, get_filename_from_url
 
 import argparse
@@ -208,25 +210,33 @@ class MWAXCalvinProcessor:
                 if self.job_type == CalvinJobType.realtime:
                     # Download from MWAX boxes
                     self.data_downloaded, error_message = self.download_realtime_data()
+                    retry_download = True
+
                 elif self.job_type == CalvinJobType.mwa_asvo:
                     # Download from MWA ASVO URL
-                    self.data_downloaded, error_message = self.download_mwa_asvo_data()
+                    self.data_downloaded, error_message, retry_download = self.download_mwa_asvo_data()
+
                 else:
                     error_message = f"Error- unknown job_type {self.job_type}. Aborting"
                     logger.error(error_message)
                     self.fail_job_downloading(error_message)
                     exit(-1)
 
-                data_download_attempt += 1
+                if retry_download:
+                    data_download_attempt += 1
 
-                # Wait before trying again if we failed
-                if not self.data_downloaded:
-                    self.sleep(self.download_retry_wait)
+                    # Wait before trying again if we failed
+                    if not self.data_downloaded:
+                        self.sleep(self.download_retry_wait)
 
             if not self.data_downloaded:
                 self.fail_job_downloading(
                     f"Failed to download data after {self.download_retries} attempts. Error: {error_message}"
                 )
+
+                # If we were not realtime and retry_download came back as false
+                # give up, and requeue since this is likely due to an expired download
+                mwax_mover.mwax_db.insert_calibration_request_row(self.mro_metadatadb_db, self.obs_id, realtime=False)
                 exit(0)
 
             # Working path for Birli / uvfits output is determined by calculating the size of the output visibilites:
@@ -553,16 +563,17 @@ class MWAXCalvinProcessor:
         else:
             return False, "get_observation_file_list cancelled due to processor shutdown"
 
-    def download_mwa_asvo_data(self) -> tuple[bool, str]:
+    def download_mwa_asvo_data(self) -> tuple[bool, str, bool]:
         """Download and extract MWA ASVO observation data from URL. The caller will try this X times.
 
         Downloads a tarball from the MWA ASVO download URL and extracts it to
         the job input path.
 
         Returns:
-            A tuple of (success, error_message). If successful, error_message is empty.
+            A tuple of (success, error_message, retry_download). If successful, error_message is empty.
         """
         # Given the URL from command line args, download and untar the MWA ASVO data
+        retry_download = True  # We only don't try again if the issue is unrecoverable- e.g. the download expired
         try:
             stdout = ""
             logger.info(
@@ -587,6 +598,11 @@ class MWAXCalvinProcessor:
                         f"{str(self.obs_id)} successfully downloaded "
                         f"from {self.mwa_asvo_download_url} into {self.job_input_path}"
                     )
+                elif f"Obsid {self.obs_id} wasn't found in your list of jobs" in stdout:
+                    retry_download = False
+                    raise Exception(
+                        "The MWA ASVO job download has expired. This calibration request will be readded to the table and retried"
+                    )
                 else:
                     # We didn't get that message, so something went wrong
                     raise Exception("giant-squid returned success but file was not downloaded")
@@ -596,7 +612,7 @@ class MWAXCalvinProcessor:
         except Exception:
             error_message = f"Failed to download observation {self.obs_id} from {self.mwa_asvo_download_url}. Stdout from giant-squid: {stdout}"
             logger.exception(error_message)
-            return False, error_message
+            return False, error_message, retry_download
 
         # now extract the tar
         exit_error_message = ""
@@ -613,7 +629,7 @@ class MWAXCalvinProcessor:
             # delete the tar file
             utils.remove_file(tar_filename, raise_error=False)
 
-        return exit_bool, exit_error_message
+        return exit_bool, exit_error_message, retry_download
 
     def download_realtime_data(self) -> tuple[bool, str]:
         """Download realtime visibility files from MWAX boxes via rsync.

@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.6.15 29-Apr-2026
+
+* calvin_processor: If MWA ASVO download has expired, fail the job, but requeue it in the db.
+
 # 1.6.14 29-Apr-2026
 
 * calvin_processor: Minor fix for giant-squid download and untar to ensure tar file is always cleaned up.
