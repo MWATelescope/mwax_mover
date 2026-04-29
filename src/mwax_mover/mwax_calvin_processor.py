@@ -239,7 +239,11 @@ class MWAXCalvinProcessor:
                 # If we were not realtime and retry_download came back as false
                 # give up, and requeue since this is likely due to an expired download
                 if not retry_download and self.job_type == CalvinJobType.mwa_asvo:
-                    mwax_mover.mwax_db.insert_calibration_request_row(self.db_handler, self.obs_id, realtime=False)
+                    if not mwax_mover.mwax_db.insert_calibration_request_row(
+                        self.db_handler, self.obs_id, realtime=False
+                    ):
+                        logger.error("Failed to re-add calibration request")
+                        exit(1)
                 exit(0)
 
             # Working path for Birli / uvfits output is determined by calculating the size of the output visibilites:
