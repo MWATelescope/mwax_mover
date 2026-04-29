@@ -8,8 +8,6 @@ metadata database via process_solutions(), then signals each MWAX host to releas
 the calibrator visibility files for archiving or discard.
 """
 
-import mwax_mover.mwax_db
-
 from mwax_mover.utils import run_giant_squid, extract_tar, get_filename_from_url
 
 import argparse
@@ -41,6 +39,7 @@ from mwax_mover.mwax_db import (
     update_calsolution_request_download_complete_status,
     update_calsolution_request_calibration_started_status,
     update_calsolution_request_calibration_complete_status,
+    insert_calibration_request_row,
 )
 from mwalib import MetafitsContext
 
@@ -187,7 +186,7 @@ class MWAXCalvinProcessor:
                 f" {catch_all_exception}"
                 logger.exception(error_message)
                 self.fail_job_downloading(error_message)
-                exit(-1)
+                self.stop(exit_code=-1)
 
             # Create metafits context
             logger.info(f"Reading metafits file {self.metafits_filename} with mwalib...")
@@ -199,7 +198,7 @@ class MWAXCalvinProcessor:
             result, error_message = self.get_observation_file_list()
             if not result:
                 self.fail_job_downloading(error_message)
-                exit(0)
+                self.stop(exit_code=-1)
 
             # next step depends on jobtype
             data_download_attempt: int = 1
@@ -220,7 +219,7 @@ class MWAXCalvinProcessor:
                     error_message = f"Error- unknown job_type {self.job_type}. Aborting"
                     logger.error(error_message)
                     self.fail_job_downloading(error_message)
-                    exit(-1)
+                    self.stop(exit_code=-1)
 
                 if retry_download:
                     data_download_attempt += 1
@@ -239,12 +238,11 @@ class MWAXCalvinProcessor:
                 # If we were not realtime and retry_download came back as false
                 # give up, and requeue since this is likely due to an expired download
                 if not retry_download and self.job_type == CalvinJobType.mwa_asvo:
-                    if not mwax_mover.mwax_db.insert_calibration_request_row(
-                        self.db_handler, self.obs_id, realtime=False
-                    ):
+                    if not insert_calibration_request_row(self.db_handler, self.obs_id, realtime=False):
                         logger.error("Failed to re-add calibration request")
-                        exit(1)
-                exit(0)
+                        self.stop(exit_code=-1)
+                        return
+                self.stop(exit_code=-1)
 
             # Working path for Birli / uvfits output is determined by calculating the size of the output visibilites:
             logger.info("Calculating observation output size...")
@@ -293,7 +291,7 @@ class MWAXCalvinProcessor:
                 )
             else:
                 self.fail_job_downloading(error_message)
-                exit(-1)
+                self.stop(exit_code=-1)
 
             # We have all the files, so run birli
             self.current_task_name = "Birli"
@@ -301,7 +299,7 @@ class MWAXCalvinProcessor:
 
             if not result:
                 self.fail_job_processing(error_message)
-                exit(-1)
+                self.stop(exit_code=-1)
 
             # Birli was successful so run hyperdrive!
             self.current_task_name = "Hyperdrive"
@@ -309,7 +307,7 @@ class MWAXCalvinProcessor:
 
             if not result:
                 self.fail_job_processing(error_message)
-                exit(-1)
+                self.stop(exit_code=-1)
 
             # If that worked, process the solutions and insert into db
             self.current_task_name = "Processing"
@@ -345,11 +343,11 @@ class MWAXCalvinProcessor:
                         self.release_mwax_files()
 
                     self.fail_job_processing(error_message)
-                    exit(0)
+                    self.stop(exit_code=-1)
             else:
                 # Something unexpected went wrong
                 self.fail_job_processing(error_message)
-                exit(0)
+                self.stop(exit_code=-1)
 
             # This clean up only happens on success
             # if we get here, the whole calibration solution was inserted ok.
@@ -366,8 +364,7 @@ class MWAXCalvinProcessor:
 
             # Final log message
             self.current_task_name = "Complete"
-            logger.info("Completed Successfully")
-            self.stop()
+            self.stop(exit_code=0)
 
         except Exception as e:
             # Something really bad went wrong!
@@ -376,6 +373,7 @@ class MWAXCalvinProcessor:
                 self.fail_job_processing(error_message)
             else:
                 self.fail_job_downloading(error_message)
+            self.stop(exit_code=-1)
 
     def release_mwax_files(self):
         """Release visibility files from MWAX boxes after processing.
@@ -453,15 +451,6 @@ class MWAXCalvinProcessor:
                     f"Error: {str(e)}"
                 )
 
-        try:
-            self.stop()
-        except Exception as e:
-            if logger:
-                logger.info(f"Failed to stop processor {str(e)}")
-
-        if logger:
-            logger.info("Completed with downloading errors")
-
     def fail_job_processing(self, error_message: str):
         """Mark a job as failed during the processing phase.
 
@@ -489,15 +478,6 @@ class MWAXCalvinProcessor:
                     f"Params: {self.obs_id}, None,  None, None, {error_datetime}, {error_message}. "
                     f"Error: {str(e)}"
                 )
-
-        try:
-            self.stop()
-        except Exception as e:
-            if logger:
-                logger.info(f"Failed to stop processor {str(e)}")
-
-        if logger:
-            logger.info("Completed with processing errors")
 
     def succeed_job_processing(self, fit_id: int):
         """Mark a job as successfully completed.
@@ -897,16 +877,30 @@ class MWAXCalvinProcessor:
         else:
             return False, "Hyperdrive run failed. See logs"
 
-    def stop(self):
+    def stop(self, exit_code: int = 0):
         """Shutdown the processor and close all connections.
+
+        Args:
+            exit_code: The exit code to return when exiting
 
         Closes database connections and terminates the processor.
         """
         # Close all database connections
-        if self.db_handler:
-            self.db_handler.close()
+        try:
+            if self.db_handler is not None:
+                self.db_handler.close()
+        except Exception:
+            pass
+
         self.running = False
-        sys.exit(0)
+
+        if logger is not None:
+            if exit_code == 0:
+                logger.info("Process completed successfully.")
+            else:
+                logger.info("Process completed with errors.")
+
+        sys.exit(exit_code)
 
     def health_loop(self):
         """Periodically send health status via UDP multicast.
@@ -1302,7 +1296,7 @@ class MWAXCalvinProcessor:
         except Exception as e:
             error_message = str(e)
             self.fail_job_downloading(error_message)
-            exit(-1)
+            sys.exit(-1)
 
     def initialise_from_command_line(self):
         """Initialize the processor from command-line arguments.
@@ -1353,14 +1347,14 @@ class MWAXCalvinProcessor:
 
         if not utils.is_int(obs_id):
             print(f"ERROR: cmd line argument obs-id {obs_id} is not a number. Aborting.")
-            exit(-1)
+            sys.exit(-1)
 
         slurm_job_id = args["slurm_job_id"]
         print(f"Command line argument 'slurm-job-id' == {slurm_job_id}")
 
         if not utils.is_int(slurm_job_id):
             print(f"ERROR: cmd line argument slurm-job-id {slurm_job_id} is not a number. Aborting.")
-            exit(-1)
+            sys.exit(-1)
 
         job_type = args["job_type"]
         print(f"Command line argument 'job-type' == {job_type}")
@@ -1377,7 +1371,7 @@ class MWAXCalvinProcessor:
                 f"ERROR: cmd line argument job-type {job_type.value} is not a valid without "
                 "the mwa_asvo_download_url being provided too. Aborting."
             )
-            exit(-1)
+            sys.exit(-1)
 
         # Get a list of request ids
         request_ids: list[int] = []
@@ -1394,11 +1388,11 @@ class MWAXCalvinProcessor:
                     f"ERROR: request-ids param '{request_ids_string}' must be one or more positive integers"
                     " separated by commas. Aborting."
                 )
-                exit(-1)
+                sys.exit(-1)
         # Check we got at least one
         if len(request_ids) == 0:
             print(f"ERROR: request-ids param '{request_ids_string}' must contain at least one request-id. Aborting.")
-            exit(-1)
+            sys.exit(-1)
         print(f"request_ids parsed as: {request_ids}")
 
         self.initialise(
