@@ -557,15 +557,20 @@ class MWAXCalvinProcessor:
         the job input path.
 
         Returns:
-            A tuple of (success, error_message, retry_download). If successful, error_message is empty.
+            A tuple of (success, error_message, retry_this_download). If successful, error_message is empty.
         """
         # Given the URL from command line args, download and untar the MWA ASVO data
-        retry_download = True  # We only don't try again if the issue is unrecoverable- e.g. the download expired
+        retry_this_download = True  # We only don't try again if the issue is unrecoverable- e.g. the download expired
         try:
             stdout = ""
+
+            # Determine what the filename will be
+            tar_filename = get_filename_from_url(self.mwa_asvo_download_url)
+            full_tar_filename = os.path.join(self.job_input_path, tar_filename)
+
             logger.info(
                 f"{self.obs_id}: Attempting to download MWA ASVO data"
-                f" {self.mwa_asvo_download_url} to {self.job_input_path}..."
+                f" {self.mwa_asvo_download_url} to {full_tar_filename}..."
             )
 
             # old was: cmdline = f'wget -q -O - "{self.mwa_asvo_download_url}" | tar -x -C {self.job_input_path}'
@@ -573,7 +578,7 @@ class MWAXCalvinProcessor:
             # Do the download
             #
             subcmd = "download"
-            args = f"--keep-tar {self.obs_id} -d {self.job_output_path}"
+            args = f"--keep-tar {self.obs_id} -d {self.job_input_path}"
             # On success we just return some stdout, otherwise an exception is raised
             stdout = run_giant_squid(self.giant_squid_binary_path, subcmd, args, self.mwaasvo_download_obs_timeout)
 
@@ -582,10 +587,10 @@ class MWAXCalvinProcessor:
             if "Completed download" in stdout:
                 logger.info(
                     f"{str(self.obs_id)} successfully downloaded "
-                    f"from {self.mwa_asvo_download_url} into {self.job_input_path}"
+                    f"from {self.mwa_asvo_download_url} to {full_tar_filename}"
                 )
             elif f"Obsid {self.obs_id} wasn't found in your list of jobs" in stdout:
-                retry_download = False
+                retry_this_download = False
                 raise Exception(
                     "The MWA ASVO job download has expired. This calibration request will be readded to the table and retried"
                 )
@@ -596,13 +601,14 @@ class MWAXCalvinProcessor:
         except Exception:
             error_message = f"Failed to download observation {self.obs_id} from {self.mwa_asvo_download_url}. Stdout from giant-squid: {stdout}"
             logger.exception(error_message)
-            return False, error_message, retry_download
+            return False, error_message, retry_this_download
 
         # now extract the tar
         exit_error_message = ""
-        tar_filename = get_filename_from_url(self.mwa_asvo_download_url)
         try:
-            extract_tar(tar_filename, self.job_input_path)
+            logger.info(f"Extracting {full_tar_filename} to {self.job_input_path}")
+            extract_tar(full_tar_filename, self.job_input_path)
+            logger.info(f"Extracted {full_tar_filename} successfully.")
             exit_bool = True
 
         except Exception:
@@ -611,9 +617,10 @@ class MWAXCalvinProcessor:
             exit_bool = False
         finally:
             # delete the tar file
+            logger.info(f"Cleaning up {full_tar_filename}")
             utils.remove_file(tar_filename, raise_error=False)
 
-        return exit_bool, exit_error_message, retry_download
+        return exit_bool, exit_error_message, retry_this_download
 
     def download_realtime_data(self) -> tuple[bool, str]:
         """Download realtime visibility files from MWAX boxes via rsync.

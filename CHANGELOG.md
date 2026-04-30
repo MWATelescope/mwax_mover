@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.6.19 01-May 2026
+
+* calvin_processor: Fixed bug with untaring.
+
 # 1.6.15-18 29-Apr-2026
 
 * calvin_processor: If MWA ASVO download has expired, fail the job, but requeue it in the db.
