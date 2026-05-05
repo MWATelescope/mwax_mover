@@ -54,11 +54,12 @@ class CalibrationRequest:
         """Initialize a CalibrationRequest instance.
 
         Stores information about a calibration request including observation ID,
-        request ID, and job type.
+        request ID, and job type and if it is a bulk requyest.
         """
         self.obs_id: int = 0
         self.request_id: int = 0
         self.type: CalvinJobType
+        self.bulk_request: bool = False
 
 
 class MWAXCalvinController:
@@ -227,7 +228,25 @@ class MWAXCalvinController:
             requests_queued = 0
             # we keep our own local var here so we don't go over the limit
             vis_jobs_in_progress = self.mwa_asvo_vis_jobs_in_progress
-            for cal_request in asvo_requests_list:
+
+            # Do one loop through bulk requests=false (i.e. ASVO requests)
+            for cal_request in (r for r in asvo_requests_list if not r.bulk_request):
+                # For mwa_asvo, if we are not already dealing with this obsid,
+                # AND we are below our asvo job limit add it!
+                # This prevents us pulling in dupes
+                if vis_jobs_in_progress < self.max_in_progress_asvo_jobs:
+                    try:
+                        if self.mwa_asvo_add_new_asvo_job(cal_request.request_id, cal_request.obs_id):
+                            vis_jobs_in_progress += 1
+                    except Exception:
+                        logger.exception("Error submitting asvo slurm job")
+                        self.slurm_errors += 1
+                else:
+                    # This job was passed over because we have too many in progress
+                    requests_queued += 1
+
+            # Do another loop through bulk_requests=true (i.e. background bulk calibration tasks by Ops team)
+            for cal_request in (r for r in asvo_requests_list if r.bulk_request):
                 # For mwa_asvo, if we are not already dealing with this obsid,
                 # AND we are below our asvo job limit add it!
                 # This prevents us pulling in dupes
@@ -522,7 +541,7 @@ class MWAXCalvinController:
 
             # Get the an outstanding calibration_requests from the db
             #
-            # returned fields: list[Tuple[requestid, calid, realtime]] or None
+            # returned fields: list[Tuple[requestid, calid, realtime, bulk_request]] or None
             results = get_unattempted_calsolution_requests(self.db_handler)
             if results is not None:
                 logger.debug(f"...Query returned {len(results)} rows")
@@ -545,6 +564,7 @@ class MWAXCalvinController:
                         new_request.type = CalvinJobType.realtime
                         return_list_realtime.append(new_request)
                     else:
+                        new_request.bulk_request = result[3]
                         new_request.type = CalvinJobType.mwa_asvo
                         return_list_asvo.append(new_request)
 

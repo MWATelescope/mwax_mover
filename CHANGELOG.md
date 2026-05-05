@@ -1,5 +1,13 @@
 # Changelog
 
+# 1.6.21 06-May 2026
+
+* Ensure "bulk" calvin requests get lowest priority.
+
+# 1.6.20 05-May 2026
+
+* Created stand alone aocal file splitter.
+
 # 1.6.19 01-May 2026
 
 * calvin_processor: Fixed bug with untaring.

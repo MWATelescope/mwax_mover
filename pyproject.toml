@@ -1,6 +1,6 @@
 [project]
 name = "mwax_mover"
-version = "1.6.19"
+version = "1.6.20"
 description = "A module to manage input, archiving and calibration for the MWAX correlator"
 readme = "README.md"
 requires-python = ">=3.12, <3.15"
@@ -52,6 +52,7 @@ mwax_calvin_controller = "mwax_mover.mwax_calvin_controller:main"
 mwax_subfile_distributor = "mwax_mover.mwax_subfile_distributor:main"
 mwacache_archiver = "mwax_mover.mwacache_archive_processor:main"
 mwacache_checks = "mwax_mover.mwacache_checks:main"
+aocal_split = "mwax_mover.aocal_split:main"
 
 [tool.black]
 line-length = 120

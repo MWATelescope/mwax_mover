@@ -169,12 +169,8 @@ class MWAXDBHandler:
                             return rows
                         else:
                             # Something went wrong
-                            logger.error(
-                                f"Error- queried {rows_affected} rows, expected 1. SQL={sql}"
-                            )
-                            raise Exception(
-                                f"Error- queried {rows_affected} rows, expected 1. SQL={sql}"
-                            )
+                            logger.error(f"Error- queried {rows_affected} rows, expected 1. SQL={sql}")
+                            raise Exception(f"Error- queried {rows_affected} rows, expected 1. SQL={sql}")
                     else:
                         # We don't know how many rows, so cool, return them
                         return rows
@@ -257,14 +253,10 @@ class MWAXDBHandler:
                             # An exception in here will trigger a rollback
                             # which is good
                             logger.error(
-                                "Error- query"
-                                f" affected {rows_affected} rows, expected {expected_rows}."
-                                f" SQL={sql}"
+                                f"Error- query affected {rows_affected} rows, expected {expected_rows}. SQL={sql}"
                             )
                             raise Exception(
-                                "Error- query"
-                                f" affected {rows_affected} rows, expected {expected_rows}."
-                                f" SQL={sql}"
+                                f"Error- query affected {rows_affected} rows, expected {expected_rows}. SQL={sql}"
                             )
 
         except psycopg.errors.ForeignKeyViolation:
@@ -310,16 +302,8 @@ class MWAXDBHandler:
             if rows_affected != 1:
                 # An exception in here will trigger a rollback
                 # which is good
-                logger.error(
-                    "Error- query"
-                    f" affected {rows_affected} rows, expected 1."
-                    f" SQL={sql}"
-                )
-                raise Exception(
-                    "Error- query"
-                    f" affected {rows_affected} rows, expected 1."
-                    f" SQL={sql}"
-                )
+                logger.error(f"Error- query affected {rows_affected} rows, expected 1. SQL={sql}")
+                raise Exception(f"Error- query affected {rows_affected} rows, expected 1. SQL={sql}")
 
         except Exception:
             logger.exception("postgres Exception")
@@ -378,15 +362,12 @@ def get_data_file_row(db_handler_object: MWAXDBHandler, full_filename: str, obs_
         data_files_row.size = row["size"]
         data_files_row.checksum = row["checksum"]
 
-        logger.info(
-            f"{full_filename} Successfully read from data_files table {vars(data_files_row)}"
-        )
+        logger.info(f"{full_filename} Successfully read from data_files table {vars(data_files_row)}")
         return data_files_row
 
     except Exception as select_exception:
         logger.error(
-            f"{full_filename} error selecting data_files"
-            f" record in data_files table: {select_exception}. SQL was {sql}"
+            f"{full_filename} error selecting data_files record in data_files table: {select_exception}. SQL was {sql}"
         )
         raise Exception from select_exception
 
@@ -452,10 +433,7 @@ def insert_data_file_row(
         # In this scenario it means M&C deleted the observation BUT the metafits was already generated
         # so mwax_u2s et al. thought it was still a real observation
         # we should just delete this file and move on
-        logger.warning(
-            f"{filename} observation_num {obsid} has been deleted by M&C."
-            "Deleting this data file."
-        )
+        logger.warning(f"{filename} observation_num {obsid} has been deleted by M&C.Deleting this data file.")
         os.remove(archive_filename)
 
         # returning True here will cause the item to be ack'd off the queue so it is not tried again
@@ -511,11 +489,7 @@ def update_data_file_row_as_archived(
         return True
 
     except Exception:
-        logger.exception(
-            f"{filename} error updating"
-            f" data_files record in data_files table. SQL"
-            f" was {sql}"
-        )
+        logger.exception(f"{filename} error updating data_files record in data_files table. SQL was {sql}")
         return False
 
 
@@ -541,9 +515,7 @@ def insert_calibration_request_row(db_handler_object: MWAXDBHandler, obs_id: int
 
     except Exception:
         logger.exception(
-            f"{obs_id}: error inserting"
-            f" calibration_request record in table. SQL was"
-            f" {sql} Values: {sql_values}"
+            f"{obs_id}: error inserting calibration_request record in table. SQL was {sql} Values: {sql_values}"
         )
         return False
 
@@ -580,16 +552,12 @@ def insert_calibration_fits_row(
     try:
         db_handler_object.execute_dml_row_within_transaction(sql, sql_values, transaction_cursor)
 
-        logger.info(
-            f"{obs_id}: Successfully wrote into calibration_fits table. fit_id={fit_id}"
-        )
+        logger.info(f"{obs_id}: Successfully wrote into calibration_fits table. fit_id={fit_id}")
         return (True, fit_id)
 
     except Exception:
         logger.exception(
-            f"{obs_id}: error inserting"
-            f" calibration_fits record in table. SQL was"
-            f" {sql} Values: {sql_values}"
+            f"{obs_id}: error inserting calibration_fits record in table. SQL was {sql} Values: {sql_values}"
         )
         if transaction_cursor:
             transaction_cursor.connection.rollback()
@@ -678,15 +646,12 @@ def insert_calibration_solutions_row(
     try:
         db_handler_object.execute_dml_row_within_transaction(sql, sql_values, transaction_cursor)
 
-        logger.info(
-            f"{obs_id} tile {tile_id}: Successfully wrote into calibration_solutions table"
-        )
+        logger.info(f"{obs_id} tile {tile_id}: Successfully wrote into calibration_solutions table")
         return True
 
     except Exception:
         logger.exception(
-            f"{obs_id}: error inserting"
-            f" calibration_solutions record in table. SQL was {sql} Values {sql_values}"
+            f"{obs_id}: error inserting calibration_solutions record in table. SQL was {sql} Values {sql_values}"
         )
         return False
 
@@ -733,7 +698,7 @@ def get_unattempted_unrequested_cal_obsids(db_handler_object: MWAXDBHandler, old
 #
 # Calvin controller
 #
-def get_unattempted_calsolution_requests(db_handler_object: MWAXDBHandler) -> list[Tuple[int, int, bool]] | None:
+def get_unattempted_calsolution_requests(db_handler_object: MWAXDBHandler) -> list[Tuple[int, int, bool, bool]] | None:
     """Returns the deatils of the next oldest unattempted calibration_requests.
 
     Parameters:
@@ -741,7 +706,7 @@ def get_unattempted_calsolution_requests(db_handler_object: MWAXDBHandler) -> li
             hostname (str): The name of the current host so we can specify who is working on this request
 
     Returns:
-            list of Tuple(request_id, cal_id, realtime) OR None if none found. Raises exceptions on error
+            list of Tuple(request_id, cal_id, realtime,bulk_request) OR None if none found. Raises exceptions on error
     """
 
     # How this works!
@@ -772,7 +737,7 @@ def get_unattempted_calsolution_requests(db_handler_object: MWAXDBHandler) -> li
     #     * on failure, do nothing, but try again in the next loop
 
     sql_get = """
-    SELECT c.id as request_id, c.cal_id as obs_id, c.realtime
+    SELECT c.id as request_id, c.cal_id as obs_id, c.realtime, c.bulk_request
     FROM public.calibration_request c
     WHERE
     -- Not yet submitted to slurm
@@ -793,9 +758,10 @@ def get_unattempted_calsolution_requests(db_handler_object: MWAXDBHandler) -> li
             c.realtime IS TRUE
         )
     )
-    ORDER BY c.request_added_datetime"""
+    -- Always ensure bulk requests are sorted last for non-realtime
+    ORDER BY c.bulk_request, c.request_added_datetime"""
 
-    return_list: list[Tuple[int, int, bool]] = []
+    return_list: list[Tuple[int, int, bool, bool]] = []
 
     try:
         # Get the next request, if any
@@ -813,8 +779,9 @@ def get_unattempted_calsolution_requests(db_handler_object: MWAXDBHandler) -> li
             request_id: int = int(row["request_id"])
             obs_id: int = int(row["obs_id"])
             realtime: bool = bool(row["realtime"])
+            bulk_request: bool = bool(row["bulk_request"])
 
-            return_list.append((request_id, obs_id, realtime))
+            return_list.append((request_id, obs_id, realtime, bulk_request))
 
         return return_list
 
@@ -863,15 +830,10 @@ def update_calsolution_request_submit_mwa_asvo_job_status(
 
     try:
         db_handler_object.execute_dml(sql, params, len(request_ids))
-        logger.debug(
-            "Successfully updated calibration_request table."
-        )
+        logger.debug("Successfully updated calibration_request table.")
 
     except Exception:
-        logger.exception(
-            "error updating calibration_request record. SQL"
-            f" was {sql}, params were: {params}"
-        )
+        logger.exception(f"error updating calibration_request record. SQL was {sql}, params were: {params}")
 
         # Re-raise error
         raise
@@ -906,15 +868,10 @@ def update_calibration_request_slurm_status(
     try:
         # Update the rows
         db_handler_object.execute_dml(sql, params, len(request_ids))
-        logger.debug(
-            "Successfully updated calibration_request table."
-        )
+        logger.debug("Successfully updated calibration_request table.")
 
     except Exception:
-        logger.exception(
-            "error updating calibration_request "
-            f"record. SQL was {sql}, params were: {params}"
-        )
+        logger.exception(f"error updating calibration_request record. SQL was {sql}, params were: {params}")
 
         # Re-raise error
         raise
@@ -976,15 +933,10 @@ def update_calsolution_request_download_complete_status(
 
     try:
         db_handler_object.execute_dml(sql, params, None)
-        logger.debug(
-            "Successfully updated calibration_request table."
-        )
+        logger.debug("Successfully updated calibration_request table.")
 
     except Exception:
-        logger.exception(
-            "error updating calibration_request "
-            f"record. SQL was {sql}, params were: {params}"
-        )
+        logger.exception(f"error updating calibration_request record. SQL was {sql}, params were: {params}")
 
         # Re-raise error
         raise
@@ -1011,15 +963,10 @@ def update_calibration_request_assign_hostname_start_download(
         # Update the row
         db_handler_object.execute_dml(sql, params, None)
 
-        logger.debug(
-            "Successfully updated calibration_request table."
-        )
+        logger.debug("Successfully updated calibration_request table.")
 
     except Exception:
-        logger.exception(
-            "error updating calibration_request "
-            f"record. SQL was {sql}, params were: {params}"
-        )
+        logger.exception(f"error updating calibration_request record. SQL was {sql}, params were: {params}")
 
         # Re-raise error
         raise
@@ -1062,15 +1009,10 @@ def update_calsolution_request_calibration_started_status(
         params = [calibration_started_datetime, calibration_started_datetime, slurm_job_id]
 
         db_handler_object.execute_dml(sql, params, None)
-        logger.debug(
-            "Successfully updated calibration_request table."
-        )
+        logger.debug("Successfully updated calibration_request table.")
 
     except Exception:
-        logger.exception(
-            "error updating calibration_request "
-            f"record. SQL was {sql}, params were: {params}"
-        )
+        logger.exception(f"error updating calibration_request record. SQL was {sql}, params were: {params}")
 
         # Re-raise error
         raise
@@ -1138,15 +1080,10 @@ def update_calsolution_request_calibration_complete_status(
         ]
 
         db_handler_object.execute_dml(sql, params, None)
-        logger.debug(
-            "Successfully updated calibration_request table."
-        )
+        logger.debug("Successfully updated calibration_request table.")
 
     except Exception:  # pylint: disable=broad-except
-        logger.exception(
-            "error updating "
-            f"calibration_request record. SQL was {sql}, params were: {params}"
-        )
+        logger.exception(f"error updating calibration_request record. SQL was {sql}, params were: {params}")
 
         # Re-raise error
         raise
