@@ -25,7 +25,7 @@ class MWAASVOJobState(Enum):
     Staging = "Staging"
     Staged = "Staged"
     Downloading = "Downloading"
-    Preprocessing = "Processing"
+    Preprocessing = "Preprocessing"
     Imaging = "Imaging"
     Delivering = "Delivering"
     Ready = "Ready"
@@ -41,16 +41,18 @@ class MWAASVOJob:
     to track its progress from submission to completion
     """
 
-    def __init__(self, request_id: int, obs_id: int, job_id: int):
+    def __init__(self, request_id: int, obs_id: int, job_id: int, bulk_request: bool):
         """Initialize an MWA ASVO job instance.
 
         Args:
             request_id: The calibration solution request ID.
             obs_id: The observation ID.
             job_id: The MWA ASVO job ID.
+            bulk_request: Is this request an ASVO cal request (bulk_request=False) or an MWA Ops Team bulk calibration (bulk_request=True)
         """
         self.request_ids: list[int] = []
         self.request_ids.append(request_id)
+        self.bulk_request: bool = bulk_request
 
         self.obs_id = obs_id
         self.job_id = job_id
@@ -104,6 +106,7 @@ class MWAASVOJob:
             "job_id": str(self.job_id),
             "obs_id": str(self.obs_id),
             "state": str(self.job_state.value),
+            "bulk": str(self.bulk_request),
             "MWA ASVO Job submitted": (
                 self.submitted_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.submitted_datetime else ""
             ),
@@ -188,12 +191,13 @@ class MWAASVOHelper:
             logger.exception("get_in_progress_asvo_job_count() failed")
             return -1
 
-    def submit_download_job(self, request_id: int, obs_id: int) -> MWAASVOJob:
+    def submit_download_job(self, request_id: int, obs_id: int, bulk_request: bool) -> MWAASVOJob:
         """Submit an MWA ASVO download job and track it internally.
 
         Args:
             request_id: The calibration solution request ID.
             obs_id: The observation ID for which to download files.
+            bulk_request: Is this an ASVO job (False) or a bulk request from Ops team (True)
 
         Returns:
             A new MWAASVOJob instance with submission details.
@@ -251,7 +255,7 @@ class MWAASVOHelper:
             #     )
             # else:
         # add a new job to be tracked
-        job = MWAASVOJob(request_id=request_id, obs_id=obs_id, job_id=job_id)
+        job = MWAASVOJob(request_id=request_id, obs_id=obs_id, job_id=job_id, bulk_request=bulk_request)
         job.submitted_datetime = datetime.now(timezone.utc)
         self.current_asvo_jobs.append(job)
         logger.info(f"{obs_id}: Added JobID {job_id}. Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs")
@@ -380,7 +384,7 @@ def get_job_id_from_giant_squid_stdout(stdout: str) -> int:
 
     # Try this too
     # 12:08:08 [WARN] Job already running or complete. Job Id: 878060 ObsID: 1427464352
-    regex_match = re.search(r"Job already running or complete. Job Id: (\d+) ObsID:", stdout, re.M)
+    regex_match = re.search(r"Job already running or complete. Job Id: (\d+) ObsId: (\d+)", stdout, re.M)
 
     if regex_match:
         job_id_str = regex_match.group(1)

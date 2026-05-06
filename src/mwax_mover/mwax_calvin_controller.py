@@ -236,7 +236,9 @@ class MWAXCalvinController:
                 # This prevents us pulling in dupes
                 if vis_jobs_in_progress < self.max_in_progress_asvo_jobs:
                     try:
-                        if self.mwa_asvo_add_new_asvo_job(cal_request.request_id, cal_request.obs_id):
+                        if self.mwa_asvo_add_new_asvo_job(
+                            cal_request.request_id, cal_request.obs_id, bulk_request=False
+                        ):
                             vis_jobs_in_progress += 1
                     except Exception:
                         logger.exception("Error submitting asvo slurm job")
@@ -252,7 +254,9 @@ class MWAXCalvinController:
                 # This prevents us pulling in dupes
                 if vis_jobs_in_progress < self.max_in_progress_asvo_jobs:
                     try:
-                        if self.mwa_asvo_add_new_asvo_job(cal_request.request_id, cal_request.obs_id):
+                        if self.mwa_asvo_add_new_asvo_job(
+                            cal_request.request_id, cal_request.obs_id, bulk_request=True
+                        ):
                             vis_jobs_in_progress += 1
                     except Exception:
                         logger.exception("Error submitting asvo slurm job")
@@ -304,6 +308,7 @@ class MWAXCalvinController:
             CalvinJobType.realtime,
             self.log_path,
             [str(realtime_request.request_id)],
+            False,
             "",
         )
 
@@ -395,6 +400,7 @@ class MWAXCalvinController:
                             CalvinJobType.mwa_asvo,
                             self.log_path,
                             [str(r) for r in job.request_ids],
+                            job.bulk_request,
                             f'--mwa-asvo-download-url="{job.download_url}"',
                         )
 
@@ -570,12 +576,13 @@ class MWAXCalvinController:
 
         return return_list_realtime, return_list_asvo
 
-    def mwa_asvo_add_new_asvo_job(self, request_id: int, obs_id: int) -> bool:
+    def mwa_asvo_add_new_asvo_job(self, request_id: int, obs_id: int, bulk_request: bool) -> bool:
         """Add and track a new MWA ASVO job, submitting if not already submitted.
 
         Args:
             request_id: The request ID for this job.
             obs_id: The observation ID for this job.
+            bulk_request: Is this request a bulk request?
 
         Returns:
             bool: True on successful adding of a job, False if any issue occurred (or job not needed to be added)
@@ -625,7 +632,7 @@ class MWAXCalvinController:
 
             try:
                 # Submit job and add to the ones we are tracking
-                new_job = self.mwax_asvo_helper.submit_download_job(request_id, obs_id)
+                new_job = self.mwax_asvo_helper.submit_download_job(request_id, obs_id, bulk_request)
 
                 # We submmited a new MWA ASVO job, update the request table so we know we're on it!
                 # Update database

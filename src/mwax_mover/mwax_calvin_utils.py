@@ -2198,6 +2198,7 @@ def create_sbatch_script(
     jobtype: CalvinJobType,
     log_path: str,
     request_ids: list[str],
+    bulk_request: bool,
     processor_args: str,
 ) -> str:
     """Create a Slurm batch script for Calvin processing.
@@ -2208,6 +2209,7 @@ def create_sbatch_script(
         jobtype: Type of Calvin job (realtime or mwa_asvo).
         log_path: Global log directory path.
         request_ids: List of request IDs.
+        bulk_request: Is this a bulk request? If so lower priority.
         processor_args: Extra command-line arguments for the processor.
 
     Returns:
@@ -2225,7 +2227,10 @@ def create_sbatch_script(
     else:
         job_name = f"asvo{obs_id}"
         partition = "gpu"
-        nice = "#SBATCH --nice=1000"  # lower priority than realtime jobs
+        if bulk_request:
+            nice = "#SBATCH --nice=10000"  # lowest priority
+        else:
+            nice = "#SBATCH --nice=100"  # lower priority than realtime jobs
         wall_time = "08:00:00"  # allow extra time for downloading from ASVO (6 hours + 2 for processing)
 
     job_script = f"""#!/bin/bash

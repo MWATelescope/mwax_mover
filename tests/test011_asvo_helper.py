@@ -123,7 +123,7 @@ def test_mwax_asvo_helper():
         10,
         10,
     )
-    asvo.submit_download_job(0, 1115977528)
+    asvo.submit_download_job(0, 1115977528, False)
 
     asvo.update_all_job_status()
 

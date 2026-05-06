@@ -1643,10 +1643,8 @@ class TestGetSortedSolutionFiles:
         self._touch(tmp_path / f"{self.OBS_ID}_solutions.fits")
         self._touch(tmp_path / f"{self.OBS_ID}_solutions.bin")
 
-        _result = get_sorted_solution_files(str(tmp_path), self.OBS_ID, extension=".fits")
-
-        with pytest.RaisesExc(ValueError) as e:
-            assert e is not None
+        with pytest.RaisesExc(ValueError):
+            _result = get_sorted_solution_files(str(tmp_path), self.OBS_ID, extension=".fits")
 
     def test_empty_directory(self, tmp_path) -> None:
         result = get_sorted_solution_files(str(tmp_path), self.OBS_ID)
