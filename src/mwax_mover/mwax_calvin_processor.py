@@ -618,7 +618,7 @@ class MWAXCalvinProcessor:
         finally:
             # delete the tar file
             logger.info(f"Cleaning up {full_tar_filename}")
-            utils.remove_file(tar_filename, raise_error=False)
+            utils.remove_file(full_tar_filename, raise_error=False)
 
         return exit_bool, exit_error_message, retry_this_download
 

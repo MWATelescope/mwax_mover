@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.6.22 07-May 2026
+
+* calvin_processor: Fixed bug where tar file was not being deleted.
+
 # 1.6.21 06-May 2026
 
 * Ensure "bulk" calvin requests get lowest priority.
