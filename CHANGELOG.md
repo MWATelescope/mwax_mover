@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.6.23 07-May 2026
+
+* Created standalone vdif combiner util.
+
 # 1.6.22 07-May 2026
 
 * calvin_processor: Fixed bug where tar file was not being deleted.
