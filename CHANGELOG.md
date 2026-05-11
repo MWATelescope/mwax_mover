@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.6.24 11-May 2026
+
+* calvin controller: Fixed bug where any MWA ASVO job that had an error would increment the error count every refresh interval.
+
 # 1.6.23 07-May 2026
 
 * Created standalone vdif combiner util.

@@ -362,9 +362,10 @@ class MWAXCalvinController:
         scripts to SLURM for them to be downloaded and processed by the calvin
         processor. Handles error states appropriately.
         """
-        error_message: str = ""
 
-        for job in self.mwax_asvo_helper.current_asvo_jobs:
+        for job in self.mwax_asvo_helper.current_asvo_jobs[
+            :
+        ]:  # [:] makes a shallow copy which allows us to remove the item we're iterating
             if not job.download_slurm_job_submitted:
                 if job.job_state == mwax_asvo_helper.MWAASVOJobState.Error:
                     # MWA ASVO completed this job with error
@@ -386,6 +387,10 @@ class MWAXCalvinController:
                             job.download_error_datetime,
                             job.download_error_message,
                         )
+
+                        # now remove the job from our list
+                        self.mwax_asvo_helper.current_asvo_jobs.append(job)
+
                     except Exception:
                         logger.exception("Unable to update calibration_request table")
                         self.database_errors += 1
