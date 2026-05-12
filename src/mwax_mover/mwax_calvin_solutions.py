@@ -45,6 +45,7 @@ def process_solutions(
     source_list: str,
     num_sources: int,
     produce_debug_plots: bool,
+    calibration_command: str,
 ) -> tuple[bool, str, Optional[int]]:
     """Process hyperdrive calibration solutions and insert into the database.
 
@@ -61,6 +62,7 @@ def process_solutions(
         source_list: Source list identifier used for the calibration.
         num_sources: Number of sources in the calibration.
         produce_debug_plots: Whether to produce debug plots.
+        calibration_command: Full hyperdrive command line used to generate the calibration.
 
     Returns:
         A tuple containing:
@@ -185,6 +187,7 @@ def process_solutions(
                     fit_limit=None,
                     source_list=source_list,
                     num_sources=num_sources,
+                    calibration_command=calibration_command,
                 )
 
                 if fit_id is None or not success:

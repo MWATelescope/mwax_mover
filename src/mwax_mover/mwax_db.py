@@ -530,6 +530,7 @@ def insert_calibration_fits_row(
     fit_limit: Optional[int],
     source_list: str,
     num_sources: int,
+    calibration_command: str,
 ) -> Tuple[bool, int | None]:
     """Inserts a new calibration_fits row and return the fit_id if successful
     This row represents the calibration 'header' for an obsid.
@@ -540,14 +541,24 @@ def insert_calibration_fits_row(
 
     sql = (
         "INSERT INTO calibration_fits"
-        " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit,source_list,num_sources)"
-        " VALUES (%s,%s,%s,now(),%s,%s,%s,%s,%s);"
+        " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit,source_list,num_sources,calibration_command)"
+        " VALUES (%s,%s,%s,now(),%s,%s,%s,%s,%s,%s);"
     )
 
     # Fit ID is the Unix timestamp multiplied by 10**6 so it's an int
     fit_id = math.floor(time.time() * 10**6)
 
-    sql_values = (fit_id, obs_id, code_version, creator, fit_niter, fit_limit, source_list, num_sources)
+    sql_values = (
+        fit_id,
+        obs_id,
+        code_version,
+        creator,
+        fit_niter,
+        fit_limit,
+        source_list,
+        num_sources,
+        calibration_command,
+    )
 
     try:
         db_handler_object.execute_dml_row_within_transaction(sql, sql_values, transaction_cursor)

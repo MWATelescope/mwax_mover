@@ -121,6 +121,10 @@ class MWAXCalvinController:
         self.giant_squid_list_timeout_seconds: int = 0
         self.giant_squid_submitvis_timeout_seconds: int = 0
 
+        # S3 upload settings
+        self.s3_profile: str = ""
+        self.s3_bucket: str = ""
+
         # Helper for MWA ASVO interactions and job record keeping
         self.mwax_asvo_helper: mwax_asvo_helper.MWAASVOHelper = mwax_asvo_helper.MWAASVOHelper()
 
@@ -841,6 +845,12 @@ class MWAXCalvinController:
         self.giant_squid_submitvis_timeout_seconds = int(
             utils.read_config(config, "giant squid", "giant_squid_submitvis_timeout_seconds")
         )
+
+        #
+        # Solutions upload section
+        #
+        self.s3_profile = str(utils.read_config(config, "solutions upload", "s3_profile"))
+        self.s3_bucket = str(utils.read_config(config, "solutions upload", "s3_bucket"))
 
         # Setup the MWA ASVO Helper
         self.mwax_asvo_helper.initialise(

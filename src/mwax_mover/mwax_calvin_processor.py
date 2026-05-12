@@ -124,6 +124,7 @@ class MWAXCalvinProcessor:
         # hyperdrive
         self.hyperdrive_timeout: int = 0
         self.hyperdrive_binary_path: str = ""
+        self.hyperdrive_extra_args: str = ""
 
     def start(self):
         """Start the processor and execute calibration workflow.
@@ -303,7 +304,7 @@ class MWAXCalvinProcessor:
 
             # Birli was successful so run hyperdrive!
             self.current_task_name = "Hyperdrive"
-            result, error_message = self.run_hyperdrive()
+            result, error_message, calibration_command = self.run_hyperdrive()
 
             if not result:
                 self.fail_job_processing(error_message)
@@ -321,6 +322,7 @@ class MWAXCalvinProcessor:
                 os.path.basename(self.source_list_filename),
                 self.num_sources,
                 self.produce_debug_plots,
+                calibration_command,
             )
 
             if result:
@@ -731,14 +733,14 @@ class MWAXCalvinProcessor:
         else:
             return False, "Birli run failed. See logs"
 
-    def run_hyperdrive(self) -> tuple[bool, str]:
+    def run_hyperdrive(self) -> tuple[bool, str, str]:
         """Execute Hyperdrive calibration to produce calibration solutions.
 
         Runs Hyperdrive calibration on preprocessed UVFITS files, generates
         statistics and plots, and exports solutions to configured directories.
 
         Returns:
-            A tuple of (success, error_message). If successful, error_message is empty.
+            A tuple of (success, error_message, calibration_command). If successful, error_message is empty.
         """
         hyperdrive_success = False
 
@@ -750,7 +752,7 @@ class MWAXCalvinProcessor:
         uvfits_files = glob.glob(os.path.join(self.working_path, "*.uvfits"))
 
         # Run hyperdrive (might be multiple times if picket fence)
-        hyperdrive_success = mwax_calvin_utils.run_hyperdrive(
+        hyperdrive_success, calibration_command = mwax_calvin_utils.run_hyperdrive(
             uvfits_files,
             self.metafits_filename,
             self.job_output_path,
@@ -760,6 +762,7 @@ class MWAXCalvinProcessor:
             self.source_list_type,
             self.num_sources,
             self.hyperdrive_timeout,
+            self.hyperdrive_extra_args,
         )
 
         # Did we have N number of successful runs?
@@ -880,9 +883,9 @@ class MWAXCalvinProcessor:
                     )
 
         if hyperdrive_success:
-            return True, ""
+            return True, "", calibration_command
         else:
-            return False, "Hyperdrive run failed. See logs"
+            return False, "Hyperdrive run failed. See logs", calibration_command
 
     def stop(self, exit_code: int = 0):
         """Shutdown the processor and close all connections.
@@ -1176,14 +1179,6 @@ class MWAXCalvinProcessor:
             #
             # Hyperdrive config
             #
-            self.phase_fit_niter = int(
-                utils.read_config(
-                    config,
-                    "hyperdrive",
-                    "phase_fit_niter",
-                )
-            )
-
             self.num_sources = int(
                 utils.read_config(
                     config,
@@ -1229,6 +1224,15 @@ class MWAXCalvinProcessor:
                     f"hyperdrive_binary_path location  {self.hyperdrive_binary_path} does not exist. Quitting."
                 )
                 sys.exit(1)
+
+            # hyperdrive extra args
+            self.hyperdrive_extra_args = str(
+                utils.read_config(
+                    config,
+                    "hyperdrive",
+                    "extra_args",
+                )
+            )
 
             #
             # processing config
@@ -1297,6 +1301,14 @@ class MWAXCalvinProcessor:
                     config,
                     "processing",
                     "cal_export_max_age_hours",
+                )
+            )
+
+            self.phase_fit_niter = int(
+                utils.read_config(
+                    config,
+                    "processing",
+                    "phase_fit_niter",
                 )
             )
 

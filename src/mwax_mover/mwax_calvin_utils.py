@@ -1915,7 +1915,8 @@ def run_hyperdrive(
     source_list_type: str,
     num_sources: int,
     hyperdrive_timeout: int,
-) -> bool:
+    hyperdrive_extra_args: str,
+) -> tuple[bool, str]:
     """Run hyperdrive calibration on UV FITS files.
 
     Args:
@@ -1928,9 +1929,10 @@ def run_hyperdrive(
         source_list_type: Type of source list (e.g., 'gleam').
         num_sources: Number of sources in the list.
         hyperdrive_timeout: Timeout in seconds for hyperdrive execution.
+        hyperdrive_extra_args: Any additional command line args provided from the calvin_processor config file.
 
     Returns:
-        True if all runs succeeded, False if any failed.
+        tuple[True, calibration_command] if all runs succeeded, [False, calibration_command] if any failed.
     """
     logger.info(
         f"{obs_id}: {len(input_uvfits_files)} contiguous bands detected."
@@ -1959,15 +1961,13 @@ def run_hyperdrive(
             bin_solution_full_filename = os.path.join(job_output_path, bin_solution_filename)
 
             # Run hyperdrive
+            calibration_command = f"--num-sources {num_sources} --source-list {source_list_filename} --source-list-type {source_list_type} {hyperdrive_extra_args}"
             # Output to hyperdrive format and old aocal format (bin)
             cmdline = (
                 f"{hyperdrive_binary_path} di-calibrate"
-                " --no-progress-bars --data"
-                f" {uvfits_file} {metafits_filename} --num-sources {num_sources}"
-                " --source-list"
-                f" {source_list_filename} --source-list-type"
-                f" {source_list_type} --outputs"
-                f" {hyperdrive_solution_full_filename} {bin_solution_full_filename}"
+                f" --no-progress-bars {calibration_command}"
+                f" --data {uvfits_file} {metafits_filename} "
+                f" --outputs {hyperdrive_solution_full_filename} {bin_solution_full_filename}"
             )
 
             start_time = time.time()
@@ -2043,9 +2043,9 @@ def run_hyperdrive(
             stdout,
             stderr,
         )
-        return False
+        return False, calibration_command
 
-    return True
+    return True, calibration_command
 
 
 def run_hyperdrive_stats(
