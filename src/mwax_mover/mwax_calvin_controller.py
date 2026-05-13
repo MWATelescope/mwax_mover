@@ -19,6 +19,10 @@ calibration form the calvin HPC cluster
    * Clean up
 """
 
+from dataclasses import dataclass
+
+import subprocess
+
 import argparse
 from configparser import ConfigParser
 from datetime import datetime, timedelta
@@ -124,6 +128,10 @@ class MWAXCalvinController:
         # S3 upload settings
         self.s3_profile: str = ""
         self.s3_bucket: str = ""
+        self.plot_upload_interval_secs = 120
+
+        # Create a stop event handler for the plot uploader thread
+        self.plot_uploader_stop_event = threading.Event()
 
         # Helper for MWA ASVO interactions and job record keeping
         self.mwax_asvo_helper: mwax_asvo_helper.MWAASVOHelper = mwax_asvo_helper.MWAASVOHelper()
@@ -144,6 +152,17 @@ class MWAXCalvinController:
         logger.info("Starting health_thread...")
         health_thread = threading.Thread(name="health_thread", target=self.health_loop, daemon=True)
         health_thread.start()
+
+        # Start plot upload thread
+        # Create a thread to handle uploading plots to S3
+        self.plot_upload_thread = threading.Thread(
+            target=self.plot_upload_handler,
+            args=[self.plot_upload_paths, self.plot_uploader_stop_event],
+            name="plot-upload",
+            daemon=True,
+        )
+        logger.info("Starting plot_upload_thread...")
+        self.plot_upload_thread.start()
 
         logger.info("Started...")
 
@@ -185,6 +204,82 @@ class MWAXCalvinController:
 
         # Final log message
         logger.info("Completed Successfully")
+
+    def plot_upload_handler(self, stop_event: threading.Event) -> None:
+        """Main loop for the background upload thread.
+
+        Iterates over all paths every UPLOAD_INTERVAL_SECS seconds, respecting
+        per-path exponential backoff on failure.
+
+        Args:
+            plot_upload_paths: List of local directory paths to upload from.
+            stop_event: Threading event that signals the loop to exit cleanly.
+        """
+        MIN_AGE_SECS = 60
+
+        # we keep track of failures for each path
+        @dataclass
+        class UploadPathTracker:
+            plot_upload_path: str
+            consecutive_failures: int = 0
+            next_attempt_time: float = 0.0
+
+            def get_backoff_delay(self) -> float:
+                """Calculate exponential backoff delay for a given failure count.
+
+                Returns:
+                    Backoff delay in seconds, capped at BACKOFF_MAX_SECS.
+                """
+                BACKOFF_BASE_SECS = 10
+                BACKOFF_MAX_SECS = 3600  # 1 hour
+
+                delay = BACKOFF_BASE_SECS * (2 ** (self.consecutive_failures - 1))
+                return min(delay, BACKOFF_MAX_SECS)
+
+        # initialise the upload trackers
+        upload_trackers: list[UploadPathTracker] = [
+            UploadPathTracker(plot_upload_path=t, next_attempt_time=time.monotonic()) for t in self.plot_upload_paths
+        ]
+
+        while not stop_event.is_set():
+            for tracker in upload_trackers:
+                now: float = time.monotonic()
+
+                if now < tracker.next_attempt_time:
+                    remaining = tracker.next_attempt_time - now
+                    logger.debug(f"Skipping {tracker.plot_upload_path} — backoff active, {remaining:.1f}s remaining")
+                    continue
+
+                try:
+                    utils.rclone_move(
+                        tracker.plot_upload_path, self.s3_profile, self.s3_bucket, min_file_age_secs=MIN_AGE_SECS
+                    )
+                    if tracker.consecutive_failures > 0:
+                        logger.info(
+                            f"rclone move succeeded for {tracker.plot_upload_path} after {tracker.consecutive_failures} failure(s)",
+                        )
+                    tracker.consecutive_failures = 0
+                    tracker.next_attempt_time = time.monotonic()
+
+                except subprocess.CalledProcessError as e:
+                    tracker.consecutive_failures += 1
+                    delay = tracker.get_backoff_delay()
+                    tracker.next_attempt_time = time.monotonic() + delay
+
+                    logger.warning(
+                        f"rclone move failed for {tracker.plot_upload_path} (failure #{tracker.consecutive_failures}, retrying in {delay:.0f}s): {e.stderr.strip() if e.stderr else str(e)}"
+                    )
+                except Exception as e:
+                    tracker.consecutive_failures += 1
+                    delay = tracker.get_backoff_delay()
+                    tracker.next_attempt_time = time.monotonic() + delay
+                    logger.warning(
+                        f"Unexpected error uploading {tracker.plot_upload_path} (failure #{tracker.consecutive_failures}, retrying in {delay:.0f}s): {e}",
+                    )
+
+            stop_event.wait(timeout=self.plot_upload_interval_secs)
+
+        logger.info("Plot upload thread completed successfully.")
 
     def main_loop_handler(self):
         """Handle a single iteration of the main control loop.
@@ -460,6 +555,7 @@ class MWAXCalvinController:
         """
 
         self.running = False
+        self.plot_uploader_stop_event.set()
 
         # Close all database connections
         if self.db_handler:
@@ -847,10 +943,18 @@ class MWAXCalvinController:
         )
 
         #
-        # Solutions upload section
+        # plots upload section
         #
-        self.s3_profile = str(utils.read_config(config, "solutions upload", "s3_profile"))
-        self.s3_bucket = str(utils.read_config(config, "solutions upload", "s3_bucket"))
+        self.s3_profile = str(utils.read_config(config, "plots upload", "s3_profile"))
+        self.s3_bucket = str(utils.read_config(config, "plots upload", "s3_bucket"))
+        self.plot_upload_paths: list[str] = utils.read_config_list(config, "plots upload", "plot_upload_paths")
+        for p in self.plot_upload_paths:
+            if not os.path.exists(p):
+                logger.error(f"plot_upload_path: {p} does not exist. Quitting.")
+                sys.exit(1)
+        self.plot_upload_interval_secs: int = int(
+            utils.read_config(config, "plots upload", "plot_upload_interval_secs")
+        )
 
         # Setup the MWA ASVO Helper
         self.mwax_asvo_helper.initialise(

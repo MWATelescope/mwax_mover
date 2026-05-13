@@ -13,9 +13,11 @@ from mwax_mover.utils import run_giant_squid, extract_tar, get_filename_from_url
 import argparse
 from configparser import ConfigParser
 import datetime
+from datetime import timezone
 import json
 import glob
 import logging
+import mimetypes
 import os
 import shutil
 import signal
@@ -112,6 +114,8 @@ class MWAXCalvinProcessor:
         self.keep_completed_visibility_files: bool = False
         self.cal_export_path: Optional[str] = None
         self.cal_export_max_age_hours: int = 24  # default to 24 hours
+        self.plot_upload_path = ""  # where we move plots and stats to on successful calibration
+        self.plot_front_end_url = ""
 
         # birli
         self.birli_timeout: int = 0
@@ -333,6 +337,12 @@ class MWAXCalvinProcessor:
                     if self.job_type == CalvinJobType.realtime:
                         self.current_task_name = "Releasing MWAX files"
                         self.release_mwax_files()
+
+                    # Try and generate an index file
+                    if self.generate_plot_index_file(fit_id):
+                        # Go and upload all the files (including the index)
+                        self.upload_plot_files(fit_id)
+
                 else:
                     # We returned True (no unexpected errors occured)
                     # but we didn't get a fit_id. This is due to
@@ -376,6 +386,145 @@ class MWAXCalvinProcessor:
             else:
                 self.fail_job_downloading(error_message)
             self.stop(exit_code=-1)
+
+    def generate_plot_index_file(self, fit_id: int) -> bool:
+        """Scans the specified directory (non-recursively) and produces a JSON manifest
+        describing each file, suitable for upload to S3 alongside the files themselves.
+        The manifest includes a CloudFront URL and MIME type for each file.
+
+        Args:
+            fit_id: the fit_id of this calibration. We use this to create a dir in the plot_upload_path
+        """
+
+        def get_file_description(filename: str) -> str:
+            """Given a filename, attempt to generate a description of it
+            Args:
+                filename: The filename to be described
+            """
+
+            # If it has a "chNNN" then this is a single coarse channel output
+            chans = utils.extract_channels_from_filename(filename)
+            if chans is not None:
+                chan_no = chans["start"]
+
+                if "end" not in chans:
+                    channel_suffix = f" for receiver channel {chan_no} ({chan_no * 1.28:.3f} MHz)"
+                else:
+                    chan_no_end = chans["end"]
+                    channel_suffix = f" for receiver channels {chan_no}-{chan_no_end} ({chan_no * 1.28:.3f} - {chan_no_end * 1.28:.3f} MHz)"
+            else:
+                channel_suffix = " for all coarse channels"
+
+            desc = ""
+            if "birli_readme.txt" in filename:
+                desc = "Full log output of the Birli run"
+            elif "hyperdrive_readme.txt" in filename:
+                desc = "Full log output of the Hyperdrive run"
+            elif "intercepts.png" in filename:
+                desc = "Plots showing, for each reciever type and polarisation, a plot of the phase intercepts in polar coordinates vs cable length"
+            elif "phase_fits_xx.png" in filename:
+                desc = "Plot of the phase fit for each tile (phase vs frequency) for XX"
+            elif "phase_fits_yy.png" in filename:
+                desc = "Plot of the phase fit for each tile (phase vs frequency) for YY"
+            elif "phase_fits.tsv" in filename:
+                desc = "Tab separated values (TSV) file containing all of the phase fit statistics per tile"
+            elif "rx_lengths.png" in filename:
+                desc = "Cable length offsets in metres per receiver"
+            elif "solutions_amps.png" in filename:
+                desc = "Calibration solution amplitudes vs fine channel per tile"
+            elif "solutions_phases.png" in filename:
+                desc = "Calibration solution phase vs fine channel per tile"
+            elif "stats.txt" in filename:
+                desc = "Hyperdrive fine channel convergence statistics"
+            elif "residual.tsv" in filename:
+                desc = (
+                    "Tab separated value (TSV) file of phase residuals vs frequency by receiver type and polarisation"
+                )
+            elif "residual.png" in filename:
+                desc = "Plot of phase residuals vs frequency by receiver type and polarisation"
+
+            if desc == "":
+                return "Miscellaneous file"
+            else:
+                return f"{desc}{channel_suffix}"
+
+        try:
+            files_path: str = os.path.join(self.plot_upload_path, str(fit_id))
+
+            if not os.path.isdir(files_path):
+                raise NotADirectoryError(f"Not a valid directory: {files_path}")
+
+            files = []
+            for filename in sorted(os.scandir(files_path), key=lambda e: e.name):
+                if not filename.is_file():
+                    continue
+                if filename.name == "index.json":
+                    continue
+
+                stat = filename.stat()
+                last_modified = datetime.datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+                mime_type, _ = mimetypes.guess_type(filename.name)
+
+                s3_path = f"{str(fit_id)}/{filename.name}"
+
+                files.append(
+                    {
+                        "filename": filename.name,
+                        "url": f"{self.plot_front_end_url}/{s3_path}",
+                        "size_bytes": stat.st_size,
+                        "last_modified": last_modified.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "content_type": mime_type or "application/octet-stream",
+                        "description": get_file_description(filename.name),
+                    }
+                )
+
+            index = {
+                "version": 1,
+                "generated_at": datetime.datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "base_url": self.plot_front_end_url,
+                "path": s3_path,
+                "files": files,
+            }
+
+            output_path = os.path.join(files_path, "index.json")
+
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(index, f, indent=2)
+
+            return True
+        except Exception:
+            # log it and return
+            logger.warning(f"Problem generating the index.json file for fit {fit_id}")
+            return False
+
+    def upload_plot_files(self, fit_id: int):
+        """Move all the plots and stats to the plots dir and include the fit_id as a folder.
+        It's a nice to have, so if we fail, log it and move on
+
+        Args:
+            fit_id: the fit_id of this calibration. We use this to create a dir in the plot_upload_path
+        """
+        try:
+            dest_dir = os.path.join(self.plot_upload_path, str(fit_id))
+
+            # Create the dest dir
+            os.mkdir(dest_dir)
+
+            exts = ["*.png", "*.txt", "*.tsv", "*.json"]
+            for ext in exts:
+                plot_files = glob.glob(os.path.join(self.job_output_path, ext))
+                for file_no, pfile in enumerate(plot_files):
+                    try:
+                        dest_filename = os.path.join(dest_dir, os.path.basename(pfile))
+                        logger.debug(f"Moving {pfile} to {dest_filename} [{file_no}/{len(plot_files)}]")
+                        shutil.move(pfile, dest_filename)
+                    except Exception as e:
+                        logger.warning(f"Failed to move {pfile} to the {dest_dir}. Error: {str(e)}. Ignoring")
+                        # keep going and try the next file
+
+        except Exception as ee:
+            # Something went wrong- log it and keep going
+            logger.warning(f"Failed to move files to the {self.plot_upload_path}. Error: {str(ee)}. Ignoring")
 
     def release_mwax_files(self):
         """Release visibility files from MWAX boxes after processing.
@@ -1311,6 +1460,20 @@ class MWAXCalvinProcessor:
                     "phase_fit_niter",
                 )
             )
+
+            # Get the plot_upload_path dir
+            self.plot_upload_path = utils.read_config(
+                config,
+                "processing",
+                "plot_upload_path",
+            )
+
+            if not os.path.exists(self.plot_upload_path):
+                logger.error(f"plot_upload_path location  {self.plot_upload_path} does not exist. Quitting.")
+                sys.exit(1)
+
+            # Get the base url of our calibration web front end (in front of the S3 bucket)
+            self.plot_front_end_url = utils.read_config(config, "processing", "plot_front_end_url")
 
         except Exception as e:
             error_message = str(e)

@@ -7,6 +7,8 @@ PSRDADA header parsing, Redis-based beamformer signalling, UDP multicast sending
 and config file helpers (read_config, read_optional_config, read_config_list).
 """
 
+import subprocess
+
 from urllib.parse import unquote, urlparse
 
 import tarfile
@@ -2293,3 +2295,108 @@ def get_filename_from_url(url: str) -> str:
         raise ValueError(f"No filename found in URL: {url}")
 
     return filename
+
+
+def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 120) -> None:
+    """Run rclone move for files in a directory to the S3 destination.
+
+    Uses --min-age to skip files that are too new, and --no-traverse for
+    efficiency on large buckets.
+
+    Args:
+        path: Local directory path to move files from.
+        profile: The rclone profile to use (see rclone.conf).
+        bucket: Destination bucket name.
+        min_file_age_secs: Do not attempt to move any file which is newer than this many seconds.
+            This prevents moving files before they are finished being written.
+
+    Raises:
+        subprocess.CalledProcessError: If rclone exits with a non-zero return code.
+    """
+
+    def _parse_rclone_stats(stderr: str) -> dict:
+        """Extract the final stats block from rclone's JSON log output.
+
+        rclone emits one JSON object per line to stderr when --use-json-log is set.
+        The last line containing a 'stats' key is the end-of-run summary.
+
+        Args:
+            stderr: Raw stderr output from the rclone process.
+
+        Returns:
+            A dict of rclone stats, or an empty dict if none could be parsed.
+            Useful keys: 'transfers' (files moved), 'bytes', 'errors', 'elapsedTime'.
+        """
+        last_stats: dict = {}
+        for line in stderr.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+                if "stats" in entry:
+                    last_stats = entry["stats"]
+            except json.JSONDecodeError:
+                continue
+        return last_stats
+
+    dest = f"{profile}:{bucket}"
+    cmd = [
+        "rclone",
+        "move",
+        "--min-age",
+        f"{min_file_age_secs}s",
+        "--no-traverse",
+        "--use-json-log",  # structured JSON lines on stderr
+        "--stats",
+        "0",  # suppress periodic stats, only emit at end
+        path,
+        dest,
+    ]
+    logger.debug(f"Running rclone: {' '.join(cmd)}")
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    #  get rclone stats - skip if we hit an error
+    try:
+        stats = _parse_rclone_stats(result.stderr)
+        transfers = stats.get("transfers", 0)
+        if transfers > 0:
+            bytes_moved = stats.get("bytes", 0)
+            elapsed = stats.get("elapsedTime", 0.0)
+            logger.info(
+                f"rclone moved {transfers} file(s) ({bytes_moved / 1000.0:.1f} KB) from {path} in {elapsed:.1f}s",
+            )
+        else:
+            logger.debug(f"rclone: nothing to move from {path}")
+    except Exception:
+        logger.exception("Error getting stats from rclone. Skipping.")
+
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
+
+    if result.stdout:
+        logger.debug(f"rclone stdout: {result.stdout.strip()}")
+
+
+def extract_channels_from_filename(filename: str) -> dict | None:
+    """Extracts channel information from a filename.
+
+    Handles two patterns:
+    - Single channel: e.g. "1445856416_ch96_solutions_phases.png"
+    - Channel range:  e.g. "1424383568_ch110-121_solutions_amps.png"
+
+    Args:
+        filename: The filename (not full path) to extract channel info from.
+
+    Returns:
+        A dict with a "start" key and optional "end" key if a channel pattern
+        is found, or None if no channel pattern is present.
+    """
+    match = re.search(r"_ch(\d{1,3})(?:-(\d{1,3}))?_", filename)
+    if not match:
+        return None
+    result = {"start": int(match.group(1))}
+    if match.group(2) is not None:
+        result["end"] = int(match.group(2))
+    return result

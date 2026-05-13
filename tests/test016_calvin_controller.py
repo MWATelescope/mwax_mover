@@ -48,3 +48,7 @@ def test_mwax_calvin_controller():
     assert mcal.max_in_progress_asvo_jobs == 10
     assert mcal.s3_profile == "mwa-calvin-s3"
     assert mcal.s3_bucket == "mwa_calvin_solutions"
+    assert mcal.plot_upload_paths == [
+        "/home/gsleap/mwax_mover_testing/test016/shared/data/calvin11/plots",
+        "/home/gsleap/mwax_mover_testing/test016/shared/data/calvin12/plots",
+    ]
