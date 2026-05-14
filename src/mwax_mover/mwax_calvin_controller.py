@@ -19,6 +19,8 @@ calibration form the calvin HPC cluster
    * Clean up
 """
 
+from pathlib import Path
+
 from dataclasses import dataclass
 
 import subprocess
@@ -254,6 +256,17 @@ class MWAXCalvinController:
                     utils.rclone_move(
                         tracker.plot_upload_path, self.s3_profile, self.s3_bucket, min_file_age_secs=MIN_AGE_SECS
                     )
+
+                    # rclone move will leave behind empty dirs so clean them up
+                    # this will rmdir any empty subdirs of tracker.plot_upload_path which are older than 60 seconds
+                    # (This is to prevent removing a dir that a calvin_processor might be creating!)
+                    try:
+                        for path in sorted(Path(tracker.plot_upload_path).rglob("*"), reverse=True):
+                            if path.is_dir() and not any(path.iterdir()) and time.time() - path.stat().st_mtime > 60:
+                                path.rmdir()
+                    except Exception as e:
+                        logger.warning(f"Error clearing empty dirs under {tracker.plot_upload_path}. Error {str(e)}")
+
                     if tracker.consecutive_failures > 0:
                         logger.info(
                             f"rclone move succeeded for {tracker.plot_upload_path} after {tracker.consecutive_failures} failure(s)",
