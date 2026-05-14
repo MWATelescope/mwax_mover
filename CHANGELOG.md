@@ -4,10 +4,6 @@
 
 * calvin: Now passing asvo job id to the processor to ensure giant squid knows how to download the obs.
 
-TODO:
-* calvin_processor: clip large gains (c.f. config file item processor->max_gains) before generating plots or writing the solution to the database. 
-  * Add the original pre-clipped gains to the 'x_gains_pre_clipped_value ' and 'y_gains_pre_clipped_value' columns of the 'calibration_solutions' table.
-
 # 1.7.0 13-May 2026
 
 * calvin_processor: add config file items for hyperdrive: extra_args.

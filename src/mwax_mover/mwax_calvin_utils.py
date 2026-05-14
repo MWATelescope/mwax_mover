@@ -2822,3 +2822,45 @@ def generate_plot_index_file(
         # log it and return
         logger.exception(f"Problem generating the {output_filename} file for fit {fit_id}")
         return False, {}
+
+
+#
+# Keeping this just in case- but this functionality is now in Hyperdrive
+#
+# def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float):
+#     HDU = "SOLUTIONS"
+
+#     with fits.open(hyperdrive_fits_file, mode="update") as hdul:
+#         # Check if solutions HDU exists
+#         if HDU not in hdul:
+#             raise Exception(
+#                 f"clip_hyperdrive_solution_gains(): Warning: No SOLUTIONS HDU found in {hyperdrive_fits_file}"
+#             )
+
+#         logger.info(
+#             f"clip_hyperdrive_solution_gains(): checking solutions file {hyperdrive_fits_file} for gains > {cut_off}"
+#         )
+
+#         # shape: (time, antenna, chan, 8)
+#         # force native endianness (by setting type to float64)
+#         data = np.array(hdul[HDU].data, dtype=np.float64)
+
+#         # Reinterpret pairs of float64 as complex128
+#         # shape: (time, antenna, chan, 4) where 0=XX, 1=XY, 2=YX, 3=YY
+#         data_complex = data.view(np.complex128)
+
+#         # Compute amplitude for each polarisation
+#         amp = np.abs(data_complex)  # shape: (time, antenna, chan, 4)
+
+#         total_samples = amp.size
+
+#         # Build mask and apply NaN where amplitude exceeds threshold
+#         mask = amp > cut_off
+#         data_complex[mask] = np.nan + 1j * np.nan
+#         flagged_count = mask.sum()
+#         logger.debug(f"Gains > {cut_off}: {flagged_count} / {total_samples} ({100 * mask.mean():.2f}%) set to NaN")
+
+#         # Assign modified data back and flush to disk
+#         hdul[HDU].data = data
+#         hdul.flush()
+#         logger.info(f"clip_hyperdrive_solution_gains(): finished rewriting solutions file {hyperdrive_fits_file}")

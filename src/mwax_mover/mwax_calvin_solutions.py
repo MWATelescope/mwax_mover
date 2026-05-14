@@ -79,7 +79,7 @@ def process_solutions(
 
         fits_solution_files = get_sorted_solution_files(output_data_path, obs_id, "fits")
 
-        logger.debug(f"{output_data_path} - uploading {fits_solution_files=}")
+        logger.debug(f"{output_data_path} - reading {fits_solution_files=}")
 
         soln_group = HyperfitsSolutionGroup(
             [Metafits(f) for f in metafits_files], [HyperfitsSolution(f) for f in fits_solution_files]
@@ -267,13 +267,13 @@ def process_solutions(
         return True, "", int(fit_id)
 
     except Exception:
-        error_text = f"Error in upload_handler:\n{traceback.format_exc()}"
+        error_text = f"Error in process_solutions():\n{traceback.format_exc()}"
         logger.exception(error_text)
 
         # Write an error readme
         write_readme_file(
             os.path.join(output_data_path, "readme_error.txt"),
-            "upload_handler()",
+            "process_solutions()",
             -999,
             "",
             error_text,

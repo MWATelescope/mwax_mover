@@ -32,6 +32,7 @@ def test_mwax_calvin_processor():
         config_filename,
         1234567890,
         1234,
+        None,
         CalvinJobType.realtime,
         "https//test.test",
         [
