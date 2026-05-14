@@ -7,15 +7,18 @@ binary format constants and read/write helpers, SBATCH script generation
 functions, and estimate_birli_output_bytes() for storage pre-checks.
 """
 
+from datetime import timezone
 import datetime
+from enum import Enum
 import glob
 import re
+import json
 import logging
+import mimetypes
 import os
 import shutil
 import time
 import numpy as np
-from enum import Enum
 from astropy.io import fits
 from astropy import units as u
 from astropy.constants import c  # ty: ignore[unresolved-import]
@@ -27,21 +30,17 @@ import struct
 import matplotlib as mpl
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
-
+from mwalib import MetafitsContext
+import numpy.typing as npt  # noqa: F401
+from numpy.typing import ArrayLike, NDArray
+from typing import NamedTuple, List, Tuple, Optional  # noqa: F401
+import sys
 from mwax_mover.mwax_command import (
     run_command_ext,
     run_command_popen,
     check_popen_finished,
 )
-from mwax_mover.utils import is_int
-from mwalib import MetafitsContext
-import numpy.typing as npt  # noqa: F401
-from numpy.typing import ArrayLike, NDArray
-from typing import NamedTuple, List, Tuple, Optional  # noqa: F401
-
-# from nptyping import NDArray, Shape
-
-import sys
+from mwax_mover.utils import is_int, extract_channels_from_filename, get_png_dimensions
 
 logger = logging.getLogger(__name__)
 
@@ -2700,3 +2699,126 @@ def get_sorted_solution_files(directory: str, obs_id: int, extension: str = "fit
         glob.glob(os.path.join(directory, f"{obs_id}_*solutions.{extension}")),
         key=_sort_key,
     )
+
+
+def get_file_description(filename: str) -> str:
+    """Given a filename, attempt to generate a description of it
+    Args:
+        filename: The filename to be described
+    """
+
+    # If it has a "chNNN" then this is a single coarse channel output
+    chans = extract_channels_from_filename(filename)
+    if chans is not None:
+        chan_no = chans["start"]
+
+        if "end" not in chans:
+            channel_suffix = f" for receiver channel {chan_no} ({chan_no * 1.28:.3f} MHz)"
+        else:
+            chan_no_end = chans["end"]
+            channel_suffix = (
+                f" for receiver channels {chan_no}-{chan_no_end} ({chan_no * 1.28:.3f} - {chan_no_end * 1.28:.3f} MHz)"
+            )
+    else:
+        channel_suffix = " for all coarse channels"
+
+    desc = ""
+    if "birli_readme.txt" in filename:
+        desc = "Full log output of the Birli run"
+    elif "hyperdrive_readme.txt" in filename:
+        desc = "Full log output of the Hyperdrive run"
+    elif "intercepts.png" in filename:
+        desc = "Plots showing, for each reciever type and polarisation, a plot of the phase intercepts in polar coordinates vs cable length"
+    elif "phase_fits_xx.png" in filename:
+        desc = "Plot of the phase fit for each tile (phase vs frequency) for XX"
+    elif "phase_fits_yy.png" in filename:
+        desc = "Plot of the phase fit for each tile (phase vs frequency) for YY"
+    elif "phase_fits.tsv" in filename:
+        desc = "Tab separated values (TSV) file containing all of the phase fit statistics per tile"
+    elif "rx_lengths.png" in filename:
+        desc = "Cable length offsets in metres per receiver"
+    elif "solutions_amps.png" in filename:
+        desc = "Calibration solution amplitudes vs fine channel per tile"
+    elif "solutions_phases.png" in filename:
+        desc = "Calibration solution phase vs fine channel per tile"
+    elif "stats.txt" in filename:
+        desc = "Hyperdrive fine channel convergence statistics"
+    elif "residual.tsv" in filename:
+        desc = "Tab separated value (TSV) file of phase residuals vs frequency by receiver type and polarisation"
+    elif "residual.png" in filename:
+        desc = "Plot of phase residuals vs frequency by receiver type and polarisation"
+
+    if desc == "":
+        return "Miscellaneous file"
+    else:
+        return f"{desc}{channel_suffix}"
+
+
+def generate_plot_index_file(
+    fit_id: int, plot_front_end_url: str, fit_dir: str, output_filename: str
+) -> tuple[bool, dict]:
+    """Scans the specified directory (non-recursively) and produces a JSON manifest
+    describing each file, suitable for upload to S3 alongside the files themselves.
+    The manifest includes a CloudFront URL and MIME type for each file.
+
+    Args:
+        fit_id: the fit_id of this calibration. We use this to create a dir in the plot_upload_path
+        plot_front_end_url: URL base to retrieve the file. E.g. https://s3blah
+        fit_dir: Directory containing the fit to index
+        output_filename: full path and name of the JSON file to write
+
+    Returns:
+        bool: Success / failure
+        dict: The JSON generated (if successful)
+    """
+    try:
+        if not os.path.isdir(fit_dir):
+            raise NotADirectoryError(f"Not a valid directory: {fit_dir}")
+
+        files = []
+        for filename in sorted(os.scandir(fit_dir), key=lambda e: e.name):
+            if not filename.is_file():
+                continue
+            if filename.name == "index.json":
+                continue
+
+            stat = filename.stat()
+            last_modified = datetime.datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+            mime_type, _ = mimetypes.guess_type(filename.name)
+
+            is_png = filename.name.endswith(".png")
+
+            if is_png:
+                # try to get dimensions of the png for the metadata
+                height, width = get_png_dimensions(filename.path)
+
+            s3_path = f"{str(fit_id)}/{filename.name}"
+
+            files.append(
+                {
+                    "filename": filename.name,
+                    "url": f"{plot_front_end_url}/{s3_path}",
+                    "size_bytes": stat.st_size,
+                    "last_modified": last_modified.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "content_type": mime_type or "application/octet-stream",
+                    "description": get_file_description(filename.name),
+                    **({"image_width": width, "image_height": height} if is_png else {}),
+                }
+            )
+
+        index = {
+            "version": 1,
+            "generated_at": datetime.datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "base_url": plot_front_end_url,
+            "path": s3_path,
+            "files": files,
+        }
+
+        with open(output_filename, "w", encoding="utf-8") as f:
+            json.dump(index, f, indent=2)
+
+        return True, index
+    except Exception:
+        # log it and return
+        logger.exception(f"Problem generating the {output_filename} file for fit {fit_id}")
+        return False, {}

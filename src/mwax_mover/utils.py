@@ -2400,3 +2400,25 @@ def extract_channels_from_filename(filename: str) -> dict | None:
     if match.group(2) is not None:
         result["end"] = int(match.group(2))
     return result
+
+
+def get_png_dimensions(path: str) -> tuple[int, int]:
+    """Get the width and height of a PNG image file.
+
+    Args:
+        path: Path to the PNG file.
+
+    Returns:
+        A tuple of (width, height) in pixels.
+
+    Raises:
+        ValueError: If the file does not appear to be a valid PNG.
+    """
+    with open(path, "rb") as f:
+        sig = f.read(8)
+        if sig != b"\x89PNG\r\n\x1a\n":
+            raise ValueError(f"Not a valid PNG file: {path}")
+        f.read(4)  # IHDR chunk length
+        f.read(4)  # "IHDR"
+        width, height = struct.unpack(">II", f.read(8))
+    return width, height

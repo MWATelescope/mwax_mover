@@ -54,6 +54,7 @@ mwacache_archiver = "mwax_mover.mwacache_archive_processor:main"
 mwacache_checks = "mwax_mover.mwacache_checks:main"
 aocal_split = "mwax_mover.aocal_split:main"
 vdif_cat = "mwax_mover.vdif_cat:main"
+generate_index_json = "mwax_mover.generate_index_json:main"
 
 [tool.black]
 line-length = 120

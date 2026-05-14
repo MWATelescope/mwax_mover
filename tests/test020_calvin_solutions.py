@@ -15,9 +15,7 @@ METAFITS_FILENAME below accordingly.
 """
 
 import glob
-
 import shutil
-
 import logging
 import os
 from unittest.mock import MagicMock, patch
@@ -143,6 +141,7 @@ def test_process_solutions_success(real_data_paths, tmp_path):
             source_list="test_srclist",
             num_sources=100,
             produce_debug_plots=False,
+            calibration_command="",
         )
 
     assert success is True, f"Expected success=True, got error: {error_msg}"
@@ -181,6 +180,7 @@ def test_process_solutions_all_tiles_flagged(tmp_path):
         source_list="test_srclist",
         num_sources=100,
         produce_debug_plots=False,
+        calibration_command="",
     )
 
     assert success is True
@@ -212,6 +212,7 @@ def test_process_solutions_soln_count_mismatch(real_data_paths, tmp_path):
         source_list="test_srclist",
         num_sources=100,
         produce_debug_plots=False,
+        calibration_command="",
     )
 
     assert success is False
@@ -250,6 +251,7 @@ def test_process_solutions_db_fit_insert_fails(real_data_paths, tmp_path):
             source_list="test_srclist",
             num_sources=100,
             produce_debug_plots=False,
+            calibration_command="",
         )
 
     assert success is False
@@ -288,6 +290,7 @@ def test_process_solutions_db_soln_insert_fails(real_data_paths, tmp_path):
             source_list="test_srclist",
             num_sources=100,
             produce_debug_plots=False,
+            calibration_command="",
         )
 
     assert success is False
@@ -327,6 +330,7 @@ def test_process_solutions_readme_written_on_any_exception(real_data_paths, tmp_
             source_list="test_srclist",
             num_sources=100,
             produce_debug_plots=False,
+            calibration_command="",
         )
 
     assert success is False
@@ -355,6 +359,7 @@ def test_process_solutions_no_solution_files_in_output(real_data_paths, tmp_path
         source_list="test_srclist",
         num_sources=100,
         produce_debug_plots=False,
+        calibration_command="",
     )
 
     assert success is False
@@ -392,6 +397,7 @@ def test_process_solutions_produce_debug_plots_false_does_not_import_matplotlib(
             source_list="test_srclist",
             num_sources=100,
             produce_debug_plots=False,
+            calibration_command="",
         )
 
     mock_debug.assert_not_called()
@@ -490,6 +496,7 @@ def test_process_solutions_success_2():
             source_list="test_srclist",
             num_sources=100,
             produce_debug_plots=True,
+            calibration_command="",
         )
 
     assert success is True, f"Expected success=True, got error: {error_msg}"
