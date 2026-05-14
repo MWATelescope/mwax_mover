@@ -2810,7 +2810,7 @@ def generate_plot_index_file(
             "version": 1,
             "generated_at": datetime.datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "base_url": plot_front_end_url,
-            "path": s3_path,
+            "path": str(fit_id),
             "files": files,
         }
 
