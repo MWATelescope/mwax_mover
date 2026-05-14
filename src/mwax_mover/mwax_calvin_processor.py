@@ -79,6 +79,7 @@ class MWAXCalvinProcessor:
         self.job_type: CalvinJobType
         self.mwa_asvo_download_url: str = ""
         self.obs_id: int = 0
+        self.asvo_job_id: int = 0
         self.slurm_job_id: int = 0
         self.request_id_list: list[int] = []
         self.metafits_name: str = ""
@@ -623,7 +624,7 @@ class MWAXCalvinProcessor:
             # Do the download
             #
             subcmd = "download"
-            args = f"--keep-tar {self.obs_id} -d {self.job_input_path}"
+            args = f"--keep-tar {self.asvo_job_id} -d {self.job_input_path}"
             # On success we just return some stdout, otherwise an exception is raised
             stdout = run_giant_squid(self.giant_squid_binary_path, subcmd, args, self.mwaasvo_download_obs_timeout)
 
@@ -1041,6 +1042,7 @@ class MWAXCalvinProcessor:
         config_filename,
         obs_id: int,
         slurm_job_id: int,
+        asvo_job_id: Optional[int],
         job_type: CalvinJobType,
         mwa_asvo_download_url: str,
         request_ids: list[int],
@@ -1052,6 +1054,7 @@ class MWAXCalvinProcessor:
             config_filename: Path to the configuration file.
             obs_id: The observation ID to process.
             slurm_job_id: The SLURM job ID of this job.
+            asvo_job_id: For MWA ASVO jobs, we pass in the MWA ASVO job id which we use in giant-squid to do the download.
             job_type: Type of job (realtime or mwa_asvo).
             mwa_asvo_download_url: Download URL for MWA ASVO jobs (empty for realtime).
             request_ids: List of request IDs associated with this job.
@@ -1064,6 +1067,8 @@ class MWAXCalvinProcessor:
         self.obs_id = obs_id
         self.slurm_job_id = slurm_job_id
         self.request_id_list = request_ids
+        if asvo_job_id is not None:
+            self.asvo_job_id = asvo_job_id
 
         if not os.path.exists(config_filename):
             print(f"Configuration file location {config_filename} does not exist. Quitting.")
@@ -1393,6 +1398,7 @@ class MWAXCalvinProcessor:
         parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
         parser.add_argument("-o", "--obs-id", required=True, type=int, help="ObservationID.\n")
         parser.add_argument("-s", "--slurm-job-id", required=True, type=int, help="This Slurm Job ID.\n")
+        parser.add_argument("-a", "--asvo-job-id", required=False, type=int, help="MWA ASVO Job ID.\n")
         parser.add_argument(
             "-r", "--request-ids", required=True, type=str, help="A comma separated list of one or more request ids.\n"
         )
@@ -1431,6 +1437,17 @@ class MWAXCalvinProcessor:
         if not utils.is_int(slurm_job_id):
             print(f"ERROR: cmd line argument slurm-job-id {slurm_job_id} is not a number. Aborting.")
             sys.exit(-1)
+
+        if args["asvo_job_id"] is not None:
+            print(f"Command line argument 'asvo-job-id' == {args['asvo_job_id']}")
+
+            asvo_job_id = int(args["asvo_job_id"])
+
+            if not utils.is_int(args["asvo_job_id"]):
+                print(f"ERROR: cmd line argument asvo-job-id {args['asvo_job_id']} is not a number. Aborting.")
+                sys.exit(-1)
+        else:
+            asvo_job_id = None
 
         job_type = args["job_type"]
         print(f"Command line argument 'job-type' == {job_type}")
@@ -1475,6 +1492,7 @@ class MWAXCalvinProcessor:
             config_filename,
             int(obs_id),
             int(slurm_job_id),
+            asvo_job_id,
             job_type,
             mwa_asvo_download_url,
             request_ids,
