@@ -1,6 +1,6 @@
 # Changelog
 
-# 1.7.0 12-May 2026
+# 1.7.0 13-May 2026
 
 * calvin_processor: add config file items for hyperdrive: extra_args.
 * calvin_processor: set number of sources to 1000 (up from 99) in the config file.
@@ -9,6 +9,8 @@
 * calvin_controller: add s3 config file items: s3_endpoints, s3_profile, s3_bucket.
   * Now uploads any solution images to S3 so they can be displayed by the Django (WS) server. Once uploaded they are deleted.
 * Added standalone util to generate the index.json given a local file path.
+
+TODO:
 * calvin_processor: clip large gains (c.f. config file item processor->max_gains) before generating plots or writing the solution to the database. 
   * Add the original pre-clipped gains to the 'x_gains_pre_clipped_value ' and 'y_gains_pre_clipped_value' columns of the 'calibration_solutions' table.
 

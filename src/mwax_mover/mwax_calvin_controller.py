@@ -159,7 +159,7 @@ class MWAXCalvinController:
         # Create a thread to handle uploading plots to S3
         self.plot_upload_thread = threading.Thread(
             target=self.plot_upload_handler,
-            args=[self.plot_upload_paths, self.plot_uploader_stop_event],
+            args=[self.plot_uploader_stop_event],
             name="plot-upload",
             daemon=True,
         )
