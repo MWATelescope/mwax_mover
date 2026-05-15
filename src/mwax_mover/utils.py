@@ -2344,12 +2344,13 @@ def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 1
     cmd = [
         "rclone",
         "move",
+        "-v",  # This is needed to get any json output
         "--min-age",
         f"{min_file_age_secs}s",
         "--no-traverse",
         "--use-json-log",  # structured JSON lines on stderr
         "--stats",
-        "0",  # suppress periodic stats, only emit at end
+        "1h",  # suppress periodic stats, only emit at end
         path,
         dest,
     ]

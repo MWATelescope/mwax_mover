@@ -2899,7 +2899,7 @@ def generate_plot_index_file(
 
             if is_png:
                 # try to get dimensions of the png for the metadata
-                height, width = get_png_dimensions(filename.path)
+                width, height = get_png_dimensions(filename.path)
 
             s3_path = f"{str(fit_id)}/{filename.name}"
 
@@ -2916,7 +2916,7 @@ def generate_plot_index_file(
             )
 
         index = {
-            "version": 1,
+            "version": 2,
             "generated_at": datetime.datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "base_url": plot_front_end_url,
             "path": str(fit_id),

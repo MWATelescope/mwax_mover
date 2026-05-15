@@ -1,5 +1,10 @@
 # Changelog
 
+# 1.7.5 15-May-2026
+
+* calvin_processor: Fixed swapping of width and height in index.json. Bumped index.json version to 2.
+* calvin_controller: Fixed debug log which said no files were moved by rclone even when they were.
+
 # 1.7.4 15-May-2026
 
 * calvin_processor: Fixed index.json containing files it shouldn't have!
