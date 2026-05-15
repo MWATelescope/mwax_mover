@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.7.3 15-May-2026
+
+* calvin_processor: Fixed logging typo.
+
 # 1.7.2 15-May-2026
 
 * calvin_processor: Now sets gains to NaN if gain is > cut off specified in config file.

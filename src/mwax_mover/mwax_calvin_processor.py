@@ -411,7 +411,7 @@ class MWAXCalvinProcessor:
             exts = ["*.png", "*.txt", "*.tsv", "*.json"]
             for ext in exts:
                 plot_files = glob.glob(os.path.join(job_output_path, ext))
-                for file_no, pfile in enumerate(plot_files):
+                for file_no, pfile in enumerate(plot_files, start=1):
                     try:
                         dest_filename = os.path.join(upload_path, os.path.basename(pfile))
                         logger.debug(f"Moving {pfile} to {dest_filename} [{file_no}/{len(plot_files)}]")
