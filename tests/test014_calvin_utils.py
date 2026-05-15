@@ -33,6 +33,7 @@ import mwax_mover.mwax_calvin_utils
 import numpy as np
 import pandas as pd
 import pytest
+from astropy.io import fits
 from astropy import units as u
 from astropy.constants import c as speed_of_light  # ty: ignore[unresolved-import]
 
@@ -61,6 +62,7 @@ from mwax_mover.mwax_calvin_utils import (
     write_readme_file,
     parse_solution_channels,
     get_sorted_solution_files,
+    clip_hyperdrive_solution_gains,
 )
 from tests_common import setup_test_directories
 
@@ -1252,21 +1254,21 @@ def process_fits_inputs():
 
 def test_process_phase_fits_returns_dataframe_with_correct_columns(process_fits_inputs, tmp_path):
     tiles, freqs, weights, soln_tile_ids, all_xx, all_yy = process_fits_inputs
-    result = process_phase_fits(str(tmp_path), tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1)
+    result = process_phase_fits(tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1)
     assert isinstance(result, pd.DataFrame)
     assert _EXPECTED_PHASE_COLS.issubset(set(result.columns))
 
 
 def test_process_phase_fits_skips_flagged_tile(process_fits_inputs, tmp_path):
     tiles, freqs, weights, soln_tile_ids, all_xx, all_yy = process_fits_inputs
-    result = process_phase_fits(str(tmp_path), tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1)
+    result = process_phase_fits(tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1)
     assert 3 not in result["tile_id"].values
 
 
 def test_process_phase_fits_has_xx_and_yy_rows(process_fits_inputs, tmp_path):
     """2 unflagged tiles × 2 pols = 4 rows."""
     tiles, freqs, weights, soln_tile_ids, all_xx, all_yy = process_fits_inputs
-    result = process_phase_fits(str(tmp_path), tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1)
+    result = process_phase_fits(tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1)
     assert len(result) == 4
     assert set(result["pol"].unique()) == {"XX", "YY"}
 
@@ -1281,9 +1283,7 @@ def test_process_phase_fits_bad_solution_skipped_not_raised(tmp_path):
     # Corrupt tile 1 (index 0) with NaN
     all_xx[0, 0, :] = np.nan
     all_yy[0, 0, :] = np.nan
-    result = process_phase_fits(
-        str(tmp_path), tiles, _GAIN_FREQS, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1
-    )
+    result = process_phase_fits(tiles, _GAIN_FREQS, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1)
     assert 1 not in result["tile_id"].values
     assert 2 in result["tile_id"].values
 
@@ -1675,136 +1675,136 @@ class TestGetSortedSolutionFiles:
         ]
 
 
-# #
-# # tests for clipping gains
-# #
-# def make_solutions_fits(path: str, data: np.ndarray) -> None:
-#     """Create a minimal FITS file containing a SOLUTIONS ImageHDU.
+#
+# tests for clipping gains
+#
+def make_solutions_fits(path: str, data: np.ndarray) -> None:
+    """Create a minimal FITS file containing a SOLUTIONS ImageHDU.
 
-#     Args:
-#         path: Output path for the FITS file.
-#         data: Array of shape (time, antenna, chan, 8) with dtype float64.
-#     """
-#     primary = fits.PrimaryHDU()
-#     solutions_hdu = fits.ImageHDU(data=data.astype(np.float64), name="SOLUTIONS")
-#     fits.HDUList([primary, solutions_hdu]).writeto(path, overwrite=True)
-
-
-# def read_solutions_complex(path: str) -> np.ndarray:
-#     """Read the SOLUTIONS HDU from a FITS file and return as complex128.
-
-#     Args:
-#         path: Path to the FITS file.
-
-#     Returns:
-#         Array of shape (time, antenna, chan, 4) with dtype complex128.
-#     """
-#     with fits.open(path) as hdul:
-#         return np.array(hdul["SOLUTIONS"].data, dtype=np.float64).view(np.complex128)
+    Args:
+        path: Output path for the FITS file.
+        data: Array of shape (time, antenna, chan, 8) with dtype float64.
+    """
+    primary = fits.PrimaryHDU()
+    solutions_hdu = fits.ImageHDU(data=data.astype(np.float64), name="SOLUTIONS")
+    fits.HDUList([primary, solutions_hdu]).writeto(path, overwrite=True)
 
 
-# # --- Tests ---
+def read_solutions_complex(path: str) -> np.ndarray:
+    """Read the SOLUTIONS HDU from a FITS file and return as complex128.
+
+    Args:
+        path: Path to the FITS file.
+
+    Returns:
+        Array of shape (time, antenna, chan, 4) with dtype complex128.
+    """
+    with fits.open(path) as hdul:
+        return np.array(hdul["SOLUTIONS"].data, dtype=np.float64).view(np.complex128)
 
 
-# def test_no_values_clipped_when_all_below_cutoff(tmp_path):
-#     """No values should be NaN when all amplitudes are below cut_off."""
-#     # amp = sqrt(1^2 + 1^2) = ~1.41, well below 100
-#     data = np.ones((2, 3, 4, 8), dtype=np.float64)
-#     path = str(tmp_path / "solutions.fits")
-#     make_solutions_fits(path, data)
-
-#     clip_hyperdrive_solution_gains(path, cut_off=100.0)
-
-#     assert not np.any(np.isnan(read_solutions_complex(path)))
+# --- Tests ---
 
 
-# def test_value_above_cutoff_set_to_nan(tmp_path):
-#     """A single polarisation above cut_off should be set to NaN."""
-#     data = np.ones((2, 3, 4, 8), dtype=np.float64)
-#     # Set XX at (time=0, tile=1, chan=2): re=200, im=0 → amp=200
-#     data[0, 1, 2, 0] = 200.0
-#     data[0, 1, 2, 1] = 0.0
-#     path = str(tmp_path / "solutions.fits")
-#     make_solutions_fits(path, data)
+def test_no_values_clipped_when_all_below_cutoff(tmp_path):
+    """No values should be NaN when all amplitudes are below cut_off."""
+    # amp = sqrt(1^2 + 1^2) = ~1.41, well below 100
+    data = np.ones((2, 3, 4, 8), dtype=np.float64)
+    path = str(tmp_path / "solutions.fits")
+    make_solutions_fits(path, data)
 
-#     clip_hyperdrive_solution_gains(path, cut_off=100.0)
+    clip_hyperdrive_solution_gains(path, cut_off=100.0)
 
-#     result = read_solutions_complex(path)
-#     assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
-#     assert np.isnan(result[0, 1, 2, 0])  # XX clipped
+    assert not np.any(np.isnan(read_solutions_complex(path)))
 
 
-# def test_only_flagged_pol_set_to_nan_at_position(tmp_path):
-#     """Only the pol exceeding cut_off should be NaN; others at the same position should not."""
-#     data = np.ones((1, 1, 1, 8), dtype=np.float64)
-#     # Set YY (indices 6, 7): re=200, im=0 → amp=200
-#     data[0, 0, 0, 6] = 200.0
-#     data[0, 0, 0, 7] = 0.0
-#     path = str(tmp_path / "solutions.fits")
-#     make_solutions_fits(path, data)
+def test_value_above_cutoff_set_to_nan(tmp_path):
+    """A single polarisation above cut_off should be set to NaN."""
+    data = np.ones((2, 3, 4, 8), dtype=np.float64)
+    # Set XX at (time=0, tile=1, chan=2): re=200, im=0 → amp=200
+    data[0, 1, 2, 0] = 200.0
+    data[0, 1, 2, 1] = 0.0
+    path = str(tmp_path / "solutions.fits")
+    make_solutions_fits(path, data)
 
-#     clip_hyperdrive_solution_gains(path, cut_off=100.0)
+    clip_hyperdrive_solution_gains(path, cut_off=100.0)
 
-#     result = read_solutions_complex(path)
-#     assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
-#     assert not np.isnan(result[0, 0, 0, 0])  # XX intact
-#     assert not np.isnan(result[0, 0, 0, 1])  # XY intact
-#     assert not np.isnan(result[0, 0, 0, 2])  # YX intact
-#     assert np.isnan(result[0, 0, 0, 3])  # YY clipped
+    result = read_solutions_complex(path)
+    assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
+    assert np.isnan(result[0, 1, 2, 0])  # XX clipped
 
 
-# def test_all_values_clipped_when_all_above_cutoff(tmp_path):
-#     """All values should be NaN when every amplitude exceeds cut_off."""
-#     # amp = sqrt(200^2 + 200^2) = ~282.8, above 100
-#     data = np.full((2, 3, 4, 8), 200.0, dtype=np.float64)
-#     path = str(tmp_path / "solutions.fits")
-#     make_solutions_fits(path, data)
+def test_only_flagged_pol_set_to_nan_at_position(tmp_path):
+    """Only the pol exceeding cut_off should be NaN; others at the same position should not."""
+    data = np.ones((1, 1, 1, 8), dtype=np.float64)
+    # Set YY (indices 6, 7): re=200, im=0 → amp=200
+    data[0, 0, 0, 6] = 200.0
+    data[0, 0, 0, 7] = 0.0
+    path = str(tmp_path / "solutions.fits")
+    make_solutions_fits(path, data)
 
-#     clip_hyperdrive_solution_gains(path, cut_off=100.0)
-#     result = read_solutions_complex(path)
-#     assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
-#     assert np.all(np.isnan(result))
+    clip_hyperdrive_solution_gains(path, cut_off=100.0)
 
-
-# def test_preexisting_nans_are_preserved(tmp_path):
-#     """Pre-existing NaN values should not be modified or trigger additional flagging."""
-#     data = np.ones((2, 3, 4, 8), dtype=np.float64)
-#     # Pre-existing NaN in XX real/imag at (time=1, tile=0, chan=0)
-#     data[1, 0, 0, 0] = np.nan
-#     data[1, 0, 0, 1] = np.nan
-#     path = str(tmp_path / "solutions.fits")
-#     make_solutions_fits(path, data)
-
-#     clip_hyperdrive_solution_gains(path, cut_off=100.0)
-
-#     result = read_solutions_complex(path)
-#     assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
-#     assert np.isnan(result[1, 0, 0, 0])  # pre-existing NaN preserved
-#     assert not np.any(np.isnan(result[0, :, :]))  # other timestep untouched
+    result = read_solutions_complex(path)
+    assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
+    assert not np.isnan(result[0, 0, 0, 0])  # XX intact
+    assert not np.isnan(result[0, 0, 0, 1])  # XY intact
+    assert not np.isnan(result[0, 0, 0, 2])  # YX intact
+    assert np.isnan(result[0, 0, 0, 3])  # YY clipped
 
 
-# def test_value_exactly_at_cutoff_not_clipped(tmp_path):
-#     """A value exactly equal to cut_off should not be clipped (mask is strictly >)."""
-#     data = np.ones((1, 1, 1, 8), dtype=np.float64)
-#     # Set XX: re=100, im=0 → amp=100.0 exactly
-#     data[0, 0, 0, 0] = 100.0
-#     data[0, 0, 0, 1] = 0.0
-#     path = str(tmp_path / "solutions.fits")
-#     make_solutions_fits(path, data)
+def test_all_values_clipped_when_all_above_cutoff(tmp_path):
+    """All values should be NaN when every amplitude exceeds cut_off."""
+    # amp = sqrt(200^2 + 200^2) = ~282.8, above 100
+    data = np.full((2, 3, 4, 8), 200.0, dtype=np.float64)
+    path = str(tmp_path / "solutions.fits")
+    make_solutions_fits(path, data)
 
-#     clip_hyperdrive_solution_gains(path, cut_off=100.0)
-
-#     result = read_solutions_complex(path)
-#     assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
-#     assert not np.isnan(result[0, 0, 0, 0])  # exactly at cutoff, not clipped
+    clip_hyperdrive_solution_gains(path, cut_off=100.0)
+    result = read_solutions_complex(path)
+    assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
+    assert np.all(np.isnan(result))
 
 
-# def test_missing_solutions_hdu_raises(tmp_path):
-#     """Should raise an exception if no SOLUTIONS HDU exists in the file."""
-#     primary = fits.PrimaryHDU()
-#     other = fits.ImageHDU(data=np.ones((2, 2), dtype=np.float64), name="OTHER")
-#     path = str(tmp_path / "no_solutions.fits")
-#     fits.HDUList([primary, other]).writeto(path, overwrite=True)
+def test_preexisting_nans_are_preserved(tmp_path):
+    """Pre-existing NaN values should not be modified or trigger additional flagging."""
+    data = np.ones((2, 3, 4, 8), dtype=np.float64)
+    # Pre-existing NaN in XX real/imag at (time=1, tile=0, chan=0)
+    data[1, 0, 0, 0] = np.nan
+    data[1, 0, 0, 1] = np.nan
+    path = str(tmp_path / "solutions.fits")
+    make_solutions_fits(path, data)
 
-#     with pytest.raises(Exception, match="No SOLUTIONS HDU found"):
-#         clip_hyperdrive_solution_gains(path, cut_off=100.0)
+    clip_hyperdrive_solution_gains(path, cut_off=100.0)
+
+    result = read_solutions_complex(path)
+    assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
+    assert np.isnan(result[1, 0, 0, 0])  # pre-existing NaN preserved
+    assert not np.any(np.isnan(result[0, :, :]))  # other timestep untouched
+
+
+def test_value_exactly_at_cutoff_not_clipped(tmp_path):
+    """A value exactly equal to cut_off should not be clipped (mask is strictly >)."""
+    data = np.ones((1, 1, 1, 8), dtype=np.float64)
+    # Set XX: re=100, im=0 → amp=100.0 exactly
+    data[0, 0, 0, 0] = 100.0
+    data[0, 0, 0, 1] = 0.0
+    path = str(tmp_path / "solutions.fits")
+    make_solutions_fits(path, data)
+
+    clip_hyperdrive_solution_gains(path, cut_off=100.0)
+
+    result = read_solutions_complex(path)
+    assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
+    assert not np.isnan(result[0, 0, 0, 0])  # exactly at cutoff, not clipped
+
+
+def test_missing_solutions_hdu_raises(tmp_path):
+    """Should raise an exception if no SOLUTIONS HDU exists in the file."""
+    primary = fits.PrimaryHDU()
+    other = fits.ImageHDU(data=np.ones((2, 2), dtype=np.float64), name="OTHER")
+    path = str(tmp_path / "no_solutions.fits")
+    fits.HDUList([primary, other]).writeto(path, overwrite=True)
+
+    with pytest.raises(Exception, match="No SOLUTIONS HDU found"):
+        clip_hyperdrive_solution_gains(path, cut_off=100.0)

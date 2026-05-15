@@ -7,6 +7,9 @@ binary format constants and read/write helpers, SBATCH script generation
 functions, and estimate_birli_output_bytes() for storage pre-checks.
 """
 
+import mwalib
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timezone
 import datetime
 from enum import Enum
@@ -33,7 +36,7 @@ from matplotlib.colors import LinearSegmentedColormap
 from mwalib import MetafitsContext
 import numpy.typing as npt  # noqa: F401
 from numpy.typing import ArrayLike, NDArray
-from typing import NamedTuple, List, Tuple, Optional  # noqa: F401
+from typing import NamedTuple, List, Tuple, Optional, Any  # noqa: F401
 import sys
 from mwax_mover.mwax_command import (
     run_command_ext,
@@ -468,7 +471,7 @@ class HyperfitsSolutionGroup:
     @classmethod
     def get_soln_chan_info(
         cls, metafits_chan_info: ChanInfo, solns: List[HyperfitsSolution]
-    ) -> Tuple[Optional[int], List[NDArray[np.int_]]]:
+    ) -> Tuple[int, List[NDArray[np.int_]]]:
         """Get channel block information for provided solutions.
 
         Validates that channel info from metafits is consistent with solutions.
@@ -561,6 +564,9 @@ class HyperfitsSolutionGroup:
 
         if all_chanblocks_hz is None:
             raise RuntimeError("No valid channels found")
+
+        if chanblocks_per_coarse is None:
+            raise RuntimeError("chanblocks_per_coarse is none")
 
         return (chanblocks_per_coarse, all_chanblocks_hz)
 
@@ -1092,7 +1098,7 @@ def fit_phase_line(
     )
 
 
-def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse) -> GainFitInfo:
+def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse: int) -> GainFitInfo:
     """Fit gain solutions across frequency channels.
 
     Args:
@@ -1434,7 +1440,7 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fi
                 continue
             mask = np.where(np.logical_and(np.isfinite(signal), weights2 > 0))[0]
             angle = np.angle(signal)
-            mask_freq: ArrayLike = freqs[mask]
+            mask_freq: np.ndarray = freqs[mask]
             model_freqs = np.linspace(mask_freq.min(), mask_freq.max(), len(freqs))
             rx_idx = np.where(rxs == fit["rx"])[0][0]
             slot_idx = np.where(slots == fit["slot"])[0][0]
@@ -2048,7 +2054,7 @@ def run_hyperdrive(
 
 
 def run_hyperdrive_stats(
-    input_uvfits_files,
+    input_solution_files: list[str],
     metafits_filename: str,
     obs_id: int,
     hyperdrive_binary_path: str,
@@ -2057,7 +2063,7 @@ def run_hyperdrive_stats(
     """Generate statistics and plots from hyperdrive solution files.
 
     Args:
-        input_uvfits_files: List of input UV FITS files.
+        input_solution_files: List of input hyperdrive solution files (full filename).
         metafits_filename: Path to the metafits file.
         obs_id: Observation ID.
         hyperdrive_binary_path: Path to the hyperdrive executable.
@@ -2070,17 +2076,15 @@ def run_hyperdrive_stats(
     stats_successful: int = 0
 
     logger.info(
-        f"{obs_id}: {len(input_uvfits_files)} contiguous bands detected."
-        f" Running hyperdrive stats {len(input_uvfits_files)} times...."
+        f"{obs_id}: {len(input_solution_files)} contiguous bands detected."
+        f" Running hyperdrive stats {len(input_solution_files)} times...."
     )
 
-    for hyperdrive_stats_run, uvfits_file in enumerate(input_uvfits_files):
+    for hyperdrive_stats_run, solution_filename in enumerate(input_solution_files):
         # Take the filename which for picket fence will also have
         # the band info and in all cases the obsid. We will use
         # this as a base for other files we work with
-        obsid_and_band = os.path.basename(uvfits_file).replace(".uvfits", "")
-
-        hyperdrive_solution_filename = os.path.join(hyperdrive_output_path, f"{obsid_and_band}_solutions.fits")
+        obsid_and_band = os.path.basename(solution_filename).replace("_solutions.fits", "")
 
         # Write the stats to the output dir
         stats_filename = os.path.join(hyperdrive_output_path, f"{obsid_and_band}_stats.txt")
@@ -2091,7 +2095,7 @@ def run_hyperdrive_stats(
         ) = write_stats(
             obs_id,
             stats_filename,
-            hyperdrive_solution_filename,
+            solution_filename,
             hyperdrive_binary_path,
             metafits_filename,
         )
@@ -2101,11 +2105,11 @@ def run_hyperdrive_stats(
         else:
             logger.warning(
                 f"{obs_id}: hyperdrive stats run"
-                f" {hyperdrive_stats_run + 1}/{len(input_uvfits_files)} FAILED:"
+                f" {hyperdrive_stats_run + 1}/{len(input_solution_files)} FAILED:"
                 f" {stats_error}."
             )
 
-    if stats_successful == len(input_uvfits_files):
+    if stats_successful == len(input_solution_files):
         logger.info(f"{obs_id}: All {stats_successful} hyperdrive stats runs successful")
         return True
     else:
@@ -2113,13 +2117,10 @@ def run_hyperdrive_stats(
         return False
 
 
-def process_phase_fits(
-    output_path, tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter
-):
+def process_phase_fits(tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter):
     """Fit linear phase ramps to each tile and polarization.
 
     Args:
-        output_path: Output directory path.
         tiles: DataFrame with tile information.
         chanblocks_hz: Array of channel block frequencies in Hz.
         all_xx_solns: XX polarization solutions for all tiles.
@@ -2131,29 +2132,131 @@ def process_phase_fits(
     Returns:
         DataFrame with phase fit parameters for each tile and polarization.
     """
-    fits = []
+    futures = {}
 
-    for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
-        for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
-            id_matches = tiles[tiles.id == tile_id]
-            if len(id_matches) != 1:
-                continue
-            tile = id_matches.iloc[0]
-            if tile.flag:
-                continue
-            name = tile.name
-            try:
-                fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)
-            except Exception as exc:
-                logger.error(f"{tile_id=:4} {pol} ({name}) {exc}")
-                continue
-            logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
-            fits.append([tile_id, soln_idx, pol, *fit])
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
+            for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
+                future = executor.submit(
+                    _phase_fit_one,
+                    soln_idx,
+                    tile_id,
+                    pol,
+                    solns,
+                    chanblocks_hz,
+                    weights,
+                    phase_fit_niter,
+                    tiles,
+                )
+                futures[future] = (soln_idx, tile_id, pol)
+
+    fits = [result for future in as_completed(futures) if (result := future.result()) is not None]
 
     return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])
 
 
-def process_gain_fits(tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, chanblocks_per_coarse):
+def _phase_fit_one(
+    soln_idx: int,
+    tile_id: int,
+    pol: str,
+    solns: NDArray[np.complex128],
+    chanblocks_hz: NDArray[np.float64],
+    weights: NDArray[np.float64],
+    phase_fit_niter: int,
+    tiles: DataFrame,
+) -> list | None:
+    """Fit a phase ramp for a single tile and polarization.
+
+    Looks up the tile in the tiles DataFrame, skips flagged or missing tiles,
+    and calls fit_phase_line to perform the fit. Intended to be called
+    concurrently via ThreadPoolExecutor.
+
+    Args:
+        soln_idx: Index of this tile in the solutions array.
+        tile_id: The tile ID to look up in the tiles DataFrame.
+        pol: Polarization label, either "XX" or "YY".
+        solns: Complex calibration solutions for this tile and polarization.
+        chanblocks_hz: Array of channel block frequencies in Hz.
+        weights: Weight values for each solution.
+        phase_fit_niter: Number of iterations for phase fitting.
+        tiles: DataFrame containing tile metadata including flags and names.
+
+    Returns:
+        A list of [tile_id, soln_idx, pol, *PhaseFitInfo fields] if the fit
+        succeeded, or None if the tile was skipped or the fit failed.
+    """
+    id_matches = tiles[tiles.id == tile_id]
+    if len(id_matches) != 1:
+        return None
+    tile = id_matches.iloc[0]
+    if tile.flag:
+        return None
+    name = tile.name
+    try:
+        fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)
+    except Exception as exc:
+        logger.error(f"{tile_id=:4} {pol} ({name}) {exc}")
+        return None
+    logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
+    return [tile_id, soln_idx, pol, *fit]
+
+
+def _gain_fit_one(
+    soln_idx: int,
+    tile_id: int,
+    pol: str,
+    solns: NDArray[np.complex128],
+    chanblocks_hz: NDArray[np.float64],
+    weights: NDArray[np.float64],
+    chanblocks_per_coarse: int,
+    tiles: DataFrame,
+) -> list | None:
+    """Fit gain solutions for a single tile and polarization.
+
+    Looks up the tile in the tiles DataFrame, skips flagged or missing tiles,
+    and calls fit_gain to perform the fit. Intended to be called
+    concurrently via ThreadPoolExecutor.
+
+    Args:
+        soln_idx: Index of this tile in the solutions array.
+        tile_id: The tile ID to look up in the tiles DataFrame.
+        pol: Polarization label, either "XX" or "YY".
+        solns: Complex calibration solutions for this tile and polarization.
+        chanblocks_hz: Array of channel block frequencies in Hz.
+        weights: Weight values for each solution.
+        chanblocks_per_coarse: Number of channel blocks per coarse channel.
+        tiles: DataFrame containing tile metadata including flags and names.
+
+    Returns:
+        A list of [tile_id, soln_idx, pol, *GainFitInfo fields] if the fit
+        succeeded, or None if the tile was skipped or the fit failed.
+    """
+    id_matches = tiles[tiles.id == tile_id]
+    if len(id_matches) != 1:
+        return None
+    tile = id_matches.iloc[0]
+    if tile.flag:
+        return None
+    name = tile.name
+    try:
+        fit = fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse)
+        logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
+        logger.debug(f"gains: {fit.gains}")
+    except Exception as exc:
+        logger.error(f"{tile_id=:4} {pol} ({name}) {exc}")
+        return None
+    return [tile_id, soln_idx, pol, *fit]
+
+
+def process_gain_fits(
+    tiles: DataFrame,
+    chanblocks_hz: NDArray[np.float64],
+    all_xx_solns: NDArray[np.complex128],
+    all_yy_solns: NDArray[np.complex128],
+    weights: NDArray[np.float64],
+    soln_tile_ids: NDArray[np.signedinteger[Any]],
+    chanblocks_per_coarse: int,
+) -> DataFrame:
     """Fit gain solutions to each tile and polarization.
 
     Args:
@@ -2168,25 +2271,25 @@ def process_gain_fits(tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights,
     Returns:
         DataFrame with gain fit parameters for each tile and polarization.
     """
-    fits = []
-    for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
-        for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
-            id_matches = tiles[tiles.id == tile_id]
-            if len(id_matches) != 1:
-                continue
-            tile = id_matches.iloc[0]
-            if tile.flag:
-                continue
-            name = tile.name
-            try:
-                fit = fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse)
+    futures = {}
 
-                logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
-                logger.debug(f"gains: {fit.gains}")
-            except Exception as exc:
-                logger.error(f"{tile_id=:4} {pol} ({name}) {exc}")
-                continue
-            fits.append([tile_id, soln_idx, pol, *fit])
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
+            for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
+                future = executor.submit(
+                    _gain_fit_one,
+                    soln_idx,
+                    tile_id,
+                    pol,
+                    solns,
+                    chanblocks_hz,
+                    weights,
+                    chanblocks_per_coarse,
+                    tiles,
+                )
+                futures[future] = (soln_idx, tile_id, pol)
+
+    fits = [result for future in as_completed(futures) if (result := future.result()) is not None]
 
     return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *GainFitInfo._fields])
 
@@ -2824,43 +2927,72 @@ def generate_plot_index_file(
         return False, {}
 
 
-#
-# Keeping this just in case- but this functionality is now in Hyperdrive
-#
-# def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float):
-#     HDU = "SOLUTIONS"
+def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc: mwalib.MetafitsContext):
+    """Clip hyperdrive calibration solution gains exceeding a threshold.
 
-#     with fits.open(hyperdrive_fits_file, mode="update") as hdul:
-#         # Check if solutions HDU exists
-#         if HDU not in hdul:
-#             raise Exception(
-#                 f"clip_hyperdrive_solution_gains(): Warning: No SOLUTIONS HDU found in {hyperdrive_fits_file}"
-#             )
+    Opens a hyperdrive FITS solution file, finds any complex gain amplitudes
+    exceeding the cut_off threshold, sets them to NaN, and writes the result
+    back to disk.
 
-#         logger.info(
-#             f"clip_hyperdrive_solution_gains(): checking solutions file {hyperdrive_fits_file} for gains > {cut_off}"
-#         )
+    Args:
+        hyperdrive_fits_file: Path to the hyperdrive FITS solution file.
+        cut_off: Threshold above which gains are set to NaN.
+        mc: MetafitsContext used to determine the tileid and name from the antenna indices in the solutions file
+    """
+    HDU = "SOLUTIONS"
+    POL_NAMES = ["XX", "XY", "YX", "YY"]
 
-#         # shape: (time, antenna, chan, 8)
-#         # force native endianness (by setting type to float64)
-#         data = np.array(hdul[HDU].data, dtype=np.float64)
+    with fits.open(hyperdrive_fits_file, mode="update") as hdul:
+        # Check if solutions HDU exists
+        if HDU not in hdul:
+            raise Exception(
+                f"clip_hyperdrive_solution_gains(): Warning: No SOLUTIONS HDU found in {hyperdrive_fits_file}"
+            )
 
-#         # Reinterpret pairs of float64 as complex128
-#         # shape: (time, antenna, chan, 4) where 0=XX, 1=XY, 2=YX, 3=YY
-#         data_complex = data.view(np.complex128)
+        logger.info(
+            f"clip_hyperdrive_solution_gains(): checking solutions file {hyperdrive_fits_file} for gains > {cut_off}"
+        )
 
-#         # Compute amplitude for each polarisation
-#         amp = np.abs(data_complex)  # shape: (time, antenna, chan, 4)
+        # shape: (time, antenna, chan, 8)
+        # force native endianness (by setting type to float64)
+        data = np.array(hdul[HDU].data, dtype=np.float64)
 
-#         total_samples = amp.size
+        # Reinterpret pairs of float64 as complex128
+        # shape: (time, antenna, chan, 4) where 0=XX, 1=XY, 2=YX, 3=YY
+        data_complex = data.view(np.complex128)
 
-#         # Build mask and apply NaN where amplitude exceeds threshold
-#         mask = amp > cut_off
-#         data_complex[mask] = np.nan + 1j * np.nan
-#         flagged_count = mask.sum()
-#         logger.debug(f"Gains > {cut_off}: {flagged_count} / {total_samples} ({100 * mask.mean():.2f}%) set to NaN")
+        # Compute amplitude for each polarisation
+        amp = np.abs(data_complex)  # shape: (time, antenna, chan, 4)
 
-#         # Assign modified data back and flush to disk
-#         hdul[HDU].data = data
-#         hdul.flush()
-#         logger.info(f"clip_hyperdrive_solution_gains(): finished rewriting solutions file {hyperdrive_fits_file}")
+        total_samples = amp.size
+
+        # Build mask and apply NaN where amplitude exceeds threshold
+        mask = amp > cut_off
+        data_complex[mask] = np.nan + 1j * np.nan
+        flagged_count = mask.sum()
+
+        logger.debug(
+            f"clip_hyperdrive_solution_gains(): Gains > {cut_off}: {flagged_count} / {total_samples} ({100 * mask.mean():.2f}%) set to NaN:"
+        )
+
+        # Log each unique (antenna, chan) combination that had any flagged value,
+        # grouped with the polarisations that were flagged at that location.
+        # np.argwhere returns array of shape (N, 4) with columns: time, antenna, chan, pol
+        if flagged_count > 0:
+            flagged_indices = np.argwhere(mask)
+            unique_ant_chan = np.unique(flagged_indices[:, 1:3], axis=0)
+            for ant_idx, chan_idx in unique_ant_chan:
+                flagged_pols = np.unique(
+                    flagged_indices[(flagged_indices[:, 1] == ant_idx) & (flagged_indices[:, 2] == chan_idx), 3]
+                )
+                pol_details = ", ".join(
+                    f"{POL_NAMES[p]}(Gain={amp[:, ant_idx, chan_idx, p].max():.4f})" for p in flagged_pols
+                )
+                logger.debug(
+                    f"  antenna_idx={ant_idx} [TileId: {mc.antennas[ant_idx].tile_id} Name: {mc.antennas[ant_idx].tile_name}], chan_idx={chan_idx}: pols flagged: {pol_details}"
+                )
+
+        # Assign modified data back and flush to disk
+        hdul[HDU].data = data
+        hdul.flush()
+        logger.info(f"clip_hyperdrive_solution_gains(): finished rewriting solutions file {hyperdrive_fits_file}")

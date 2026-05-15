@@ -1,6 +1,11 @@
 # Changelog
 
-# 1.7.1 13-May-2026
+# 1.7.2 15-May-2026
+
+* calvin_processor: Now sets gains to NaN if gain is > cut off specified in config file.
+* calvin_processor: Now solution fitting runs in parallel.
+
+# 1.7.1 14-May-2026
 
 * calvin: Now passing asvo job id to the processor to ensure giant squid knows how to download the obs.
 

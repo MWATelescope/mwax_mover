@@ -115,7 +115,7 @@ def process_solutions(
         chanblocks_per_coarse = soln_group.chanblocks_per_coarse
 
         # all_chanblocks_hz = soln_group.all_chanblocks_hz
-        all_chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz)
+        all_chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz).astype(np.float64)
 
         logger.debug(f"{chanblocks_per_coarse=}, {all_chanblocks_hz=}")
 
@@ -125,7 +125,6 @@ def process_solutions(
         weights = soln_group.weights
 
         phase_fits = process_phase_fits(
-            output_data_path,
             unflagged_tiles,
             all_chanblocks_hz,
             all_xx_solns,

@@ -8,6 +8,8 @@ metadata database via process_solutions(), then signals each MWAX host to releas
 the calibrator visibility files for archiving or discard.
 """
 
+import mwalib
+
 from mwax_mover.utils import run_giant_squid, extract_tar, get_filename_from_url
 
 import argparse
@@ -115,6 +117,7 @@ class MWAXCalvinProcessor:
         self.cal_export_max_age_hours: int = 24  # default to 24 hours
         self.plot_upload_path = ""  # where we move plots and stats to on successful calibration
         self.plot_front_end_url = ""
+        self.gains_cut_off_max: float = 0.0
 
         # birli
         self.birli_timeout: int = 0
@@ -307,7 +310,7 @@ class MWAXCalvinProcessor:
 
             # Birli was successful so run hyperdrive!
             self.current_task_name = "Hyperdrive"
-            result, error_message, calibration_command = self.run_hyperdrive()
+            result, error_message, calibration_command = self.run_hyperdrive(self.metafits_context)
 
             if not result:
                 self.fail_job_processing(error_message)
@@ -777,11 +780,14 @@ class MWAXCalvinProcessor:
         else:
             return False, "Birli run failed. See logs"
 
-    def run_hyperdrive(self) -> tuple[bool, str, str]:
+    def run_hyperdrive(self, metafits_context: mwalib.MetafitsContext) -> tuple[bool, str, str]:
         """Execute Hyperdrive calibration to produce calibration solutions.
 
         Runs Hyperdrive calibration on preprocessed UVFITS files, generates
         statistics and plots, and exports solutions to configured directories.
+
+        Args:
+            metafits_context: Metafits context for translating ant no to tileid and name
 
         Returns:
             A tuple of (success, error_message, calibration_command). If successful, error_message is empty.
@@ -811,9 +817,24 @@ class MWAXCalvinProcessor:
 
         # Did we have N number of successful runs?
         if hyperdrive_success:
+            # before we do any stats/plots, lets set any bad amps to NaNs.
+            solution_files: list[str] = []
+
+            for uvfits_filename in uvfits_files:
+                # Generate the solution filenames based on the uvfits filenames
+                obsid_and_band = os.path.basename(uvfits_filename).replace(".uvfits", "")
+
+                hyperdrive_solution_filename = os.path.join(self.job_output_path, f"{obsid_and_band}_solutions.fits")
+                solution_files.append(hyperdrive_solution_filename)
+
+                # Now clip any large gains to NaNs
+                mwax_calvin_utils.clip_hyperdrive_solution_gains(
+                    hyperdrive_solution_filename, self.gains_cut_off_max, metafits_context
+                )
+
             # Run hyperdrive and get plots and stats
             mwax_calvin_utils.run_hyperdrive_stats(
-                uvfits_files,
+                solution_files,
                 self.metafits_filename,
                 self.obs_id,
                 self.hyperdrive_binary_path,
@@ -1373,6 +1394,8 @@ class MWAXCalvinProcessor:
 
             # Get the base url of our calibration web front end (in front of the S3 bucket)
             self.plot_front_end_url = utils.read_config(config, "processing", "plot_front_end_url")
+
+            self.gains_cut_off_max = float(utils.read_config(config, "processing", "gains_cut_off_max"))
 
         except Exception as e:
             error_message = str(e)
