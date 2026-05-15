@@ -2885,6 +2885,12 @@ def generate_plot_index_file(
             if filename.name == "index.json":
                 continue
 
+            ext = os.path.splitext(filename)[1]
+
+            # We only care about these files
+            if ext != ".png" and ext != ".tsv" and ext != ".txt":
+                continue
+
             stat = filename.stat()
             last_modified = datetime.datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
             mime_type, _ = mimetypes.guess_type(filename.name)

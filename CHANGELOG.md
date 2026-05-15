@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.7.4 15-May-2026
+
+* calvin_processor: Fixed index.json containing files it shouldn't have!
+
 # 1.7.3 15-May-2026
 
 * calvin_processor: Fixed logging typo.
