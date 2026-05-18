@@ -1713,7 +1713,10 @@ def test_no_values_clipped_when_all_below_cutoff(tmp_path):
     path = str(tmp_path / "solutions.fits")
     make_solutions_fits(path, data)
 
-    clip_hyperdrive_solution_gains(path, cut_off=100.0)
+    # setup dummy metafitscontext
+    mc = mwalib.MetafitsContext("tests/data/1457904016/1457904016_metafits.fits")
+
+    clip_hyperdrive_solution_gains(path, cut_off=100.0, mc=mc)
 
     assert not np.any(np.isnan(read_solutions_complex(path)))
 
@@ -1727,11 +1730,22 @@ def test_value_above_cutoff_set_to_nan(tmp_path):
     path = str(tmp_path / "solutions.fits")
     make_solutions_fits(path, data)
 
-    clip_hyperdrive_solution_gains(path, cut_off=100.0)
+    # setup dummy metafitscontext
+    mc = mwalib.MetafitsContext("tests/data/1457904016/1457904016_metafits.fits")
+
+    clip_hyperdrive_solution_gains(path, cut_off=100.0, mc=mc)
 
     result = read_solutions_complex(path)
     assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
-    assert np.isnan(result[0, 1, 2, 0])  # XX clipped
+
+    # XX was clipped — both parts NaN
+    assert np.isnan(result[0, 1, 2, 0].real)
+    assert np.isnan(result[0, 1, 2, 0].imag)
+
+    # XY, YX, YY untouched — np.ones gives re=1, im=1 → 1+1j
+    assert result[0, 1, 2, 1] == complex(1, 1)  # XY not clipped
+    assert result[0, 1, 2, 2] == complex(1, 1)  # YX not clipped
+    assert result[0, 1, 2, 3] == complex(1, 1)  # YY not clipped
 
 
 def test_only_flagged_pol_set_to_nan_at_position(tmp_path):
@@ -1743,7 +1757,10 @@ def test_only_flagged_pol_set_to_nan_at_position(tmp_path):
     path = str(tmp_path / "solutions.fits")
     make_solutions_fits(path, data)
 
-    clip_hyperdrive_solution_gains(path, cut_off=100.0)
+    # setup dummy metafitscontext
+    mc = mwalib.MetafitsContext("tests/data/1457904016/1457904016_metafits.fits")
+
+    clip_hyperdrive_solution_gains(path, cut_off=100.0, mc=mc)
 
     result = read_solutions_complex(path)
     assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
@@ -1760,7 +1777,10 @@ def test_all_values_clipped_when_all_above_cutoff(tmp_path):
     path = str(tmp_path / "solutions.fits")
     make_solutions_fits(path, data)
 
-    clip_hyperdrive_solution_gains(path, cut_off=100.0)
+    # setup dummy metafitscontext
+    mc = mwalib.MetafitsContext("tests/data/1457904016/1457904016_metafits.fits")
+
+    clip_hyperdrive_solution_gains(path, cut_off=100.0, mc=mc)
     result = read_solutions_complex(path)
     assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
     assert np.all(np.isnan(result))
@@ -1775,7 +1795,10 @@ def test_preexisting_nans_are_preserved(tmp_path):
     path = str(tmp_path / "solutions.fits")
     make_solutions_fits(path, data)
 
-    clip_hyperdrive_solution_gains(path, cut_off=100.0)
+    # setup dummy metafitscontext
+    mc = mwalib.MetafitsContext("tests/data/1457904016/1457904016_metafits.fits")
+
+    clip_hyperdrive_solution_gains(path, cut_off=100.0, mc=mc)
 
     result = read_solutions_complex(path)
     assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
@@ -1792,7 +1815,10 @@ def test_value_exactly_at_cutoff_not_clipped(tmp_path):
     path = str(tmp_path / "solutions.fits")
     make_solutions_fits(path, data)
 
-    clip_hyperdrive_solution_gains(path, cut_off=100.0)
+    # setup dummy metafitscontext
+    mc = mwalib.MetafitsContext("tests/data/1457904016/1457904016_metafits.fits")
+
+    clip_hyperdrive_solution_gains(path, cut_off=100.0, mc=mc)
 
     result = read_solutions_complex(path)
     assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
@@ -1806,5 +1832,8 @@ def test_missing_solutions_hdu_raises(tmp_path):
     path = str(tmp_path / "no_solutions.fits")
     fits.HDUList([primary, other]).writeto(path, overwrite=True)
 
+    # setup dummy metafitscontext
+    mc = mwalib.MetafitsContext("tests/data/1457904016/1457904016_metafits.fits")
+
     with pytest.raises(Exception, match="No SOLUTIONS HDU found"):
-        clip_hyperdrive_solution_gains(path, cut_off=100.0)
+        clip_hyperdrive_solution_gains(path, cut_off=100.0, mc=mc)

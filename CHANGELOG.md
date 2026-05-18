@@ -1,5 +1,11 @@
 # Changelog
 
+# 1.7.6 18-May-2026
+
+* calvin_processor: Fixed hyperdrive log not being uploaded.
+* calvin_processor: Turn down matplotlib logging verbosity.
+* calvin: Implemented a very simple retry mechanism with backoff for giant-squid calls.
+
 # 1.7.5 15-May-2026
 
 * calvin_processor: Fixed swapping of width and height in index.json. Bumped index.json version to 2.

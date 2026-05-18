@@ -171,8 +171,9 @@ def run_command_popen(
 def check_popen_finished(popen_process, timeout: int = 60) -> typing.Tuple[int, str, str]:
     """Wait for a Popen process to finish and return its exit code and output.
 
-    Blocks until the process terminates or the timeout is exceeded. Handles
-    timeout and exception cases gracefully.
+    Blocks until the process terminates or the timeout is exceeded. On timeout,
+    the process is killed and any partial output is captured. Handles exception
+    cases gracefully.
 
     Args:
         popen_process: A subprocess.Popen object to wait for.
@@ -181,27 +182,28 @@ def check_popen_finished(popen_process, timeout: int = 60) -> typing.Tuple[int, 
     Returns:
         A tuple of (exit_code: int, stdout: str, stderr: str).
     """
-    stderror = ""
     stdout = ""
+    stderr = ""
     exit_code = -1
 
     try:
-        stdout, stderror = popen_process.communicate(timeout=timeout)
+        stdout, stderr = popen_process.communicate(timeout=timeout)
         exit_code = popen_process.returncode
 
         if exit_code != 0:
             logger.error(
-                f"Error executing {popen_process.args}. Return code: {exit_code} StdErr: {stderror} StdOut: {stdout}"
+                f"Error executing {popen_process.args}. Return code: {exit_code} StdErr: {stderr} StdOut: {stdout}"
             )
 
     except subprocess.TimeoutExpired as timeout_expired:
-        logger.error(f"Timeout expired executing {timeout_expired.cmd}")
-        stderror += "\nTimeout expired"
+        popen_process.kill()
+        stdout, stderr = popen_process.communicate()
+        stderr = (stderr or "") + "\nTimeout expired"
+        logger.error(
+            f"Timeout expired executing {timeout_expired.cmd}. Partial stdout: {stdout} Partial stderr: {stderr}"
+        )
 
-    except subprocess.CalledProcessError as cpe:
-        logger.error(f"CalledProcessError executing {popen_process.args}: {str(cpe)} {cpe.stderr}")
-
-    except Exception as command_exception:  # pylint: disable=broad-except
+    except Exception as command_exception:
         logger.error(f"Exception executing {popen_process.args}: {str(command_exception)}")
 
-    return (exit_code, stdout, stderror)
+    return (exit_code, stdout, stderr)

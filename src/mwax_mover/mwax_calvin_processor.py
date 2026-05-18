@@ -51,6 +51,7 @@ handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(f
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
 
 class MWAXCalvinProcessor:

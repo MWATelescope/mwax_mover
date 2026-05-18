@@ -7,6 +7,8 @@ PSRDADA header parsing, Redis-based beamformer signalling, UDP multicast sending
 and config file helpers (read_config, read_optional_config, read_config_list).
 """
 
+import random
+
 import subprocess
 
 from urllib.parse import unquote, urlparse
@@ -2169,69 +2171,87 @@ def get_gbps(size_gigabytes: float, start_time: float) -> float:
     return gigabytes_to_gigabits(size_gigabytes) / elapsed_seconds if elapsed_seconds > 0 else 0.0
 
 
-def run_giant_squid(path_to_giant_squid_binary: str, subcommand: str, args: str, timeout_seconds: int) -> str:
+def run_giant_squid(
+    path_to_giant_squid_binary: str,
+    subcommand: str,
+    args: str,
+    timeout_seconds: int,
+    max_retries: int = 5,
+    retry_delay_seconds: float = 10.0,
+) -> str:
     """Execute a giant-squid command and return its output.
 
+    Retries on transient failures (no known error code) with exponential
+    backoff and jitter. Does not retry on known error codes or ASVO outages.
+
     Args:
-        path_to_giant_squid_binary: The fully qualiified path to giant-squid binary.
+        path_to_giant_squid_binary: The fully qualified path to giant-squid binary.
         subcommand: The giant-squid subcommand (e.g., 'submit-vis', 'list').
         args: Arguments to pass to the giant-squid command.
         timeout_seconds: Maximum time in seconds to wait for command completion.
+        max_retries: Maximum number of retry attempts after the initial try.
+        retry_delay_seconds: Base delay in seconds between retries; doubles each
+            attempt with added jitter.
 
     Returns:
         The stdout output from the giant-squid command.
 
     Raises:
-        GiantSquidMWAASVOOutageException: If the ASVO service is down.
-        GiantSquidException: If the command fails or returns an error code.
+        GiantSquidMWAASVOOutageException: If the ASVO service is down. Not retried.
+        GiantSquidException: If the command fails with a known error code, or if
+            all retry attempts are exhausted on a transient failure.
     """
     cmdline: str = f"{path_to_giant_squid_binary} {subcommand} {args}"
+    last_exception: GiantSquidException = GiantSquidException("Unknown Error")
 
-    start_time = time.time()
+    for attempt in range(max_retries + 1):
+        if attempt > 0:
+            delay = retry_delay_seconds * (2 ** (attempt - 1)) + random.uniform(0, 1)
+            logger.warning(
+                f"run_giant_squid: retry {attempt}/{max_retries} after {delay:.1f}s (last error: {last_exception})"
+            )
+            time.sleep(delay)
 
-    # run giant-squid. We don't care about running on a specific numa
-    # node so we pass -1 for that
-    success, stdout = run_command_ext(cmdline, None, timeout_seconds, True)
+        start_time = time.time()
 
-    elapsed = time.time() - start_time
+        success, stdout = run_command_ext(cmdline, None, timeout_seconds, True)
 
-    logger.debug(f"run_giant_squid: completed in {elapsed:.3f} seconds [Success={success}]")
+        elapsed = time.time() - start_time
+        logger.debug(
+            f"run_giant_squid: attempt {attempt + 1}/{max_retries} completed in "
+            f"{elapsed:.3f} seconds [Success={success}]"
+        )
 
-    if success:
-        return stdout
-    else:
-        # Bad return code, failure!
+        if success:
+            return stdout
 
-        # Known errors have error codes:
-        # These exist in manta-ray/asvo_server/views_dispatch.py
-        # 0 = Invalid input, outage_in_progress
-        # 1 = job_limit_reached
-        # 2 = job_running_or_complete
-        # 3 = job_not_found
-        # Error code looks like this in StdOut:  "error_code": 2
+        # Bad return code — classify the failure before deciding whether to retry.
         regex_match = re.search(r'"error_code": (\d+)', stdout)
 
         if regex_match:
-            # We found an error code in the stdout
+            # Known server-side error code — definitive, do not retry.
             error_code_str = regex_match.group(1)
-
             raise GiantSquidException(
-                f"_run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. "
+                f"run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. "
                 f"Error code: {error_code_str} {stdout}"
             )
+
         elif "Your job cannot be submitted as the archive location of the observation is down" in stdout:
+            # ASVO outage — raise immediately, caller handles this.
             raise GiantSquidMWAASVOOutageException("Unable to communicate with MWA ASVO- the archive location is down")
 
         elif "outage" in stdout:
-            # Outage message looks like this:
-            # 'Error: The server responded with status code 0, message:
-            # Your job cannot be submitted as there is a full outage in progress.'"
+            # ASVO outage — raise immediately, caller handles this.
             raise GiantSquidMWAASVOOutageException("Unable to communicate with MWA ASVO- an outage is in progress")
+
         else:
-            # There was no "error_code" in stdout, so just report the whole stdout error message
-            raise GiantSquidException(
-                f"_run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. Error: {stdout}"
+            # Transient / unknown failure — eligible for retry.
+            last_exception = GiantSquidException(
+                f"run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. Error: {stdout}"
             )
+
+    logger.error(f"run_giant_squid: all {max_retries + 1} attempts failed for {cmdline}. Last error: {last_exception}")
+    raise last_exception  # type: ignore[misc]  # always set if we reach here
 
 
 def extract_tar(tar_filename: str, dest_path: str) -> None:

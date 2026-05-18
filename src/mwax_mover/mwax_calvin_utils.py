@@ -1944,30 +1944,34 @@ def run_hyperdrive(
         f" Running hyperdrive {len(input_uvfits_files)} times...."
     )
 
-    # Keep track of the number of successful hyperdrive runs
     hyperdrive_runs_success: int = 0
     stdout = ""
     stderr = ""
     elapsed = -1
     cmdline = ""
     exit_code = 0
+    # FIX 1: initialise calibration_command so it is always bound, even if
+    # input_uvfits_files is empty, preventing UnboundLocalError at the return sites.
+    calibration_command = ""
 
     for hyperdrive_run, uvfits_file in enumerate(input_uvfits_files):
-        # Take the filename which for picket fence will also have
-        # the band info and in all cases the obsid. We will use
-        # this as a base for other files we work with
-
-        # Remove the path to the uvfits file, leave the filename then remove the ".uvfits"
         obsid_and_band = os.path.basename(uvfits_file.replace(".uvfits", ""))
+
+        # FIX 2: move start_time above the try block so it is always bound
+        # before the exception handler references elapsed.
+        start_time = time.time()
 
         try:
             hyperdrive_solution_full_filename = os.path.join(job_output_path, f"{obsid_and_band}_solutions.fits")
             bin_solution_filename = f"{obsid_and_band}_solutions.bin"
             bin_solution_full_filename = os.path.join(job_output_path, bin_solution_filename)
 
-            # Run hyperdrive
-            calibration_command = f"--num-sources {num_sources} --source-list {source_list_filename} --source-list-type {source_list_type} {hyperdrive_extra_args}"
-            # Output to hyperdrive format and old aocal format (bin)
+            calibration_command = (
+                f"--num-sources {num_sources}"
+                f" --source-list {source_list_filename}"
+                f" --source-list-type {source_list_type}"
+                f" {hyperdrive_extra_args}"
+            )
             cmdline = (
                 f"{hyperdrive_binary_path} di-calibrate"
                 f" --no-progress-bars {calibration_command}"
@@ -1975,9 +1979,6 @@ def run_hyperdrive(
                 f" --outputs {hyperdrive_solution_full_filename} {bin_solution_full_filename}"
             )
 
-            start_time = time.time()
-
-            # run hyperdrive
             logger.info(f"{obs_id}: Running hyperdrive on {uvfits_file}...")
             hyperdrive_popen_process = run_command_popen(cmdline, -1, False, False)
 
@@ -1995,10 +1996,9 @@ def run_hyperdrive(
                     f" in {elapsed:.3f} seconds"
                 )
 
-                # Success!
-                # Write out a useful file of command line info
-                readme_filename = f"{obsid_and_band}_hyperdrive_readme.txt"
-
+                # FIX 3: include job_output_path so the readme is written to
+                # the correct output directory, not the current working directory.
+                readme_filename = os.path.join(job_output_path, f"{obsid_and_band}_hyperdrive_readme.txt")
                 write_readme_file(
                     readme_filename,
                     cmdline,
@@ -2015,9 +2015,10 @@ def run_hyperdrive(
                     f" Exit code of {exit_code} in"
                     f" {elapsed:.3f} seconds. StdErr: {stderr}"
                 )
-                # exit for loop- since run failed
                 break
+
         except Exception as hyperdrive_run_exception:
+            elapsed = time.time() - start_time
             logger.error(
                 f"{obs_id}: hyperdrive run"
                 f" {hyperdrive_run + 1}/{len(input_uvfits_files)} FAILED:"
@@ -2025,21 +2026,16 @@ def run_hyperdrive(
                 f" {hyperdrive_run_exception} in"
                 f" {elapsed:.3f} seconds. StdErr: {stderr}"
             )
-            # exit for loop since run failed
             break
 
     if hyperdrive_runs_success != len(input_uvfits_files):
-        # We did not run successfully on one or all hyperdrive calls.
-        # Move the files to a the job output dir
         logger.info(
             f"{obs_id}: moving failed files to {job_output_path} for manual analysis and writing readme_error.txt"
         )
 
-        # Move the input uvfits files to the job path
         for uvfits_file in input_uvfits_files:
             shutil.move(uvfits_file, job_output_path)
 
-        # Write out a useful file of error and command line info
         readme_filename = os.path.join(job_output_path, "readme_error.txt")
         write_readme_file(
             readme_filename,
@@ -2943,13 +2939,15 @@ def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc
     Args:
         hyperdrive_fits_file: Path to the hyperdrive FITS solution file.
         cut_off: Threshold above which gains are set to NaN.
-        mc: MetafitsContext used to determine the tileid and name from the antenna indices in the solutions file
+        mc: MetafitsContext used to determine the tileid and name from the
+            antenna indices in the solutions file.
     """
     HDU = "SOLUTIONS"
+    # Polarisation names indexed by their position in the last axis of the
+    # solutions array: 0=XX, 1=XY, 2=YX, 3=YY
     POL_NAMES = ["XX", "XY", "YX", "YY"]
 
     with fits.open(hyperdrive_fits_file, mode="update") as hdul:
-        # Check if solutions HDU exists
         if HDU not in hdul:
             raise Exception(
                 f"clip_hyperdrive_solution_gains(): Warning: No SOLUTIONS HDU found in {hyperdrive_fits_file}"
@@ -2959,46 +2957,94 @@ def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc
             f"clip_hyperdrive_solution_gains(): checking solutions file {hyperdrive_fits_file} for gains > {cut_off}"
         )
 
-        # shape: (time, antenna, chan, 8)
-        # force native endianness (by setting type to float64)
+        # The SOLUTIONS HDU stores each complex gain as two consecutive float64
+        # values (real, imag), so the raw FITS column layout is:
+        #   shape: (time, antenna, chan, 8)  -- 8 floats = 4 pols × (re + im)
+        #
+        # Force native byte order (little-endian on x86): FITS files are
+        # big-endian, and np.view() below requires a native-endian array to
+        # safely reinterpret the memory as complex128.
         data = np.array(hdul[HDU].data, dtype=np.float64)
+        # shape: (time, antenna, chan, 8)
 
-        # Reinterpret pairs of float64 as complex128
-        # shape: (time, antenna, chan, 4) where 0=XX, 1=XY, 2=YX, 3=YY
+        # Reinterpret each consecutive pair of float64 (re, im) as one
+        # complex128 value. np.view() does not copy data; it aliases the same
+        # memory with a different dtype, halving the size of the last axis.
         data_complex = data.view(np.complex128)
+        # shape: (time, antenna, chan, 4)  -- last axis: [XX, XY, YX, YY]
+        #
+        # data_complex and data share the same underlying buffer, so writes to
+        # data_complex are visible through data (and vice versa). This is what
+        # allows us to flag via data_complex and then assign data back to the HDU.
 
-        # Compute amplitude for each polarisation
-        amp = np.abs(data_complex)  # shape: (time, antenna, chan, 4)
+        # Compute the amplitude (absolute value) of every complex gain sample.
+        amp = np.abs(data_complex)
+        # shape: (time, antenna, chan, 4)  -- last axis: [XX, XY, YX, YY]
 
-        total_samples = amp.size
+        total_samples = amp.size  # total number of (time, ant, chan, pol) samples
 
-        # Build mask and apply NaN where amplitude exceeds threshold
+        # Boolean mask: True wherever the gain amplitude exceeds the threshold.
         mask = amp > cut_off
+        # shape: (time, antenna, chan, 4)  -- same layout as amp
+
+        # Set flagged gains to NaN + NaN*j so downstream calibration steps treat
+        # them as missing. Because data_complex is a view of data, this also
+        # updates data in-place — no separate copy-back is needed for the flags.
         data_complex[mask] = np.nan + 1j * np.nan
-        flagged_count = mask.sum()
+
+        flagged_count = int(mask.sum())  # total number of flagged (time, ant, chan, pol) samples
 
         logger.debug(
-            f"clip_hyperdrive_solution_gains(): Gains > {cut_off}: {flagged_count} / {total_samples} ({100 * mask.mean():.2f}%) set to NaN:"
+            f"clip_hyperdrive_solution_gains(): Gains > {cut_off}: {flagged_count} / {total_samples}"
+            f" ({100 * mask.mean():.2f}%) set to NaN:"
         )
 
-        # Log each unique (antenna, chan) combination that had any flagged value,
-        # grouped with the polarisations that were flagged at that location.
-        # np.argwhere returns array of shape (N, 4) with columns: time, antenna, chan, pol
         if flagged_count > 0:
+            # np.argwhere(mask) returns the indices of every True element.
+            # Each row is one flagged sample: [time_idx, ant_idx, chan_idx, pol_idx]
             flagged_indices = np.argwhere(mask)
+            # shape: (flagged_count, 4)  -- columns: [time, antenna, chan, pol]
+
+            # Collapse to unique (antenna, chan) pairs so we log one line per
+            # affected tile+channel rather than one line per time step.
+            # Slice columns 1:3 to get just [ant_idx, chan_idx].
             unique_ant_chan = np.unique(flagged_indices[:, 1:3], axis=0)
+            # shape: (n_unique_ant_chan, 2)  -- columns: [antenna, chan]
+
             for ant_idx, chan_idx in unique_ant_chan:
+                # Find all rows in flagged_indices that belong to this
+                # (antenna, chan) pair, then extract the unique pol indices
+                # from column 3.
                 flagged_pols = np.unique(
-                    flagged_indices[(flagged_indices[:, 1] == ant_idx) & (flagged_indices[:, 2] == chan_idx), 3]
+                    flagged_indices[
+                        (flagged_indices[:, 1] == ant_idx)  # match antenna
+                        & (flagged_indices[:, 2] == chan_idx),  # match channel
+                        3,  # extract pol axis
+                    ]
                 )
+                # flagged_pols: 1-D array of pol indices (subset of {0,1,2,3})
+
+                # For each flagged polarisation, report the worst (max) amplitude
+                # seen across all time steps at this (antenna, chan, pol).
+                # amp[:, ant_idx, chan_idx, p] selects all time steps for a
+                # fixed (antenna, chan, pol) triple.
+                # shape of that slice: (n_timesteps,)
                 pol_details = ", ".join(
                     f"{POL_NAMES[p]}(Gain={amp[:, ant_idx, chan_idx, p].max():.4f})" for p in flagged_pols
                 )
+
                 logger.debug(
-                    f"  antenna_idx={ant_idx} [TileId: {mc.antennas[ant_idx].tile_id} Name: {mc.antennas[ant_idx].tile_name}], chan_idx={chan_idx}: pols flagged: {pol_details}"
+                    f"  antenna_idx={ant_idx}"
+                    f" [TileId: {mc.antennas[ant_idx].tile_id}"
+                    f" Name: {mc.antennas[ant_idx].tile_name}],"
+                    f" chan_idx={chan_idx}: pols flagged: {pol_details}"
                 )
 
-        # Assign modified data back and flush to disk
+        # Write the modified float64 array (which contains the NaN-flagged
+        # complex pairs) back to the HDU and flush to disk.
+        # Note: we assign `data` (the float64 view) rather than `data_complex`
+        # because that is the shape the HDU originally held.
         hdul[HDU].data = data
         hdul.flush()
+
         logger.info(f"clip_hyperdrive_solution_gains(): finished rewriting solutions file {hyperdrive_fits_file}")

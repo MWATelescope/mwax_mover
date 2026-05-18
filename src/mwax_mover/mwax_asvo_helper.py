@@ -236,24 +236,6 @@ class MWAASVOHelper:
             # Some other error happened- update database as an error
             raise
 
-            #
-            # GJS commenting out so we always add a job
-            #
-            # create, populate and add the MWAASVOJob if we don't already have it
-            # job = self.get_first_job_for_obs_id(obs_id)
-            # if job:
-            #     # Only add this request if it is not already in the list
-            #     if request_id not in job.request_ids:
-            #         job.request_ids.append(request_id)
-
-            #     if job.submitted_datetime is None:
-            #         job.submitted_datetime = datetime.now(timezone.utc)
-
-            #     logger.info(
-            #         f"{obs_id}: Added RequestID {request_id} to JobID {job_id} as this ObsID is already tracked."
-            #         f"Tracking {len(self.current_asvo_jobs)} MWA ASVO jobs"
-            #     )
-            # else:
         # add a new job to be tracked
         job = MWAASVOJob(request_id=request_id, obs_id=obs_id, job_id=job_id, bulk_request=bulk_request)
         job.submitted_datetime = datetime.now(timezone.utc)
