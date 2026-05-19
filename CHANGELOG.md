@@ -1,5 +1,10 @@
 # Changelog
 
+# 1.7.7 19-May-2026
+
+* calvin_processor: Now sets gains of entire jones matrix to NaN if gain of any part of the matrix is > cut off specified in config file.
+* calvin_processor: Hyperdrive amp plot Y max limit set to 5 (was previously unset, and thus used the max gain which can stil be <=cut_off making plots hard to read).
+
 # 1.7.6 18-May-2026
 
 * calvin_processor: Fixed hyperdrive log not being uploaded.

@@ -1689,7 +1689,7 @@ def get_convergence_summary(solutions_fits_file: str):
     return summary
 
 
-def write_stats(
+def write_hyperdrive_stats(
     obs_id,
     stats_filename,
     hyperdrive_solution_filename,
@@ -1718,7 +1718,9 @@ def write_stats(
                 stats.write(f"{row[0]}: {row[1]}\n")
 
         # Now run hyperdrive again to do some plots
-        hyp_soln_plot_args = f"--no-ref-tile --output-directory {os.path.dirname(hyperdrive_solution_filename)}"
+        hyp_soln_plot_args = (
+            f"--no-ref-tile --max-amp 5 --output-directory {os.path.dirname(hyperdrive_solution_filename)}"
+        )
         cmd = (
             f"{hyperdrive_binary_path} solutions-plot {hyp_soln_plot_args} "
             f"-m"
@@ -2088,7 +2090,7 @@ def run_hyperdrive_stats(
         (
             stats_success,
             stats_error,
-        ) = write_stats(
+        ) = write_hyperdrive_stats(
             obs_id,
             stats_filename,
             solution_filename,
@@ -2932,13 +2934,14 @@ def generate_plot_index_file(
 def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc: mwalib.MetafitsContext):
     """Clip hyperdrive calibration solution gains exceeding a threshold.
 
-    Opens a hyperdrive FITS solution file, finds any complex gain amplitudes
-    exceeding the cut_off threshold, sets them to NaN, and writes the result
+    Opens a hyperdrive FITS solution file, finds any Jones matrices where at
+    least one complex gain amplitude exceeds the cut_off threshold, sets all
+    four polarisations of those Jones matrices to NaN, and writes the result
     back to disk.
 
     Args:
         hyperdrive_fits_file: Path to the hyperdrive FITS solution file.
-        cut_off: Threshold above which gains are set to NaN.
+        cut_off: Threshold above which an entire Jones matrix is set to NaN.
         mc: MetafitsContext used to determine the tileid and name from the
             antenna indices in the solutions file.
     """
@@ -2981,29 +2984,52 @@ def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc
         amp = np.abs(data_complex)
         # shape: (time, antenna, chan, 4)  -- last axis: [XX, XY, YX, YY]
 
-        total_samples = amp.size  # total number of (time, ant, chan, pol) samples
+        # Total counts used in logging below.
+        total_samples = amp.size  # total (time, ant, chan, pol) samples
+        total_jones = amp.shape[0] * amp.shape[1] * amp.shape[2]  # total (time, ant, chan) Jones matrices
 
-        # Boolean mask: True wherever the gain amplitude exceeds the threshold.
+        # Boolean mask: True wherever an individual gain amplitude exceeds the
+        # threshold. Kept separate from the Jones-matrix flag below so we can
+        # report how many individual pol samples actually triggered the cutoff.
         mask = amp > cut_off
         # shape: (time, antenna, chan, 4)  -- same layout as amp
 
-        # Set flagged gains to NaN + NaN*j so downstream calibration steps treat
-        # them as missing. Because data_complex is a view of data, this also
-        # updates data in-place — no separate copy-back is needed for the flags.
-        data_complex[mask] = np.nan + 1j * np.nan
+        # Reduce across the polarisation axis: True for any (time, ant, chan)
+        # where at least one of XX, XY, YX, YY exceeded the threshold.
+        # If any one pol is bad the whole Jones matrix is considered unreliable,
+        # so we flag all four pols together.
+        any_flagged = mask.any(axis=-1)
+        # shape: (time, antenna, chan)  -- pol axis removed; True = entire Jones matrix flagged
 
-        flagged_count = int(mask.sum())  # total number of flagged (time, ant, chan, pol) samples
+        # Set all four polarisations of every flagged Jones matrix to NaN + NaN*j.
+        # Indexing data_complex with a (time, ant, chan) boolean array selects
+        # rows of shape (4,) — one row per flagged Jones matrix — so the single
+        # assignment sets all four pols at once.
+        # Because data_complex is a view of data, this also updates data in-place;
+        # no separate copy-back is needed for the flags.
+        data_complex[any_flagged] = np.nan + 1j * np.nan
+
+        # Count the pol samples that actually exceeded the cutoff (what triggered flagging).
+        exceeded_count = int(mask.sum())
+        # Count how many Jones matrices were flagged, and the resulting NaN pol samples
+        # (always 4× the Jones matrix count since all four pols are set to NaN together).
+        jones_flagged_count = int(any_flagged.sum())
+        nan_pol_count = jones_flagged_count * 4
 
         logger.debug(
-            f"clip_hyperdrive_solution_gains(): Gains > {cut_off}: {flagged_count} / {total_samples}"
-            f" ({100 * mask.mean():.2f}%) set to NaN:"
+            f"clip_hyperdrive_solution_gains(): Gains > {cut_off}:"
+            f" {exceeded_count} / {total_samples} pol samples exceeded cutoff"
+            f" ({100 * exceeded_count / total_samples:.2f}%);"
+            f" {jones_flagged_count} / {total_jones} Jones matrices"
+            f" ({nan_pol_count} / {total_samples} pol samples) set to NaN"
+            f" ({100 * jones_flagged_count / total_jones:.2f}% of Jones matrices)"
         )
 
-        if flagged_count > 0:
-            # np.argwhere(mask) returns the indices of every True element.
-            # Each row is one flagged sample: [time_idx, ant_idx, chan_idx, pol_idx]
-            flagged_indices = np.argwhere(mask)
-            # shape: (flagged_count, 4)  -- columns: [time, antenna, chan, pol]
+        if jones_flagged_count > 0:
+            # np.argwhere(any_flagged) returns the indices of every True element.
+            # Each row is one flagged Jones matrix: [time_idx, ant_idx, chan_idx]
+            flagged_indices = np.argwhere(any_flagged)
+            # shape: (jones_flagged_count, 3)  -- columns: [time, antenna, chan]
 
             # Collapse to unique (antenna, chan) pairs so we log one line per
             # affected tile+channel rather than one line per time step.
@@ -3012,32 +3038,21 @@ def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc
             # shape: (n_unique_ant_chan, 2)  -- columns: [antenna, chan]
 
             for ant_idx, chan_idx in unique_ant_chan:
-                # Find all rows in flagged_indices that belong to this
-                # (antenna, chan) pair, then extract the unique pol indices
-                # from column 3.
-                flagged_pols = np.unique(
-                    flagged_indices[
-                        (flagged_indices[:, 1] == ant_idx)  # match antenna
-                        & (flagged_indices[:, 2] == chan_idx),  # match channel
-                        3,  # extract pol axis
-                    ]
-                )
-                # flagged_pols: 1-D array of pol indices (subset of {0,1,2,3})
-
-                # For each flagged polarisation, report the worst (max) amplitude
-                # seen across all time steps at this (antenna, chan, pol).
-                # amp[:, ant_idx, chan_idx, p] selects all time steps for a
-                # fixed (antenna, chan, pol) triple.
-                # shape of that slice: (n_timesteps,)
+                # Report the worst (max) amplitude seen across all time steps for
+                # each of the four polarisations at this (antenna, chan) pair.
+                # amp[:, ant_idx, chan_idx, p] selects all time steps for a fixed
+                # (antenna, chan, pol) triple; shape: (n_timesteps,).
+                # All four pols are shown regardless of which one(s) triggered the
+                # cutoff, since the entire Jones matrix has been set to NaN.
                 pol_details = ", ".join(
-                    f"{POL_NAMES[p]}(Gain={amp[:, ant_idx, chan_idx, p].max():.4f})" for p in flagged_pols
+                    f"{POL_NAMES[p]}(Gain={amp[:, ant_idx, chan_idx, p].max():.4f})" for p in range(4)
                 )
 
                 logger.debug(
                     f"  antenna_idx={ant_idx}"
                     f" [TileId: {mc.antennas[ant_idx].tile_id}"
                     f" Name: {mc.antennas[ant_idx].tile_name}],"
-                    f" chan_idx={chan_idx}: pols flagged: {pol_details}"
+                    f" chan_idx={chan_idx}: all pols set to NaN: {pol_details}"
                 )
 
         # Write the modified float64 array (which contains the NaN-flagged

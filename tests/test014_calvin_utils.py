@@ -1738,36 +1738,21 @@ def test_value_above_cutoff_set_to_nan(tmp_path):
     result = read_solutions_complex(path)
     assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
 
-    # XX was clipped — both parts NaN
+    # XX was > cut off, so entire jones matrix is NaN
+    # lets check the r,i values first of XX
     assert np.isnan(result[0, 1, 2, 0].real)
     assert np.isnan(result[0, 1, 2, 0].imag)
 
     # XY, YX, YY untouched — np.ones gives re=1, im=1 → 1+1j
-    assert result[0, 1, 2, 1] == complex(1, 1)  # XY not clipped
-    assert result[0, 1, 2, 2] == complex(1, 1)  # YX not clipped
-    assert result[0, 1, 2, 3] == complex(1, 1)  # YY not clipped
+    assert np.isnan(result[0, 1, 2, 1])  # XY also clipped
+    assert np.isnan(result[0, 1, 2, 2])  # YX also clipped
+    assert np.isnan(result[0, 1, 2, 3])  # YY also clipped
 
-
-def test_only_flagged_pol_set_to_nan_at_position(tmp_path):
-    """Only the pol exceeding cut_off should be NaN; others at the same position should not."""
-    data = np.ones((1, 1, 1, 8), dtype=np.float64)
-    # Set YY (indices 6, 7): re=200, im=0 → amp=200
-    data[0, 0, 0, 6] = 200.0
-    data[0, 0, 0, 7] = 0.0
-    path = str(tmp_path / "solutions.fits")
-    make_solutions_fits(path, data)
-
-    # setup dummy metafitscontext
-    mc = mwalib.MetafitsContext("tests/data/1457904016/1457904016_metafits.fits")
-
-    clip_hyperdrive_solution_gains(path, cut_off=100.0, mc=mc)
-
-    result = read_solutions_complex(path)
-    assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
-    assert not np.isnan(result[0, 0, 0, 0])  # XX intact
-    assert not np.isnan(result[0, 0, 0, 1])  # XY intact
-    assert not np.isnan(result[0, 0, 0, 2])  # YX intact
-    assert np.isnan(result[0, 0, 0, 3])  # YY clipped
+    # Other jones matrices are normal
+    assert result[0, 1, 1, 0] == complex(1, 1)  # XX not clipped
+    assert result[0, 1, 1, 1] == complex(1, 1)  # XY not clipped
+    assert result[0, 1, 1, 2] == complex(1, 1)  # YX not clipped
+    assert result[0, 1, 1, 3] == complex(1, 1)  # YY not clipped
 
 
 def test_all_values_clipped_when_all_above_cutoff(tmp_path):
