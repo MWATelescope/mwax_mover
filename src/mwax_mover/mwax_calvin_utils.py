@@ -2942,9 +2942,15 @@ def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc
     Args:
         hyperdrive_fits_file: Path to the hyperdrive FITS solution file.
         cut_off: Threshold above which an entire Jones matrix is set to NaN.
+                 If cutoff is negative then we don't do anything and return early.
         mc: MetafitsContext used to determine the tileid and name from the
             antenna indices in the solutions file.
     """
+    if cut_off < 0:
+        # Applying a gains cut off is disabled, just return
+        logger.debug(f"cut off is negative: {cut_off} disabling gains clipping.")
+        return
+
     HDU = "SOLUTIONS"
     # Polarisation names indexed by their position in the last axis of the
     # solutions array: 0=XX, 1=XY, 2=YX, 3=YY
@@ -2952,13 +2958,9 @@ def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc
 
     with fits.open(hyperdrive_fits_file, mode="update") as hdul:
         if HDU not in hdul:
-            raise Exception(
-                f"clip_hyperdrive_solution_gains(): Warning: No SOLUTIONS HDU found in {hyperdrive_fits_file}"
-            )
+            raise Exception(f"Warning: No SOLUTIONS HDU found in {hyperdrive_fits_file}")
 
-        logger.info(
-            f"clip_hyperdrive_solution_gains(): checking solutions file {hyperdrive_fits_file} for gains > {cut_off}"
-        )
+        logger.info(f"checking solutions file {hyperdrive_fits_file} for gains > {cut_off}")
 
         # The SOLUTIONS HDU stores each complex gain as two consecutive float64
         # values (real, imag), so the raw FITS column layout is:
@@ -3017,7 +3019,7 @@ def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc
         nan_pol_count = jones_flagged_count * 4
 
         logger.debug(
-            f"clip_hyperdrive_solution_gains(): Gains > {cut_off}:"
+            f"Gains > {cut_off}:"
             f" {exceeded_count} / {total_samples} pol samples exceeded cutoff"
             f" ({100 * exceeded_count / total_samples:.2f}%);"
             f" {jones_flagged_count} / {total_jones} Jones matrices"
@@ -3062,4 +3064,4 @@ def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc
         hdul[HDU].data = data
         hdul.flush()
 
-        logger.info(f"clip_hyperdrive_solution_gains(): finished rewriting solutions file {hyperdrive_fits_file}")
+        logger.info(f"finished rewriting solutions file {hyperdrive_fits_file}")

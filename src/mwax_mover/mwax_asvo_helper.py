@@ -24,6 +24,7 @@ class MWAASVOJobState(Enum):
     Waitcal = "WaitCal"
     Staging = "Staging"
     Staged = "Staged"
+    Preparing = "Preparing"
     Downloading = "Downloading"
     Preprocessing = "Preprocessing"
     Imaging = "Imaging"

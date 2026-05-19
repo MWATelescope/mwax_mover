@@ -118,7 +118,7 @@ class MWAXCalvinProcessor:
         self.cal_export_max_age_hours: int = 24  # default to 24 hours
         self.plot_upload_path = ""  # where we move plots and stats to on successful calibration
         self.plot_front_end_url = ""
-        self.gains_cut_off_max: float = 0.0
+        self.gains_cut_off_max: float = -1.0  # it's a bit yucky but we'll use negative number to denote disabled
 
         # birli
         self.birli_timeout: int = 0
@@ -1396,7 +1396,20 @@ class MWAXCalvinProcessor:
             # Get the base url of our calibration web front end (in front of the S3 bucket)
             self.plot_front_end_url = utils.read_config(config, "processing", "plot_front_end_url")
 
-            self.gains_cut_off_max = float(utils.read_config(config, "processing", "gains_cut_off_max"))
+            if config.has_option("processing", "gains_cut_off_max"):
+                gains_cut_off_max: str = utils.read_config(config, "processing", "gains_cut_off_max")
+
+                if gains_cut_off_max.isdecimal():
+                    self.gains_cut_off_max = float(gains_cut_off_max)
+
+                    # a negative value means disabled
+                    if self.gains_cut_off_max < 0.0:
+                        self.gains_cut_off_max = -1.0
+                else:
+                    self.gains_cut_off_max = -1.0
+            else:
+                # a negative value means disabled
+                self.gains_cut_off_max = -1.0
 
         except Exception as e:
             error_message = str(e)
