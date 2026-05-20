@@ -118,7 +118,7 @@ class MWAXCalvinProcessor:
         self.cal_export_max_age_hours: int = 24  # default to 24 hours
         self.plot_upload_path = ""  # where we move plots and stats to on successful calibration
         self.plot_front_end_url = ""
-        self.gains_cut_off_max: float = -1.0  # it's a bit yucky but we'll use negative number to denote disabled
+        self.gains_cut_off_max: Optional[float] = None
 
         # birli
         self.birli_timeout: int = 0
@@ -828,10 +828,11 @@ class MWAXCalvinProcessor:
                 hyperdrive_solution_filename = os.path.join(self.job_output_path, f"{obsid_and_band}_solutions.fits")
                 solution_files.append(hyperdrive_solution_filename)
 
-                # Now clip any large gains to NaNs
-                mwax_calvin_utils.clip_hyperdrive_solution_gains(
-                    hyperdrive_solution_filename, self.gains_cut_off_max, metafits_context
-                )
+                # Now clip any large gains to NaNs if we have a cut off value set
+                if self.gains_cut_off_max is not None:
+                    mwax_calvin_utils.clip_hyperdrive_solution_gains(
+                        hyperdrive_solution_filename, self.gains_cut_off_max, metafits_context
+                    )
 
             # Run hyperdrive and get plots and stats
             mwax_calvin_utils.run_hyperdrive_stats(
@@ -1401,15 +1402,15 @@ class MWAXCalvinProcessor:
 
                 if gains_cut_off_max.isdecimal():
                     self.gains_cut_off_max = float(gains_cut_off_max)
-
-                    # a negative value means disabled
-                    if self.gains_cut_off_max < 0.0:
-                        self.gains_cut_off_max = -1.0
                 else:
-                    self.gains_cut_off_max = -1.0
+                    self.gains_cut_off_max = None
             else:
-                # a negative value means disabled
-                self.gains_cut_off_max = -1.0
+                self.gains_cut_off_max = None
+
+            if self.gains_cut_off_max is not None:
+                logger.info(f"Gains will be cut off at {self.gains_cut_off_max}.")
+            else:
+                logger.info("Gains cut off/clipping disabled.")
 
         except Exception as e:
             error_message = str(e)

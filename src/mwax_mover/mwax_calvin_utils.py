@@ -2942,14 +2942,9 @@ def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc
     Args:
         hyperdrive_fits_file: Path to the hyperdrive FITS solution file.
         cut_off: Threshold above which an entire Jones matrix is set to NaN.
-                 If cutoff is negative then we don't do anything and return early.
         mc: MetafitsContext used to determine the tileid and name from the
             antenna indices in the solutions file.
     """
-    if cut_off < 0:
-        # Applying a gains cut off is disabled, just return
-        logger.debug(f"cut off is negative: {cut_off} disabling gains clipping.")
-        return
 
     HDU = "SOLUTIONS"
     # Polarisation names indexed by their position in the last axis of the
