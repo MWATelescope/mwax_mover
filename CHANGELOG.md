@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.7.10 20-May-2026
+
+* calvin_processor: fixed parsing of `gain_max_cutoff` in config file to include floats.
+
 # 1.7.9 20-May-2026
 
 * calvin_processor: added new db column `gain_max_cutoff` to calibration_fit table.

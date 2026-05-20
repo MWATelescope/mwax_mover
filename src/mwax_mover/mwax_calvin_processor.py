@@ -1400,9 +1400,9 @@ class MWAXCalvinProcessor:
             if config.has_option("processing", "gains_cut_off_max"):
                 gains_cut_off_max: str = utils.read_config(config, "processing", "gains_cut_off_max")
 
-                if gains_cut_off_max.isdecimal():
+                try:
                     self.gains_cut_off_max = float(gains_cut_off_max)
-                else:
+                except ValueError:
                     self.gains_cut_off_max = None
             else:
                 self.gains_cut_off_max = None
