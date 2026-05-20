@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.7.9 20-May-2026
+
+* calvin_processor: added new db column `gain_max_cutoff` to calibration_fit table.
+
 # 1.7.8 19-May-2026
 
 * calvin: Added missing "Preparing" ASVO state to list of valid states.

@@ -531,6 +531,7 @@ def insert_calibration_fits_row(
     source_list: str,
     num_sources: int,
     calibration_command: str,
+    gain_max_cutoff: Optional[float],
 ) -> Tuple[bool, int | None]:
     """Inserts a new calibration_fits row and return the fit_id if successful
     This row represents the calibration 'header' for an obsid.
@@ -541,8 +542,8 @@ def insert_calibration_fits_row(
 
     sql = (
         "INSERT INTO calibration_fits"
-        " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit,source_list,num_sources,calibration_command)"
-        " VALUES (%s,%s,%s,now(),%s,%s,%s,%s,%s,%s);"
+        " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit,source_list,num_sources,calibration_command,gain_max_cutoff)"
+        " VALUES (%s,%s,%s,now(),%s,%s,%s,%s,%s,%s,%s);"
     )
 
     # Fit ID is the Unix timestamp multiplied by 10**6 so it's an int
@@ -558,6 +559,7 @@ def insert_calibration_fits_row(
         source_list,
         num_sources,
         calibration_command,
+        gain_max_cutoff,
     )
 
     try:
