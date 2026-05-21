@@ -1,6 +1,10 @@
 # Changelog
 
-# 1.7.11 20-May-2026
+# 1.7.12 21-May-2026
+
+* Fixed logging bug in rclone move in calvin controller
+
+# 1.7.11 21-May-2026
 
 * calvin_controller: reduced verbosity of logging.
 * calvin_controller: Fixed bug where ASVO error job was not being removed from job list.

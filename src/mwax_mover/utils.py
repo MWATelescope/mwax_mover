@@ -2385,6 +2385,7 @@ def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 1
     try:
         stats = _parse_rclone_stats(result.stderr)
         transfers = stats.get("transfers", 0)
+        bytes_moved = 0
         if transfers > 0:
             bytes_moved = stats.get("bytes", 0)
             elapsed = stats.get("elapsedTime", 0.0)
@@ -2394,6 +2395,8 @@ def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 1
         else:
             logger.debug(f"rclone: nothing to move from {path}")
     except Exception:
+        bytes_moved = 0
+        transfers = 0
         logger.exception("Error getting stats from rclone. Skipping.")
 
     if result.returncode != 0:
