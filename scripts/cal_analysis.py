@@ -1,9 +1,8 @@
 #!/usr/bin/env python
 import numpy as np
-import matplotlib.pyplot as plt
 import os
 import pandas as pd
-from argparse import ArgumentParser, FileType
+from argparse import ArgumentParser
 import sys
 import shlex
 
@@ -59,7 +58,7 @@ def main():
     tiles = soln_group.metafits_tiles_df
     refant_name = soln_group.refant["name"]
     # print(f"{refant=}")
-    chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz)
+    chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz).astype(np.float64)
     # print(f"{len(chanblocks_hz)=}")
     soln_tile_ids, all_xx_solns, all_yy_solns = soln_group.get_solns(refant_name)
     # matrix plot of phase angle vs frequency
@@ -88,13 +87,13 @@ def main():
                 solns *= phase_diff
 
             try:
-                fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)  # type: ignore
+                fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)
             except Exception as exc:
                 print(f"{tile_id=:4} ({tile.name}) {pol} {exc}")
                 continue
             phase_fits.append([tile_id, soln_idx, pol, *fit])
 
-    phase_fits = pd.DataFrame(phase_fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])  # type: ignore
+    phase_fits = pd.DataFrame(phase_fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])
 
     if not len(phase_fits):
         return
@@ -111,7 +110,7 @@ def main():
         title=title,
         plot_residual=args.plot_residual,
         residual_vmax=args.residual_vmax,
-    )  # type: ignore
+    )
 
 
 if __name__ == "__main__":

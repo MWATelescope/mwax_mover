@@ -142,6 +142,7 @@ def test_process_solutions_success(real_data_paths, tmp_path):
             num_sources=100,
             produce_debug_plots=False,
             calibration_command="",
+            gain_max_cutoff=None,
         )
 
     assert success is True, f"Expected success=True, got error: {error_msg}"
@@ -181,6 +182,7 @@ def test_process_solutions_all_tiles_flagged(tmp_path):
         num_sources=100,
         produce_debug_plots=False,
         calibration_command="",
+        gain_max_cutoff=None,
     )
 
     assert success is True
@@ -213,6 +215,7 @@ def test_process_solutions_soln_count_mismatch(real_data_paths, tmp_path):
         num_sources=100,
         produce_debug_plots=False,
         calibration_command="",
+        gain_max_cutoff=None,
     )
 
     assert success is False
@@ -252,6 +255,7 @@ def test_process_solutions_db_fit_insert_fails(real_data_paths, tmp_path):
             num_sources=100,
             produce_debug_plots=False,
             calibration_command="",
+            gain_max_cutoff=None,
         )
 
     assert success is False
@@ -291,6 +295,7 @@ def test_process_solutions_db_soln_insert_fails(real_data_paths, tmp_path):
             num_sources=100,
             produce_debug_plots=False,
             calibration_command="",
+            gain_max_cutoff=None,
         )
 
     assert success is False
@@ -331,6 +336,7 @@ def test_process_solutions_readme_written_on_any_exception(real_data_paths, tmp_
             num_sources=100,
             produce_debug_plots=False,
             calibration_command="",
+            gain_max_cutoff=None,
         )
 
     assert success is False
@@ -360,6 +366,7 @@ def test_process_solutions_no_solution_files_in_output(real_data_paths, tmp_path
         num_sources=100,
         produce_debug_plots=False,
         calibration_command="",
+        gain_max_cutoff=None,
     )
 
     assert success is False
@@ -398,6 +405,7 @@ def test_process_solutions_produce_debug_plots_false_does_not_import_matplotlib(
             num_sources=100,
             produce_debug_plots=False,
             calibration_command="",
+            gain_max_cutoff=None,
         )
 
     mock_debug.assert_not_called()
@@ -497,6 +505,7 @@ def test_process_solutions_success_2():
             num_sources=100,
             produce_debug_plots=True,
             calibration_command="",
+            gain_max_cutoff=None,
         )
 
     assert success is True, f"Expected success=True, got error: {error_msg}"

@@ -2317,7 +2317,7 @@ def get_filename_from_url(url: str) -> str:
     return filename
 
 
-def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 120) -> None:
+def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 120) -> tuple[int, int]:
     """Run rclone move for files in a directory to the S3 destination.
 
     Uses --min-age to skip files that are too new, and --no-traverse for
@@ -2329,6 +2329,9 @@ def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 1
         bucket: Destination bucket name.
         min_file_age_secs: Do not attempt to move any file which is newer than this many seconds.
             This prevents moving files before they are finished being written.
+
+    Returns:
+        tuple of transfers and bytes_transferred
 
     Raises:
         subprocess.CalledProcessError: If rclone exits with a non-zero return code.
@@ -2398,6 +2401,9 @@ def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 1
 
     if result.stdout:
         logger.debug(f"rclone stdout: {result.stdout.strip()}")
+
+    # pass back transfers, transferred_bytes
+    return transfers, bytes_moved
 
 
 def extract_channels_from_filename(filename: str) -> dict | None:

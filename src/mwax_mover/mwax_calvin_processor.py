@@ -330,6 +330,7 @@ class MWAXCalvinProcessor:
                 self.num_sources,
                 self.produce_debug_plots,
                 calibration_command,
+                self.gains_cut_off_max,
             )
 
             if result:

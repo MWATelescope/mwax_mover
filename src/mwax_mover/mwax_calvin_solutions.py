@@ -46,6 +46,7 @@ def process_solutions(
     num_sources: int,
     produce_debug_plots: bool,
     calibration_command: str,
+    gain_max_cutoff: Optional[float],
 ) -> tuple[bool, str, Optional[int]]:
     """Process hyperdrive calibration solutions and insert into the database.
 
@@ -63,6 +64,7 @@ def process_solutions(
         num_sources: Number of sources in the calibration.
         produce_debug_plots: Whether to produce debug plots.
         calibration_command: Full hyperdrive command line used to generate the calibration.
+        gain_max_cutoff: Gain cutoff value (or None)
 
     Returns:
         A tuple containing:
@@ -117,7 +119,9 @@ def process_solutions(
         # all_chanblocks_hz = soln_group.all_chanblocks_hz
         all_chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz).astype(np.float64)
 
-        logger.debug(f"{chanblocks_per_coarse=}, {all_chanblocks_hz=}")
+        logger.debug(f"{chanblocks_per_coarse=} fine channels per coarse channel")
+        logger.debug(f"First 32 fine channels: {[f'{x / 1e6:.3f}' for x in all_chanblocks_hz[0:32]]} MHz")
+        logger.debug(f"Last 32 fine channels: {[f'{x / 1e6:.3f}' for x in all_chanblocks_hz[-32:]]} MHz")
 
         soln_tile_ids, all_xx_solns_noref, all_yy_solns_noref = soln_group.get_solns()
         _, all_xx_solns, all_yy_solns = soln_group.get_solns(refant["name"])
@@ -187,6 +191,7 @@ def process_solutions(
                     source_list=source_list,
                     num_sources=num_sources,
                     calibration_command=calibration_command,
+                    gain_max_cutoff=gain_max_cutoff,
                 )
 
                 if fit_id is None or not success:

@@ -292,7 +292,7 @@ class MWAXCalvinController:
 
             stop_event.wait(timeout=self.plot_upload_interval_secs)
 
-        logger.info("Plot upload thread completed successfully.")
+        logger.debug("Plot upload thread completed successfully.")
 
     def main_loop_handler(self):
         """Handle a single iteration of the main control loop.
@@ -501,7 +501,7 @@ class MWAXCalvinController:
                         )
 
                         # now remove the job from our list
-                        self.mwax_asvo_helper.current_asvo_jobs.append(job)
+                        self.mwax_asvo_helper.current_asvo_jobs.remove(job)
 
                     except Exception:
                         logger.exception("Unable to update calibration_request table")
@@ -509,7 +509,7 @@ class MWAXCalvinController:
 
                 elif job.job_state == mwax_asvo_helper.MWAASVOJobState.Ready:
                     try:
-                        logger.info(f"{job}: Submitting slurm job")
+                        logger.debug(f"{job}: Submitting slurm job")
 
                         script = create_sbatch_script(
                             self.worker_config_filename,

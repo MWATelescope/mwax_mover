@@ -1,5 +1,12 @@
 # Changelog
 
+# 1.7.11 20-May-2026
+
+* calvin_controller: reduced verbosity of logging.
+* calvin_controller: Fixed bug where ASVO error job was not being removed from job list.
+* calvin_controller: Tweaked nice to have greater range.
+* calvin_processor: Fixed insert_calibration_fits row bug
+
 # 1.7.10 20-May-2026
 
 * calvin_processor: fixed parsing of `gain_max_cutoff` in config file to include floats.

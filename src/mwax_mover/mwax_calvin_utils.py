@@ -2192,10 +2192,11 @@ def _phase_fit_one(
     name = tile.name
     try:
         fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)
-    except Exception as exc:
-        logger.error(f"{tile_id=:4} {pol} ({name}) {exc}")
+    except Exception:
+        logger.exception(f"Error: {tile_id=:4} {pol} ({name})")
         return None
-    logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
+    # uncomment me for verbose debug
+    # logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
     return [tile_id, soln_idx, pol, *fit]
 
 
@@ -2238,10 +2239,11 @@ def _gain_fit_one(
     name = tile.name
     try:
         fit = fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse)
-        logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
-        logger.debug(f"gains: {fit.gains}")
-    except Exception as exc:
-        logger.error(f"{tile_id=:4} {pol} ({name}) {exc}")
+        # uncomment me for verbose debug
+        # logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
+        # logger.debug(f"gains: {fit.gains}")
+    except Exception:
+        logger.exception(f"Error: {tile_id=:4} {pol} ({name})")
         return None
     return [tile_id, soln_idx, pol, *fit]
 
@@ -2322,16 +2324,16 @@ def create_sbatch_script(
     if jobtype == CalvinJobType.realtime:
         job_name = f"real{obs_id}"
         partition = "priority,gpu"
-        nice = ""  # ommiting nice keeps the priority high
+        nice = "-1000000"  # highest priority
         wall_time = "04:00:00"
     else:
         job_name = f"asvo{obs_id}"
         partition = "gpu"
         if bulk_request:
-            nice = "#SBATCH --nice=10000"  # lowest priority
+            nice = "1000000"  # lowest priority
         else:
-            nice = "#SBATCH --nice=100"  # lower priority than realtime jobs
-        wall_time = "08:00:00"  # allow extra time for downloading from ASVO (6 hours + 2 for processing)
+            nice = "10000"  # lower priority than realtime jobs
+        wall_time = "10:00:00"  # allow extra time for downloading from ASVO (8 hours + 2 for processing)
 
     job_script = f"""#!/bin/bash
 #SBATCH --partition={partition}
@@ -2349,7 +2351,7 @@ def create_sbatch_script(
 #SBATCH --error={log_path}/%J.out
 #SBATCH --open-mode=append
 #SBATCH --parsable
-{nice}
+#SBATCH --nice={nice}
 
 echo "Starting Calvin {jobtype.value} Job: $SLURM_JOBID";
 
