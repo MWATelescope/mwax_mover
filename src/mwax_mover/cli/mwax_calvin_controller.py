@@ -253,7 +253,7 @@ class MWAXCalvinController:
                     continue
 
                 try:
-                    utils.rclone_move_or_copy(
+                    utils.rclone_move(
                         tracker.plot_upload_path, self.s3_profile, self.s3_bucket, min_file_age_secs=MIN_AGE_SECS
                     )
 

@@ -5,6 +5,7 @@ import os
 import argparse
 import sys
 from mwax_mover.mwax_calvin_utils import generate_hyperdrive_plots
+from mwax_mover.utils import rclone_copy
 import json
 from datetime import datetime, timezone
 
@@ -129,6 +130,8 @@ def main() -> None:
         help="Path to the hyperdrive binary",
     )
 
+    parser.add_argument("--rclone_profile", required=False, type=str, help="Rclone profile to use to copy files to S3")
+
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -136,6 +139,8 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    dry_run: bool = args.dry_run
 
     solution_directory: str = args.directory
 
@@ -147,15 +152,24 @@ def main() -> None:
 
     obs_id = int(args.obs_id)
 
-    hyperdrive_binary_path = args.hyperdrive_binary_path
+    if dry_run:
+        rclone_profile = ""
+    else:
+        if args.rclone_profile is not None:
+            rclone_profile: str = args.rclone_profile
+        else:
+            print("When --dry-run is False, you must profile an --rclone-profile value.")
+            exit(1)
+
+    hyperdrive_binary_path: str = args.hyperdrive_binary_path
     if not os.path.exists(hyperdrive_binary_path):
         print(f"hyperdrive binary path: {hyperdrive_binary_path} does not exist. Exiting")
         sys.exit(1)
 
     metafits_filename = ""
-    metafits_filenames = [f"{obs_id}_metafits.fits", f"{obs_id}.metafits", f"{obs_id}_metafits_ppds.fits"]
+    possible_metafits_filenames = [f"{obs_id}_metafits.fits", f"{obs_id}.metafits", f"{obs_id}_metafits_ppds.fits"]
 
-    for mf in metafits_filenames:
+    for mf in possible_metafits_filenames:
         temp_filename = os.path.join(solution_directory, mf)
         if os.path.exists(temp_filename):
             metafits_filename = temp_filename
@@ -221,9 +235,16 @@ def main() -> None:
     files_to_upload.append(os.path.join(solution_directory, "index.json"))
 
     if not args.dry_run:
-        pass
+        # Upload files
+        try:
+            files_copied, bytes_copied = rclone_copy(files_to_upload, rclone_profile, str(fit_id))
+        except Exception as e:
+            print(f"Error uploading files to S3: {str(e)}")
+            exit(1)
     else:
         print(f"Not uploading files: {files_to_upload} to S3 (bucket={fit_id}) as dry-run = true.")
+
+    print("Completed successfully")
 
 
 if __name__ == "__main__":

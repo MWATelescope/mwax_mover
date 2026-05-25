@@ -2317,6 +2317,33 @@ def get_filename_from_url(url: str) -> str:
     return filename
 
 
+def parse_rclone_stats(stderr: str) -> dict:
+    """Extract the final stats block from rclone's JSON log output.
+
+    rclone emits one JSON object per line to stderr when --use-json-log is set.
+    The last line containing a 'stats' key is the end-of-run summary.
+
+    Args:
+        stderr: Raw stderr output from the rclone process.
+
+    Returns:
+        A dict of rclone stats, or an empty dict if none could be parsed.
+        Useful keys: 'transfers' (files moved), 'bytes', 'errors', 'elapsedTime'.
+    """
+    last_stats: dict = {}
+    for line in stderr.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+            if "stats" in entry:
+                last_stats = entry["stats"]
+        except json.JSONDecodeError:
+            continue
+    return last_stats
+
+
 def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 120) -> tuple[int, int]:
     """Run rclone move for files in a directory to the S3 destination.
 
@@ -2336,32 +2363,6 @@ def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 1
     Raises:
         subprocess.CalledProcessError: If rclone exits with a non-zero return code.
     """
-
-    def _parse_rclone_stats(stderr: str) -> dict:
-        """Extract the final stats block from rclone's JSON log output.
-
-        rclone emits one JSON object per line to stderr when --use-json-log is set.
-        The last line containing a 'stats' key is the end-of-run summary.
-
-        Args:
-            stderr: Raw stderr output from the rclone process.
-
-        Returns:
-            A dict of rclone stats, or an empty dict if none could be parsed.
-            Useful keys: 'transfers' (files moved), 'bytes', 'errors', 'elapsedTime'.
-        """
-        last_stats: dict = {}
-        for line in stderr.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-                if "stats" in entry:
-                    last_stats = entry["stats"]
-            except json.JSONDecodeError:
-                continue
-        return last_stats
 
     dest = f"{profile}:{bucket}"
     cmd = [
@@ -2383,7 +2384,7 @@ def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 1
 
     #  get rclone stats - skip if we hit an error
     try:
-        stats = _parse_rclone_stats(result.stderr)
+        stats = parse_rclone_stats(result.stderr)
         transfers = stats.get("transfers", 0)
         bytes_moved = 0
         if transfers > 0:
@@ -2410,21 +2411,16 @@ def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 1
 
 
 def rclone_copy(
-    path: str,
+    filenames: list[str],
     profile: str,
     bucket: str,
 ) -> tuple[int, int]:
-    """Run rclone copy files in a directory to the S3 destination.
-
-    Uses --min-age to skip files that are too new, and --no-traverse for
-    efficiency on large buckets.
+    """Run rclone copy files to an S3 bucket destination.
 
     Args:
-        path: Local directory path to move files from.
+        filenames: List of local files to copy.
         profile: The rclone profile to use (see rclone.conf).
         bucket: Destination bucket name.
-        min_file_age_secs: Do not attempt to move any file which is newer than this many seconds.
-            This prevents moving files before they are finished being written.
 
     Returns:
         tuple of transfers and bytes_transferred
@@ -2433,65 +2429,41 @@ def rclone_copy(
         subprocess.CalledProcessError: If rclone exits with a non-zero return code.
     """
 
-    def _parse_rclone_stats(stderr: str) -> dict:
-        """Extract the final stats block from rclone's JSON log output.
-
-        rclone emits one JSON object per line to stderr when --use-json-log is set.
-        The last line containing a 'stats' key is the end-of-run summary.
-
-        Args:
-            stderr: Raw stderr output from the rclone process.
-
-        Returns:
-            A dict of rclone stats, or an empty dict if none could be parsed.
-            Useful keys: 'transfers' (files moved), 'bytes', 'errors', 'elapsedTime'.
-        """
-        last_stats: dict = {}
-        for line in stderr.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-                if "stats" in entry:
-                    last_stats = entry["stats"]
-            except json.JSONDecodeError:
-                continue
-        return last_stats
-
     dest = f"{profile}:{bucket}"
     cmd = [
         "rclone",
         "move",
         "-v",  # This is needed to get any json output
-        "--min-age",
-        f"{min_file_age_secs}s",
-        "--no-traverse",
         "--use-json-log",  # structured JSON lines on stderr
         "--stats",
         "1h",  # suppress periodic stats, only emit at end
-        path,
-        dest,
     ]
+    # append each filename
+    for f in filenames:
+        cmd.append("--include")
+        cmd.append(f)
+
+    # now append the destination
+    cmd.append(dest)
     logger.debug(f"Running rclone: {' '.join(cmd)}")
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     #  get rclone stats - skip if we hit an error
     try:
-        stats = _parse_rclone_stats(result.stderr)
+        stats = parse_rclone_stats(result.stderr)
         transfers = stats.get("transfers", 0)
-        bytes_moved = 0
+        bytes_copied = 0
         if transfers > 0:
-            bytes_moved = stats.get("bytes", 0)
+            bytes_copied = stats.get("bytes", 0)
             elapsed = stats.get("elapsedTime", 0.0)
             logger.info(
-                f"rclone moved {transfers} file(s) ({bytes_moved / 1000.0:.1f} KB) from {path} in {elapsed:.1f}s",
+                f"rclone moved {transfers} file(s) ({bytes_copied / 1000.0:.1f} KB) in {elapsed:.1f}s",
             )
         else:
-            logger.debug(f"rclone: nothing to move from {path}")
+            logger.debug("rclone: nothing to copy")
     except Exception:
-        bytes_moved = 0
+        bytes_copied = 0
         transfers = 0
         logger.exception("Error getting stats from rclone. Skipping.")
 
@@ -2502,7 +2474,7 @@ def rclone_copy(
         logger.debug(f"rclone stdout: {result.stdout.strip()}")
 
     # pass back transfers, transferred_bytes
-    return transfers, bytes_moved
+    return transfers, bytes_copied
 
 
 def extract_channels_from_filename(filename: str) -> dict | None:
