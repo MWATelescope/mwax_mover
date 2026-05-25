@@ -1,5 +1,11 @@
 # Changelog
 
+# 1.7.13 25-May-2026
+
+* calvin: Removed: no_ref tile from the hyperdrive plots command!
+* moved all cli commands to the cli subdir.
+* Added new CLI to regenerate the calvin plots with the latest hyperdrive plot settings, pull down the index.json, update index.json with new file size, modified and size, then reupload the plots and index.json to S3.
+
 # 1.7.12 21-May-2026
 
 * Fixed logging bug in rclone move in calvin controller

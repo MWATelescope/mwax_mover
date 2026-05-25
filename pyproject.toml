@@ -1,6 +1,6 @@
 [project]
 name = "mwax_mover"
-version = "1.7.12"
+version = "1.7.13"
 description = "A module to manage input, archiving and calibration for the MWAX correlator"
 readme = "README.md"
 requires-python = ">=3.12, <3.15"
@@ -47,14 +47,14 @@ repository = "https://github.com/MWATelescope/mwax_mover"
 changelog = "https://github.com/MWATelescope/mwax_mover/CHANGELOG.md"
 
 [project.scripts]
-mwax_calvin_processor = "mwax_mover.mwax_calvin_processor:main"
-mwax_calvin_controller = "mwax_mover.mwax_calvin_controller:main"
-mwax_subfile_distributor = "mwax_mover.mwax_subfile_distributor:main"
-mwacache_archiver = "mwax_mover.mwacache_archive_processor:main"
-mwacache_checks = "mwax_mover.mwacache_checks:main"
-aocal_split = "mwax_mover.aocal_split:main"
-vdif_cat = "mwax_mover.vdif_cat:main"
-generate_index_json = "mwax_mover.generate_index_json:main"
+mwax_calvin_processor = "mwax_mover.cli.mwax_calvin_processor:main"
+mwax_calvin_controller = "mwax_mover.cli.mwax_calvin_controller:main"
+mwax_subfile_distributor = "mwax_mover.cli.mwax_subfile_distributor:main"
+mwacache_archiver = "mwax_mover.cli.mwacache_archive_processor:main"
+aocal_split = "mwax_mover.cli.aocal_split:main"
+vdif_cat = "mwax_mover.cli.vdif_cat:main"
+generate_index_json = "mwax_mover.cli.generate_index_json:main"
+update_calvin_plots_and_index = "mwax_mover.cli.update_calvin_plots_and_index:main"
 
 [tool.black]
 line-length = 120

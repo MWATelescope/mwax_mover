@@ -1689,21 +1689,56 @@ def get_convergence_summary(solutions_fits_file: str):
     return summary
 
 
-def write_hyperdrive_stats(
-    obs_id,
-    stats_filename,
-    hyperdrive_solution_filename,
-    hyperdrive_binary_path,
-    metafits_filename,
+def generate_hyperdrive_plots(
+    obs_id: int,
+    hyperdrive_solution_filename: str,
+    hyperdrive_binary_path: str,
+    metafits_filename: str,
 ) -> Tuple[bool, str]:
-    """Write convergence statistics and generate solution plots.
+    """Generate solution plots.
+
+    Args:
+        obs_id: Observation ID.
+        hyperdrive_solution_filename: Path to the hyperdrive solution FITS file.
+        hyperdrive_binary_path: Path to the hyperdrive executable.
+        metafits_filename: Path to the metafits file.
+
+    Returns:
+        A tuple of (success: bool, error_message: str).
+    """
+    logger.info(f"{obs_id} generating plots for {hyperdrive_solution_filename}...")
+
+    try:
+        # Now run hyperdrive again to do some plots
+        hyp_soln_plot_args = f"--max-amp 5 --output-directory {os.path.dirname(hyperdrive_solution_filename)}"
+        cmd = (
+            f"{hyperdrive_binary_path} solutions-plot {hyp_soln_plot_args} "
+            f"-m"
+            f" {metafits_filename} {hyperdrive_solution_filename}"
+        )
+
+        return_value, _ = run_command_ext(cmd, -1, timeout=60, use_shell=False)
+
+        logger.info(
+            f"{obs_id} Finished running hyperdrive plots on {hyperdrive_solution_filename}. Return={return_value}"
+        )
+    except Exception as catch_all_exception:
+        return False, str(catch_all_exception)
+
+    return True, ""
+
+
+def write_hyperdrive_stats(
+    obs_id: int,
+    stats_filename: str,
+    hyperdrive_solution_filename: str,
+) -> Tuple[bool, str]:
+    """Write convergence statistics.
 
     Args:
         obs_id: Observation ID.
         stats_filename: Path to write statistics to.
         hyperdrive_solution_filename: Path to the hyperdrive solution FITS file.
-        hyperdrive_binary_path: Path to the hyperdrive executable.
-        metafits_filename: Path to the metafits file.
 
     Returns:
         A tuple of (success: bool, error_message: str).
@@ -1717,21 +1752,7 @@ def write_hyperdrive_stats(
             for row in conv_summary_list:
                 stats.write(f"{row[0]}: {row[1]}\n")
 
-        # Now run hyperdrive again to do some plots
-        hyp_soln_plot_args = (
-            f"--no-ref-tile --max-amp 5 --output-directory {os.path.dirname(hyperdrive_solution_filename)}"
-        )
-        cmd = (
-            f"{hyperdrive_binary_path} solutions-plot {hyp_soln_plot_args} "
-            f"-m"
-            f" {metafits_filename} {hyperdrive_solution_filename}"
-        )
-
-        return_value, _ = run_command_ext(cmd, -1, timeout=10, use_shell=False)
-
-        logger.info(
-            f"{obs_id} Finished running hyperdrive stats on {hyperdrive_solution_filename}. Return={return_value}"
-        )
+        logger.info(f"{obs_id} Finished running hyperdrive stats on {hyperdrive_solution_filename}.")
     except Exception as catch_all_exception:
         return False, str(catch_all_exception)
 
@@ -2071,6 +2092,7 @@ def run_hyperdrive_stats(
         True if all stats generation succeeded, False otherwise.
     """
     # produce stats/plots
+    plots_successful: int = 0
     stats_successful: int = 0
 
     logger.info(
@@ -2078,11 +2100,21 @@ def run_hyperdrive_stats(
         f" Running hyperdrive stats {len(input_solution_files)} times...."
     )
 
-    for hyperdrive_stats_run, solution_filename in enumerate(input_solution_files):
+    for hyperdrive_run, solution_filename in enumerate(input_solution_files):
         # Take the filename which for picket fence will also have
         # the band info and in all cases the obsid. We will use
         # this as a base for other files we work with
         obsid_and_band = os.path.basename(solution_filename).replace("_solutions.fits", "")
+
+        (
+            plots_success,
+            plots_error,
+        ) = generate_hyperdrive_plots(
+            obs_id,
+            solution_filename,
+            hyperdrive_binary_path,
+            metafits_filename,
+        )
 
         # Write the stats to the output dir
         stats_filename = os.path.join(hyperdrive_output_path, f"{obsid_and_band}_stats.txt")
@@ -2094,25 +2126,37 @@ def run_hyperdrive_stats(
             obs_id,
             stats_filename,
             solution_filename,
-            hyperdrive_binary_path,
-            metafits_filename,
         )
+
+        if plots_success:
+            plots_successful += 1
+        else:
+            logger.warning(
+                f"{obs_id}: hyperdrive plots run"
+                f" {hyperdrive_run + 1}/{len(input_solution_files)} FAILED:"
+                f" {plots_error}."
+            )
 
         if stats_success:
             stats_successful += 1
         else:
             logger.warning(
                 f"{obs_id}: hyperdrive stats run"
-                f" {hyperdrive_stats_run + 1}/{len(input_solution_files)} FAILED:"
+                f" {hyperdrive_run + 1}/{len(input_solution_files)} FAILED:"
                 f" {stats_error}."
             )
 
+    if plots_successful == len(input_solution_files):
+        logger.info(f"{obs_id}: All {plots_successful} hyperdrive plots runs successful")
+    else:
+        logger.warning(f"{obs_id}: Not all hyperdrive plots runs were successful.")
+
     if stats_successful == len(input_solution_files):
         logger.info(f"{obs_id}: All {stats_successful} hyperdrive stats runs successful")
-        return True
     else:
         logger.warning(f"{obs_id}: Not all hyperdrive stats runs were successful.")
-        return False
+
+    return plots_successful == stats_successful == len(input_solution_files)
 
 
 def process_phase_fits(tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter):
