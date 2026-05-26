@@ -2931,7 +2931,11 @@ def generate_plot_index_file(
             if filename.name == "index.json":
                 continue
 
-            files.append(populate_index_json_entry(Path(filename), fit_id, plot_front_end_url))
+            new_entry = populate_index_json_entry(Path(filename), fit_id, plot_front_end_url)
+
+            # None means it found a file we don't want to upload so skip it
+            if new_entry is not None:
+                files.append(new_entry)
 
         index = {
             "version": 2,
