@@ -79,13 +79,16 @@ def update_plot_index_file_entry(solution_directory: str, filename: str, fit_id:
     entries = index.get("files", [])
     matching = [entry for entry in entries if entry["filename"] == filename]
 
-    if not matching:
+    if matching:
+        entry = matching[0]
+    else:
         # add it
-        new_entry = populate_index_json_entry(file_path, fit_id, plot_front_end_url)
-        if new_entry is not None:
-            entries.append(new_entry)
-
-    entry = matching[0]
+        entry = populate_index_json_entry(file_path, fit_id, plot_front_end_url)
+        if entry is not None:
+            entries.append(entry)
+        else:
+            # Entry is none so skip it
+            return
 
     stat = file_path.stat()
     entry["size_bytes"] = stat.st_size
@@ -234,21 +237,12 @@ def main() -> None:
             print(f"Error generating plots for {file}: {error_message}")
             exit(1)
 
-    try:
-        # Update index file for each solution file
-        png_files = glob.glob(os.path.join(solution_dir, "*.png"))
-        for png in png_files:
-            try:
-                print(f"Updating {png} in index.json")
-                update_plot_index_file_entry(solution_dir, os.path.basename(png), fit_id, plot_front_end_url)
-                files_to_upload.append(png)
-            except Exception as e:
-                print(f"Error writing index file for png file {png}: {e}", file=sys.stderr)
-                sys.exit(1)
-
-    except Exception as e:
-        print(f"Error writing index file: {e}", file=sys.stderr)
-        sys.exit(1)
+    # Update index file for each solution file
+    png_files = glob.glob(os.path.join(solution_dir, "*.png"))
+    for png in png_files:
+        print(f"Updating {png} in index.json")
+        update_plot_index_file_entry(solution_dir, os.path.basename(png), fit_id, plot_front_end_url)
+        files_to_upload.append(png)
 
     files_to_upload.append(os.path.join(solution_dir, "index.json"))
 
