@@ -74,6 +74,9 @@ def update_plot_index_file_entry(
     with index_path.open("r", encoding="utf-8") as f:
         index = json.load(f)
 
+    # update generated at
+    index["generated_at"] = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     entries = index["files"]
     matching = [entry for entry in entries if entry["filename"] == filename]
 
