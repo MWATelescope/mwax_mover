@@ -146,10 +146,10 @@ def main() -> None:
 
     dry_run: bool = args.dry_run
 
-    solution_directory: str = args.solution_directory
+    solution_dir: str = args.solution_dir
 
-    if not os.path.exists(solution_directory):
-        print(f"Solution_directory: {solution_directory} does not exist. Exiting")
+    if not os.path.exists(solution_dir):
+        print(f"Solution_directory: {solution_dir} does not exist. Exiting")
         sys.exit(1)
 
     fit_id = int(args.fit_id)
@@ -174,20 +174,20 @@ def main() -> None:
     possible_metafits_filenames = [f"{obs_id}_metafits.fits", f"{obs_id}.metafits", f"{obs_id}_metafits_ppds.fits"]
 
     for mf in possible_metafits_filenames:
-        temp_filename = os.path.join(solution_directory, mf)
+        temp_filename = os.path.join(solution_dir, mf)
         if os.path.exists(temp_filename):
             metafits_filename = temp_filename
             break
 
     if metafits_filename == "":
-        print(f"No metafits file could be found in {solution_directory}")
+        print(f"No metafits file could be found in {solution_dir}")
         exit(1)
 
     try:
         # Download index file
         download_plot_index_file(
             fit_id,
-            solution_directory,
+            solution_dir,
         )
     except requests.HTTPError as httpe:
         resp = httpe.response
@@ -205,7 +205,7 @@ def main() -> None:
         exit(1)
 
     # Get all the solution files
-    solution_files = glob.glob(os.path.join(solution_directory, "*_solutions.fits"))
+    solution_files = glob.glob(os.path.join(solution_dir, "*_solutions.fits"))
     print(f"{len(solution_files)} solution files found.")
 
     files_to_upload = []
@@ -222,11 +222,11 @@ def main() -> None:
 
     try:
         # Update index file for each solution file
-        png_files = glob.glob(os.path.join(solution_directory, "*.png"))
+        png_files = glob.glob(os.path.join(solution_dir, "*.png"))
         for png in png_files:
             try:
                 print(f"Updating {png} in index.json")
-                update_plot_index_file_entry(solution_directory, os.path.basename(png))
+                update_plot_index_file_entry(solution_dir, os.path.basename(png))
                 files_to_upload.append(png)
             except Exception as e:
                 print(f"Error writing index file for png file {png}: {e}", file=sys.stderr)
@@ -236,7 +236,7 @@ def main() -> None:
         print(f"Error writing index file: {e}", file=sys.stderr)
         sys.exit(1)
 
-    files_to_upload.append(os.path.join(solution_directory, "index.json"))
+    files_to_upload.append(os.path.join(solution_dir, "index.json"))
 
     if not args.dry_run:
         upload_dir = os.path.join(base_upload_dir, str(fit_id))
