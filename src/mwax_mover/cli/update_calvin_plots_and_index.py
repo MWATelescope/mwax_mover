@@ -141,7 +141,7 @@ def main() -> None:
 
     parser.add_argument(
         "--plot-front-end-url",
-        required=True,
+        required=False,
         default="https://cal.mwatelescope.org",
         help="Path to the hyperdrive binary",
     )
