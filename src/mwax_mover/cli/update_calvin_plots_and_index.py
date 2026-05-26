@@ -252,6 +252,7 @@ def main() -> None:
             for f in files_to_upload:
                 dest_filename = os.path.join(upload_dir, os.path.basename(f))
                 shutil.move(f, dest_filename)
+                print(f"Moved {f} to {dest_filename}")
 
         except Exception as e:
             print(f"Error moving files to upload dir {upload_dir}: {str(e)}")
