@@ -5,7 +5,7 @@ from pathlib import Path
 import os
 import argparse
 import sys
-from mwax_mover.mwax_calvin_utils import generate_hyperdrive_plots
+from mwax_mover.mwax_calvin_utils import generate_hyperdrive_plots, populate_index_json_entry
 import json
 from datetime import datetime, timezone
 
@@ -40,10 +40,7 @@ def download_plot_index_file(fit_id: int, solution_directory: str) -> None:
     output_path.write_bytes(response.content)
 
 
-def update_plot_index_file_entry(
-    solution_directory: str,
-    filename: str,
-) -> None:
+def update_plot_index_file_entry(solution_directory: str, filename: str, fit_id: int, plot_front_end_url: str) -> None:
     """Updates metadata fields for a named entry in a solution directory's index.json.
 
     Reads the index.json file from the given solution directory, locates the entry
@@ -57,6 +54,8 @@ def update_plot_index_file_entry(
         solution_directory: Path to the directory containing both index.json and
             the file to be stat'd.
         filename: The filename value to match against entries in the ``files`` list.
+        fit_id: Id of the fit for this solution.
+        plot_front_end_url: base url where plots live: e.g. https://cal.mwatelescope.org
 
     Raises:
         FileNotFoundError: If index.json or the target file does not exist in the
@@ -81,7 +80,8 @@ def update_plot_index_file_entry(
     matching = [entry for entry in entries if entry["filename"] == filename]
 
     if not matching:
-        raise ValueError(f"No entry with filename {filename!r} found in {index_path}")
+        # add it
+        entries.append(populate_index_json_entry(file_path, fit_id, plot_front_end_url))
 
     entry = matching[0]
 
@@ -140,6 +140,13 @@ def main() -> None:
     )
 
     parser.add_argument(
+        "--plot-front-end-url",
+        required=True,
+        default="https://cal.mwatelescope.org",
+        help="Path to the hyperdrive binary",
+    )
+
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Don't actually upload anything.",
@@ -150,6 +157,8 @@ def main() -> None:
     dry_run: bool = args.dry_run
 
     solution_dir: str = args.solution_dir
+
+    plot_front_end_url = args.plot_front_end_url
 
     if not os.path.exists(solution_dir):
         print(f"Solution_directory: {solution_dir} does not exist. Exiting")
@@ -229,7 +238,7 @@ def main() -> None:
         for png in png_files:
             try:
                 print(f"Updating {png} in index.json")
-                update_plot_index_file_entry(solution_dir, os.path.basename(png))
+                update_plot_index_file_entry(solution_dir, os.path.basename(png), fit_id, plot_front_end_url)
                 files_to_upload.append(png)
             except Exception as e:
                 print(f"Error writing index file for png file {png}: {e}", file=sys.stderr)

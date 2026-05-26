@@ -7,6 +7,8 @@ binary format constants and read/write helpers, SBATCH script generation
 functions, and estimate_birli_output_bytes() for storage pre-checks.
 """
 
+from pathlib import Path
+
 import mwalib
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -2929,35 +2931,7 @@ def generate_plot_index_file(
             if filename.name == "index.json":
                 continue
 
-            ext = os.path.splitext(filename)[1]
-
-            # We only care about these files
-            if ext != ".png" and ext != ".tsv" and ext != ".txt":
-                continue
-
-            stat = filename.stat()
-            last_modified = datetime.datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
-            mime_type, _ = mimetypes.guess_type(filename.name)
-
-            is_png = filename.name.endswith(".png")
-
-            if is_png:
-                # try to get dimensions of the png for the metadata
-                width, height = get_png_dimensions(filename.path)
-
-            s3_path = f"{str(fit_id)}/{filename.name}"
-
-            files.append(
-                {
-                    "filename": filename.name,
-                    "url": f"{plot_front_end_url}/{s3_path}",
-                    "size_bytes": stat.st_size,
-                    "last_modified": last_modified.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "content_type": mime_type or "application/octet-stream",
-                    "description": get_file_description(filename.name),
-                    **({"image_width": width, "image_height": height} if is_png else {}),
-                }
-            )
+            files.append(populate_index_json_entry(Path(filename), fit_id, plot_front_end_url))
 
         index = {
             "version": 2,
@@ -2975,6 +2949,63 @@ def generate_plot_index_file(
         # log it and return
         logger.exception(f"Problem generating the {output_filename} file for fit {fit_id}")
         return False, {}
+
+
+def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_url: str) -> Optional[dict]:
+    """Builds an index.json file entry dict for a given directory entry.
+
+    Inspects the file at ``filename``, extracts metadata (size, modification
+    time, MIME type, and PNG dimensions where applicable), and returns a dict
+    suitable for inclusion in the ``files`` list of an index.json file.
+
+    Only ``.png``, ``.tsv``, and ``.txt`` files are supported; all other
+    extensions return ``None``.
+
+    Args:
+        filename: A str or Path representing the file to describe.
+            Must refer to an existing, stat-able file.
+        fit_id: The integer fit ID, used to construct the S3 path component
+            of the entry's ``url``.
+        plot_front_end_url: Base URL of the calibration plot front end
+            (e.g. ``"https://cal.mwatelescope.org"``). Combined with
+            ``fit_id`` and the filename to form the full entry URL.
+
+    Returns:
+        A dict containing the index.json entry fields (``filename``, ``url``,
+        ``size_bytes``, ``last_modified``, ``content_type``, ``description``,
+        and, for PNG files, ``image_width`` and ``image_height``), or ``None``
+        if the file extension is not one of ``.png``, ``.tsv``, or ``.txt``.
+
+    Raises:
+        OSError: If the file cannot be stat'd.
+        Exception: Any exception raised by :func:`mwax_mover.utils.get_png_dimensions`
+            for PNG files is propagated to the caller.
+    """
+    path = Path(filename)
+    _, ext = os.path.splitext(path.name)
+
+    if ext not in (".png", ".tsv", ".txt"):
+        return None
+
+    stat = path.stat()
+    last_modified = datetime.datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+    mime_type, _ = mimetypes.guess_type(path.name)
+
+    is_png = ext == ".png"
+    width, height = None, None
+
+    if is_png:
+        width, height = get_png_dimensions(str(path))
+
+    return {
+        "filename": path.name,
+        "url": f"{plot_front_end_url}/{fit_id}/{path.name}",
+        "size_bytes": stat.st_size,
+        "last_modified": last_modified.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "content_type": mime_type or "application/octet-stream",
+        "description": get_file_description(str(path)),
+        **({"image_width": width, "image_height": height} if is_png else {}),
+    }
 
 
 def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc: mwalib.MetafitsContext):
