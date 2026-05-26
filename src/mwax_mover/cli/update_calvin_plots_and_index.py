@@ -1,3 +1,4 @@
+import shutil
 import glob
 import requests
 from pathlib import Path
@@ -5,7 +6,6 @@ import os
 import argparse
 import sys
 from mwax_mover.mwax_calvin_utils import generate_hyperdrive_plots
-from mwax_mover.utils import rclone_copy
 import json
 from datetime import datetime, timezone
 
@@ -99,15 +99,21 @@ def main() -> None:
     """Entry point for the update_hyperdrive_plots_and_index command line tool.
 
     Parses arguments and calls generate_hyperdrive_plots(), downloads the old index.json,
-    updates index.json then re-uploads it, printing a summary on success or an error message on failure.
+    updates index.json then copies the files to the local upload directory for calvin controller to upload, printing a summary on success or an error message on failure.
     """
     parser = argparse.ArgumentParser(
         description="calls generate_hyperdrive_plots(), downloads the old index.json, updates index.json then re-uploads it",
     )
     parser.add_argument(
-        "--directory",
+        "--solution-dir",
         required=True,
         help="Path to the directory containing the solution files",
+    )
+
+    parser.add_argument(
+        "--base-upload-dir",
+        required=False,
+        help="Path to the directory that calvin controller uploads to S3- usually /data/calvin/plots. This util will create a dir for the fit inside the base dir.",
     )
 
     parser.add_argument(
@@ -130,8 +136,6 @@ def main() -> None:
         help="Path to the hyperdrive binary",
     )
 
-    parser.add_argument("--rclone_profile", required=False, type=str, help="Rclone profile to use to copy files to S3")
-
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -142,7 +146,7 @@ def main() -> None:
 
     dry_run: bool = args.dry_run
 
-    solution_directory: str = args.directory
+    solution_directory: str = args.solution_directory
 
     if not os.path.exists(solution_directory):
         print(f"Solution_directory: {solution_directory} does not exist. Exiting")
@@ -153,12 +157,12 @@ def main() -> None:
     obs_id = int(args.obs_id)
 
     if dry_run:
-        rclone_profile = ""
+        base_upload_dir = ""
     else:
-        if args.rclone_profile is not None:
-            rclone_profile: str = args.rclone_profile
+        if args.base_upload_dir is not None:
+            base_upload_dir: str = args.base_upload_dir
         else:
-            print("When --dry-run is False, you must profile an --rclone-profile value.")
+            print("When --dry-run is not passed, you must provide a --base-upload-dir value.")
             exit(1)
 
     hyperdrive_binary_path: str = args.hyperdrive_binary_path
@@ -235,11 +239,22 @@ def main() -> None:
     files_to_upload.append(os.path.join(solution_directory, "index.json"))
 
     if not args.dry_run:
-        # Upload files
+        upload_dir = os.path.join(base_upload_dir, str(fit_id))
+
+        # Make Upload dir and move files there
         try:
-            files_copied, bytes_copied = rclone_copy(files_to_upload, rclone_profile, str(fit_id))
+            os.mkdir(upload_dir)
+        except FileExistsError:
+            # dir already exists, no worries
+            pass
+
+        try:
+            for f in files_to_upload:
+                dest_filename = os.path.join(upload_dir, os.path.basename(f))
+                shutil.move(f, dest_filename)
+
         except Exception as e:
-            print(f"Error uploading files to S3: {str(e)}")
+            print(f"Error moving files to upload dir {upload_dir}: {str(e)}")
             exit(1)
     else:
         print(f"Not uploading files: {files_to_upload} to S3 (bucket={fit_id}) as dry-run = true.")

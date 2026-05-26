@@ -2410,71 +2410,73 @@ def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 1
     return transfers, bytes_moved
 
 
-def rclone_copy(
-    filenames: list[str],
-    profile: str,
-    bucket: str,
-) -> tuple[int, int]:
-    """Run rclone copy files to an S3 bucket destination.
+# def rclone_copy(
+#     path: str,
+#     filenames_no_path: list[str],
+#     profile: str,
+#     bucket: str,
+# ) -> tuple[int, int]:
+#     """Run rclone copy files to an S3 bucket destination.
 
-    Args:
-        filenames: List of local files to copy.
-        profile: The rclone profile to use (see rclone.conf).
-        bucket: Destination bucket name.
+#     Args:
+#         path: local directory that `filenames` lives in
+#         filenames: List of local files to copy (no directories/paths).
+#         profile: The rclone profile to use (see rclone.conf).
+#         bucket: Destination bucket name.
 
-    Returns:
-        tuple of transfers and bytes_transferred
+#     Returns:
+#         tuple of transfers and bytes_transferred
 
-    Raises:
-        subprocess.CalledProcessError: If rclone exits with a non-zero return code.
-    """
+#     Raises:
+#         subprocess.CalledProcessError: If rclone exits with a non-zero return code.
+#     """
+#     dest = f"{profile}:{bucket}"
+#     cmd = [
+#         "rclone",
+#         "copy",
+#         path,
+#         "-v",  # This is needed to get any json output
+#         "--use-json-log",  # structured JSON lines on stderr
+#         "--stats",
+#         "1h",  # suppress periodic stats, only emit at end
+#     ]
+#     # append each filename
+#     for f in filenames_no_path:
+#         cmd.append("--include")
+#         cmd.append(os.path.basename(f))
 
-    dest = f"{profile}:{bucket}"
-    cmd = [
-        "rclone",
-        "move",
-        "-v",  # This is needed to get any json output
-        "--use-json-log",  # structured JSON lines on stderr
-        "--stats",
-        "1h",  # suppress periodic stats, only emit at end
-    ]
-    # append each filename
-    for f in filenames:
-        cmd.append("--include")
-        cmd.append(f)
+#     # now append the destination
+#     cmd.append(dest)
+#     logger.debug(f"Running rclone: {' '.join(cmd)}")
 
-    # now append the destination
-    cmd.append(dest)
-    logger.debug(f"Running rclone: {' '.join(cmd)}")
+#     result = subprocess.run(cmd, capture_output=True, text=True)
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+#     #  get rclone stats - skip if we hit an error
+#     try:
+#         stats = parse_rclone_stats(result.stderr)
+#         transfers = stats.get("transfers", 0)
+#         bytes_copied = 0
+#         if transfers > 0:
+#             bytes_copied = stats.get("bytes", 0)
+#             elapsed = stats.get("elapsedTime", 0.0)
+#             logger.info(
+#                 f"rclone moved {transfers} file(s) ({bytes_copied / 1000.0:.1f} KB) in {elapsed:.1f}s",
+#             )
+#         else:
+#             logger.debug("rclone: nothing to copy")
+#     except Exception:
+#         bytes_copied = 0
+#         transfers = 0
+#         logger.exception("Error getting stats from rclone. Skipping.")
 
-    #  get rclone stats - skip if we hit an error
-    try:
-        stats = parse_rclone_stats(result.stderr)
-        transfers = stats.get("transfers", 0)
-        bytes_copied = 0
-        if transfers > 0:
-            bytes_copied = stats.get("bytes", 0)
-            elapsed = stats.get("elapsedTime", 0.0)
-            logger.info(
-                f"rclone moved {transfers} file(s) ({bytes_copied / 1000.0:.1f} KB) in {elapsed:.1f}s",
-            )
-        else:
-            logger.debug("rclone: nothing to copy")
-    except Exception:
-        bytes_copied = 0
-        transfers = 0
-        logger.exception("Error getting stats from rclone. Skipping.")
+#     if result.returncode != 0:
+#         raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
 
-    if result.returncode != 0:
-        raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
+#     if result.stdout:
+#         logger.debug(f"rclone stdout: {result.stdout.strip()}")
 
-    if result.stdout:
-        logger.debug(f"rclone stdout: {result.stdout.strip()}")
-
-    # pass back transfers, transferred_bytes
-    return transfers, bytes_copied
+#     # pass back transfers, transferred_bytes
+#     return transfers, bytes_copied
 
 
 def extract_channels_from_filename(filename: str) -> dict | None:
