@@ -76,12 +76,14 @@ def update_plot_index_file_entry(solution_directory: str, filename: str, fit_id:
     # update generated at
     index["generated_at"] = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    entries = index["files"]
+    entries = index.get("files", [])
     matching = [entry for entry in entries if entry["filename"] == filename]
 
     if not matching:
         # add it
-        entries.append(populate_index_json_entry(file_path, fit_id, plot_front_end_url))
+        new_entry = populate_index_json_entry(file_path, fit_id, plot_front_end_url)
+        if new_entry is not None:
+            entries.append(new_entry)
 
     entry = matching[0]
 
