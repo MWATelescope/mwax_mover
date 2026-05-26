@@ -10,9 +10,6 @@ import json
 from datetime import datetime, timezone
 
 
-from mwax_mover.utils import get_png_dimensions
-
-
 def download_plot_index_file(fit_id: int, solution_directory: str) -> None:
     """Downloads the plot index JSON file for a given fit ID from the MWA calibration portal.
 
@@ -75,7 +72,6 @@ def update_plot_index_file_entry(solution_directory: str, filename: str, fit_id:
 
     # update generated at
     index["generated_at"] = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    index["version"] = 2
 
     entries = index.get("files", [])
     matching = [entry for entry in entries if entry["filename"] == filename]
@@ -91,14 +87,16 @@ def update_plot_index_file_entry(solution_directory: str, filename: str, fit_id:
             # Entry is none so skip it
             return
 
-    stat = file_path.stat()
-    entry["size_bytes"] = stat.st_size
-    entry["last_modified"] = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    if file_path.suffix.lower() == ".png":
-        width, height = get_png_dimensions(str(file_path))
-        entry["image_width"] = width
-        entry["image_height"] = height
+    if file_path.suffix.lower() == ".png" and int(index["version"]) == 1:
+        #
+        # if we are a v1 json file the width and height are swapped
+        # - I would upgrade the version to 2 and fix it but there may be other
+        # unmodified files in the index.json and we don't want to mix v1 and v2 conventions
+        #
+        width = entry["image_width"]
+        height = entry["image_height"]
+        entry["image_height"] = width
+        entry["image_width"] = height
 
     with index_path.open("w", encoding="utf-8") as f:
         json.dump(index, f, indent=2)
