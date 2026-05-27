@@ -1,5 +1,10 @@
 # Changelog
 
+# 1.7.14 27-May-2026
+
+* calvin_processor: uses haproxy on 127.0.0.1 to proxy to the mwacache servers which proxy to Pawsey so calvin can use the 100G link to download data from MWA ASVO. Proxy currently hardcoded.
+* calvin_processor: added download rate to the log message after successfully downloading a tar file.
+
 # 1.7.13 25-May-2026
 
 * calvin: Removed: no_ref tile from the hyperdrive plots command!

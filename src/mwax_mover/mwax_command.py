@@ -16,15 +16,13 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-# This will return true/false plus the output from stdout
-# use shell should be used when you are using wildcards and other shell
-# features
 def run_command_ext(
     command: str,
     numa_node: typing.Optional[int],
     timeout: int = 60,
     use_shell: bool = False,
     copy_user_env: bool = False,
+    extra_env_vars: Optional[dict[str, str]] = None,
 ) -> typing.Tuple[bool, str]:
     """Execute a command synchronously with optional NUMA pinning.
 
@@ -38,6 +36,9 @@ def run_command_ext(
         timeout: Maximum time in seconds to wait for command. Defaults to 60.
         use_shell: Whether to execute via shell. Defaults to False.
         copy_user_env: Whether to copy user's environment variables. Defaults to False.
+        extra_env_vars: An optional dictionary of key/value pairs to be added to
+            the environment the command runs in. Works independently of
+            copy_user_env. Defaults to None.
 
     Returns:
         A tuple of (success: bool, output: str). Success is True if return code
@@ -48,6 +49,11 @@ def run_command_ext(
     if copy_user_env:
         # Should we copy the user's environment for the subprocess? Default is no
         myenv = os.environ.copy()
+
+    if extra_env_vars is not None:
+        if myenv is None:
+            myenv = {}
+        myenv.update(extra_env_vars)
 
     # Example: ["dada_diskdb", "-k 1234", "-f 1216447872_02_256_201.sub -s"]
     if numa_node is None:
@@ -62,7 +68,6 @@ def run_command_ext(
         logger.debug(f"Executing {cmdline}...")
 
         # Parse the command into executable and args
-
         if use_shell:
             #
             # NOTE: using shell=true in subprocess.run requires a string.
@@ -104,7 +109,7 @@ def run_command_ext(
         else:
             return True, f"{stdout} {stderror}"
 
-    except Exception as command_exception:  # pylint: disable=broad-except
+    except Exception as command_exception:
         error = f"Exception executing {cmdline}: {str(command_exception)}"
         logger.exception(f"Exception executing {cmdline}:")
         return False, error

@@ -628,17 +628,29 @@ class MWAXCalvinProcessor:
             #
             # Do the download
             #
+            start_time = time.monotonic()
+
             subcmd = "download"
             args = f"--keep-tar {self.asvo_job_id} -d {self.job_input_path}"
             # On success we just return some stdout, otherwise an exception is raised
-            stdout = run_giant_squid(self.giant_squid_binary_path, subcmd, args, self.mwaasvo_download_obs_timeout)
+            stdout = run_giant_squid(
+                self.giant_squid_binary_path,
+                subcmd,
+                args,
+                self.mwaasvo_download_obs_timeout,
+                https_proxy="https://127.0.0.1:3128",
+            )
+            elapsed_seconds = time.monotonic() - start_time
 
             # It's possible to have a successful run, but the obsid or jobid doesn't exist or some other problem. Let's check stdout
             # success message is like: "08:19:20 [INFO] Job ID 1028014 (obsid: 1422444512) [1/1]: Completed download of 1.4 MiB in 0.002 s (717.8 MiB/s)"
             if "Completed download" in stdout:
+                file_size_bytes = os.stat(full_tar_filename).st_size
+                gbps = (file_size_bytes * 8) / (elapsed_seconds * 1_000_000_000)
                 logger.info(
-                    f"{str(self.obs_id)} successfully downloaded "
-                    f"from {self.mwa_asvo_download_url} to {full_tar_filename}"
+                    f"{str(self.obs_id)} Download of {full_tar_filename} complete. Size: {file_size_bytes / 1_000_000_000:.1f} GB"
+                    f" Time: {elapsed_seconds:.1f}s"
+                    f" Rate: {gbps:.1f} Gbps"
                 )
             elif f"Obsid {self.obs_id} wasn't found in your list of jobs" in stdout:
                 retry_this_download = False
