@@ -638,7 +638,7 @@ class MWAXCalvinProcessor:
                 subcmd,
                 args,
                 self.mwaasvo_download_obs_timeout,
-                https_proxy="https://127.0.0.1:3128",
+                env_args={"HTTPS_PROXY": "http://localhost:3128", "NO_PROXY": "asvo.mwatelescope.org"},
             )
             elapsed_seconds = time.monotonic() - start_time
 

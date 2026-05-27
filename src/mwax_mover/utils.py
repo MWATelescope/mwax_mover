@@ -2178,7 +2178,7 @@ def run_giant_squid(
     timeout_seconds: int,
     max_retries: int = 5,
     retry_delay_seconds: float = 10.0,
-    https_proxy: Optional[str] = None,
+    env_args: Optional[dict[str, str]] = None,
 ) -> str:
     """Execute a giant-squid command and return its output.
 
@@ -2193,7 +2193,7 @@ def run_giant_squid(
         max_retries: Maximum number of retry attempts after the initial try.
         retry_delay_seconds: Base delay in seconds between retries; doubles each
             attempt with added jitter.
-        https_proxy: Optionally specify a https proxy to use. E.g. https://127.0.0.1:3128
+        env_args: Optionally specify extra env args in a dict- e.g. a https proxy to use. E.g. {"HTTPS_PROXY": "http://127.0.0.1:3128"}
 
     Returns:
         The stdout output from the giant-squid command.
@@ -2216,13 +2216,8 @@ def run_giant_squid(
 
         start_time = time.time()
 
-        if https_proxy is not None:
-            extra_env_vars = {"HTTPS_PROXY": https_proxy}
-        else:
-            extra_env_vars = None
-
         success, stdout = run_command_ext(
-            command=cmdline, numa_node=None, timeout=timeout_seconds, use_shell=True, extra_env_vars=extra_env_vars
+            command=cmdline, numa_node=None, timeout=timeout_seconds, use_shell=True, extra_env_vars=env_args
         )
 
         elapsed = time.time() - start_time

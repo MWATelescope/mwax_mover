@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.7.15 27-May-2026
+
+* calvin_processor: fixed syntax when using proxy.
+
 # 1.7.14 27-May-2026
 
 * calvin_processor: uses haproxy on 127.0.0.1 to proxy to the mwacache servers which proxy to Pawsey so calvin can use the 100G link to download data from MWA ASVO. Proxy currently hardcoded.
