@@ -2217,7 +2217,12 @@ def run_giant_squid(
         start_time = time.time()
 
         success, stdout = run_command_ext(
-            command=cmdline, numa_node=None, timeout=timeout_seconds, use_shell=True, extra_env_vars=env_args
+            command=cmdline,
+            numa_node=None,
+            timeout=timeout_seconds,
+            use_shell=True,
+            copy_user_env=True,
+            extra_env_vars=env_args,
         )
 
         elapsed = time.time() - start_time

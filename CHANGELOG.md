@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.7.16 27-May-2026
+
+* calvin_processor: fix bug where giant squid could not find the api key env variable.
+
 # 1.7.15 27-May-2026
 
 * calvin_processor: fixed syntax when using proxy.
