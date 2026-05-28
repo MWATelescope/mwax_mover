@@ -173,14 +173,15 @@ class MWAXCalvinController:
             self.main_loop_handler()
 
             tracked_asvo_job_count: int = 0
-            for job in self.mwax_asvo_helper.current_asvo_jobs:
-                if job.download_slurm_job_submitted is False and job.download_error_datetime is None:
-                    tracked_asvo_job_count += 1
-                    logger.debug(
-                        f"{job} {job.job_state}; "
-                        f"elapsed: {job.elapsed_time_seconds()} s; "
-                        f"last_seen={job.last_seen_datetime}"
-                    )
+            with self.mwax_asvo_helper.current_asvo_jobs_lock:
+                for job in self.mwax_asvo_helper.current_asvo_jobs:
+                    if job.download_slurm_job_submitted is False and job.download_error_datetime is None:
+                        tracked_asvo_job_count += 1
+                        logger.debug(
+                            f"{job} {job.job_state}; "
+                            f"elapsed: {job.elapsed_time_seconds()} s; "
+                            f"last_seen={job.last_seen_datetime}"
+                        )
 
             # Dump out the counters
             logger.debug(
@@ -318,7 +319,7 @@ class MWAXCalvinController:
             self.database_errors += 1
 
         logger.info(
-            f"Found {len(realtime_requests_list)} realtime and {len(asvo_requests_list)} MWA ASVO requests to add."
+            f"Found {len(realtime_requests_list)} realtime, {sum(1 for r in asvo_requests_list if not r.bulk_request)} MWA ASVO and {sum(1 for r in asvo_requests_list if r.bulk_request)} bulk requests to add."
         )
 
         # Handle realtime requests first!
@@ -475,90 +476,91 @@ class MWAXCalvinController:
         processor. Handles error states appropriately.
         """
 
-        for job in self.mwax_asvo_helper.current_asvo_jobs[
-            :
-        ]:  # [:] makes a shallow copy which allows us to remove the item we're iterating
-            if not job.download_slurm_job_submitted:
-                if job.job_state == mwax_asvo_helper.MWAASVOJobState.Error:
-                    # MWA ASVO completed this job with error
-                    error_message = "MWA ASVO completed this job with an Error state"
-                    logger.warning(f"{job}: {error_message}")
+        with self.mwax_asvo_helper.current_asvo_jobs_lock:
+            for job in self.mwax_asvo_helper.current_asvo_jobs:
+                if not job.download_slurm_job_submitted:
+                    if job.job_state == mwax_asvo_helper.MWAASVOJobState.Error:
+                        # MWA ASVO completed this job with error
+                        error_message = "MWA ASVO completed this job with an Error state"
+                        logger.warning(f"{job}: {error_message}")
 
-                    self.mwa_asvo_errors += 1
+                        self.mwa_asvo_errors += 1
 
-                    job.download_error_datetime = datetime.now().astimezone()
-                    job.download_error_message = error_message
+                        job.download_error_datetime = datetime.now().astimezone()
+                        job.download_error_message = error_message
 
-                    # Update database
-                    try:
-                        update_calsolution_request_submit_mwa_asvo_job_status(
-                            self.db_handler,
-                            job.request_ids,
-                            job.job_id,
-                            None,
-                            job.download_error_datetime,
-                            job.download_error_message,
-                        )
-
-                        # now remove the job from our list
-                        self.mwax_asvo_helper.current_asvo_jobs.remove(job)
-
-                    except Exception:
-                        logger.exception("Unable to update calibration_request table")
-                        self.database_errors += 1
-
-                elif job.job_state == mwax_asvo_helper.MWAASVOJobState.Ready:
-                    try:
-                        logger.debug(f"{job}: Submitting slurm job")
-
-                        script = create_sbatch_script(
-                            self.worker_config_filename,
-                            job.obs_id,
-                            CalvinJobType.mwa_asvo,
-                            self.log_path,
-                            [str(r) for r in job.request_ids],
-                            job.bulk_request,
-                            f'--mwa-asvo-download-url="{job.download_url}" --asvo-job-id={job.job_id}',
-                        )
-
-                        # submit sbatch script
-                        success = False
-                        slurm_job_id = None
+                        # Update database
                         try:
-                            (success, slurm_job_id) = submit_sbatch(self.script_path, script, job.obs_id)
+                            update_calsolution_request_submit_mwa_asvo_job_status(
+                                self.db_handler,
+                                job.request_ids,
+                                job.job_id,
+                                None,
+                                job.download_error_datetime,
+                                job.download_error_message,
+                            )
 
-                            if success:
-                                self.mwa_asvo_slurm_jobs_submitted += 1
-                            else:
-                                self.slurm_errors += 1
+                            # now remove the job from our list
+                            job.remove_from_list = True
+
                         except Exception:
-                            logger.exception("Unable to submit MWA ASVO slurm job")
-                            self.slurm_errors += 1
+                            logger.exception("Unable to update calibration_request table")
+                            self.database_errors += 1
 
-                        # all is good
-                        if success and slurm_job_id is not None:
-                            job.download_slurm_job_submitted = True
-                            job.download_slurm_job_id = slurm_job_id
-                            job.download_slurm_job_submitted_datetime = datetime.now().astimezone()
+                    elif job.job_state == mwax_asvo_helper.MWAASVOJobState.Ready:
+                        try:
+                            logger.debug(f"{job}: Submitting slurm job")
 
-                            # Now update the database with the jobid
+                            script = create_sbatch_script(
+                                self.worker_config_filename,
+                                job.obs_id,
+                                CalvinJobType.mwa_asvo,
+                                self.log_path,
+                                [str(r) for r in job.request_ids],
+                                job.bulk_request,
+                                f'--mwa-asvo-download-url="{job.download_url}" --asvo-job-id={job.job_id}',
+                            )
+
+                            # submit sbatch script
+                            success = False
+                            slurm_job_id = None
                             try:
-                                update_calibration_request_slurm_status(
-                                    self.db_handler,
-                                    job.request_ids,
-                                    slurm_job_id,
-                                    job.download_slurm_job_submitted_datetime,
-                                    None,
-                                    None,
-                                )
-                            except Exception:
-                                logger.exception("Unable to update calibration_request table")
-                                self.database_errors += 1
+                                (success, slurm_job_id) = submit_sbatch(self.script_path, script, job.obs_id)
 
-                    except Exception:
-                        # Something went wrong!
-                        logger.exception(f"{job}: Exception submitting sbtach to SLURM, will try again in next loop")
-                        self.slurm_errors += 1
+                                if success:
+                                    self.mwa_asvo_slurm_jobs_submitted += 1
+                                else:
+                                    self.slurm_errors += 1
+                            except Exception:
+                                logger.exception("Unable to submit MWA ASVO slurm job")
+                                self.slurm_errors += 1
+
+                            # all is good
+                            if success and slurm_job_id is not None:
+                                job.download_slurm_job_submitted = True
+                                job.download_slurm_job_id = slurm_job_id
+                                job.download_slurm_job_submitted_datetime = datetime.now().astimezone()
+
+                                # Now update the database with the jobid
+                                try:
+                                    update_calibration_request_slurm_status(
+                                        self.db_handler,
+                                        job.request_ids,
+                                        slurm_job_id,
+                                        job.download_slurm_job_submitted_datetime,
+                                        None,
+                                        None,
+                                    )
+                                except Exception:
+                                    logger.exception("Unable to update calibration_request table")
+                                    self.database_errors += 1
+
+                        except Exception:
+                            # Something went wrong!
+                            logger.exception(
+                                f"{job}: Exception submitting sbtach to SLURM, will try again in next loop"
+                            )
+                            self.slurm_errors += 1
 
     def stop(self):
         """Shutdown the controller and close all connections.

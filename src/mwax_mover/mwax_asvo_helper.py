@@ -7,6 +7,8 @@ timestamp, and download URL. MWAASVOJobState enumerates the possible ASVO job
 states. Typed exceptions are raised for outages and duplicate submissions.
 """
 
+import threading
+
 from mwax_mover.utils import run_giant_squid, GiantSquidMWAASVOOutageException, GiantSquidJobAlreadyExistsException
 
 from datetime import datetime, timezone
@@ -66,6 +68,8 @@ class MWAASVOJob:
         self.download_slurm_job_submitted: bool = False
         self.download_slurm_job_id: Optional[int] = None
         self.download_slurm_job_submitted_datetime: Optional[datetime] = None
+        # A flag used to build a new list without the ones needing to be removed. Bypasses the classic mutating a list while iterating issue! https://rednafi.com/python/modify-iterables-while-iterating/
+        self.remove_from_list: bool = False
 
     def __str__(self):
         return f"JobID: {self.job_id}; ObsID: {self.obs_id}"
@@ -144,6 +148,7 @@ class MWAASVOHelper:
 
         # List of Jobs and obs_ids the helper is keeping track of
         self.current_asvo_jobs: List[MWAASVOJob] = []
+        self.current_asvo_jobs_lock = threading.Lock()
 
         self.mwa_asvo_outage_datetime: Optional[datetime] = None
 
@@ -174,9 +179,10 @@ class MWAASVOHelper:
         Returns:
             True if the request is being tracked, False otherwise.
         """
-        for job in self.current_asvo_jobs:
-            if request_id in job.request_ids:
-                return True
+        with self.current_asvo_jobs_lock:
+            for job in self.current_asvo_jobs:
+                if request_id in job.request_ids:
+                    return True
 
         # not found
         return False
@@ -187,7 +193,8 @@ class MWAASVOHelper:
         Returns:
             the number of ASVO jobs which are in progress"""
         try:
-            return sum(1 for item in self.current_asvo_jobs if item.is_in_progress())
+            with self.current_asvo_jobs_lock:
+                return sum(1 for item in self.current_asvo_jobs if item.is_in_progress())
         except Exception:
             logger.exception("get_in_progress_asvo_job_count() failed")
             return -1
@@ -240,8 +247,9 @@ class MWAASVOHelper:
         # add a new job to be tracked
         job = MWAASVOJob(request_id=request_id, obs_id=obs_id, job_id=job_id, bulk_request=bulk_request)
         job.submitted_datetime = datetime.now(timezone.utc)
-        self.current_asvo_jobs.append(job)
-        logger.info(f"{obs_id}: Added JobID {job_id}. Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs")
+        with self.current_asvo_jobs_lock:
+            self.current_asvo_jobs.append(job)
+            logger.info(f"{obs_id}: Added JobID {job_id}. Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs")
 
         return job
 
@@ -281,51 +289,47 @@ class MWAASVOHelper:
             obs_id, job_id, job_state, download_url = get_job_info_from_giant_squid_json(json_stdout, json_one_job)
 
             # Find the giant squid job in our in memory list
-            for job in self.current_asvo_jobs:
-                if job.job_id == job_id:
-                    changed: bool = False
+            with self.current_asvo_jobs_lock:
+                for job in self.current_asvo_jobs:
+                    if job.job_id == job_id:
+                        changed: bool = False
 
-                    if job.job_state != job_state:
-                        job.job_state = job_state
-                        changed = True
-
-                    if download_url is not None:
-                        if job.download_url != download_url:
-                            job.download_url = download_url
+                        if job.job_state != job_state:
+                            job.job_state = job_state
                             changed = True
 
-                    job.last_seen_datetime = update_datetime
+                        if download_url is not None:
+                            if job.download_url != download_url:
+                                job.download_url = download_url
+                                changed = True
 
-                    if changed:
-                        logger.info(f"{job}: updated - {job.job_state.value} {job.download_url}")
-                    break
+                        job.last_seen_datetime = update_datetime
+
+                        if changed:
+                            logger.info(
+                                f"{job}: updated - {job.job_state.value}{'' if job.download_url is None else ' ' + job.download_url}"
+                            )
+                        break
 
         # Finally, we need to check for any jobs in memory which were not seen anymore
         # in giant squid
         #
         # TODO: hmm we may want to update the database to say it's failed?
         #
-        jobs_to_delete: list[MWAASVOJob] = []
+        with self.current_asvo_jobs_lock:
+            for job in self.current_asvo_jobs:
+                if job.last_seen_datetime != update_datetime:
+                    # We didn't see this job
+                    # We should log it and remove it
+                    job.remove_from_list = True
+                    logger.warning(
+                        f"{job}: removed - {job.job_state.value} {job.download_url} as it was no longer "
+                        f"seen by giant-squid-list. {update_datetime} vs {job.last_seen_datetime}"
+                    )
 
-        for job in self.current_asvo_jobs:
-            if job.last_seen_datetime != update_datetime:
-                # We didn't see this job
-                # We should log it and remove it
-                logger.warning(
-                    f"{job}: removed - {job.job_state.value} {job.download_url} as it was no longer "
-                    f"seen by giant-squid-list. {update_datetime} vs {job.last_seen_datetime}"
-                )
-                jobs_to_delete.append(job)
-
-        # Now do the delete/removal
-        for job_to_delete in jobs_to_delete:
-            # We didn't see this job
-            # We should log it and remove it
-            logger.warning(
-                f"{job}: removed - {job.job_state.value} {job.download_url} as it was no longer "
-                f"seen by giant-squid-list. {update_datetime} vs {job.last_seen_datetime}"
-            )
-            self.current_asvo_jobs.remove(job_to_delete)
+            # This is the safest way to remove jobs from the list as it bypasses the classic python mutating
+            # a list while iterating problem
+            self.current_asvo_jobs = [j for j in self.current_asvo_jobs if not j.remove_from_list]
 
 
 def get_job_id_from_giant_squid_stdout(stdout: str) -> int:

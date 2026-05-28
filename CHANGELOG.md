@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.7.18 29-May-2026
+
+* calvin_controller: added a lock and updated logic to prevent mutation of a list during iteration issue which was causing controller to lose track of jobs.
+
 # 1.7.17 28-May-2026
 
 * calvin_processor: delete tar file from Acacia Projects after successful calibration.
