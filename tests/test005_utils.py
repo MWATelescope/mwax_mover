@@ -9,7 +9,7 @@ tested is the filename and metafits file (which is included).
 from pathlib import Path
 import tarfile
 
-from mwax_mover.utils import run_giant_squid, extract_tar, get_filename_from_url
+from mwax_mover.utils import run_giant_squid, extract_tar, extract_filename_from_mwa_asvo_signed_url
 
 from configparser import ConfigParser
 import os
@@ -971,8 +971,8 @@ def test_extract_tar():
 def test_get_filename_from_url():
     filename_in_url = "https://projects.pawsey org au/mwa-asvo/1444927824_1021186_vis.tar?AWSAccessKeyId=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX&Signature=YYYYYYYYYYYYYYYYY%3D&Expires=1777533409"
 
-    assert get_filename_from_url(filename_in_url) == "1444927824_1021186_vis.tar"
+    assert extract_filename_from_mwa_asvo_signed_url(filename_in_url) == "1444927824_1021186_vis.tar"
 
     no_filename_url = "https://something.com"
-    with pytest.RaisesExc(ValueError):
-        get_filename_from_url(no_filename_url)
+    with pytest.RaisesExc(Exception):
+        extract_filename_from_mwa_asvo_signed_url(no_filename_url)

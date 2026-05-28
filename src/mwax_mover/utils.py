@@ -11,7 +11,7 @@ import random
 
 import subprocess
 
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 import tarfile
 
@@ -39,7 +39,7 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 import threading
 import time
 import typing
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import List
 from typing import Tuple, Optional
 import astropy.io.fits as fits
@@ -2302,30 +2302,6 @@ def extract_tar(tar_filename: str, dest_path: str) -> None:
         raise RuntimeError(f"Failed to extract {tar_filename}: {e}") from e
 
 
-def get_filename_from_url(url: str) -> str:
-    """Extract the filename component from a URL, ignoring query parameters.
-
-    Parses the URL path and returns only the final filename portion,
-    with any percent-encoded characters decoded.
-
-    Args:
-        url: The full URL to extract the filename from.
-
-    Returns:
-        The decoded filename (e.g. '1444927824_1021186_vis.tar').
-
-    Raises:
-        ValueError: If the URL has no path or the path has no filename.
-    """
-    path = urlparse(url).path
-    filename = PurePosixPath(unquote(path)).name
-
-    if not filename:
-        raise ValueError(f"No filename found in URL: {url}")
-
-    return filename
-
-
 def parse_rclone_stats(stderr: str) -> dict:
     """Extract the final stats block from rclone's JSON log output.
 
@@ -2531,3 +2507,55 @@ def get_png_dimensions(path: str) -> tuple[int, int]:
         f.read(4)  # "IHDR"
         width, height = struct.unpack(">II", f.read(8))
     return width, height
+
+
+def rclone_delete_file(profile: str, bucket: str, filename: str) -> None:
+    """Delete a file from a remote bucket using rclone.
+
+    Args:
+        profile: The rclone remote profile name (as configured in rclone.conf).
+        bucket: The name of the bucket to delete the file from.
+        filename: The name of the file to delete within the bucket.
+
+    Raises:
+        subprocess.CalledProcessError: If rclone exits with a non-zero return
+            code, with stderr included in the exception message.
+        FileNotFoundError: If the rclone binary is not found on PATH.
+    """
+    remote_path = f"{profile}:{bucket}/{filename}"
+    result = subprocess.run(
+        ["rclone", "deletefile", remote_path],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            result.args,
+            output=result.stdout,
+            stderr=result.stderr,
+        )
+
+
+def extract_filename_from_mwa_asvo_signed_url(url: str) -> str:
+    """Extract the filename from an MWA ASVO presigned URL.
+
+    Parses the URL path component and returns the final path segment,
+    ignoring any query string parameters (e.g. AWSAccessKeyId, Signature,
+    Expires).
+
+    Args:
+        url: A presigned URL in the format:
+            https://projects.pawsey.org.au/mwa-asvo/<filename>?<query>
+
+    Returns:
+        The filename portion of the URL path, e.g. '1066827928_1045138_vis.tar'.
+
+    Raises:
+        ValueError: If the URL path contains no filename component.
+    """
+    path = urlparse(url).path  # '/mwa-asvo/1066827928_1045138_vis.tar'
+    filename = os.path.basename(path)  # '1066827928_1045138_vis.tar'
+    if not filename:
+        raise ValueError(f"Could not extract filename from URL: {url}")
+    return filename

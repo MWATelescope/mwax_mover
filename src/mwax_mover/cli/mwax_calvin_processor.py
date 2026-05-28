@@ -8,9 +8,16 @@ metadata database via process_solutions(), then signals each MWAX host to releas
 the calibrator visibility files for archiving or discard.
 """
 
+from subprocess import CalledProcessError
+
 import mwalib
 
-from mwax_mover.utils import run_giant_squid, extract_tar, get_filename_from_url
+from mwax_mover.utils import (
+    run_giant_squid,
+    extract_tar,
+    rclone_delete_file,
+    extract_filename_from_mwa_asvo_signed_url,
+)
 
 import argparse
 from configparser import ConfigParser
@@ -119,6 +126,8 @@ class MWAXCalvinProcessor:
         self.plot_upload_path = ""  # where we move plots and stats to on successful calibration
         self.plot_front_end_url = ""
         self.gains_cut_off_max: Optional[float] = None
+        self.acacia_projects_profile: str = ""
+        self.acacia_projects_bucket: str = ""
 
         # birli
         self.birli_timeout: int = 0
@@ -245,8 +254,11 @@ class MWAXCalvinProcessor:
 
                 # If we were not realtime and retry_download came back as false
                 # give up, and requeue since this is likely due to an expired download
+                # We don't know if this is a bulk_request or not, so just in case it is for asvo we will pass False
                 if not retry_download and self.job_type == CalvinJobType.mwa_asvo:
-                    if not insert_calibration_request_row(self.db_handler, self.obs_id, realtime=False):
+                    if not insert_calibration_request_row(
+                        self.db_handler, self.obs_id, realtime=False, bulk_request=False
+                    ):
                         logger.error("Failed to re-add calibration request")
                         self.stop(exit_code=-1)
                         return
@@ -372,18 +384,54 @@ class MWAXCalvinProcessor:
                 self.fail_job_processing(error_message)
                 self.stop(exit_code=-1)
 
-            # This clean up only happens on success
+            #
+            # These clean ups only happens on success
+            #
+            # if this was asvo then delete the file from Acacia (Projects)
+            # Get the filename from the url
+            if self.job_type == CalvinJobType.mwa_asvo:
+                try:
+                    acacia_filename = extract_filename_from_mwa_asvo_signed_url(self.mwa_asvo_download_url)
+
+                    try:
+                        rclone_delete_file(
+                            profile=self.acacia_projects_profile,
+                            bucket=self.acacia_projects_bucket,
+                            filename=acacia_filename,
+                        )
+                        logger.info(
+                            f"Successfully deleted {acacia_filename} from {self.acacia_projects_profile}:{self.acacia_projects_bucket}."
+                        )
+                    except CalledProcessError as cp:
+                        if cp.returncode == 4:
+                            # File didn't exist — this is ok- it might have been automatically cleaned up
+                            logger.warning(
+                                f"Tried to delete {acacia_filename} from {self.acacia_projects_profile}:{self.acacia_projects_bucket} but rclone reports FileNotFound. Ignoring."
+                            )
+                        else:
+                            logger.warning(
+                                f"CalledProcessError deleting {acacia_filename} from {self.acacia_projects_profile}:{self.acacia_projects_bucket}. Ignoring."
+                            )
+                    except Exception:
+                        logger.warning(
+                            f"Error deleting {acacia_filename} from {self.acacia_projects_profile}:{self.acacia_projects_bucket}. Ignoring."
+                        )
+                except Exception:
+                    logger.warning(
+                        f"Could not parse MWA ASVO presigned url {self.mwa_asvo_download_url} to get the filename to delete from {self.acacia_projects_profile}. Ignoring."
+                    )
+
             # if we get here, the whole calibration solution was inserted ok.
             if not self.keep_completed_visibility_files:
                 # Remove visibilitiy files
                 visibility_files = glob.glob(os.path.join(self.job_input_path, f"{self.obs_id}_*_*_*.fits"))
                 for file_to_delete in visibility_files:
-                    os.remove(file_to_delete)
+                    utils.remove_file(file_to_delete, False)
 
                 # Now remove uvfits too
                 uvfits_files = glob.glob(os.path.join(self.job_input_path, "*.uvfits"))
                 for file_to_delete in uvfits_files:
-                    os.remove(file_to_delete)
+                    utils.remove_file(file_to_delete, False)
 
             # Final log message
             self.current_task_name = "Complete"
@@ -616,7 +664,7 @@ class MWAXCalvinProcessor:
             stdout = ""
 
             # Determine what the filename will be
-            tar_filename = get_filename_from_url(self.mwa_asvo_download_url)
+            tar_filename = extract_filename_from_mwa_asvo_signed_url(self.mwa_asvo_download_url)
             full_tar_filename = os.path.join(self.job_input_path, tar_filename)
 
             logger.info(
@@ -633,6 +681,10 @@ class MWAXCalvinProcessor:
             subcmd = "download"
             args = f"--keep-tar {self.asvo_job_id} -d {self.job_input_path}"
             # On success we just return some stdout, otherwise an exception is raised
+            #
+            # "HTTPS_PROXY": "http://localhost:3128" => ensures downloads from pawsey go via haproxy->mwacache->squid->Pawsey so we can download via 100G link
+            # "NO_PROXY": "asvo.mwatelescope.org"    => ensures authentication and other ASVO calls don't go via haproxy
+            #
             stdout = run_giant_squid(
                 self.giant_squid_binary_path,
                 subcmd,
@@ -1424,6 +1476,13 @@ class MWAXCalvinProcessor:
                 logger.info(f"Gains will be cut off at {self.gains_cut_off_max}.")
             else:
                 logger.info("Gains cut off/clipping disabled.")
+
+            self.acacia_projects_profile = utils.read_config(
+                config=config, section="processing", key="acacia_projects_profile"
+            )
+            self.acacia_projects_bucket = utils.read_config(
+                config=config, section="processing", key="acacia_projects_bucket"
+            )
 
         except Exception as e:
             error_message = str(e)

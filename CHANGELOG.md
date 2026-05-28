@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.7.17 28-May-2026
+
+* calvin_processor: delete tar file from Acacia Projects after successful calibration.
+
 # 1.7.16 27-May-2026
 
 * calvin_processor: fix bug where giant squid could not find the api key env variable.

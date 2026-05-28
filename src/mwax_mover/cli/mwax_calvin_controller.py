@@ -399,7 +399,7 @@ class MWAXCalvinController:
         if obs_ids_to_request:
             # Insert them all as requests
             for obs_id in obs_ids_to_request:
-                insert_calibration_request_row(self.db_handler, obs_id, True)
+                insert_calibration_request_row(self.db_handler, obs_id, True, bulk_request=False)
 
     def realtime_submit_to_slurm(self, realtime_request: CalibrationRequest):
         """Submit a realtime calibration request to SLURM.
