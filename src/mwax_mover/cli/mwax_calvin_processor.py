@@ -48,7 +48,6 @@ from mwax_mover.mwax_db import (
     update_calsolution_request_download_complete_status,
     update_calsolution_request_calibration_started_status,
     update_calsolution_request_calibration_complete_status,
-    insert_calibration_request_row,
 )
 from mwalib import MetafitsContext
 
@@ -251,17 +250,6 @@ class MWAXCalvinProcessor:
                 self.fail_job_downloading(
                     f"Failed to download data after {self.download_retries} attempts. Error: {error_message}"
                 )
-
-                # If we were not realtime and retry_download came back as false
-                # give up, and requeue since this is likely due to an expired download
-                # We don't know if this is a bulk_request or not, so just in case it is for asvo we will pass False
-                if not retry_download and self.job_type == CalvinJobType.mwa_asvo:
-                    if not insert_calibration_request_row(
-                        self.db_handler, self.obs_id, realtime=False, bulk_request=False
-                    ):
-                        logger.error("Failed to re-add calibration request")
-                        self.stop(exit_code=-1)
-                        return
                 self.stop(exit_code=-1)
 
             # Working path for Birli / uvfits output is determined by calculating the size of the output visibilites:
@@ -395,7 +383,7 @@ class MWAXCalvinProcessor:
 
                     try:
                         rclone_delete_file(
-                            profile=self.acacia_projects_profile,
+                            rclone_profile=self.acacia_projects_profile,
                             bucket=self.acacia_projects_bucket,
                             filename=acacia_filename,
                         )
@@ -653,7 +641,7 @@ class MWAXCalvinProcessor:
         """Download and extract MWA ASVO observation data from URL. The caller will try this X times.
 
         Downloads a tarball from the MWA ASVO download URL and extracts it to
-        the job input path.
+        the job input path. Checks for its existence first.
 
         Returns:
             A tuple of (success, error_message, retry_this_download). If successful, error_message is empty.
@@ -666,6 +654,14 @@ class MWAXCalvinProcessor:
             # Determine what the filename will be
             tar_filename = extract_filename_from_mwa_asvo_signed_url(self.mwa_asvo_download_url)
             full_tar_filename = os.path.join(self.job_input_path, tar_filename)
+
+            if not utils.check_remote_file_exists(
+                self.acacia_projects_profile, self.acacia_projects_bucket, tar_filename
+            ):
+                message = "MWA ASVO data no longer exists. It might have expired or been deleted by a recent request for this obsid. Erroring job."
+                logger.warning(f"{self.obs_id}: {message}")
+
+                return False, message, False
 
             logger.info(
                 f"{self.obs_id}: Attempting to download MWA ASVO data"

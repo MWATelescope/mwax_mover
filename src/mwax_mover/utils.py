@@ -2509,11 +2509,11 @@ def get_png_dimensions(path: str) -> tuple[int, int]:
     return width, height
 
 
-def rclone_delete_file(profile: str, bucket: str, filename: str) -> None:
+def rclone_delete_file(rclone_profile: str, bucket: str, filename: str) -> None:
     """Delete a file from a remote bucket using rclone.
 
     Args:
-        profile: The rclone remote profile name (as configured in rclone.conf).
+        rclone_profile: The rclone remote profile name (as configured in rclone.conf).
         bucket: The name of the bucket to delete the file from.
         filename: The name of the file to delete within the bucket.
 
@@ -2522,7 +2522,7 @@ def rclone_delete_file(profile: str, bucket: str, filename: str) -> None:
             code, with stderr included in the exception message.
         FileNotFoundError: If the rclone binary is not found on PATH.
     """
-    remote_path = f"{profile}:{bucket}/{filename}"
+    remote_path = f"{rclone_profile}:{bucket}/{filename}"
     result = subprocess.run(
         ["rclone", "deletefile", remote_path],
         capture_output=True,
@@ -2535,6 +2535,39 @@ def rclone_delete_file(profile: str, bucket: str, filename: str) -> None:
             output=result.stdout,
             stderr=result.stderr,
         )
+
+
+def check_remote_file_exists(rclone_profile: str, bucket_name: str, filename: str) -> bool:
+    """Check whether a file exists on an rclone remote.
+
+    Args:
+        rclone_profile: The rclone remote name (e.g. ``"acacia"``).
+        bucket_name: The bucket or top-level path on the remote.
+        filename: The filename or relative path within the bucket.
+
+    Returns:
+        True if the file exists, False if it does not.
+
+    Raises:
+        subprocess.CalledProcessError: If rclone exits with an unexpected
+            error (i.e. not a simple "not found" result).
+        FileNotFoundError: If the rclone binary cannot be found.
+    """
+    remote_path = f"{rclone_profile}:{bucket_name}/{filename}"
+
+    result = subprocess.run(
+        ["rclone", "lsf", remote_path],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode == 0:
+        return True
+    elif result.returncode == 3:
+        # Exit code 3: directory/file not found
+        return False
+    else:
+        raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
 
 
 def extract_filename_from_mwa_asvo_signed_url(url: str) -> str:

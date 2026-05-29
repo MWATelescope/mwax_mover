@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.7.22 29-May-2026
+
+* calvin_processor: Check for the acacia donwload file existing. If it does't then it means it has expired (we took more than 7 days from ASVO to calibration to start) OR another recent calibration job for this obs occurred and deleted the tar file (in which case fail the job).
+
 # 1.7.21 29-May-2026
 
 * calvin_controller: added requestids to slurm script filename to prevent duplicates.
