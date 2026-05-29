@@ -72,7 +72,7 @@ class MWAASVOJob:
         self.remove_from_list: bool = False
 
     def __str__(self):
-        return f"JobID: {self.job_id}; ObsID: {self.obs_id}"
+        return f"JobID: {self.job_id}; ObsID: {self.obs_id}; RequestIDs: {self.request_ids}"
 
     def __repr__(self):
         return f"{self.get_status()}"
@@ -309,7 +309,8 @@ class MWAASVOHelper:
                             logger.info(
                                 f"{job}: updated - {job.job_state.value}{'' if job.download_url is None else ' ' + job.download_url}"
                             )
-                        break
+                        # break
+                        # Do not break here because in theory there could be >1 request for this asvo job.
 
         # Finally, we need to check for any jobs in memory which were not seen anymore
         # in giant squid

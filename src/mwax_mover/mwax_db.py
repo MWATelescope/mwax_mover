@@ -716,7 +716,7 @@ def get_unattempted_unrequested_cal_obsids(db_handler_object: MWAXDBHandler, old
 #
 # Calvin controller
 #
-def get_unattempted_calsolution_requests(db_handler_object: MWAXDBHandler) -> list[Tuple[int, int, bool, bool]] | None:
+def get_unattempted_calibration_requests(db_handler_object: MWAXDBHandler) -> list[Tuple[int, int, bool, bool]] | None:
     """Returns the deatils of the next oldest unattempted calibration_requests.
 
     Parameters:

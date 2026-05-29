@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.7.20 29-May-2026
+
+* calvin_controller: Removed break in loop that was causing false "job not seen by giant squid warnings" too. Added request id to logging to make it more obvious.
+
 # 1.7.19 29-May-2026
 
 * calvin_controller: Introduce a short 5 sec wait after submitting jobs before running giant-squid-list to eliminate false "job not seen by giant squid warnings".

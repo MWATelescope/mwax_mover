@@ -39,7 +39,7 @@ from typing import Optional
 from mwax_mover import utils, version, mwax_asvo_helper
 from mwax_mover.mwax_db import (
     MWAXDBHandler,
-    get_unattempted_calsolution_requests,
+    get_unattempted_calibration_requests,
     update_calsolution_request_submit_mwa_asvo_job_status,
     update_calibration_request_slurm_status,
     get_unattempted_unrequested_cal_obsids,
@@ -672,7 +672,7 @@ class MWAXCalvinController:
             # Get the an outstanding calibration_requests from the db
             #
             # returned fields: list[Tuple[requestid, calid, realtime, bulk_request]] or None
-            results = get_unattempted_calsolution_requests(self.db_handler)
+            results = get_unattempted_calibration_requests(self.db_handler)
             if results is not None:
                 logger.debug(f"...Query returned {len(results)} rows")
             else:
