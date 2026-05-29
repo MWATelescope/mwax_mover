@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.7.19 29-May-2026
+
+* calvin_controller: Introduce a short 5 sec wait after submitting jobs before running giant-squid-list to eliminate false "job not seen by giant squid warnings".
+
 # 1.7.18 29-May-2026
 
 * calvin_controller: added a lock and updated logic to prevent mutation of a list during iteration issue which was causing controller to lose track of jobs.

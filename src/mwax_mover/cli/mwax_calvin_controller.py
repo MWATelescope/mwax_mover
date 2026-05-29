@@ -381,8 +381,12 @@ class MWAXCalvinController:
             # Now update the value in self- the health loop will report this number
             self.mwa_asvo_calibration_requests_queued = requests_queued
 
+            # Put in a sleep to allow newly created jobs to be show in giant squid when we run mwa_asvo_update_tracked_jobs()
+            self.sleep(5)
+
             # For mwa_asvo requests, if we're not in an MWA ASVO outage, update jobs check for ready ones
             self.mwa_asvo_update_tracked_jobs()
+
             self.mwa_asvo_submit_ready_asvo_jobs_to_slurm()
 
     def realtime_create_requests_for_unattempted_cal_obs(self):
