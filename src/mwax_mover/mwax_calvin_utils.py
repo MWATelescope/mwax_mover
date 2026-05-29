@@ -2424,19 +2424,23 @@ exit $?
     return job_script
 
 
-def submit_sbatch(script_path: str, script: str, obs_id: int) -> Tuple[bool, Optional[int]]:
+def submit_sbatch(script_path: str, script: str, obs_id: int, request_ids: list[int]) -> Tuple[bool, Optional[int]]:
     """Submit an sbatch script to Slurm.
 
     Args:
         script_path: Directory to write the script to.
         script: The batch script content.
         obs_id: Observation ID (for naming).
+        request_id: Request ID (for naming-prevents duplicates- yes it can happen. In fact it just did. Hence this change!)
 
     Returns:
         A tuple of (success: bool, slurm_job_id: int or None).
     """
     try:
-        script_filename: str = os.path.join(script_path, datetime.datetime.now().strftime(f"%Y%m%d-%H%M%S-{obs_id}.sh"))
+        script_filename: str = os.path.join(
+            script_path,
+            datetime.datetime.now().strftime(f"%Y%m%d-%H%M%S-{obs_id}-{'-'.join(str(i) for i in request_ids)}.sh"),
+        )
         cmdline = f"sbatch {script_filename}"
 
         # Create an sbatch file

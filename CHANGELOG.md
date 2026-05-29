@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.7.21 29-May-2026
+
+* calvin_controller: added requestids to slurm script filename to prevent duplicates.
+
 # 1.7.20 29-May-2026
 
 * calvin_controller: Removed break in loop that was causing false "job not seen by giant squid warnings" too. Added request id to logging to make it more obvious.

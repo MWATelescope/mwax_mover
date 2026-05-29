@@ -434,7 +434,14 @@ class MWAXCalvinController:
 
         # submit sbatch script
         try:
-            (success, slurm_job_id) = submit_sbatch(self.script_path, script, realtime_request.obs_id)
+            (success, slurm_job_id) = submit_sbatch(
+                self.script_path,
+                script,
+                realtime_request.obs_id,
+                [
+                    realtime_request.request_id,
+                ],
+            )
 
             if success:
                 self.realtime_slurm_jobs_submitted += 1
@@ -529,7 +536,9 @@ class MWAXCalvinController:
                             success = False
                             slurm_job_id = None
                             try:
-                                (success, slurm_job_id) = submit_sbatch(self.script_path, script, job.obs_id)
+                                (success, slurm_job_id) = submit_sbatch(
+                                    self.script_path, script, job.obs_id, job.request_ids
+                                )
 
                                 if success:
                                     self.mwa_asvo_slurm_jobs_submitted += 1
