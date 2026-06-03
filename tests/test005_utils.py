@@ -18,6 +18,7 @@ import queue
 import shutil
 import time
 from mwax_mover import utils
+from mwax_mover import version
 
 
 def test_running_under_pytest():
@@ -54,6 +55,10 @@ def test_correlator_mode_class():
     assert not utils.CorrelatorMode.is_vcs("MWAX_BEAMFORMER")
     assert not utils.CorrelatorMode.is_voltage_buffer("MWAX_BEAMFORMER")
     assert utils.CorrelatorMode.is_beamformer("MWAX_BEAMFORMER")
+
+
+def test_version():
+    assert len(version.get_mwax_mover_version_string()) > 0
 
 
 def test_validate_filename_valid1():
@@ -925,7 +930,7 @@ def test_run_giant_squid():
     subcmd = "list"
     args = ""
 
-    stdout = run_giant_squid(path_to_binary, subcmd, args, timeout_secs)
+    stdout = run_giant_squid(path_to_binary, subcmd, args, timeout_secs, max_retries=1, retry_delay_seconds=1)
     assert stdout != ""
 
 

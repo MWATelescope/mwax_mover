@@ -3,7 +3,7 @@ Version handling for mwax_mover
 """
 
 import typing
-import importlib_metadata  # part of setuptools
+from importlib.metadata import version as _get_version
 
 
 def get_mwax_mover_version_string() -> str:
@@ -12,8 +12,7 @@ def get_mwax_mover_version_string() -> str:
     Returns:
         The package version as a string (e.g., "1.2.3").
     """
-    package_version = importlib_metadata.version("mwax_mover")
-    return package_version
+    return _get_version("mwax_mover")
 
 
 def get_pmwax_mover_version_number() -> typing.Tuple[int, int, int]:
