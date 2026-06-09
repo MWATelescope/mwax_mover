@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.7.24 09-Jun-2026
+
+* mwax_subfile_distributor: No longer pass aocal filename to redis / beamformer.
+
 # 1.7.23 03-Jun-2026
 
 * Fixed version code in backport of importlib_metadata.
