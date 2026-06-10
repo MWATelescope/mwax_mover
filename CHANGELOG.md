@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.7.25 10-Jun-2026
+
+* calvin_processor: No longer splits and copies aocal files.
+
 # 1.7.24 09-Jun-2026
 
 * mwax_subfile_distributor: No longer pass aocal filename to redis / beamformer.

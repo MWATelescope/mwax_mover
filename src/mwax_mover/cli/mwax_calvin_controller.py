@@ -678,7 +678,7 @@ class MWAXCalvinController:
         if self.running:
             logger.debug("Querying database for unattempted calsolution_requests...")
 
-            # Get the an outstanding calibration_requests from the db
+            # Get the outstanding calibration_requests from the db
             #
             # returned fields: list[Tuple[requestid, calid, realtime, bulk_request]] or None
             results = get_unattempted_calibration_requests(self.db_handler)

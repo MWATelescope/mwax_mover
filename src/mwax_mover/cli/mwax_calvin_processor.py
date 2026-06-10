@@ -40,7 +40,7 @@ from mwax_mover import (
     mwax_calvin_utils,
 )
 from mwax_mover.mwa_archiver import copy_file_rsync
-from mwax_mover.mwax_calvin_utils import CalvinJobType, estimate_birli_output_bytes, parse_solution_channels
+from mwax_mover.mwax_calvin_utils import CalvinJobType, estimate_birli_output_bytes
 from mwax_mover.mwax_calvin_solutions import process_solutions
 from mwax_mover.mwax_db import (
     MWAXDBHandler,
@@ -906,9 +906,7 @@ class MWAXCalvinProcessor:
 
             # if cal_export_path is set then:
             # 1. copy the solution FITS files to the export dir
-            # 2. split the aocal files into coarse chan files
-            # 3. copy the split aocal files to the export dir
-            # 4. try to clean up old files
+            # 2. try to clean up old files
             if self.cal_export_path is not None:
                 #
                 # copy the solution.fits file(s) to the export directory
@@ -920,81 +918,6 @@ class MWAXCalvinProcessor:
                     cal_dest = os.path.join(self.cal_export_path, os.path.basename(f))
                     logger.info(f"Copying solution FITS file {f} to {cal_dest}")
                     shutil.copy(f, cal_dest)
-
-                #
-                # re-export aocal into 1 file per coarse channel
-                aocal_files = glob.glob(os.path.join(self.job_output_path, "*.bin"))
-                out_aocal_files = []
-
-                logger.info(f"Found {len(aocal_files)} aocal files in {self.job_output_path}.")
-
-                if len(aocal_files) < len(self.metafits_context.metafits_coarse_chans):
-                    logger.info("Splitting each into 1 aocal file per coarse channel.")
-
-                    all_rec_chans = [ch.rec_chan_number for ch in self.metafits_context.metafits_coarse_chans]
-
-                    for aocal_file in aocal_files:
-                        # Figure out which channels this file has
-                        result = parse_solution_channels(aocal_file)
-
-                        if result is None:
-                            this_band_chans = all_rec_chans
-                        else:
-                            this_band_chans = [ch for ch in all_rec_chans if result[0] <= ch <= result[1]]
-
-                        logger.debug(f"Splitting {aocal_file}...")
-                        this_band_aocal_files = mwax_calvin_utils.split_aocal_file_into_coarse_channels(
-                            self.obs_id,
-                            aocal_file,
-                            this_band_chans,
-                            self.job_output_path,
-                        )
-
-                        for f in this_band_aocal_files:
-                            out_aocal_files.append(f)
-
-                    for f in out_aocal_files:
-                        # Copy aocal files to the aocal_export directory
-                        aocal_dest = os.path.join(self.cal_export_path, os.path.basename(f))
-                        logger.info(f"Copying split aocal file {f} to {aocal_dest}")
-                        shutil.copy(f, aocal_dest)
-                else:
-                    # We already have 1 per coarse channel
-                    logger.info("No spliting needed, we already have 1 aocal file per coarse channel.")
-                    for aocal_file in aocal_files:
-                        logger.debug(f"Renaming {aocal_file}...")
-
-                        # determine rec_chan_number - we don't want to mess this up!
-                        # The existing aocal filename will be in the form of
-                        #
-                        # /path/to/file/obsid_chNNN_solutions.bin
-                        # (where NNN is either 1 2 or 3 digits)
-                        #
-                        # So we will remove the path then cut the first bit up to "ch" and chop off "_solutions.bin"
-                        # then convert to int. It's a big messy but we really don't want to assume the order of coarse
-                        # channels in our file list matches the order of coarse chans in the metafits_context.
-
-                        # strip the directory then remove the first part of the filename
-                        aocal_file_rec_chan_no_str: str = os.path.basename(aocal_file).replace(f"{self.obs_id}_ch", "")
-                        logger.debug(f"...Removed first bit of string from {aocal_file}: {aocal_file_rec_chan_no_str}")
-                        aocal_file_rec_chan_no_str: str = aocal_file_rec_chan_no_str.replace("_solutions.bin", "")
-                        logger.debug(
-                            f"...Removed last bit of string: {aocal_file_rec_chan_no_str} and converting to int"
-                        )
-                        # Should be left with a 1,2 or 3 digit number
-                        rec_chan_number = int(aocal_file_rec_chan_no_str)
-
-                        aocal_dest = mwax_calvin_utils.get_aocal_filename(
-                            self.obs_id,
-                            self.metafits_context.num_ants,
-                            self.metafits_context.num_corr_fine_chans_per_coarse,
-                            rec_chan_number,
-                        )
-
-                        aocal_dest = os.path.join(self.cal_export_path, aocal_dest)
-
-                        logger.info(f"Copying aocal file {aocal_file} to {aocal_dest}")
-                        shutil.copy(aocal_file, aocal_dest)
 
                 # Clean up old files
                 ext_list = ["fits", "bin"]

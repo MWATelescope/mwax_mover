@@ -10,7 +10,7 @@ import threading
 import time
 
 
-from mwax_mover.mwacache_archive_processor import MWACacheArchiveProcessor
+from mwax_mover.cli.mwacache_archive_processor import MWACacheArchiveProcessor
 from mwax_mover.utils import ArchiveLocation
 from tests_common import setup_test_directories
 from tests_fakedb import FakeMWAXDBHandler
@@ -45,7 +45,7 @@ def test_mwacache_archiver_config_file():
     assert mcap.metafits_path == "/home/gsleap/mwax_mover_testing/test009/vulcan/metafits"
     assert mcap.archive_to_location == ArchiveLocation.AcaciaMWA
 
-    assert mcap.health_multicast_interface_name == "eth0"
+    assert mcap.health_multicast_interface_name == "eth2"
     assert mcap.health_multicast_ip == "224.250.0.0"
     assert mcap.health_multicast_port == 8004
     assert mcap.health_multicast_hops == 1

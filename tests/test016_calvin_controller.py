@@ -1,6 +1,6 @@
 import logging
 import os
-from mwax_mover.mwax_calvin_controller import MWAXCalvinController
+from mwax_mover.cli.mwax_calvin_controller import MWAXCalvinController
 import tests_common
 from tests_fakedb import FakeMWAXDBHandler
 
@@ -41,7 +41,7 @@ def test_mwax_calvin_controller():
         f"log path mismatch: {mcal.log_path} {os.path.join(base_dir, 'logs')}"
     )
 
-    assert mcal.health_multicast_interface_name == "eth0"
+    assert mcal.health_multicast_interface_name == "eth2"
     assert mcal.health_multicast_ip == "127.0.0.1"
     assert mcal.health_multicast_port == 8012
     assert mcal.health_multicast_hops == 1

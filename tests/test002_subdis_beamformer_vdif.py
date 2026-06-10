@@ -9,7 +9,7 @@ import threading
 import time
 
 from mwax_mover.utils import MWAXSubfileDistirbutorMode
-from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
+from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
 from tests_common import setup_test_directories
 from tests_fakedb import FakeMWAXDBHandler
 

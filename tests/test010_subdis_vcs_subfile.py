@@ -11,7 +11,7 @@ import time
 
 from mwax_mover.utils import MWAXSubfileDistirbutorMode
 from tests_common import create_observation_subfiles, setup_test_directories
-from mwax_mover.mwax_subfile_distributor import MWAXSubfileDistributor
+from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
 from tests_fakedb import FakeMWAXDBHandler
 
 TEST_CONFIG_FILE = "tests/data/test010/test010.cfg"
@@ -40,7 +40,7 @@ def test_correlator_config_file():
 
     # mwax_mover section
     assert sd.cfg_webserver_port == 9999
-    assert sd.cfg_health_multicast_interface_name == "eth0"
+    assert sd.cfg_health_multicast_interface_name == "eth2"
     assert sd.cfg_health_multicast_ip == "224.234.0.0"
     assert sd.cfg_health_multicast_port == 8005
     assert sd.cfg_health_multicast_hops == 1
