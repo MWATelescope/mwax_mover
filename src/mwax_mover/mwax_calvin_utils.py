@@ -2369,7 +2369,7 @@ def create_sbatch_script(
     if jobtype == CalvinJobType.realtime:
         job_name = f"real{obs_id}"
         partition = "priority,gpu"
-        nice = "-10000"  # highest priority
+        nice = "0"  # highest priority
         wall_time = "04:00:00"
     else:
         job_name = f"asvo{obs_id}"

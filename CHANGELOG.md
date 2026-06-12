@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.7.27 12-Jun-2026
+
+* calvin_controller: fix invalid nice value in sbatch script- negatives not allowed in our current slurm config.
+
 # 1.7.26 12-Jun-2026
 
 * calvin_controller: fix invalid nice value in sbatch script.
