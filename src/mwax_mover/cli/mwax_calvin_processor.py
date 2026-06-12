@@ -717,6 +717,7 @@ class MWAXCalvinProcessor:
         # now extract the tar
         exit_error_message = ""
         try:
+            self.current_task_name = "Untaring files"
             logger.info(f"Extracting {full_tar_filename} to {self.job_input_path}")
             extract_tar(full_tar_filename, self.job_input_path)
             logger.info(f"Extracted {full_tar_filename} successfully.")

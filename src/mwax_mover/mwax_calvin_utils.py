@@ -2369,15 +2369,15 @@ def create_sbatch_script(
     if jobtype == CalvinJobType.realtime:
         job_name = f"real{obs_id}"
         partition = "priority,gpu"
-        nice = "-1000000"  # highest priority
+        nice = "-10000"  # highest priority
         wall_time = "04:00:00"
     else:
         job_name = f"asvo{obs_id}"
         partition = "gpu"
         if bulk_request:
-            nice = "1000000"  # lowest priority
+            nice = "10000"  # lowest priority
         else:
-            nice = "10000"  # lower priority than realtime jobs
+            nice = "1000"  # lower priority than realtime jobs
         wall_time = "10:00:00"  # allow extra time for downloading from ASVO (8 hours + 2 for processing)
 
     job_script = f"""#!/bin/bash

@@ -1,5 +1,10 @@
 # Changelog
 
+# 1.7.26 12-Jun-2026
+
+* calvin_controller: fix invalid nice value in sbatch script.
+* calvin_processor: add task name in health packets for untarring.
+
 # 1.7.25 10-Jun-2026
 
 * calvin_processor: No longer splits and copies aocal files.
