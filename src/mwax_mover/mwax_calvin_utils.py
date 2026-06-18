@@ -532,22 +532,20 @@ class HyperfitsSolutionGroup:
         Raises:
             ValueError: If no unflagged tiles are found.
         """
-        tiles_df = self.metafits_tiles_df.copy()
-
-        # flag tiles_df with solution flags
+        # Start from metafits flags then OR-in the solution flags for each file,
+        # without copying the full DataFrame.
+        combined_flag = self.metafits_tiles_df["flag"].to_numpy(dtype=bool)
         for soln in self.solns:
-            tiles_df["flag_metafits"] = tiles_df["flag"]
-            tiles_df["flag_soln"] = soln.tile_flags
-            tiles_df["flag"] = np.logical_or(tiles_df["flag_metafits"], tiles_df["flag_soln"])
-            tiles_df.drop(columns=["flag_metafits", "flag_soln"], inplace=True)
+            combined_flag = np.logical_or(combined_flag, soln.tile_flags)
 
-        tiles = tiles_df[tiles_df.flag == 0]
-
-        if not len(tiles):
+        unflagged_mask = ~combined_flag
+        if not unflagged_mask.any():
             raise ValueError("No unflagged tiles found")
 
-        # tiles_by_id = sorted(tiles, key=lambda tile: tile.id)
-        return tiles.sort_values(by=["id"]).take([0]).iloc[0]
+        # Return the row with the lowest tile ID among unflagged tiles.
+        candidate_ids = self.metafits_tiles_df["id"].to_numpy()
+        best_idx = np.where(unflagged_mask)[0][np.argmin(candidate_ids[unflagged_mask])]
+        return self.metafits_tiles_df.iloc[best_idx]
 
     @property
     def calibrator(self):
@@ -610,6 +608,11 @@ class HyperfitsSolutionGroup:
         Raises:
             RuntimeError: If reference antenna is not found or flagged in solutions.
         """
+        # Pre-extract metafits arrays once to avoid per-iteration DataFrame copies.
+        tile_names = self.metafits_tiles_df["name"].to_numpy()
+        tile_ids = self.metafits_tiles_df["id"].to_numpy()
+        metafits_flags = self.metafits_tiles_df["flag"].to_numpy(dtype=bool)
+
         soln_tile_ids = None
         ref_tile_idx = None
         all_xx_solns = None
@@ -619,29 +622,23 @@ class HyperfitsSolutionGroup:
             # TODO: ch_flags = hdus['CHANBLOCKS'].data['Flag']
             # TODO: results = hdus['RESULTS'].data.flatten()
 
-            # validate tile selection
-            # join the tile dataframe on name, just in case order is different
-            soln_tiles = self.metafits_tiles_df.copy()
-            soln_tiles["flag_metafits"] = soln_tiles["flag"]
-            soln_tiles["flag_soln"] = soln.tile_flags
-            soln_tiles["flag"] = np.logical_or(soln_tiles["flag_soln"], soln_tiles["flag_metafits"])
-            soln_tiles.drop(columns=["flag_metafits", "flag_soln"], inplace=True)
+            # Merge metafits and solution flags without copying the full DataFrame.
+            combined_flag = np.logical_or(metafits_flags, soln.tile_flags)
 
             if refant_name is not None:
-                _ref_tiles = soln_tiles[soln_tiles["name"] == refant_name]
+                ref_mask = tile_names == refant_name
 
-                if not len(_ref_tiles):
+                if not ref_mask.any():
                     raise RuntimeError(f"{soln.filename} - reference tile {refant_name} not found in solution file")
 
-                if len(_ref_tiles) > 1:
+                if ref_mask.sum() > 1:
                     raise RuntimeError(
                         f"{soln.filename} - more than one tile with name {refant_name} found in solution file"
                     )
 
-                _ref_tile_idx = _ref_tiles.index[0]
-                _ref_tile_flag = _ref_tiles.iloc[0]["flag"]
+                _ref_tile_idx = int(np.where(ref_mask)[0][0])
 
-                if _ref_tile_flag:
+                if combined_flag[_ref_tile_idx]:
                     raise RuntimeError(
                         f"{soln.filename} - reference tile {refant_name}"
                         f" is flagged in solutions file (index {_ref_tile_idx})"
@@ -655,11 +652,11 @@ class HyperfitsSolutionGroup:
                         f"{soln.filename} - reference tile in solution file does not match previous solution files"
                     )
 
-            _tile_ids = soln_tiles["id"].to_numpy()
+            _tile_ids = tile_ids
 
             # _tile_ids, _ref_tile_idx = soln.validate_tiles(tiles_by_name, refant)
             if soln_tile_ids is None or not len(soln_tile_ids):
-                soln_tile_ids = soln_tiles["id"].to_numpy()
+                soln_tile_ids = tile_ids
             elif not np.array_equal(soln_tile_ids, _tile_ids):
                 raise RuntimeError(
                     f"{soln.filename} - tile selection in solution file"
@@ -721,6 +718,140 @@ class HyperfitsSolutionGroup:
             raise RuntimeError("No valid solutions found")
 
         return soln_tile_ids, all_xx_solns, all_yy_solns
+
+    def get_solns_both(
+        self, refant_name: str
+    ) -> Tuple[
+        NDArray[np.int_],
+        NDArray[np.complex128],
+        NDArray[np.complex128],
+        NDArray[np.complex128],
+        NDArray[np.complex128],
+    ]:
+        """Return tile IDs, raw and reference-normalised XX/YY solutions in one FITS read pass.
+
+        Equivalent to calling ``get_solns()`` and ``get_solns(refant_name)``
+        back-to-back, but reads each solution FITS file only once instead of
+        twice.  The raw (un-normalised) solutions are needed for gain fitting;
+        the reference-normalised solutions are needed for phase fitting.
+
+        The reference normalisation replicates
+        ``HyperfitsSolution.get_ref_solutions()`` on the already-read raw data,
+        avoiding a second FITS open.  The Jones matrix inverse of the reference
+        tile is applied channel-wise via the standard 2×2 determinant formula.
+
+        Args:
+            refant_name: Name of the reference antenna (must not be flagged in
+                either the metafits or the solution file).
+
+        Returns:
+            A 5-tuple of ``(tile_ids, noref_xx, noref_yy, ref_xx, ref_yy)``.
+
+        Raises:
+            RuntimeError: If the reference antenna is not found, is flagged, or
+                if solution data is inconsistent across files.
+        """
+        # Pre-extract metafits arrays once so the per-file loop needs no
+        # DataFrame copies and no repeated column access.
+        tile_names = self.metafits_tiles_df["name"].to_numpy()
+        tile_ids = self.metafits_tiles_df["id"].to_numpy()
+        metafits_flags = self.metafits_tiles_df["flag"].to_numpy(dtype=bool)
+
+        soln_tile_ids = None
+        ref_tile_idx: Optional[int] = None
+        all_noref_xx: Optional[NDArray[np.complex128]] = None
+        all_noref_yy: Optional[NDArray[np.complex128]] = None
+        all_ref_xx: Optional[NDArray[np.complex128]] = None
+        all_ref_yy: Optional[NDArray[np.complex128]] = None
+
+        for chanblocks_hz, soln in zip(self.all_chanblocks_hz, self.solns):
+            # Merge flags without a DataFrame copy.
+            combined_flag = np.logical_or(metafits_flags, soln.tile_flags)
+
+            # Find and validate the reference antenna.
+            ref_mask = tile_names == refant_name
+            if not ref_mask.any():
+                raise RuntimeError(f"{soln.filename} - reference tile {refant_name} not found in solution file")
+            if ref_mask.sum() > 1:
+                raise RuntimeError(
+                    f"{soln.filename} - more than one tile with name {refant_name} found in solution file"
+                )
+            _ref_tile_idx = int(np.where(ref_mask)[0][0])
+            if combined_flag[_ref_tile_idx]:
+                raise RuntimeError(
+                    f"{soln.filename} - reference tile {refant_name}"
+                    f" is flagged in solutions file (index {_ref_tile_idx})"
+                )
+            if ref_tile_idx is None:
+                ref_tile_idx = _ref_tile_idx
+            elif ref_tile_idx != _ref_tile_idx:
+                raise RuntimeError(
+                    f"{soln.filename} - reference tile in solution file does not match previous solution files"
+                )
+
+            # Tile ID consistency check.
+            if soln_tile_ids is None:
+                soln_tile_ids = tile_ids
+            elif not np.array_equal(soln_tile_ids, tile_ids):
+                raise RuntimeError(f"{soln.filename} - tile IDs do not match previous solution files")
+
+            # Single FITS read for all solution data — this is the key difference
+            # from two separate get_solns() calls.
+            raw_solutions = soln.get_solutions()
+
+            # Validate timeblock count directly from the solutions array,
+            # avoiding a separate FITS open for the TIMEBLOCKS HDU.
+            n_times = raw_solutions[0].shape[0]
+            if n_times != 1:
+                raise RuntimeError(f"{soln.filename} - exactly 1 timeblock must be provided: ({n_times})")
+
+            # Shape validation.
+            for solution in raw_solutions:
+                if (ntimes := solution.shape[0]) != 1:
+                    raise RuntimeError(f"{soln.filename} - SOLUTIONS HDU timeblock count ({ntimes}) != 1")
+                if (ntiles := solution.shape[1]) != len(soln_tile_ids):
+                    raise RuntimeError(
+                        f"{soln.filename} - number of tiles in SOLUTIONS HDU ({ntiles})"
+                        f" does not match TILES HDU ({len(soln_tile_ids)})"
+                    )
+                if (nchans := solution.shape[2]) != len(chanblocks_hz):
+                    raise RuntimeError(
+                        f"{soln.filename} - number of channels in SOLUTIONS HDU ({nchans})"
+                        f" does not match CHANBLOCKS HDU ({len(chanblocks_hz)})"
+                    )
+
+            # Raw (un-normalised) XX and YY for gain fitting.
+            noref_xx = raw_solutions[0]
+            noref_yy = raw_solutions[3]
+
+            # Reference-normalised XX and YY for phase fitting.
+            # Replicates HyperfitsSolution.get_ref_solutions() on already-read data.
+            # ref[i] has shape (1, n_chans); broadcasting over the tiles axis is implicit.
+            ref = [s[:, ref_tile_idx, :] for s in raw_solutions]
+            ref_inv_det = np.divide(1 + 0j, ref[0] * ref[3] - ref[1] * ref[2])
+            ref_xx = (raw_solutions[0] * ref[3] - raw_solutions[1] * ref[2]) * ref_inv_det
+            ref_yy = (raw_solutions[3] * ref[0] - raw_solutions[2] * ref[1]) * ref_inv_det
+
+            # Accumulate across solution files.
+            if all_noref_xx is None or all_noref_yy is None or all_ref_xx is None or all_ref_yy is None:
+                all_noref_xx, all_noref_yy = noref_xx, noref_yy
+                all_ref_xx, all_ref_yy = ref_xx, ref_yy
+            else:
+                all_noref_xx = np.concatenate((all_noref_xx, noref_xx), axis=2)
+                all_noref_yy = np.concatenate((all_noref_yy, noref_yy), axis=2)
+                all_ref_xx = np.concatenate((all_ref_xx, ref_xx), axis=2)
+                all_ref_yy = np.concatenate((all_ref_yy, ref_yy), axis=2)
+
+        if (
+            soln_tile_ids is None
+            or all_noref_xx is None
+            or all_noref_yy is None
+            or all_ref_xx is None
+            or all_ref_yy is None
+        ):
+            raise RuntimeError("No valid solutions found")
+
+        return soln_tile_ids, all_noref_xx, all_noref_yy, all_ref_xx, all_ref_yy
 
 
 class PhaseFitInfo(NamedTuple):

@@ -9,6 +9,7 @@ database.
 import logging
 import os
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 import numpy as np
@@ -136,30 +137,38 @@ def process_solutions(
         logger.debug(f"First 32 fine channels: {[f'{x / 1e6:.3f}' for x in all_chanblocks_hz[0:32]]} MHz")
         logger.debug(f"Last 32 fine channels: {[f'{x / 1e6:.3f}' for x in all_chanblocks_hz[-32:]]} MHz")
 
-        soln_tile_ids, all_xx_solns_noref, all_yy_solns_noref = soln_group.get_solns()
-        _, all_xx_solns, all_yy_solns = soln_group.get_solns(refant["name"])
+        soln_tile_ids, all_xx_solns_noref, all_yy_solns_noref, all_xx_solns, all_yy_solns = soln_group.get_solns_both(
+            refant["name"]
+        )
 
         weights = soln_group.weights
 
-        phase_fits = process_phase_fits(
-            unflagged_tiles,
-            all_chanblocks_hz,
-            all_xx_solns,
-            all_yy_solns,
-            weights,
-            soln_tile_ids,
-            phase_fit_niter,
-        )
-
-        gain_fits = process_gain_fits(
-            unflagged_tiles,
-            all_chanblocks_hz,
-            all_xx_solns_noref,
-            all_yy_solns_noref,
-            weights,
-            soln_tile_ids,
-            chanblocks_per_coarse,
-        )
+        # Run phase and gain fitting concurrently — they are independent and each
+        # internally spawns os.cpu_count() threads, so running them sequentially
+        # wastes wall time during the startup / drain phases of each pool.
+        with ThreadPoolExecutor(max_workers=2) as fitting_executor:
+            phase_future = fitting_executor.submit(
+                process_phase_fits,
+                unflagged_tiles,
+                all_chanblocks_hz,
+                all_xx_solns,
+                all_yy_solns,
+                weights,
+                soln_tile_ids,
+                phase_fit_niter,
+            )
+            gain_future = fitting_executor.submit(
+                process_gain_fits,
+                unflagged_tiles,
+                all_chanblocks_hz,
+                all_xx_solns_noref,
+                all_yy_solns_noref,
+                weights,
+                soln_tile_ids,
+                chanblocks_per_coarse,
+            )
+            phase_fits = phase_future.result()
+            gain_fits = gain_future.result()
 
         # if ~np.any(np.isfinite(phase_fits["length"])):
         #     logger.warning(f"{item} - no valid phase fits found, continuing anyway")
@@ -212,35 +221,40 @@ def process_solutions(
                     # This will trigger a rollback of the calibration_fit row
                     raise Exception("failed to insert calibration fit")
 
+                # Pre-index both DataFrames by (tile_id, pol) so each per-tile
+                # lookup is O(1) instead of O(n) boolean-mask scan.
+                gain_indexed = gain_fits.set_index(["tile_id", "pol"])
+                phase_indexed = phase_fits.set_index(["tile_id", "pol"])
+
                 for tile_id in soln_tile_ids:
                     some_fits = False
 
                     try:
-                        x_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "XX")].iloc[0]
+                        x_gains = gain_indexed.loc[(tile_id, "XX")]
                         if len(x_gains.gains) < n_metafits_coarse:
                             x_gains = pad_gain_fit_info(x_gains, solution_coarse_chans, all_metafits_coarse_chans)
                         some_fits = True
-                    except IndexError:
+                    except KeyError:
                         x_gains = GainFitInfo.nan(n_metafits_coarse)
 
                     try:
-                        y_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "YY")].iloc[0]
+                        y_gains = gain_indexed.loc[(tile_id, "YY")]
                         if len(y_gains.gains) < n_metafits_coarse:
                             y_gains = pad_gain_fit_info(y_gains, solution_coarse_chans, all_metafits_coarse_chans)
                         some_fits = True
-                    except IndexError:
+                    except KeyError:
                         y_gains = GainFitInfo.nan(n_metafits_coarse)
 
                     try:
-                        x_phase = phase_fits[(phase_fits.tile_id == tile_id) & (phase_fits.pol == "XX")].iloc[0]
+                        x_phase = phase_indexed.loc[(tile_id, "XX")]
                         some_fits = True
-                    except IndexError:
+                    except KeyError:
                         x_phase = PhaseFitInfo.nan()
 
                     try:
-                        y_phase = phase_fits[(phase_fits.tile_id == tile_id) & (phase_fits.pol == "YY")].iloc[0]
+                        y_phase = phase_indexed.loc[(tile_id, "YY")]
                         some_fits = True
-                    except IndexError:
+                    except KeyError:
                         y_phase = PhaseFitInfo.nan()
 
                     if not some_fits:
