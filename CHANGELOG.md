@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.7.28 12-Jun-2026
+
+* calvin_processor: If <24 coarse channels still insert db records for 24 channels.
+
 # 1.7.27 12-Jun-2026
 
 * calvin_controller: fix invalid nice value in sbatch script- negatives not allowed in our current slurm config.

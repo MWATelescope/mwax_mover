@@ -6,7 +6,6 @@ inserts the resulting calibration fit and solution records into the MWA metadata
 database.
 """
 
-import glob
 import logging
 import os
 import traceback
@@ -75,16 +74,16 @@ def process_solutions(
     conn = None
 
     try:
-        metafits_files = glob.glob(os.path.join(input_data_path, "*_metafits.fits"))
+        metafits_file = os.path.join(input_data_path, f"{obs_id}_metafits.fits")
 
-        logger.debug(f"{input_data_path} - {metafits_files=}")
+        logger.debug(f"{input_data_path} - {metafits_file=}")
 
         fits_solution_files = get_sorted_solution_files(output_data_path, obs_id, "fits")
 
         logger.debug(f"{output_data_path} - reading {fits_solution_files=}")
 
         soln_group = HyperfitsSolutionGroup(
-            [Metafits(f) for f in metafits_files], [HyperfitsSolution(f) for f in fits_solution_files]
+            Metafits(metafits_file), [HyperfitsSolution(f) for f in fits_solution_files]
         )
 
         # get tiles

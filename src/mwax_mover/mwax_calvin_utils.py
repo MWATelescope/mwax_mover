@@ -395,7 +395,7 @@ class HyperfitsSolution:
 class HyperfitsSolutionGroup:
     """A group of Hyperdrive FITS calibration solutions and corresponding metafits files."""
 
-    def __init__(self, metafits: List[Metafits], solns: List[HyperfitsSolution]):
+    def __init__(self, metafits: Metafits, solns: List[HyperfitsSolution]):
         """Initialize a solution group with metafits and solution files.
 
         Args:
@@ -405,28 +405,26 @@ class HyperfitsSolutionGroup:
         Raises:
             RuntimeError: If no metafits or solution files are provided.
         """
-        if not len(metafits):
-            raise RuntimeError("no metafits files provided")
         self.metafits = metafits
 
         if not len(solns):
             raise RuntimeError("no solutions files provided")
         self.solns = solns
 
-        self.metafits_tiles_df = HyperfitsSolutionGroup.get_metafits_tiles_df(self.metafits)
+        self.metafits_tiles_df = self.metafits.tiles_df
         self.metafits_chan_info = HyperfitsSolutionGroup.get_metafits_chan_info(self.metafits)
         self.chanblocks_per_coarse, self.all_chanblocks_hz = HyperfitsSolutionGroup.get_soln_chan_info(
             self.metafits_chan_info, self.solns
         )
 
     @classmethod
-    def get_metafits_chan_info(cls, metafits: List[Metafits]) -> ChanInfo:
+    def get_metafits_chan_info(cls, metafits: Metafits) -> ChanInfo:
         """Get combined channel information from all metafits files.
 
         Validates that channel ranges do not overlap and that channel info is consistent.
 
         Args:
-            metafits: List of Metafits file readers.
+            metafits: Metafits file object.
 
         Returns:
             Combined ChanInfo object.
@@ -434,29 +432,8 @@ class HyperfitsSolutionGroup:
         Raises:
             RuntimeError: If channel info is inconsistent or ranges overlap.
         """
-        first_chan_info = metafits[0].chan_info
-        all_ranges = [*first_chan_info.coarse_chan_ranges]
-
-        for metafits_ in metafits[1:]:
-            chan_info = metafits_.chan_info
-
-            if chan_info.fine_chans_per_coarse != first_chan_info.fine_chans_per_coarse:
-                raise RuntimeError(
-                    f"fine channels per coarse mismatch between metafits files. "
-                    f"{metafits[0].filename} ({first_chan_info.fine_chans_per_coarse}) != "
-                    f"{metafits_.filename} ({chan_info.fine_chans_per_coarse})"
-                )
-
-            if chan_info.fine_chan_width_hz != first_chan_info.fine_chan_width_hz:
-                raise RuntimeError(
-                    f"fine channel width mismatch between metafits files. "
-                    f"{metafits[0].filename} ({first_chan_info.fine_chan_width_hz}) != "
-                    f"{metafits_.filename} ({chan_info.fine_chan_width_hz})"
-                )
-
-            all_ranges.extend(chan_info.coarse_chan_ranges)
-
-        all_ranges = sorted(all_ranges, key=lambda x: x[0])
+        first_chan_info = metafits.chan_info
+        all_ranges = sorted([*first_chan_info.coarse_chan_ranges], key=lambda x: x[0])
 
         # assert coarse channel ranges do not overlap
         for left, right in zip(all_ranges[:-1], all_ranges[1:]):
@@ -571,34 +548,6 @@ class HyperfitsSolutionGroup:
 
         return (chanblocks_per_coarse, all_chanblocks_hz)
 
-    @classmethod
-    def get_metafits_tiles_df(cls, metafits) -> pd.DataFrame:
-        """Get tiles dataframe, verifying all metafits have the same tiles.
-
-        Args:
-            metafits: List of Metafits file readers.
-
-        Returns:
-            DataFrame containing tile information.
-
-        Raises:
-            RuntimeError: If tile information differs between metafits files.
-        """
-        columns = list(set(Tile._fields) - set(["flag"]))
-        tiles_df = metafits[0].tiles_df
-
-        for metafits_ in metafits[1:]:
-            for column in columns:
-                if not tiles_df[column].equals(metafits_.tiles_df[column]):
-                    raise RuntimeError(
-                        f"tiles dataframes from metafits files do not match on {column=}. "
-                        f"{metafits[0].filename} != {metafits_.filename}\n"
-                        f"{tiles_df[column].tolist()}\n\n"
-                        f"{metafits_.tiles_df[column].tolist()}\n"
-                    )
-
-        return tiles_df
-
     @property
     def refant(self) -> pd.Series:
         """Get reference antenna (unflagged tile with lowest ID).
@@ -630,15 +579,8 @@ class HyperfitsSolutionGroup:
 
     @property
     def calibrator(self):
-        """Get calibrator source name(s) from all metafits files."""
-        calibrators = set(filter(None, [meta.calibrator for meta in self.metafits]))
-        return " ".join(calibrators)
-
-    @property
-    def obsids(self):
-        """Get observation IDs from all metafits files."""
-        obsids = set(filter(None, [meta.obsid for meta in self.metafits]))
-        return [*obsids]
+        """Get calibrator source name(s) from metafits file."""
+        return self.metafits.calibrator
 
     @property
     def results(self) -> NDArray[np.float64]:
