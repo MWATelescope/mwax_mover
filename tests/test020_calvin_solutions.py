@@ -520,11 +520,15 @@ def test_process_solutions_success_2():
 
 
 def _make_synthetic_metafits(path: str, obs_id: int, coarse_chans: list, n_tiles: int = 3) -> None:
-    """Create a minimal synthetic MWA metafits FITS file for testing.
+    """Create a synthetic MWA metafits FITS file compatible with mwalib MetafitsContext.
 
-    Writes a PRIMARY HDU (with the headers required by Metafits.chan_info and
-    Metafits.tiles) and a TILEDATA HDU with *n_tiles* unflagged tiles, each
-    appearing twice (X and Y polarisation).
+    Writes a PRIMARY HDU with all headers required by ``mwalib.MetafitsContext``
+    and a TILEDATA HDU with all 21 columns present in a real MWAX metafits file.
+    All *n_tiles* tiles are unflagged.  Each tile produces two rows (Y then X
+    polarisation), matching the ordering seen in real metafits files.
+
+    Column formats and header values are modelled directly on obs 1369821496
+    so that mwalib can parse the result without errors.
 
     Args:
         path: Output file path.
@@ -533,55 +537,196 @@ def _make_synthetic_metafits(path: str, obs_id: int, coarse_chans: list, n_tiles
             (e.g. ``[100, 101, 102, 103]``).
         n_tiles: Number of tiles to include (default 3, all unflagged).
     """
+    import datetime
     from astropy.io import fits as astropy_fits
     import numpy as np
 
+    # ── Derived observation parameters ────────────────────────────────────────
     n_coarse = len(coarse_chans)
-    fine_chan_width_khz = 320.0  # 320 kHz chanblocks
-    chanblocks_per_coarse = 4
+    sorted_chans = sorted(coarse_chans)
+    n_inputs = n_tiles * 2  # X and Y pols per tile
+
+    # Channel / frequency constants (standard MWA MWAX correlator)
+    coarse_bandwidth_hz = 1_280_000  # 1.28 MHz per coarse channel
+    fine_chan_width_khz = 320.0  # 320 kHz per fine channel (chanblock)
+    fine_chan_width_hz = int(fine_chan_width_khz * 1_000)
+    chanblocks_per_coarse = coarse_bandwidth_hz // fine_chan_width_hz  # = 4
     n_fine_chans = n_coarse * chanblocks_per_coarse
-    total_bandwidth_hz = int(fine_chan_width_khz * 1000) * n_fine_chans
-    total_bandwidth_mhz = total_bandwidth_hz / 1e6
+    total_bandwidth_mhz = round(n_coarse * coarse_bandwidth_hz / 1e6, 6)
 
+    # Centre channel and frequency (formula verified against obs 1369821496:
+    # CENTCHAN = sorted_chans[n_coarse // 2]; FREQCENT = (centchan - 0.5) * 1.28)
+    centchan = sorted_chans[n_coarse // 2]
+    centre_freq_mhz = round((centchan - 0.5) * coarse_bandwidth_hz / 1e6, 6)
+
+    # Timing: GPS → Unix.  GPS epoch = Unix 315964800; 18 leap seconds as of 2019.
+    unix_start = obs_id + 315964800 - 18
+    n_scans = 56
+    int_time_s = 2.0
+    exposure_s = int(n_scans * int_time_s)  # 112 s
+    quack_time_s = 4.0
+    good_time_unix = float(unix_start) + quack_time_s
+    mjd_start = round(40587.0 + unix_start / 86400.0, 8)  # MJD of Unix epoch = 40587.0
+    date_obs = datetime.datetime.fromtimestamp(unix_start, tz=datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
+    # ── PRIMARY HDU ───────────────────────────────────────────────────────────
     primary = astropy_fits.PrimaryHDU()
-    hdr = primary.header
-    hdr["GPSTIME"] = obs_id
-    hdr["CHANNELS"] = ",".join(str(c) for c in sorted(coarse_chans))
-    hdr["CHANSEL"] = ",".join(str(i) for i in range(n_coarse))
-    hdr["FINECHAN"] = fine_chan_width_khz  # kHz
-    hdr["BANDWDTH"] = total_bandwidth_mhz  # MHz
-    hdr["NCHANS"] = n_fine_chans
-    hdr["INTTIME"] = 2.0
-    hdr["NSCANS"] = 56
-    hdr["CALIBSRC"] = "TestSrc"
+    h = primary.header
+    h["SIMPLE"] = True
+    h["BITPIX"] = 8
+    h["NAXIS"] = 0
+    h["EXTEND"] = True
 
-    tile_names, tile_ids, flags, rxs, slots, receiver_types = [], [], [], [], [], []
-    inputs_list, pols, lengths = [], [], []
+    # Core observation identity
+    h["GPSTIME"] = (obs_id, "GPS start time of observation")
+    h["EXPOSURE"] = (exposure_s, "Scheduled exposure in seconds")
+    h["FILENAME"] = ("SynthTest", "Observation name")
+    h["MJD"] = (mjd_start, "MJD start of observation")
+    h["DATE-OBS"] = (date_obs, "UTC start of observation")
 
+    # Pointing (zenith, MWA latitude −26.7°)
+    h["LST"] = (0.0, "Local Sidereal Time (degrees)")
+    h["HA"] = ("00:00:00.00", "Hour angle")
+    h["AZIMUTH"] = (0.0, "Pointing azimuth (degrees)")
+    h["ALTITUDE"] = (90.0, "Pointing altitude/elevation (degrees)")
+    h["RA"] = (0.0, "RA tile pointing (degrees)")
+    h["DEC"] = (-26.7, "DEC tile pointing (degrees)")
+    h["RAPHASE"] = (0.0, "RA phase centre (degrees)")
+    h["DECPHASE"] = (-26.7, "DEC phase centre (degrees)")
+
+    # Delay / correction flags (matching obs 1369821496 where CABLEDEL=1)
+    h["DELAYMOD"] = ("CABLE", "Delay model applied")
+    h["CABLEDEL"] = (1, "Cable delays applied (1=yes)")
+    h["GEODEL"] = (0, "Geometric delays applied (0=no)")
+    h["CALIBDEL"] = (0, "Calibration delays applied (0=no)")
+    h["SIGCHDEL"] = (0, "Signal chain corrections applied (0=no)")
+    h["DELDESC"] = "Apply cable delays only"
+
+    # Array / sky metadata
+    h["ATTEN_DB"] = (1.0, "Global analogue attenuation (dB)")
+    h["SUN-DIST"] = (90.0, "Sun distance from pointing (degrees)")
+    h["SUN-ALT"] = (-30.0, "Sun altitude (degrees)")
+    h["MOONDIST"] = (90.0, "Moon distance from pointing (degrees)")
+    h["JUP-DIST"] = (90.0, "Jupiter distance from pointing (degrees)")
+    h["GRIDNAME"] = ("sweet", "Grid name")
+    h["GRIDNUM"] = (0, "Grid number")
+    h["CREATOR"] = ("test", "Observation creator")
+    h["PROJECT"] = ("test", "Project ID")
+    h["MODE"] = ("MWAX_CORRELATOR", "Observation mode")
+    h["RECVRS"] = ("1", "Receivers used")
+    h["DELAYS"] = ("0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0", "Beamformer delays")
+
+    # Calibration
+    h["CALIBRAT"] = (True, "Is calibration observation")
+    h["CALIBSRC"] = ("TestSrc", "Calibrator source name")
+
+    # Channel / frequency metadata
+    h["CENTCHAN"] = (centchan, "Centre coarse channel number")
+    h["CHANNELS"] = (",".join(str(c) for c in sorted_chans), "Coarse channel numbers")
+    h["CHANSEL"] = (",".join(str(i) for i in range(n_coarse)), "Channel selection indices")
+    h["FINECHAN"] = (fine_chan_width_khz, "Fine channel width (kHz)")
+    h["INTTIME"] = (int_time_s, "Integration time (s)")
+    h["NAV_FREQ"] = (1, "Nav frequency")
+    h["NSCANS"] = (n_scans, "Number of scans / timesteps")
+    h["NINPUTS"] = (n_inputs, "Number of rf inputs")
+    h["NCHANS"] = (n_fine_chans, "Total number of fine channels")
+    h["BANDWDTH"] = (total_bandwidth_mhz, "Total bandwidth (MHz)")
+    h["DERIPPLE"] = (0, "Deripple applied (0=no)")
+    h["DR_FLAG"] = (0, "Deripple parameter")
+    h["OVERSAMP"] = (0, "Oversampled coarse channels (0=no)")
+    h["FREQCENT"] = (centre_freq_mhz, "Centre frequency (MHz)")
+    h["TIMEOFF"] = (0, "Time offset")
+    h["DATESTRT"] = (date_obs, "UTC start of observation")
+    h["RAWSCALE"] = (0.003, "Correlator raw scale factor")
+    h["VERSION"] = (2.4, "Metafits version")
+    h["TELESCOP"] = ("MWA", "Telescope name")
+    h["INSTRUME"] = ("MWAX", "Instrument name")
+    h["QUACKTIM"] = (quack_time_s, "Quack time (s)")
+    h["GOODTIME"] = (good_time_unix, "First good timestep (Unix)")
+
+    # ── TILEDATA HDU — all 21 columns matching a real MWAX metafits ───────────
+    # Rows are ordered Y then X for each tile (matching real metafits ordering).
+    # Antenna = 0-based ordinal sorted by tile_id (1001→0, 1002→1, …).
+    # VCSOrder = input_index * 4  (pattern from real metafits rows 0-3: 0,4,8,12).
+    input_col = []
+    antenna_col = []
+    tile_col = []
+    tilename_col = []
+    pol_col = []
+    rx_col = []
+    slot_col = []
+    flag_col = []
+    length_col = []
+    north_col = []
+    height_col = []
+    gains_col = []  # shape (n_inputs, n_coarse), int16
+    bftemps_col = []
+    delays_col = []  # shape (n_inputs, 16), int16 — dipole delays
+    vcsorder_col = []
+    flavors_col = []  # cable type string (e.g. 'RG6_150')
+    calib_delay_col = []
+    calib_gains_col = []  # shape (n_inputs, n_coarse), float32
+    receiver_types_col = []
+    whitening_col = []
+
+    input_idx = 0
     for i in range(n_tiles):
-        tid = 1001 + i
-        for pol in ("X", "Y"):
-            tile_names.append(f"Tile{i + 1:02d}")
-            tile_ids.append(tid)
-            flags.append(0)
-            rxs.append(1)
-            slots.append(i + 1)
-            receiver_types.append("RRI")
-            inputs_list.append(len(inputs_list))
-            pols.append(pol)
-            lengths.append(f"EL_{float(i + 1):.1f}")
+        tile_id = 1001 + i
+        tile_name = f"Tile{i + 1:02d}"
+        length_m = 1.5 + i * 0.5  # 1.5, 2.0, 2.5 m (distinct per tile)
+        north_m = float(i * 10)  # 0, 10, 20 m north offset
+
+        for pol_char in ("Y", "X"):  # Y first, matching real metafits ordering
+            input_col.append(input_idx)
+            antenna_col.append(i)  # ant ordinal = tile sort position
+            tile_col.append(tile_id)
+            tilename_col.append(tile_name)
+            pol_col.append(pol_char)
+            rx_col.append(1)
+            slot_col.append(i + 1)
+            flag_col.append(0)
+            length_col.append(f"EL_{length_m:.3f}")
+            north_col.append(north_m)
+            height_col.append(377.83)  # MWA array altitude (m)
+            gains_col.append([64] * n_coarse)  # 64 / 64 = 1.0 after mwalib scaling
+            bftemps_col.append(21.9)
+            delays_col.append([0] * 16)  # zenith pointing, 16 dipole delays
+            vcsorder_col.append(input_idx * 4)  # VCSOrder = input * 4 (real pattern)
+            flavors_col.append("RG6_150")  # cable flavour string
+            calib_delay_col.append(0.0)
+            calib_gains_col.append([1.0] * n_coarse)
+            receiver_types_col.append("RRI")
+            whitening_col.append(1)
+            input_idx += 1
+
+    gains_fmt = f"{n_coarse}I"  # e.g. '4I' for 4 coarse channels
+    calib_gains_fmt = f"{n_coarse}E"  # e.g. '4E'
 
     cols = astropy_fits.ColDefs(
         [
-            astropy_fits.Column(name="TileName", format="10A", array=np.array(tile_names)),
-            astropy_fits.Column(name="Tile", format="J", array=np.array(tile_ids, dtype=np.int32)),
-            astropy_fits.Column(name="Flag", format="J", array=np.array(flags, dtype=np.int32)),
-            astropy_fits.Column(name="Rx", format="J", array=np.array(rxs, dtype=np.int32)),
-            astropy_fits.Column(name="Slot", format="J", array=np.array(slots, dtype=np.int32)),
-            astropy_fits.Column(name="Receiver_Types", format="10A", array=np.array(receiver_types)),
-            astropy_fits.Column(name="Input", format="J", array=np.array(inputs_list, dtype=np.int32)),
-            astropy_fits.Column(name="Pol", format="1A", array=np.array(pols)),
-            astropy_fits.Column(name="Length", format="10A", array=np.array(lengths)),
+            astropy_fits.Column(name="Input", format="I", array=np.array(input_col, dtype=np.int16)),
+            astropy_fits.Column(name="Antenna", format="I", array=np.array(antenna_col, dtype=np.int16)),
+            astropy_fits.Column(name="Tile", format="I", array=np.array(tile_col, dtype=np.int16)),
+            astropy_fits.Column(name="TileName", format="8A", array=np.array(tilename_col)),
+            astropy_fits.Column(name="Pol", format="A", array=np.array(pol_col)),
+            astropy_fits.Column(name="Rx", format="I", array=np.array(rx_col, dtype=np.int16)),
+            astropy_fits.Column(name="Slot", format="I", array=np.array(slot_col, dtype=np.int16)),
+            astropy_fits.Column(name="Flag", format="I", array=np.array(flag_col, dtype=np.int16)),
+            astropy_fits.Column(name="Length", format="14A", array=np.array(length_col)),
+            astropy_fits.Column(name="North", format="E", unit="m", array=np.array(north_col, dtype=np.float32)),
+            astropy_fits.Column(name="East", format="E", unit="m", array=np.zeros(n_inputs, dtype=np.float32)),
+            astropy_fits.Column(name="Height", format="E", unit="m", array=np.array(height_col, dtype=np.float32)),
+            astropy_fits.Column(name="Gains", format=gains_fmt, array=np.array(gains_col, dtype=np.int16)),
+            astropy_fits.Column(name="BFTemps", format="E", array=np.array(bftemps_col, dtype=np.float32)),
+            astropy_fits.Column(name="Delays", format="16I", array=np.array(delays_col, dtype=np.int16)),
+            astropy_fits.Column(name="VCSOrder", format="I", array=np.array(vcsorder_col, dtype=np.int16)),
+            astropy_fits.Column(name="Flavors", format="10A", array=np.array(flavors_col)),
+            astropy_fits.Column(name="Calib_Delay", format="E", array=np.array(calib_delay_col, dtype=np.float32)),
+            astropy_fits.Column(
+                name="Calib_Gains", format=calib_gains_fmt, array=np.array(calib_gains_col, dtype=np.float32)
+            ),
+            astropy_fits.Column(name="Receiver_Types", format="10A", array=np.array(receiver_types_col)),
+            astropy_fits.Column(name="Whitening_Filter", format="B", array=np.array(whitening_col, dtype=np.uint8)),
         ]
     )
     tile_hdu = astropy_fits.BinTableHDU.from_columns(cols, name="TILEDATA")

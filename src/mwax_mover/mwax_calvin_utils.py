@@ -37,7 +37,7 @@ from matplotlib.colors import LinearSegmentedColormap
 from mwalib import MetafitsContext
 import numpy.typing as npt  # noqa: F401
 from numpy.typing import ArrayLike, NDArray
-from typing import NamedTuple, List, Tuple, Optional, Any  # noqa: F401
+from typing import NamedTuple, List, Tuple, Optional, Union, Any  # noqa: F401
 import sys
 from mwax_mover.mwax_command import (
     run_command_ext,
@@ -112,75 +112,82 @@ class TimeInfo(NamedTuple):
 
 
 class Metafits:
-    """MWA Metadata file in FITS format"""
+    """MWA Metadata reader backed by mwalib MetafitsContext.
 
-    def __init__(self, filename: str):
-        """Initialize a Metafits file reader.
+    Replaces the former astropy FITS implementation.  All properties now
+    delegate to ``mwalib.MetafitsContext`` instead of opening the FITS file
+    directly, which removes several manual parsing steps and CHANSEL sanity
+    checks that mwalib already validates internally.
+    """
+
+    def __init__(self, metafits: Union[str, MetafitsContext]):
+        """Initialise a Metafits reader backed by mwalib.
 
         Args:
-            filename: Path to the FITS metafits file.
+            metafits: Path to the metafits FITS file, or an already-opened
+                MetafitsContext.  Passing an existing context avoids re-opening
+                the file when the caller already holds one.
         """
-        self.filename = filename
+        if isinstance(metafits, str):
+            self.filename = metafits
+            self._mc: MetafitsContext = MetafitsContext(metafits, None)
+        else:
+            self.filename = metafits.metafits_filename
+            self._mc = metafits
 
     @property
     def tiles(self) -> List[Tile]:
-        """Get tile information from metafits, sorted by ID."""
-        with fits.open(self.filename) as hdus:
-            metafits_inputs = hdus["TILEDATA"].data
+        """Get tile information from metafits, sorted by tile ID.
 
-            # using a set here to avoid duplicates (pol=X,Y)
-            tiles = set(
+        mwalib exposes one Antenna per tile (not duplicated per pol), so
+        no set-based deduplication is needed.  Flag, rx, and slot come from
+        rfinput_x (identical to rfinput_y for those fields).
+        """
+        return sorted(
+            [
                 Tile(
-                    name=metafits_input["TileName"],
-                    id=metafits_input["Tile"],
-                    flag=metafits_input["Flag"],
-                    # index=metafits_input["Antenna"],
-                    rx=metafits_input["Rx"],
-                    slot=metafits_input["Slot"],
-                    flavor=metafits_input["Receiver_Types"],
+                    name=ant.tile_name,
+                    id=ant.tile_id,
+                    flag=bool(ant.rfinput_x.flagged),
+                    rx=ant.rfinput_x.rec_number,
+                    slot=ant.rfinput_x.rec_slot_number,
+                    flavor=str(ant.rfinput_x.rec_type),
                 )
-                for metafits_input in metafits_inputs
-            )
-
-            return sorted([*tiles], key=lambda tile: tile.id)
+                for ant in self._mc.antennas
+            ],
+            key=lambda tile: tile.id,
+        )
 
     @property
     def inputs(self) -> List[Input]:
-        """Get input information from metafits, sorted by ID."""
-        with fits.open(self.filename) as hdus:
-            metafits_inputs = hdus["TILEDATA"].data
+        """Get input (rf_input) information from metafits, sorted by input index.
 
-            inputs = set(
+        mwalib exposes one Rfinput per polarisation per tile, so no
+        set-based deduplication is needed.  The electrical length is already
+        a float (metres) — the ``"EL_"`` prefix stripping from the old FITS
+        read is not required.
+        """
+        return sorted(
+            [
                 Input(
-                    id=metafits_input["Input"],
-                    name=metafits_input["TileName"] + metafits_input["Pol"],
-                    flag=metafits_input["Flag"],
-                    pol=metafits_input["Pol"],
-                    # index=metafits_input["Antenna"],
-                    rx=metafits_input["Rx"],
-                    slot=metafits_input["Slot"],
-                    # flavor=metafits_input["Flavors"],
-                    flavor=metafits_input["Receiver_Types"],
-                    length=float(metafits_input["Length"][3:]),
+                    id=rfi.input,
+                    name=rfi.tile_name + str(rfi.pol),
+                    flag=bool(rfi.flagged),
+                    pol=str(rfi.pol),
+                    rx=rfi.rec_number,
+                    slot=rfi.rec_slot_number,
+                    length=rfi.electrical_length_m,
+                    flavor=str(rfi.rec_type),
                 )
-                for metafits_input in metafits_inputs
-            )
-
-            return sorted([*inputs], key=lambda inp: inp.id)
+                for rfi in self._mc.rf_inputs
+            ],
+            key=lambda inp: inp.id,
+        )
 
     @property
     def tiles_df(self) -> pd.DataFrame:
         """Get tiles as a pandas DataFrame."""
-        # determine array configuration (compact or extended)
-        # config = Config.from_tiles(tiles)
-        tiles = self.tiles
-        return pd.DataFrame(tiles, columns=Tile._fields)
-
-        # unflagged = tiles[tiles.flag == 0]
-        # if not len(unflagged):
-        #     raise ValueError("No unflagged tiles found")
-        # # tiles_by_id = sorted(tiles, key=lambda tile: tile.id)
-        # return unflagged.sort_values(by=["id"]).take([0])["name"], tiles
+        return pd.DataFrame(self.tiles, columns=Tile._fields)
 
     @property
     def inputs_df(self) -> pd.DataFrame:
@@ -189,87 +196,44 @@ class Metafits:
 
     @property
     def chan_info(self) -> ChanInfo:
-        """Get coarse channel information from metafits."""
-        with fits.open(self.filename) as hdus:
-            hdu = hdus["PRIMARY"]
-            header: fits.header.Header = hdu.header
+        """Get coarse channel information from metafits.
 
-            # coarse channels
-            coarse_chans = parse_csv_header(header["CHANNELS"], int)
+        mwalib validates CHANNELS, CHANSEL, FINECHAN and their mutual
+        consistency internally, so the former sanity checks and the CHANSEL
+        length comparison are not reproduced here.
+        """
+        coarse_chans = np.sort([c.rec_chan_number for c in self._mc.metafits_coarse_chans])
+        fine_chan_width_hz = self._mc.corr_fine_chan_width_hz
+        fine_chans_per_coarse = self._mc.num_corr_fine_chans_per_coarse
 
-            # coarse channel selection
-            chansel = parse_csv_header(header["CHANSEL"], int)
+        coarse_chan_ranges = [g for g in np.split(coarse_chans, np.where(np.diff(coarse_chans) != 1)[0] + 1)]
 
-            if len(chansel) != len(coarse_chans):
-                raise RuntimeError(f"channel selection is not tested. {chansel=}")
-
-            # coarse_chans = np.sort(coarse_chans[chansel])
-            coarse_chans = np.sort(coarse_chans)
-
-            # fine channel width
-            fine_chan_width_hz = int(float(header["FINECHAN"]) * 1000)
-
-            # total observation bandwidth
-            total_bandwidth_hz = int(float(header["BANDWDTH"]) * 1000000)
-
-            # number of fine channels in observation
-            obs_num_fine_chans = int(header["NCHANS"])
-
-            # sanity checks
-            if total_bandwidth_hz != fine_chan_width_hz * obs_num_fine_chans:
-                raise ValueError(
-                    f"{self.filename} - ({total_bandwidth_hz=}) != ({fine_chan_width_hz=}) * ({obs_num_fine_chans=})"
-                )
-
-            if obs_num_fine_chans % len(coarse_chans) != 0:
-                raise ValueError(
-                    f"Number of fine channels ({obs_num_fine_chans}) "
-                    f"not a multiple of the number of coarse channels ({len(coarse_chans)})"
-                )
-
-            # calculate number of fine channels per coarse channel
-            fine_chans_per_coarse = obs_num_fine_chans // len(coarse_chans)
-
-            coarse_chan_ranges = []
-            for _, g in enumerate(np.split(coarse_chans, np.where(np.diff(coarse_chans) != 1)[0] + 1)):
-                coarse_chan_ranges.append(g)
-
-            return ChanInfo(
-                coarse_chan_ranges=coarse_chan_ranges,
-                fine_chan_width_hz=fine_chan_width_hz,
-                fine_chans_per_coarse=fine_chans_per_coarse,
-            )
+        return ChanInfo(
+            coarse_chan_ranges=coarse_chan_ranges,
+            fine_chan_width_hz=fine_chan_width_hz,
+            fine_chans_per_coarse=fine_chans_per_coarse,
+        )
 
     @property
     def time_info(self) -> TimeInfo:
         """Get time information from metafits."""
-        with fits.open(self.filename) as hdus:
-            hdu = hdus["PRIMARY"]
-            header = hdu.header
-            inttime = header["INTTIME"]
-            nscans = header["NSCANS"]
-            return TimeInfo(
-                num_times=nscans,
-                int_time_s=inttime,
-            )
+        return TimeInfo(
+            num_times=self._mc.num_metafits_timesteps,
+            int_time_s=self._mc.corr_int_time_ms / 1000.0,
+        )
 
     @property
-    def calibrator(self):
-        """Get calibrator source name from metafits header."""
-        with fits.open(self.filename) as hdus:
-            hdu = hdus["PRIMARY"]
-            header = hdu.header
-            if header.get("CALIBSRC"):
-                return header["CALIBSRC"]
+    def calibrator(self) -> Optional[str]:
+        """Get calibrator source name from metafits.
+
+        Returns None when the metafits carries an empty CALIBSRC string.
+        """
+        return self._mc.calibrator_source or None
 
     @property
-    def obsid(self):
-        """Get observation ID (GPS time) from metafits header."""
-        with fits.open(self.filename) as hdus:
-            hdu = hdus["PRIMARY"]
-            header = hdu.header
-            if header.get("GPSTIME"):
-                return header["GPSTIME"]
+    def obsid(self) -> int:
+        """Get observation ID (GPS time) from metafits."""
+        return self._mc.obs_id
 
 
 class HyperfitsSolution:
