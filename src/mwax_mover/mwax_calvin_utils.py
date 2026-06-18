@@ -413,9 +413,11 @@ class HyperfitsSolutionGroup:
 
         self.metafits_tiles_df = self.metafits.tiles_df
         self.metafits_chan_info = HyperfitsSolutionGroup.get_metafits_chan_info(self.metafits)
-        self.chanblocks_per_coarse, self.all_chanblocks_hz = HyperfitsSolutionGroup.get_soln_chan_info(
-            self.metafits_chan_info, self.solns
-        )
+        (
+            self.chanblocks_per_coarse,
+            self.all_chanblocks_hz,
+            self.all_solution_coarse_chan_indices,
+        ) = HyperfitsSolutionGroup.get_soln_chan_info(self.metafits_chan_info, self.solns)
 
     @classmethod
     def get_metafits_chan_info(cls, metafits: Metafits) -> ChanInfo:
@@ -449,7 +451,7 @@ class HyperfitsSolutionGroup:
     @classmethod
     def get_soln_chan_info(
         cls, metafits_chan_info: ChanInfo, solns: List[HyperfitsSolution]
-    ) -> Tuple[int, List[NDArray[np.int_]]]:
+    ) -> Tuple[int, List[NDArray[np.int_]], List[int]]:
         """Get channel block information for provided solutions.
 
         Validates that channel info from metafits is consistent with solutions.
@@ -459,13 +461,15 @@ class HyperfitsSolutionGroup:
             solns: List of solution files.
 
         Returns:
-            A tuple of (chanblocks_per_coarse, list of chanblocks_hz arrays).
+            A tuple of (chanblocks_per_coarse, list of chanblocks_hz arrays,
+            sorted list of coarse channel indices present across all solutions).
 
         Raises:
             RuntimeError: If channel info is inconsistent between solution and metafits.
         """
         chanblocks_per_coarse = None
         all_chanblocks_hz = []
+        all_solution_coarse_chans: list[int] = []
 
         metafits_coarse_chans = np.concatenate(metafits_chan_info.coarse_chan_ranges)
         metafits_fine_chan_width_hz = metafits_chan_info.fine_chan_width_hz
@@ -538,6 +542,10 @@ class HyperfitsSolutionGroup:
                     f" given {chanblocks_per_coarse=}, {chans_per_block=}"
                 )
 
+            # Accumulate coarse channel indices found in this solution file so
+            # we can later detect which metafits channels are missing solutions.
+            all_solution_coarse_chans.extend(int(c) for c in soln_coarse_chans)
+
             all_chanblocks_hz.append(chanblocks_hz)
 
         if all_chanblocks_hz is None:
@@ -546,7 +554,7 @@ class HyperfitsSolutionGroup:
         if chanblocks_per_coarse is None:
             raise RuntimeError("chanblocks_per_coarse is none")
 
-        return (chanblocks_per_coarse, all_chanblocks_hz)
+        return (chanblocks_per_coarse, all_chanblocks_hz, sorted(all_solution_coarse_chans))
 
     @property
     def refant(self) -> pd.Series:
@@ -815,6 +823,74 @@ class GainFitInfo(NamedTuple):
             pol1=[np.nan] * n_coarse,
             sigma_resid=[np.nan] * n_coarse,
         )
+
+
+def pad_gains_to_full_coarse(
+    values: List[float],
+    actual_chans: List[int],
+    expected_chans: NDArray[np.int_],
+) -> List[float]:
+    """Pad a per-coarse-channel list to match all expected metafits channels.
+
+    Creates a list of length ``len(expected_chans)`` initialised to NaN, then
+    places each value from *values* at the position of its corresponding coarse
+    channel index in *expected_chans*.  Channels present in *expected_chans*
+    but absent from *actual_chans* remain NaN.
+
+    Args:
+        values: Per-coarse-channel values, in the same order as *actual_chans*.
+            Length must equal ``len(actual_chans)``.
+        actual_chans: Coarse channel indices present in the calibration
+            solutions, in the same order as *values*.
+        expected_chans: All coarse channel indices from the metafits, sorted
+            ascending.  Defines the length and ordering of the output.
+
+    Returns:
+        List of length ``len(expected_chans)`` with each value placed at the
+        position of its channel in *expected_chans*, and NaN at positions for
+        missing channels.
+    """
+    n_expected = len(expected_chans)
+    padded: List[float] = [np.nan] * n_expected
+    for i, chan_idx in enumerate(actual_chans):
+        positions = np.where(expected_chans == chan_idx)[0]
+        if len(positions) == 1:
+            padded[positions[0]] = values[i]
+    return padded
+
+
+def pad_gain_fit_info(
+    gain_fit: GainFitInfo,
+    actual_coarse_chans: List[int],
+    expected_coarse_chans: NDArray[np.int_],
+) -> GainFitInfo:
+    """Return a new GainFitInfo with all per-channel arrays padded to the full metafits channel set.
+
+    Applies :func:`pad_gains_to_full_coarse` to the *gains*, *pol0*, *pol1*,
+    and *sigma_resid* arrays of *gain_fit*, producing a new ``GainFitInfo``
+    whose per-channel arrays have ``len(expected_coarse_chans)`` elements.
+    The *quality* scalar is preserved unchanged.
+
+    Args:
+        gain_fit: Source ``GainFitInfo`` (or a pandas Series with the same
+            named fields) whose per-channel arrays may have fewer elements
+            than ``len(expected_coarse_chans)``.
+        actual_coarse_chans: Sorted coarse channel indices present in the
+            calibration solutions (same length as ``gain_fit.gains``).
+        expected_coarse_chans: All coarse channel indices from the metafits,
+            sorted ascending.
+
+    Returns:
+        New ``GainFitInfo`` with per-channel arrays of length
+        ``len(expected_coarse_chans)``, NaN-padded at missing channels.
+    """
+    return GainFitInfo(
+        quality=gain_fit.quality,
+        gains=pad_gains_to_full_coarse(gain_fit.gains, actual_coarse_chans, expected_coarse_chans),
+        pol0=pad_gains_to_full_coarse(gain_fit.pol0, actual_coarse_chans, expected_coarse_chans),
+        pol1=pad_gains_to_full_coarse(gain_fit.pol1, actual_coarse_chans, expected_coarse_chans),
+        sigma_resid=pad_gains_to_full_coarse(gain_fit.sigma_resid, actual_coarse_chans, expected_coarse_chans),
+    )
 
 
 def ensure_system_byte_order(arr):

@@ -25,6 +25,7 @@ from mwax_mover.mwax_calvin_utils import (
     HyperfitsSolutionGroup,
     PhaseFitInfo,
     debug_phase_fits,
+    pad_gain_fit_info,
     process_phase_fits,
     process_gain_fits,
     write_readme_file,
@@ -118,6 +119,19 @@ def process_solutions(
         # all_chanblocks_hz = soln_group.all_chanblocks_hz
         all_chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz).astype(np.float64)
 
+        # Build the full sorted list of coarse channel indices from the metafits.
+        # This is used below to NaN-pad gains for any missing channels.
+        all_metafits_coarse_chans = np.sort(np.concatenate(chaninfo.coarse_chan_ranges))
+        solution_coarse_chans = soln_group.all_solution_coarse_chan_indices
+        n_metafits_coarse = len(all_metafits_coarse_chans)
+
+        if len(solution_coarse_chans) < n_metafits_coarse:
+            logger.warning(
+                f"{obs_id}: Only {len(solution_coarse_chans)} of {n_metafits_coarse} "
+                f"metafits coarse channels have solutions. "
+                f"Missing channels will be padded with NaN in the calibration solutions."
+            )
+
         logger.debug(f"{chanblocks_per_coarse=} fine channels per coarse channel")
         logger.debug(f"First 32 fine channels: {[f'{x / 1e6:.3f}' for x in all_chanblocks_hz[0:32]]} MHz")
         logger.debug(f"Last 32 fine channels: {[f'{x / 1e6:.3f}' for x in all_chanblocks_hz[-32:]]} MHz")
@@ -203,15 +217,19 @@ def process_solutions(
 
                     try:
                         x_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "XX")].iloc[0]
+                        if len(x_gains.gains) < n_metafits_coarse:
+                            x_gains = pad_gain_fit_info(x_gains, solution_coarse_chans, all_metafits_coarse_chans)
                         some_fits = True
                     except IndexError:
-                        x_gains = GainFitInfo.nan()
+                        x_gains = GainFitInfo.nan(n_metafits_coarse)
 
                     try:
                         y_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "YY")].iloc[0]
+                        if len(y_gains.gains) < n_metafits_coarse:
+                            y_gains = pad_gain_fit_info(y_gains, solution_coarse_chans, all_metafits_coarse_chans)
                         some_fits = True
                     except IndexError:
-                        y_gains = GainFitInfo.nan()
+                        y_gains = GainFitInfo.nan(n_metafits_coarse)
 
                     try:
                         x_phase = phase_fits[(phase_fits.tile_id == tile_id) & (phase_fits.pol == "XX")].iloc[0]

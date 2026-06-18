@@ -512,3 +512,252 @@ def test_process_solutions_success_2():
     assert error_msg == ""
     assert fit_id == 999
     mock_fit_insert.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Synthetic FITS helpers for partial-channel tests
+# ---------------------------------------------------------------------------
+
+
+def _make_synthetic_metafits(path: str, obs_id: int, coarse_chans: list, n_tiles: int = 3) -> None:
+    """Create a minimal synthetic MWA metafits FITS file for testing.
+
+    Writes a PRIMARY HDU (with the headers required by Metafits.chan_info and
+    Metafits.tiles) and a TILEDATA HDU with *n_tiles* unflagged tiles, each
+    appearing twice (X and Y polarisation).
+
+    Args:
+        path: Output file path.
+        obs_id: GPS observation ID written to the GPSTIME header.
+        coarse_chans: Sorted list of receiver coarse channel indices
+            (e.g. ``[100, 101, 102, 103]``).
+        n_tiles: Number of tiles to include (default 3, all unflagged).
+    """
+    from astropy.io import fits as astropy_fits
+    import numpy as np
+
+    n_coarse = len(coarse_chans)
+    fine_chan_width_khz = 320.0  # 320 kHz chanblocks
+    chanblocks_per_coarse = 4
+    n_fine_chans = n_coarse * chanblocks_per_coarse
+    total_bandwidth_hz = int(fine_chan_width_khz * 1000) * n_fine_chans
+    total_bandwidth_mhz = total_bandwidth_hz / 1e6
+
+    primary = astropy_fits.PrimaryHDU()
+    hdr = primary.header
+    hdr["GPSTIME"] = obs_id
+    hdr["CHANNELS"] = ",".join(str(c) for c in sorted(coarse_chans))
+    hdr["CHANSEL"] = ",".join(str(i) for i in range(n_coarse))
+    hdr["FINECHAN"] = fine_chan_width_khz  # kHz
+    hdr["BANDWDTH"] = total_bandwidth_mhz  # MHz
+    hdr["NCHANS"] = n_fine_chans
+    hdr["INTTIME"] = 2.0
+    hdr["NSCANS"] = 56
+    hdr["CALIBSRC"] = "TestSrc"
+
+    tile_names, tile_ids, flags, rxs, slots, receiver_types = [], [], [], [], [], []
+    inputs_list, pols, lengths = [], [], []
+
+    for i in range(n_tiles):
+        tid = 1001 + i
+        for pol in ("X", "Y"):
+            tile_names.append(f"Tile{i + 1:02d}")
+            tile_ids.append(tid)
+            flags.append(0)
+            rxs.append(1)
+            slots.append(i + 1)
+            receiver_types.append("RRI")
+            inputs_list.append(len(inputs_list))
+            pols.append(pol)
+            lengths.append(f"EL_{float(i + 1):.1f}")
+
+    cols = astropy_fits.ColDefs(
+        [
+            astropy_fits.Column(name="TileName", format="10A", array=np.array(tile_names)),
+            astropy_fits.Column(name="Tile", format="J", array=np.array(tile_ids, dtype=np.int32)),
+            astropy_fits.Column(name="Flag", format="J", array=np.array(flags, dtype=np.int32)),
+            astropy_fits.Column(name="Rx", format="J", array=np.array(rxs, dtype=np.int32)),
+            astropy_fits.Column(name="Slot", format="J", array=np.array(slots, dtype=np.int32)),
+            astropy_fits.Column(name="Receiver_Types", format="10A", array=np.array(receiver_types)),
+            astropy_fits.Column(name="Input", format="J", array=np.array(inputs_list, dtype=np.int32)),
+            astropy_fits.Column(name="Pol", format="1A", array=np.array(pols)),
+            astropy_fits.Column(name="Length", format="10A", array=np.array(lengths)),
+        ]
+    )
+    tile_hdu = astropy_fits.BinTableHDU.from_columns(cols, name="TILEDATA")
+
+    astropy_fits.HDUList([primary, tile_hdu]).writeto(path, overwrite=True)
+
+
+def _make_synthetic_solution(path: str, coarse_chans: list, n_tiles: int = 3, chanblocks_per_coarse: int = 4) -> None:
+    """Create a minimal synthetic hyperdrive FITS solution file for testing.
+
+    Generates identity Jones matrices (unit gains, zero phases) for all tiles
+    and channels.  The RESULTS HDU is intentionally omitted so that the weight
+    fallback in ``HyperfitsSolution.weights`` produces uniform unit weights.
+
+    Chanblock centre frequencies are computed from standard MWA coarse-channel
+    geometry (1.28 MHz per coarse channel, uniformly subdivided into
+    *chanblocks_per_coarse* blocks).
+
+    Args:
+        path: Output file path.
+        coarse_chans: Sorted list of coarse channel indices to include
+            (may be a strict subset of the metafits channel list to simulate
+            missing channels).
+        n_tiles: Number of tiles (must match the metafits tile count).
+        chanblocks_per_coarse: Chanblocks per coarse channel (default 4).
+    """
+    from astropy.io import fits as astropy_fits
+    import numpy as np
+
+    coarse_bandwidth_hz = 1_280_000  # 1.28 MHz
+    chanblock_width_hz = coarse_bandwidth_hz // chanblocks_per_coarse  # 320 kHz
+
+    # Build contiguous chanblock centre frequencies for the *included* channels
+    chanblocks_hz: list = []
+    for chan_idx in sorted(coarse_chans):
+        chan_center_hz = chan_idx * coarse_bandwidth_hz
+        for k in range(chanblocks_per_coarse):
+            offset = int(-coarse_bandwidth_hz / 2 + (k + 0.5) * chanblock_width_hz)
+            chanblocks_hz.append(chan_center_hz + offset)
+
+    n_chanblocks = len(chanblocks_hz)
+    tile_names = [f"Tile{i + 1:02d}" for i in range(n_tiles)]
+
+    tiles_hdu = astropy_fits.BinTableHDU.from_columns(
+        astropy_fits.ColDefs(
+            [
+                astropy_fits.Column(name="TileName", format="10A", array=np.array(tile_names)),
+                astropy_fits.Column(name="Flag", format="J", array=np.zeros(n_tiles, dtype=np.int32)),
+            ]
+        ),
+        name="TILES",
+    )
+
+    chanblocks_hdu = astropy_fits.BinTableHDU.from_columns(
+        astropy_fits.ColDefs(
+            [
+                astropy_fits.Column(name="Freq", format="K", array=np.array(chanblocks_hz, dtype=np.int64)),
+                astropy_fits.Column(name="Flag", format="J", array=np.zeros(n_chanblocks, dtype=np.int32)),
+            ]
+        ),
+        name="CHANBLOCKS",
+    )
+
+    timeblocks_hdu = astropy_fits.BinTableHDU.from_columns(
+        astropy_fits.ColDefs(
+            [
+                astropy_fits.Column(name="Average", format="D", array=np.array([1.0])),
+                astropy_fits.Column(name="Start", format="D", array=np.array([0.0])),
+                astropy_fits.Column(name="End", format="D", array=np.array([2.0])),
+            ]
+        ),
+        name="TIMEBLOCKS",
+    )
+
+    # Identity Jones matrices: XX=1+0j, XY=0, YX=0, YY=1+0j
+    # SOLUTIONS shape: (ntimes=1, ntiles, nchans, 8) where 8 = 4 pols × (re, im)
+    solutions = np.zeros((1, n_tiles, n_chanblocks, 8), dtype=np.float64)
+    solutions[:, :, :, 0] = 1.0  # XX real
+    solutions[:, :, :, 7] = 1.0  # YY real
+    solutions_hdu = astropy_fits.ImageHDU(data=solutions, name="SOLUTIONS")
+
+    # No RESULTS HDU → HyperfitsSolution.weights falls back to uniform 1.0
+
+    astropy_fits.HDUList([astropy_fits.PrimaryHDU(), tiles_hdu, chanblocks_hdu, timeblocks_hdu, solutions_hdu]).writeto(
+        path, overwrite=True
+    )
+
+
+# ---------------------------------------------------------------------------
+# Integration test: partial coarse channel coverage
+# ---------------------------------------------------------------------------
+
+
+def test_process_solutions_partial_coarse_channels(tmp_path):
+    """Gains are NaN-padded when the solution covers fewer channels than the metafits.
+
+    Setup
+    -----
+    * Metafits declares 4 coarse channels: [100, 101, 102, 103].
+    * Solution file covers only [100, 101, 102] — channel 103 is absent.
+    * Tiles: 3, all unflagged.
+
+    Expected behaviour
+    ------------------
+    * ``process_solutions`` succeeds (returns True, fit_id=42).
+    * Each ``insert_calibration_solutions_row`` call receives a *x_gains*
+      array of length 4 (= number of metafits channels).
+    * gains[0..2] are finite (channels 100–102 have real solutions).
+    * gains[3] is NaN  (channel 103 is missing from the solution file).
+    """
+    import numpy as np
+    from unittest.mock import MagicMock, patch
+
+    obs_id = 1234567890
+    all_chans = [100, 101, 102, 103]  # metafits channel list
+    soln_chans = [100, 101, 102]  # solution only covers the first 3
+
+    input_path = str(tmp_path / "input")
+    output_path = str(tmp_path / "output")
+    os.makedirs(input_path)
+    os.makedirs(output_path)
+
+    metafits_path = os.path.join(input_path, f"{obs_id}_metafits.fits")
+    solution_path = os.path.join(output_path, f"{obs_id}_solutions.fits")
+    _make_synthetic_metafits(metafits_path, obs_id, all_chans, n_tiles=3)
+    _make_synthetic_solution(solution_path, soln_chans, n_tiles=3, chanblocks_per_coarse=4)
+
+    # Capture the x_gains list passed to insert_calibration_solutions_row
+    inserted_x_gains = []
+
+    def _capture_soln(*args, **kwargs):
+        """Side-effect that records the x_gains argument and returns True."""
+        # Positional signature:
+        # (db, cursor, fit_id, obs_id, tile_id, x_phase_len, x_phase_int, x_gains, ...)
+        inserted_x_gains.append(args[7])
+        return True
+
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn = MagicMock()
+    mock_conn.cursor.return_value = mock_cursor
+    mock_conn.transaction.return_value.__enter__ = MagicMock(return_value=None)
+    mock_conn.transaction.return_value.__exit__ = MagicMock(return_value=False)
+    mock_db.pool.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
+    mock_db.pool.connection.return_value.__exit__ = MagicMock(return_value=False)
+
+    with (
+        patch("mwax_mover.mwax_calvin_solutions.insert_calibration_fits_row", return_value=(True, 42)),
+        patch(
+            "mwax_mover.mwax_calvin_solutions.insert_calibration_solutions_row",
+            side_effect=_capture_soln,
+        ),
+    ):
+        success, error_msg, fit_id = process_solutions(
+            db_handler_object=mock_db,
+            obs_id=obs_id,
+            input_data_path=input_path,
+            output_data_path=output_path,
+            phase_fit_niter=1,
+            source_list="test_srclist",
+            num_sources=10,
+            produce_debug_plots=False,
+            calibration_command="",
+            gain_max_cutoff=None,
+        )
+
+    assert success is True, f"Expected success=True, got error: {error_msg}"
+    assert fit_id == 42
+    assert len(inserted_x_gains) > 0, "No solution rows were inserted"
+
+    for tile_idx, gains in enumerate(inserted_x_gains):
+        n = len(gains)
+        assert n == len(all_chans), f"Tile {tile_idx}: expected {len(all_chans)} gains, got {n}"
+        # Channels 100, 101, 102 must have finite values
+        assert np.isfinite(gains[0]), f"Tile {tile_idx}: gains[0] (ch100) should be finite, got {gains[0]}"
+        assert np.isfinite(gains[1]), f"Tile {tile_idx}: gains[1] (ch101) should be finite, got {gains[1]}"
+        assert np.isfinite(gains[2]), f"Tile {tile_idx}: gains[2] (ch102) should be finite, got {gains[2]}"
+        # Channel 103 is absent from the solution → must be NaN
+        assert np.isnan(gains[3]), f"Tile {tile_idx}: gains[3] (ch103) should be NaN, got {gains[3]}"
