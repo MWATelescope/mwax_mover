@@ -3,6 +3,7 @@
 # 1.7.28 12-Jun-2026
 
 * calvin_processor: If <24 coarse channels still insert db records for 24 channels.
+* calvin_processor: Fix bug where successful jobs were being updated with "Cancelled: Received SIGTERM" in the calibration_request table.
 
 # 1.7.27 12-Jun-2026
 
