@@ -52,6 +52,7 @@ def test_mwacache_archiver_config_file():
 
     assert mcap.concurrent_archive_workers == 4
     assert mcap.archive_command_timeout_sec == 1800
+    assert mcap.rclone_check_wait_secs == 60
 
     assert mcap.s3_profile == "gsleap4"
 

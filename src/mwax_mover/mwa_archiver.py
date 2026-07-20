@@ -312,7 +312,6 @@ _HAPROXY_MAX_TIMEOUT_MINS = 60
 # retries. This handles the case where HAProxy routes copyto and check to different
 # VSS nodes and replication lag causes the check to fail transiently.
 _RCLONE_CHECK_RETRIES = 3
-_RCLONE_CHECK_RETRY_WAIT_SECS = 15
 
 
 def archive_file_rclone_haproxy(
@@ -322,6 +321,7 @@ def archive_file_rclone_haproxy(
     md5hash: str,
     rclone_timeout_mins: int = 20,
     rclone_retries: int = 3,
+    rclone_check_wait_secs: int = 15,
 ) -> bool:
     """Upload a file to Pawsey S3 (Acacia/Banksia) via rclone with HAProxy load balancing.
 
@@ -347,6 +347,7 @@ def archive_file_rclone_haproxy(
         rclone_retries: Number of times rclone will retry a failed transfer or
             check before giving up. Handles transient errors on live endpoints.
             Defaults to 3.
+        rclone_check_wait_secs: Number of seconds to wait between rclone copy and rclone check.
 
     Returns:
         True if upload succeeded and checksum verified.
@@ -425,10 +426,8 @@ def archive_file_rclone_haproxy(
             # Wait before checking to allow for VSS replication lag. HAProxy may
             # route copyto and check to different VSS nodes, and the file may not
             # yet be visible on all nodes immediately after the upload completes.
-            logger.debug(
-                f"{full_filename}: Waiting {_RCLONE_CHECK_RETRY_WAIT_SECS} seconds before running rclone check."
-            )
-            time.sleep(_RCLONE_CHECK_RETRY_WAIT_SECS)
+            logger.debug(f"{full_filename}: Waiting {rclone_check_wait_secs} seconds before running rclone check.")
+            time.sleep(rclone_check_wait_secs)
 
             # Verify the file at the remote, retrying a few times to allow for
             # replication lag across VSS nodes when HAProxy routes to a different
@@ -458,9 +457,9 @@ def archive_file_rclone_haproxy(
                     logger.warning(
                         f"{full_filename}: rclone check attempt {check_attempt}"
                         f" of {_RCLONE_CHECK_RETRIES} failed, retrying in"
-                        f" {_RCLONE_CHECK_RETRY_WAIT_SECS} seconds. Output: {stdout}"
+                        f" {rclone_check_wait_secs} seconds. Output: {stdout}"
                     )
-                    time.sleep(_RCLONE_CHECK_RETRY_WAIT_SECS)
+                    time.sleep(rclone_check_wait_secs)
 
             if return_val:
                 check_elapsed = time.time() - check_start

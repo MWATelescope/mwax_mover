@@ -30,6 +30,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
         remote_db_handler_object: MWAXDBHandler,
         s3_profile: str,
         archive_to_location: ArchiveLocation,
+        rclone_check_wait_secs: int,
     ):
         """Initialize the PawseyOutgoingProcessor.
 
@@ -43,6 +44,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             remote_db_handler_object: Database handler for the remote metadata database.
             s3_profile: AWS/S3 profile name for Ceph access.
             archive_to_location: Target archive location (Acacia, Banksia, or AcaciaMWA).
+            rclone_check_wait_secs: Number of seconds to wait between rclone copy and rclone check (to allow banksia VSS's to sync)
         """
         super().__init__(
             name,
@@ -58,6 +60,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
         self.remote_db_handler_object = remote_db_handler_object
         self.s3_profile = s3_profile
         self.archive_to_location = archive_to_location
+        self.rclone_check_wait_secs = rclone_check_wait_secs
 
     def handler(self, item: str) -> bool:
         """Validate and archive a mwacache file to Pawsey Long-Term Storage.
@@ -140,6 +143,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
                     item,
                     bucket,
                     data_files_row.checksum,
+                    rclone_check_wait_secs=self.rclone_check_wait_secs,
                 )
             else:
                 raise NotImplementedError(f"Location {self.archive_to_location.value} not implemented")
