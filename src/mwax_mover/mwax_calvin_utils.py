@@ -37,7 +37,7 @@ from matplotlib.colors import LinearSegmentedColormap
 from mwalib import MetafitsContext
 import numpy.typing as npt  # noqa: F401
 from numpy.typing import ArrayLike, NDArray
-from typing import NamedTuple, List, Tuple, Optional, Any  # noqa: F401
+from typing import NamedTuple, List, Tuple, Optional, Union, Any  # noqa: F401
 import sys
 from mwax_mover.mwax_command import (
     run_command_ext,
@@ -112,75 +112,82 @@ class TimeInfo(NamedTuple):
 
 
 class Metafits:
-    """MWA Metadata file in FITS format"""
+    """MWA Metadata reader backed by mwalib MetafitsContext.
 
-    def __init__(self, filename: str):
-        """Initialize a Metafits file reader.
+    Replaces the former astropy FITS implementation.  All properties now
+    delegate to ``mwalib.MetafitsContext`` instead of opening the FITS file
+    directly, which removes several manual parsing steps and CHANSEL sanity
+    checks that mwalib already validates internally.
+    """
+
+    def __init__(self, metafits: Union[str, MetafitsContext]):
+        """Initialise a Metafits reader backed by mwalib.
 
         Args:
-            filename: Path to the FITS metafits file.
+            metafits: Path to the metafits FITS file, or an already-opened
+                MetafitsContext.  Passing an existing context avoids re-opening
+                the file when the caller already holds one.
         """
-        self.filename = filename
+        if isinstance(metafits, str):
+            self.filename = metafits
+            self._mc: MetafitsContext = MetafitsContext(metafits, None)
+        else:
+            self.filename = metafits.metafits_filename
+            self._mc = metafits
 
     @property
     def tiles(self) -> List[Tile]:
-        """Get tile information from metafits, sorted by ID."""
-        with fits.open(self.filename) as hdus:
-            metafits_inputs = hdus["TILEDATA"].data
+        """Get tile information from metafits, sorted by tile ID.
 
-            # using a set here to avoid duplicates (pol=X,Y)
-            tiles = set(
+        mwalib exposes one Antenna per tile (not duplicated per pol), so
+        no set-based deduplication is needed.  Flag, rx, and slot come from
+        rfinput_x (identical to rfinput_y for those fields).
+        """
+        return sorted(
+            [
                 Tile(
-                    name=metafits_input["TileName"],
-                    id=metafits_input["Tile"],
-                    flag=metafits_input["Flag"],
-                    # index=metafits_input["Antenna"],
-                    rx=metafits_input["Rx"],
-                    slot=metafits_input["Slot"],
-                    flavor=metafits_input["Receiver_Types"],
+                    name=ant.tile_name,
+                    id=ant.tile_id,
+                    flag=bool(ant.rfinput_x.flagged),
+                    rx=ant.rfinput_x.rec_number,
+                    slot=ant.rfinput_x.rec_slot_number,
+                    flavor=str(ant.rfinput_x.rec_type),
                 )
-                for metafits_input in metafits_inputs
-            )
-
-            return sorted([*tiles], key=lambda tile: tile.id)
+                for ant in self._mc.antennas
+            ],
+            key=lambda tile: tile.id,
+        )
 
     @property
     def inputs(self) -> List[Input]:
-        """Get input information from metafits, sorted by ID."""
-        with fits.open(self.filename) as hdus:
-            metafits_inputs = hdus["TILEDATA"].data
+        """Get input (rf_input) information from metafits, sorted by input index.
 
-            inputs = set(
+        mwalib exposes one Rfinput per polarisation per tile, so no
+        set-based deduplication is needed.  The electrical length is already
+        a float (metres) — the ``"EL_"`` prefix stripping from the old FITS
+        read is not required.
+        """
+        return sorted(
+            [
                 Input(
-                    id=metafits_input["Input"],
-                    name=metafits_input["TileName"] + metafits_input["Pol"],
-                    flag=metafits_input["Flag"],
-                    pol=metafits_input["Pol"],
-                    # index=metafits_input["Antenna"],
-                    rx=metafits_input["Rx"],
-                    slot=metafits_input["Slot"],
-                    # flavor=metafits_input["Flavors"],
-                    flavor=metafits_input["Receiver_Types"],
-                    length=float(metafits_input["Length"][3:]),
+                    id=rfi.input,
+                    name=rfi.tile_name + str(rfi.pol),
+                    flag=bool(rfi.flagged),
+                    pol=str(rfi.pol),
+                    rx=rfi.rec_number,
+                    slot=rfi.rec_slot_number,
+                    length=rfi.electrical_length_m,
+                    flavor=str(rfi.rec_type),
                 )
-                for metafits_input in metafits_inputs
-            )
-
-            return sorted([*inputs], key=lambda inp: inp.id)
+                for rfi in self._mc.rf_inputs
+            ],
+            key=lambda inp: inp.id,
+        )
 
     @property
     def tiles_df(self) -> pd.DataFrame:
         """Get tiles as a pandas DataFrame."""
-        # determine array configuration (compact or extended)
-        # config = Config.from_tiles(tiles)
-        tiles = self.tiles
-        return pd.DataFrame(tiles, columns=Tile._fields)
-
-        # unflagged = tiles[tiles.flag == 0]
-        # if not len(unflagged):
-        #     raise ValueError("No unflagged tiles found")
-        # # tiles_by_id = sorted(tiles, key=lambda tile: tile.id)
-        # return unflagged.sort_values(by=["id"]).take([0])["name"], tiles
+        return pd.DataFrame(self.tiles, columns=Tile._fields)
 
     @property
     def inputs_df(self) -> pd.DataFrame:
@@ -189,87 +196,44 @@ class Metafits:
 
     @property
     def chan_info(self) -> ChanInfo:
-        """Get coarse channel information from metafits."""
-        with fits.open(self.filename) as hdus:
-            hdu = hdus["PRIMARY"]
-            header: fits.header.Header = hdu.header
+        """Get coarse channel information from metafits.
 
-            # coarse channels
-            coarse_chans = parse_csv_header(header["CHANNELS"], int)
+        mwalib validates CHANNELS, CHANSEL, FINECHAN and their mutual
+        consistency internally, so the former sanity checks and the CHANSEL
+        length comparison are not reproduced here.
+        """
+        coarse_chans = np.sort([c.rec_chan_number for c in self._mc.metafits_coarse_chans])
+        fine_chan_width_hz = self._mc.corr_fine_chan_width_hz
+        fine_chans_per_coarse = self._mc.num_corr_fine_chans_per_coarse
 
-            # coarse channel selection
-            chansel = parse_csv_header(header["CHANSEL"], int)
+        coarse_chan_ranges = [g for g in np.split(coarse_chans, np.where(np.diff(coarse_chans) != 1)[0] + 1)]
 
-            if len(chansel) != len(coarse_chans):
-                raise RuntimeError(f"channel selection is not tested. {chansel=}")
-
-            # coarse_chans = np.sort(coarse_chans[chansel])
-            coarse_chans = np.sort(coarse_chans)
-
-            # fine channel width
-            fine_chan_width_hz = int(float(header["FINECHAN"]) * 1000)
-
-            # total observation bandwidth
-            total_bandwidth_hz = int(float(header["BANDWDTH"]) * 1000000)
-
-            # number of fine channels in observation
-            obs_num_fine_chans = int(header["NCHANS"])
-
-            # sanity checks
-            if total_bandwidth_hz != fine_chan_width_hz * obs_num_fine_chans:
-                raise ValueError(
-                    f"{self.filename} - ({total_bandwidth_hz=}) != ({fine_chan_width_hz=}) * ({obs_num_fine_chans=})"
-                )
-
-            if obs_num_fine_chans % len(coarse_chans) != 0:
-                raise ValueError(
-                    f"Number of fine channels ({obs_num_fine_chans}) "
-                    f"not a multiple of the number of coarse channels ({len(coarse_chans)})"
-                )
-
-            # calculate number of fine channels per coarse channel
-            fine_chans_per_coarse = obs_num_fine_chans // len(coarse_chans)
-
-            coarse_chan_ranges = []
-            for _, g in enumerate(np.split(coarse_chans, np.where(np.diff(coarse_chans) != 1)[0] + 1)):
-                coarse_chan_ranges.append(g)
-
-            return ChanInfo(
-                coarse_chan_ranges=coarse_chan_ranges,
-                fine_chan_width_hz=fine_chan_width_hz,
-                fine_chans_per_coarse=fine_chans_per_coarse,
-            )
+        return ChanInfo(
+            coarse_chan_ranges=coarse_chan_ranges,
+            fine_chan_width_hz=fine_chan_width_hz,
+            fine_chans_per_coarse=fine_chans_per_coarse,
+        )
 
     @property
     def time_info(self) -> TimeInfo:
         """Get time information from metafits."""
-        with fits.open(self.filename) as hdus:
-            hdu = hdus["PRIMARY"]
-            header = hdu.header
-            inttime = header["INTTIME"]
-            nscans = header["NSCANS"]
-            return TimeInfo(
-                num_times=nscans,
-                int_time_s=inttime,
-            )
+        return TimeInfo(
+            num_times=self._mc.num_metafits_timesteps,
+            int_time_s=self._mc.corr_int_time_ms / 1000.0,
+        )
 
     @property
-    def calibrator(self):
-        """Get calibrator source name from metafits header."""
-        with fits.open(self.filename) as hdus:
-            hdu = hdus["PRIMARY"]
-            header = hdu.header
-            if header.get("CALIBSRC"):
-                return header["CALIBSRC"]
+    def calibrator(self) -> Optional[str]:
+        """Get calibrator source name from metafits.
+
+        Returns None when the metafits carries an empty CALIBSRC string.
+        """
+        return self._mc.calibrator_source or None
 
     @property
-    def obsid(self):
-        """Get observation ID (GPS time) from metafits header."""
-        with fits.open(self.filename) as hdus:
-            hdu = hdus["PRIMARY"]
-            header = hdu.header
-            if header.get("GPSTIME"):
-                return header["GPSTIME"]
+    def obsid(self) -> int:
+        """Get observation ID (GPS time) from metafits."""
+        return self._mc.obs_id
 
 
 class HyperfitsSolution:
@@ -395,7 +359,7 @@ class HyperfitsSolution:
 class HyperfitsSolutionGroup:
     """A group of Hyperdrive FITS calibration solutions and corresponding metafits files."""
 
-    def __init__(self, metafits: List[Metafits], solns: List[HyperfitsSolution]):
+    def __init__(self, metafits: Metafits, solns: List[HyperfitsSolution]):
         """Initialize a solution group with metafits and solution files.
 
         Args:
@@ -405,28 +369,28 @@ class HyperfitsSolutionGroup:
         Raises:
             RuntimeError: If no metafits or solution files are provided.
         """
-        if not len(metafits):
-            raise RuntimeError("no metafits files provided")
         self.metafits = metafits
 
         if not len(solns):
             raise RuntimeError("no solutions files provided")
         self.solns = solns
 
-        self.metafits_tiles_df = HyperfitsSolutionGroup.get_metafits_tiles_df(self.metafits)
+        self.metafits_tiles_df = self.metafits.tiles_df
         self.metafits_chan_info = HyperfitsSolutionGroup.get_metafits_chan_info(self.metafits)
-        self.chanblocks_per_coarse, self.all_chanblocks_hz = HyperfitsSolutionGroup.get_soln_chan_info(
-            self.metafits_chan_info, self.solns
-        )
+        (
+            self.chanblocks_per_coarse,
+            self.all_chanblocks_hz,
+            self.all_solution_coarse_chan_indices,
+        ) = HyperfitsSolutionGroup.get_soln_chan_info(self.metafits_chan_info, self.solns)
 
     @classmethod
-    def get_metafits_chan_info(cls, metafits: List[Metafits]) -> ChanInfo:
+    def get_metafits_chan_info(cls, metafits: Metafits) -> ChanInfo:
         """Get combined channel information from all metafits files.
 
         Validates that channel ranges do not overlap and that channel info is consistent.
 
         Args:
-            metafits: List of Metafits file readers.
+            metafits: Metafits file object.
 
         Returns:
             Combined ChanInfo object.
@@ -434,29 +398,8 @@ class HyperfitsSolutionGroup:
         Raises:
             RuntimeError: If channel info is inconsistent or ranges overlap.
         """
-        first_chan_info = metafits[0].chan_info
-        all_ranges = [*first_chan_info.coarse_chan_ranges]
-
-        for metafits_ in metafits[1:]:
-            chan_info = metafits_.chan_info
-
-            if chan_info.fine_chans_per_coarse != first_chan_info.fine_chans_per_coarse:
-                raise RuntimeError(
-                    f"fine channels per coarse mismatch between metafits files. "
-                    f"{metafits[0].filename} ({first_chan_info.fine_chans_per_coarse}) != "
-                    f"{metafits_.filename} ({chan_info.fine_chans_per_coarse})"
-                )
-
-            if chan_info.fine_chan_width_hz != first_chan_info.fine_chan_width_hz:
-                raise RuntimeError(
-                    f"fine channel width mismatch between metafits files. "
-                    f"{metafits[0].filename} ({first_chan_info.fine_chan_width_hz}) != "
-                    f"{metafits_.filename} ({chan_info.fine_chan_width_hz})"
-                )
-
-            all_ranges.extend(chan_info.coarse_chan_ranges)
-
-        all_ranges = sorted(all_ranges, key=lambda x: x[0])
+        first_chan_info = metafits.chan_info
+        all_ranges = sorted([*first_chan_info.coarse_chan_ranges], key=lambda x: x[0])
 
         # assert coarse channel ranges do not overlap
         for left, right in zip(all_ranges[:-1], all_ranges[1:]):
@@ -472,7 +415,7 @@ class HyperfitsSolutionGroup:
     @classmethod
     def get_soln_chan_info(
         cls, metafits_chan_info: ChanInfo, solns: List[HyperfitsSolution]
-    ) -> Tuple[int, List[NDArray[np.int_]]]:
+    ) -> Tuple[int, List[NDArray[np.int_]], List[int]]:
         """Get channel block information for provided solutions.
 
         Validates that channel info from metafits is consistent with solutions.
@@ -482,13 +425,15 @@ class HyperfitsSolutionGroup:
             solns: List of solution files.
 
         Returns:
-            A tuple of (chanblocks_per_coarse, list of chanblocks_hz arrays).
+            A tuple of (chanblocks_per_coarse, list of chanblocks_hz arrays,
+            sorted list of coarse channel indices present across all solutions).
 
         Raises:
             RuntimeError: If channel info is inconsistent between solution and metafits.
         """
         chanblocks_per_coarse = None
         all_chanblocks_hz = []
+        all_solution_coarse_chans: list[int] = []
 
         metafits_coarse_chans = np.concatenate(metafits_chan_info.coarse_chan_ranges)
         metafits_fine_chan_width_hz = metafits_chan_info.fine_chan_width_hz
@@ -561,6 +506,10 @@ class HyperfitsSolutionGroup:
                     f" given {chanblocks_per_coarse=}, {chans_per_block=}"
                 )
 
+            # Accumulate coarse channel indices found in this solution file so
+            # we can later detect which metafits channels are missing solutions.
+            all_solution_coarse_chans.extend(int(c) for c in soln_coarse_chans)
+
             all_chanblocks_hz.append(chanblocks_hz)
 
         if all_chanblocks_hz is None:
@@ -569,35 +518,7 @@ class HyperfitsSolutionGroup:
         if chanblocks_per_coarse is None:
             raise RuntimeError("chanblocks_per_coarse is none")
 
-        return (chanblocks_per_coarse, all_chanblocks_hz)
-
-    @classmethod
-    def get_metafits_tiles_df(cls, metafits) -> pd.DataFrame:
-        """Get tiles dataframe, verifying all metafits have the same tiles.
-
-        Args:
-            metafits: List of Metafits file readers.
-
-        Returns:
-            DataFrame containing tile information.
-
-        Raises:
-            RuntimeError: If tile information differs between metafits files.
-        """
-        columns = list(set(Tile._fields) - set(["flag"]))
-        tiles_df = metafits[0].tiles_df
-
-        for metafits_ in metafits[1:]:
-            for column in columns:
-                if not tiles_df[column].equals(metafits_.tiles_df[column]):
-                    raise RuntimeError(
-                        f"tiles dataframes from metafits files do not match on {column=}. "
-                        f"{metafits[0].filename} != {metafits_.filename}\n"
-                        f"{tiles_df[column].tolist()}\n\n"
-                        f"{metafits_.tiles_df[column].tolist()}\n"
-                    )
-
-        return tiles_df
+        return (chanblocks_per_coarse, all_chanblocks_hz, sorted(all_solution_coarse_chans))
 
     @property
     def refant(self) -> pd.Series:
@@ -611,34 +532,25 @@ class HyperfitsSolutionGroup:
         Raises:
             ValueError: If no unflagged tiles are found.
         """
-        tiles_df = self.metafits_tiles_df.copy()
-
-        # flag tiles_df with solution flags
+        # Start from metafits flags then OR-in the solution flags for each file,
+        # without copying the full DataFrame.
+        combined_flag = self.metafits_tiles_df["flag"].to_numpy(dtype=bool)
         for soln in self.solns:
-            tiles_df["flag_metafits"] = tiles_df["flag"]
-            tiles_df["flag_soln"] = soln.tile_flags
-            tiles_df["flag"] = np.logical_or(tiles_df["flag_metafits"], tiles_df["flag_soln"])
-            tiles_df.drop(columns=["flag_metafits", "flag_soln"], inplace=True)
+            combined_flag = np.logical_or(combined_flag, soln.tile_flags)
 
-        tiles = tiles_df[tiles_df.flag == 0]
-
-        if not len(tiles):
+        unflagged_mask = ~combined_flag
+        if not unflagged_mask.any():
             raise ValueError("No unflagged tiles found")
 
-        # tiles_by_id = sorted(tiles, key=lambda tile: tile.id)
-        return tiles.sort_values(by=["id"]).take([0]).iloc[0]
+        # Return the row with the lowest tile ID among unflagged tiles.
+        candidate_ids = self.metafits_tiles_df["id"].to_numpy()
+        best_idx = np.where(unflagged_mask)[0][np.argmin(candidate_ids[unflagged_mask])]
+        return self.metafits_tiles_df.iloc[best_idx]
 
     @property
     def calibrator(self):
-        """Get calibrator source name(s) from all metafits files."""
-        calibrators = set(filter(None, [meta.calibrator for meta in self.metafits]))
-        return " ".join(calibrators)
-
-    @property
-    def obsids(self):
-        """Get observation IDs from all metafits files."""
-        obsids = set(filter(None, [meta.obsid for meta in self.metafits]))
-        return [*obsids]
+        """Get calibrator source name(s) from metafits file."""
+        return self.metafits.calibrator
 
     @property
     def results(self) -> NDArray[np.float64]:
@@ -696,6 +608,11 @@ class HyperfitsSolutionGroup:
         Raises:
             RuntimeError: If reference antenna is not found or flagged in solutions.
         """
+        # Pre-extract metafits arrays once to avoid per-iteration DataFrame copies.
+        tile_names = self.metafits_tiles_df["name"].to_numpy()
+        tile_ids = self.metafits_tiles_df["id"].to_numpy()
+        metafits_flags = self.metafits_tiles_df["flag"].to_numpy(dtype=bool)
+
         soln_tile_ids = None
         ref_tile_idx = None
         all_xx_solns = None
@@ -705,29 +622,23 @@ class HyperfitsSolutionGroup:
             # TODO: ch_flags = hdus['CHANBLOCKS'].data['Flag']
             # TODO: results = hdus['RESULTS'].data.flatten()
 
-            # validate tile selection
-            # join the tile dataframe on name, just in case order is different
-            soln_tiles = self.metafits_tiles_df.copy()
-            soln_tiles["flag_metafits"] = soln_tiles["flag"]
-            soln_tiles["flag_soln"] = soln.tile_flags
-            soln_tiles["flag"] = np.logical_or(soln_tiles["flag_soln"], soln_tiles["flag_metafits"])
-            soln_tiles.drop(columns=["flag_metafits", "flag_soln"], inplace=True)
+            # Merge metafits and solution flags without copying the full DataFrame.
+            combined_flag = np.logical_or(metafits_flags, soln.tile_flags)
 
             if refant_name is not None:
-                _ref_tiles = soln_tiles[soln_tiles["name"] == refant_name]
+                ref_mask = tile_names == refant_name
 
-                if not len(_ref_tiles):
+                if not ref_mask.any():
                     raise RuntimeError(f"{soln.filename} - reference tile {refant_name} not found in solution file")
 
-                if len(_ref_tiles) > 1:
+                if ref_mask.sum() > 1:
                     raise RuntimeError(
                         f"{soln.filename} - more than one tile with name {refant_name} found in solution file"
                     )
 
-                _ref_tile_idx = _ref_tiles.index[0]
-                _ref_tile_flag = _ref_tiles.iloc[0]["flag"]
+                _ref_tile_idx = int(np.where(ref_mask)[0][0])
 
-                if _ref_tile_flag:
+                if combined_flag[_ref_tile_idx]:
                     raise RuntimeError(
                         f"{soln.filename} - reference tile {refant_name}"
                         f" is flagged in solutions file (index {_ref_tile_idx})"
@@ -741,11 +652,11 @@ class HyperfitsSolutionGroup:
                         f"{soln.filename} - reference tile in solution file does not match previous solution files"
                     )
 
-            _tile_ids = soln_tiles["id"].to_numpy()
+            _tile_ids = tile_ids
 
             # _tile_ids, _ref_tile_idx = soln.validate_tiles(tiles_by_name, refant)
             if soln_tile_ids is None or not len(soln_tile_ids):
-                soln_tile_ids = soln_tiles["id"].to_numpy()
+                soln_tile_ids = tile_ids
             elif not np.array_equal(soln_tile_ids, _tile_ids):
                 raise RuntimeError(
                     f"{soln.filename} - tile selection in solution file"
@@ -807,6 +718,140 @@ class HyperfitsSolutionGroup:
             raise RuntimeError("No valid solutions found")
 
         return soln_tile_ids, all_xx_solns, all_yy_solns
+
+    def get_solns_both(
+        self, refant_name: str
+    ) -> Tuple[
+        NDArray[np.int_],
+        NDArray[np.complex128],
+        NDArray[np.complex128],
+        NDArray[np.complex128],
+        NDArray[np.complex128],
+    ]:
+        """Return tile IDs, raw and reference-normalised XX/YY solutions in one FITS read pass.
+
+        Equivalent to calling ``get_solns()`` and ``get_solns(refant_name)``
+        back-to-back, but reads each solution FITS file only once instead of
+        twice.  The raw (un-normalised) solutions are needed for gain fitting;
+        the reference-normalised solutions are needed for phase fitting.
+
+        The reference normalisation replicates
+        ``HyperfitsSolution.get_ref_solutions()`` on the already-read raw data,
+        avoiding a second FITS open.  The Jones matrix inverse of the reference
+        tile is applied channel-wise via the standard 2×2 determinant formula.
+
+        Args:
+            refant_name: Name of the reference antenna (must not be flagged in
+                either the metafits or the solution file).
+
+        Returns:
+            A 5-tuple of ``(tile_ids, noref_xx, noref_yy, ref_xx, ref_yy)``.
+
+        Raises:
+            RuntimeError: If the reference antenna is not found, is flagged, or
+                if solution data is inconsistent across files.
+        """
+        # Pre-extract metafits arrays once so the per-file loop needs no
+        # DataFrame copies and no repeated column access.
+        tile_names = self.metafits_tiles_df["name"].to_numpy()
+        tile_ids = self.metafits_tiles_df["id"].to_numpy()
+        metafits_flags = self.metafits_tiles_df["flag"].to_numpy(dtype=bool)
+
+        soln_tile_ids = None
+        ref_tile_idx: Optional[int] = None
+        all_noref_xx: Optional[NDArray[np.complex128]] = None
+        all_noref_yy: Optional[NDArray[np.complex128]] = None
+        all_ref_xx: Optional[NDArray[np.complex128]] = None
+        all_ref_yy: Optional[NDArray[np.complex128]] = None
+
+        for chanblocks_hz, soln in zip(self.all_chanblocks_hz, self.solns):
+            # Merge flags without a DataFrame copy.
+            combined_flag = np.logical_or(metafits_flags, soln.tile_flags)
+
+            # Find and validate the reference antenna.
+            ref_mask = tile_names == refant_name
+            if not ref_mask.any():
+                raise RuntimeError(f"{soln.filename} - reference tile {refant_name} not found in solution file")
+            if ref_mask.sum() > 1:
+                raise RuntimeError(
+                    f"{soln.filename} - more than one tile with name {refant_name} found in solution file"
+                )
+            _ref_tile_idx = int(np.where(ref_mask)[0][0])
+            if combined_flag[_ref_tile_idx]:
+                raise RuntimeError(
+                    f"{soln.filename} - reference tile {refant_name}"
+                    f" is flagged in solutions file (index {_ref_tile_idx})"
+                )
+            if ref_tile_idx is None:
+                ref_tile_idx = _ref_tile_idx
+            elif ref_tile_idx != _ref_tile_idx:
+                raise RuntimeError(
+                    f"{soln.filename} - reference tile in solution file does not match previous solution files"
+                )
+
+            # Tile ID consistency check.
+            if soln_tile_ids is None:
+                soln_tile_ids = tile_ids
+            elif not np.array_equal(soln_tile_ids, tile_ids):
+                raise RuntimeError(f"{soln.filename} - tile IDs do not match previous solution files")
+
+            # Single FITS read for all solution data — this is the key difference
+            # from two separate get_solns() calls.
+            raw_solutions = soln.get_solutions()
+
+            # Validate timeblock count directly from the solutions array,
+            # avoiding a separate FITS open for the TIMEBLOCKS HDU.
+            n_times = raw_solutions[0].shape[0]
+            if n_times != 1:
+                raise RuntimeError(f"{soln.filename} - exactly 1 timeblock must be provided: ({n_times})")
+
+            # Shape validation.
+            for solution in raw_solutions:
+                if (ntimes := solution.shape[0]) != 1:
+                    raise RuntimeError(f"{soln.filename} - SOLUTIONS HDU timeblock count ({ntimes}) != 1")
+                if (ntiles := solution.shape[1]) != len(soln_tile_ids):
+                    raise RuntimeError(
+                        f"{soln.filename} - number of tiles in SOLUTIONS HDU ({ntiles})"
+                        f" does not match TILES HDU ({len(soln_tile_ids)})"
+                    )
+                if (nchans := solution.shape[2]) != len(chanblocks_hz):
+                    raise RuntimeError(
+                        f"{soln.filename} - number of channels in SOLUTIONS HDU ({nchans})"
+                        f" does not match CHANBLOCKS HDU ({len(chanblocks_hz)})"
+                    )
+
+            # Raw (un-normalised) XX and YY for gain fitting.
+            noref_xx = raw_solutions[0]
+            noref_yy = raw_solutions[3]
+
+            # Reference-normalised XX and YY for phase fitting.
+            # Replicates HyperfitsSolution.get_ref_solutions() on already-read data.
+            # ref[i] has shape (1, n_chans); broadcasting over the tiles axis is implicit.
+            ref = [s[:, ref_tile_idx, :] for s in raw_solutions]
+            ref_inv_det = np.divide(1 + 0j, ref[0] * ref[3] - ref[1] * ref[2])
+            ref_xx = (raw_solutions[0] * ref[3] - raw_solutions[1] * ref[2]) * ref_inv_det
+            ref_yy = (raw_solutions[3] * ref[0] - raw_solutions[2] * ref[1]) * ref_inv_det
+
+            # Accumulate across solution files.
+            if all_noref_xx is None or all_noref_yy is None or all_ref_xx is None or all_ref_yy is None:
+                all_noref_xx, all_noref_yy = noref_xx, noref_yy
+                all_ref_xx, all_ref_yy = ref_xx, ref_yy
+            else:
+                all_noref_xx = np.concatenate((all_noref_xx, noref_xx), axis=2)
+                all_noref_yy = np.concatenate((all_noref_yy, noref_yy), axis=2)
+                all_ref_xx = np.concatenate((all_ref_xx, ref_xx), axis=2)
+                all_ref_yy = np.concatenate((all_ref_yy, ref_yy), axis=2)
+
+        if (
+            soln_tile_ids is None
+            or all_noref_xx is None
+            or all_noref_yy is None
+            or all_ref_xx is None
+            or all_ref_yy is None
+        ):
+            raise RuntimeError("No valid solutions found")
+
+        return soln_tile_ids, all_noref_xx, all_noref_yy, all_ref_xx, all_ref_yy
 
 
 class PhaseFitInfo(NamedTuple):
@@ -873,6 +918,74 @@ class GainFitInfo(NamedTuple):
             pol1=[np.nan] * n_coarse,
             sigma_resid=[np.nan] * n_coarse,
         )
+
+
+def pad_gains_to_full_coarse(
+    values: List[float],
+    actual_chans: List[int],
+    expected_chans: NDArray[np.int_],
+) -> List[float]:
+    """Pad a per-coarse-channel list to match all expected metafits channels.
+
+    Creates a list of length ``len(expected_chans)`` initialised to NaN, then
+    places each value from *values* at the position of its corresponding coarse
+    channel index in *expected_chans*.  Channels present in *expected_chans*
+    but absent from *actual_chans* remain NaN.
+
+    Args:
+        values: Per-coarse-channel values, in the same order as *actual_chans*.
+            Length must equal ``len(actual_chans)``.
+        actual_chans: Coarse channel indices present in the calibration
+            solutions, in the same order as *values*.
+        expected_chans: All coarse channel indices from the metafits, sorted
+            ascending.  Defines the length and ordering of the output.
+
+    Returns:
+        List of length ``len(expected_chans)`` with each value placed at the
+        position of its channel in *expected_chans*, and NaN at positions for
+        missing channels.
+    """
+    n_expected = len(expected_chans)
+    padded: List[float] = [np.nan] * n_expected
+    for i, chan_idx in enumerate(actual_chans):
+        positions = np.where(expected_chans == chan_idx)[0]
+        if len(positions) == 1:
+            padded[positions[0]] = values[i]
+    return padded
+
+
+def pad_gain_fit_info(
+    gain_fit: GainFitInfo,
+    actual_coarse_chans: List[int],
+    expected_coarse_chans: NDArray[np.int_],
+) -> GainFitInfo:
+    """Return a new GainFitInfo with all per-channel arrays padded to the full metafits channel set.
+
+    Applies :func:`pad_gains_to_full_coarse` to the *gains*, *pol0*, *pol1*,
+    and *sigma_resid* arrays of *gain_fit*, producing a new ``GainFitInfo``
+    whose per-channel arrays have ``len(expected_coarse_chans)`` elements.
+    The *quality* scalar is preserved unchanged.
+
+    Args:
+        gain_fit: Source ``GainFitInfo`` (or a pandas Series with the same
+            named fields) whose per-channel arrays may have fewer elements
+            than ``len(expected_coarse_chans)``.
+        actual_coarse_chans: Sorted coarse channel indices present in the
+            calibration solutions (same length as ``gain_fit.gains``).
+        expected_coarse_chans: All coarse channel indices from the metafits,
+            sorted ascending.
+
+    Returns:
+        New ``GainFitInfo`` with per-channel arrays of length
+        ``len(expected_coarse_chans)``, NaN-padded at missing channels.
+    """
+    return GainFitInfo(
+        quality=gain_fit.quality,
+        gains=pad_gains_to_full_coarse(gain_fit.gains, actual_coarse_chans, expected_coarse_chans),
+        pol0=pad_gains_to_full_coarse(gain_fit.pol0, actual_coarse_chans, expected_coarse_chans),
+        pol1=pad_gains_to_full_coarse(gain_fit.pol1, actual_coarse_chans, expected_coarse_chans),
+        sigma_resid=pad_gains_to_full_coarse(gain_fit.sigma_resid, actual_coarse_chans, expected_coarse_chans),
+    )
 
 
 def ensure_system_byte_order(arr):

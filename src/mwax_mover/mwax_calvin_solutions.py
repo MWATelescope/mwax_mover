@@ -6,10 +6,10 @@ inserts the resulting calibration fit and solution records into the MWA metadata
 database.
 """
 
-import glob
 import logging
 import os
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 import numpy as np
@@ -26,6 +26,7 @@ from mwax_mover.mwax_calvin_utils import (
     HyperfitsSolutionGroup,
     PhaseFitInfo,
     debug_phase_fits,
+    pad_gain_fit_info,
     process_phase_fits,
     process_gain_fits,
     write_readme_file,
@@ -75,16 +76,16 @@ def process_solutions(
     conn = None
 
     try:
-        metafits_files = glob.glob(os.path.join(input_data_path, "*_metafits.fits"))
+        metafits_file = os.path.join(input_data_path, f"{obs_id}_metafits.fits")
 
-        logger.debug(f"{input_data_path} - {metafits_files=}")
+        logger.debug(f"{input_data_path} - {metafits_file=}")
 
         fits_solution_files = get_sorted_solution_files(output_data_path, obs_id, "fits")
 
         logger.debug(f"{output_data_path} - reading {fits_solution_files=}")
 
         soln_group = HyperfitsSolutionGroup(
-            [Metafits(f) for f in metafits_files], [HyperfitsSolution(f) for f in fits_solution_files]
+            Metafits(metafits_file), [HyperfitsSolution(f) for f in fits_solution_files]
         )
 
         # get tiles
@@ -119,34 +120,55 @@ def process_solutions(
         # all_chanblocks_hz = soln_group.all_chanblocks_hz
         all_chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz).astype(np.float64)
 
+        # Build the full sorted list of coarse channel indices from the metafits.
+        # This is used below to NaN-pad gains for any missing channels.
+        all_metafits_coarse_chans = np.sort(np.concatenate(chaninfo.coarse_chan_ranges))
+        solution_coarse_chans = soln_group.all_solution_coarse_chan_indices
+        n_metafits_coarse = len(all_metafits_coarse_chans)
+
+        if len(solution_coarse_chans) < n_metafits_coarse:
+            logger.warning(
+                f"{obs_id}: Only {len(solution_coarse_chans)} of {n_metafits_coarse} "
+                f"metafits coarse channels have solutions. "
+                f"Missing channels will be padded with NaN in the calibration solutions."
+            )
+
         logger.debug(f"{chanblocks_per_coarse=} fine channels per coarse channel")
         logger.debug(f"First 32 fine channels: {[f'{x / 1e6:.3f}' for x in all_chanblocks_hz[0:32]]} MHz")
         logger.debug(f"Last 32 fine channels: {[f'{x / 1e6:.3f}' for x in all_chanblocks_hz[-32:]]} MHz")
 
-        soln_tile_ids, all_xx_solns_noref, all_yy_solns_noref = soln_group.get_solns()
-        _, all_xx_solns, all_yy_solns = soln_group.get_solns(refant["name"])
+        soln_tile_ids, all_xx_solns_noref, all_yy_solns_noref, all_xx_solns, all_yy_solns = soln_group.get_solns_both(
+            refant["name"]
+        )
 
         weights = soln_group.weights
 
-        phase_fits = process_phase_fits(
-            unflagged_tiles,
-            all_chanblocks_hz,
-            all_xx_solns,
-            all_yy_solns,
-            weights,
-            soln_tile_ids,
-            phase_fit_niter,
-        )
-
-        gain_fits = process_gain_fits(
-            unflagged_tiles,
-            all_chanblocks_hz,
-            all_xx_solns_noref,
-            all_yy_solns_noref,
-            weights,
-            soln_tile_ids,
-            chanblocks_per_coarse,
-        )
+        # Run phase and gain fitting concurrently — they are independent and each
+        # internally spawns os.cpu_count() threads, so running them sequentially
+        # wastes wall time during the startup / drain phases of each pool.
+        with ThreadPoolExecutor(max_workers=2) as fitting_executor:
+            phase_future = fitting_executor.submit(
+                process_phase_fits,
+                unflagged_tiles,
+                all_chanblocks_hz,
+                all_xx_solns,
+                all_yy_solns,
+                weights,
+                soln_tile_ids,
+                phase_fit_niter,
+            )
+            gain_future = fitting_executor.submit(
+                process_gain_fits,
+                unflagged_tiles,
+                all_chanblocks_hz,
+                all_xx_solns_noref,
+                all_yy_solns_noref,
+                weights,
+                soln_tile_ids,
+                chanblocks_per_coarse,
+            )
+            phase_fits = phase_future.result()
+            gain_fits = gain_future.result()
 
         # if ~np.any(np.isfinite(phase_fits["length"])):
         #     logger.warning(f"{item} - no valid phase fits found, continuing anyway")
@@ -199,31 +221,40 @@ def process_solutions(
                     # This will trigger a rollback of the calibration_fit row
                     raise Exception("failed to insert calibration fit")
 
+                # Pre-index both DataFrames by (tile_id, pol) so each per-tile
+                # lookup is O(1) instead of O(n) boolean-mask scan.
+                gain_indexed = gain_fits.set_index(["tile_id", "pol"])
+                phase_indexed = phase_fits.set_index(["tile_id", "pol"])
+
                 for tile_id in soln_tile_ids:
                     some_fits = False
 
                     try:
-                        x_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "XX")].iloc[0]
+                        x_gains = gain_indexed.loc[(tile_id, "XX")]
+                        if len(x_gains.gains) < n_metafits_coarse:
+                            x_gains = pad_gain_fit_info(x_gains, solution_coarse_chans, all_metafits_coarse_chans)
                         some_fits = True
-                    except IndexError:
-                        x_gains = GainFitInfo.nan()
+                    except KeyError:
+                        x_gains = GainFitInfo.nan(n_metafits_coarse)
 
                     try:
-                        y_gains = gain_fits[(gain_fits.tile_id == tile_id) & (gain_fits.pol == "YY")].iloc[0]
+                        y_gains = gain_indexed.loc[(tile_id, "YY")]
+                        if len(y_gains.gains) < n_metafits_coarse:
+                            y_gains = pad_gain_fit_info(y_gains, solution_coarse_chans, all_metafits_coarse_chans)
                         some_fits = True
-                    except IndexError:
-                        y_gains = GainFitInfo.nan()
+                    except KeyError:
+                        y_gains = GainFitInfo.nan(n_metafits_coarse)
 
                     try:
-                        x_phase = phase_fits[(phase_fits.tile_id == tile_id) & (phase_fits.pol == "XX")].iloc[0]
+                        x_phase = phase_indexed.loc[(tile_id, "XX")]
                         some_fits = True
-                    except IndexError:
+                    except KeyError:
                         x_phase = PhaseFitInfo.nan()
 
                     try:
-                        y_phase = phase_fits[(phase_fits.tile_id == tile_id) & (phase_fits.pol == "YY")].iloc[0]
+                        y_phase = phase_indexed.loc[(tile_id, "YY")]
                         some_fits = True
-                    except IndexError:
+                    except KeyError:
                         y_phase = PhaseFitInfo.nan()
 
                     if not some_fits:

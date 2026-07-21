@@ -60,6 +60,24 @@ logger.addHandler(handler)
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
 
+def _pool_worker_init() -> None:
+    """Reset inherited signal handlers in multiprocessing Pool worker processes.
+
+    When Pool forks workers from the main process they inherit all registered
+    signal handlers, including the application-level SIGTERM/SIGINT/SIGUSR1
+    shutdown handler.  When Pool.__exit__() calls terminate() after all tasks
+    complete, idle workers receive SIGTERM and would otherwise run that handler
+    — logging spurious errors and writing a failure record to the database.
+
+    Resetting handlers here (to SIG_DFL for SIGTERM/SIGUSR1 so the OS kills
+    the worker cleanly, and SIG_IGN for SIGINT so Ctrl-C doesn't propagate)
+    ensures workers die quietly without triggering any application logic.
+    """
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGUSR1, signal.SIG_DFL)
+
+
 class MWAXCalvinProcessor:
     """The main class processing calibration solutions"""
 
@@ -749,7 +767,7 @@ class MWAXCalvinProcessor:
         COPY_WORKERS = 24
 
         try:
-            with Pool(processes=COPY_WORKERS) as pool:
+            with Pool(processes=COPY_WORKERS, initializer=_pool_worker_init) as pool:
                 results = pool.starmap(
                     copy_file_rsync,
                     zip(
@@ -1043,7 +1061,7 @@ class MWAXCalvinProcessor:
 
         # Stop any Processors
         logger.warning(f"{signal_message}. Shutting down processor...")
-        self.stop()
+        self.stop(exit_code=-1)
 
     def initialise(
         self,

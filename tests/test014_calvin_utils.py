@@ -44,6 +44,8 @@ from mwax_mover.mwax_calvin_utils import (
     fit_gain,
     fit_phase_line,
     get_solution_fits_filename,
+    pad_gain_fit_info,
+    pad_gains_to_full_coarse,
     parse_csv_header,
     process_gain_fits,
     process_phase_fits,
@@ -1812,3 +1814,181 @@ def test_missing_solutions_hdu_raises(tmp_path):
 
     with pytest.raises(Exception, match="No SOLUTIONS HDU found"):
         clip_hyperdrive_solution_gains(path, cut_off=100.0, mc=mc)
+
+
+# ===========================================================================
+# Tests for pad_gains_to_full_coarse and pad_gain_fit_info
+# ===========================================================================
+
+
+class TestPadGainsToFullCoarse:
+    """Tests for the pad_gains_to_full_coarse() helper."""
+
+    def test_no_padding_needed_all_channels_present(self):
+        """When actual == expected, values are placed at correct positions unchanged."""
+        expected = np.array([100, 101, 102, 103])
+        actual = [100, 101, 102, 103]
+        values = [1.0, 2.0, 3.0, 4.0]
+
+        result = pad_gains_to_full_coarse(values, actual, expected)
+
+        assert len(result) == 4
+        assert result[0] == pytest.approx(1.0)
+        assert result[1] == pytest.approx(2.0)
+        assert result[2] == pytest.approx(3.0)
+        assert result[3] == pytest.approx(4.0)
+
+    def test_last_channel_missing(self):
+        """Missing last channel produces NaN at the final position."""
+        expected = np.array([100, 101, 102, 103])
+        actual = [100, 101, 102]
+        values = [1.0, 2.0, 3.0]
+
+        result = pad_gains_to_full_coarse(values, actual, expected)
+
+        assert len(result) == 4
+        assert result[0] == pytest.approx(1.0)
+        assert result[1] == pytest.approx(2.0)
+        assert result[2] == pytest.approx(3.0)
+        assert np.isnan(result[3])
+
+    def test_first_channel_missing(self):
+        """Missing first channel produces NaN at position 0."""
+        expected = np.array([100, 101, 102, 103])
+        actual = [101, 102, 103]
+        values = [2.0, 3.0, 4.0]
+
+        result = pad_gains_to_full_coarse(values, actual, expected)
+
+        assert len(result) == 4
+        assert np.isnan(result[0])
+        assert result[1] == pytest.approx(2.0)
+        assert result[2] == pytest.approx(3.0)
+        assert result[3] == pytest.approx(4.0)
+
+    def test_middle_channel_missing(self):
+        """Missing middle channel produces NaN at the correct interior position."""
+        expected = np.array([100, 101, 102, 103])
+        actual = [100, 102, 103]
+        values = [1.0, 3.0, 4.0]
+
+        result = pad_gains_to_full_coarse(values, actual, expected)
+
+        assert len(result) == 4
+        assert result[0] == pytest.approx(1.0)
+        assert np.isnan(result[1])
+        assert result[2] == pytest.approx(3.0)
+        assert result[3] == pytest.approx(4.0)
+
+    def test_multiple_channels_missing(self):
+        """Multiple missing channels all become NaN at their respective positions."""
+        expected = np.array([100, 101, 102, 103, 104, 105])
+        actual = [101, 104]
+        values = [10.0, 40.0]
+
+        result = pad_gains_to_full_coarse(values, actual, expected)
+
+        assert len(result) == 6
+        assert np.isnan(result[0])  # ch100 missing
+        assert result[1] == pytest.approx(10.0)  # ch101
+        assert np.isnan(result[2])  # ch102 missing
+        assert np.isnan(result[3])  # ch103 missing
+        assert result[4] == pytest.approx(40.0)  # ch104
+        assert np.isnan(result[5])  # ch105 missing
+
+    def test_output_length_equals_expected_chans(self):
+        """Output length always equals len(expected_chans), not len(actual_chans)."""
+        expected = np.array([56, 57, 58, 59, 60, 61, 62, 63])
+        actual = [56, 57]
+        values = [1.0, 2.0]
+
+        result = pad_gains_to_full_coarse(values, actual, expected)
+
+        assert len(result) == len(expected)
+        assert result[0] == pytest.approx(1.0)
+        assert result[1] == pytest.approx(2.0)
+        for i in range(2, 8):
+            assert np.isnan(result[i])
+
+    def test_nan_values_in_input_are_preserved(self):
+        """NaN values already in the input list are placed at their positions."""
+        expected = np.array([100, 101, 102])
+        actual = [100, 101, 102]
+        values = [1.0, np.nan, 3.0]
+
+        result = pad_gains_to_full_coarse(values, actual, expected)
+
+        assert len(result) == 3
+        assert result[0] == pytest.approx(1.0)
+        assert np.isnan(result[1])
+        assert result[2] == pytest.approx(3.0)
+
+
+class TestPadGainFitInfo:
+    """Tests for the pad_gain_fit_info() helper."""
+
+    def _make_gain_fit(self, n: int, value: float = 1.0) -> GainFitInfo:
+        """Return a GainFitInfo with n-element arrays filled with *value*."""
+        return GainFitInfo(
+            quality=0.9,
+            gains=[value] * n,
+            pol0=[value * 0.1] * n,
+            pol1=[value * 0.2] * n,
+            sigma_resid=[value * 0.01] * n,
+        )
+
+    def test_all_channels_present_is_noop(self):
+        """When actual == expected channels, all arrays are returned unchanged."""
+        expected = np.array([100, 101, 102])
+        actual = [100, 101, 102]
+        gf = self._make_gain_fit(3, value=2.5)
+
+        result = pad_gain_fit_info(gf, actual, expected)
+
+        assert len(result.gains) == 3
+        assert all(v == pytest.approx(2.5) for v in result.gains)
+        assert result.quality == pytest.approx(0.9)
+
+    def test_missing_last_channel_pads_all_arrays(self):
+        """All four per-channel arrays are padded consistently for a missing last channel."""
+        expected = np.array([100, 101, 102, 103])
+        actual = [100, 101, 102]
+        gf = self._make_gain_fit(3, value=1.0)
+
+        result = pad_gain_fit_info(gf, actual, expected)
+
+        assert len(result.gains) == 4
+        assert len(result.pol0) == 4
+        assert len(result.pol1) == 4
+        assert len(result.sigma_resid) == 4
+
+        # Last position is NaN in every array
+        assert np.isnan(result.gains[3])
+        assert np.isnan(result.pol0[3])
+        assert np.isnan(result.pol1[3])
+        assert np.isnan(result.sigma_resid[3])
+
+        # First three positions have real values
+        for i in range(3):
+            assert np.isfinite(result.gains[i])
+            assert np.isfinite(result.pol0[i])
+
+    def test_quality_scalar_is_preserved(self):
+        """The quality scalar is carried through unchanged."""
+        expected = np.array([100, 101, 102, 103])
+        actual = [100, 101]
+        gf = GainFitInfo(quality=0.75, gains=[1.0, 1.0], pol0=[0.1, 0.1], pol1=[0.2, 0.2], sigma_resid=[0.01, 0.01])
+
+        result = pad_gain_fit_info(gf, actual, expected)
+
+        assert result.quality == pytest.approx(0.75)
+
+    def test_returns_gain_fit_info_instance(self):
+        """Return value is a proper GainFitInfo NamedTuple."""
+        expected = np.array([100, 101])
+        actual = [100]
+        gf = self._make_gain_fit(1)
+
+        result = pad_gain_fit_info(gf, actual, expected)
+
+        assert isinstance(result, GainFitInfo)

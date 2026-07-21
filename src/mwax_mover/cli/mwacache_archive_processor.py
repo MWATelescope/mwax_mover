@@ -62,6 +62,7 @@ class MWACacheArchiveProcessor:
         self.archive_to_location: ArchiveLocation = ArchiveLocation.Unknown
         self.concurrent_archive_workers: int = 0
         self.archive_command_timeout_sec: int = 0
+        self.rclone_check_wait_secs: int = 0
 
         # database config
         self.remote_metadatadb_db: str = ""
@@ -336,6 +337,15 @@ class MWACacheArchiveProcessor:
             )
         )
 
+        # Seconds to wait between rclone copy and rclone check to ensure Banksia VSS nodes have synced
+        self.rclone_check_wait_secs = int(
+            utils.read_config(
+                config,
+                "mwax mover",
+                "rclone_check_wait_secs",
+            )
+        )
+
         # Get list of projectids which are to be given
         # high priority when archiving
         self.high_priority_correlator_projectids = utils.read_config_list(
@@ -473,6 +483,7 @@ class MWACacheArchiveProcessor:
                 self.remote_db_handler,
                 self.s3_profile,
                 self.archive_to_location,
+                self.rclone_check_wait_secs,
             )
             self.workers.append(worker)
 
