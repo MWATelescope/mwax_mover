@@ -1,6 +1,6 @@
 [project]
 name = "mwax_mover"
-version = "1.7.29"
+version = "1.7.30"
 description = "A module to manage input, archiving and calibration for the MWAX correlator"
 readme = "README.md"
 requires-python = ">=3.12, <3.15"
@@ -51,10 +51,13 @@ mwax_calvin_processor = "mwax_mover.cli.mwax_calvin_processor:main"
 mwax_calvin_controller = "mwax_mover.cli.mwax_calvin_controller:main"
 mwax_subfile_distributor = "mwax_mover.cli.mwax_subfile_distributor:main"
 mwacache_archiver = "mwax_mover.cli.mwacache_archive_processor:main"
+fits_inspect = "mwax_mover.cli.fits_inspect:main"
 aocal_split = "mwax_mover.cli.aocal_split:main"
+cal_utils = "mwax_mover.cli.cal_utils:main"
 vdif_cat = "mwax_mover.cli.vdif_cat:main"
 generate_index_json = "mwax_mover.cli.generate_index_json:main"
 update_calvin_plots_and_index = "mwax_mover.cli.update_calvin_plots_and_index:main"
+print_metafits_info = "mwax_mover.cli.print_metafits_info:main"
 
 [tool.black]
 line-length = 120

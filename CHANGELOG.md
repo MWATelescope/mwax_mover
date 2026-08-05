@@ -1,5 +1,10 @@
 # Changelog
 
+# 1.7.30 5-Aug-2026
+
+* calvin_controller: handle "no obs locations" errors and don't fail the calibration_request.
+* utils and mwax_asvo_helper: some ruff lint fixes.
+
 # 1.7.28,29 12-Jun-2026
 
 * calvin_processor: If <24 coarse channels still insert db records for 24 channels.

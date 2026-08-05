@@ -7,44 +7,37 @@ PSRDADA header parsing, Redis-based beamformer signalling, UDP multicast sending
 and config file helpers (read_config, read_optional_config, read_config_list).
 """
 
-import random
-
-import subprocess
-
-from urllib.parse import urlparse
-
-import tarfile
-
-from mwax_mover.mwax_command import run_command_ext
-import re
-
-import sys
-
 import base64
-from astropy import time as astrotime
-from configparser import ConfigParser
 import datetime
-from enum import Enum
 import fcntl
 import glob
 import json
 import logging
 import os
 import queue
-import redis
+import random
+import re
 import shutil
 import socket
 import struct
-from tenacity import retry, stop_after_attempt, wait_fixed
+import subprocess
+import sys
+import tarfile
 import threading
 import time
-import typing
+from configparser import ConfigParser
+from enum import Enum
 from pathlib import Path
-from typing import List
-from typing import Tuple, Optional
-import astropy.io.fits as fits
+from urllib.parse import urlparse
+
+import redis
 import requests
+from astropy import time as astrotime
+from astropy.io import fits
+from tenacity import retry, stop_after_attempt, wait_fixed
+
 from mwax_mover import mwax_command
+from mwax_mover.mwax_command import run_command_ext
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
 
 logger = logging.getLogger(__name__)
@@ -604,7 +597,7 @@ def get_metafits_value_from_hdu(metafits_filename: str, hdu_name: str, key: str)
         ) from catch_all_exception
 
 
-def get_metafits_values(metafits_filename: str) -> Tuple[bool, str, str]:
+def get_metafits_values(metafits_filename: str) -> tuple[bool, str, str]:
     """
     Read calibrator status, project ID, and calibrator source from a metafits file.
 
@@ -675,7 +668,7 @@ def read_config(config: ConfigParser, section: str, key: str, b64encoded=False):
     return value
 
 
-def read_optional_config(config: ConfigParser, section: str, key: str, b64encoded=False) -> Optional[str]:
+def read_optional_config(config: ConfigParser, section: str, key: str, b64encoded=False) -> str | None:
     """
     Read an optional string value from a ConfigParser object.
 
@@ -810,7 +803,7 @@ def get_hostname() -> str:
 def process_mwax_stats(
     mwax_stats_dir: str,
     full_filename: str,
-    numa_node: Optional[int],
+    numa_node: int | None,
     timeout: int,
     stats_dump_dir: str,
     metafits_path: str,
@@ -1113,9 +1106,6 @@ def send_multicast(
         # Send data to the multicast group
         if sock.sendto(message, (dest_multicast_ip, dest_multicast_port)) == 0:
             raise Exception("Error sock.sendto() sent 0 bytes")
-
-    except Exception as catch_all_exception:
-        raise catch_all_exception
     finally:
         sock.close()
 
@@ -1159,7 +1149,7 @@ def get_primary_ip_address() -> str:
     return socket.gethostbyname(socket.getfqdn())
 
 
-def get_disk_space_bytes(path: str) -> typing.Tuple[int, int, int]:
+def get_disk_space_bytes(path: str) -> tuple[int, int, int]:
     """
     Return disk usage statistics for the filesystem containing ``path``.
 
@@ -1174,7 +1164,7 @@ def get_disk_space_bytes(path: str) -> typing.Tuple[int, int, int]:
     return shutil.disk_usage(path)
 
 
-def do_checksum_md5(full_filename: str, numa_node: Optional[int], timeout: int) -> str:
+def do_checksum_md5(full_filename: str, numa_node: int | None, timeout: int) -> str:
     """
     Compute the MD5 checksum of a file by running the system ``md5sum`` command.
 
@@ -1378,7 +1368,7 @@ def inject_beamformer_headers(subfile_filename: str, beamformer_settings: str):
     inject_subfile_header(subfile_filename, beamformer_settings)
 
 
-def read_subfile_value(filename: str, key: str) -> typing.Union[str, None]:
+def read_subfile_value(filename: str, key: str) -> str | None:
     """
     Read a single keyword value from a PSRDADA subfile header.
 
@@ -1431,7 +1421,7 @@ def read_subfile_values(filename: str, keys: list[str]) -> dict:
         A dict mapping each key in ``keys`` to its value string, or None for
         any keyword not found in the header.
     """
-    subfile_values = dict()
+    subfile_values = {}
     found = 0
 
     # Create the dict with None values for all keys
@@ -1601,10 +1591,7 @@ def should_project_be_archived(project_id: str) -> bool:
         False if ``project_id`` is ``'C123'`` (case-insensitive), True for
         all other project IDs.
     """
-    if project_id.upper() == "C123":
-        return False
-    else:
-        return True
+    return project_id.upper() != "C123"
 
 
 def call_webservice(
@@ -1810,7 +1797,7 @@ def remove_file(filename: str, raise_error: bool) -> bool:
     except Exception as delete_exception:  # pylint: disable=broad-except
         if raise_error:
             logger.error(f"{filename}- Error deleting: {delete_exception}. Retrying up to 3 times.")
-            raise delete_exception
+            raise
         else:
             logger.warning(f"{filename}- Error deleting: {delete_exception}. File may have been moved or removed.")
             return True
@@ -1828,9 +1815,10 @@ def get_gpstime_of_datetime(date_time: datetime.datetime) -> int:
         The GPS time as an integer number of seconds since the GPS epoch
         (6 January 1980 00:00:00 UTC).
     """
-    utc_datetime: astrotime.Time = astrotime.Time(date_time, scale="utc")
-    current_gpstime = utc_datetime.gps
-    return int(current_gpstime)
+    utc_datetime = astrotime.Time(date_time, scale="utc")
+    # astropy's stubs type `.gps` as possibly `Masked` for array inputs;
+    # not possible here since `date_time` is a scalar datetime.
+    return round(utc_datetime.gps)  # type: ignore[arg-type]
 
 
 # Return the GPS seconds as an integer of Now
@@ -1842,7 +1830,7 @@ def get_gpstime_of_now() -> int:
         The current GPS time as an integer number of seconds since the GPS
         epoch (6 January 1980 00:00:00 UTC).
     """
-    return get_gpstime_of_datetime(datetime.datetime.now(datetime.timezone.utc))
+    return get_gpstime_of_datetime(datetime.datetime.now(datetime.UTC))
 
 
 def is_int(value) -> bool:
@@ -1940,7 +1928,7 @@ def delete_files_older_than(path: str, older_than_seconds: int, extensions: list
     norm_exts = {("." + ext.lower().lstrip(".")) for ext in extensions}
 
     now = time.time()
-    deleted: List[str] = []
+    deleted: list[str] = []
 
     # Iterate non-recursively over files in the directory
     for entry in p.iterdir():
@@ -2178,7 +2166,7 @@ def run_giant_squid(
     timeout_seconds: int,
     max_retries: int = 5,
     retry_delay_seconds: float = 10.0,
-    env_args: Optional[dict[str, str]] = None,
+    env_args: dict[str, str] | None = None,
 ) -> str:
     """Execute a giant-squid command and return its output.
 
@@ -2240,12 +2228,16 @@ def run_giant_squid(
         if regex_match:
             # Known server-side error code — definitive, do not retry.
             error_code_str = regex_match.group(1)
+
             raise GiantSquidException(
                 f"run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. "
                 f"Error code: {error_code_str} {stdout}"
             )
 
-        elif "Your job cannot be submitted as the archive location of the observation is down" in stdout:
+        elif (
+            "Your job cannot be submitted as the archive location of the observation is down" in stdout
+            or "No obs locations found" in stdout
+        ):
             # ASVO outage — raise immediately, caller handles this.
             raise GiantSquidMWAASVOOutageException("Unable to communicate with MWA ASVO- the archive location is down")
 
@@ -2365,7 +2357,7 @@ def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 1
     ]
     logger.debug(f"Running rclone: {' '.join(cmd)}")
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
 
     #  get rclone stats - skip if we hit an error
     try:
@@ -2523,11 +2515,7 @@ def rclone_delete_file(rclone_profile: str, bucket: str, filename: str) -> None:
         FileNotFoundError: If the rclone binary is not found on PATH.
     """
     remote_path = f"{rclone_profile}:{bucket}/{filename}"
-    result = subprocess.run(
-        ["rclone", "deletefile", remote_path],
-        capture_output=True,
-        text=True,
-    )
+    result = subprocess.run(["rclone", "deletefile", remote_path], capture_output=True, text=True, check=False)
     if result.returncode != 0:
         raise subprocess.CalledProcessError(
             result.returncode,
@@ -2555,11 +2543,7 @@ def check_remote_file_exists(rclone_profile: str, bucket_name: str, filename: st
     """
     remote_path = f"{rclone_profile}:{bucket_name}/{filename}"
 
-    result = subprocess.run(
-        ["rclone", "lsf", remote_path],
-        capture_output=True,
-        text=True,
-    )
+    result = subprocess.run(["rclone", "lsf", remote_path], capture_output=True, text=True, check=False)
 
     if result.returncode == 0:
         return True

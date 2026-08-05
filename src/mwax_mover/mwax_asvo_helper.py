@@ -7,16 +7,14 @@ timestamp, and download URL. MWAASVOJobState enumerates the possible ASVO job
 states. Typed exceptions are raised for outages and duplicate submissions.
 """
 
-import threading
-
-from mwax_mover.utils import run_giant_squid, GiantSquidMWAASVOOutageException, GiantSquidJobAlreadyExistsException
-
-from datetime import datetime, timezone
-from enum import Enum
 import json
 import logging
 import re
-from typing import List, Optional
+import threading
+from datetime import UTC, datetime
+from enum import Enum
+
+from mwax_mover.utils import GiantSquidJobAlreadyExistsException, GiantSquidMWAASVOOutageException, run_giant_squid
 
 logger = logging.getLogger(__name__)
 
@@ -61,13 +59,13 @@ class MWAASVOJob:
         self.job_id = job_id
         self.job_state = MWAASVOJobState.Unknown
         self.submitted_datetime: datetime
-        self.download_error_datetime: Optional[datetime] = None
-        self.download_error_message: Optional[str] = None
-        self.last_seen_datetime: Optional[datetime] = None
-        self.download_url: Optional[str] = None
+        self.download_error_datetime: datetime | None = None
+        self.download_error_message: str | None = None
+        self.last_seen_datetime: datetime | None = None
+        self.download_url: str | None = None
         self.download_slurm_job_submitted: bool = False
-        self.download_slurm_job_id: Optional[int] = None
-        self.download_slurm_job_submitted_datetime: Optional[datetime] = None
+        self.download_slurm_job_id: int | None = None
+        self.download_slurm_job_submitted_datetime: datetime | None = None
         # A flag used to build a new list without the ones needing to be removed. Bypasses the classic mutating a list while iterating issue! https://rednafi.com/python/modify-iterables-while-iterating/
         self.remove_from_list: bool = False
 
@@ -84,7 +82,7 @@ class MWAASVOJob:
             The elapsed time in seconds, or 0 if not yet submitted.
         """
         if self.submitted_datetime is not None:
-            return int((datetime.now(timezone.utc) - self.submitted_datetime).total_seconds())
+            return int((datetime.now(UTC) - self.submitted_datetime).total_seconds())
         else:
             return 0
 
@@ -147,10 +145,10 @@ class MWAASVOHelper:
         self.giant_squid_submitvis_timeout_seconds: int = 0
 
         # List of Jobs and obs_ids the helper is keeping track of
-        self.current_asvo_jobs: List[MWAASVOJob] = []
+        self.current_asvo_jobs: list[MWAASVOJob] = []
         self.current_asvo_jobs_lock = threading.Lock()
 
-        self.mwa_asvo_outage_datetime: Optional[datetime] = None
+        self.mwa_asvo_outage_datetime: datetime | None = None
 
     def initialise(
         self,
@@ -246,7 +244,7 @@ class MWAASVOHelper:
 
         # add a new job to be tracked
         job = MWAASVOJob(request_id=request_id, obs_id=obs_id, job_id=job_id, bulk_request=bulk_request)
-        job.submitted_datetime = datetime.now(timezone.utc)
+        job.submitted_datetime = datetime.now(UTC)
         with self.current_asvo_jobs_lock:
             self.current_asvo_jobs.append(job)
             logger.info(f"{obs_id}: Added JobID {job_id}. Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs")
@@ -298,10 +296,9 @@ class MWAASVOHelper:
                             job.job_state = job_state
                             changed = True
 
-                        if download_url is not None:
-                            if job.download_url != download_url:
-                                job.download_url = download_url
-                                changed = True
+                        if download_url is not None and job.download_url != download_url:
+                            job.download_url = download_url
+                            changed = True
 
                         job.last_seen_datetime = update_datetime
 
@@ -363,7 +360,7 @@ def get_job_id_from_giant_squid_stdout(stdout: str) -> int:
 
     # Output of successful, but already existing job id is:
     # 14:24:17 [WARN] Job already queued, processing or complete. Job Id: 10001610
-    regex_match = re.search(r"Job already queued, processing or complete. Job Id: (\d+)", stdout, re.M)
+    regex_match = re.search(r"Job already queued, processing or complete. Job Id: (\d+)", stdout, re.MULTILINE)
 
     if regex_match:
         job_id_str = regex_match.group(1)
@@ -372,7 +369,7 @@ def get_job_id_from_giant_squid_stdout(stdout: str) -> int:
 
     # Try this too
     # 12:08:08 [WARN] Job already running or complete. Job Id: 878060 ObsID: 1427464352
-    regex_match = re.search(r"Job already running or complete. Job Id: (\d+) ObsId: (\d+)", stdout, re.M)
+    regex_match = re.search(r"Job already running or complete. Job Id: (\d+) ObsId: (\d+)", stdout, re.MULTILINE)
 
     if regex_match:
         job_id_str = regex_match.group(1)
@@ -414,7 +411,7 @@ def get_job_info_from_giant_squid_json(stdout_json, json_for_one_job) -> tuple[i
         job_state = job_state_json
     else:
         # If it is a dict, get the first key- that will be the state
-        for key, value in job_state_json.items():
+        for key in job_state_json:
             job_state = key
             break
 
