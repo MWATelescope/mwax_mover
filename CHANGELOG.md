@@ -1,5 +1,12 @@
 # Changelog
 
+# 1.8.0 6-Aug-2026
+
+* calvin_processor: generate gain outlier fit & residual MAD outlier plots.
+* calvin_processor: read gain outlier config params from config file.
+* calvin_processor: add digital gains to each tile in the TILE HDU of the hyperdrive solutions file(s) (for the beamformer).
+* calvin_processor: upload new gain outlier plots and the actual solutions to s3.
+
 # 1.7.30 5-Aug-2026
 
 * calvin_controller: handle "no obs locations" errors and don't fail the calibration_request.

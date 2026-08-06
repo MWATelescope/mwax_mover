@@ -7,50 +7,48 @@ binary format constants and read/write helpers, SBATCH script generation
 functions, and estimate_birli_output_bytes() for storage pre-checks.
 """
 
-from pathlib import Path
-
-import mwalib
-
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import timezone
 import datetime
-from enum import Enum
 import glob
-import re
 import json
 import logging
 import mimetypes
 import os
+import re
 import shutil
+import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from enum import Enum
+from pathlib import Path
+from typing import Any, NamedTuple
+
+import matplotlib as mpl
 import numpy as np
-from astropy.io import fits
+import numpy.typing as npt  # noqa: F401
+import pandas as pd
+import seaborn as sns
 from astropy import units as u
 from astropy.constants import c  # ty: ignore[unresolved-import]
-from scipy.optimize import minimize
-import pandas as pd
-from pandas import DataFrame
-import seaborn as sns
-import matplotlib as mpl
+from astropy.io import fits
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from mwalib import MetafitsContext
-import numpy.typing as npt  # noqa: F401
 from numpy.typing import ArrayLike, NDArray
-from typing import NamedTuple, List, Tuple, Optional, Union, Any  # noqa: F401
-import sys
+from pandas import DataFrame
+from scipy.optimize import minimize
+
 from mwax_mover.mwax_command import (
+    check_popen_finished,
     run_command_ext,
     run_command_popen,
-    check_popen_finished,
 )
-from mwax_mover.utils import is_int, extract_channels_from_filename, get_png_dimensions
+from mwax_mover.utils import extract_channels_from_filename, get_png_dimensions, is_int
 
 logger = logging.getLogger(__name__)
 
 V_LIGHT_M_S = 299792458.0
 
-AOCAL_INTRO = "MWAOCAL\0".encode("utf8")
+AOCAL_INTRO = b"MWAOCAL\0"
 AOCAL_FILE_TYPE = 0
 AOCAL_STRUCTURE_TYPE = 0
 AOCAL_INTERVAL_COUNT = 1
@@ -99,7 +97,7 @@ class Input(NamedTuple):
 class ChanInfo(NamedTuple):
     """channel selection info"""
 
-    coarse_chan_ranges: List[NDArray[np.int_]]  # List[Tuple(int, int)]
+    coarse_chan_ranges: list[NDArray[np.int_]]  # List[Tuple(int, int)]
     fine_chans_per_coarse: int
     fine_chan_width_hz: float
 
@@ -120,7 +118,7 @@ class Metafits:
     checks that mwalib already validates internally.
     """
 
-    def __init__(self, metafits: Union[str, MetafitsContext]):
+    def __init__(self, metafits: str | MetafitsContext):
         """Initialise a Metafits reader backed by mwalib.
 
         Args:
@@ -136,7 +134,7 @@ class Metafits:
             self._mc = metafits
 
     @property
-    def tiles(self) -> List[Tile]:
+    def tiles(self) -> list[Tile]:
         """Get tile information from metafits, sorted by tile ID.
 
         mwalib exposes one Antenna per tile (not duplicated per pol), so
@@ -159,7 +157,7 @@ class Metafits:
         )
 
     @property
-    def inputs(self) -> List[Input]:
+    def inputs(self) -> list[Input]:
         """Get input (rf_input) information from metafits, sorted by input index.
 
         mwalib exposes one Rfinput per polarisation per tile, so no
@@ -223,7 +221,7 @@ class Metafits:
         )
 
     @property
-    def calibrator(self) -> Optional[str]:
+    def calibrator(self) -> str | None:
         """Get calibrator source name from metafits.
 
         Returns None when the metafits carries an empty CALIBSRC string.
@@ -276,13 +274,13 @@ class HyperfitsSolution:
     #         ]
 
     @property
-    def tile_flags(self) -> List[bool]:
+    def tile_flags(self) -> list[bool]:
         """Get tile flags ordered by antenna index."""
         with fits.open(self.filename) as hdus:
             tile_data = hdus["TILES"].data
             return tile_data["Flag"]
 
-    def get_average_times(self) -> List[float]:
+    def get_average_times(self) -> list[float]:
         """Get the average time for each timeblock.
 
         Raises:
@@ -292,7 +290,7 @@ class HyperfitsSolution:
             time_data = hdus["TIMEBLOCKS"].data
             return [time["Average"] for time in time_data]
 
-    def get_solutions(self) -> List[NDArray[np.complex128]]:
+    def get_solutions(self) -> list[NDArray[np.complex128]]:
         """Get solutions as complex arrays.
 
         Returns:
@@ -307,7 +305,7 @@ class HyperfitsSolution:
                 solutions[:, :, :, 6] + 1j * solutions[:, :, :, 7],
             ]
 
-    def get_ref_solutions(self, ref_tile_idx=None) -> List[NDArray[np.complex128]]:
+    def get_ref_solutions(self, ref_tile_idx=None) -> list[NDArray[np.complex128]]:
         """Get solutions divided by reference tile.
 
         Args:
@@ -359,7 +357,7 @@ class HyperfitsSolution:
 class HyperfitsSolutionGroup:
     """A group of Hyperdrive FITS calibration solutions and corresponding metafits files."""
 
-    def __init__(self, metafits: Metafits, solns: List[HyperfitsSolution]):
+    def __init__(self, metafits: Metafits, solns: list[HyperfitsSolution]):
         """Initialize a solution group with metafits and solution files.
 
         Args:
@@ -414,8 +412,8 @@ class HyperfitsSolutionGroup:
 
     @classmethod
     def get_soln_chan_info(
-        cls, metafits_chan_info: ChanInfo, solns: List[HyperfitsSolution]
-    ) -> Tuple[int, List[NDArray[np.int_]], List[int]]:
+        cls, metafits_chan_info: ChanInfo, solns: list[HyperfitsSolution]
+    ) -> tuple[int, list[NDArray[np.int_]], list[int]]:
         """Get channel block information for provided solutions.
 
         Validates that channel info from metafits is consistent with solutions.
@@ -596,7 +594,7 @@ class HyperfitsSolutionGroup:
         except KeyError:
             return np.full(len(self.all_chanblocks_hz[0]), 1.0)
 
-    def get_solns(self, refant_name=None) -> Tuple[NDArray[np.int_], NDArray[np.complex128], NDArray[np.complex128]]:
+    def get_solns(self, refant_name=None) -> tuple[NDArray[np.int_], NDArray[np.complex128], NDArray[np.complex128]]:
         """Get tile IDs and XX/YY solutions for the reference antenna.
 
         Args:
@@ -721,7 +719,7 @@ class HyperfitsSolutionGroup:
 
     def get_solns_both(
         self, refant_name: str
-    ) -> Tuple[
+    ) -> tuple[
         NDArray[np.int_],
         NDArray[np.complex128],
         NDArray[np.complex128],
@@ -758,11 +756,11 @@ class HyperfitsSolutionGroup:
         metafits_flags = self.metafits_tiles_df["flag"].to_numpy(dtype=bool)
 
         soln_tile_ids = None
-        ref_tile_idx: Optional[int] = None
-        all_noref_xx: Optional[NDArray[np.complex128]] = None
-        all_noref_yy: Optional[NDArray[np.complex128]] = None
-        all_ref_xx: Optional[NDArray[np.complex128]] = None
-        all_ref_yy: Optional[NDArray[np.complex128]] = None
+        ref_tile_idx: int | None = None
+        all_noref_xx: NDArray[np.complex128] | None = None
+        all_noref_yy: NDArray[np.complex128] | None = None
+        all_ref_xx: NDArray[np.complex128] | None = None
+        all_ref_yy: NDArray[np.complex128] | None = None
 
         for chanblocks_hz, soln in zip(self.all_chanblocks_hz, self.solns):
             # Merge flags without a DataFrame copy.
@@ -884,10 +882,10 @@ class PhaseFitInfo(NamedTuple):
 
 class GainFitInfo(NamedTuple):
     quality: float
-    gains: List[float]
-    pol0: List[float]
-    pol1: List[float]
-    sigma_resid: List[float]
+    gains: list[float]
+    pol0: list[float]
+    pol1: list[float]
+    sigma_resid: list[float]
 
     @staticmethod
     def default(n_coarse: int = MWA_NUM_COARSE_CHANS) -> "GainFitInfo":
@@ -921,10 +919,10 @@ class GainFitInfo(NamedTuple):
 
 
 def pad_gains_to_full_coarse(
-    values: List[float],
-    actual_chans: List[int],
+    values: list[float],
+    actual_chans: list[int],
     expected_chans: NDArray[np.int_],
-) -> List[float]:
+) -> list[float]:
     """Pad a per-coarse-channel list to match all expected metafits channels.
 
     Creates a list of length ``len(expected_chans)`` initialised to NaN, then
@@ -946,7 +944,7 @@ def pad_gains_to_full_coarse(
         missing channels.
     """
     n_expected = len(expected_chans)
-    padded: List[float] = [np.nan] * n_expected
+    padded: list[float] = [np.nan] * n_expected
     for i, chan_idx in enumerate(actual_chans):
         positions = np.where(expected_chans == chan_idx)[0]
         if len(positions) == 1:
@@ -956,7 +954,7 @@ def pad_gains_to_full_coarse(
 
 def pad_gain_fit_info(
     gain_fit: GainFitInfo,
-    actual_coarse_chans: List[int],
+    actual_coarse_chans: list[int],
     expected_coarse_chans: NDArray[np.int_],
 ) -> GainFitInfo:
     """Return a new GainFitInfo with all per-channel arrays padded to the full metafits channel set.
@@ -1366,7 +1364,7 @@ def debug_phase_fits(
     title: str = "",
     plot_residual: bool = False,
     residual_vmax=None,
-) -> Optional[pd.DataFrame]:
+) -> pd.DataFrame | None:
     """Generate debug plots and analysis for phase fits.
 
     Produces plots and TSV files for phase fit intercepts, residuals, and RX lengths,
@@ -1621,7 +1619,7 @@ def plot_phase_intercepts(prefix, show, title, flavor_fits):
         row="flavor",
         col="pol",
         hue="flavor",
-        subplot_kws=dict(projection="polar"),
+        subplot_kws={"projection": "polar"},
         sharex=False,
         sharey=False,
         despine=False,
@@ -1760,7 +1758,7 @@ def pivot_phase_fits(
     phase_fits = pd.merge(phase_fits, tiles, left_on="tile_id", right_on="id")
     phase_fits.drop("id", axis=1, inplace=True)
     tile_columns = ["soln_idx", "name", "tile_id", "rx", "slot", "flavor"]
-    tile_columns += [*(set(tiles.columns) - set(tile_columns) - set(["id"]))]
+    tile_columns += [*(set(tiles.columns) - set(tile_columns) - {"id"})]
     fit_columns = [column for column in phase_fits.columns if column not in tile_columns]
     fit_columns.sort()
     phase_fits = pd.concat([phase_fits[tile_columns], phase_fits[fit_columns]], axis=1)
@@ -1780,7 +1778,7 @@ def get_convergence_summary(solutions_fits_file: str):
     results = soln.results
     converged_channel_indices = np.where(~np.isnan(results))
     summary = []
-    summary.append(results)
+    summary.append(converged_channel_indices)
     summary.append(("Total number of channels", len(results)))
     summary.append(
         (
@@ -1808,7 +1806,7 @@ def generate_hyperdrive_plots(
     hyperdrive_solution_filename: str,
     hyperdrive_binary_path: str,
     metafits_filename: str,
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """Generate solution plots.
 
     Args:
@@ -1846,7 +1844,7 @@ def write_hyperdrive_stats(
     obs_id: int,
     stats_filename: str,
     hyperdrive_solution_filename: str,
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """Write convergence statistics.
 
     Args:
@@ -1863,8 +1861,7 @@ def write_hyperdrive_stats(
         conv_summary_list = get_convergence_summary(hyperdrive_solution_filename)
 
         with open(stats_filename, "w", encoding="UTF-8") as stats:
-            for row in conv_summary_list:
-                stats.write(f"{row[0]}: {row[1]}\n")
+            stats.writelines(f"{row[0]}: {row[1]}\n" for row in conv_summary_list)
 
         logger.info(f"{obs_id} Finished running hyperdrive stats on {hyperdrive_solution_filename}.")
     except Exception as catch_all_exception:
@@ -2048,7 +2045,7 @@ def run_birli(
 
 
 def run_hyperdrive(
-    input_uvfits_files: List[str],
+    input_uvfits_files: list[str],
     metafits_filename: str,
     job_output_path: str,
     obs_id: int,
@@ -2220,6 +2217,7 @@ def run_hyperdrive_stats(
         # this as a base for other files we work with
         obsid_and_band = os.path.basename(solution_filename).replace("_solutions.fits", "")
 
+        # Do hyperdrive plots now
         (
             plots_success,
             plots_error,
@@ -2536,7 +2534,7 @@ exit $?
     return job_script
 
 
-def submit_sbatch(script_path: str, script: str, obs_id: int, request_ids: list[int]) -> Tuple[bool, Optional[int]]:
+def submit_sbatch(script_path: str, script: str, obs_id: int, request_ids: list[int]) -> tuple[bool, int | None]:
     """Submit an sbatch script to Slurm.
 
     Args:
@@ -2559,7 +2557,7 @@ def submit_sbatch(script_path: str, script: str, obs_id: int, request_ids: list[
         with open(script_filename, "w") as job_script:
             job_script.write(script)
     except Exception:
-        logger.exception(f"{str(obs_id)} failure creating temp sbatch script.")
+        logger.exception(f"{obs_id!s} failure creating temp sbatch script.")
         return (False, None)
 
     # Submit the job
@@ -2855,7 +2853,7 @@ def estimate_birli_output_bytes(
 #     return f"{obsid}_*_{rec_chan_no:03}_calfile.bin"
 
 
-def get_solution_fits_filename(solutions_dir: str, obs_id: int, rec_chan: int) -> Optional[str]:
+def get_solution_fits_filename(solutions_dir: str, obs_id: int, rec_chan: int) -> str | None:
     """Find a hyperdrive solution FITS file for a specific channel.
 
     Searches for solution files in multiple formats:
@@ -2886,7 +2884,7 @@ def get_solution_fits_filename(solutions_dir: str, obs_id: int, rec_chan: int) -
     return None
 
 
-def parse_solution_channels(filename: str) -> Optional[tuple[int, int]]:
+def parse_solution_channels(filename: str) -> tuple[int, int] | None:
     """Parse channel range from a hyperdrive solution filename.
 
     Recognises these filename flavours (with .fits or .bin extension):
@@ -3055,7 +3053,7 @@ def generate_plot_index_file(
 
         index = {
             "version": 2,
-            "generated_at": datetime.datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "generated_at": datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "base_url": plot_front_end_url,
             "path": str(fit_id),
             "files": files,
@@ -3071,7 +3069,7 @@ def generate_plot_index_file(
         return False, {}
 
 
-def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_url: str) -> Optional[dict]:
+def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_url: str) -> dict | None:
     """Builds an index.json file entry dict for a given directory entry.
 
     Inspects the file at ``filename``, extracts metadata (size, modification
@@ -3108,7 +3106,7 @@ def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_
         return None
 
     stat = path.stat()
-    last_modified = datetime.datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+    last_modified = datetime.datetime.fromtimestamp(stat.st_mtime, tz=datetime.UTC)
     mime_type, _ = mimetypes.guess_type(path.name)
 
     is_png = ext == ".png"
@@ -3126,134 +3124,3 @@ def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_
         "description": get_file_description(str(path)),
         **({"image_width": width, "image_height": height} if is_png else {}),
     }
-
-
-def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc: mwalib.MetafitsContext):
-    """Clip hyperdrive calibration solution gains exceeding a threshold.
-
-    Opens a hyperdrive FITS solution file, finds any Jones matrices where at
-    least one complex gain amplitude exceeds the cut_off threshold, sets all
-    four polarisations of those Jones matrices to NaN, and writes the result
-    back to disk.
-
-    Args:
-        hyperdrive_fits_file: Path to the hyperdrive FITS solution file.
-        cut_off: Threshold above which an entire Jones matrix is set to NaN.
-        mc: MetafitsContext used to determine the tileid and name from the
-            antenna indices in the solutions file.
-    """
-
-    HDU = "SOLUTIONS"
-    # Polarisation names indexed by their position in the last axis of the
-    # solutions array: 0=XX, 1=XY, 2=YX, 3=YY
-    POL_NAMES = ["XX", "XY", "YX", "YY"]
-
-    with fits.open(hyperdrive_fits_file, mode="update") as hdul:
-        if HDU not in hdul:
-            raise Exception(f"Warning: No SOLUTIONS HDU found in {hyperdrive_fits_file}")
-
-        logger.info(f"checking solutions file {hyperdrive_fits_file} for gains > {cut_off}")
-
-        # The SOLUTIONS HDU stores each complex gain as two consecutive float64
-        # values (real, imag), so the raw FITS column layout is:
-        #   shape: (time, antenna, chan, 8)  -- 8 floats = 4 pols × (re + im)
-        #
-        # Force native byte order (little-endian on x86): FITS files are
-        # big-endian, and np.view() below requires a native-endian array to
-        # safely reinterpret the memory as complex128.
-        data = np.array(hdul[HDU].data, dtype=np.float64)
-        # shape: (time, antenna, chan, 8)
-
-        # Reinterpret each consecutive pair of float64 (re, im) as one
-        # complex128 value. np.view() does not copy data; it aliases the same
-        # memory with a different dtype, halving the size of the last axis.
-        data_complex = data.view(np.complex128)
-        # shape: (time, antenna, chan, 4)  -- last axis: [XX, XY, YX, YY]
-        #
-        # data_complex and data share the same underlying buffer, so writes to
-        # data_complex are visible through data (and vice versa). This is what
-        # allows us to flag via data_complex and then assign data back to the HDU.
-
-        # Compute the amplitude (absolute value) of every complex gain sample.
-        amp = np.abs(data_complex)
-        # shape: (time, antenna, chan, 4)  -- last axis: [XX, XY, YX, YY]
-
-        # Total counts used in logging below.
-        total_samples = amp.size  # total (time, ant, chan, pol) samples
-        total_jones = amp.shape[0] * amp.shape[1] * amp.shape[2]  # total (time, ant, chan) Jones matrices
-
-        # Boolean mask: True wherever an individual gain amplitude exceeds the
-        # threshold. Kept separate from the Jones-matrix flag below so we can
-        # report how many individual pol samples actually triggered the cutoff.
-        mask = amp > cut_off
-        # shape: (time, antenna, chan, 4)  -- same layout as amp
-
-        # Reduce across the polarisation axis: True for any (time, ant, chan)
-        # where at least one of XX, XY, YX, YY exceeded the threshold.
-        # If any one pol is bad the whole Jones matrix is considered unreliable,
-        # so we flag all four pols together.
-        any_flagged = mask.any(axis=-1)
-        # shape: (time, antenna, chan)  -- pol axis removed; True = entire Jones matrix flagged
-
-        # Set all four polarisations of every flagged Jones matrix to NaN + NaN*j.
-        # Indexing data_complex with a (time, ant, chan) boolean array selects
-        # rows of shape (4,) — one row per flagged Jones matrix — so the single
-        # assignment sets all four pols at once.
-        # Because data_complex is a view of data, this also updates data in-place;
-        # no separate copy-back is needed for the flags.
-        data_complex[any_flagged] = np.nan + 1j * np.nan
-
-        # Count the pol samples that actually exceeded the cutoff (what triggered flagging).
-        exceeded_count = int(mask.sum())
-        # Count how many Jones matrices were flagged, and the resulting NaN pol samples
-        # (always 4× the Jones matrix count since all four pols are set to NaN together).
-        jones_flagged_count = int(any_flagged.sum())
-        nan_pol_count = jones_flagged_count * 4
-
-        logger.debug(
-            f"Gains > {cut_off}:"
-            f" {exceeded_count} / {total_samples} pol samples exceeded cutoff"
-            f" ({100 * exceeded_count / total_samples:.2f}%);"
-            f" {jones_flagged_count} / {total_jones} Jones matrices"
-            f" ({nan_pol_count} / {total_samples} pol samples) set to NaN"
-            f" ({100 * jones_flagged_count / total_jones:.2f}% of Jones matrices)"
-        )
-
-        if jones_flagged_count > 0:
-            # np.argwhere(any_flagged) returns the indices of every True element.
-            # Each row is one flagged Jones matrix: [time_idx, ant_idx, chan_idx]
-            flagged_indices = np.argwhere(any_flagged)
-            # shape: (jones_flagged_count, 3)  -- columns: [time, antenna, chan]
-
-            # Collapse to unique (antenna, chan) pairs so we log one line per
-            # affected tile+channel rather than one line per time step.
-            # Slice columns 1:3 to get just [ant_idx, chan_idx].
-            unique_ant_chan = np.unique(flagged_indices[:, 1:3], axis=0)
-            # shape: (n_unique_ant_chan, 2)  -- columns: [antenna, chan]
-
-            for ant_idx, chan_idx in unique_ant_chan:
-                # Report the worst (max) amplitude seen across all time steps for
-                # each of the four polarisations at this (antenna, chan) pair.
-                # amp[:, ant_idx, chan_idx, p] selects all time steps for a fixed
-                # (antenna, chan, pol) triple; shape: (n_timesteps,).
-                # All four pols are shown regardless of which one(s) triggered the
-                # cutoff, since the entire Jones matrix has been set to NaN.
-                pol_details = ", ".join(
-                    f"{POL_NAMES[p]}(Gain={amp[:, ant_idx, chan_idx, p].max():.4f})" for p in range(4)
-                )
-
-                logger.debug(
-                    f"  antenna_idx={ant_idx}"
-                    f" [TileId: {mc.antennas[ant_idx].tile_id}"
-                    f" Name: {mc.antennas[ant_idx].tile_name}],"
-                    f" chan_idx={chan_idx}: all pols set to NaN: {pol_details}"
-                )
-
-        # Write the modified float64 array (which contains the NaN-flagged
-        # complex pairs) back to the HDU and flush to disk.
-        # Note: we assign `data` (the float64 view) rather than `data_complex`
-        # because that is the shape the HDU originally held.
-        hdul[HDU].data = data
-        hdul.flush()
-
-        logger.info(f"finished rewriting solutions file {hyperdrive_fits_file}")
