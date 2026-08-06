@@ -42,14 +42,21 @@ import argparse
 import numpy as np
 from astropy.io import fits
 
-from mwax_mover.mwax_calvin_quality import CalSolutionQuality, compute_bad_gains, plot_bad_gains, tile_flag_reason
+from mwax_mover.mwax_calvin_quality import (
+    CalSolutionQuality,
+    compute_bad_gains,
+    plot_bad_gains,
+    tile_flag_reason,
+)
 
 # ---------------------------------------------------------------------------
 # Console summary table
 # ---------------------------------------------------------------------------
 
 
-def build_tile_summary_table(quality: CalSolutionQuality, original_bad: np.ndarray) -> list[dict]:
+def build_tile_summary_table(
+    quality: CalSolutionQuality, original_bad: np.ndarray
+) -> list[dict]:
     """Build a per-tile summary for console display.
 
     A tile is only reported as fully flagged (with a reason string) if
@@ -212,7 +219,9 @@ def main() -> None:
     """Command-line entry point: parses sys.argv and runs the cleaning/plot
     pipeline, or dumps raw per-tile values if --dump-tile is given.
     """
-    parser = argparse.ArgumentParser(description="Flag and clean bad gains in a hyperdrive solutions file.")
+    parser = argparse.ArgumentParser(
+        description="Flag and clean bad gains in a hyperdrive solutions file."
+    )
     parser.add_argument("solutions_path", help="Path to hyperdrive solutions FITS file")
     parser.add_argument(
         "--poly-degree",
@@ -249,11 +258,13 @@ def main() -> None:
         dump_tile_raw_values(args.solutions_path, args.dump_tile)
         return
 
-    (quality, bad_mask, new_flags, band, fit, original_gains, original_bad) = compute_bad_gains(
-        solutions_path=args.solutions_path,
-        poly_degree=args.poly_degree,
-        residual_threshold=args.residual_threshold,
-        modify_gains=False,
+    (quality, bad_mask, new_flags, band, fit, original_gains, original_bad) = (
+        compute_bad_gains(
+            solutions_path=args.solutions_path,
+            poly_degree=args.poly_degree,
+            residual_threshold=args.residual_threshold,
+            modify_gains=False,
+        )
     )
 
     plot_bad_gains(

@@ -58,9 +58,13 @@ def copy_file_rsync(
 
     if return_val:
         try:
-            file_size = os.path.getsize(os.path.join(destination_dir, os.path.basename(source_filename)))
+            file_size = os.path.getsize(
+                os.path.join(destination_dir, os.path.basename(source_filename))
+            )
         except Exception:
-            logger.exception(f"{source_filename}: Error determining destination file size.")
+            logger.exception(
+                f"{source_filename}: Error determining destination file size."
+            )
             return False
 
         elapsed = time.time() - start_time
@@ -166,7 +170,9 @@ def archive_file_xrootd(
             )
             return True
         else:
-            logger.error(f"{full_filename}: archive_file_xrootd rename failed. Error {stdout}")
+            logger.error(
+                f"{full_filename}: archive_file_xrootd rename failed. Error {stdout}"
+            )
             return False
     else:
         logger.error(f"{full_filename}: archive_file_xrootd failed. Error {stdout}")
@@ -220,7 +226,9 @@ def archive_file_rclone(
         endpoint_url = random.choice(endpoints)
 
         # rclone will create bucket if required
-        logger.debug(f"{full_filename}: attempting upload to {rclone_profile} {endpoint_url} bucket {bucket_name}...")
+        logger.debug(
+            f"{full_filename}: attempting upload to {rclone_profile} {endpoint_url} bucket {bucket_name}..."
+        )
 
         # Do upload
         #
@@ -418,7 +426,9 @@ def archive_file_rclone_haproxy(
             f" {full_filename} {rclone_profile}:/{bucket_name}/{filename}"
         )
 
-        return_val, stdout = run_command_ext(cmdline, None, subprocess_timeout_secs, False)
+        return_val, stdout = run_command_ext(
+            cmdline, None, subprocess_timeout_secs, False
+        )
 
         if return_val:
             elapsed = time.time() - start_time
@@ -426,7 +436,9 @@ def archive_file_rclone_haproxy(
             # Wait before checking to allow for VSS replication lag. HAProxy may
             # route copyto and check to different VSS nodes, and the file may not
             # yet be visible on all nodes immediately after the upload completes.
-            logger.debug(f"{full_filename}: Waiting {rclone_check_wait_secs} seconds before running rclone check.")
+            logger.debug(
+                f"{full_filename}: Waiting {rclone_check_wait_secs} seconds before running rclone check."
+            )
             time.sleep(rclone_check_wait_secs)
 
             # Verify the file at the remote, retrying a few times to allow for
@@ -451,7 +463,9 @@ def archive_file_rclone_haproxy(
                     f" of {_RCLONE_CHECK_RETRIES} against {rclone_profile}"
                     f" bucket {bucket_name} via HAProxy..."
                 )
-                return_val, stdout = run_command_ext(cmdline, None, subprocess_timeout_secs, False)
+                return_val, stdout = run_command_ext(
+                    cmdline, None, subprocess_timeout_secs, False
+                )
 
                 if not return_val and check_attempt < _RCLONE_CHECK_RETRIES:
                     logger.warning(
@@ -486,7 +500,9 @@ def archive_file_rclone_haproxy(
             return False
 
     except Exception:
-        logger.exception(f"{full_filename}: Error uploading to bucket {bucket_name} via rclone_haproxy.")
+        logger.exception(
+            f"{full_filename}: Error uploading to bucket {bucket_name} via rclone_haproxy."
+        )
         return False
 
 

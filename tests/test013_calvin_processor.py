@@ -57,7 +57,10 @@ def test_mwax_calvin_processor():
 
     assert mcal.job_input_path == os.path.join(base_dir, "data/calvin/in_jobs")
     assert mcal.job_output_path == os.path.join(base_dir, "data/calvin/out_jobs")
-    assert mcal.source_list_filename == "../srclists/srclist_pumav3_EoR0aegean_fixedEoR1pietro+ForA_phase1+2.txt"
+    assert (
+        mcal.source_list_filename
+        == "../srclists/srclist_pumav3_EoR0aegean_fixedEoR1pietro+ForA_phase1+2.txt"
+    )
     assert mcal.source_list_type == "rts"
     assert mcal.hyperdrive_binary_path == "../mwa_hyperdrive/target/release/hyperdrive"
     assert mcal.hyperdrive_timeout == 7200
@@ -123,7 +126,10 @@ def test_mwax_calvin_processor_no_gains_cutoff():
 
     assert mcal.job_input_path == os.path.join(base_dir, "data/calvin/in_jobs")
     assert mcal.job_output_path == os.path.join(base_dir, "data/calvin/out_jobs")
-    assert mcal.source_list_filename == "../srclists/srclist_pumav3_EoR0aegean_fixedEoR1pietro+ForA_phase1+2.txt"
+    assert (
+        mcal.source_list_filename
+        == "../srclists/srclist_pumav3_EoR0aegean_fixedEoR1pietro+ForA_phase1+2.txt"
+    )
     assert mcal.source_list_type == "rts"
     assert mcal.hyperdrive_binary_path == "../mwa_hyperdrive/target/release/hyperdrive"
     assert mcal.hyperdrive_timeout == 7200

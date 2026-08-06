@@ -42,7 +42,9 @@ def test_mwacache_archiver_config_file():
     #
 
     # mwax_mover section
-    assert mcap.metafits_path == "/home/gsleap/mwax_mover_testing/test009/vulcan/metafits"
+    assert (
+        mcap.metafits_path == "/home/gsleap/mwax_mover_testing/test009/vulcan/metafits"
+    )
     assert mcap.archive_to_location == ArchiveLocation.AcaciaMWA
 
     assert mcap.health_multicast_interface_name == "eth2"
@@ -69,7 +71,9 @@ def test_mwacache_archiver_config_file():
     assert mcap.mro_metadatadb_pass == "dummy"
 
     assert len(mcap.watch_dirs) == 3
-    assert mcap.watch_dirs[0] == "/home/gsleap/mwax_mover_testing/test009/volume1/incoming"
+    assert (
+        mcap.watch_dirs[0] == "/home/gsleap/mwax_mover_testing/test009/volume1/incoming"
+    )
 
     # test list of projects
     assert mcap.high_priority_correlator_projectids == ["D0006"]
@@ -90,7 +94,9 @@ def test_mwacache_archiver_metafits_file():
     config_filename = "tests/data/test009/test009.cfg"
 
     # setup data
-    incoming = os.path.join(os.path.join(base_dir, "volume1/incoming"), os.path.basename(TEST_METAFITS))
+    incoming = os.path.join(
+        os.path.join(base_dir, "volume1/incoming"), os.path.basename(TEST_METAFITS)
+    )
     shutil.copyfile(TEST_METAFITS, incoming)
 
     # Override db_handler with a fake one
@@ -100,7 +106,13 @@ def test_mwacache_archiver_metafits_file():
     fake_remote_db_handler = FakeMWAXDBHandler()
     # Add any select results (in order in the code below-or keep commented if none)
     fake_remote_db_handler.select_results = [
-        [{"observation_num": 1122979144, "size": 74880, "checksum": "428e7e38ca40ff9cb473e5d78a0f9879"}],
+        [
+            {
+                "observation_num": 1122979144,
+                "size": 74880,
+                "checksum": "428e7e38ca40ff9cb473e5d78a0f9879",
+            }
+        ],
     ]
 
     # Call to read config <-- this is what we're testing!

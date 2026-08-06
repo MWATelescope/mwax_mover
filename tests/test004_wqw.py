@@ -5,7 +5,10 @@
 import os
 import shutil
 
-from mwax_mover.mwax_watch_queue_worker import MWAXWatchQueueWorker, MWAXPriorityWatchQueueWorker
+from mwax_mover.mwax_watch_queue_worker import (
+    MWAXWatchQueueWorker,
+    MWAXPriorityWatchQueueWorker,
+)
 import time
 import logging
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
@@ -13,7 +16,9 @@ from tests_common import setup_test_directories
 
 # Setup root logger
 handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
+handler.setFormatter(
+    logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s")
+)
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
@@ -33,9 +38,15 @@ def test_wqw():
 
     incoming_dir = os.path.join(base_dir, "visdata/incoming")
 
-    shutil.copyfile(metafits_path, os.path.join(incoming_dir, "1369821482_metafits.fits"))
-    shutil.copyfile(metafits_path, os.path.join(incoming_dir, "1369821616_metafits.fits"))
-    shutil.copyfile(metafits_path, os.path.join(incoming_dir, "1369821736_metafits.fits"))
+    shutil.copyfile(
+        metafits_path, os.path.join(incoming_dir, "1369821482_metafits.fits")
+    )
+    shutil.copyfile(
+        metafits_path, os.path.join(incoming_dir, "1369821616_metafits.fits")
+    )
+    shutil.copyfile(
+        metafits_path, os.path.join(incoming_dir, "1369821736_metafits.fits")
+    )
 
     wqw = MyWatchQueueWorker(
         "test_wqw",
@@ -66,9 +77,15 @@ def test_priority_wqw():
 
     incoming_dir = os.path.join(base_dir, "visdata/incoming")
 
-    shutil.copyfile(metafits_path, os.path.join(incoming_dir, "1451758560_metafits.fits"))
-    shutil.copyfile(metafits_path, os.path.join(incoming_dir, "1451768432_metafits.fits"))
-    shutil.copyfile(metafits_path, os.path.join(incoming_dir, "1451768488_metafits.fits"))
+    shutil.copyfile(
+        metafits_path, os.path.join(incoming_dir, "1451758560_metafits.fits")
+    )
+    shutil.copyfile(
+        metafits_path, os.path.join(incoming_dir, "1451768432_metafits.fits")
+    )
+    shutil.copyfile(
+        metafits_path, os.path.join(incoming_dir, "1451768488_metafits.fits")
+    )
 
     wqw = MyPriorityWatchQueueWorker(
         "test_priority_wqw",

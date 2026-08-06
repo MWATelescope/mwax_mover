@@ -12,7 +12,10 @@ from pathlib import Path
 
 import mwalib
 
-from mwax_mover.mwax_calvin_utils import split_aocal_file_into_coarse_channels, parse_solution_channels
+from mwax_mover.mwax_calvin_utils import (
+    split_aocal_file_into_coarse_channels,
+    parse_solution_channels,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +87,9 @@ def get_obs_metadata(metafits_file: Path, aocal_filename: str) -> tuple[int, lis
     result = parse_solution_channels(aocal_filename)
 
     all_rec_chans = [ch.rec_chan_number for ch in context.metafits_coarse_chans]
-    all_rec_chans_sorted = sorted([ch.rec_chan_number for ch in context.metafits_coarse_chans])
+    all_rec_chans_sorted = sorted(
+        [ch.rec_chan_number for ch in context.metafits_coarse_chans]
+    )
 
     assert all_rec_chans == all_rec_chans_sorted
 

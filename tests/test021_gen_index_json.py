@@ -26,4 +26,6 @@ def test_generate_plot_file():
 
     # check that the number of files == the json number of files!
     files = [f for f in os.scandir(fit_path)]
-    assert len(index["files"]) == len(files) - 1  # minus one due to the index.json we just created!
+    assert (
+        len(index["files"]) == len(files) - 1
+    )  # minus one due to the index.json we just created!

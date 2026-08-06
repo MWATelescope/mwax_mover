@@ -33,7 +33,9 @@ from mwax_mover.utils import ArchiveLocation
 
 # Setup root logger
 handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(message)s"))
+handler.setFormatter(
+    logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(message)s")
+)
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
@@ -120,7 +122,9 @@ class MWACacheArchiveProcessor:
 
         # create a health thread
         logger.info("Starting health_thread...")
-        health_thread = threading.Thread(name="health_thread", target=self.health_handler, daemon=True)
+        health_thread = threading.Thread(
+            name="health_thread", target=self.health_handler, daemon=True
+        )
         health_thread.start()
 
         logger.info("Cleaning up old temp files...")
@@ -137,7 +141,10 @@ class MWACacheArchiveProcessor:
                 # in progress file.
                 min_partial_purge_age_secs = 3600
 
-                if time.time() - os.path.getmtime(partial_file) > min_partial_purge_age_secs:
+                if (
+                    time.time() - os.path.getmtime(partial_file)
+                    > min_partial_purge_age_secs
+                ):
                     logger.warning(
                         f"Partial file {partial_file} is older than"
                         f" {min_partial_purge_age_secs} seconds and will be"
@@ -236,7 +243,9 @@ class MWACacheArchiveProcessor:
                     self.health_multicast_hops,
                 )
             except Exception as catch_all_exception:  # pylint: disable=broad-except
-                logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
+                logger.warning(
+                    f"health_handler: Failed to send health information. {catch_all_exception}"
+                )
 
             # Sleep for a second
             time.sleep(1)
@@ -291,7 +300,9 @@ class MWACacheArchiveProcessor:
             override_remote_db_handler: If present, this will override the default MWAXDBHandler (this is used for testing via tests/tests_fakedb.py FakeMWAXDBHandler). Defaults to None.
         """
         if not os.path.exists(config_filename):
-            print(f"Configuration file location {config_filename} does not exist. Quitting.")
+            print(
+                f"Configuration file location {config_filename} does not exist. Quitting."
+            )
             sys.exit(1)
 
         # Parse config file
@@ -299,13 +310,17 @@ class MWACacheArchiveProcessor:
         config.read_file(open(config_filename, "r", encoding="utf-8"))
 
         # Read log level
-        config_file_log_level: Optional[str] = utils.read_optional_config(config, "mwax mover", "log_level")
+        config_file_log_level: Optional[str] = utils.read_optional_config(
+            config, "mwax mover", "log_level"
+        )
         if config_file_log_level:
             # It's now safe to start logging
             # start logging
             logger.setLevel(config_file_log_level)
 
-        logger.info(f"Starting mwacache_archive_processor processor...v{version.get_mwax_mover_version_string()}")
+        logger.info(
+            f"Starting mwacache_archive_processor processor...v{version.get_mwax_mover_version_string()}"
+        )
 
         logger.info(f"hostname: {self.hostname}")
 
@@ -324,11 +339,17 @@ class MWACacheArchiveProcessor:
         self.metafits_path = utils.read_config(config, "mwax mover", "metafits_path")
 
         if not os.path.exists(self.metafits_path):
-            logger.error(f"Metafits file location  {self.metafits_path} does not exist. Quitting.")
+            logger.error(
+                f"Metafits file location  {self.metafits_path} does not exist. Quitting."
+            )
             sys.exit(1)
 
-        self.archive_to_location = ArchiveLocation(int(utils.read_config(config, "mwax mover", "archive_to_location")))
-        self.concurrent_archive_workers = int(utils.read_config(config, "mwax mover", "concurrent_archive_workers"))
+        self.archive_to_location = ArchiveLocation(
+            int(utils.read_config(config, "mwax mover", "archive_to_location"))
+        )
+        self.concurrent_archive_workers = int(
+            utils.read_config(config, "mwax mover", "concurrent_archive_workers")
+        )
         self.archive_command_timeout_sec = int(
             utils.read_config(
                 config,
@@ -360,16 +381,24 @@ class MWACacheArchiveProcessor:
         )
 
         # health
-        self.health_multicast_ip = utils.read_config(config, "mwax mover", "health_multicast_ip")
-        self.health_multicast_port = int(utils.read_config(config, "mwax mover", "health_multicast_port"))
-        self.health_multicast_hops = int(utils.read_config(config, "mwax mover", "health_multicast_hops"))
+        self.health_multicast_ip = utils.read_config(
+            config, "mwax mover", "health_multicast_ip"
+        )
+        self.health_multicast_port = int(
+            utils.read_config(config, "mwax mover", "health_multicast_port")
+        )
+        self.health_multicast_hops = int(
+            utils.read_config(config, "mwax mover", "health_multicast_hops")
+        )
         self.health_multicast_interface_name = utils.read_config(
             config,
             "mwax mover",
             "health_multicast_interface_name",
         )
         # get this hosts primary network interface ip
-        self.health_multicast_interface_ip = utils.get_ip_address(self.health_multicast_interface_name)
+        self.health_multicast_interface_ip = utils.get_ip_address(
+            self.health_multicast_interface_name
+        )
         logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
 
         # We set different s3 options based on the location
@@ -396,7 +425,9 @@ class MWACacheArchiveProcessor:
 
         # Look for data_path1.. data_pathN
         while config.has_option(self.hostname, f"incoming_path{i}"):
-            new_incoming_path = utils.read_config(config, self.hostname, f"incoming_path{i}")
+            new_incoming_path = utils.read_config(
+                config, self.hostname, f"incoming_path{i}"
+            )
             if not os.path.exists(new_incoming_path):
                 logger.error(
                     f"incoming file location in incoming_path{i} - {new_incoming_path} does not exist. Quitting."
@@ -420,16 +451,24 @@ class MWACacheArchiveProcessor:
         #
         # MRO database - this is one we will update
         #
-        self.mro_metadatadb_host = utils.read_config(config, "mro metadata database", "host")
+        self.mro_metadatadb_host = utils.read_config(
+            config, "mro metadata database", "host"
+        )
 
-        self.mro_metadatadb_db = utils.read_config(config, "mro metadata database", "db")
-        self.mro_metadatadb_user = utils.read_config(config, "mro metadata database", "user")
+        self.mro_metadatadb_db = utils.read_config(
+            config, "mro metadata database", "db"
+        )
+        self.mro_metadatadb_user = utils.read_config(
+            config, "mro metadata database", "user"
+        )
 
         self.mro_metadatadb_pass = utils.read_config(
             config, "mro metadata database", "pass", self.mro_metadatadb_host != "dummy"
         )
 
-        self.mro_metadatadb_port = int(utils.read_config(config, "mro metadata database", "port"))
+        self.mro_metadatadb_port = int(
+            utils.read_config(config, "mro metadata database", "port")
+        )
 
         # Initiate database connection for mro metadata db
         if override_mro_db_handler:
@@ -447,14 +486,25 @@ class MWACacheArchiveProcessor:
         # Remote metadata db is ready only- just used to query file size and
         # date info
         #
-        self.remote_metadatadb_host = utils.read_config(config, "remote metadata database", "host")
-
-        self.remote_metadatadb_db = utils.read_config(config, "remote metadata database", "db")
-        self.remote_metadatadb_user = utils.read_config(config, "remote metadata database", "user")
-        self.remote_metadatadb_pass = utils.read_config(
-            config, "remote metadata database", "pass", self.remote_metadatadb_db != "dummy"
+        self.remote_metadatadb_host = utils.read_config(
+            config, "remote metadata database", "host"
         )
-        self.remote_metadatadb_port = int(utils.read_config(config, "remote metadata database", "port"))
+
+        self.remote_metadatadb_db = utils.read_config(
+            config, "remote metadata database", "db"
+        )
+        self.remote_metadatadb_user = utils.read_config(
+            config, "remote metadata database", "user"
+        )
+        self.remote_metadatadb_pass = utils.read_config(
+            config,
+            "remote metadata database",
+            "pass",
+            self.remote_metadatadb_db != "dummy",
+        )
+        self.remote_metadatadb_port = int(
+            utils.read_config(config, "remote metadata database", "port")
+        )
 
         # Initiate database connection for remote metadata db
         if override_remote_db_handler:
@@ -510,7 +560,9 @@ class MWACacheArchiveProcessor:
             " local disk."
         )
 
-        parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
+        parser.add_argument(
+            "-c", "--cfg", required=True, help="Configuration file location.\n"
+        )
 
         args = vars(parser.parse_args())
 

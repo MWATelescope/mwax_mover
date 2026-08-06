@@ -113,7 +113,10 @@ class CorrelatorMode(Enum):
         Returns:
             True if the mode is NO_CAPTURE or CORR_MODE_CHANGE, False otherwise.
         """
-        return mode_string in [CorrelatorMode.NO_CAPTURE.value, CorrelatorMode.CORR_MODE_CHANGE.value]
+        return mode_string in [
+            CorrelatorMode.NO_CAPTURE.value,
+            CorrelatorMode.CORR_MODE_CHANGE.value,
+        ]
 
     @staticmethod
     def is_correlator(mode_string: str) -> bool:
@@ -166,7 +169,10 @@ class CorrelatorMode(Enum):
         Returns:
             True if the mode is MWAX_BEAMFORMER or MWAX_CORR_BF, False otherwise.
         """
-        return mode_string in [CorrelatorMode.MWAX_BEAMFORMER.value, CorrelatorMode.MWAX_CORR_BF.value]
+        return mode_string in [
+            CorrelatorMode.MWAX_BEAMFORMER.value,
+            CorrelatorMode.MWAX_CORR_BF.value,
+        ]
 
 
 class MWADataFileType(Enum):
@@ -316,7 +322,9 @@ def validate_filename(
 
         if not obs_id_check.isdigit():
             valid = False
-            validation_error = "Filename does not start with a 10 digit observation_id- ignoring"
+            validation_error = (
+                "Filename does not start with a 10 digit observation_id- ignoring"
+            )
         else:
             obs_id = int(obs_id_check)
 
@@ -327,7 +335,10 @@ def validate_filename(
         elif file_ext_part.lower() == ".fits":
             # Could be metafits (e.g. 1316906688_metafits_ppds.fits) or
             # visibilitlies
-            if file_name_part[10:] == "_metafits_ppds" or file_name_part[10:] == "_metafits":
+            if (
+                file_name_part[10:] == "_metafits_ppds"
+                or file_name_part[10:] == "_metafits"
+            ):
                 filetype_id = MWADataFileType.MWA_PPD_FILE.value
             else:
                 filetype_id = MWADataFileType.MWAX_VISIBILITIES.value
@@ -380,7 +391,11 @@ def validate_filename(
         elif filetype_id == MWADataFileType.MWA_PPD_FILE.value:
             # filename format should be obsid_metafits_ppds.fits or
             # obsid_metafits.fits or obsid.metafits
-            if len(file_name_part) != 24 and len(file_name_part) != 19 and len(file_name_part) != 10:
+            if (
+                len(file_name_part) != 24
+                and len(file_name_part) != 19
+                and len(file_name_part) != 10
+            ):
                 valid = False
                 validation_error = (
                     "Filename (excluding extension) is not in the correct"
@@ -438,7 +453,9 @@ def validate_filename(
         # Obtain a lock so we can only do this inside one thread
         with metafits_file_lock:
             if not os.path.exists(metafits_filename):
-                logger.info(f"Metafits file {metafits_filename} not found. Atempting to download it")
+                logger.info(
+                    f"Metafits file {metafits_filename} not found. Atempting to download it"
+                )
                 try:
                     download_metafits_file(obs_id, metafits_path)
                 except requests.RequestException as download_exception:
@@ -450,7 +467,9 @@ def validate_filename(
                     )
 
             if valid:
-                calibrator, project_id, calib_source = get_metafits_values(metafits_filename)
+                calibrator, project_id, calib_source = get_metafits_values(
+                    metafits_filename
+                )
 
                 # if calib_source is SUN then ignore
                 if calib_source.upper() == "SUN":
@@ -668,7 +687,9 @@ def read_config(config: ConfigParser, section: str, key: str, b64encoded=False):
     return value
 
 
-def read_optional_config(config: ConfigParser, section: str, key: str, b64encoded=False) -> str | None:
+def read_optional_config(
+    config: ConfigParser, section: str, key: str, b64encoded=False
+) -> str | None:
     """
     Read an optional string value from a ConfigParser object.
 
@@ -848,7 +869,9 @@ def process_mwax_stats(
     return return_value
 
 
-def load_psrdada_ringbuffer(full_filename: str, ringbuffer_key: str, numa_node, timeout: int) -> bool:
+def load_psrdada_ringbuffer(
+    full_filename: str, ringbuffer_key: str, numa_node, timeout: int
+) -> bool:
     """
     Load a subfile into a PSRDADA ring buffer using ``dada_diskdb``.
 
@@ -882,7 +905,9 @@ def load_psrdada_ringbuffer(full_filename: str, ringbuffer_key: str, numa_node, 
         return_value = True
         stdout = ""
     else:
-        logger.debug(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
+        logger.debug(
+            f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}"
+        )
         return_value, stdout = mwax_command.run_command_ext(cmd, numa_node, timeout)
 
     elapsed = time.time() - start_time
@@ -897,12 +922,16 @@ def load_psrdada_ringbuffer(full_filename: str, ringbuffer_key: str, numa_node, 
             f" {gbps_per_sec:.3f} Gbps)"
         )
     else:
-        logger.error(f"{full_filename} load_psrdada_ringbuffer failed with error {stdout}")
+        logger.error(
+            f"{full_filename} load_psrdada_ringbuffer failed with error {stdout}"
+        )
 
     return return_value
 
 
-def run_mwax_packet_stats(mwax_stats_dir: str, full_filename: str, output_dir: str, numa_node, timeout: int) -> bool:
+def run_mwax_packet_stats(
+    mwax_stats_dir: str, full_filename: str, output_dir: str, numa_node, timeout: int
+) -> bool:
     """
     Run the ``mwax_packet_stats`` Rust binary against a subfile to generate packet statistics.
 
@@ -1011,10 +1040,14 @@ def scan_for_existing_files_and_add_to_priority_queue(
             list_of_vcs_high_priority_projects,
         )
         queue_target.put((priority, MWAXPriorityQueueData(filename)))
-        logger.info(f"{watch_dir}: {os.path.basename(filename)} added to queue with priority {priority}")
+        logger.info(
+            f"{watch_dir}: {os.path.basename(filename)} added to queue with priority {priority}"
+        )
 
 
-def scan_directory(watch_dir: str, pattern: str, recursive: bool, exclude_pattern) -> list:
+def scan_directory(
+    watch_dir: str, pattern: str, recursive: bool, exclude_pattern
+) -> list:
     """
     Scan a directory for files matching a glob pattern and return them as a list.
 
@@ -1034,7 +1067,9 @@ def scan_directory(watch_dir: str, pattern: str, recursive: bool, exclude_patter
     # Just loop through all files and add them to the queue
     if recursive:
         find_pattern = os.path.join(os.path.abspath(watch_dir), "**/*" + pattern)
-        logger.info(f"{watch_dir}: Scanning recursively for files matching {find_pattern}...")
+        logger.info(
+            f"{watch_dir}: Scanning recursively for files matching {find_pattern}..."
+        )
     else:
         find_pattern = os.path.join(os.path.abspath(watch_dir), "*" + pattern)
         logger.info(f"{watch_dir}: Scanning for files matching *{pattern}...")
@@ -1194,7 +1229,9 @@ def do_checksum_md5(full_filename: str, numa_node: int | None, timeout: int) -> 
     size = os.path.getsize(full_filename)
 
     start_time = time.time()
-    return_value, md5output = mwax_command.run_command_ext(cmdline, numa_node, timeout, False)
+    return_value, md5output = mwax_command.run_command_ext(
+        cmdline, numa_node, timeout, False
+    )
     elapsed = time.time() - start_time
 
     size_megabytes = size / (1000 * 1000)
@@ -1215,7 +1252,9 @@ def do_checksum_md5(full_filename: str, numa_node: int | None, timeout: int) -> 
             )
             return checksum
         else:
-            raise Exception(f"Calculated MD5 checksum is not valid: md5 output {md5output}")
+            raise Exception(
+                f"Calculated MD5 checksum is not valid: md5 output {md5output}"
+            )
     else:
         raise Exception(f"md5sum returned an unexpected return code {return_value}")
 
@@ -1280,14 +1319,19 @@ def get_priority(
                 return_priority = 90
         elif val.filetype_id == MWADataFileType.MWA_PPD_FILE.value:
             return_priority = 1
-        elif val.filetype_id == MWADataFileType.VDIF.value or val.filetype_id == MWADataFileType.FILTERBANK.value:
+        elif (
+            val.filetype_id == MWADataFileType.VDIF.value
+            or val.filetype_id == MWADataFileType.FILTERBANK.value
+        ):
             # VDIF and filterbank files are treated as high priority as they are small and quick to archive
             if val.project_id in list_of_vcs_high_priority_projects:
                 return_priority = 5
             else:
                 return_priority = 10
     else:
-        raise Exception(f"File {filename} is not valid! Reason: {val.validation_message}")
+        raise Exception(
+            f"File {filename} is not valid! Reason: {val.validation_message}"
+        )
 
     return return_priority
 
@@ -1628,7 +1672,9 @@ def call_webservice(
             all retries.
     """
 
-    def call_webservice_inner(obs_id: int, url_list: list[str], data) -> requests.Response:
+    def call_webservice_inner(
+        obs_id: int, url_list: list[str], data
+    ) -> requests.Response:
         """Call each url in the list until: a response of
         200 (in which case return the response)
         """
@@ -1641,7 +1687,9 @@ def call_webservice(
             # try next url
             i += 1
 
-            logger.debug(f"{obs_id}: trying with {url} with data ({'' if data is None else data})")
+            logger.debug(
+                f"{obs_id}: trying with {url} with data ({'' if data is None else data})"
+            )
 
             try:
                 response = requests.get(url, data, timeout=timeout)
@@ -1657,7 +1705,9 @@ def call_webservice(
 
                 else:
                     # Non-200 status code- try next url
-                    logger.warning(f"{obs_id}: returned {response.status_code} {response.text} (failure)")
+                    logger.warning(
+                        f"{obs_id}: returned {response.status_code} {response.text} (failure)"
+                    )
 
             except Exception:
                 # Exception raised- try next url
@@ -1665,7 +1715,9 @@ def call_webservice(
 
         # We tried all urls without success- up to tenacity to retry X times now
         logger.error(f"{obs_id}: failed after trying {len(url_list)} urls.")
-        raise requests.RequestException(f"{obs_id}: call_webservice()- failed after trying {len(url_list)} urls.")
+        raise requests.RequestException(
+            f"{obs_id}: call_webservice()- failed after trying {len(url_list)} urls."
+        )
 
     if max_retries <= 0:
         raise ValueError("max_retries must be >=1")
@@ -1705,7 +1757,10 @@ def get_data_files_for_obsid_from_webservice(
     Raises:
         Exception: If the web service cannot be reached after all retries.
     """
-    urls = ["http://mro.mwa128t.org/metadata/data_files", "http://ws.mwatelescope.org/metadata/data_files"]
+    urls = [
+        "http://mro.mwa128t.org/metadata/data_files",
+        "http://ws.mwatelescope.org/metadata/data_files",
+    ]
     data = {"obs_id": obs_id, "terse": False, "all_files": True}
 
     # On failure of all urls and retries it will raise an exception
@@ -1743,7 +1798,10 @@ def get_data_files_with_hostname_for_obsid_from_webservice(
     Raises:
         Exception: If the web service cannot be reached after all retries.
     """
-    urls = ["http://mro.mwa128t.org/metadata/data_files", "http://ws.mwatelescope.org/metadata/data_files"]
+    urls = [
+        "http://mro.mwa128t.org/metadata/data_files",
+        "http://ws.mwatelescope.org/metadata/data_files",
+    ]
     data = {"obs_id": obs_id, "terse": False, "all_files": True}
 
     # On failure of all urls and retries it will raise an exception
@@ -1796,10 +1854,14 @@ def remove_file(filename: str, raise_error: bool) -> bool:
 
     except Exception as delete_exception:  # pylint: disable=broad-except
         if raise_error:
-            logger.error(f"{filename}- Error deleting: {delete_exception}. Retrying up to 3 times.")
+            logger.error(
+                f"{filename}- Error deleting: {delete_exception}. Retrying up to 3 times."
+            )
             raise
         else:
-            logger.warning(f"{filename}- Error deleting: {delete_exception}. File may have been moved or removed.")
+            logger.warning(
+                f"{filename}- Error deleting: {delete_exception}. File may have been moved or removed."
+            )
             return True
 
 
@@ -1891,7 +1953,9 @@ def bytes_to_gigabytes(num_bytes: int) -> float:
     return num_bytes / (1000.0 * 1000.0 * 1000.0)
 
 
-def delete_files_older_than(path: str, older_than_seconds: int, extensions: list[str]) -> list[str]:
+def delete_files_older_than(
+    path: str, older_than_seconds: int, extensions: list[str]
+) -> list[str]:
     """
     Delete files in a directory that are older than a threshold and match given extensions.
 
@@ -1961,7 +2025,9 @@ def delete_files_older_than(path: str, older_than_seconds: int, extensions: list
         if file_age >= older_than_seconds:
             # Attempt deletion
             try:
-                os.remove(entry)  # pathlib's unlink() also works; os.remove is fine for files
+                os.remove(
+                    entry
+                )  # pathlib's unlink() also works; os.remove is fine for files
                 deleted.append(str(entry.resolve()))
             except OSError:
                 # If deletion fails (permissions, locked files), skip silently or log if desired
@@ -2092,7 +2158,9 @@ def copy_subfile_to_disk_dd(
     Returns:
         True if ``dd`` exited successfully, False otherwise.
     """
-    logger.debug(f"{filename}- Copying first {bytes_to_write} bytes of file into {destination_path}")
+    logger.debug(
+        f"{filename}- Copying first {bytes_to_write} bytes of file into {destination_path}"
+    )
 
     command = f"dd if={filename} of={destination_path}/{destination_filename} bs=4M oflag=direct iflag=count_bytes count={bytes_to_write}"
 
@@ -2156,7 +2224,11 @@ def get_gbps(size_gigabytes: float, start_time: float) -> float:
         Throughput in Gbps, or 0.0 if elapsed time is zero.
     """
     elapsed_seconds = time.time() - start_time
-    return gigabytes_to_gigabits(size_gigabytes) / elapsed_seconds if elapsed_seconds > 0 else 0.0
+    return (
+        gigabytes_to_gigabits(size_gigabytes) / elapsed_seconds
+        if elapsed_seconds > 0
+        else 0.0
+    )
 
 
 def run_giant_squid(
@@ -2235,15 +2307,20 @@ def run_giant_squid(
             )
 
         elif (
-            "Your job cannot be submitted as the archive location of the observation is down" in stdout
+            "Your job cannot be submitted as the archive location of the observation is down"
+            in stdout
             or "No obs locations found" in stdout
         ):
             # ASVO outage — raise immediately, caller handles this.
-            raise GiantSquidMWAASVOOutageException("Unable to communicate with MWA ASVO- the archive location is down")
+            raise GiantSquidMWAASVOOutageException(
+                "Unable to communicate with MWA ASVO- the archive location is down"
+            )
 
         elif "outage" in stdout:
             # ASVO outage — raise immediately, caller handles this.
-            raise GiantSquidMWAASVOOutageException("Unable to communicate with MWA ASVO- an outage is in progress")
+            raise GiantSquidMWAASVOOutageException(
+                "Unable to communicate with MWA ASVO- an outage is in progress"
+            )
 
         else:
             # Transient / unknown failure — eligible for retry.
@@ -2251,7 +2328,9 @@ def run_giant_squid(
                 f"run_giant_squid: Error running {cmdline} in {elapsed:.3f} seconds. Error: {stdout}"
             )
 
-    logger.error(f"run_giant_squid: all {max_retries + 1} attempts failed for {cmdline}. Last error: {last_exception}")
+    logger.error(
+        f"run_giant_squid: all {max_retries + 1} attempts failed for {cmdline}. Last error: {last_exception}"
+    )
     raise last_exception  # type: ignore[misc]  # always set if we reach here
 
 
@@ -2289,7 +2368,9 @@ def extract_tar(tar_filename: str, dest_path: str) -> None:
             total = len(members)
             for i, member in enumerate(members, start=1):
                 tf.extract(member, path=dest_path, filter="data")
-                logger.debug(f"Extracted ({i}/{total}): {os.path.join(dest_path, member.name)}")
+                logger.debug(
+                    f"Extracted ({i}/{total}): {os.path.join(dest_path, member.name)}"
+                )
     except tarfile.TarError as e:
         raise RuntimeError(f"Failed to extract {tar_filename}: {e}") from e
 
@@ -2321,7 +2402,9 @@ def parse_rclone_stats(stderr: str) -> dict:
     return last_stats
 
 
-def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 120) -> tuple[int, int]:
+def rclone_move(
+    path: str, profile: str, bucket: str, min_file_age_secs: int = 120
+) -> tuple[int, int]:
     """Run rclone move for files in a directory to the S3 destination.
 
     Uses --min-age to skip files that are too new, and --no-traverse for
@@ -2378,7 +2461,9 @@ def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 1
         logger.exception("Error getting stats from rclone. Skipping.")
 
     if result.returncode != 0:
-        raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
+        raise subprocess.CalledProcessError(
+            result.returncode, cmd, output=result.stdout, stderr=result.stderr
+        )
 
     if result.stdout:
         logger.debug(f"rclone stdout: {result.stdout.strip()}")
@@ -2515,7 +2600,12 @@ def rclone_delete_file(rclone_profile: str, bucket: str, filename: str) -> None:
         FileNotFoundError: If the rclone binary is not found on PATH.
     """
     remote_path = f"{rclone_profile}:{bucket}/{filename}"
-    result = subprocess.run(["rclone", "deletefile", remote_path], capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        ["rclone", "deletefile", remote_path],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     if result.returncode != 0:
         raise subprocess.CalledProcessError(
             result.returncode,
@@ -2525,7 +2615,9 @@ def rclone_delete_file(rclone_profile: str, bucket: str, filename: str) -> None:
         )
 
 
-def check_remote_file_exists(rclone_profile: str, bucket_name: str, filename: str) -> bool:
+def check_remote_file_exists(
+    rclone_profile: str, bucket_name: str, filename: str
+) -> bool:
     """Check whether a file exists on an rclone remote.
 
     Args:
@@ -2543,7 +2635,9 @@ def check_remote_file_exists(rclone_profile: str, bucket_name: str, filename: st
     """
     remote_path = f"{rclone_profile}:{bucket_name}/{filename}"
 
-    result = subprocess.run(["rclone", "lsf", remote_path], capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        ["rclone", "lsf", remote_path], capture_output=True, text=True, check=False
+    )
 
     if result.returncode == 0:
         return True
@@ -2551,7 +2645,9 @@ def check_remote_file_exists(rclone_profile: str, bucket_name: str, filename: st
         # Exit code 3: directory/file not found
         return False
     else:
-        raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
+        raise subprocess.CalledProcessError(
+            result.returncode, result.args, result.stdout, result.stderr
+        )
 
 
 def extract_filename_from_mwa_asvo_signed_url(url: str) -> str:

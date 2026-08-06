@@ -104,7 +104,9 @@ def set_filterbank_key_value_int(header: bytearray, key: str, value: int) -> byt
         # The value we want to replace will be the next 4 bytes
         if key_bytes in cuml_bytes:
             start_idx = len(cuml_bytes)
-            header[start_idx : start_idx + 4] = value.to_bytes(4, "little", signed=False)
+            header[start_idx : start_idx + 4] = value.to_bytes(
+                4, "little", signed=False
+            )
             return header
 
     raise ValueError(f"Key {key} not found in filterbank file")
@@ -135,7 +137,9 @@ def stitch_filterbank_files(files: List[str], output_dir: str) -> str:
 
     if len(files) == 1:
         # Nothing to stitch but we still need the output_filename to be created, so copy the file
-        logger.debug(f"Only one filterbank file, no stiching needed: copying {files[0]} to {output_filename}")
+        logger.debug(
+            f"Only one filterbank file, no stiching needed: copying {files[0]} to {output_filename}"
+        )
         shutil.copyfile(files[0], output_filename)
         return output_filename
 

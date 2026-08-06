@@ -28,7 +28,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         Parsed argument namespace with attributes:
             nput_dir (Path), output_dir (Path).
     """
-    parser = argparse.ArgumentParser(description=("Combine multiple 8 second VDIF files into a single VDIF and header"))
+    parser = argparse.ArgumentParser(
+        description=(
+            "Combine multiple 8 second VDIF files into a single VDIF and header"
+        )
+    )
 
     parser.add_argument(
         "-m",
@@ -108,7 +112,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # Do the stitching
     for file_list in groups.values():
-        out_vdif, out_hdr = stitch_vdif_files_and_write_hdr(str(args.metafits_file), file_list, args.output_dir)
+        out_vdif, out_hdr = stitch_vdif_files_and_write_hdr(
+            str(args.metafits_file), file_list, args.output_dir
+        )
 
     return 0
 

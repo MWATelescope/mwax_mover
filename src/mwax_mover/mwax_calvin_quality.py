@@ -50,7 +50,9 @@ class CalSolutionQuality:
     n_chanblocks: int
 
 
-def tile_flag_reason(tile: int, quality: CalSolutionQuality, original_bad: np.ndarray) -> str:
+def tile_flag_reason(
+    tile: int, quality: CalSolutionQuality, original_bad: np.ndarray
+) -> str:
     """Describe why a tile has zero good channels prior to polynomial-fit
     clipping.
 
@@ -112,7 +114,9 @@ def load_hyperdrive_solutions(path: str) -> CalSolutionQuality:
         solutions = hdul["SOLUTIONS"].data.astype(np.float64)
         n_timeblocks, n_tiles, n_chanblocks, _ = solutions.shape
         if n_timeblocks > 1:
-            print(f"Note: file has {n_timeblocks} timeblocks; only timeblock 0 is used.")
+            print(
+                f"Note: file has {n_timeblocks} timeblocks; only timeblock 0 is used."
+            )
         solutions = solutions[0]  # (tile, chanblock, 8)
 
         # The 8 floats per (tile, chanblock) are, in order:
@@ -177,7 +181,9 @@ def _tile_names_from_tiles_hdu(hdul: fits.HDUList, n_tiles: int) -> list[str]:
     return [str(tile_names_raw[i]) for i in order]
 
 
-def _tile_flags_from_baselines(baseline_weights: np.ndarray, n_tiles: int) -> np.ndarray:
+def _tile_flags_from_baselines(
+    baseline_weights: np.ndarray, n_tiles: int
+) -> np.ndarray:
     """Infer per-tile flagging from the BASELINES HDU's NaN pattern.
 
     Baselines are ordered ascending: (0,1), (0,2), ..., (0,N-1), (1,2), ...
@@ -294,7 +300,13 @@ def flag_bad_gains(
     quality: CalSolutionQuality,
     poly_degree: int = 2,
     residual_threshold: float = 5.0,
-) -> tuple[np.ndarray, np.ndarray, dict[str, tuple[np.ndarray, np.ndarray]], np.ndarray, dict[str, np.ndarray]]:
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    dict[str, tuple[np.ndarray, np.ndarray]],
+    np.ndarray,
+    dict[str, np.ndarray],
+]:
     """Build boolean 'bad gain' masks combining convergence, tile flags,
     NaN gains, and a per-tile robust polynomial-fit outlier check.
 
@@ -421,7 +433,9 @@ def _grid_shape(n: int) -> tuple[int, int]:
     return rows, cols
 
 
-def _paged_output_path(output_path: str, first_tile_index: int, last_tile_index: int) -> str:
+def _paged_output_path(
+    output_path: str, first_tile_index: int, last_tile_index: int
+) -> str:
     """Build a per-page output filename with a tile-range suffix.
 
     E.g. _paged_output_path("test.png", 0, 63) -> "test_0-63.png"
@@ -500,7 +514,9 @@ def plot_combined(
     n_plotted = len(tile_range)
     n_rows, n_tile_cols = _grid_shape(n_tiles)
     n_cols = n_tile_cols * 2  # two subplots per tile: gx + gy
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 4 * n_rows), dpi=150, squeeze=False)
+    fig, axes = plt.subplots(
+        n_rows, n_cols, figsize=(6 * n_cols, 4 * n_rows), dpi=150, squeeze=False
+    )
 
     for i, tile in enumerate(tile_range):
         row = i // n_tile_cols
@@ -664,7 +680,9 @@ def plot_combined(
             handles.append(h)
             labels.append(l)
     fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.97), ncol=4)
-    obsid_str = f"obsid {quality.obsid}" if quality.obsid is not None else "obsid unknown"
+    obsid_str = (
+        f"obsid {quality.obsid}" if quality.obsid is not None else "obsid unknown"
+    )
     fig.suptitle(
         f"Gain amplitude with fit & MAD band ({obsid_str}, gx & gy, "
         f"tiles {first_tile_index}-{last_tile_index - 1})",
@@ -779,13 +797,17 @@ def plot_bad_gains(
         figures.append(fig)
 
         if output_path is not None:
-            page_path = _paged_output_path(output_path, first_tile_index, last_tile_index)
+            page_path = _paged_output_path(
+                output_path, first_tile_index, last_tile_index
+            )
             fig.savefig(page_path, dpi=150, bbox_inches="tight")
 
     return figures
 
 
-def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc: mwalib.MetafitsContext):
+def clip_hyperdrive_solution_gains(
+    hyperdrive_fits_file: str, cut_off: float, mc: mwalib.MetafitsContext
+):
     """Clip hyperdrive calibration solution gains exceeding a threshold.
 
     Opens a hyperdrive FITS solution file, finds any Jones matrices where at
@@ -807,9 +829,13 @@ def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc
 
     with fits.open(hyperdrive_fits_file, mode="update") as hdul:
         if HDU not in hdul:
-            raise Exception(f"Warning: No SOLUTIONS HDU found in {hyperdrive_fits_file}")
+            raise Exception(
+                f"Warning: No SOLUTIONS HDU found in {hyperdrive_fits_file}"
+            )
 
-        logger.info(f"checking solutions file {hyperdrive_fits_file} for gains > {cut_off}")
+        logger.info(
+            f"checking solutions file {hyperdrive_fits_file} for gains > {cut_off}"
+        )
 
         # The SOLUTIONS HDU stores each complex gain as two consecutive float64
         # values (real, imag), so the raw FITS column layout is:
@@ -837,7 +863,9 @@ def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc
 
         # Total counts used in logging below.
         total_samples = amp.size  # total (time, ant, chan, pol) samples
-        total_jones = amp.shape[0] * amp.shape[1] * amp.shape[2]  # total (time, ant, chan) Jones matrices
+        total_jones = (
+            amp.shape[0] * amp.shape[1] * amp.shape[2]
+        )  # total (time, ant, chan) Jones matrices
 
         # Boolean mask: True wherever an individual gain amplitude exceeds the
         # threshold. Kept separate from the Jones-matrix flag below so we can
@@ -896,7 +924,8 @@ def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc
                 # All four pols are shown regardless of which one(s) triggered the
                 # cutoff, since the entire Jones matrix has been set to NaN.
                 pol_details = ", ".join(
-                    f"{POL_NAMES[p]}(Gain={amp[:, ant_idx, chan_idx, p].max():.4f})" for p in range(4)
+                    f"{POL_NAMES[p]}(Gain={amp[:, ant_idx, chan_idx, p].max():.4f})"
+                    for p in range(4)
                 )
 
                 logger.debug(
@@ -952,16 +981,24 @@ def add_digital_gains_column(
             metafits_context.rf_inputs for the X polarisation.
     """
     # Lookup: tile_id -> digital_gains, X pol only (X and Y are identical).
-    gains_by_tile = {rf.ant: rf.digital_gains for rf in metafits_context.rf_inputs if rf.pol == mwalib.Pol.X}
+    gains_by_tile = {
+        rf.ant: rf.digital_gains
+        for rf in metafits_context.rf_inputs
+        if rf.pol == mwalib.Pol.X
+    }
 
     with fits.open(hyperdrive_solution_filename, mode="update") as hdul:
         tile_hdu = hdul[hdu_name]
         tile_ids = tile_hdu.data[id_col]
 
         try:
-            gains_array = np.array([gains_by_tile[int(tid)] for tid in tile_ids], dtype=np.uint16)
+            gains_array = np.array(
+                [gains_by_tile[int(tid)] for tid in tile_ids], dtype=np.uint16
+            )
         except KeyError as e:
-            raise KeyError(f"Tile ID {e} in HDU '{hdu_name}' not found in metafits rf_inputs for pol='X'") from e
+            raise KeyError(
+                f"Tile ID {e} in HDU '{hdu_name}' not found in metafits rf_inputs for pol='X'"
+            ) from e
 
         n_chans = gains_array.shape[1]
         new_col = fits.Column(
@@ -971,7 +1008,9 @@ def add_digital_gains_column(
             bzero=2**15,  # unsigned-16 convention: signed I + BZERO offset
         )
 
-        new_hdu = fits.BinTableHDU.from_columns(tile_hdu.columns + new_col, header=tile_hdu.header)
+        new_hdu = fits.BinTableHDU.from_columns(
+            tile_hdu.columns + new_col, header=tile_hdu.header
+        )
         new_hdu.name = hdu_name
 
         hdul[hdul.index_of(hdu_name)] = new_hdu

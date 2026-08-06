@@ -25,7 +25,9 @@ class VDIFHeader:
         mode, instrument, and data format specifications.
         """
         self.VDIF_HDR_VERSION: str = "0.2"
-        self.MWA_CAPTURE_VERSION: str = mwax_mover.version.get_mwax_mover_version_string()
+        self.MWA_CAPTURE_VERSION: str = (
+            mwax_mover.version.get_mwax_mover_version_string()
+        )
         self.MWA_SAMPLE_VERSION: str = "0.1"
         self.TELESCOPE: str = "MWA"
         self.MODE: str = "MWAX_BEAMFORMER"
@@ -63,10 +65,14 @@ class VDIFHeader:
         self.mjd_epoch = mc.sched_start_mjd
         self.sec_offset = 0
 
-        self.source = mc.obs_name  # might get overridden by metafits so this is the default
+        self.source = (
+            mc.obs_name
+        )  # might get overridden by metafits so this is the default
         self.ra = str(0)  # might get overridden by metafits so this is the default
         self.dec = str(0)  # might get overridden by metafits so this is the default
-        self.tsamp = 1.0 / 1280000  # might get overridden by metafits so this is the default
+        self.tsamp = (
+            1.0 / 1280000
+        )  # might get overridden by metafits so this is the default
 
         if mc.metafits_voltage_beams:
             voltage_beam = mc.metafits_voltage_beams[beam_no]
@@ -184,7 +190,9 @@ def get_stitched_filename(filename: str) -> str:
     return os.path.join(file_path, f"{obsid}_ch{chan:03d}_beam{beam:02d}.vdif")
 
 
-def stitch_vdif_files_and_write_hdr(metafits_filename: str, files: List[str], output_dir: str) -> tuple[str, str]:
+def stitch_vdif_files_and_write_hdr(
+    metafits_filename: str, files: List[str], output_dir: str
+) -> tuple[str, str]:
     """Concatenate VDIF files and generate a header file with beam metadata.
 
     Combines per-subobservation VDIF files produced by the MWAX beamformer
@@ -206,12 +214,16 @@ def stitch_vdif_files_and_write_hdr(metafits_filename: str, files: List[str], ou
         raise Exception("No VDIF files to stitch")
 
     output_vdif_filename: str = get_stitched_filename(files[0])
-    output_vdif_filename = os.path.join(output_dir, os.path.basename(output_vdif_filename))
+    output_vdif_filename = os.path.join(
+        output_dir, os.path.basename(output_vdif_filename)
+    )
     output_hdr_filename: str = output_vdif_filename.replace(".vdif", ".hdr")
 
     if len(files) == 1:
         # Nothing to stitch- but we still need the output_vdif_filename to be created, so copy the file
-        logger.debug(f"Only one VDIF file, no stiching needed: copying {files[0]} to {output_vdif_filename}")
+        logger.debug(
+            f"Only one VDIF file, no stiching needed: copying {files[0]} to {output_vdif_filename}"
+        )
         shutil.copyfile(files[0], output_vdif_filename)
     else:
         # The filenames will ensure a good sort order

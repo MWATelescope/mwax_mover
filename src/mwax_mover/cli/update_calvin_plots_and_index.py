@@ -5,7 +5,10 @@ from pathlib import Path
 import os
 import argparse
 import sys
-from mwax_mover.mwax_calvin_utils import generate_hyperdrive_plots, populate_index_json_entry
+from mwax_mover.mwax_calvin_utils import (
+    generate_hyperdrive_plots,
+    populate_index_json_entry,
+)
 import json
 from datetime import datetime, timezone
 
@@ -37,7 +40,9 @@ def download_plot_index_file(fit_id: int, solution_directory: str) -> None:
     output_path.write_bytes(response.content)
 
 
-def update_plot_index_file_entry(solution_directory: str, filename: str, fit_id: int, plot_front_end_url: str) -> None:
+def update_plot_index_file_entry(
+    solution_directory: str, filename: str, fit_id: int, plot_front_end_url: str
+) -> None:
     """Updates metadata fields for a named entry in a solution directory's index.json.
 
     Reads the index.json file from the given solution directory, locates the entry
@@ -178,16 +183,24 @@ def main() -> None:
         if args.base_upload_dir is not None:
             base_upload_dir: str = args.base_upload_dir
         else:
-            print("When --dry-run is not passed, you must provide a --base-upload-dir value.")
+            print(
+                "When --dry-run is not passed, you must provide a --base-upload-dir value."
+            )
             exit(1)
 
     hyperdrive_binary_path: str = args.hyperdrive_binary_path
     if not os.path.exists(hyperdrive_binary_path):
-        print(f"hyperdrive binary path: {hyperdrive_binary_path} does not exist. Exiting")
+        print(
+            f"hyperdrive binary path: {hyperdrive_binary_path} does not exist. Exiting"
+        )
         sys.exit(1)
 
     metafits_filename = ""
-    possible_metafits_filenames = [f"{obs_id}_metafits.fits", f"{obs_id}.metafits", f"{obs_id}_metafits_ppds.fits"]
+    possible_metafits_filenames = [
+        f"{obs_id}_metafits.fits",
+        f"{obs_id}.metafits",
+        f"{obs_id}_metafits_ppds.fits",
+    ]
 
     for mf in possible_metafits_filenames:
         temp_filename = os.path.join(solution_dir, mf)
@@ -212,10 +225,14 @@ def main() -> None:
                 print(f"Fit id {fit_id} not found in S3")
                 exit(1)
             else:
-                print(f"HTTP error when downloading the index.json file: {resp.status_code}")
+                print(
+                    f"HTTP error when downloading the index.json file: {resp.status_code}"
+                )
                 exit(1)
         else:
-            print(f"HTTP error when downloading the index.json file: no response received {str(httpe)}")
+            print(
+                f"HTTP error when downloading the index.json file: no response received {str(httpe)}"
+            )
     except Exception as e:
         print(f"Error downloading plot file: {e}")
         exit(1)
@@ -229,7 +246,9 @@ def main() -> None:
     # Regenerate the plots for each solutions file
     for file in solution_files:
         print(f"Generating new plots for {file} in index.json")
-        success, error_message = generate_hyperdrive_plots(obs_id, file, hyperdrive_binary_path, metafits_filename)
+        success, error_message = generate_hyperdrive_plots(
+            obs_id, file, hyperdrive_binary_path, metafits_filename
+        )
 
         # Exit early on failure
         if not success:
@@ -240,7 +259,9 @@ def main() -> None:
     png_files = glob.glob(os.path.join(solution_dir, "*.png"))
     for png in png_files:
         print(f"Updating {png} in index.json")
-        update_plot_index_file_entry(solution_dir, os.path.basename(png), fit_id, plot_front_end_url)
+        update_plot_index_file_entry(
+            solution_dir, os.path.basename(png), fit_id, plot_front_end_url
+        )
         files_to_upload.append(png)
 
     files_to_upload.append(os.path.join(solution_dir, "index.json"))
@@ -265,7 +286,9 @@ def main() -> None:
             print(f"Error moving files to upload dir {upload_dir}: {str(e)}")
             exit(1)
     else:
-        print(f"Not uploading files: {files_to_upload} to S3 (bucket={fit_id}) as dry-run = true.")
+        print(
+            f"Not uploading files: {files_to_upload} to S3 (bucket={fit_id}) as dry-run = true."
+        )
 
     print("Completed successfully")
 

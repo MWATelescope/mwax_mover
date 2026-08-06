@@ -6,6 +6,8 @@
 * calvin_processor: read gain outlier config params from config file.
 * calvin_processor: add digital gains to each tile in the TILE HDU of the hyperdrive solutions file(s) (for the beamformer).
 * calvin_processor: upload new gain outlier plots and the actual solutions to s3.
+* Fixed formatting in many files (ruff).
+* Fixed broken tests.
 
 # 1.7.30 5-Aug-2026
 

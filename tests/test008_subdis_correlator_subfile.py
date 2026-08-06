@@ -32,7 +32,9 @@ def test_correlator_config_file():
     # e.g. fake_db_handler.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
 
     # Call to read config <-- this is what we're testing!
-    sd.initialise(TEST_CONFIG_FILE, MWAXSubfileDistirbutorMode.CORRELATOR, fake_db_handler)
+    sd.initialise(
+        TEST_CONFIG_FILE, MWAXSubfileDistirbutorMode.CORRELATOR, fake_db_handler
+    )
 
     #
     # Now confirm the params all match the config file
@@ -46,7 +48,9 @@ def test_correlator_config_file():
     assert sd.cfg_subfile_incoming_path == os.path.join(base_dir, "dev/shm/mwax")
     assert sd.cfg_voltdata_incoming_path == os.path.join(base_dir, "voltdata/incoming")
     assert sd.cfg_voltdata_outgoing_path == os.path.join(base_dir, "voltdata/outgoing")
-    assert sd.cfg_voltdata_dont_archive_path == os.path.join(base_dir, "voltdata/dont_archive")
+    assert sd.cfg_voltdata_dont_archive_path == os.path.join(
+        base_dir, "voltdata/dont_archive"
+    )
     assert sd.cfg_always_keep_subfiles == 0
     assert sd.cfg_archive_command_timeout_sec == 300
     assert sd.cfg_psrdada_timeout_sec == 32
@@ -55,15 +59,27 @@ def test_correlator_config_file():
 
     # correlator section
     assert sd.cfg_corr_input_ringbuffer_key == "0x1234"
-    assert sd.cfg_corr_visdata_incoming_path == os.path.join(base_dir, "visdata/incoming")
-    assert sd.cfg_corr_visdata_dont_archive_path == os.path.join(base_dir, "visdata/dont_archive")
-    assert sd.cfg_corr_visdata_processing_stats_path == os.path.join(base_dir, "visdata/processing_stats")
-    assert sd.cfg_corr_visdata_outgoing_path == os.path.join(base_dir, "visdata/outgoing")
+    assert sd.cfg_corr_visdata_incoming_path == os.path.join(
+        base_dir, "visdata/incoming"
+    )
+    assert sd.cfg_corr_visdata_dont_archive_path == os.path.join(
+        base_dir, "visdata/dont_archive"
+    )
+    assert sd.cfg_corr_visdata_processing_stats_path == os.path.join(
+        base_dir, "visdata/processing_stats"
+    )
+    assert sd.cfg_corr_visdata_outgoing_path == os.path.join(
+        base_dir, "visdata/outgoing"
+    )
     assert sd.cfg_corr_mwax_stats_binary_dir == "../mwax_stats/target/release"
 
-    assert sd.cfg_corr_mwax_stats_dump_dir == os.path.join(base_dir, "vulcan/mwax_stats_dump")
+    assert sd.cfg_corr_mwax_stats_dump_dir == os.path.join(
+        base_dir, "vulcan/mwax_stats_dump"
+    )
     assert sd.cfg_corr_mwax_stats_timeout_sec == 600
-    assert sd.cfg_corr_calibrator_outgoing_path == os.path.join(base_dir, "visdata/cal_outgoing")
+    assert sd.cfg_corr_calibrator_outgoing_path == os.path.join(
+        base_dir, "visdata/cal_outgoing"
+    )
     assert sd.cfg_corr_metafits_path == os.path.join(base_dir, "vulcan/metafits")
     assert sd.cfg_corr_high_priority_correlator_projectids == ["D0006"]
     assert not sd.cfg_corr_high_priority_vcs_projectids
@@ -102,7 +118,13 @@ def test_process_correlator_subfile():
     shutil.copyfile(TEST_METAFITS, metafits)
 
     create_observation_subfiles(
-        1369821496, 3, "MWAX_CORRELATOR", 109, 0, os.path.join(base_dir, "tmp"), sd.cfg_subfile_incoming_path
+        1369821496,
+        3,
+        "MWAX_CORRELATOR",
+        109,
+        0,
+        os.path.join(base_dir, "tmp"),
+        sd.cfg_subfile_incoming_path,
     )
 
     # start processor

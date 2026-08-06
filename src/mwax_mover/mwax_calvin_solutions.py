@@ -80,7 +80,9 @@ def process_solutions(
 
         logger.debug(f"{input_data_path} - {metafits_file=}")
 
-        fits_solution_files = get_sorted_solution_files(output_data_path, obs_id, "fits")
+        fits_solution_files = get_sorted_solution_files(
+            output_data_path, obs_id, "fits"
+        )
 
         logger.debug(f"{output_data_path} - reading {fits_solution_files=}")
 
@@ -118,7 +120,9 @@ def process_solutions(
         chanblocks_per_coarse = soln_group.chanblocks_per_coarse
 
         # all_chanblocks_hz = soln_group.all_chanblocks_hz
-        all_chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz).astype(np.float64)
+        all_chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz).astype(
+            np.float64
+        )
 
         # Build the full sorted list of coarse channel indices from the metafits.
         # This is used below to NaN-pad gains for any missing channels.
@@ -134,12 +138,20 @@ def process_solutions(
             )
 
         logger.debug(f"{chanblocks_per_coarse=} fine channels per coarse channel")
-        logger.debug(f"First 32 fine channels: {[f'{x / 1e6:.3f}' for x in all_chanblocks_hz[0:32]]} MHz")
-        logger.debug(f"Last 32 fine channels: {[f'{x / 1e6:.3f}' for x in all_chanblocks_hz[-32:]]} MHz")
-
-        soln_tile_ids, all_xx_solns_noref, all_yy_solns_noref, all_xx_solns, all_yy_solns = soln_group.get_solns_both(
-            refant["name"]
+        logger.debug(
+            f"First 32 fine channels: {[f'{x / 1e6:.3f}' for x in all_chanblocks_hz[0:32]]} MHz"
         )
+        logger.debug(
+            f"Last 32 fine channels: {[f'{x / 1e6:.3f}' for x in all_chanblocks_hz[-32:]]} MHz"
+        )
+
+        (
+            soln_tile_ids,
+            all_xx_solns_noref,
+            all_yy_solns_noref,
+            all_xx_solns,
+            all_yy_solns,
+        ) = soln_group.get_solns_both(refant["name"])
 
         weights = soln_group.weights
 
@@ -232,7 +244,11 @@ def process_solutions(
                     try:
                         x_gains = gain_indexed.loc[(tile_id, "XX")]
                         if len(x_gains.gains) < n_metafits_coarse:
-                            x_gains = pad_gain_fit_info(x_gains, solution_coarse_chans, all_metafits_coarse_chans)
+                            x_gains = pad_gain_fit_info(
+                                x_gains,
+                                solution_coarse_chans,
+                                all_metafits_coarse_chans,
+                            )
                         some_fits = True
                     except KeyError:
                         x_gains = GainFitInfo.nan(n_metafits_coarse)
@@ -240,7 +256,11 @@ def process_solutions(
                     try:
                         y_gains = gain_indexed.loc[(tile_id, "YY")]
                         if len(y_gains.gains) < n_metafits_coarse:
-                            y_gains = pad_gain_fit_info(y_gains, solution_coarse_chans, all_metafits_coarse_chans)
+                            y_gains = pad_gain_fit_info(
+                                y_gains,
+                                solution_coarse_chans,
+                                all_metafits_coarse_chans,
+                            )
                         some_fits = True
                     except KeyError:
                         y_gains = GainFitInfo.nan(n_metafits_coarse)
@@ -271,10 +291,12 @@ def process_solutions(
                         int(fit_id),
                         int(obs_id),
                         int(tile_id),
-                        -1 * x_phase.length,  # legacy calibration pipeline used inverse convention
+                        -1
+                        * x_phase.length,  # legacy calibration pipeline used inverse convention
                         x_phase.intercept,
                         x_gains.gains,
-                        -1 * y_phase.length,  # legacy calibration pipeline used inverse convention
+                        -1
+                        * y_phase.length,  # legacy calibration pipeline used inverse convention
                         y_phase.intercept,
                         y_gains.gains,
                         x_gains.pol1,
@@ -294,10 +316,14 @@ def process_solutions(
                     )
 
                     if not success:
-                        logger.error(f"failed to insert calibration solution for tile {tile_id}")
+                        logger.error(
+                            f"failed to insert calibration solution for tile {tile_id}"
+                        )
                         # This will trigger a rollback of the calibration_fit row and any
                         # calibration_solutions child rows
-                        raise Exception(f"failed to insert calibration solution for tile {tile_id}")
+                        raise Exception(
+                            f"failed to insert calibration solution for tile {tile_id}"
+                        )
 
         return True, "", int(fit_id)
 

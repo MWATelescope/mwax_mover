@@ -80,20 +80,26 @@ def main():
     else:
         print("not applying phase correction")
 
-    for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
+    for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(
+        zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])
+    ):
         tile: Tile = tiles[tiles.id == tile_id].iloc[0]
         for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
             if tile.flavor.endswith("-NI"):
                 solns *= phase_diff
 
             try:
-                fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)
+                fit = fit_phase_line(
+                    chanblocks_hz, solns, weights, niter=phase_fit_niter
+                )
             except Exception as exc:
                 print(f"{tile_id=:4} ({tile.name}) {pol} {exc}")
                 continue
             phase_fits.append([tile_id, soln_idx, pol, *fit])
 
-    phase_fits = pd.DataFrame(phase_fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])
+    phase_fits = pd.DataFrame(
+        phase_fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields]
+    )
 
     if not len(phase_fits):
         return

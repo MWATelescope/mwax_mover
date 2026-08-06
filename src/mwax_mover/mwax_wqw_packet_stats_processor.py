@@ -16,7 +16,12 @@ logger = logging.getLogger(__name__)
 
 
 class PacketStatsProcessor(MWAXWatchQueueWorker):
-    def __init__(self, packet_stats_dump_dir: str, packet_stats_file_ext: str, packet_stats_destination_dir: str):
+    def __init__(
+        self,
+        packet_stats_dump_dir: str,
+        packet_stats_file_ext: str,
+        packet_stats_destination_dir: str,
+    ):
         """Initialize the PacketStatsProcessor.
 
         Args:
@@ -50,13 +55,19 @@ class PacketStatsProcessor(MWAXWatchQueueWorker):
         # The "item" is the full path and filename of a packet stats data file
         # which now needs to be copied to the destination path (e.g. vulcan)
         # and the deleted once successful
-        destination_filename: str = os.path.join(self.packet_stats_destination_dir, os.path.basename(item))
+        destination_filename: str = os.path.join(
+            self.packet_stats_destination_dir, os.path.basename(item)
+        )
 
         try:
-            logger.debug(f"{item}: Attempting to copy local packet stats file {item} to{destination_filename}")
+            logger.debug(
+                f"{item}: Attempting to copy local packet stats file {item} to{destination_filename}"
+            )
             shutil.copy2(item, destination_filename)
 
-            logger.debug(f"{item}: Copy success. Deleting local packet stats file {item}")
+            logger.debug(
+                f"{item}: Copy success. Deleting local packet stats file {item}"
+            )
 
             # Success- now delete the file
             os.remove(item)

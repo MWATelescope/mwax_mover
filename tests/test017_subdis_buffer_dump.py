@@ -32,7 +32,14 @@ def test_corr_buffer_dump():
     dump_end = dump_start + 32
     trigger_id = 123
 
-    file_dict = do_buffer_dump(MWAXSubfileDistirbutorMode.CORRELATOR, obsid, obs_exp, dump_start, dump_end, trigger_id)
+    file_dict = do_buffer_dump(
+        MWAXSubfileDistirbutorMode.CORRELATOR,
+        obsid,
+        obs_exp,
+        dump_start,
+        dump_end,
+        trigger_id,
+    )
 
     expected_dumped_files = (
         int(((dump_end - dump_start) + 8) / 8) - 2
@@ -124,7 +131,10 @@ def do_buffer_dump(
         1,
     )
 
-    assert len(glob.glob(os.path.join(sd.cfg_subfile_incoming_path, "*.sub"))) == expected_subfiles
+    assert (
+        len(glob.glob(os.path.join(sd.cfg_subfile_incoming_path, "*.sub")))
+        == expected_subfiles
+    )
 
     # Start the processor
     thrd.start()
@@ -134,7 +144,9 @@ def do_buffer_dump(
 
     print("Dump triggered!")
     # Now do a buffer dump!
-    dump_success = call_dump_voltages(sd.cfg_webserver_port, dump_start, dump_end, dump_trigger_id)
+    dump_success = call_dump_voltages(
+        sd.cfg_webserver_port, dump_start, dump_end, dump_trigger_id
+    )
 
     assert dump_success
 
@@ -169,7 +181,9 @@ def do_buffer_dump(
         "dev_shm_mwax_free_files": glob.glob(f"{sd.cfg_subfile_incoming_path}/*.free"),
         "dev_shm_mwax_keep_files": glob.glob(f"{sd.cfg_subfile_incoming_path}/*.keep"),
         "dev_shm_mwax_sub_files": glob.glob(f"{sd.cfg_subfile_incoming_path}/*.sub"),
-        "voltdata_dont_archive_sub_files": glob.glob(f"{sd.cfg_voltdata_dont_archive_path}/*.sub"),
+        "voltdata_dont_archive_sub_files": glob.glob(
+            f"{sd.cfg_voltdata_dont_archive_path}/*.sub"
+        ),
     }
 
 

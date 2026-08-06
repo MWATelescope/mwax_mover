@@ -79,7 +79,13 @@ def run_command_ext(
 
         # Execute the command
         completed_process = subprocess.run(
-            args, shell=use_shell, check=False, timeout=timeout, capture_output=True, text=True, env=myenv
+            args,
+            shell=use_shell,
+            check=False,
+            timeout=timeout,
+            capture_output=True,
+            text=True,
+            env=myenv,
         )
 
         return_code = completed_process.returncode
@@ -168,12 +174,19 @@ def run_command_popen(
 
     # Execute the command
     popen_process = subprocess.Popen(
-        args, shell=use_shell, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=myenv
+        args,
+        shell=use_shell,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=myenv,
     )
     return popen_process
 
 
-def check_popen_finished(popen_process, timeout: int = 60) -> typing.Tuple[int, str, str]:
+def check_popen_finished(
+    popen_process, timeout: int = 60
+) -> typing.Tuple[int, str, str]:
     """Wait for a Popen process to finish and return its exit code and output.
 
     Blocks until the process terminates or the timeout is exceeded. On timeout,
@@ -209,6 +222,8 @@ def check_popen_finished(popen_process, timeout: int = 60) -> typing.Tuple[int, 
         )
 
     except Exception as command_exception:
-        logger.error(f"Exception executing {popen_process.args}: {str(command_exception)}")
+        logger.error(
+            f"Exception executing {popen_process.args}: {str(command_exception)}"
+        )
 
     return (exit_code, stdout, stderr)

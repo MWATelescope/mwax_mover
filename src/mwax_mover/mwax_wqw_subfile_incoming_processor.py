@@ -124,7 +124,9 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         """
         success = False
 
-        logger.info(f"{item}: SubfileIncomingProcessor.subfile_handler is handling {item}...")
+        logger.info(
+            f"{item}: SubfileIncomingProcessor.subfile_handler is handling {item}..."
+        )
 
         handler_starttime = time.time()
 
@@ -167,9 +169,13 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         # bigger than the data
         # transfer_size_str = utils.read_subfile_value(item, utils.PSRDADA_TRANSFER_SIZE)
         if subfile_header_values[utils.PSRDADA_TRANSFER_SIZE] is None:
-            raise ValueError(f"Keyword {utils.PSRDADA_TRANSFER_SIZE} not found in {item}")
+            raise ValueError(
+                f"Keyword {utils.PSRDADA_TRANSFER_SIZE} not found in {item}"
+            )
         transfer_size = int(subfile_header_values[utils.PSRDADA_TRANSFER_SIZE])
-        subfile_bytes_to_write = transfer_size + utils.PSRDADA_HEADER_BYTES  # We add the header to the transfer size
+        subfile_bytes_to_write = (
+            transfer_size + utils.PSRDADA_HEADER_BYTES
+        )  # We add the header to the transfer size
 
         # Get Mode
         if subfile_header_values[utils.PSRDADA_MODE] is None:
@@ -180,7 +186,9 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         if self.packet_stats_dump_dir != "":
             # For all subfiles we need to extract the packet stats:
             # Ignore failures
-            utils.run_mwax_packet_stats(self.mwax_stats_binary_dir, item, self.packet_stats_dump_dir, -1, 3)
+            utils.run_mwax_packet_stats(
+                self.mwax_stats_binary_dir, item, self.packet_stats_dump_dir, -1, 3
+            )
 
         try:
             #
@@ -189,7 +197,10 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
             # like a VCS observation
             #
             if (
-                (self.sd_ctx.dump_start_gps is not None and self.sd_ctx.dump_end_gps is not None)
+                (
+                    self.sd_ctx.dump_start_gps is not None
+                    and self.sd_ctx.dump_end_gps is not None
+                )
                 and subobs_id >= self.sd_ctx.dump_start_gps
                 and subobs_id < self.sd_ctx.dump_end_gps
             ):
@@ -213,7 +224,10 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                     logger.info(
                         f"{item}: injecting {utils.PSRDADA_TRIGGER_ID} {self.sd_ctx.dump_trigger_id} into subfile..."
                     )
-                    utils.inject_subfile_header(item, f"{utils.PSRDADA_TRIGGER_ID} {self.sd_ctx.dump_trigger_id}\n")
+                    utils.inject_subfile_header(
+                        item,
+                        f"{utils.PSRDADA_TRIGGER_ID} {self.sd_ctx.dump_trigger_id}\n",
+                    )
 
                 success = utils.copy_subfile_to_disk_dd(
                     item,
@@ -241,7 +255,10 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
 
                 if utils.CorrelatorMode.is_correlator(subfile_mode):
                     # Check if we're in the right mwax_subfile_distributor mode
-                    if self.subfile_dist_mode == utils.MWAXSubfileDistirbutorMode.CORRELATOR:
+                    if (
+                        self.subfile_dist_mode
+                        == utils.MWAXSubfileDistirbutorMode.CORRELATOR
+                    ):
                         # This is a normal MWAX_CORRELATOR obs, continue as normal
                         if self.archive_destination_enabled:
                             self.sd_ctx.pause_archiving(False)
@@ -264,7 +281,10 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
 
                 elif utils.CorrelatorMode.is_vcs(subfile_mode):
                     # Check if we're in the right mwax_subfile_distributor mode
-                    if self.subfile_dist_mode == utils.MWAXSubfileDistirbutorMode.CORRELATOR:
+                    if (
+                        self.subfile_dist_mode
+                        == utils.MWAXSubfileDistirbutorMode.CORRELATOR
+                    ):
                         # Pause archiving so we have the disk to ourselves
                         if self.archive_destination_enabled:
                             self.sd_ctx.pause_archiving(True)
@@ -285,23 +305,34 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                         success = True  # It's True because that signals the caller to keep going and don't retry
 
                 elif utils.CorrelatorMode.is_beamformer(subfile_mode):
-                    if self.subfile_dist_mode == utils.MWAXSubfileDistirbutorMode.BEAMFORMER:
+                    if (
+                        self.subfile_dist_mode
+                        == utils.MWAXSubfileDistirbutorMode.BEAMFORMER
+                    ):
                         # This is a beamformer obs, enable archiving as normal (if configured)
                         if self.archive_destination_enabled:
                             self.sd_ctx.pause_archiving(False)
 
                         # Get number of inputs and coarse channel from header
                         if subfile_header_values[utils.PSRDADA_COARSE_CHANNEL] is None:
-                            raise ValueError(f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {item}")
-                        rec_chan_no = int(subfile_header_values[utils.PSRDADA_COARSE_CHANNEL])
+                            raise ValueError(
+                                f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {item}"
+                            )
+                        rec_chan_no = int(
+                            subfile_header_values[utils.PSRDADA_COARSE_CHANNEL]
+                        )
 
                         # Get cal_obsid from metafits
-                        metafits_filename = os.path.join(self.metafits_path, f"{obs_id}_metafits.fits")
+                        metafits_filename = os.path.join(
+                            self.metafits_path, f"{obs_id}_metafits.fits"
+                        )
                         METAFITS_CALOBSID = "CALOBSID"
                         METAFITS_CALIBDATA_HDU = "CALIBDATA"
                         try:
                             cal_obs_id_str = utils.get_metafits_value_from_hdu(
-                                metafits_filename, METAFITS_CALIBDATA_HDU, METAFITS_CALOBSID
+                                metafits_filename,
+                                METAFITS_CALIBDATA_HDU,
+                                METAFITS_CALOBSID,
                             )
                         except Exception:
                             logger.warning(
@@ -325,9 +356,9 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                         )
                         success = True  # It's True because that signals the caller to keep going and don't retry
 
-                elif utils.CorrelatorMode.is_no_capture(subfile_mode) or utils.CorrelatorMode.is_voltage_buffer(
+                elif utils.CorrelatorMode.is_no_capture(
                     subfile_mode
-                ):
+                ) or utils.CorrelatorMode.is_voltage_buffer(subfile_mode):
                     logger.info(f"{item}: ignoring due to mode: {subfile_mode}")
 
                     #
@@ -350,7 +381,9 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                     success = True
 
                 else:
-                    logger.error(f"{item}: Unknown subfile mode {subfile_mode}, ignoring.")
+                    logger.error(
+                        f"{item}: Unknown subfile mode {subfile_mode}, ignoring."
+                    )
                     success = True
 
                 # There is a semi-rare case where in between the top of this code and now
@@ -409,7 +442,8 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                 # take care of it when it has finished with it
                 if (
                     utils.CorrelatorMode.is_beamformer(subfile_mode)
-                    and self.subfile_dist_mode == utils.MWAXSubfileDistirbutorMode.BEAMFORMER
+                    and self.subfile_dist_mode
+                    == utils.MWAXSubfileDistirbutorMode.BEAMFORMER
                 ):
                     # Don't rename .sub to .free- the beamformer does it
                     pass
@@ -426,7 +460,9 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                             pass
 
                     except Exception as move_exception:  # pylint: disable=broad-except
-                        logger.error(f"{item}: Could not rename {item} back to {free_filename}. Error {move_exception}")
+                        logger.error(
+                            f"{item}: Could not rename {item} back to {free_filename}. Error {move_exception}"
+                        )
                         sys.exit(2)
 
             handler_elapsed = time.time() - handler_starttime
@@ -456,17 +492,23 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         """
 
         # Get the fits solution file too
-        sol_fits_filename = get_solution_fits_filename(self.bf_cal_path, cal_obs_id, rec_chan_no)
+        sol_fits_filename = get_solution_fits_filename(
+            self.bf_cal_path, cal_obs_id, rec_chan_no
+        )
 
         if not sol_fits_filename:
             sol_fits_filename = ""
 
         # Now signal with what we got
         signal_value = {"subfile": item, "calsolfile": sol_fits_filename}
-        logger.info(f"{item}: Signalling beamformer with ({signal_value}) via redis {self.bf_redis_host}...")
+        logger.info(
+            f"{item}: Signalling beamformer with ({signal_value}) via redis {self.bf_redis_host}..."
+        )
         try:
             # Write the signal value- if reader disconnects it will auto-reopen unless timeout is hit
-            utils.push_message_to_redis(self.bf_redis_host, self.bf_redis_queue_key, signal_value)
+            utils.push_message_to_redis(
+                self.bf_redis_host, self.bf_redis_queue_key, signal_value
+            )
             # Success
             logger.info(f"{item}: Signalling beamformer success")
             return True
@@ -493,17 +535,25 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         # Get next keep file off the queue
         keep_filename = self.sd_ctx.dump_keep_file_queue.get()
 
-        logger.info(f"SubfileProcessor.handle_next_keep_file is handling {keep_filename}...")
+        logger.info(
+            f"SubfileProcessor.handle_next_keep_file is handling {keep_filename}..."
+        )
 
         # Read TRANSFER_SIZE from subfile header
         # We only use this when writing a subfile to disk in case the subfile is
         # bigger than the data
-        transfer_size_str = utils.read_subfile_value(keep_filename, utils.PSRDADA_TRANSFER_SIZE)
+        transfer_size_str = utils.read_subfile_value(
+            keep_filename, utils.PSRDADA_TRANSFER_SIZE
+        )
         if transfer_size_str is None:
-            raise ValueError(f"Keyword {utils.PSRDADA_TRANSFER_SIZE} not found in {keep_filename}")
+            raise ValueError(
+                f"Keyword {utils.PSRDADA_TRANSFER_SIZE} not found in {keep_filename}"
+            )
 
         transfer_size = int(transfer_size_str)
-        subfile_bytes_to_write = transfer_size + utils.PSRDADA_HEADER_BYTES  # We add the header to the transfer size
+        subfile_bytes_to_write = (
+            transfer_size + utils.PSRDADA_HEADER_BYTES
+        )  # We add the header to the transfer size
 
         # Copy the .keep file to the voltdata incoming dir
         # and ensure it is named as a ".sub" file
@@ -512,18 +562,24 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
             self.corr_diskdb_numa_node,
             self.voltdata_incoming_path,
             self.copy_subfile_to_disk_timeout_sec,
-            os.path.basename(keep_filename).replace(self.ext_keep_file, self.ext_sub_file),
+            os.path.basename(keep_filename).replace(
+                self.ext_keep_file, self.ext_sub_file
+            ),
             subfile_bytes_to_write,
         )
 
         if copy_success:
             # Rename kept subfile so that mwax_u2s can reuse it
-            free_filename = keep_filename.replace(self.ext_keep_file, self.ext_free_file)
+            free_filename = keep_filename.replace(
+                self.ext_keep_file, self.ext_free_file
+            )
 
             try:
                 shutil.move(keep_filename, free_filename)
             except Exception as move_exception:  # pylint: disable=broad-except
-                logger.error(f"Could not rename {keep_filename} back to {free_filename}. Error {move_exception}")
+                logger.error(
+                    f"Could not rename {keep_filename} back to {free_filename}. Error {move_exception}"
+                )
                 sys.exit(2)
 
         else:
