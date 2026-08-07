@@ -953,10 +953,7 @@ class MWAXCalvinProcessor:
                 # Now add the digital gains to the solution file (for the beamformer to use)
                 add_digital_gains_column(
                     hyperdrive_solution_filename,
-                    "TILES",
                     metafits_context,
-                    "DIGITAL_GAINS",
-                    "Antenna",
                 )
 
                 # Now plot gains within a certain MAD limit

@@ -1007,12 +1007,12 @@ def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc
 
 def add_digital_gains_column(
     hyperdrive_solution_filename: str,
-    hdu_name: str,
     metafits_context: mwalib.MetafitsContext,
-    col_name="DIGITAL_GAINS",
+    hdu_name: str = "TILES",
+    col_name="DigitalGains",
     id_col="Antenna",
 ):
-    """Add a uint16[24] digital-gains column to a FITS binary table HDU.
+    """Add a float32[24] digital-gains column to a FITS binary table HDU.
 
     Builds the 24-element (one per coarse channel) digital gain array for
     each tile/row in the given HDU, sourced from a populated mwalib
@@ -1023,12 +1023,12 @@ def add_digital_gains_column(
 
     Args:
         hyperdrive_solution_filename: Path to the FITS file to modify.
-        hdu_name: Name of the binary table HDU to add the column to
-            (e.g. "TILES").
         metafits_context: A populated mwalib.MetafitsContext instance;
             the caller is responsible for constructing/populating it.
+        hdu_name: Name of the binary table HDU to add the column to
+            (e.g. "TILES").
         col_name: Name of the new FITS column. Defaults to
-            "DIGITAL_GAINS".
+            "DigitalGains".
         id_col: Name of the existing column in the HDU containing
             IDs, used to align rows with metafits rf_inputs.
             Defaults to "Antenna".
@@ -1047,17 +1047,22 @@ def add_digital_gains_column(
         tile_hdu = hdul[hdu_name]
         tile_ids = tile_hdu.data[id_col]
 
+        # Does this column already exist? If so don't do anything but log a warning.
+        if col_name in hdul[hdu_name].columns.names:
+            logger.warning(f"Column '{col_name}' already exists in HDU '{hdu_name}'; skipping addition.")
+            return tile_hdu
+
         try:
-            gains_array = np.array([gains_by_tile[int(tid)] for tid in tile_ids], dtype=np.uint16)
+            gains_array = np.array([gains_by_tile[int(tid)] for tid in tile_ids], dtype=np.float32)
+            print(gains_array)
         except KeyError as e:
             raise KeyError(f"Tile ID {e} in HDU '{hdu_name}' not found in metafits rf_inputs for pol='X'") from e
 
         n_chans = gains_array.shape[1]
         new_col = fits.Column(
             name=col_name,
-            format=f"{n_chans}I",
+            format=f"{n_chans}E",
             array=gains_array,
-            bzero=2**15,  # unsigned-16 convention: signed I + BZERO offset
         )
 
         new_hdu = fits.BinTableHDU.from_columns(tile_hdu.columns + new_col, header=tile_hdu.header)
