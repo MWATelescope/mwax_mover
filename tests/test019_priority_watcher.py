@@ -28,12 +28,12 @@ import subprocess
 import tempfile
 import threading
 import time
-import unittest.mock as mock
+from unittest import mock
 
 import inotify.constants
 import pytest
 
-import mwax_mover.mwax_mover as mwax_mover
+from mwax_mover import mwax_mover
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
 from mwax_mover.mwax_priority_watcher import PriorityWatcher
 

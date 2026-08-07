@@ -1,11 +1,16 @@
 """Functions for checking and modifying hyperdrive calibration solution files."""
 
 import logging
+import shutil
+import sys
+from typing import TextIO
 
 import mwalib
 import numpy as np
 import numpy.typing as npt  # noqa: F401
 from astropy.io import fits
+
+from mwax_mover.mwax_calvin_utils import parse_solution_channels
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +53,11 @@ class CalSolutionQuality:
     obsid: int | None
     n_tiles: int
     n_chanblocks: int
+    first_coarse_channel: int
+    last_coarse_channel: int
 
 
-def tile_flag_reason(
-    tile: int, quality: CalSolutionQuality, original_bad: np.ndarray
-) -> str:
+def tile_flag_reason(tile: int, quality: CalSolutionQuality, original_bad: np.ndarray) -> str:
     """Describe why a tile has zero good channels prior to polynomial-fit
     clipping.
 
@@ -93,7 +98,7 @@ def tile_flag_reason(
 # ---------------------------------------------------------------------------
 
 
-def load_hyperdrive_solutions(path: str) -> CalSolutionQuality:
+def load_hyperdrive_solutions(hyperdrive_solutions_filename: str) -> CalSolutionQuality:
     """Load a hyperdrive calibration solutions FITS file.
 
     Reads the SOLUTIONS, RESULTS, BASELINES, and (if present) TILES HDUs,
@@ -101,7 +106,7 @@ def load_hyperdrive_solutions(path: str) -> CalSolutionQuality:
     https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_hyp.html
 
     Args:
-        path: Path to a hyperdrive `hyp_sols.fits`-style file. Assumed to
+        hyperdrive_solutions_filename: Path to a hyperdrive `hyp_sols.fits`-style file. Assumed to
             contain a single timeblock; if more are present, only
             timeblock 0 is used (with a printed note).
 
@@ -110,13 +115,11 @@ def load_hyperdrive_solutions(path: str) -> CalSolutionQuality:
         matrices, plus convergence, per-tile flagging, and tile name info,
         for timeblock 0.
     """
-    with fits.open(path) as hdul:
+    with fits.open(hyperdrive_solutions_filename) as hdul:
         solutions = hdul["SOLUTIONS"].data.astype(np.float64)
         n_timeblocks, n_tiles, n_chanblocks, _ = solutions.shape
         if n_timeblocks > 1:
-            print(
-                f"Note: file has {n_timeblocks} timeblocks; only timeblock 0 is used."
-            )
+            logger.warning(f"Note: file has {n_timeblocks} timeblocks; only timeblock 0 is used.")
         solutions = solutions[0]  # (tile, chanblock, 8)
 
         # The 8 floats per (tile, chanblock) are, in order:
@@ -142,6 +145,14 @@ def load_hyperdrive_solutions(path: str) -> CalSolutionQuality:
         if "OBSID" in hdul[0].header:
             obsid = int(hdul[0].header["OBSID"])
 
+        solution_file_channels = parse_solution_channels(hyperdrive_solutions_filename)
+
+        if solution_file_channels is not None:
+            (first_coarse_channel, last_coarse_channel) = solution_file_channels
+        else:
+            first_coarse_channel = -1
+            last_coarse_channel = -1
+
     return CalSolutionQuality(
         gains=gains,
         chanblock_converged=chanblock_converged,
@@ -151,6 +162,8 @@ def load_hyperdrive_solutions(path: str) -> CalSolutionQuality:
         obsid=obsid,
         n_tiles=n_tiles,
         n_chanblocks=n_chanblocks,
+        first_coarse_channel=first_coarse_channel,
+        last_coarse_channel=last_coarse_channel,
     )
 
 
@@ -168,7 +181,7 @@ def _tile_names_from_tiles_hdu(hdul: fits.HDUList, n_tiles: int) -> list[str]:
         List of tile names in antenna-index order, length n_tiles.
     """
     if "TILES" not in hdul:
-        print("Note: no TILES HDU found; falling back to generic tile names.")
+        logger.warning("Note: no TILES HDU found; falling back to generic tile names.")
         return [f"Tile{i}" for i in range(n_tiles)]
 
     tiles_table = hdul["TILES"].data
@@ -181,9 +194,7 @@ def _tile_names_from_tiles_hdu(hdul: fits.HDUList, n_tiles: int) -> list[str]:
     return [str(tile_names_raw[i]) for i in order]
 
 
-def _tile_flags_from_baselines(
-    baseline_weights: np.ndarray, n_tiles: int
-) -> np.ndarray:
+def _tile_flags_from_baselines(baseline_weights: np.ndarray, n_tiles: int) -> np.ndarray:
     """Infer per-tile flagging from the BASELINES HDU's NaN pattern.
 
     Baselines are ordered ascending: (0,1), (0,2), ..., (0,N-1), (1,2), ...
@@ -433,9 +444,7 @@ def _grid_shape(n: int) -> tuple[int, int]:
     return rows, cols
 
 
-def _paged_output_path(
-    output_path: str, first_tile_index: int, last_tile_index: int
-) -> str:
+def _paged_output_path(output_path: str, first_tile_index: int, last_tile_index: int) -> str:
     """Build a per-page output filename with a tile-range suffix.
 
     E.g. _paged_output_path("test.png", 0, 63) -> "test_0-63.png"
@@ -462,6 +471,7 @@ def plot_combined(
     first_tile_index: int = 0,
     n_tiles: int = 16,
     display_gains: np.ndarray | None = None,
+    solution_file_will_be_modified: bool = False,
 ) -> plt.Figure:
     """Plot gx and gy gain amplitude in separate subplots per tile, each
     with the polynomial fit line and a shaded +/- MAD-threshold band.
@@ -496,6 +506,7 @@ def plot_combined(
         display_gains: Gains array to compute the plotted amplitudes
             from, shape (tile, chanblock, 2, 2). Defaults to
             quality.gains if not given.
+        solution_file_will_be_modified: If True, a warning is added to the figure title
 
     Returns:
         The matplotlib Figure containing the grid of per-tile subplot pairs.
@@ -514,9 +525,7 @@ def plot_combined(
     n_plotted = len(tile_range)
     n_rows, n_tile_cols = _grid_shape(n_tiles)
     n_cols = n_tile_cols * 2  # two subplots per tile: gx + gy
-    fig, axes = plt.subplots(
-        n_rows, n_cols, figsize=(6 * n_cols, 4 * n_rows), dpi=150, squeeze=False
-    )
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 4 * n_rows), dpi=150, squeeze=False)
 
     for i, tile in enumerate(tile_range):
         row = i // n_tile_cols
@@ -680,12 +689,19 @@ def plot_combined(
             handles.append(h)
             labels.append(l)
     fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.97), ncol=4)
-    obsid_str = (
-        f"obsid {quality.obsid}" if quality.obsid is not None else "obsid unknown"
+    obsid_str = f"obsid {quality.obsid}" if quality.obsid is not None else "obsid unknown"
+    chan_str = (
+        f"channels {quality.first_coarse_channel}-{quality.last_coarse_channel}"
+        if quality.first_coarse_channel >= 0
+        else "All Channels"
+    )
+    modification_str = (
+        "Jones matrices of outlier gains will be NaNed"
+        if solution_file_will_be_modified
+        else "Outlier gains are reported only, solutions file was not modified"
     )
     fig.suptitle(
-        f"Gain amplitude with fit & MAD band ({obsid_str}, gx & gy, "
-        f"tiles {first_tile_index}-{last_tile_index - 1})",
+        f"Gain amplitude with fit & MAD band for {obsid_str} - (channels: {chan_str}; tiles: {first_tile_index}-{last_tile_index - 1}; NO REF TILE). {modification_str}",
         y=0.995,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.90))
@@ -693,7 +709,55 @@ def plot_combined(
     return fig
 
 
-def compute_bad_gains(
+def _write_bad_gains_as_nan(solutions_path: str, bad_mask: np.ndarray) -> str:
+    """Back up a hyperdrive solutions file, then overwrite it with bad
+    entries set to NaN.
+
+    Makes a copy of the original file at `{solutions_path}.original`
+    before modifying anything (overwriting that backup if it already
+    exists, with a printed warning). Then opens the original path in
+    update mode and sets all 4 complex Jones matrix terms (8 underlying
+    floats) to NaN for every (tile, chanblock) flagged in bad_mask.
+
+    Args:
+        solutions_path: Path to the hyperdrive solutions FITS file to
+            back up and overwrite.
+        bad_mask: Boolean mask, shape (tile, chanblock), True where the
+            entry should be set to NaN. Assumes timeblock 0 (the only
+            timeblock this tool supports).
+
+    Returns:
+        The backup file path.
+    """
+    backup_path = f"{solutions_path}".replace(".fits", ".original.fits")
+    if os.path.exists(backup_path):
+        logger.warning(f"Warning: backup {backup_path} already exists and will be overwritten.")
+    shutil.copy2(solutions_path, backup_path)
+    logger.debug(f"Backed up original file to {backup_path}")
+
+    with fits.open(solutions_path, mode="update") as hdul:
+        # Force native byte order: FITS files are big-endian on disk, and
+        # we need a native-endian array to safely write NaN into the
+        # 8-float-per-entry layout without corrupting adjacent bytes.
+        data = np.array(hdul["SOLUTIONS"].data, dtype=np.float64)
+        # shape: (timeblock, tile, chanblock, 8)
+
+        # bad_mask covers timeblock 0 only (the only timeblock this tool
+        # supports). data[0][bad_mask] selects the (n_flagged, 8) rows of
+        # flagged (tile, chanblock) entries; broadcasting np.nan sets all
+        # 8 floats (gx, Dx, Dy, gy re/im) to NaN for each.
+        data[0][bad_mask] = np.nan
+
+        hdul["SOLUTIONS"].data = data
+        hdul.flush()
+
+    n_flagged = int(bad_mask.sum())
+    logger.info(f"Wrote NaN for {n_flagged} flagged (tile, chanblock) entries to {solutions_path}")
+
+    return backup_path
+
+
+def compute_outlier_gains(
     solutions_path: str,
     poly_degree: int = 2,
     residual_threshold: float = 5.0,
@@ -718,20 +782,24 @@ def compute_bad_gains(
         modify_gains: If True, every Jones matrix flagged as bad (per the
             returned bad_mask) has all 4 complex terms (gx, Dx, Dy, gy --
             i.e. all 8 underlying floats) set to NaN in the returned
-            quality.gains array, IN MEMORY ONLY (the FITS file on disk is
-            not touched).
+            quality.gains array (in memory), AND the same NaN-out is
+            written back to the FITS file on disk at solutions_path. The
+            original file is first backed up to
+            "{solutions_path}.original" (overwriting any existing backup
+            at that path, with a printed warning) before the original
+            path is overwritten.
 
     Returns:
-        Returns:
         A tuple (quality, bad_mask, new_flags, band, fit, original_gains,
         original_bad). original_gains is a copy of quality.gains taken
         BEFORE any modify_gains NaN-out is applied -- pass it as
         display_gains to plot_bad_gains if you want plots to show the
-        original values even when modify_gains=True. original_bad is a boolean mask of the
-        entries that were already flagged in the original file (convergence/tile/NaN criteria)
-        before the polynomial-fit check ran, so callers can distinguish
-        "already broken in the original file" from "newly caught by our own outlier detection".
-
+        original values even when modify_gains=True. original_bad is a
+        boolean mask of the entries that were already flagged in the
+        original file (convergence/tile/NaN criteria) before the
+        polynomial-fit check ran, so callers can distinguish "already
+        broken in the original file" from "newly caught by our own
+        outlier detection".
     """
     quality = load_hyperdrive_solutions(solutions_path)
     bad_mask, new_flags, band, original_bad, fit = flag_bad_gains(
@@ -742,11 +810,12 @@ def compute_bad_gains(
 
     if modify_gains:
         quality.gains[bad_mask] = np.nan + 1j * np.nan
+        _write_bad_gains_as_nan(solutions_path, bad_mask)
 
     return quality, bad_mask, new_flags, band, fit, original_gains, original_bad
 
 
-def plot_bad_gains(
+def plot_outlier_gains(
     quality: CalSolutionQuality,
     bad_mask: np.ndarray,
     new_flags: np.ndarray,
@@ -756,6 +825,7 @@ def plot_bad_gains(
     n_tiles: int = 16,
     output_path: str | None = None,
     display_gains: np.ndarray | None = None,
+    solution_file_will_be_modified: bool = False,
 ) -> list[plt.Figure]:
     """Plot flagged hyperdrive calibration gains, paged by tile.
 
@@ -771,7 +841,7 @@ def plot_bad_gains(
             filename, with "_{first}-{last}" inserted before the extension.
         display_gains: Gains array to plot amplitudes from, shape
             (tile, chanblock, 2, 2). Defaults to quality.gains if not given.
-
+        solution_file_will_be_modified: If True, a warning is added to the solution plot
     Returns:
         A list of matplotlib Figures, one per page, in tile order.
     """
@@ -793,21 +863,18 @@ def plot_bad_gains(
             first_tile_index=first_tile_index,
             n_tiles=n_tiles,
             display_gains=display_gains,
+            solution_file_will_be_modified=solution_file_will_be_modified,
         )
         figures.append(fig)
 
         if output_path is not None:
-            page_path = _paged_output_path(
-                output_path, first_tile_index, last_tile_index
-            )
+            page_path = _paged_output_path(output_path, first_tile_index, last_tile_index)
             fig.savefig(page_path, dpi=150, bbox_inches="tight")
 
     return figures
 
 
-def clip_hyperdrive_solution_gains(
-    hyperdrive_fits_file: str, cut_off: float, mc: mwalib.MetafitsContext
-):
+def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc: mwalib.MetafitsContext):
     """Clip hyperdrive calibration solution gains exceeding a threshold.
 
     Opens a hyperdrive FITS solution file, finds any Jones matrices where at
@@ -829,13 +896,9 @@ def clip_hyperdrive_solution_gains(
 
     with fits.open(hyperdrive_fits_file, mode="update") as hdul:
         if HDU not in hdul:
-            raise Exception(
-                f"Warning: No SOLUTIONS HDU found in {hyperdrive_fits_file}"
-            )
+            raise Exception(f"Warning: No SOLUTIONS HDU found in {hyperdrive_fits_file}")
 
-        logger.info(
-            f"checking solutions file {hyperdrive_fits_file} for gains > {cut_off}"
-        )
+        logger.info(f"checking solutions file {hyperdrive_fits_file} for gains > {cut_off}")
 
         # The SOLUTIONS HDU stores each complex gain as two consecutive float64
         # values (real, imag), so the raw FITS column layout is:
@@ -863,9 +926,7 @@ def clip_hyperdrive_solution_gains(
 
         # Total counts used in logging below.
         total_samples = amp.size  # total (time, ant, chan, pol) samples
-        total_jones = (
-            amp.shape[0] * amp.shape[1] * amp.shape[2]
-        )  # total (time, ant, chan) Jones matrices
+        total_jones = amp.shape[0] * amp.shape[1] * amp.shape[2]  # total (time, ant, chan) Jones matrices
 
         # Boolean mask: True wherever an individual gain amplitude exceeds the
         # threshold. Kept separate from the Jones-matrix flag below so we can
@@ -924,8 +985,7 @@ def clip_hyperdrive_solution_gains(
                 # All four pols are shown regardless of which one(s) triggered the
                 # cutoff, since the entire Jones matrix has been set to NaN.
                 pol_details = ", ".join(
-                    f"{POL_NAMES[p]}(Gain={amp[:, ant_idx, chan_idx, p].max():.4f})"
-                    for p in range(4)
+                    f"{POL_NAMES[p]}(Gain={amp[:, ant_idx, chan_idx, p].max():.4f})" for p in range(4)
                 )
 
                 logger.debug(
@@ -981,24 +1041,16 @@ def add_digital_gains_column(
             metafits_context.rf_inputs for the X polarisation.
     """
     # Lookup: tile_id -> digital_gains, X pol only (X and Y are identical).
-    gains_by_tile = {
-        rf.ant: rf.digital_gains
-        for rf in metafits_context.rf_inputs
-        if rf.pol == mwalib.Pol.X
-    }
+    gains_by_tile = {rf.ant: rf.digital_gains for rf in metafits_context.rf_inputs if rf.pol == mwalib.Pol.X}
 
     with fits.open(hyperdrive_solution_filename, mode="update") as hdul:
         tile_hdu = hdul[hdu_name]
         tile_ids = tile_hdu.data[id_col]
 
         try:
-            gains_array = np.array(
-                [gains_by_tile[int(tid)] for tid in tile_ids], dtype=np.uint16
-            )
+            gains_array = np.array([gains_by_tile[int(tid)] for tid in tile_ids], dtype=np.uint16)
         except KeyError as e:
-            raise KeyError(
-                f"Tile ID {e} in HDU '{hdu_name}' not found in metafits rf_inputs for pol='X'"
-            ) from e
+            raise KeyError(f"Tile ID {e} in HDU '{hdu_name}' not found in metafits rf_inputs for pol='X'") from e
 
         n_chans = gains_array.shape[1]
         new_col = fits.Column(
@@ -1008,12 +1060,119 @@ def add_digital_gains_column(
             bzero=2**15,  # unsigned-16 convention: signed I + BZERO offset
         )
 
-        new_hdu = fits.BinTableHDU.from_columns(
-            tile_hdu.columns + new_col, header=tile_hdu.header
-        )
+        new_hdu = fits.BinTableHDU.from_columns(tile_hdu.columns + new_col, header=tile_hdu.header)
         new_hdu.name = hdu_name
 
         hdul[hdul.index_of(hdu_name)] = new_hdu
         hdul.flush()
 
     return new_hdu
+
+
+def build_tile_summary_table(quality: CalSolutionQuality, original_bad: np.ndarray) -> list[dict]:
+    """Build a per-tile summary for console display.
+
+    A tile is only reported as fully flagged (with a reason string) if
+    EVERY channel is bad per original_bad (convergence/tile/NaN criteria,
+    before polynomial-fit clipping). Otherwise, before-cleaning gain
+    amplitude stats (min/median/max/stdev, for both gx and gy) are
+    computed over the tile's good channels only, with a count of how many
+    channels were excluded from that calculation.
+
+    Args:
+        quality: Parsed solution quality info.
+        original_bad: original_bad mask from flag_bad_gains, shape
+            (tile, chanblock).
+
+    Returns:
+        List of one dict per tile, each with keys:
+        - tile (int), tile_name (str)
+        - fully_flagged (bool): True only if every channel is bad.
+        - reason (str): populated only if fully_flagged.
+        - n_good (int), n_excluded (int): channel counts.
+        - gx_min, gx_median, gx_max, gx_std, gy_min, gy_median, gy_max,
+          gy_std (float): NaN if fully_flagged, else computed over good
+          channels only.
+    """
+    gx_amp = np.abs(quality.gains[..., 0, 0])
+    gy_amp = np.abs(quality.gains[..., 1, 1])
+
+    rows = []
+    for tile in range(quality.n_tiles):
+        tile_bad = original_bad[tile, :]
+        good = ~tile_bad
+        n_good = int(good.sum())
+        n_excluded = int(tile_bad.sum())
+        fully_flagged = n_good == 0
+
+        row = {
+            "tile": tile,
+            "tile_name": quality.tile_names[tile],
+            "fully_flagged": fully_flagged,
+            "reason": "",
+            "n_good": n_good,
+            "n_excluded": n_excluded,
+            "gx_min": np.nan,
+            "gx_median": np.nan,
+            "gx_max": np.nan,
+            "gx_std": np.nan,
+            "gy_min": np.nan,
+            "gy_median": np.nan,
+            "gy_max": np.nan,
+            "gy_std": np.nan,
+        }
+
+        if fully_flagged:
+            row["reason"] = tile_flag_reason(tile, quality, original_bad)
+        else:
+            row["gx_min"] = float(np.min(gx_amp[tile, good]))
+            row["gx_median"] = float(np.median(gx_amp[tile, good]))
+            row["gx_max"] = float(np.max(gx_amp[tile, good]))
+            row["gx_std"] = float(np.std(gx_amp[tile, good]))
+            row["gy_min"] = float(np.min(gy_amp[tile, good]))
+            row["gy_median"] = float(np.median(gy_amp[tile, good]))
+            row["gy_max"] = float(np.max(gy_amp[tile, good]))
+            row["gy_std"] = float(np.std(gy_amp[tile, good]))
+
+        rows.append(row)
+
+    return rows
+
+
+def write_tile_summary_table(rows: list[dict], file: TextIO = sys.stdout) -> None:
+    """Write a per-tile summary table to a file-like object.
+
+    Tiles with zero good channels show their flag reason in place of gain
+    stats. All other tiles show before-cleaning min/median/max/stdev gain
+    amplitude for gx and gy, computed over their good channels only, with
+    a note if any channels were excluded from that calculation.
+
+    Args:
+        rows: Output of build_tile_summary_table.
+        file: A writable, text-mode file-like object (anything with a
+            .write() method taking str -- e.g. an open file, io.StringIO,
+            or sys.stdout). Defaults to sys.stdout, so existing callers
+            printing to the console need no changes. To write to a real
+            file: `with open(path, "w") as f: print_tile_summary_table(rows, file=f)`.
+    """
+    id_w = 6
+    name_w = max(10, max(len(r["tile_name"]) for r in rows) + 2)
+    info_w = 100
+
+    header = f"{'TileID':<{id_w}} {'TileName':<{name_w}} {'Info':<{info_w}}"
+    print(header, file=file)
+    print("-" * len(header), file=file)
+
+    for r in rows:
+        if r["fully_flagged"]:
+            info = f"FLAGGED (no good channels): {r['reason']}"
+        else:
+            info = (
+                f"gx[min={r['gx_min']:.2f} med={r['gx_median']:.2f} "
+                f"max={r['gx_max']:.2f} std={r['gx_std']:.2f}]  "
+                f"gy[min={r['gy_min']:.2f} med={r['gy_median']:.2f} "
+                f"max={r['gy_max']:.2f} std={r['gy_std']:.2f}]"
+            )
+            if r["n_excluded"] > 0:
+                info += f"  ({r['n_excluded']} channel(s) excluded)"
+        print(f"{r['tile']:<{id_w}} {r['tile_name']:<{name_w}} {info:<{info_w}}", file=file)

@@ -1,11 +1,13 @@
-from tests_common import setup_test_directories
-from mwax_mover.mwax_bf_filterbank_utils import (
-    stitch_filterbank_files,
-    get_stitched_filename,
-    get_filterbank_components,
-)
-import pytest
 import os
+
+import pytest
+from tests_common import setup_test_directories
+
+from mwax_mover.mwax_bf_filterbank_utils import (
+    get_filterbank_components,
+    get_stitched_filename,
+    stitch_filterbank_files,
+)
 
 
 def test_get_stitched_filename():

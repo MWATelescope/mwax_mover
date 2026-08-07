@@ -35,9 +35,11 @@ from mwax_mover import (
 from mwax_mover.mwa_archiver import copy_file_rsync
 from mwax_mover.mwax_calvin_quality import (
     add_digital_gains_column,
+    build_tile_summary_table,
     clip_hyperdrive_solution_gains,
-    compute_bad_gains,
-    plot_bad_gains,
+    compute_outlier_gains,
+    plot_outlier_gains,
+    write_tile_summary_table,
 )
 from mwax_mover.mwax_calvin_solutions import process_solutions
 from mwax_mover.mwax_calvin_utils import CalvinJobType, estimate_birli_output_bytes
@@ -57,9 +59,7 @@ from mwax_mover.utils import (
 
 # Setup root logger
 handler = logging.StreamHandler()
-handler.setFormatter(
-    logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(message)s")
-)
+handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(message)s"))
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
@@ -131,22 +131,22 @@ class MWAXCalvinProcessor:
         self.giant_squid_binary_path: str = ""
 
         # processing
-        self.job_input_path: str = ""  # this is just /data/calvin/jobs/SLURM_JOB_ID_OBSID - where the visibility files are stored
-        self.working_path: str = ""  # where does Birli write to? /data/calvin/jobs/SLURM_JOB_ID_OBSID or /tmp if the obs is small enough
+        self.job_input_path: str = (
+            ""  # this is just /data/calvin/jobs/SLURM_JOB_ID_OBSID - where the visibility files are stored
+        )
+        self.working_path: str = (
+            ""  # where does Birli write to? /data/calvin/jobs/SLURM_JOB_ID_OBSID or /tmp if the obs is small enough
+        )
         self.job_output_path: str = ""  # e.g. /data/calvin/jobs/SLURM_JOB_ID_OBSID
         self.source_list_filename: str = ""
         self.source_list_type: str = ""
         self.phase_fit_niter: int = 0
         self.num_sources: int = 0
-        self.produce_debug_plots: bool = (
-            True  # default to true- for now only off if running via pytest
-        )
+        self.produce_debug_plots: bool = True  # default to true- for now only off if running via pytest
         self.keep_completed_visibility_files: bool = False
         self.cal_export_path: str | None = None
         self.cal_export_max_age_hours: int = 24  # default to 24 hours
-        self.plot_upload_path = (
-            ""  # where we move plots and stats to on successful calibration
-        )
+        self.plot_upload_path = ""  # where we move plots and stats to on successful calibration
         self.plot_front_end_url = ""
         self.gains_cut_off_max: float | None = None
         self.acacia_projects_profile: str = ""
@@ -182,9 +182,7 @@ class MWAXCalvinProcessor:
         try:
             # create a health thread
             logger.info("Starting health_thread...")
-            health_thread = threading.Thread(
-                name="health_thread", target=self.health_loop, daemon=True
-            )
+            health_thread = threading.Thread(name="health_thread", target=self.health_loop, daemon=True)
             health_thread.start()
 
             # Cleaning up /tmp in case there is a left over failed job that wasn't cleaned up
@@ -209,23 +207,17 @@ class MWAXCalvinProcessor:
 
             # Set the data path and metadata
             # will be something like: /data/calvin/jobs/SLURM_JOB_ID_OBSID
-            self.job_input_path = os.path.join(
-                self.job_input_path, f"{self.slurm_job_id!s}_{self.obs_id!s}"
-            )
+            self.job_input_path = os.path.join(self.job_input_path, f"{self.slurm_job_id!s}_{self.obs_id!s}")
 
             # Ensure input data path exists
             os.makedirs(name=self.job_input_path, exist_ok=True)
             logger.info(f"Job Input Data will be downloaded to: {self.job_input_path}")
 
-            self.metafits_filename = os.path.join(
-                self.job_input_path, f"{self.obs_id}_metafits.fits"
-            )
+            self.metafits_filename = os.path.join(self.job_input_path, f"{self.obs_id}_metafits.fits")
             logger.info(f"Job metafits filename: {self.metafits_filename}")
 
             # Output dirs
-            self.job_output_path = os.path.join(
-                self.job_output_path, f"{self.slurm_job_id!s}_{self.obs_id!s}"
-            )
+            self.job_output_path = os.path.join(self.job_output_path, f"{self.slurm_job_id!s}_{self.obs_id!s}")
 
             # Ensure output path exists
             os.makedirs(name=self.job_output_path, exist_ok=True)
@@ -237,9 +229,7 @@ class MWAXCalvinProcessor:
             try:
                 utils.download_metafits_file(self.obs_id, self.job_input_path)
             except Exception as catch_all_exception:  # pylint: disable=broad-except
-                error_message = (
-                    f"Metafits file {self.metafits_filename} did not exist and"
-                )
+                error_message = f"Metafits file {self.metafits_filename} did not exist and"
                 " could not download one from web service. Exiting."
                 f" {catch_all_exception}"
                 logger.exception(error_message)
@@ -247,9 +237,7 @@ class MWAXCalvinProcessor:
                 self.stop(exit_code=-1)
 
             # Create metafits context
-            logger.info(
-                f"Reading metafits file {self.metafits_filename} with mwalib..."
-            )
+            logger.info(f"Reading metafits file {self.metafits_filename} with mwalib...")
             self.metafits_context = MetafitsContext(self.metafits_filename, None)
 
             # Get list of expected files from web service- wait if obs is still in progress!
@@ -263,16 +251,9 @@ class MWAXCalvinProcessor:
             # next step depends on jobtype
             data_download_attempt: int = 1
 
-            while (
-                not self.data_downloaded
-                and data_download_attempt <= self.download_retries
-            ):
-                self.current_task_name = (
-                    f"Download ({data_download_attempt}/{self.download_retries})"
-                )
-                logger.info(
-                    f"Download attempt {data_download_attempt} of {self.download_retries}..."
-                )
+            while not self.data_downloaded and data_download_attempt <= self.download_retries:
+                self.current_task_name = f"Download ({data_download_attempt}/{self.download_retries})"
+                logger.info(f"Download attempt {data_download_attempt} of {self.download_retries}...")
                 if self.job_type == CalvinJobType.realtime:
                     # Download from MWAX boxes
                     self.data_downloaded, error_message = self.download_realtime_data()
@@ -280,9 +261,7 @@ class MWAXCalvinProcessor:
 
                 elif self.job_type == CalvinJobType.mwa_asvo:
                     # Download from MWA ASVO URL
-                    self.data_downloaded, error_message, retry_download = (
-                        self.download_mwa_asvo_data()
-                    )
+                    self.data_downloaded, error_message, retry_download = self.download_mwa_asvo_data()
 
                 else:
                     error_message = f"Error- unknown job_type {self.job_type}. Aborting"
@@ -325,16 +304,12 @@ class MWAXCalvinProcessor:
 
             if self.estimated_uvfits_GB < 500:
                 # Use temp_working_dir
-                self.working_path = os.path.join(
-                    self.temp_working_path, f"{self.slurm_job_id!s}_{self.obs_id!s}"
-                )
+                self.working_path = os.path.join(self.temp_working_path, f"{self.slurm_job_id!s}_{self.obs_id!s}")
                 # Ensure input data path exists
                 os.makedirs(name=self.working_path, exist_ok=True)
 
                 # Override the birli allowed memory
-                self.birli_max_mem_gib -= int(
-                    utils.gigabyte_to_gibibyte(self.estimated_uvfits_GB)
-                )
+                self.birli_max_mem_gib -= int(utils.gigabyte_to_gibibyte(self.estimated_uvfits_GB))
                 logger.info(
                     f"Using temporary work dir {self.temp_working_path} for Birli output. Reduced "
                     f"allowed Birli memory to: {self.birli_max_mem_gib} GiB"
@@ -345,12 +320,8 @@ class MWAXCalvinProcessor:
                 logger.info(f"Using work dir {self.working_path} for Birli output.")
 
             # Set uvfits filename
-            self.uvfits_filename = os.path.join(
-                self.working_path, f"{self.obs_id}.uvfits"
-            )
-            logger.info(
-                f"Job Output UVFITS file(s) will be created as: {self.uvfits_filename}"
-            )
+            self.uvfits_filename = os.path.join(self.working_path, f"{self.obs_id}.uvfits")
+            logger.info(f"Job Output UVFITS file(s) will be created as: {self.uvfits_filename}")
 
             # All files we could get are now in the processing_path
             logger.info("Ensuring all data is ready for processing...")
@@ -377,9 +348,7 @@ class MWAXCalvinProcessor:
 
             # Birli was successful so run hyperdrive!
             self.current_task_name = "Hyperdrive"
-            result, error_message, calibration_command = self.run_hyperdrive(
-                self.metafits_context
-            )
+            result, error_message, calibration_command = self.run_hyperdrive(self.metafits_context)
 
             if not result:
                 self.fail_job_processing(error_message)
@@ -399,6 +368,9 @@ class MWAXCalvinProcessor:
                 self.produce_debug_plots,
                 calibration_command,
                 self.gains_cut_off_max,
+                self.gain_outlier_poly_degree,
+                self.gain_outlier_mad_residual_threshold,
+                self.gain_outlier_modify_gains,
             )
 
             if result:
@@ -417,9 +389,7 @@ class MWAXCalvinProcessor:
                         self.job_output_path,
                         os.path.join(self.job_output_path, "index.json"),
                     ):
-                        plot_upload_path = os.path.join(
-                            self.plot_upload_path, str(fit_id)
-                        )
+                        plot_upload_path = os.path.join(self.plot_upload_path, str(fit_id))
 
                         # Go and upload all the files (including the index)
                         self.upload_plot_files(self.job_output_path, plot_upload_path)
@@ -449,9 +419,7 @@ class MWAXCalvinProcessor:
             # Get the filename from the url
             if self.job_type == CalvinJobType.mwa_asvo:
                 try:
-                    acacia_filename = extract_filename_from_mwa_asvo_signed_url(
-                        self.mwa_asvo_download_url
-                    )
+                    acacia_filename = extract_filename_from_mwa_asvo_signed_url(self.mwa_asvo_download_url)
 
                     try:
                         rclone_delete_file(
@@ -484,9 +452,7 @@ class MWAXCalvinProcessor:
             # if we get here, the whole calibration solution was inserted ok.
             if not self.keep_completed_visibility_files:
                 # Remove visibilitiy files
-                visibility_files = glob.glob(
-                    os.path.join(self.job_input_path, f"{self.obs_id}_*_*_*.fits")
-                )
+                visibility_files = glob.glob(os.path.join(self.job_input_path, f"{self.obs_id}_*_*_*.fits"))
                 for file_to_delete in visibility_files:
                     utils.remove_file(file_to_delete, False)
 
@@ -520,29 +486,27 @@ class MWAXCalvinProcessor:
             # Create the dest dir
             os.mkdir(upload_path)
 
-            exts = ["*.png", "*.txt", "*.tsv", "*.json"]
+            exts = ["*.png", "*.txt", "*.tsv", "*.json", "*_solutions.fits", "*_solutions.original.fits"]
             for ext in exts:
                 plot_files = glob.glob(os.path.join(job_output_path, ext))
                 for file_no, pfile in enumerate(plot_files, start=1):
                     try:
-                        dest_filename = os.path.join(
-                            upload_path, os.path.basename(pfile)
-                        )
-                        logger.debug(
-                            f"Moving {pfile} to {dest_filename} [{file_no}/{len(plot_files)}]"
-                        )
-                        shutil.move(pfile, dest_filename)
+                        dest_filename = os.path.join(upload_path, os.path.basename(pfile))
+                        logger.debug(f"Moving {pfile} to {dest_filename} [{file_no}/{len(plot_files)}]")
+
+                        # We want to keep the solutions on calvin servers so copy them, don't move them!
+                        if ext in ["*_solutions.fits", "*_solutions.original.fits"]:
+                            shutil.copy(pfile, dest_filename)
+                        else:
+                            shutil.move(pfile, dest_filename)
+
                     except Exception as e:
-                        logger.warning(
-                            f"Failed to move {pfile} to the {upload_path}. Error: {e!s}. Ignoring"
-                        )
+                        logger.warning(f"Failed to move {pfile} to the {upload_path}. Error: {e!s}. Ignoring")
                         # keep going and try the next file
 
         except Exception as ee:
             # Something went wrong- log it and keep going
-            logger.warning(
-                f"Failed to move files to the {upload_path}. Error: {ee!s}. Ignoring"
-            )
+            logger.warning(f"Failed to move files to the {upload_path}. Error: {ee!s}. Ignoring")
 
     def release_mwax_files(self):
         """Release visibility files from MWAX boxes after processing.
@@ -563,14 +527,8 @@ class MWAXCalvinProcessor:
         start_time = datetime.datetime.now()
 
         # Do this while there are hosts to release and we have not exceeded our MAX_WAIT_FOR_MWAX_SECONDS
-        while (
-            len(hostnames) > 0
-            and (datetime.datetime.now() - start_time).seconds
-            < MAX_WAIT_FOR_MWAX_SECONDS
-        ):
-            logger.info(
-                f"Attempting to release {len(hostnames)} files from MWAX boxes..."
-            )
+        while len(hostnames) > 0 and (datetime.datetime.now() - start_time).seconds < MAX_WAIT_FOR_MWAX_SECONDS:
+            logger.info(f"Attempting to release {len(hostnames)} files from MWAX boxes...")
             successful_hosts = set()
 
             for hostname in hostnames:
@@ -709,9 +667,7 @@ class MWAXCalvinProcessor:
         if self.running:
             try:
                 ws_filenames_and_hosts: list[tuple[str, str]] = (
-                    utils.get_data_files_with_hostname_for_obsid_from_webservice(
-                        self.obs_id
-                    )
+                    utils.get_data_files_with_hostname_for_obsid_from_webservice(self.obs_id)
                 )
             except Exception:
                 # The previous call would have already logged tonnes of errors so no need to log anything specific here
@@ -728,9 +684,7 @@ class MWAXCalvinProcessor:
                 # to 192.168.120.201
                 host_ip = hostname.replace("mwax", "192.168.120.2")
 
-                self.mwax_download_filenames.append(
-                    f"mwa@{host_ip}:/{os.path.join('visdata/cal_outgoing/', filename)}"
-                )
+                self.mwax_download_filenames.append(f"mwa@{host_ip}:/{os.path.join('visdata/cal_outgoing/', filename)}")
                 self.ws_filenames.append(filename)
 
             return True, ""
@@ -755,9 +709,7 @@ class MWAXCalvinProcessor:
             stdout = ""
 
             # Determine what the filename will be
-            tar_filename = extract_filename_from_mwa_asvo_signed_url(
-                self.mwa_asvo_download_url
-            )
+            tar_filename = extract_filename_from_mwa_asvo_signed_url(self.mwa_asvo_download_url)
             full_tar_filename = os.path.join(self.job_input_path, tar_filename)
 
             if not utils.check_remote_file_exists(
@@ -815,9 +767,7 @@ class MWAXCalvinProcessor:
                 )
             else:
                 # We didn't get that message, so something went wrong
-                raise Exception(
-                    "giant-squid returned success but file was not downloaded"
-                )
+                raise Exception("giant-squid returned success but file was not downloaded")
 
         except Exception:
             error_message = f"Failed to download observation {self.obs_id} from {self.mwa_asvo_download_url}. Stdout from giant-squid: {stdout}"
@@ -901,9 +851,7 @@ class MWAXCalvinProcessor:
         try:
             # Check for gpubox files (mwax OR legacy)
             glob_spec = f"{self.obs_id}_*_*_*.fits"
-            data_dir_full_path_files = glob.glob(
-                os.path.join(self.job_input_path, glob_spec)
-            )
+            data_dir_full_path_files = glob.glob(os.path.join(self.job_input_path, glob_spec))
             data_dir_filenames = [os.path.basename(i) for i in data_dir_full_path_files]
             data_dir_filenames.sort()
 
@@ -955,9 +903,7 @@ class MWAXCalvinProcessor:
         else:
             return False, "Birli run failed. See logs"
 
-    def run_hyperdrive(
-        self, metafits_context: mwalib.MetafitsContext
-    ) -> tuple[bool, str, str]:
+    def run_hyperdrive(self, metafits_context: mwalib.MetafitsContext) -> tuple[bool, str, str]:
         """Execute Hyperdrive calibration to produce calibration solutions.
 
         Runs Hyperdrive calibration on preprocessed UVFITS files, generates
@@ -999,13 +945,9 @@ class MWAXCalvinProcessor:
 
             for uvfits_filename in uvfits_files:
                 # Generate the solution filenames based on the uvfits filenames
-                obsid_and_band = os.path.basename(uvfits_filename).replace(
-                    ".uvfits", ""
-                )
+                obsid_and_band = os.path.basename(uvfits_filename).replace(".uvfits", "")
 
-                hyperdrive_solution_filename = os.path.join(
-                    self.job_output_path, f"{obsid_and_band}_solutions.fits"
-                )
+                hyperdrive_solution_filename = os.path.join(self.job_output_path, f"{obsid_and_band}_solutions.fits")
                 solution_files.append(hyperdrive_solution_filename)
 
                 # Now add the digital gains to the solution file (for the beamformer to use)
@@ -1027,14 +969,14 @@ class MWAXCalvinProcessor:
                         fit,
                         original_gains,
                         original_bad_gains,
-                    ) = compute_bad_gains(
+                    ) = compute_outlier_gains(
                         hyperdrive_solution_filename,
                         self.gain_outlier_poly_degree,
                         self.gain_outlier_mad_residual_threshold,
                         self.gain_outlier_modify_gains,
                     )
 
-                    plot_bad_gains(
+                    plot_outlier_gains(
                         quality,
                         bad_mask,
                         new_flags,
@@ -1042,14 +984,29 @@ class MWAXCalvinProcessor:
                         fit,
                         original_bad_gains,
                         self.gain_outlier_plot_n_tiles_per_page,
-                        os.path.join(
-                            self.job_output_path, f"{obsid_and_band}_gain_outliers"
-                        ),
+                        os.path.join(self.job_output_path, f"{obsid_and_band}_gain_outliers_tiles"),
                         original_gains,
+                        solution_file_will_be_modified=self.gain_outlier_modify_gains,
                     )
+
+                    # Build a summary table for later output
+                    gains_outlier_table_rows = build_tile_summary_table(quality, original_bad_gains)
+
+                    # Now write the summary table to a CSV file
+                    gains_outlier_table_rows_filename = os.path.join(
+                        self.job_output_path, f"{obsid_and_band}_gain_outlier_stats.txt"
+                    )
+
+                    # Write to file
+                    with open(gains_outlier_table_rows_filename, "w") as f:
+                        write_tile_summary_table(
+                            gains_outlier_table_rows,
+                            f,
+                        )
+
                 except Exception:
                     logger.exception(
-                        "Failed to produce plots for compute_and_plot_bad_gains. Ignoring and continuing."
+                        "Failed to produce plots and stats for compute_bad_gains and plot_bad_gains. Ignoring and continuing."
                     )
 
                 # Now clip any large gains to NaNs if we have a cut off value set
@@ -1075,12 +1032,8 @@ class MWAXCalvinProcessor:
             if self.cal_export_path is not None:
                 #
                 # copy the solution.fits file(s) to the export directory
-                fitscal_files = glob.glob(
-                    os.path.join(self.job_output_path, "*solutions.fits")
-                )
-                logger.info(
-                    f"Found {len(fitscal_files)} solution FITS files in {self.job_output_path}."
-                )
+                fitscal_files = glob.glob(os.path.join(self.job_output_path, "*solutions.fits"))
+                logger.info(f"Found {len(fitscal_files)} solution FITS files in {self.job_output_path}.")
 
                 for f in fitscal_files:
                     # Copy solution fits files to the cal_export directory
@@ -1120,9 +1073,7 @@ class MWAXCalvinProcessor:
             if self.db_handler is not None:
                 self.db_handler.close()
         except Exception:
-            logger.exception(
-                "Problem closing database connection. Ignoring and continuing."
-            )
+            logger.exception("Problem closing database connection. Ignoring and continuing.")
 
         self.running = False
 
@@ -1157,9 +1108,7 @@ class MWAXCalvinProcessor:
                     self.health_multicast_hops,
                 )
             except Exception:
-                logger.exception(
-                    "health_handler: Failed to send health information. Ignoring and continuing"
-                )
+                logger.exception("health_handler: Failed to send health information. Ignoring and continuing")
 
             # Sleep for a second
             self.sleep(1)
@@ -1251,9 +1200,7 @@ class MWAXCalvinProcessor:
             self.asvo_job_id = asvo_job_id
 
         if not os.path.exists(config_filename):
-            print(
-                f"Configuration file location {config_filename} does not exist. Quitting."
-            )
+            print(f"Configuration file location {config_filename} does not exist. Quitting.")
             sys.exit(1)
 
         # Make sure we can Ctrl-C / kill out of this
@@ -1273,36 +1220,24 @@ class MWAXCalvinProcessor:
             sys.exit(1)
 
         # Read log level
-        config_file_log_level: str | None = utils.read_optional_config(
-            config, "mwax mover", "log_level"
-        )
+        config_file_log_level: str | None = utils.read_optional_config(config, "mwax mover", "log_level")
         if config_file_log_level:
             logger.setLevel(config_file_log_level)
 
-        logger.info(
-            f"Starting mwax_calvin_processor processor...v{version.get_mwax_mover_version_string()}"
-        )
+        logger.info(f"Starting mwax_calvin_processor processor...v{version.get_mwax_mover_version_string()}")
         logger.info(f"Reading config file: {config_filename}")
 
         #
         # MRO database
         #
-        self.mro_metadatadb_host = utils.read_config(
-            config, "mro metadata database", "host"
-        )
-        self.mro_metadatadb_db = utils.read_config(
-            config, "mro metadata database", "db"
-        )
-        self.mro_metadatadb_user = utils.read_config(
-            config, "mro metadata database", "user"
-        )
+        self.mro_metadatadb_host = utils.read_config(config, "mro metadata database", "host")
+        self.mro_metadatadb_db = utils.read_config(config, "mro metadata database", "db")
+        self.mro_metadatadb_user = utils.read_config(config, "mro metadata database", "user")
         # Don't require base64 encoded password if running a pytest
         self.mro_metadatadb_pass = utils.read_config(
             config, "mro metadata database", "pass", not utils.running_under_pytest()
         )
-        self.mro_metadatadb_port = int(
-            utils.read_config(config, "mro metadata database", "port")
-        )
+        self.mro_metadatadb_port = int(utils.read_config(config, "mro metadata database", "port"))
 
         # Initiate database connection for mro metadata db
         if override_db_handler:
@@ -1321,15 +1256,9 @@ class MWAXCalvinProcessor:
         #
         try:
             # health
-            self.health_multicast_ip = utils.read_config(
-                config, "mwax mover", "health_multicast_ip"
-            )
-            self.health_multicast_port = int(
-                utils.read_config(config, "mwax mover", "health_multicast_port")
-            )
-            self.health_multicast_hops = int(
-                utils.read_config(config, "mwax mover", "health_multicast_hops")
-            )
+            self.health_multicast_ip = utils.read_config(config, "mwax mover", "health_multicast_ip")
+            self.health_multicast_port = int(utils.read_config(config, "mwax mover", "health_multicast_port"))
+            self.health_multicast_hops = int(utils.read_config(config, "mwax mover", "health_multicast_hops"))
             self.health_multicast_interface_name = utils.read_config(
                 config,
                 "mwax mover",
@@ -1337,26 +1266,16 @@ class MWAXCalvinProcessor:
             )
 
             # get this hosts primary network interface ip
-            self.health_multicast_interface_ip = utils.get_ip_address(
-                self.health_multicast_interface_name
-            )
-            logger.info(
-                f"IP for sending multicast: {self.health_multicast_interface_ip}"
-            )
+            self.health_multicast_interface_ip = utils.get_ip_address(self.health_multicast_interface_name)
+            logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
 
             #
             # Downloading
             #
-            self.download_retries = int(
-                utils.read_config(config, "downloading", "download_retries")
-            )
-            self.download_retry_wait = int(
-                utils.read_config(config, "downloading", "download_retry_wait")
-            )
+            self.download_retries = int(utils.read_config(config, "downloading", "download_retries"))
+            self.download_retry_wait = int(utils.read_config(config, "downloading", "download_retry_wait"))
             self.realtime_download_file_timeout = int(
-                utils.read_config(
-                    config, "downloading", "realtime_download_file_timeout"
-                )
+                utils.read_config(config, "downloading", "realtime_download_file_timeout")
             )
             self.mwaasvo_download_obs_timeout = int(
                 utils.read_config(config, "downloading", "mwaasvo_download_obs_timeout")
@@ -1404,9 +1323,7 @@ class MWAXCalvinProcessor:
             )
 
             if not os.path.exists(self.birli_binary_path):
-                logger.error(
-                    f"birli_binary_path location  {self.birli_binary_path} does not exist. Quitting."
-                )
+                logger.error(f"birli_binary_path location  {self.birli_binary_path} does not exist. Quitting.")
                 sys.exit(1)
 
             # Get Birli freq res
@@ -1454,9 +1371,7 @@ class MWAXCalvinProcessor:
             )
 
             if not os.path.exists(self.source_list_filename):
-                logger.error(
-                    f"source_list_filename location  {self.source_list_filename} does not exist. Quitting."
-                )
+                logger.error(f"source_list_filename location  {self.source_list_filename} does not exist. Quitting.")
                 sys.exit(1)
 
             self.source_list_type = utils.read_config(
@@ -1507,9 +1422,7 @@ class MWAXCalvinProcessor:
             )
 
             if not os.path.exists(self.job_input_path):
-                logger.error(
-                    f"job_input_path location  {self.job_input_path} does not exist. Quitting."
-                )
+                logger.error(f"job_input_path location  {self.job_input_path} does not exist. Quitting.")
                 sys.exit(1)
 
             # Get the job_output_path dir
@@ -1520,9 +1433,7 @@ class MWAXCalvinProcessor:
             )
 
             if not os.path.exists(self.job_output_path):
-                logger.error(
-                    f"job_output_path location  {self.job_output_path} does not exist. Quitting."
-                )
+                logger.error(f"job_output_path location  {self.job_output_path} does not exist. Quitting.")
                 sys.exit(1)
 
             # Get the temp working dir
@@ -1536,14 +1447,10 @@ class MWAXCalvinProcessor:
                 if self.temp_working_path.startswith("/tmp"):
                     # Create it (if it does not start with /tmp assume it is a permanent path in
                     # which case user has to create it
-                    logger.debug(
-                        f"temp_working_path location {self.temp_working_path} does not exist, creating it."
-                    )
+                    logger.debug(f"temp_working_path location {self.temp_working_path} does not exist, creating it.")
                     os.makedirs(self.temp_working_path)
                 else:
-                    logger.error(
-                        f"temp_working_path location  {self.temp_working_path} does not exist. Quitting."
-                    )
+                    logger.error(f"temp_working_path location  {self.temp_working_path} does not exist. Quitting.")
                     sys.exit(1)
 
             self.keep_completed_visibility_files = utils.read_config_bool(
@@ -1560,14 +1467,10 @@ class MWAXCalvinProcessor:
             )
 
             if self.cal_export_path is None:
-                logger.warning(
-                    "cal_export_path not set. Will not be exporting calibration solution files."
-                )
+                logger.warning("cal_export_path not set. Will not be exporting calibration solution files.")
             else:
                 if not os.path.exists(self.cal_export_path):
-                    logger.error(
-                        f"cal_export_path location  {self.cal_export_path} does not exist. Quitting."
-                    )
+                    logger.error(f"cal_export_path location  {self.cal_export_path} does not exist. Quitting.")
                     sys.exit(1)
 
             self.cal_export_max_age_hours: int = int(
@@ -1594,20 +1497,14 @@ class MWAXCalvinProcessor:
             )
 
             if not os.path.exists(self.plot_upload_path):
-                logger.error(
-                    f"plot_upload_path location  {self.plot_upload_path} does not exist. Quitting."
-                )
+                logger.error(f"plot_upload_path location  {self.plot_upload_path} does not exist. Quitting.")
                 sys.exit(1)
 
             # Get the base url of our calibration web front end (in front of the S3 bucket)
-            self.plot_front_end_url = utils.read_config(
-                config, "processing", "plot_front_end_url"
-            )
+            self.plot_front_end_url = utils.read_config(config, "processing", "plot_front_end_url")
 
             if config.has_option("processing", "gains_cut_off_max"):
-                gains_cut_off_max: str = utils.read_config(
-                    config, "processing", "gains_cut_off_max"
-                )
+                gains_cut_off_max: str = utils.read_config(config, "processing", "gains_cut_off_max")
 
                 try:
                     self.gains_cut_off_max = float(gains_cut_off_max)
@@ -1629,9 +1526,7 @@ class MWAXCalvinProcessor:
             )
 
             self.gain_outlier_poly_degree = int(
-                utils.read_config(
-                    config=config, section="processing", key="gain_outlier_poly_degree"
-                )
+                utils.read_config(config=config, section="processing", key="gain_outlier_poly_degree")
             )
             self.gain_outlier_mad_residual_threshold = float(
                 utils.read_config(
@@ -1672,18 +1567,10 @@ class MWAXCalvinProcessor:
             "Birli and Hyperdrive and then upload the calibration solution."
         )
 
-        parser.add_argument(
-            "-c", "--cfg", required=True, help="Configuration file location.\n"
-        )
-        parser.add_argument(
-            "-o", "--obs-id", required=True, type=int, help="ObservationID.\n"
-        )
-        parser.add_argument(
-            "-s", "--slurm-job-id", required=True, type=int, help="This Slurm Job ID.\n"
-        )
-        parser.add_argument(
-            "-a", "--asvo-job-id", required=False, type=int, help="MWA ASVO Job ID.\n"
-        )
+        parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
+        parser.add_argument("-o", "--obs-id", required=True, type=int, help="ObservationID.\n")
+        parser.add_argument("-s", "--slurm-job-id", required=True, type=int, help="This Slurm Job ID.\n")
+        parser.add_argument("-a", "--asvo-job-id", required=False, type=int, help="MWA ASVO Job ID.\n")
         parser.add_argument(
             "-r",
             "--request-ids",
@@ -1717,18 +1604,14 @@ class MWAXCalvinProcessor:
         print(f"Command line argument 'obs-id' == {obs_id}")
 
         if not utils.is_int(obs_id):
-            print(
-                f"ERROR: cmd line argument obs-id {obs_id} is not a number. Aborting."
-            )
+            print(f"ERROR: cmd line argument obs-id {obs_id} is not a number. Aborting.")
             sys.exit(-1)
 
         slurm_job_id = args["slurm_job_id"]
         print(f"Command line argument 'slurm-job-id' == {slurm_job_id}")
 
         if not utils.is_int(slurm_job_id):
-            print(
-                f"ERROR: cmd line argument slurm-job-id {slurm_job_id} is not a number. Aborting."
-            )
+            print(f"ERROR: cmd line argument slurm-job-id {slurm_job_id} is not a number. Aborting.")
             sys.exit(-1)
 
         if args["asvo_job_id"] is not None:
@@ -1737,9 +1620,7 @@ class MWAXCalvinProcessor:
             asvo_job_id = int(args["asvo_job_id"])
 
             if not utils.is_int(args["asvo_job_id"]):
-                print(
-                    f"ERROR: cmd line argument asvo-job-id {args['asvo_job_id']} is not a number. Aborting."
-                )
+                print(f"ERROR: cmd line argument asvo-job-id {args['asvo_job_id']} is not a number. Aborting.")
                 sys.exit(-1)
         else:
             asvo_job_id = None
@@ -1752,9 +1633,7 @@ class MWAXCalvinProcessor:
             print("Command line argument 'mwa-asvo-download-url' == not passed")
         else:
             mwa_asvo_download_url = args["mwa_asvo_download_url"]
-            print(
-                f"Command line argument 'mwa-asvo-download-url' == {mwa_asvo_download_url}"
-            )
+            print(f"Command line argument 'mwa-asvo-download-url' == {mwa_asvo_download_url}")
 
         if job_type == CalvinJobType.mwa_asvo and mwa_asvo_download_url == "":
             print(
@@ -1781,9 +1660,7 @@ class MWAXCalvinProcessor:
                 sys.exit(-1)
         # Check we got at least one
         if len(request_ids) == 0:
-            print(
-                f"ERROR: request-ids param '{request_ids_string}' must contain at least one request-id. Aborting."
-            )
+            print(f"ERROR: request-ids param '{request_ids_string}' must contain at least one request-id. Aborting.")
             sys.exit(-1)
         print(f"request_ids parsed as: {request_ids}")
 

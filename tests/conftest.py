@@ -9,7 +9,6 @@ mwax_mover log output is visible at DEBUG level during test runs.
 
 import logging
 
-
 # ---------------------------------------------------------------------------
 # Suppress noisy third-party loggers
 # ---------------------------------------------------------------------------

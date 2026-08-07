@@ -6,13 +6,14 @@ per-subobservation VDIF files produced by the MWAX beamformer into a single
 complete observation output file.
 """
 
-from typing import List
 import logging
-from mwalib import MetafitsContext
-import mwax_mover.version
 import os
 import re
 import shutil
+
+from mwalib import MetafitsContext
+
+import mwax_mover.version
 
 logger = logging.getLogger(__name__)
 
@@ -136,8 +137,7 @@ class VDIFHeader:
 
         # Write the header
         with open(vdif_hdr_filename, "w") as f:
-            for line in lines:
-                f.write(line + "\n")
+            f.writelines(line + "\n" for line in lines)
 
 
 def get_vdif_filename_components(filename: str) -> tuple[str, int, int, int, int]:
@@ -191,7 +191,7 @@ def get_stitched_filename(filename: str) -> str:
 
 
 def stitch_vdif_files_and_write_hdr(
-    metafits_filename: str, files: List[str], output_dir: str
+    metafits_filename: str, files: list[str], output_dir: str
 ) -> tuple[str, str]:
     """Concatenate VDIF files and generate a header file with beam metadata.
 

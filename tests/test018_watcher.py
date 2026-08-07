@@ -22,12 +22,12 @@ import subprocess
 import tempfile
 import threading
 import time
-import unittest.mock as mock
+from unittest import mock
 
 import inotify.constants
 import pytest
 
-import mwax_mover.mwax_mover as mwax_mover
+from mwax_mover import mwax_mover
 from mwax_mover.mwax_watcher import Watcher
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

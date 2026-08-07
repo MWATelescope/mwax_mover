@@ -4,8 +4,11 @@
 
 * calvin_processor: generate gain outlier fit & residual MAD outlier plots.
 * calvin_processor: read gain outlier config params from config file.
+* calvin_processor: save gain outlier config params from config file to database calibration_fits table.
 * calvin_processor: add digital gains to each tile in the TILE HDU of the hyperdrive solutions file(s) (for the beamformer).
-* calvin_processor: upload new gain outlier plots and the actual solutions to s3.
+* calvin_processor: upload new gain outlier plots and the actual solutions (and the unmodified original if applicable) to s3.
+* calvin_processor: Added more info to solution quality txt file report.
+* calvin_processor: don't hardcode the gain plots from hyperdrive to a max of 5.
 * Fixed formatting in many files (ruff).
 * Fixed broken tests.
 

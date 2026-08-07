@@ -10,14 +10,15 @@ Also provides ceph_get_s3_md5_etag() to compute the Ceph multipart ETag for S3
 integrity verification.
 """
 
-import os
 import hashlib
+import logging
+import os
 import random
 import time
 import uuid
-import logging
-from mwax_mover.utils import running_under_pytest, get_gbps, bytes_to_gigabytes
+
 from mwax_mover.mwax_command import run_command_ext
+from mwax_mover.utils import bytes_to_gigabytes, get_gbps, running_under_pytest
 
 logger = logging.getLogger(__name__)
 

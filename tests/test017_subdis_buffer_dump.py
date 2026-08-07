@@ -3,19 +3,18 @@ This is to test if MWAXSubfileDistributor does a buffer dump.
 """
 
 import glob
-
-import requests
-
 import os
 import shutil
 import signal
 import threading
 import time
 
-from mwax_mover.utils import MWAXSubfileDistirbutorMode, running_under_pytest
+import requests
 from tests_common import create_observation_subfiles, setup_test_directories
-from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
 from tests_fakedb import FakeMWAXDBHandler
+
+from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
+from mwax_mover.utils import MWAXSubfileDistirbutorMode, running_under_pytest
 
 TEST_CONFIG_FILE = "tests/data/test017/test017.cfg"
 

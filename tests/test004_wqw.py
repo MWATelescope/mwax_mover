@@ -2,17 +2,18 @@
 # Tests for the watch_queue_worker abstract base class (ABC)
 #
 
+import logging
 import os
 import shutil
-
-from mwax_mover.mwax_watch_queue_worker import (
-    MWAXWatchQueueWorker,
-    MWAXPriorityWatchQueueWorker,
-)
 import time
-import logging
-from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
+
 from tests_common import setup_test_directories
+
+from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
+from mwax_mover.mwax_watch_queue_worker import (
+    MWAXPriorityWatchQueueWorker,
+    MWAXWatchQueueWorker,
+)
 
 # Setup root logger
 handler = logging.StreamHandler()

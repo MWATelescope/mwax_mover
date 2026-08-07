@@ -1,17 +1,13 @@
 """Utility to concatenate multiple 8 second VDIF files into a single VDIF file and header"""
 
-from collections import defaultdict
-
-import re
-
-import os
-import glob
-
 import argparse
+import glob
 import logging
+import os
+import re
 import sys
+from collections import defaultdict
 from pathlib import Path
-
 
 from mwax_mover.mwax_bf_vdif_utils import stitch_vdif_files_and_write_hdr
 

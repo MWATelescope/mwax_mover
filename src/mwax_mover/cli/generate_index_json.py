@@ -1,8 +1,9 @@
-from pathlib import Path
 import argparse
 import json
 import os
 import sys
+from pathlib import Path
+
 from mwax_mover.mwax_calvin_utils import generate_plot_index_file
 
 

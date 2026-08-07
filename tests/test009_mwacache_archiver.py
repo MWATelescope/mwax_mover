@@ -9,11 +9,11 @@ import signal
 import threading
 import time
 
+from tests_common import setup_test_directories
+from tests_fakedb import FakeMWAXDBHandler
 
 from mwax_mover.cli.mwacache_archive_processor import MWACacheArchiveProcessor
 from mwax_mover.utils import ArchiveLocation
-from tests_common import setup_test_directories
-from tests_fakedb import FakeMWAXDBHandler
 
 
 def test_mwacache_archiver_config_file():
@@ -42,12 +42,10 @@ def test_mwacache_archiver_config_file():
     #
 
     # mwax_mover section
-    assert (
-        mcap.metafits_path == "/home/gsleap/mwax_mover_testing/test009/vulcan/metafits"
-    )
+    assert mcap.metafits_path == "/home/gsleap/mwax_mover_testing/test009/vulcan/metafits"
     assert mcap.archive_to_location == ArchiveLocation.AcaciaMWA
 
-    assert mcap.health_multicast_interface_name == "eth2"
+    assert mcap.health_multicast_interface_name == "lo"
     assert mcap.health_multicast_ip == "224.250.0.0"
     assert mcap.health_multicast_port == 8004
     assert mcap.health_multicast_hops == 1
@@ -71,9 +69,7 @@ def test_mwacache_archiver_config_file():
     assert mcap.mro_metadatadb_pass == "dummy"
 
     assert len(mcap.watch_dirs) == 3
-    assert (
-        mcap.watch_dirs[0] == "/home/gsleap/mwax_mover_testing/test009/volume1/incoming"
-    )
+    assert mcap.watch_dirs[0] == "/home/gsleap/mwax_mover_testing/test009/volume1/incoming"
 
     # test list of projects
     assert mcap.high_priority_correlator_projectids == ["D0006"]
@@ -94,9 +90,7 @@ def test_mwacache_archiver_metafits_file():
     config_filename = "tests/data/test009/test009.cfg"
 
     # setup data
-    incoming = os.path.join(
-        os.path.join(base_dir, "volume1/incoming"), os.path.basename(TEST_METAFITS)
-    )
+    incoming = os.path.join(os.path.join(base_dir, "volume1/incoming"), os.path.basename(TEST_METAFITS))
     shutil.copyfile(TEST_METAFITS, incoming)
 
     # Override db_handler with a fake one

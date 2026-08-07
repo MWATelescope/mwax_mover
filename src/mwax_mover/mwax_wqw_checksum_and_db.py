@@ -6,14 +6,14 @@ dont_archive directory based on file type (visibilities, voltages, PPD, VDIF,
 filterbank) and whether the observation's project should be archived.
 """
 
-from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
-from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
-from mwax_mover import utils
-from mwax_mover.utils import ValidationData, MWADataFileType
-from mwax_mover.mwax_db import MWAXDBHandler, insert_data_file_row
 import logging
 import os
-from typing import Optional
+
+from mwax_mover import utils
+from mwax_mover.mwax_db import MWAXDBHandler, insert_data_file_row
+from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
+from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
+from mwax_mover.utils import MWADataFileType, ValidationData
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
         self.db_handler_object = db_handler_object
         self.archiving_enabled = archiving_enabled
 
-    def _checksum_and_insert_db(self, item: str, val: ValidationData) -> Optional[bool]:
+    def _checksum_and_insert_db(self, item: str, val: ValidationData) -> bool | None:
         """Compute the MD5 checksum and insert a metadata database record.
 
         Computes the MD5 checksum of the file and inserts a data_files record into
@@ -142,7 +142,7 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
 
     def _get_destination(
         self, item: str, val: ValidationData, archive: bool
-    ) -> Optional[str]:
+    ) -> str | None:
         """Determine the destination directory for the file.
 
         Routes files based on type and archive flag. Visibilities always go to

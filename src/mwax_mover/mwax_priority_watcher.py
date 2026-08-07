@@ -6,16 +6,17 @@ priority queue
 import logging
 import os
 import queue
-import inotify.constants
+
 import inotify.adapters
-from typing import Optional
+import inotify.constants
+
 from mwax_mover import mwax_mover, utils
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
 
 logger = logging.getLogger(__name__)
 
 
-class PriorityWatcher(object):
+class PriorityWatcher:
     """Class that watches a directory and adds files to a priority queue"""
 
     def __init__(
@@ -29,7 +30,7 @@ class PriorityWatcher(object):
         metafits_path,
         list_of_correlator_high_priority_projects: list[str],
         list_of_vcs_high_priority_projects: list[str],
-        exclude_pattern: Optional[str] = None,
+        exclude_pattern: str | None = None,
     ):
         """Initialize a priority directory watcher.
 
@@ -49,9 +50,7 @@ class PriorityWatcher(object):
             FileNotFoundError: If the specified path does not exist.
         """
         self.name = name
-        self.inotify_tree: Optional[
-            inotify.adapters.InotifyTree | inotify.adapters.Inotify
-        ] = None
+        self.inotify_tree: inotify.adapters.InotifyTree | inotify.adapters.Inotify | None = None
         self.recursive = recursive
         self.mode = mode
         self.path = path

@@ -80,7 +80,6 @@ class FakeMWAXDBHandler(MWAXDBHandler):
     def close(self):
         """Overrides the close method- nothing to do here since we don't have
         connections or a pool"""
-        pass
 
     def select_postgres(self, sql: str, parm_list, expected_rows):
         """Return the next pre-loaded result set without hitting the database.

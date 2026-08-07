@@ -6,23 +6,22 @@ which do not exist in the git repo. This is fine as the main thing being
 tested is the filename and metafits file (which is included).
 """
 
-from pathlib import Path
-import tarfile
-
-from mwax_mover.utils import (
-    run_giant_squid,
-    extract_tar,
-    extract_filename_from_mwa_asvo_signed_url,
-)
-
-from configparser import ConfigParser
 import os
-import pytest
 import queue
 import shutil
+import tarfile
 import time
-from mwax_mover import utils
-from mwax_mover import version
+from configparser import ConfigParser
+from pathlib import Path
+
+import pytest
+
+from mwax_mover import utils, version
+from mwax_mover.utils import (
+    extract_filename_from_mwa_asvo_signed_url,
+    extract_tar,
+    run_giant_squid,
+)
 
 
 def test_running_under_pytest():

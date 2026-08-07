@@ -9,22 +9,20 @@ also exposes a Flask web service for health reporting, archiving pause/resume, a
 calibration observation release.
 """
 
-from mwax_mover.mwax_db import MWAXDBHandler
-
 import argparse
-from configparser import ConfigParser
-import queue
+import glob
 import json
 import logging
-import glob
 import os
+import queue
 import random
+import shutil
 import signal
 import socket
 import sys
-import shutil
-import time
 import threading
+import time
+from configparser import ConfigParser
 
 from flask import Flask, request
 from werkzeug.serving import make_server
@@ -32,13 +30,13 @@ from werkzeug.serving import make_server
 from mwax_mover import (
     mwax_db,
     utils,
+    version,
 )
+from mwax_mover.mwax_db import MWAXDBHandler
 from mwax_mover.mwax_watch_queue_worker import (
     MWAXPriorityWatchQueueWorker,
     MWAXWatchQueueWorker,
 )
-from typing import Optional
-from mwax_mover import version
 from mwax_mover.mwax_wqw_bf_stitching_processor import BfStitchingProcessor
 from mwax_mover.mwax_wqw_checksum_and_db import ChecksumAndDBProcessor
 from mwax_mover.mwax_wqw_outgoing import OutgoingProcessor
@@ -81,7 +79,7 @@ class MWAXSubfileDistributor:
 
         # Web server
         self.flask_app = Flask(__name__)
-        self.flask_thread: Optional[threading.Thread] = None
+        self.flask_thread: threading.Thread | None = None
         self.flask_server = None
 
         # This list helps us keep track of all the workers
@@ -210,7 +208,7 @@ class MWAXSubfileDistributor:
         self,
         config_filename: str,
         config_mode: utils.MWAXSubfileDistirbutorMode,
-        override_db_handler: Optional[MWAXDBHandler] = None,
+        override_db_handler: MWAXDBHandler | None = None,
     ):
         """Initialize the distributor from configuration file and mode.
 
@@ -230,7 +228,7 @@ class MWAXSubfileDistributor:
         self.config.read_file(open(config_filename, "r", encoding="utf-8"))
 
         # Read log level
-        config_file_log_level: Optional[str] = utils.read_optional_config(
+        config_file_log_level: str | None = utils.read_optional_config(
             self.config, "mwax mover", "log_level"
         )
 
@@ -980,7 +978,7 @@ class MWAXSubfileDistributor:
                     )
 
         except Exception as ws_exception:
-            return f"ERROR: {ws_exception}".encode("utf-8"), 500
+            return f"ERROR: {ws_exception}".encode(), 500
 
     def endpoint_dump_voltages(self):
         """Web service endpoint to request voltage buffer dump.
@@ -1048,10 +1046,10 @@ class MWAXSubfileDistributor:
                     )
 
         except ValueError as parameters_exception:  # pylint: disable=broad-except
-            return f"Value Error: {parameters_exception}".encode("utf-8"), 400
+            return f"Value Error: {parameters_exception}".encode(), 400
 
         except Exception as dump_voltages_exception:  # pylint: disable=broad-except
-            return f"ERROR: {dump_voltages_exception}".encode("utf-8"), 500
+            return f"ERROR: {dump_voltages_exception}".encode(), 500
 
     def dump_voltages(
         self, start_gps_time: int, end_gps_time: int, trigger_id: int
@@ -1075,7 +1073,7 @@ class MWAXSubfileDistributor:
         self.dump_trigger_id = trigger_id
 
         logger.info(
-            f"dump_voltages: from {str(start_gps_time)} to {str(end_gps_time)} for trigger {trigger_id}..."
+            f"dump_voltages: from {start_gps_time!s} to {end_gps_time!s} for trigger {trigger_id}..."
         )
 
         # Look for any .free files which have the first 10 characters of

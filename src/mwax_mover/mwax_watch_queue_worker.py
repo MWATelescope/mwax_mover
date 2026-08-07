@@ -10,17 +10,17 @@ processing starts. Concrete subclasses implement only the handler() method.
 """
 
 import logging
-from queue import PriorityQueue, Queue
-from mwax_mover.mwax_watcher import Watcher
-from mwax_mover.mwax_queue_worker import QueueWorker
-from mwax_mover.mwax_priority_watcher import PriorityWatcher
-from mwax_mover.mwax_priority_queue_worker import PriorityQueueWorker
-from mwax_mover import utils
-from abc import ABC, abstractmethod
 import time
-from typing import Optional
-from threading import Thread
+from abc import ABC, abstractmethod
 from pathlib import Path
+from queue import PriorityQueue, Queue
+from threading import Thread
+
+from mwax_mover import utils
+from mwax_mover.mwax_priority_queue_worker import PriorityQueueWorker
+from mwax_mover.mwax_priority_watcher import PriorityWatcher
+from mwax_mover.mwax_queue_worker import QueueWorker
+from mwax_mover.mwax_watcher import Watcher
 
 THREAD_JOIN_WAIT_TIMEOUT = 10
 
@@ -98,7 +98,7 @@ class MWAXWatchQueueWorker(ABC):
         name: str,
         watch_paths_exts: list[tuple[str, str]],
         mode,
-        exclude_pattern: Optional[str] = None,
+        exclude_pattern: str | None = None,
         recursive=False,
         exit_once_queue_empty: bool = False,
         requeue_to_eoq_on_failure: bool = True,
@@ -275,7 +275,6 @@ class MWAXWatchQueueWorker(ABC):
         Returns:
             True if processing succeeded, False otherwise.
         """
-        pass
 
 
 class MWAXPriorityWatchQueueWorker(ABC):
@@ -294,7 +293,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
         mode,
         corr_hi_priority_projects: list[str],
         vcs_hi_priority_projects: list[str],
-        exclude_pattern: Optional[str] = None,
+        exclude_pattern: str | None = None,
         recursive=False,
         exit_once_queue_empty: bool = False,
         requeue_to_eoq_on_failure: bool = True,
@@ -479,4 +478,3 @@ class MWAXPriorityWatchQueueWorker(ABC):
         Returns:
             True if processing succeeded, False otherwise.
         """
-        pass

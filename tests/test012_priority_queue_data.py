@@ -3,6 +3,7 @@ Tests for the mwax_priority_queue_data.py module
 """
 
 import queue
+
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
 
 

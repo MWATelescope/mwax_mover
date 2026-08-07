@@ -7,11 +7,7 @@ Storage (Acacia or Banksia) via rclone, updates the MRO metadata database to
 confirm successful archival, then deletes the local copy.
 """
 
-from mwax_mover.mwax_db import MWAXDBHandler
-
 import argparse
-from configparser import ConfigParser
-from glob import glob
 import json
 import logging
 import os
@@ -19,7 +15,9 @@ import signal
 import sys
 import threading
 import time
-from typing import Optional
+from configparser import ConfigParser
+from glob import glob
+
 import astropy
 
 from mwax_mover import (
@@ -27,6 +25,7 @@ from mwax_mover import (
     utils,
     version,
 )
+from mwax_mover.mwax_db import MWAXDBHandler
 from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
 from mwax_mover.mwax_wqw_pawsey_outgoing import PawseyOutgoingProcessor
 from mwax_mover.utils import ArchiveLocation
@@ -289,8 +288,8 @@ class MWACacheArchiveProcessor:
     def initialise(
         self,
         config_filename,
-        override_mro_db_handler: Optional[MWAXDBHandler] = None,
-        override_remote_db_handler: Optional[MWAXDBHandler] = None,
+        override_mro_db_handler: MWAXDBHandler | None = None,
+        override_remote_db_handler: MWAXDBHandler | None = None,
     ):
         """Initialize the processor from a configuration file.
 
@@ -310,7 +309,7 @@ class MWACacheArchiveProcessor:
         config.read_file(open(config_filename, "r", encoding="utf-8"))
 
         # Read log level
-        config_file_log_level: Optional[str] = utils.read_optional_config(
+        config_file_log_level: str | None = utils.read_optional_config(
             config, "mwax mover", "log_level"
         )
         if config_file_log_level:

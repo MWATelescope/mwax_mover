@@ -7,15 +7,14 @@ utility (mwax_bf_vdif_utils or mwax_bf_filterbank_utils). Optionally retains
 original subobs files before stitching.
 """
 
-from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
-from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
-from mwax_mover import utils
-from mwax_mover import mwax_bf_vdif_utils
-from mwax_mover import mwax_bf_filterbank_utils
+import glob
 import logging
 import os
-import glob
 import shutil
+
+from mwax_mover import mwax_bf_filterbank_utils, mwax_bf_vdif_utils, utils
+from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
+from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
 
 METAFITS_EXPOSURE = "EXPOSURE"
 

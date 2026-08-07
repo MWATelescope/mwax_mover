@@ -19,37 +19,34 @@ calibration form the calvin HPC cluster
    * Clean up
 """
 
-from pathlib import Path
-
-from dataclasses import dataclass
-
-import subprocess
-
 import argparse
-from configparser import ConfigParser
-from datetime import datetime, timedelta
 import json
 import logging
 import os
 import signal
+import subprocess
 import sys
 import threading
 import time
-from typing import Optional
-from mwax_mover import utils, version, mwax_asvo_helper
+from configparser import ConfigParser
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
+
+from mwax_mover import mwax_asvo_helper, utils, version
+from mwax_mover.mwax_calvin_utils import (
+    CalvinJobType,
+    count_slurm_asvo_jobs,
+    create_sbatch_script,
+    submit_sbatch,
+)
 from mwax_mover.mwax_db import (
     MWAXDBHandler,
     get_unattempted_calibration_requests,
-    update_calsolution_request_submit_mwa_asvo_job_status,
-    update_calibration_request_slurm_status,
     get_unattempted_unrequested_cal_obsids,
     insert_calibration_request_row,
-)
-from mwax_mover.mwax_calvin_utils import (
-    submit_sbatch,
-    create_sbatch_script,
-    CalvinJobType,
-    count_slurm_asvo_jobs,
+    update_calibration_request_slurm_status,
+    update_calsolution_request_submit_mwa_asvo_job_status,
 )
 
 # Setup root logger
@@ -293,7 +290,7 @@ class MWAXCalvinController:
                                 path.rmdir()
                     except Exception as e:
                         logger.warning(
-                            f"Error clearing empty dirs under {tracker.plot_upload_path}. Error {str(e)}"
+                            f"Error clearing empty dirs under {tracker.plot_upload_path}. Error {e!s}"
                         )
 
                     if tracker.consecutive_failures > 0:
@@ -433,7 +430,7 @@ class MWAXCalvinController:
         """
         logger.debug("Querying mwa database for uncalibrated realtime observations ...")
         # First get the obs's which need requests created
-        obs_ids_to_request: Optional[list[int]] = (
+        obs_ids_to_request: list[int] | None = (
             get_unattempted_unrequested_cal_obsids(
                 self.db_handler, self.oldest_cal_obs_id
             )
@@ -472,7 +469,7 @@ class MWAXCalvinController:
         )
 
         success: bool = False
-        slurm_job_id: Optional[int] = None
+        slurm_job_id: int | None = None
 
         # submit sbatch script
         try:
@@ -492,7 +489,7 @@ class MWAXCalvinController:
 
         except Exception:
             logger.exception(
-                f"{str(realtime_request.obs_id)}: Unable to submit a realtime calibration "
+                f"{realtime_request.obs_id!s}: Unable to submit a realtime calibration "
                 "sbatch job. Will retry next loop"
             )
             self.slurm_errors += 1
@@ -859,7 +856,7 @@ class MWAXCalvinController:
                     f"Error submitting job for ObsID {obs_id} RequestID {request_id}."
                 )
                 logger.exception(error_message)
-                error_message = error_message + f" {str(e)}"
+                error_message = error_message + f" {e!s}"
                 update_calsolution_request_submit_mwa_asvo_job_status(
                     self.db_handler,
                     [
@@ -903,7 +900,7 @@ class MWAXCalvinController:
     def initialise(
         self,
         config_filename: str,
-        override_db_handler: Optional[MWAXDBHandler] = None,
+        override_db_handler: MWAXDBHandler | None = None,
     ):
         """Initialize the controller from a configuration file.
 
@@ -941,7 +938,7 @@ class MWAXCalvinController:
             sys.exit(1)
 
         # Read log level
-        config_file_log_level: Optional[str] = utils.read_optional_config(
+        config_file_log_level: str | None = utils.read_optional_config(
             config, "mwax mover", "log_level"
         )
         if config_file_log_level:

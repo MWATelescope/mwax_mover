@@ -13,8 +13,8 @@ from pathlib import Path
 import mwalib
 
 from mwax_mover.mwax_calvin_utils import (
-    split_aocal_file_into_coarse_channels,
     parse_solution_channels,
+    split_aocal_file_into_coarse_channels,
 )
 
 logger = logging.getLogger(__name__)

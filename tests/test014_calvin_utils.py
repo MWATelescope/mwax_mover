@@ -25,16 +25,18 @@ section if that happens.
 
 import logging
 import os
+
 import mwalib
-import mwax_mover
-import mwax_mover.mwax_calvin_utils
 import numpy as np
 import pandas as pd
 import pytest
-from astropy.io import fits
 from astropy import units as u
 from astropy.constants import c as speed_of_light  # ty: ignore[unresolved-import]
+from astropy.io import fits
 
+import mwax_mover
+import mwax_mover.mwax_calvin_utils
+from mwax_mover.mwax_calvin_quality import clip_hyperdrive_solution_gains
 from mwax_mover.mwax_calvin_utils import (
     MWA_NUM_COARSE_CHANS,
     GainFitInfo,
@@ -44,18 +46,17 @@ from mwax_mover.mwax_calvin_utils import (
     fit_gain,
     fit_phase_line,
     get_solution_fits_filename,
+    get_sorted_solution_files,
     pad_gain_fit_info,
     pad_gains_to_full_coarse,
     parse_csv_header,
+    parse_solution_channels,
     process_gain_fits,
     process_phase_fits,
     reject_outliers,
     textwrap,
     wrap_angle,
     write_readme_file,
-    parse_solution_channels,
-    get_sorted_solution_files,
-    clip_hyperdrive_solution_gains,
 )
 
 logger = logging.getLogger(__name__)
@@ -101,9 +102,7 @@ _EXPECTED_GAIN_COLS = {
 }
 
 
-def _make_phase_ramp(
-    freqs_hz: np.ndarray, length_m: float, intercept_rad: float
-) -> np.ndarray:
+def _make_phase_ramp(freqs_hz: np.ndarray, length_m: float, intercept_rad: float) -> np.ndarray:
     """Construct a complex array representing a pure phase ramp.
 
     Args:
@@ -114,16 +113,12 @@ def _make_phase_ramp(
     Returns:
         Complex array with unit amplitude and the specified phase ramp.
     """
-    slope = (
-        (2 * np.pi * u.rad * (length_m * u.m) / speed_of_light).to(u.rad / u.Hz).value
-    )
+    slope = (2 * np.pi * u.rad * (length_m * u.m) / speed_of_light).to(u.rad / u.Hz).value
     phase = slope * freqs_hz + intercept_rad
     return np.exp(1j * phase)
 
 
-def _make_tiles_df(
-    n_tiles: int = 3, flagged_ids: list[int] | None = None
-) -> pd.DataFrame:
+def _make_tiles_df(n_tiles: int = 3, flagged_ids: list[int] | None = None) -> pd.DataFrame:
     """Build a minimal tiles DataFrame for testing process_*_fits functions.
 
     Args:
@@ -149,9 +144,7 @@ def _make_tiles_df(
     return pd.DataFrame(rows)
 
 
-def _make_solns_array(
-    n_tiles: int, n_chanblocks: int, length_m: float = 5.0
-) -> np.ndarray:
+def _make_solns_array(n_tiles: int, n_chanblocks: int, length_m: float = 5.0) -> np.ndarray:
     """Build a synthetic (1, n_tiles, n_chanblocks) complex solutions array.
 
     Args:
@@ -192,9 +185,7 @@ def _make_phase_fits_df(lengths: list[float], pol: str = "XX") -> pd.DataFrame:
 def test_estimate_birli_output_bytes():
     test_metafits = "tests/data/1244973688/1244973688_metafits.fits"
     metafits_context = mwalib.MetafitsContext(test_metafits, None)
-    calc_bytes: float = mwax_mover.mwax_calvin_utils.estimate_birli_output_bytes(
-        metafits_context, 40, 2.0
-    )
+    calc_bytes: float = mwax_mover.mwax_calvin_utils.estimate_birli_output_bytes(metafits_context, 40, 2.0)
     # Manually calculate the gigabytes
     # manual = timesteps * baselines * coarse_channels * fine_channels * pols * bytes_per_r_i (from Birli)
     manual_bytes: float = 60 * 8256 * 24 * 32 * 4 * 13
@@ -990,9 +981,7 @@ def test_fit_phase_line_recovers_length():
     solns = _make_phase_ramp(_FREQS_HZ, target_length, intercept_rad=0.0)
     weights = np.ones(len(_FREQS_HZ))
     result = fit_phase_line(_FREQS_HZ, solns, weights)
-    assert abs(result.length - target_length) < 0.5, (
-        f"Expected length ≈ {target_length}m, got {result.length:.3f}m"
-    )
+    assert abs(result.length - target_length) < 0.5, f"Expected length ≈ {target_length}m, got {result.length:.3f}m"
 
 
 def test_fit_phase_line_recovers_intercept():
@@ -1120,9 +1109,7 @@ def test_weights_excludes_negative_results():
     results = np.array([1e-5, 2e-5, 3e-5, -1.0, 5e-5])
     weights = _make_mock_soln_group_with_results(results)
     # The index corresponding to -1.0 (index 3) should be zero after nan_to_num
-    assert weights[3] == pytest.approx(0.0), (
-        f"Negative result should produce zero weight, got {weights[3]}"
-    )
+    assert weights[3] == pytest.approx(0.0), f"Negative result should produce zero weight, got {weights[3]}"
     # At least some other weights should be non-zero
     assert np.any(weights > 0)
 
@@ -1131,9 +1118,7 @@ def test_weights_excludes_large_results():
     """Results > 1e-4 should be treated as NaN and contribute zero weight."""
     results = np.array([1e-5, 2e-5, 3e-5, 1.0, 5e-5])  # index 3 is too large
     weights = _make_mock_soln_group_with_results(results)
-    assert weights[3] == pytest.approx(0.0), (
-        f"Large result should produce zero weight, got {weights[3]}"
-    )
+    assert weights[3] == pytest.approx(0.0), f"Large result should produce zero weight, got {weights[3]}"
     assert np.any(weights > 0)
 
 
@@ -1199,9 +1184,7 @@ def test_fit_gain_too_few_valid_coarse_skipped():
     weights[start : start + _CHANBLOCKS_PER_COARSE] = 0.0
     weights[start] = 1.0  # exactly 1 valid
     result = fit_gain(_GAIN_FREQS, solns, weights, _CHANBLOCKS_PER_COARSE)
-    assert np.isnan(result.gains[3]), (
-        "Channel with <2 valid points should have NaN gain"
-    )
+    assert np.isnan(result.gains[3]), "Channel with <2 valid points should have NaN gain"
 
 
 def test_fit_gain_quality_always_one():
@@ -1262,31 +1245,23 @@ def process_fits_inputs():
     return tiles, _GAIN_FREQS, weights, soln_tile_ids, all_xx, all_yy
 
 
-def test_process_phase_fits_returns_dataframe_with_correct_columns(
-    process_fits_inputs, tmp_path
-):
+def test_process_phase_fits_returns_dataframe_with_correct_columns(process_fits_inputs, tmp_path):
     tiles, freqs, weights, soln_tile_ids, all_xx, all_yy = process_fits_inputs
-    result = process_phase_fits(
-        tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1
-    )
+    result = process_phase_fits(tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1)
     assert isinstance(result, pd.DataFrame)
     assert _EXPECTED_PHASE_COLS.issubset(set(result.columns))
 
 
 def test_process_phase_fits_skips_flagged_tile(process_fits_inputs, tmp_path):
     tiles, freqs, weights, soln_tile_ids, all_xx, all_yy = process_fits_inputs
-    result = process_phase_fits(
-        tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1
-    )
+    result = process_phase_fits(tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1)
     assert 3 not in result["tile_id"].values
 
 
 def test_process_phase_fits_has_xx_and_yy_rows(process_fits_inputs, tmp_path):
     """2 unflagged tiles × 2 pols = 4 rows."""
     tiles, freqs, weights, soln_tile_ids, all_xx, all_yy = process_fits_inputs
-    result = process_phase_fits(
-        tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1
-    )
+    result = process_phase_fits(tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1)
     assert len(result) == 4
     assert set(result["pol"].unique()) == {"XX", "YY"}
 
@@ -1301,36 +1276,28 @@ def test_process_phase_fits_bad_solution_skipped_not_raised(tmp_path):
     # Corrupt tile 1 (index 0) with NaN
     all_xx[0, 0, :] = np.nan
     all_yy[0, 0, :] = np.nan
-    result = process_phase_fits(
-        tiles, _GAIN_FREQS, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1
-    )
+    result = process_phase_fits(tiles, _GAIN_FREQS, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1)
     assert 1 not in result["tile_id"].values
     assert 2 in result["tile_id"].values
 
 
 def test_process_gain_fits_returns_dataframe_with_correct_columns(process_fits_inputs):
     tiles, freqs, weights, soln_tile_ids, all_xx, all_yy = process_fits_inputs
-    result = process_gain_fits(
-        tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, _CHANBLOCKS_PER_COARSE
-    )
+    result = process_gain_fits(tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, _CHANBLOCKS_PER_COARSE)
     assert isinstance(result, pd.DataFrame)
     assert _EXPECTED_GAIN_COLS.issubset(set(result.columns))
 
 
 def test_process_gain_fits_skips_flagged_tile(process_fits_inputs):
     tiles, freqs, weights, soln_tile_ids, all_xx, all_yy = process_fits_inputs
-    result = process_gain_fits(
-        tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, _CHANBLOCKS_PER_COARSE
-    )
+    result = process_gain_fits(tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, _CHANBLOCKS_PER_COARSE)
     assert 3 not in result["tile_id"].values
 
 
 def test_process_gain_fits_has_xx_and_yy_rows(process_fits_inputs):
     """2 unflagged tiles × 2 pols = 4 rows."""
     tiles, freqs, weights, soln_tile_ids, all_xx, all_yy = process_fits_inputs
-    result = process_gain_fits(
-        tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, _CHANBLOCKS_PER_COARSE
-    )
+    result = process_gain_fits(tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, _CHANBLOCKS_PER_COARSE)
     assert len(result) == 4
     assert set(result["pol"].unique()) == {"XX", "YY"}
 
@@ -1338,9 +1305,7 @@ def test_process_gain_fits_has_xx_and_yy_rows(process_fits_inputs):
 def test_process_gain_fits_gains_list_length(process_fits_inputs):
     """Each row's gains list should have length == n_coarse."""
     tiles, freqs, weights, soln_tile_ids, all_xx, all_yy = process_fits_inputs
-    result = process_gain_fits(
-        tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, _CHANBLOCKS_PER_COARSE
-    )
+    result = process_gain_fits(tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, _CHANBLOCKS_PER_COARSE)
     for gains in result["gains"]:
         assert len(gains) == _N_COARSE
 
@@ -1352,9 +1317,7 @@ def test_process_gain_fits_gains_list_length(process_fits_inputs):
 
 def test_write_readme_success_exit_code_zero(tmp_path):
     fname = str(tmp_path / "readme_ok.txt")
-    write_readme_file(
-        fname, cmd="my_command arg1", exit_code=0, output="some output", error=""
-    )
+    write_readme_file(fname, cmd="my_command arg1", exit_code=0, output="some output", error="")
     assert os.path.exists(fname)
     content = open(fname).read()
     assert "succeeded" in content  # typo fixed in source: was "succeded"
@@ -1364,9 +1327,7 @@ def test_write_readme_success_exit_code_zero(tmp_path):
 
 def test_write_readme_failure_exit_code_nonzero(tmp_path):
     fname = str(tmp_path / "readme_fail.txt")
-    write_readme_file(
-        fname, cmd="bad_command", exit_code=1, output="", error="something went wrong"
-    )
+    write_readme_file(fname, cmd="bad_command", exit_code=1, output="", error="something went wrong")
     content = open(fname).read()
     assert "failed" in content
     assert "something went wrong" in content
@@ -1384,9 +1345,7 @@ def test_write_readme_no_exception_on_bad_path(caplog):
     bad_path = "/nonexistent/deeply/nested/path/readme.txt"
     with caplog.at_level(logging.WARNING):
         write_readme_file(bad_path, cmd="cmd", exit_code=0, output="", error="")
-    assert any(
-        "Could not write" in r.message or bad_path in r.message for r in caplog.records
-    )
+    assert any("Could not write" in r.message or bad_path in r.message for r in caplog.records)
 
 
 # ============================================================
@@ -1405,9 +1364,7 @@ def test_fit_gain_basic_weighted_mean():
     solns = np.full(n_freqs, 2.0, dtype=complex)
     weights = np.ones(n_freqs)
 
-    result = mwax_mover.mwax_calvin_utils.fit_gain(
-        freqs_hz, solns, weights, chanblocks_per_coarse
-    )
+    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
 
     assert len(result.gains) == n_coarse
     for g in result.gains:
@@ -1425,9 +1382,7 @@ def test_fit_gain_pol0_pol1_flat_amps():
     solns = np.full(n_freqs, 4.0, dtype=complex)
     weights = np.ones(n_freqs)
 
-    result = mwax_mover.mwax_calvin_utils.fit_gain(
-        freqs_hz, solns, weights, chanblocks_per_coarse
-    )
+    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
 
     for i in range(n_coarse):
         assert result.pol0[i] == pytest.approx(0.25, rel=1e-5)  # intercept ~ 1/4.0
@@ -1444,9 +1399,7 @@ def test_fit_gain_sigma_resid_flat_amps():
     solns = np.full(n_freqs, 2.0, dtype=complex)
     weights = np.ones(n_freqs)
 
-    result = mwax_mover.mwax_calvin_utils.fit_gain(
-        freqs_hz, solns, weights, chanblocks_per_coarse
-    )
+    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
 
     for i in range(n_coarse):
         assert result.sigma_resid[i] == pytest.approx(0.0, abs=1e-10)
@@ -1462,9 +1415,7 @@ def test_fit_gain_quality_all_valid():
     solns = np.full(n_freqs, 2.0, dtype=complex)
     weights = np.ones(n_freqs)
 
-    result = mwax_mover.mwax_calvin_utils.fit_gain(
-        freqs_hz, solns, weights, chanblocks_per_coarse
-    )
+    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
 
     assert result.quality == pytest.approx(1.0, rel=1e-6)
 
@@ -1483,9 +1434,7 @@ def test_fit_gain_quality_reduced_by_flagged_channels():
     # Flag one entire coarse channel by zeroing its weights
     weights[:chanblocks_per_coarse] = 0.0
 
-    result = mwax_mover.mwax_calvin_utils.fit_gain(
-        freqs_hz, solns, weights, chanblocks_per_coarse
-    )
+    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
 
     # Flagged coarse channel should produce nan gain
     assert np.isnan(result.gains[0])
@@ -1506,9 +1455,7 @@ def test_fit_gain_nan_solns_skipped():
     solns[:chanblocks_per_coarse] = np.nan  # entire first coarse channel is NaN
     weights = np.ones(n_freqs)
 
-    result = mwax_mover.mwax_calvin_utils.fit_gain(
-        freqs_hz, solns, weights, chanblocks_per_coarse
-    )
+    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
 
     assert np.isnan(result.gains[0])
     assert not np.isnan(result.gains[1])
@@ -1524,9 +1471,7 @@ def test_fit_gain_output_lengths():
     solns = np.ones(n_freqs, dtype=complex)
     weights = np.ones(n_freqs)
 
-    result = mwax_mover.mwax_calvin_utils.fit_gain(
-        freqs_hz, solns, weights, chanblocks_per_coarse
-    )
+    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
 
     assert len(result.gains) == n_coarse
     assert len(result.pol0) == n_coarse
@@ -1691,9 +1636,7 @@ class TestGetSortedSolutionFiles:
         self._touch(tmp_path / f"{self.OBS_ID}_solutions.bin")
 
         with pytest.RaisesExc(ValueError):
-            _result = get_sorted_solution_files(
-                str(tmp_path), self.OBS_ID, extension=".fits"
-            )
+            _result = get_sorted_solution_files(str(tmp_path), self.OBS_ID, extension=".fits")
 
     def test_empty_directory(self, tmp_path) -> None:
         result = get_sorted_solution_files(str(tmp_path), self.OBS_ID)

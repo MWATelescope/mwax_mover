@@ -1,12 +1,14 @@
-import time
 import json
 import logging
+import time
+
 import pytest
+
 from mwax_mover.mwax_asvo_helper import (
+    MWAASVOHelper,
+    MWAASVOJobState,
     get_job_id_from_giant_squid_stdout,
     get_job_info_from_giant_squid_json,
-    MWAASVOJobState,
-    MWAASVOHelper,
 )
 
 logger = logging.getLogger(__name__)

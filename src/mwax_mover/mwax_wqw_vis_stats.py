@@ -7,12 +7,13 @@ observations go to outgoing_cal (for the Calvin pipeline), and all others go to
 outgoing for archiving.
 """
 
-from mwax_mover.mwax_watch_queue_worker import MWAXWatchQueueWorker
-from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
-from mwax_mover.utils import ValidationData
-from mwax_mover import utils
-import os
 import logging
+import os
+
+from mwax_mover import utils
+from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
+from mwax_mover.mwax_watch_queue_worker import MWAXWatchQueueWorker
+from mwax_mover.utils import ValidationData
 
 logger = logging.getLogger(__name__)
 

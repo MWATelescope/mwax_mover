@@ -13,11 +13,11 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+from tests_common import setup_test_directories
 
 from mwax_mover.mwax_db import MWAXDBHandler
 from mwax_mover.mwax_wqw_checksum_and_db import ChecksumAndDBProcessor
-from mwax_mover.utils import ValidationData, MWADataFileType
-from tests_common import setup_test_directories
+from mwax_mover.utils import MWADataFileType, ValidationData
 
 # Setup root logger so processor log output is visible when running with -s
 handler = logging.StreamHandler()

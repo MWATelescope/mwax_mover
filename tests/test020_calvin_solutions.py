@@ -15,12 +15,13 @@ METAFITS_FILENAME below accordingly.
 """
 
 import glob
-import shutil
 import logging
 import os
+import shutil
 from unittest.mock import MagicMock, patch
 
 import pytest
+from tests_common import setup_test_directories
 
 from mwax_mover.mwax_calvin_solutions import process_solutions
 
@@ -46,9 +47,7 @@ SOLUTIONS_PATH = os.path.join(DATA_DIR, SOLUTIONS_FILENAME)
 # ---------------------------------------------------------------------------
 
 
-def _make_mock_db_handler(
-    fit_id: int = 99, fit_success: bool = True, soln_success: bool = True
-):
+def _make_mock_db_handler(fit_id: int = 99, fit_success: bool = True, soln_success: bool = True):
     """Build a MagicMock db_handler_object whose pool.connection() is a valid context manager.
 
     The mock wires up:
@@ -155,6 +154,9 @@ def test_process_solutions_success(real_data_paths, tmp_path):
             produce_debug_plots=False,
             calibration_command="",
             gain_max_cutoff=None,
+            gain_outlier_poly_degree=2,
+            gain_outlier_mad_residual_threshold=10,
+            gain_outlier_modify_gains=False,
         )
 
     assert success is True, f"Expected success=True, got error: {error_msg}"
@@ -195,6 +197,9 @@ def test_process_solutions_all_tiles_flagged(tmp_path):
         produce_debug_plots=False,
         calibration_command="",
         gain_max_cutoff=None,
+        gain_outlier_poly_degree=2,
+        gain_outlier_mad_residual_threshold=10,
+        gain_outlier_modify_gains=False,
     )
 
     assert success is True
@@ -212,12 +217,8 @@ def test_process_solutions_soln_count_mismatch(real_data_paths, tmp_path):
     # Copy the solutions file twice to simulate a mismatch
     import shutil
 
-    shutil.copy(
-        SOLUTIONS_PATH, os.path.join(output_path, f"{OBS_ID}_band1_solutions.fits")
-    )
-    shutil.copy(
-        SOLUTIONS_PATH, os.path.join(output_path, f"{OBS_ID}_band2_solutions.fits")
-    )
+    shutil.copy(SOLUTIONS_PATH, os.path.join(output_path, f"{OBS_ID}_band1_solutions.fits"))
+    shutil.copy(SOLUTIONS_PATH, os.path.join(output_path, f"{OBS_ID}_band2_solutions.fits"))
 
     mock_db = MagicMock()
 
@@ -232,6 +233,9 @@ def test_process_solutions_soln_count_mismatch(real_data_paths, tmp_path):
         produce_debug_plots=False,
         calibration_command="",
         gain_max_cutoff=None,
+        gain_outlier_poly_degree=2,
+        gain_outlier_mad_residual_threshold=10,
+        gain_outlier_modify_gains=False,
     )
 
     assert success is False
@@ -275,6 +279,9 @@ def test_process_solutions_db_fit_insert_fails(real_data_paths, tmp_path):
             produce_debug_plots=False,
             calibration_command="",
             gain_max_cutoff=None,
+            gain_outlier_poly_degree=2,
+            gain_outlier_mad_residual_threshold=10,
+            gain_outlier_modify_gains=False,
         )
 
     assert success is False
@@ -321,6 +328,9 @@ def test_process_solutions_db_soln_insert_fails(real_data_paths, tmp_path):
             produce_debug_plots=False,
             calibration_command="",
             gain_max_cutoff=None,
+            gain_outlier_poly_degree=2,
+            gain_outlier_mad_residual_threshold=10,
+            gain_outlier_modify_gains=False,
         )
 
     assert success is False
@@ -363,14 +373,15 @@ def test_process_solutions_readme_written_on_any_exception(real_data_paths, tmp_
             produce_debug_plots=False,
             calibration_command="",
             gain_max_cutoff=None,
+            gain_outlier_poly_degree=2,
+            gain_outlier_mad_residual_threshold=10,
+            gain_outlier_modify_gains=False,
         )
 
     assert success is False
     assert fit_id is None
     readme_path = os.path.join(output_path, "readme_error.txt")
-    assert os.path.exists(readme_path), (
-        "readme_error.txt must be written on any exception"
-    )
+    assert os.path.exists(readme_path), "readme_error.txt must be written on any exception"
     content = open(readme_path).read()
     # The error text appears under the "error:" label (renamed from "stderr:")
     assert "injected test error" in content or "error:" in content
@@ -395,15 +406,16 @@ def test_process_solutions_no_solution_files_in_output(real_data_paths, tmp_path
         produce_debug_plots=False,
         calibration_command="",
         gain_max_cutoff=None,
+        gain_outlier_poly_degree=2,
+        gain_outlier_mad_residual_threshold=10,
+        gain_outlier_modify_gains=False,
     )
 
     assert success is False
     assert fit_id is None
 
 
-def test_process_solutions_produce_debug_plots_false_does_not_import_matplotlib(
-    real_data_paths, tmp_path
-):
+def test_process_solutions_produce_debug_plots_false_does_not_import_matplotlib(real_data_paths, tmp_path):
     """Passing produce_debug_plots=False must not call debug_phase_fits (which uses matplotlib)."""
     input_path, _ = real_data_paths
     output_path = str(tmp_path)
@@ -442,6 +454,9 @@ def test_process_solutions_produce_debug_plots_false_does_not_import_matplotlib(
             produce_debug_plots=False,
             calibration_command="",
             gain_max_cutoff=None,
+            gain_outlier_poly_degree=2,
+            gain_outlier_mad_residual_threshold=10,
+            gain_outlier_modify_gains=False,
         )
 
     mock_debug.assert_not_called()
@@ -456,8 +471,9 @@ def test_some_fits_false_logs_warning():
     triggers it: a tile_id that appears in soln_tile_ids but has no matching
     rows in either phase_fits or gain_fits.
     """
-    import pandas as pd
     from unittest.mock import patch
+
+    import pandas as pd
 
     # Replicate the exact logic from process_solutions for the some_fits block
     obs_id = OBS_ID
@@ -493,30 +509,22 @@ def test_some_fits_false_logs_warning():
         # Reproduce the exact some_fits block from process_solutions
         some_fits = False
         try:
-            empty_gain[(empty_gain.tile_id == tile_id) & (empty_gain.pol == "XX")].iloc[
-                0
-            ]
+            empty_gain[(empty_gain.tile_id == tile_id) & (empty_gain.pol == "XX")].iloc[0]
             some_fits = True
         except IndexError:
             pass
         try:
-            empty_gain[(empty_gain.tile_id == tile_id) & (empty_gain.pol == "YY")].iloc[
-                0
-            ]
+            empty_gain[(empty_gain.tile_id == tile_id) & (empty_gain.pol == "YY")].iloc[0]
             some_fits = True
         except IndexError:
             pass
         try:
-            empty_phase[
-                (empty_phase.tile_id == tile_id) & (empty_phase.pol == "XX")
-            ].iloc[0]
+            empty_phase[(empty_phase.tile_id == tile_id) & (empty_phase.pol == "XX")].iloc[0]
             some_fits = True
         except IndexError:
             pass
         try:
-            empty_phase[
-                (empty_phase.tile_id == tile_id) & (empty_phase.pol == "YY")
-            ].iloc[0]
+            empty_phase[(empty_phase.tile_id == tile_id) & (empty_phase.pol == "YY")].iloc[0]
             some_fits = True
         except IndexError:
             pass
@@ -536,14 +544,19 @@ def test_some_fits_false_logs_warning():
 
 def test_process_solutions_success_2():
     """Happy path: real files + mocked DB returning fit_id=42 -> (True, '', 42)."""
+    base_dir = setup_test_directories("test020")
+
     obsid = 1391522232
-    input_path = f"/data/{obsid}/calvin11"
-    output_path = f"/data/{obsid}/test_out"
+    input_path = f"tests/data/{obsid}"
+    output_path = os.path.join(base_dir, "data/calvin/out_jobs")
 
     # Copy the solutions file to output_path so process_solutions can glob it
     input_files = glob.glob(os.path.join(input_path, "*_solutions.fits"))
     for f in input_files:
         shutil.copy(f, output_path)
+
+    # Copy metafits
+    # shutil.copy(, output_path)
 
     mock_db = MagicMock()
     mock_cursor = MagicMock()
@@ -575,6 +588,9 @@ def test_process_solutions_success_2():
             produce_debug_plots=True,
             calibration_command="",
             gain_max_cutoff=None,
+            gain_outlier_poly_degree=2,
+            gain_outlier_mad_residual_threshold=10,
+            gain_outlier_modify_gains=False,
         )
 
     assert success is True, f"Expected success=True, got error: {error_msg}"
@@ -588,9 +604,7 @@ def test_process_solutions_success_2():
 # ---------------------------------------------------------------------------
 
 
-def _make_synthetic_metafits(
-    path: str, obs_id: int, coarse_chans: list, n_tiles: int = 3
-) -> None:
+def _make_synthetic_metafits(path: str, obs_id: int, coarse_chans: list, n_tiles: int = 3) -> None:
     """Create a synthetic MWA metafits FITS file compatible with mwalib MetafitsContext.
 
     Writes a PRIMARY HDU with all headers required by ``mwalib.MetafitsContext``
@@ -609,8 +623,9 @@ def _make_synthetic_metafits(
         n_tiles: Number of tiles to include (default 3, all unflagged).
     """
     import datetime
-    from astropy.io import fits as astropy_fits
+
     import numpy as np
+    from astropy.io import fits as astropy_fits
 
     # ── Derived observation parameters ────────────────────────────────────────
     n_coarse = len(coarse_chans)
@@ -638,9 +653,7 @@ def _make_synthetic_metafits(
     quack_time_s = 4.0
     good_time_unix = float(unix_start) + quack_time_s
     mjd_start = round(40587.0 + unix_start / 86400.0, 8)  # MJD of Unix epoch = 40587.0
-    date_obs = datetime.datetime.fromtimestamp(
-        unix_start, tz=datetime.timezone.utc
-    ).strftime("%Y-%m-%dT%H:%M:%S")
+    date_obs = datetime.datetime.fromtimestamp(unix_start, tz=datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S")
 
     # ── PRIMARY HDU ───────────────────────────────────────────────────────────
     primary = astropy_fits.PrimaryHDU()
@@ -780,31 +793,15 @@ def _make_synthetic_metafits(
 
     cols = astropy_fits.ColDefs(
         [
-            astropy_fits.Column(
-                name="Input", format="I", array=np.array(input_col, dtype=np.int16)
-            ),
-            astropy_fits.Column(
-                name="Antenna", format="I", array=np.array(antenna_col, dtype=np.int16)
-            ),
-            astropy_fits.Column(
-                name="Tile", format="I", array=np.array(tile_col, dtype=np.int16)
-            ),
-            astropy_fits.Column(
-                name="TileName", format="8A", array=np.array(tilename_col)
-            ),
+            astropy_fits.Column(name="Input", format="I", array=np.array(input_col, dtype=np.int16)),
+            astropy_fits.Column(name="Antenna", format="I", array=np.array(antenna_col, dtype=np.int16)),
+            astropy_fits.Column(name="Tile", format="I", array=np.array(tile_col, dtype=np.int16)),
+            astropy_fits.Column(name="TileName", format="8A", array=np.array(tilename_col)),
             astropy_fits.Column(name="Pol", format="A", array=np.array(pol_col)),
-            astropy_fits.Column(
-                name="Rx", format="I", array=np.array(rx_col, dtype=np.int16)
-            ),
-            astropy_fits.Column(
-                name="Slot", format="I", array=np.array(slot_col, dtype=np.int16)
-            ),
-            astropy_fits.Column(
-                name="Flag", format="I", array=np.array(flag_col, dtype=np.int16)
-            ),
-            astropy_fits.Column(
-                name="Length", format="14A", array=np.array(length_col)
-            ),
+            astropy_fits.Column(name="Rx", format="I", array=np.array(rx_col, dtype=np.int16)),
+            astropy_fits.Column(name="Slot", format="I", array=np.array(slot_col, dtype=np.int16)),
+            astropy_fits.Column(name="Flag", format="I", array=np.array(flag_col, dtype=np.int16)),
+            astropy_fits.Column(name="Length", format="14A", array=np.array(length_col)),
             astropy_fits.Column(
                 name="North",
                 format="E",
@@ -833,17 +830,13 @@ def _make_synthetic_metafits(
                 format="E",
                 array=np.array(bftemps_col, dtype=np.float32),
             ),
-            astropy_fits.Column(
-                name="Delays", format="16I", array=np.array(delays_col, dtype=np.int16)
-            ),
+            astropy_fits.Column(name="Delays", format="16I", array=np.array(delays_col, dtype=np.int16)),
             astropy_fits.Column(
                 name="VCSOrder",
                 format="I",
                 array=np.array(vcsorder_col, dtype=np.int16),
             ),
-            astropy_fits.Column(
-                name="Flavors", format="10A", array=np.array(flavors_col)
-            ),
+            astropy_fits.Column(name="Flavors", format="10A", array=np.array(flavors_col)),
             astropy_fits.Column(
                 name="Calib_Delay",
                 format="E",
@@ -854,9 +847,7 @@ def _make_synthetic_metafits(
                 format=calib_gains_fmt,
                 array=np.array(calib_gains_col, dtype=np.float32),
             ),
-            astropy_fits.Column(
-                name="Receiver_Types", format="10A", array=np.array(receiver_types_col)
-            ),
+            astropy_fits.Column(name="Receiver_Types", format="10A", array=np.array(receiver_types_col)),
             astropy_fits.Column(
                 name="Whitening_Filter",
                 format="B",
@@ -869,9 +860,7 @@ def _make_synthetic_metafits(
     astropy_fits.HDUList([primary, tile_hdu]).writeto(path, overwrite=True)
 
 
-def _make_synthetic_solution(
-    path: str, coarse_chans: list, n_tiles: int = 3, chanblocks_per_coarse: int = 4
-) -> None:
+def _make_synthetic_solution(path: str, coarse_chans: list, n_tiles: int = 3, chanblocks_per_coarse: int = 4) -> None:
     """Create a minimal synthetic hyperdrive FITS solution file for testing.
 
     Generates identity Jones matrices (unit gains, zero phases) for all tiles
@@ -890,8 +879,8 @@ def _make_synthetic_solution(
         n_tiles: Number of tiles (must match the metafits tile count).
         chanblocks_per_coarse: Chanblocks per coarse channel (default 4).
     """
-    from astropy.io import fits as astropy_fits
     import numpy as np
+    from astropy.io import fits as astropy_fits
 
     coarse_bandwidth_hz = 1_280_000  # 1.28 MHz
     chanblock_width_hz = coarse_bandwidth_hz // chanblocks_per_coarse  # 320 kHz
@@ -910,12 +899,8 @@ def _make_synthetic_solution(
     tiles_hdu = astropy_fits.BinTableHDU.from_columns(
         astropy_fits.ColDefs(
             [
-                astropy_fits.Column(
-                    name="TileName", format="10A", array=np.array(tile_names)
-                ),
-                astropy_fits.Column(
-                    name="Flag", format="J", array=np.zeros(n_tiles, dtype=np.int32)
-                ),
+                astropy_fits.Column(name="TileName", format="10A", array=np.array(tile_names)),
+                astropy_fits.Column(name="Flag", format="J", array=np.zeros(n_tiles, dtype=np.int32)),
             ]
         ),
         name="TILES",
@@ -992,8 +977,9 @@ def test_process_solutions_partial_coarse_channels(tmp_path):
     * gains[0..2] are finite (channels 100–102 have real solutions).
     * gains[3] is NaN  (channel 103 is missing from the solution file).
     """
-    import numpy as np
     from unittest.mock import MagicMock, patch
+
+    import numpy as np
 
     obs_id = 1234567890
     all_chans = [100, 101, 102, 103]  # metafits channel list
@@ -1007,9 +993,7 @@ def test_process_solutions_partial_coarse_channels(tmp_path):
     metafits_path = os.path.join(input_path, f"{obs_id}_metafits.fits")
     solution_path = os.path.join(output_path, f"{obs_id}_solutions.fits")
     _make_synthetic_metafits(metafits_path, obs_id, all_chans, n_tiles=3)
-    _make_synthetic_solution(
-        solution_path, soln_chans, n_tiles=3, chanblocks_per_coarse=4
-    )
+    _make_synthetic_solution(solution_path, soln_chans, n_tiles=3, chanblocks_per_coarse=4)
 
     # Capture the x_gains list passed to insert_calibration_solutions_row
     inserted_x_gains = []
@@ -1051,6 +1035,9 @@ def test_process_solutions_partial_coarse_channels(tmp_path):
             produce_debug_plots=False,
             calibration_command="",
             gain_max_cutoff=None,
+            gain_outlier_poly_degree=2,
+            gain_outlier_mad_residual_threshold=10,
+            gain_outlier_modify_gains=False,
         )
 
     assert success is True, f"Expected success=True, got error: {error_msg}"
@@ -1059,20 +1046,10 @@ def test_process_solutions_partial_coarse_channels(tmp_path):
 
     for tile_idx, gains in enumerate(inserted_x_gains):
         n = len(gains)
-        assert n == len(all_chans), (
-            f"Tile {tile_idx}: expected {len(all_chans)} gains, got {n}"
-        )
+        assert n == len(all_chans), f"Tile {tile_idx}: expected {len(all_chans)} gains, got {n}"
         # Channels 100, 101, 102 must have finite values
-        assert np.isfinite(gains[0]), (
-            f"Tile {tile_idx}: gains[0] (ch100) should be finite, got {gains[0]}"
-        )
-        assert np.isfinite(gains[1]), (
-            f"Tile {tile_idx}: gains[1] (ch101) should be finite, got {gains[1]}"
-        )
-        assert np.isfinite(gains[2]), (
-            f"Tile {tile_idx}: gains[2] (ch102) should be finite, got {gains[2]}"
-        )
+        assert np.isfinite(gains[0]), f"Tile {tile_idx}: gains[0] (ch100) should be finite, got {gains[0]}"
+        assert np.isfinite(gains[1]), f"Tile {tile_idx}: gains[1] (ch101) should be finite, got {gains[1]}"
+        assert np.isfinite(gains[2]), f"Tile {tile_idx}: gains[2] (ch102) should be finite, got {gains[2]}"
         # Channel 103 is absent from the solution → must be NaN
-        assert np.isnan(gains[3]), (
-            f"Tile {tile_idx}: gains[3] (ch103) should be NaN, got {gains[3]}"
-        )
+        assert np.isnan(gains[3]), f"Tile {tile_idx}: gains[3] (ch103) should be NaN, got {gains[3]}"

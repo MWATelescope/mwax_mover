@@ -1,6 +1,7 @@
-from mwax_mover.mwax_calvin_utils import generate_plot_index_file
 import logging
 import os
+
+from mwax_mover.mwax_calvin_utils import generate_plot_index_file
 
 logger = logging.getLogger(__name__)
 logger.level = logging.DEBUG

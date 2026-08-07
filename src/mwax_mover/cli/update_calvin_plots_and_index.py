@@ -1,16 +1,18 @@
-import shutil
-import glob
-import requests
-from pathlib import Path
-import os
 import argparse
+import glob
+import json
+import os
+import shutil
 import sys
+from datetime import UTC, datetime
+from pathlib import Path
+
+import requests
+
 from mwax_mover.mwax_calvin_utils import (
     generate_hyperdrive_plots,
     populate_index_json_entry,
 )
-import json
-from datetime import datetime, timezone
 
 
 def download_plot_index_file(fit_id: int, solution_directory: str) -> None:
@@ -76,7 +78,7 @@ def update_plot_index_file_entry(
         index = json.load(f)
 
     # update generated at
-    index["generated_at"] = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    index["generated_at"] = datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     entries = index.get("files", [])
     matching = [entry for entry in entries if entry["filename"] == filename]
@@ -231,7 +233,7 @@ def main() -> None:
                 exit(1)
         else:
             print(
-                f"HTTP error when downloading the index.json file: no response received {str(httpe)}"
+                f"HTTP error when downloading the index.json file: no response received {httpe!s}"
             )
     except Exception as e:
         print(f"Error downloading plot file: {e}")
@@ -283,7 +285,7 @@ def main() -> None:
                 print(f"Moved {f} to {dest_filename}")
 
         except Exception as e:
-            print(f"Error moving files to upload dir {upload_dir}: {str(e)}")
+            print(f"Error moving files to upload dir {upload_dir}: {e!s}")
             exit(1)
     else:
         print(

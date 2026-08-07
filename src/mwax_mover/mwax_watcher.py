@@ -9,14 +9,16 @@ before entering the live event loop.
 import logging
 import os
 import queue
-import inotify.constants
+
 import inotify.adapters
+import inotify.constants
+
 from mwax_mover import mwax_mover, utils
 
 logger = logging.getLogger(__name__)
 
 
-class Watcher(object):
+class Watcher:
     """Class that watches a directory and adds files to a queue"""
 
     def __init__(

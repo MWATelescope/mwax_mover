@@ -1,8 +1,10 @@
 import logging
 import os
-from mwax_mover.cli.mwax_calvin_processor import MWAXCalvinProcessor, CalvinJobType
+
 import tests_common
 from tests_fakedb import FakeMWAXDBHandler
+
+from mwax_mover.cli.mwax_calvin_processor import CalvinJobType, MWAXCalvinProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -50,17 +52,14 @@ def test_mwax_calvin_processor():
         f"log path mismatch: {mcal.log_path} {os.path.join(base_dir, 'logs')}"
     )
 
-    assert mcal.health_multicast_interface_name == "eth2"
+    assert mcal.health_multicast_interface_name == "lo"
     assert mcal.health_multicast_ip == "127.0.0.1"
     assert mcal.health_multicast_port == 8011
     assert mcal.health_multicast_hops == 1
 
     assert mcal.job_input_path == os.path.join(base_dir, "data/calvin/in_jobs")
     assert mcal.job_output_path == os.path.join(base_dir, "data/calvin/out_jobs")
-    assert (
-        mcal.source_list_filename
-        == "../srclists/srclist_pumav3_EoR0aegean_fixedEoR1pietro+ForA_phase1+2.txt"
-    )
+    assert mcal.source_list_filename == "../srclists/srclist_pumav3_EoR0aegean_fixedEoR1pietro+ForA_phase1+2.txt"
     assert mcal.source_list_type == "rts"
     assert mcal.hyperdrive_binary_path == "../mwa_hyperdrive/target/release/hyperdrive"
     assert mcal.hyperdrive_timeout == 7200
@@ -119,17 +118,14 @@ def test_mwax_calvin_processor_no_gains_cutoff():
         f"log path mismatch: {mcal.log_path} {os.path.join(base_dir, 'logs')}"
     )
 
-    assert mcal.health_multicast_interface_name == "eth2"
+    assert mcal.health_multicast_interface_name == "lo"
     assert mcal.health_multicast_ip == "127.0.0.1"
     assert mcal.health_multicast_port == 8011
     assert mcal.health_multicast_hops == 1
 
     assert mcal.job_input_path == os.path.join(base_dir, "data/calvin/in_jobs")
     assert mcal.job_output_path == os.path.join(base_dir, "data/calvin/out_jobs")
-    assert (
-        mcal.source_list_filename
-        == "../srclists/srclist_pumav3_EoR0aegean_fixedEoR1pietro+ForA_phase1+2.txt"
-    )
+    assert mcal.source_list_filename == "../srclists/srclist_pumav3_EoR0aegean_fixedEoR1pietro+ForA_phase1+2.txt"
     assert mcal.source_list_type == "rts"
     assert mcal.hyperdrive_binary_path == "../mwa_hyperdrive/target/release/hyperdrive"
     assert mcal.hyperdrive_timeout == 7200

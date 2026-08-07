@@ -1,8 +1,9 @@
-from configparser import ConfigParser
 import os
-from pathlib import Path
 import shutil
 import time
+from configparser import ConfigParser
+from pathlib import Path
+
 from mwax_mover.mwax_db import MWAXDBHandler
 from mwax_mover.utils import write_mock_subfile
 
@@ -146,7 +147,7 @@ def create_observation_subfiles(
     sub_obs_id = obs_id
     offset = 0
 
-    for _ in range(0, subfile_count):
+    for _ in range(subfile_count):
         tmp_subfile_filename = os.path.join(
             dev_shm_temp_dir,
             f"{obs_id}_{sub_obs_id}_{rec_chan}.$$$",

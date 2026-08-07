@@ -8,10 +8,11 @@ import signal
 import threading
 import time
 
-from mwax_mover.utils import MWAXSubfileDistirbutorMode
-from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
+from tests_common import create_observation_subfiles, setup_test_directories
 from tests_fakedb import FakeMWAXDBHandler
-from tests_common import setup_test_directories, create_observation_subfiles
+
+from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
+from mwax_mover.utils import MWAXSubfileDistirbutorMode
 
 TEST_CONFIG_FILE = "tests/data/test001/test001.cfg"
 TEST_METAFITS = "tests/data/1454743816/1454743816_metafits.fits"

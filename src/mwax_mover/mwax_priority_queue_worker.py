@@ -10,16 +10,16 @@ the back.
 import logging
 import os
 import queue
-import time
 import threading
-from typing import Optional
-from mwax_mover import mwax_mover, mwax_command
+import time
+
+from mwax_mover import mwax_command, mwax_mover
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
 
 logger = logging.getLogger(__name__)
 
 
-class PriorityQueueWorker(object):
+class PriorityQueueWorker:
     """
     This class represents a worker process, processing items off a priority
     queue. A priority queue takes a tuple:
@@ -86,7 +86,7 @@ class PriorityQueueWorker(object):
         self._paused = False
         self.exit_once_queue_empty = exit_once_queue_empty
         self.requeue_to_eoq_on_failure = requeue_to_eoq_on_failure
-        self.current_item: Optional[str] = None
+        self.current_item: str | None = None
         self.consecutive_error_count = 0
         self.backoff_initial_seconds = backoff_initial_seconds
         self.backoff_factor = backoff_factor
@@ -174,8 +174,7 @@ class PriorityQueueWorker(object):
                             * self.backoff_factor
                             * self.consecutive_error_count
                         )
-                        if backoff > self.backoff_limit_seconds:
-                            backoff = self.backoff_limit_seconds
+                        backoff = min(backoff, self.backoff_limit_seconds)
 
                         logger.info(
                             f"{self.consecutive_error_count} consecutive failures. Backing off for {backoff} seconds."
@@ -253,7 +252,7 @@ class PriorityQueueWorker(object):
         Returns:
             A dictionary containing the worker name, current item, and queue size.
         """
-        current: Optional[str] = None
+        current: str | None = None
 
         if self.current_item:
             if self.current_item[1]:

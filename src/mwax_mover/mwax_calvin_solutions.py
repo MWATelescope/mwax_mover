@@ -10,27 +10,26 @@ import logging
 import os
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
 
 import numpy as np
 
+from mwax_mover.mwax_calvin_utils import (
+    GainFitInfo,
+    HyperfitsSolution,
+    HyperfitsSolutionGroup,
+    Metafits,
+    PhaseFitInfo,
+    debug_phase_fits,
+    get_sorted_solution_files,
+    pad_gain_fit_info,
+    process_gain_fits,
+    process_phase_fits,
+    write_readme_file,
+)
 from mwax_mover.mwax_db import (
     MWAXDBHandler,
     insert_calibration_fits_row,
     insert_calibration_solutions_row,
-)
-from mwax_mover.mwax_calvin_utils import (
-    GainFitInfo,
-    Metafits,
-    HyperfitsSolution,
-    HyperfitsSolutionGroup,
-    PhaseFitInfo,
-    debug_phase_fits,
-    pad_gain_fit_info,
-    process_phase_fits,
-    process_gain_fits,
-    write_readme_file,
-    get_sorted_solution_files,
 )
 from mwax_mover.version import get_mwax_mover_version_string
 
@@ -47,8 +46,11 @@ def process_solutions(
     num_sources: int,
     produce_debug_plots: bool,
     calibration_command: str,
-    gain_max_cutoff: Optional[float],
-) -> tuple[bool, str, Optional[int]]:
+    gain_max_cutoff: float | None,
+    gain_outlier_poly_degree: int | None,
+    gain_outlier_mad_residual_threshold: float | None,
+    gain_outlier_modify_gains: bool | None,
+) -> tuple[bool, str, int | None]:
     """Process hyperdrive calibration solutions and insert into the database.
 
     Loads hyperfits solution files and metafits, determines a reference antenna,
@@ -66,6 +68,9 @@ def process_solutions(
         produce_debug_plots: Whether to produce debug plots.
         calibration_command: Full hyperdrive command line used to generate the calibration.
         gain_max_cutoff: Gain cutoff value (or None)
+        gain_outlier_poly_degree: Degree of polynomial for gain outlier detection (or None)
+        gain_outlier_mad_residual_threshold: MAD residual threshold for gain outlier detection (or None)
+        gain_outlier_modify_gains: Whether to modify gains to NaN full Jones matrix for outliers (or None)
 
     Returns:
         A tuple containing:
@@ -80,9 +85,7 @@ def process_solutions(
 
         logger.debug(f"{input_data_path} - {metafits_file=}")
 
-        fits_solution_files = get_sorted_solution_files(
-            output_data_path, obs_id, "fits"
-        )
+        fits_solution_files = get_sorted_solution_files(output_data_path, obs_id, "fits")
 
         logger.debug(f"{output_data_path} - reading {fits_solution_files=}")
 
@@ -120,9 +123,7 @@ def process_solutions(
         chanblocks_per_coarse = soln_group.chanblocks_per_coarse
 
         # all_chanblocks_hz = soln_group.all_chanblocks_hz
-        all_chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz).astype(
-            np.float64
-        )
+        all_chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz).astype(np.float64)
 
         # Build the full sorted list of coarse channel indices from the metafits.
         # This is used below to NaN-pad gains for any missing channels.
@@ -138,12 +139,8 @@ def process_solutions(
             )
 
         logger.debug(f"{chanblocks_per_coarse=} fine channels per coarse channel")
-        logger.debug(
-            f"First 32 fine channels: {[f'{x / 1e6:.3f}' for x in all_chanblocks_hz[0:32]]} MHz"
-        )
-        logger.debug(
-            f"Last 32 fine channels: {[f'{x / 1e6:.3f}' for x in all_chanblocks_hz[-32:]]} MHz"
-        )
+        logger.debug(f"First 32 fine channels: {[f'{x / 1e6:.3f}' for x in all_chanblocks_hz[0:32]]} MHz")
+        logger.debug(f"Last 32 fine channels: {[f'{x / 1e6:.3f}' for x in all_chanblocks_hz[-32:]]} MHz")
 
         (
             soln_tile_ids,
@@ -226,6 +223,9 @@ def process_solutions(
                     num_sources=num_sources,
                     calibration_command=calibration_command,
                     gain_max_cutoff=gain_max_cutoff,
+                    gain_outlier_poly_degree=gain_outlier_poly_degree,
+                    gain_outlier_mad_residual_threshold=gain_outlier_mad_residual_threshold,
+                    gain_outlier_modify_gains=gain_outlier_modify_gains,
                 )
 
                 if fit_id is None or not success:
@@ -291,12 +291,10 @@ def process_solutions(
                         int(fit_id),
                         int(obs_id),
                         int(tile_id),
-                        -1
-                        * x_phase.length,  # legacy calibration pipeline used inverse convention
+                        -1 * x_phase.length,  # legacy calibration pipeline used inverse convention
                         x_phase.intercept,
                         x_gains.gains,
-                        -1
-                        * y_phase.length,  # legacy calibration pipeline used inverse convention
+                        -1 * y_phase.length,  # legacy calibration pipeline used inverse convention
                         y_phase.intercept,
                         y_gains.gains,
                         x_gains.pol1,
@@ -316,14 +314,10 @@ def process_solutions(
                     )
 
                     if not success:
-                        logger.error(
-                            f"failed to insert calibration solution for tile {tile_id}"
-                        )
+                        logger.error(f"failed to insert calibration solution for tile {tile_id}")
                         # This will trigger a rollback of the calibration_fit row and any
                         # calibration_solutions child rows
-                        raise Exception(
-                            f"failed to insert calibration solution for tile {tile_id}"
-                        )
+                        raise Exception(f"failed to insert calibration solution for tile {tile_id}")
 
         return True, "", int(fit_id)
 

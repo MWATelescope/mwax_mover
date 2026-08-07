@@ -6,14 +6,13 @@ it to Acacia or Banksia via rclone, updates the MRO metadata database to record
 the archive location and bucket, then deletes the local copy.
 """
 
+import logging
 import os
 
-from mwax_mover import mwax_db
+from mwax_mover import mwa_archiver, mwax_db, mwax_mover, utils
 from mwax_mover.mwax_db import DataFileRow, MWAXDBHandler, get_data_file_row
-from mwax_mover import mwa_archiver, mwax_mover, utils
-from mwax_mover.utils import ArchiveLocation
 from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
-import logging
+from mwax_mover.utils import ArchiveLocation
 
 logger = logging.getLogger(__name__)
 

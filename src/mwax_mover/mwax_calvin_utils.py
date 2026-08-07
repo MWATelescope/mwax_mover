@@ -200,16 +200,11 @@ class Metafits:
         consistency internally, so the former sanity checks and the CHANSEL
         length comparison are not reproduced here.
         """
-        coarse_chans = np.sort(
-            [c.rec_chan_number for c in self._mc.metafits_coarse_chans]
-        )
+        coarse_chans = np.sort([c.rec_chan_number for c in self._mc.metafits_coarse_chans])
         fine_chan_width_hz = self._mc.corr_fine_chan_width_hz
         fine_chans_per_coarse = self._mc.num_corr_fine_chans_per_coarse
 
-        coarse_chan_ranges = [
-            g
-            for g in np.split(coarse_chans, np.where(np.diff(coarse_chans) != 1)[0] + 1)
-        ]
+        coarse_chan_ranges = [g for g in np.split(coarse_chans, np.where(np.diff(coarse_chans) != 1)[0] + 1)]
 
         return ChanInfo(
             coarse_chan_ranges=coarse_chan_ranges,
@@ -262,9 +257,7 @@ class HyperfitsSolution:
             if len(result) > 1:
                 diff = np.diff(result)
                 if not np.all(diff >= 0):
-                    raise RuntimeError(
-                        f"chanblocks are not in ascending order. {result=}"
-                    )
+                    raise RuntimeError(f"chanblocks are not in ascending order. {result=}")
                 if not np.all(diff[1:] == diff[0]):
                     raise RuntimeError(f"chanblocks are not contiguous. {result=}")
 
@@ -337,14 +330,10 @@ class HyperfitsSolution:
         )
 
         return [
-            (solutions[0] * ref_solutions[3] - solutions[1] * ref_solutions[2])
-            * ref_inv_det,
-            (solutions[1] * ref_solutions[0] - solutions[0] * ref_solutions[1])
-            * ref_inv_det,
-            (solutions[2] * ref_solutions[3] - solutions[3] * ref_solutions[2])
-            * ref_inv_det,
-            (solutions[3] * ref_solutions[0] - solutions[2] * ref_solutions[1])
-            * ref_inv_det,
+            (solutions[0] * ref_solutions[3] - solutions[1] * ref_solutions[2]) * ref_inv_det,
+            (solutions[1] * ref_solutions[0] - solutions[0] * ref_solutions[1]) * ref_inv_det,
+            (solutions[2] * ref_solutions[3] - solutions[3] * ref_solutions[2]) * ref_inv_det,
+            (solutions[3] * ref_solutions[0] - solutions[2] * ref_solutions[1]) * ref_inv_det,
         ]
 
     @property
@@ -385,16 +374,12 @@ class HyperfitsSolutionGroup:
         self.solns = solns
 
         self.metafits_tiles_df = self.metafits.tiles_df
-        self.metafits_chan_info = HyperfitsSolutionGroup.get_metafits_chan_info(
-            self.metafits
-        )
+        self.metafits_chan_info = HyperfitsSolutionGroup.get_metafits_chan_info(self.metafits)
         (
             self.chanblocks_per_coarse,
             self.all_chanblocks_hz,
             self.all_solution_coarse_chan_indices,
-        ) = HyperfitsSolutionGroup.get_soln_chan_info(
-            self.metafits_chan_info, self.solns
-        )
+        ) = HyperfitsSolutionGroup.get_soln_chan_info(self.metafits_chan_info, self.solns)
 
     @classmethod
     def get_metafits_chan_info(cls, metafits: Metafits) -> ChanInfo:
@@ -417,9 +402,7 @@ class HyperfitsSolutionGroup:
         # assert coarse channel ranges do not overlap
         for left, right in zip(all_ranges[:-1], all_ranges[1:]):
             if left[0] == right[0] or left[-1] >= right[0]:
-                raise RuntimeError(
-                    f"coarse channel ranges from metafits overlap. {[left, right]}, {metafits=}"
-                )
+                raise RuntimeError(f"coarse channel ranges from metafits overlap. {[left, right]}, {metafits=}")
 
         return ChanInfo(
             coarse_chan_ranges=all_ranges,
@@ -453,18 +436,14 @@ class HyperfitsSolutionGroup:
         metafits_coarse_chans = np.concatenate(metafits_chan_info.coarse_chan_ranges)
         metafits_fine_chan_width_hz = metafits_chan_info.fine_chan_width_hz
         metafits_fine_chans_per_coarse = metafits_chan_info.fine_chans_per_coarse
-        metafits_coarse_bandwidth_hz = (
-            metafits_fine_chan_width_hz * metafits_fine_chans_per_coarse
-        )
+        metafits_coarse_bandwidth_hz = metafits_fine_chan_width_hz * metafits_fine_chans_per_coarse
 
         for soln in solns:
             # coarse_chans = chaninfo.coarse_chan_ranges[coarse_chan_range_idx]
             chanblocks_hz = soln.chanblocks_hz
 
             if len(chanblocks_hz) < 2:
-                raise RuntimeError(
-                    f"{soln.filename} - not enough chanblocks found ({chanblocks_hz=})"
-                )
+                raise RuntimeError(f"{soln.filename} - not enough chanblocks found ({chanblocks_hz=})")
 
             chanblock_width_hz = chanblocks_hz[1] - chanblocks_hz[0]
 
@@ -475,9 +454,7 @@ class HyperfitsSolutionGroup:
                 )
 
             chans_per_block = int(chanblock_width_hz // metafits_fine_chan_width_hz)
-            chanblocks_per_coarse_ = int(
-                metafits_fine_chans_per_coarse // chans_per_block
-            )
+            chanblocks_per_coarse_ = int(metafits_fine_chans_per_coarse // chans_per_block)
 
             if chanblocks_per_coarse is None:
                 chanblocks_per_coarse = chanblocks_per_coarse_
@@ -490,9 +467,7 @@ class HyperfitsSolutionGroup:
 
             # break chanblocks into coarse channels
             soln_coarse_chans = []
-            for coarse_chanblocks in np.split(
-                chanblocks_hz, len(chanblocks_hz) // chanblocks_per_coarse
-            ):
+            for coarse_chanblocks in np.split(chanblocks_hz, len(chanblocks_hz) // chanblocks_per_coarse):
                 if len(coarse_chanblocks) == 1:
                     coarse_centroid_hz = coarse_chanblocks[0]
                 else:
@@ -501,13 +476,9 @@ class HyperfitsSolutionGroup:
                         raise RuntimeError(
                             f"{soln.filename} - solution {coarse_bandwidth_hz=} > {metafits_coarse_bandwidth_hz=}"
                         )
-                    coarse_centroid_hz = np.mean(
-                        coarse_chanblocks + chanblock_width_hz / 2
-                    )
+                    coarse_centroid_hz = np.mean(coarse_chanblocks + chanblock_width_hz / 2)
 
-                coarse_chan_idx = np.round(
-                    coarse_centroid_hz // metafits_coarse_bandwidth_hz
-                )
+                coarse_chan_idx = np.round(coarse_centroid_hz // metafits_coarse_bandwidth_hz)
 
                 if coarse_chan_idx not in metafits_coarse_chans:
                     raise RuntimeError(
@@ -622,15 +593,12 @@ class HyperfitsSolutionGroup:
             results[results > 1e-4] = np.nan
             exp_results = np.exp(-results)
             return np.nan_to_num(
-                (exp_results - np.nanmin(exp_results))
-                / (np.nanmax(exp_results) - np.nanmin(exp_results))
+                (exp_results - np.nanmin(exp_results)) / (np.nanmax(exp_results) - np.nanmin(exp_results))
             )
         except KeyError:
             return np.full(len(self.all_chanblocks_hz[0]), 1.0)
 
-    def get_solns(
-        self, refant_name=None
-    ) -> tuple[NDArray[np.int_], NDArray[np.complex128], NDArray[np.complex128]]:
+    def get_solns(self, refant_name=None) -> tuple[NDArray[np.int_], NDArray[np.complex128], NDArray[np.complex128]]:
         """Get tile IDs and XX/YY solutions for the reference antenna.
 
         Args:
@@ -663,9 +631,7 @@ class HyperfitsSolutionGroup:
                 ref_mask = tile_names == refant_name
 
                 if not ref_mask.any():
-                    raise RuntimeError(
-                        f"{soln.filename} - reference tile {refant_name} not found in solution file"
-                    )
+                    raise RuntimeError(f"{soln.filename} - reference tile {refant_name} not found in solution file")
 
                 if ref_mask.sum() > 1:
                     raise RuntimeError(
@@ -712,9 +678,7 @@ class HyperfitsSolutionGroup:
 
             # TODO: support multiple timeblocks
             if len(avg_times) != 1:
-                raise RuntimeError(
-                    f"{soln.filename} - exactly 1 timeblock must be provided: ({len(avg_times)})"
-                )
+                raise RuntimeError(f"{soln.filename} - exactly 1 timeblock must be provided: ({len(avg_times)})")
 
             # TODO: compare with metafits times
 
@@ -809,9 +773,7 @@ class HyperfitsSolutionGroup:
             # Find and validate the reference antenna.
             ref_mask = tile_names == refant_name
             if not ref_mask.any():
-                raise RuntimeError(
-                    f"{soln.filename} - reference tile {refant_name} not found in solution file"
-                )
+                raise RuntimeError(f"{soln.filename} - reference tile {refant_name} not found in solution file")
             if ref_mask.sum() > 1:
                 raise RuntimeError(
                     f"{soln.filename} - more than one tile with name {refant_name} found in solution file"
@@ -833,9 +795,7 @@ class HyperfitsSolutionGroup:
             if soln_tile_ids is None:
                 soln_tile_ids = tile_ids
             elif not np.array_equal(soln_tile_ids, tile_ids):
-                raise RuntimeError(
-                    f"{soln.filename} - tile IDs do not match previous solution files"
-                )
+                raise RuntimeError(f"{soln.filename} - tile IDs do not match previous solution files")
 
             # Single FITS read for all solution data — this is the key difference
             # from two separate get_solns() calls.
@@ -845,16 +805,12 @@ class HyperfitsSolutionGroup:
             # avoiding a separate FITS open for the TIMEBLOCKS HDU.
             n_times = raw_solutions[0].shape[0]
             if n_times != 1:
-                raise RuntimeError(
-                    f"{soln.filename} - exactly 1 timeblock must be provided: ({n_times})"
-                )
+                raise RuntimeError(f"{soln.filename} - exactly 1 timeblock must be provided: ({n_times})")
 
             # Shape validation.
             for solution in raw_solutions:
                 if (ntimes := solution.shape[0]) != 1:
-                    raise RuntimeError(
-                        f"{soln.filename} - SOLUTIONS HDU timeblock count ({ntimes}) != 1"
-                    )
+                    raise RuntimeError(f"{soln.filename} - SOLUTIONS HDU timeblock count ({ntimes}) != 1")
                 if (ntiles := solution.shape[1]) != len(soln_tile_ids):
                     raise RuntimeError(
                         f"{soln.filename} - number of tiles in SOLUTIONS HDU ({ntiles})"
@@ -875,20 +831,11 @@ class HyperfitsSolutionGroup:
             # ref[i] has shape (1, n_chans); broadcasting over the tiles axis is implicit.
             ref = [s[:, ref_tile_idx, :] for s in raw_solutions]
             ref_inv_det = np.divide(1 + 0j, ref[0] * ref[3] - ref[1] * ref[2])
-            ref_xx = (
-                raw_solutions[0] * ref[3] - raw_solutions[1] * ref[2]
-            ) * ref_inv_det
-            ref_yy = (
-                raw_solutions[3] * ref[0] - raw_solutions[2] * ref[1]
-            ) * ref_inv_det
+            ref_xx = (raw_solutions[0] * ref[3] - raw_solutions[1] * ref[2]) * ref_inv_det
+            ref_yy = (raw_solutions[3] * ref[0] - raw_solutions[2] * ref[1]) * ref_inv_det
 
             # Accumulate across solution files.
-            if (
-                all_noref_xx is None
-                or all_noref_yy is None
-                or all_ref_xx is None
-                or all_ref_yy is None
-            ):
+            if all_noref_xx is None or all_noref_yy is None or all_ref_xx is None or all_ref_yy is None:
                 all_noref_xx, all_noref_yy = noref_xx, noref_yy
                 all_ref_xx, all_ref_yy = ref_xx, ref_yy
             else:
@@ -1036,18 +983,10 @@ def pad_gain_fit_info(
     """
     return GainFitInfo(
         quality=gain_fit.quality,
-        gains=pad_gains_to_full_coarse(
-            gain_fit.gains, actual_coarse_chans, expected_coarse_chans
-        ),
-        pol0=pad_gains_to_full_coarse(
-            gain_fit.pol0, actual_coarse_chans, expected_coarse_chans
-        ),
-        pol1=pad_gains_to_full_coarse(
-            gain_fit.pol1, actual_coarse_chans, expected_coarse_chans
-        ),
-        sigma_resid=pad_gains_to_full_coarse(
-            gain_fit.sigma_resid, actual_coarse_chans, expected_coarse_chans
-        ),
+        gains=pad_gains_to_full_coarse(gain_fit.gains, actual_coarse_chans, expected_coarse_chans),
+        pol0=pad_gains_to_full_coarse(gain_fit.pol0, actual_coarse_chans, expected_coarse_chans),
+        pol1=pad_gains_to_full_coarse(gain_fit.pol1, actual_coarse_chans, expected_coarse_chans),
+        sigma_resid=pad_gains_to_full_coarse(gain_fit.sigma_resid, actual_coarse_chans, expected_coarse_chans),
     )
 
 
@@ -1175,9 +1114,7 @@ def fit_phase_line(
 
     bins = np.round((ν / dν).decompose().value).astype(int)
     ctr_bin = (np.min(bins) + np.max(bins)) // 2
-    shifted_bins = (
-        bins - ctr_bin
-    )  # Now "bins" represents where I want to put the solution values
+    shifted_bins = bins - ctr_bin  # Now "bins" represents where I want to put the solution values
 
     # ...except that ~1/2 of them are negative, so I'll have to add a certain amount
     # once I decide how much zero padding to include.
@@ -1200,9 +1137,7 @@ def fit_phase_line(
 
     # IFFT of sol0 to get the approximate solution as the peak in delay space
     isol0 = np.fft.ifft(sol0)
-    t = (
-        -np.fft.fftfreq(len(sol0), d=dν.to(u.Hz).value) * u.s
-    )  # (Not sure why this negative is needed)
+    t = -np.fft.fftfreq(len(sol0), d=dν.to(u.Hz).value) * u.s  # (Not sure why this negative is needed)
     d = np.fft.fftshift(c * t)
     isol0 = np.fft.fftshift(isol0)
 
@@ -1323,9 +1258,7 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse: int) -> GainF
         )
     ):
         # remove nans and zero weights
-        coarse_mask = np.where(
-            np.logical_and(np.isfinite(coarse_amps), coarse_weights > 0)
-        )[0]
+        coarse_mask = np.where(np.logical_and(np.isfinite(coarse_amps), coarse_weights > 0))[0]
         if len(coarse_mask) < 2:
             continue
 
@@ -1339,9 +1272,7 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse: int) -> GainF
         coarse_weights = coarse_weights[coarse_mask]
 
         # Calculate the weighted mean of the amplitudes for this coarse channel
-        gains[coarse_idx] = np.sum(coarse_amps * coarse_weights) / np.sum(
-            coarse_weights
-        )
+        gains[coarse_idx] = np.sum(coarse_amps * coarse_weights) / np.sum(coarse_weights)
 
         # Fit 1st order polynomial to get pol0, pol1, sigma_resid
         coeffs = np.polyfit(coarse_hz, coarse_amps, deg=1, w=coarse_weights)
@@ -1551,10 +1482,7 @@ def reject_outliers(data, quality_key, nstd=3.0):
         data["outlier"] = False
     for pol in data["pol"].unique():
         idx_pol_good = np.where(np.logical_and(data["pol"] == pol, ~data["outlier"]))[0]
-        quality_thresh = (
-            data.loc[idx_pol_good, quality_key].mean()
-            + nstd * data.loc[idx_pol_good, quality_key].std()
-        )
+        quality_thresh = data.loc[idx_pol_good, quality_key].mean() + nstd * data.loc[idx_pol_good, quality_key].std()
         if nstd >= 0:
             data.loc[data[quality_key] >= quality_thresh, "outlier"] = True
         else:
@@ -1580,9 +1508,7 @@ def plot_rx_lengths(flavor_fits, prefix, show, title):
     means = good_fits.groupby(["rx"])["length"].mean()
 
     plt.clf()
-    box_plot = sns.boxplot(
-        data=good_fits, y="rx", x="length", hue="pol", orient="h", fliersize=0.5
-    )
+    box_plot = sns.boxplot(data=good_fits, y="rx", x="length", hue="pol", orient="h", fliersize=0.5)
     # offset = good_fits['length'].median() * 0.05 # offset from median for display
     box_plot.grid(axis="x")
     x_text = np.max(box_plot.get_xlim())
@@ -1598,11 +1524,7 @@ def plot_rx_lengths(flavor_fits, prefix, show, title):
             weight="semibold",
             fontfamily="monospace",
         )
-        box_plot.add_line(
-            plt.Line2D(
-                [mean, mean], [ytick - 0.5, ytick + 0.5], color="red", linewidth=1
-            )
-        )
+        box_plot.add_line(plt.Line2D([mean, mean], [ytick - 0.5, ytick + 0.5], color="red", linewidth=1))
 
     fig = plt.gcf()
     if title:
@@ -1617,9 +1539,7 @@ def plot_rx_lengths(flavor_fits, prefix, show, title):
     return means
 
 
-def plot_phase_fits(
-    freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fits_pivot, weights2
-):
+def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fits_pivot, weights2):
     """Plot phase fits for XX and YY polarizations.
 
     Args:
@@ -1639,9 +1559,7 @@ def plot_phase_fits(
 
     for pol, soln in zip(["xx", "yy"], [soln_xx, soln_yy]):
         plt.clf()
-        fig, axs = plt.subplots(
-            len(rxs), len(slots), sharex=True, sharey="row", squeeze=True
-        )
+        fig, axs = plt.subplots(len(rxs), len(slots), sharex=True, sharey="row", squeeze=True)
         # rest of the code assumes axs is 2D array
         if len(rxs) == 1 and len(slots) == 1:
             axs = np.array([[axs]])
@@ -1664,18 +1582,12 @@ def plot_phase_fits(
             slot_idx = np.where(slots == fit["slot"])[0][0]
             ax = axs[rx_idx][slot_idx]
             ax.axis("on")
-            gradient = (
-                (2 * np.pi * u.rad * (fit[f"length_{pol}"] * u.m) / c)
-                .to(u.rad / u.Hz)
-                .value
-            )
+            gradient = (2 * np.pi * u.rad * (fit[f"length_{pol}"] * u.m) / c).to(u.rad / u.Hz).value
             intercept = fit[f"intercept_{pol}"]
             model = gradient * model_freqs + intercept
             ax.scatter(model_freqs, wrap_angle(model), c="red", s=0.5)
             mask_weights: ArrayLike = weights2[mask]
-            ax.scatter(
-                mask_freq, wrap_angle(angle[mask]), c=mask_weights, cmap=cmap, s=2
-            )
+            ax.scatter(mask_freq, wrap_angle(angle[mask]), c=mask_weights, cmap=cmap, s=2)
             outlier = fit[f"outlier_{pol}"]
             color = "red" if outlier else "black"
             ax.set_title(
@@ -1740,11 +1652,7 @@ def plot_phase_intercepts(prefix, show, title, flavor_fits):
         despine=False,
     )
     g.map(
-        (
-            lambda theta, r, size, **kwargs: plt.scatter(
-                x=theta, y=r, s=10 / (0.1 + size), **kwargs
-            )
-        ),
+        (lambda theta, r, size, **kwargs: plt.scatter(x=theta, y=r, s=10 / (0.1 + size), **kwargs)),
         "intercept",
         "length",
         "sigma_resid",
@@ -1785,14 +1693,10 @@ def plot_phase_residual(
         flavor_fits: DataFrame with phase fit results per receiver flavor.
     """
     plt.clf()
-    g = sns.FacetGrid(
-        flavor_fits, row="flavor", col="pol", hue="flavor", sharex=True, sharey=False
-    )
+    g = sns.FacetGrid(flavor_fits, row="flavor", col="pol", hue="flavor", sharex=True, sharey=False)
 
     if len(freqs) != len(weights):
-        raise RuntimeError(
-            f"({len(freqs)=}) and ({len(weights)=}) must be the same length"
-        )
+        raise RuntimeError(f"({len(freqs)=}) and ({len(weights)=}) must be the same length")
 
     df = pd.DataFrame(
         {
@@ -1809,9 +1713,7 @@ def plot_phase_residual(
         intercepts: pd.Series,
         **kwargs,
     ):
-        gradients = (
-            (2 * np.pi * u.rad * (lengths.to_numpy() * u.m) / c).to(u.rad / u.Hz).value
-        )
+        gradients = (2 * np.pi * u.rad * (lengths.to_numpy() * u.m) / c).to(u.rad / u.Hz).value
         intercepts_arr = intercepts.to_numpy()
         pol = pols.iloc[0]
         flav = flavs.iloc[0]
@@ -1821,20 +1723,13 @@ def plot_phase_residual(
             solns = soln_yy[soln_idxs.values]
         else:
             raise RuntimeError(f"wut pol? {pol}")
-        models = (
-            gradients[:, np.newaxis] * freqs[np.newaxis, :]
-            + intercepts_arr[:, np.newaxis]
-        )
+        models = gradients[:, np.newaxis] * freqs[np.newaxis, :] + intercepts_arr[:, np.newaxis]
         resids = wrap_angle(np.angle(solns) - models)
         medians = np.nanmedian(resids, axis=0)
         min_mse = np.inf
         best_coeffs = None
         best_indep = None
-        mask = np.where(
-            np.logical_and(
-                np.isfinite(medians), np.logical_not(np.isnan(medians)), weights > 0
-            )
-        )[0]
+        mask = np.where(np.logical_and(np.isfinite(medians), np.logical_not(np.isnan(medians)), weights > 0))[0]
         df[f"{flav}_{pol}"] = medians
         for indep_var in ["ν", "λ"]:
             if indep_var == "ν":
@@ -1906,9 +1801,7 @@ def pivot_phase_fits(
     phase_fits.drop("id", axis=1, inplace=True)
     tile_columns = ["soln_idx", "name", "tile_id", "rx", "slot", "flavor"]
     tile_columns += [*(set(tiles.columns) - set(tile_columns) - {"id"})]
-    fit_columns = [
-        column for column in phase_fits.columns if column not in tile_columns
-    ]
+    fit_columns = [column for column in phase_fits.columns if column not in tile_columns]
     fit_columns.sort()
     phase_fits = pd.concat([phase_fits[tile_columns], phase_fits[fit_columns]], axis=1)
     return phase_fits
@@ -1971,7 +1864,7 @@ def generate_hyperdrive_plots(
 
     try:
         # Now run hyperdrive again to do some plots
-        hyp_soln_plot_args = f"--max-amp 5 --output-directory {os.path.dirname(hyperdrive_solution_filename)}"
+        hyp_soln_plot_args = f" --output-directory {os.path.dirname(hyperdrive_solution_filename)}"
         cmd = (
             f"{hyperdrive_binary_path} solutions-plot {hyp_soln_plot_args} "
             f"-m"
@@ -2004,9 +1897,7 @@ def write_hyperdrive_stats(
     Returns:
         A tuple of (success: bool, error_message: str).
     """
-    logger.info(
-        f"{obs_id} Writing stats for {hyperdrive_solution_filename} to {stats_filename}..."
-    )
+    logger.info(f"{obs_id} Writing stats for {hyperdrive_solution_filename} to {stats_filename}...")
 
     try:
         conv_summary_list = get_convergence_summary(hyperdrive_solution_filename)
@@ -2014,9 +1905,9 @@ def write_hyperdrive_stats(
         with open(stats_filename, "w", encoding="UTF-8") as stats:
             stats.writelines(f"{row[0]}: {row[1]}\n" for row in conv_summary_list)
 
-        logger.info(
-            f"{obs_id} Finished running hyperdrive stats on {hyperdrive_solution_filename}."
-        )
+            stats.write("\n")
+
+        logger.info(f"{obs_id} Finished running hyperdrive stats on {hyperdrive_solution_filename}.")
     except Exception as catch_all_exception:
         return False, str(catch_all_exception)
 
@@ -2039,13 +1930,9 @@ def write_readme_file(filename, cmd, exit_code, output, error):
     try:
         with open(filename, "w", encoding="UTF-8") as readme:
             if exit_code == 0:
-                readme.write(
-                    f"This run succeeded at: {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n"
-                )
+                readme.write(f"This run succeeded at: {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
             else:
-                readme.write(
-                    f"This run failed at: {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n"
-                )
+                readme.write(f"This run failed at: {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
             readme.write(f"Command: {cmd}\n")
             readme.write(f"Exit code: {exit_code}\n")
             readme.write(f"output: {output}\n")
@@ -2053,9 +1940,7 @@ def write_readme_file(filename, cmd, exit_code, output, error):
 
     except Exception:
         logger.warning(
-            (
-                f"Could not write text file {filename} describing the problem observation."
-            ),
+            (f"Could not write text file {filename} describing the problem observation."),
             exc_info=True,
         )
 
@@ -2123,12 +2008,8 @@ def run_birli(
         else:
             edge_width_hz = birli_edge_width_hz  # default
             edge_width_hz = np.max([fine_chan_width_hz, edge_width_hz])
-            assert edge_width_hz >= fine_chan_width_hz, (
-                f"{edge_width_hz=} must be >= {fine_chan_width_hz=}"
-            )
-            assert edge_width_hz % fine_chan_width_hz == 0, (
-                f"{edge_width_hz=} must multiple of {fine_chan_width_hz=}"
-            )
+            assert edge_width_hz >= fine_chan_width_hz, f"{edge_width_hz=} must be >= {fine_chan_width_hz=}"
+            assert edge_width_hz % fine_chan_width_hz == 0, f"{edge_width_hz=} must multiple of {fine_chan_width_hz=}"
 
         # set minimum freq res from config
         min_freq_res = birli_freq_res_hz
@@ -2168,9 +2049,7 @@ def run_birli(
 
             # Success!
             # Write out a useful file of command line info
-            readme_filename = os.path.join(
-                job_output_path, f"{obs_id}_birli_readme.txt"
-            )
+            readme_filename = os.path.join(job_output_path, f"{obs_id}_birli_readme.txt")
             write_readme_file(
                 readme_filename,
                 cmdline,
@@ -2179,9 +2058,7 @@ def run_birli(
                 stderr,
             )
         else:
-            logger.error(
-                f"{obs_id}: Birli run FAILED: Exit code of {exit_code} in {elapsed:.3f} seconds: {stderr}"
-            )
+            logger.error(f"{obs_id}: Birli run FAILED: Exit code of {exit_code} in {elapsed:.3f} seconds: {stderr}")
     except Exception as birli_run_exception:
         elapsed = time.time() - start_time
         logger.error(
@@ -2263,13 +2140,9 @@ def run_hyperdrive(
         start_time = time.time()
 
         try:
-            hyperdrive_solution_full_filename = os.path.join(
-                job_output_path, f"{obsid_and_band}_solutions.fits"
-            )
+            hyperdrive_solution_full_filename = os.path.join(job_output_path, f"{obsid_and_band}_solutions.fits")
             bin_solution_filename = f"{obsid_and_band}_solutions.bin"
-            bin_solution_full_filename = os.path.join(
-                job_output_path, bin_solution_filename
-            )
+            bin_solution_full_filename = os.path.join(job_output_path, bin_solution_filename)
 
             calibration_command = (
                 f"--num-sources {num_sources}"
@@ -2303,9 +2176,7 @@ def run_hyperdrive(
 
                 # FIX 3: include job_output_path so the readme is written to
                 # the correct output directory, not the current working directory.
-                readme_filename = os.path.join(
-                    job_output_path, f"{obsid_and_band}_hyperdrive_readme.txt"
-                )
+                readme_filename = os.path.join(job_output_path, f"{obsid_and_band}_hyperdrive_readme.txt")
                 write_readme_file(
                     readme_filename,
                     cmdline,
@@ -2371,7 +2242,6 @@ def run_hyperdrive_stats(
         obs_id: Observation ID.
         hyperdrive_binary_path: Path to the hyperdrive executable.
         hyperdrive_output_path: Directory containing hyperdrive outputs.
-
     Returns:
         True if all stats generation succeeded, False otherwise.
     """
@@ -2388,9 +2258,7 @@ def run_hyperdrive_stats(
         # Take the filename which for picket fence will also have
         # the band info and in all cases the obsid. We will use
         # this as a base for other files we work with
-        obsid_and_band = os.path.basename(solution_filename).replace(
-            "_solutions.fits", ""
-        )
+        obsid_and_band = os.path.basename(solution_filename).replace("_solutions.fits", "")
 
         # Do hyperdrive plots now
         (
@@ -2404,9 +2272,7 @@ def run_hyperdrive_stats(
         )
 
         # Write the stats to the output dir
-        stats_filename = os.path.join(
-            hyperdrive_output_path, f"{obsid_and_band}_stats.txt"
-        )
+        stats_filename = os.path.join(hyperdrive_output_path, f"{obsid_and_band}_stats.txt")
 
         (
             stats_success,
@@ -2436,16 +2302,12 @@ def run_hyperdrive_stats(
             )
 
     if plots_successful == len(input_solution_files):
-        logger.info(
-            f"{obs_id}: All {plots_successful} hyperdrive plots runs successful"
-        )
+        logger.info(f"{obs_id}: All {plots_successful} hyperdrive plots runs successful")
     else:
         logger.warning(f"{obs_id}: Not all hyperdrive plots runs were successful.")
 
     if stats_successful == len(input_solution_files):
-        logger.info(
-            f"{obs_id}: All {stats_successful} hyperdrive stats runs successful"
-        )
+        logger.info(f"{obs_id}: All {stats_successful} hyperdrive stats runs successful")
     else:
         logger.warning(f"{obs_id}: Not all hyperdrive stats runs were successful.")
 
@@ -2478,9 +2340,7 @@ def process_phase_fits(
     futures = {}
 
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(
-            zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])
-        ):
+        for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
             for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
                 future = executor.submit(
                     _phase_fit_one,
@@ -2495,15 +2355,9 @@ def process_phase_fits(
                 )
                 futures[future] = (soln_idx, tile_id, pol)
 
-    fits = [
-        result
-        for future in as_completed(futures)
-        if (result := future.result()) is not None
-    ]
+    fits = [result for future in as_completed(futures) if (result := future.result()) is not None]
 
-    return DataFrame(
-        fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields]
-    )
+    return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])
 
 
 def _phase_fit_one(
@@ -2627,9 +2481,7 @@ def process_gain_fits(
     futures = {}
 
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(
-            zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])
-        ):
+        for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
             for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
                 future = executor.submit(
                     _gain_fit_one,
@@ -2644,11 +2496,7 @@ def process_gain_fits(
                 )
                 futures[future] = (soln_idx, tile_id, pol)
 
-    fits = [
-        result
-        for future in as_completed(futures)
-        if (result := future.result()) is not None
-    ]
+    fits = [result for future in as_completed(futures) if (result := future.result()) is not None]
 
     return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *GainFitInfo._fields])
 
@@ -2737,9 +2585,7 @@ exit $?
     return job_script
 
 
-def submit_sbatch(
-    script_path: str, script: str, obs_id: int, request_ids: list[int]
-) -> tuple[bool, int | None]:
+def submit_sbatch(script_path: str, script: str, obs_id: int, request_ids: list[int]) -> tuple[bool, int | None]:
     """Submit an sbatch script to Slurm.
 
     Args:
@@ -2754,9 +2600,7 @@ def submit_sbatch(
     try:
         script_filename: str = os.path.join(
             script_path,
-            datetime.datetime.now().strftime(
-                f"%Y%m%d-%H%M%S-{obs_id}-{'-'.join(str(i) for i in request_ids)}.sh"
-            ),
+            datetime.datetime.now().strftime(f"%Y%m%d-%H%M%S-{obs_id}-{'-'.join(str(i) for i in request_ids)}.sh"),
         )
         cmdline = f"sbatch {script_filename}"
 
@@ -2780,23 +2624,17 @@ def submit_sbatch(
         # sbatch should send this to std out:
         # "Submitted batch job 34987"
         if return_val:
-            logger.info(
-                f"{script_filename} successfully submitted to Slurm. Stdout: {stdout}"
-            )
+            logger.info(f"{script_filename} successfully submitted to Slurm. Stdout: {stdout}")
             slurm_job_id_string = stdout.replace("Submitted batch job ", "")
             if is_int(slurm_job_id_string):
                 return (True, int(slurm_job_id_string))
             else:
                 # This deserves to be a massive failure, as if SBATCH returned true it should always give
                 # us the SLURM job id!
-                logger.error(
-                    f"Slurm job submitted OK, but could not get slurm_job_id from: {stdout}. Aborting"
-                )
+                logger.error(f"Slurm job submitted OK, but could not get slurm_job_id from: {stdout}. Aborting")
                 exit(-10)
         else:
-            logger.error(
-                f"{script_filename} failed to be submitted to SLURM. Error {stdout}"
-            )
+            logger.error(f"{script_filename} failed to be submitted to SLURM. Error {stdout}")
 
     except Exception:
         logger.exception(f"{script_filename} failure running sbatch.")
@@ -2861,9 +2699,7 @@ def estimate_birli_output_bytes(
     #
     # Total GB = bytes / 1000.^3
     baselines: int = metafits_context.num_baselines  # 144T (10440)
-    timesteps: int = int(
-        metafits_context.sched_duration_ms / (birli_int_time_res_sec * 1000.0)
-    )  # 60
+    timesteps: int = int(metafits_context.sched_duration_ms / (birli_int_time_res_sec * 1000.0))  # 60
     coarse_channels: int = metafits_context.num_metafits_coarse_chans
     fine_channels: int = int(
         metafits_context.coarse_chan_width_hz / (birli_freq_res_khz * 1000.0)
@@ -2873,14 +2709,7 @@ def estimate_birli_output_bytes(
     # Uncomment for debug
     # print(f"{timesteps}ts * {coarse_channels * fine_channels}ch * {baselines}bl * {pols}pol * {bytes_per_visibility} bytes")
 
-    return (
-        timesteps
-        * coarse_channels
-        * fine_channels
-        * baselines
-        * pols
-        * bytes_per_r_and_i
-    )
+    return timesteps * coarse_channels * fine_channels * baselines * pols * bytes_per_r_and_i
 
 
 # def split_aocal_file_into_coarse_channels(
@@ -3075,9 +2904,7 @@ def estimate_birli_output_bytes(
 #     return f"{obsid}_*_{rec_chan_no:03}_calfile.bin"
 
 
-def get_solution_fits_filename(
-    solutions_dir: str, obs_id: int, rec_chan: int
-) -> str | None:
+def get_solution_fits_filename(solutions_dir: str, obs_id: int, rec_chan: int) -> str | None:
     """Find a hyperdrive solution FITS file for a specific channel.
 
     Searches for solution files in multiple formats:
@@ -3148,9 +2975,7 @@ def parse_solution_channels(filename: str) -> tuple[int, int] | None:
     raise ValueError(f"The channels for {basename} could not be determined")
 
 
-def get_sorted_solution_files(
-    directory: str, obs_id: int, extension: str = "fits"
-) -> list[str]:
+def get_sorted_solution_files(directory: str, obs_id: int, extension: str = "fits") -> list[str]:
     """Return solution files sorted numerically by channel number.
 
     Sorting order:
@@ -3171,9 +2996,7 @@ def get_sorted_solution_files(
     """
     # Check that the extension doesn't include a "."
     if extension != "fits" and extension != "bin":
-        raise ValueError(
-            "get_sorted_solution_files() extension should be 'fits' or 'bin'"
-        )
+        raise ValueError("get_sorted_solution_files() extension should be 'fits' or 'bin'")
 
     def _sort_key(path: str) -> tuple[int, str]:
         try:
@@ -3204,12 +3027,12 @@ def get_file_description(filename: str) -> str:
         chan_no = chans["start"]
 
         if "end" not in chans:
-            channel_suffix = (
-                f" for receiver channel {chan_no} ({chan_no * 1.28:.3f} MHz)"
-            )
+            channel_suffix = f" for receiver channel {chan_no} ({chan_no * 1.28:.3f} MHz)"
         else:
             chan_no_end = chans["end"]
-            channel_suffix = f" for receiver channels {chan_no}-{chan_no_end} ({chan_no * 1.28:.3f} - {chan_no_end * 1.28:.3f} MHz)"
+            channel_suffix = (
+                f" for receiver channels {chan_no}-{chan_no_end} ({chan_no * 1.28:.3f} - {chan_no_end * 1.28:.3f} MHz)"
+            )
     else:
         channel_suffix = " for all coarse channels"
 
@@ -3238,6 +3061,12 @@ def get_file_description(filename: str) -> str:
         desc = "Tab separated value (TSV) file of phase residuals vs frequency by receiver type and polarisation"
     elif "residual.png" in filename:
         desc = "Plot of phase residuals vs frequency by receiver type and polarisation"
+    elif "gain_outliers_tiles" in filename:
+        desc = "Plot of outlier gains that were removed from the calibration solutions"
+    elif "_solutions.fits" in filename:
+        desc = "Hyperdrive calibration solutions in FITS format. If a '*_solutions.original.fits' also exists, then this file has had outlier gains flagged (entire Jones matrix is NaNed)"
+    elif "_solutions.original.fits" in filename:
+        desc = "Original unmodified Hyperdrive calibration solutions out of Hyperdrive in FITS format (gain outliers not flagged)"
 
     if desc == "":
         return "Miscellaneous file"
@@ -3273,9 +3102,7 @@ def generate_plot_index_file(
             if filename.name == "index.json":
                 continue
 
-            new_entry = populate_index_json_entry(
-                Path(filename), fit_id, plot_front_end_url
-            )
+            new_entry = populate_index_json_entry(Path(filename), fit_id, plot_front_end_url)
 
             # None means it found a file we don't want to upload so skip it
             if new_entry is not None:
@@ -3283,9 +3110,7 @@ def generate_plot_index_file(
 
         index = {
             "version": 2,
-            "generated_at": datetime.datetime.now(tz=datetime.UTC).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            ),
+            "generated_at": datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "base_url": plot_front_end_url,
             "path": str(fit_id),
             "files": files,
@@ -3297,15 +3122,11 @@ def generate_plot_index_file(
         return True, index
     except Exception:
         # log it and return
-        logger.exception(
-            f"Problem generating the {output_filename} file for fit {fit_id}"
-        )
+        logger.exception(f"Problem generating the {output_filename} file for fit {fit_id}")
         return False, {}
 
 
-def populate_index_json_entry(
-    filename: str | Path, fit_id: int, plot_front_end_url: str
-) -> dict | None:
+def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_url: str) -> dict | None:
     """Builds an index.json file entry dict for a given directory entry.
 
     Inspects the file at ``filename``, extracts metadata (size, modification

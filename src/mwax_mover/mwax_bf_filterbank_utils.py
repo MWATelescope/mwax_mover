@@ -6,7 +6,6 @@ filterbank files produced by the MWAX beamformer into a single complete
 observation output file.
 """
 
-from typing import List
 import logging
 import os
 import re
@@ -112,7 +111,7 @@ def set_filterbank_key_value_int(header: bytearray, key: str, value: int) -> byt
     raise ValueError(f"Key {key} not found in filterbank file")
 
 
-def stitch_filterbank_files(files: List[str], output_dir: str) -> str:
+def stitch_filterbank_files(files: list[str], output_dir: str) -> str:
     """Concatenate multiple filterbank files into a single observation output file.
 
     Combines per-subobservation filterbank files produced by the MWAX beamformer
@@ -149,7 +148,7 @@ def stitch_filterbank_files(files: List[str], output_dir: str) -> str:
 
     # The first file header will be the one we will use
     first_header = bytearray()
-    all_data_start_indices: List[int] = []
+    all_data_start_indices: list[int] = []
 
     for filename in sorted_files:
         # Read each header and get the start index of data

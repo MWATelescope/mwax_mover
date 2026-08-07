@@ -1,8 +1,10 @@
-import shutil
-from mwax_mover.mwax_bf_vdif_utils import stitch_vdif_files_and_write_hdr
-from tests_common import setup_test_directories
-import pytest
 import os
+import shutil
+
+import pytest
+from tests_common import setup_test_directories
+
+from mwax_mover.mwax_bf_vdif_utils import stitch_vdif_files_and_write_hdr
 
 
 def test_stitch_zero_files():

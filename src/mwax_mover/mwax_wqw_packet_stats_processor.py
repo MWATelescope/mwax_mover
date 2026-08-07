@@ -5,12 +5,12 @@ one to a configured remote destination (e.g. vulcan) using shutil.copy2(), then
 deletes the local source file on success.
 """
 
-from mwax_mover.mwax_watch_queue_worker import MWAXWatchQueueWorker
-from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_NEW
+import logging
 import os
 import shutil
 
-import logging
+from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_NEW
+from mwax_mover.mwax_watch_queue_worker import MWAXWatchQueueWorker
 
 logger = logging.getLogger(__name__)
 
