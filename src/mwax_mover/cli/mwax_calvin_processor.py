@@ -151,6 +151,7 @@ class MWAXCalvinProcessor:
         self.gains_cut_off_max: float | None = None
         self.acacia_projects_profile: str = ""
         self.acacia_projects_bucket: str = ""
+        self.delete_acacia_file: bool = False  # Hardcoded to false for now, but could be set to true if we want to delete the file from acacia after processing
 
         self.gain_outlier_poly_degree: int
         self.gain_outlier_mad_residual_threshold: float
@@ -417,7 +418,7 @@ class MWAXCalvinProcessor:
             #
             # if this was asvo then delete the file from Acacia (Projects)
             # Get the filename from the url
-            if self.job_type == CalvinJobType.mwa_asvo:
+            if self.job_type == CalvinJobType.mwa_asvo and self.delete_acacia_file:
                 try:
                     acacia_filename = extract_filename_from_mwa_asvo_signed_url(self.mwa_asvo_download_url)
 

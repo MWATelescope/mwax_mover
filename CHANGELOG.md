@@ -9,6 +9,7 @@
 * calvin_processor: upload new gain outlier plots and the actual solutions (and the unmodified original if applicable) to s3.
 * calvin_processor: Added more info to solution quality txt file report.
 * calvin_processor: don't hardcode the gain plots from hyperdrive to a max of 5.
+* calvin_processor: don't delete ASVO download from Acacia (no longer needed- only was needed when I was processing a huge backlog).
 * Fixed formatting in many files (ruff).
 * Fixed broken tests.
 
