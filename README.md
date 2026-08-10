@@ -91,7 +91,7 @@ QueueWorker dequeues path → substitutes __FILE__ / __FILENOEXT__ into command 
 ### Running mwax_subfile_distributor
 
 ```bash
-usage: mwax_subfile_distributor [-h] -c CFG --mode {c,b,C,B}
+usage: mwax_subfile_distributor [-h] -c CFG
 
 mwax_subfile_distributor: a command line tool which is part of the mwax suite for the MWA. It will perform different tasks based on the configuration file.
 In addition, it will automatically archive files in /voltdata and /visdata to the mwacache servers at the Curtin Data Centre.
@@ -99,7 +99,6 @@ In addition, it will automatically archive files in /voltdata and /visdata to th
 options:
   -h, --help         show this help message and exit
   -c CFG, --cfg CFG  Configuration file location.
-  --mode {c,b,C,B}   Mode of operation: C (correlator) or B (beamformer)
 ```
 
 ### How it works
@@ -203,7 +202,7 @@ Web service commands:
     "version": "1.5.3",
     "host": "mwax99",
     "running": true,
-    "mode": "C",
+    "mode": "MWAX_CORRELATOR",
     "archiving": true,
     "cmdline": "--cfg=/path/to/config.cfg"
   },
