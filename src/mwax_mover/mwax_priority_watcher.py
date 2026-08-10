@@ -50,7 +50,9 @@ class PriorityWatcher:
             FileNotFoundError: If the specified path does not exist.
         """
         self.name = name
-        self.inotify_tree: inotify.adapters.InotifyTree | inotify.adapters.Inotify | None = None
+        self.inotify_tree: (
+            inotify.adapters.InotifyTree | inotify.adapters.Inotify | None
+        ) = None
         self.recursive = recursive
         self.mode = mode
         self.path = path

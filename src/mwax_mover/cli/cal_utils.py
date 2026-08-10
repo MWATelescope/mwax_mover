@@ -51,7 +51,9 @@ def main() -> None:
     """Command-line entry point: parses sys.argv and runs the cleaning/plot
     pipeline, or dumps raw per-tile values if --dump-tile is given.
     """
-    parser = argparse.ArgumentParser(description="Flag and clean bad gains in a hyperdrive solutions file.")
+    parser = argparse.ArgumentParser(
+        description="Flag and clean bad gains in a hyperdrive solutions file."
+    )
     parser.add_argument("solutions_path", help="Path to hyperdrive solutions FITS file")
     parser.add_argument(
         "--poly-degree",
@@ -79,11 +81,13 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    (quality, bad_mask, new_flags, band, fit, original_gains, original_bad) = compute_outlier_gains(
-        solutions_path=args.solutions_path,
-        poly_degree=args.poly_degree,
-        residual_threshold=args.residual_threshold,
-        modify_gains=False,
+    (quality, bad_mask, new_flags, band, fit, original_gains, original_bad) = (
+        compute_outlier_gains(
+            solutions_path=args.solutions_path,
+            poly_degree=args.poly_degree,
+            residual_threshold=args.residual_threshold,
+            modify_gains=False,
+        )
     )
 
     plot_outlier_gains(

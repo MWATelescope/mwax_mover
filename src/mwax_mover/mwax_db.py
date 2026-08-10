@@ -153,7 +153,10 @@ class MWAXDBHandler:
         """
         # Assuming we have a connection, try to do the database operation
         try:
-            with self.pool.connection() as conn, conn.cursor(row_factory=dict_row) as cursor:
+            with (
+                self.pool.connection() as conn,
+                conn.cursor(row_factory=dict_row) as cursor,
+            ):
                 # Run the sql
                 cursor.execute(sql, parm_list)
 
@@ -169,8 +172,12 @@ class MWAXDBHandler:
                         return rows
                     else:
                         # Something went wrong
-                        logger.error(f"Error- queried {rows_affected} rows, expected 1. SQL={sql}")
-                        raise Exception(f"Error- queried {rows_affected} rows, expected 1. SQL={sql}")
+                        logger.error(
+                            f"Error- queried {rows_affected} rows, expected 1. SQL={sql}"
+                        )
+                        raise Exception(
+                            f"Error- queried {rows_affected} rows, expected 1. SQL={sql}"
+                        )
                 else:
                     # We don't know how many rows, so cool, return them
                     return rows
@@ -251,7 +258,9 @@ class MWAXDBHandler:
                     if rows_affected != expected_rows:
                         # An exception in here will trigger a rollback
                         # which is good
-                        logger.error(f"Error- query affected {rows_affected} rows, expected {expected_rows}. SQL={sql}")
+                        logger.error(
+                            f"Error- query affected {rows_affected} rows, expected {expected_rows}. SQL={sql}"
+                        )
                         raise Exception(
                             f"Error- query affected {rows_affected} rows, expected {expected_rows}. SQL={sql}"
                         )
@@ -270,7 +279,9 @@ class MWAXDBHandler:
             logger.exception("postgres Exception")
             raise
 
-    def execute_dml_row_within_transaction(self, sql, parm_list, transaction_cursor: psycopg.Cursor):
+    def execute_dml_row_within_transaction(
+        self, sql, parm_list, transaction_cursor: psycopg.Cursor
+    ):
         """Execute an INSERT, UPDATE, or DELETE statement within a transaction.
 
         This method does not handle commit/rollback - those are the caller's responsibility.
@@ -299,8 +310,12 @@ class MWAXDBHandler:
             if rows_affected != 1:
                 # An exception in here will trigger a rollback
                 # which is good
-                logger.error(f"Error- query affected {rows_affected} rows, expected 1. SQL={sql}")
-                raise Exception(f"Error- query affected {rows_affected} rows, expected 1. SQL={sql}")
+                logger.error(
+                    f"Error- query affected {rows_affected} rows, expected 1. SQL={sql}"
+                )
+                raise Exception(
+                    f"Error- query affected {rows_affected} rows, expected 1. SQL={sql}"
+                )
 
         except Exception:
             logger.exception("postgres Exception")
@@ -320,7 +335,9 @@ class DataFileRow:
         self.checksum = ""
 
 
-def get_data_file_row(db_handler_object: MWAXDBHandler, full_filename: str, obs_id: int) -> DataFileRow:
+def get_data_file_row(
+    db_handler_object: MWAXDBHandler, full_filename: str, obs_id: int
+) -> DataFileRow:
     """Retrieve a data file record from the database.
 
     Args:
@@ -359,7 +376,9 @@ def get_data_file_row(db_handler_object: MWAXDBHandler, full_filename: str, obs_
         data_files_row.size = row["size"]
         data_files_row.checksum = row["checksum"]
 
-        logger.info(f"{full_filename} Successfully read from data_files table {vars(data_files_row)}")
+        logger.info(
+            f"{full_filename} Successfully read from data_files table {vars(data_files_row)}"
+        )
         return data_files_row
 
     except Exception as select_exception:
@@ -430,7 +449,9 @@ def insert_data_file_row(
         # In this scenario it means M&C deleted the observation BUT the metafits was already generated
         # so mwax_u2s et al. thought it was still a real observation
         # we should just delete this file and move on
-        logger.warning(f"{filename} observation_num {obsid} has been deleted by M&C.Deleting this data file.")
+        logger.warning(
+            f"{filename} observation_num {obsid} has been deleted by M&C.Deleting this data file."
+        )
         os.remove(archive_filename)
 
         # returning True here will cause the item to be ack'd off the queue so it is not tried again
@@ -486,7 +507,9 @@ def update_data_file_row_as_archived(
         return True
 
     except Exception:
-        logger.exception(f"{filename} error updating data_files record in data_files table. SQL was {sql}")
+        logger.exception(
+            f"{filename} error updating data_files record in data_files table. SQL was {sql}"
+        )
         return False
 
 
@@ -571,9 +594,13 @@ def insert_calibration_fits_row(
     )
 
     try:
-        db_handler_object.execute_dml_row_within_transaction(sql, sql_values, transaction_cursor)
+        db_handler_object.execute_dml_row_within_transaction(
+            sql, sql_values, transaction_cursor
+        )
 
-        logger.info(f"{obs_id}: Successfully wrote into calibration_fits table. fit_id={fit_id}")
+        logger.info(
+            f"{obs_id}: Successfully wrote into calibration_fits table. fit_id={fit_id}"
+        )
         return (True, fit_id)
 
     except Exception:
@@ -665,9 +692,13 @@ def insert_calibration_solutions_row(
     )
 
     try:
-        db_handler_object.execute_dml_row_within_transaction(sql, sql_values, transaction_cursor)
+        db_handler_object.execute_dml_row_within_transaction(
+            sql, sql_values, transaction_cursor
+        )
 
-        logger.info(f"{obs_id} tile {tile_id}: Successfully wrote into calibration_solutions table")
+        logger.info(
+            f"{obs_id} tile {tile_id}: Successfully wrote into calibration_solutions table"
+        )
         return True
 
     except Exception:
@@ -677,7 +708,9 @@ def insert_calibration_solutions_row(
         return False
 
 
-def get_unattempted_unrequested_cal_obsids(db_handler_object: MWAXDBHandler, oldest_obs_id: int) -> list[int] | None:
+def get_unattempted_unrequested_cal_obsids(
+    db_handler_object: MWAXDBHandler, oldest_obs_id: int
+) -> list[int] | None:
     # This SQL gets all calibrator obs which have not yet been calibrated and
     # have not had a cal request added yet
     sql = """SELECT m.starttime as obs_id
@@ -856,7 +889,9 @@ def update_calsolution_request_submit_mwa_asvo_job_status(
         logger.debug("Successfully updated calibration_request table.")
 
     except Exception:
-        logger.exception(f"error updating calibration_request record. SQL was {sql}, params were: {params}")
+        logger.exception(
+            f"error updating calibration_request record. SQL was {sql}, params were: {params}"
+        )
 
         # Re-raise error
         raise
@@ -894,7 +929,9 @@ def update_calibration_request_slurm_status(
         logger.debug("Successfully updated calibration_request table.")
 
     except Exception:
-        logger.exception(f"error updating calibration_request record. SQL was {sql}, params were: {params}")
+        logger.exception(
+            f"error updating calibration_request record. SQL was {sql}, params were: {params}"
+        )
 
         # Re-raise error
         raise
@@ -951,7 +988,9 @@ def update_calsolution_request_download_complete_status(
 
     # check for validity, raise exception if not valid
     if (
-        download_completed_datetime is not None and download_error_datetime is None and download_error_message is None
+        download_completed_datetime is not None
+        and download_error_datetime is None
+        and download_error_message is None
     ) ^ (
         download_completed_datetime is None
         and download_error_datetime is not None
@@ -969,7 +1008,9 @@ def update_calsolution_request_download_complete_status(
         logger.debug("Successfully updated calibration_request table.")
 
     except Exception:
-        logger.exception(f"error updating calibration_request record. SQL was {sql}, params were: {params}")
+        logger.exception(
+            f"error updating calibration_request record. SQL was {sql}, params were: {params}"
+        )
 
         # Re-raise error
         raise
@@ -1004,7 +1045,9 @@ def update_calibration_request_assign_hostname_start_download(
         logger.debug("Successfully updated calibration_request table.")
 
     except Exception:
-        logger.exception(f"error updating calibration_request record. SQL was {sql}, params were: {params}")
+        logger.exception(
+            f"error updating calibration_request record. SQL was {sql}, params were: {params}"
+        )
 
         # Re-raise error
         raise
@@ -1054,7 +1097,9 @@ def update_calsolution_request_calibration_started_status(
         logger.debug("Successfully updated calibration_request table.")
 
     except Exception:
-        logger.exception(f"error updating calibration_request record. SQL was {sql}, params were: {params}")
+        logger.exception(
+            f"error updating calibration_request record. SQL was {sql}, params were: {params}"
+        )
 
         # Re-raise error
         raise
@@ -1125,7 +1170,9 @@ def update_calsolution_request_calibration_complete_status(
         logger.debug("Successfully updated calibration_request table.")
 
     except Exception:  # pylint: disable=broad-except
-        logger.exception(f"error updating calibration_request record. SQL was {sql}, params were: {params}")
+        logger.exception(
+            f"error updating calibration_request record. SQL was {sql}, params were: {params}"
+        )
 
         # Re-raise error
         raise

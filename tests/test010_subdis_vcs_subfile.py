@@ -13,7 +13,6 @@ from tests_common import create_observation_subfiles, setup_test_directories
 from tests_fakedb import FakeMWAXDBHandler
 
 from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
-from mwax_mover.utils import MWAXSubfileDistirbutorMode
 
 TEST_CONFIG_FILE = "tests/data/test010/test010.cfg"
 TEST_METAFITS = "tests/data/1369821496/1369821496_metafits.fits"
@@ -33,7 +32,7 @@ def test_correlator_config_file():
     # e.g. fake_db_handler.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
 
     # Call to read config <-- this is what we're testing!
-    sd.initialise(TEST_CONFIG_FILE, MWAXSubfileDistirbutorMode.CORRELATOR, fake_db_handler)
+    sd.initialise(TEST_CONFIG_FILE, fake_db_handler)
 
     #
     # Now confirm the params all match the config file
@@ -93,7 +92,7 @@ def test_process_vcs_subfile():
     sd = MWAXSubfileDistributor()
 
     # Call to read config <-- this is what we're testing!
-    sd.initialise(TEST_CONFIG_FILE, MWAXSubfileDistirbutorMode.CORRELATOR)
+    sd.initialise(TEST_CONFIG_FILE)
     # Override db_handler with a fake one
     sd.db_handler = FakeMWAXDBHandler()
     # Add any select results (in order in the code below-or keep commented if none)

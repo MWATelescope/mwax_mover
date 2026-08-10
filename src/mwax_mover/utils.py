@@ -84,14 +84,6 @@ class GiantSquidJobAlreadyExistsException(Exception):
         self.job_id: int = job_id
 
 
-class MWAXSubfileDistirbutorMode(Enum):
-    """Class representing the mode running"""
-
-    UNKNOWN = ""
-    BEAMFORMER = "B"
-    CORRELATOR = "C"
-
-
 class CorrelatorMode(Enum):
     """Class representing correlator mode"""
 

@@ -430,10 +430,8 @@ class MWAXCalvinController:
         """
         logger.debug("Querying mwa database for uncalibrated realtime observations ...")
         # First get the obs's which need requests created
-        obs_ids_to_request: list[int] | None = (
-            get_unattempted_unrequested_cal_obsids(
-                self.db_handler, self.oldest_cal_obs_id
-            )
+        obs_ids_to_request: list[int] | None = get_unattempted_unrequested_cal_obsids(
+            self.db_handler, self.oldest_cal_obs_id
         )
 
         if obs_ids_to_request:

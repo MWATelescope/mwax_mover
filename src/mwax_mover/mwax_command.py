@@ -58,7 +58,9 @@ def run_command_ext(
         cmdline = f"{command}"
     else:
         if int(numa_node) >= 0:
-            cmdline = f"numactl --cpunodebind={numa_node!s} --membind={numa_node!s} {command}"
+            cmdline = (
+                f"numactl --cpunodebind={numa_node!s} --membind={numa_node!s} {command}"
+            )
         else:
             cmdline = f"{command}"
 
@@ -153,7 +155,9 @@ def run_command_popen(
         cmdline = f"{command}"
     else:
         if int(numa_node) > 0:
-            cmdline = f"numactl --cpunodebind={numa_node!s} --membind={numa_node!s} {command}"
+            cmdline = (
+                f"numactl --cpunodebind={numa_node!s} --membind={numa_node!s} {command}"
+            )
         else:
             cmdline = f"{command}"
 
@@ -182,9 +186,7 @@ def run_command_popen(
     return popen_process
 
 
-def check_popen_finished(
-    popen_process, timeout: int = 60
-) -> tuple[int, str, str]:
+def check_popen_finished(popen_process, timeout: int = 60) -> tuple[int, str, str]:
     """Wait for a Popen process to finish and return its exit code and output.
 
     Blocks until the process terminates or the timeout is exceeded. On timeout,
@@ -220,8 +222,6 @@ def check_popen_finished(
         )
 
     except Exception as command_exception:
-        logger.error(
-            f"Exception executing {popen_process.args}: {command_exception!s}"
-        )
+        logger.error(f"Exception executing {popen_process.args}: {command_exception!s}")
 
     return (exit_code, stdout, stderr)

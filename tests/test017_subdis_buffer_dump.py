@@ -14,7 +14,7 @@ from tests_common import create_observation_subfiles, setup_test_directories
 from tests_fakedb import FakeMWAXDBHandler
 
 from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
-from mwax_mover.utils import MWAXSubfileDistirbutorMode, running_under_pytest
+from mwax_mover.utils import running_under_pytest
 
 TEST_CONFIG_FILE = "tests/data/test017/test017.cfg"
 
@@ -32,7 +32,6 @@ def test_corr_buffer_dump():
     trigger_id = 123
 
     file_dict = do_buffer_dump(
-        MWAXSubfileDistirbutorMode.CORRELATOR,
         obsid,
         obs_exp,
         dump_start,
@@ -53,7 +52,6 @@ def test_corr_buffer_dump():
 
 
 def do_buffer_dump(
-    config_mode: MWAXSubfileDistirbutorMode,
     obs_id: int,
     obs_exp_time: int,
     dump_start: int,
@@ -72,7 +70,6 @@ def do_buffer_dump(
     8. We then collect all the files and return their names for the caller to analyse to see if the test succeeded.
 
     Args:
-        config_mode (MWAXSubfileDistirbutorMode): The config mode SubfileDistributor is in (CORRELATOR=normal; BEAMFORMER=beamformer)
         obs_id (int): An obsid to use, which we have the metafits for in test_data/OBSID/OBSID_metafits.fits.
         obs_exp_time (int): How long is the observation? The length determines how many subfiles we create for the test (and how long the test goes for).
         dump_start (int): The gps time we pass to dump_voltages that specifies the first subobs to dump.
@@ -100,7 +97,7 @@ def do_buffer_dump(
     fakedb = FakeMWAXDBHandler()
 
     # Call to read config <-- this is what we're testing!
-    sd.initialise(TEST_CONFIG_FILE, config_mode, fakedb)
+    sd.initialise(TEST_CONFIG_FILE, fakedb)
 
     # Override db_handler with a fake one
     sd.db_handler = FakeMWAXDBHandler()
@@ -130,10 +127,7 @@ def do_buffer_dump(
         1,
     )
 
-    assert (
-        len(glob.glob(os.path.join(sd.cfg_subfile_incoming_path, "*.sub")))
-        == expected_subfiles
-    )
+    assert len(glob.glob(os.path.join(sd.cfg_subfile_incoming_path, "*.sub"))) == expected_subfiles
 
     # Start the processor
     thrd.start()
@@ -143,9 +137,7 @@ def do_buffer_dump(
 
     print("Dump triggered!")
     # Now do a buffer dump!
-    dump_success = call_dump_voltages(
-        sd.cfg_webserver_port, dump_start, dump_end, dump_trigger_id
-    )
+    dump_success = call_dump_voltages(sd.cfg_webserver_port, dump_start, dump_end, dump_trigger_id)
 
     assert dump_success
 
@@ -180,9 +172,7 @@ def do_buffer_dump(
         "dev_shm_mwax_free_files": glob.glob(f"{sd.cfg_subfile_incoming_path}/*.free"),
         "dev_shm_mwax_keep_files": glob.glob(f"{sd.cfg_subfile_incoming_path}/*.keep"),
         "dev_shm_mwax_sub_files": glob.glob(f"{sd.cfg_subfile_incoming_path}/*.sub"),
-        "voltdata_dont_archive_sub_files": glob.glob(
-            f"{sd.cfg_voltdata_dont_archive_path}/*.sub"
-        ),
+        "voltdata_dont_archive_sub_files": glob.glob(f"{sd.cfg_voltdata_dont_archive_path}/*.sub"),
     }
 
 

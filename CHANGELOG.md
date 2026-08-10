@@ -12,6 +12,7 @@
 * calvin_processor: don't delete ASVO download from Acacia (no longer needed- only was needed when I was processing a huge backlog).
 * Fixed formatting in many files (ruff).
 * Fixed broken tests.
+* mwax_subfile_distributor/subfile_processor: removed cli argument --mode which told mwax if it was intended to be runnning as bf or corr.
 
 # 1.7.30 5-Aug-2026
 
