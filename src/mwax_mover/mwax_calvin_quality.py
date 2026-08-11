@@ -14,7 +14,14 @@ import numpy as np
 import numpy.typing as npt  # noqa: F401
 from astropy.io import fits
 
-from mwax_mover.mwax_calvin_utils import parse_solution_channels
+from mwax_mover.mwax_calvin_utils import (
+    generate_hyperdrive_plots,
+    parse_solution_channels,
+    read_results_hdu,
+    read_solutions_hdu_complex,
+    read_tiles_hdu,
+    write_hyperdrive_stats,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -112,26 +119,21 @@ def load_hyperdrive_solutions(hyperdrive_solutions_filename: str) -> CalSolution
         for timeblock 0.
     """
     with fits.open(hyperdrive_solutions_filename) as hdul:
-        solutions = hdul["SOLUTIONS"].data.astype(np.float64)
-        n_timeblocks, n_tiles, n_chanblocks, _ = solutions.shape
+        solutions_raw = hdul["SOLUTIONS"].data
+        n_timeblocks, n_tiles, n_chanblocks, _ = solutions_raw.shape
         if n_timeblocks > 1:
-            logger.warning(
-                f"Note: file has {n_timeblocks} timeblocks; only timeblock 0 is used."
-            )
-        solutions = solutions[0]  # (tile, chanblock, 8)
+            logger.warning(f"Note: file has {n_timeblocks} timeblocks; only timeblock 0 is used.")
 
-        # The 8 floats per (tile, chanblock) are, in order:
-        # gx_re, gx_im, Dx_re, Dx_im, Dy_re, Dy_im, gy_re, gy_im.
-        gx = solutions[..., 0] + 1j * solutions[..., 1]
-        dx = solutions[..., 2] + 1j * solutions[..., 3]
-        dy = solutions[..., 4] + 1j * solutions[..., 5]
-        gy = solutions[..., 6] + 1j * solutions[..., 7]
+        # (tile, chanblock, 4), trailing axis ordered [XX, XY, YX, YY] ==
+        # [gx, Dx, Dy, gy] in hyperdrive's own Jones-matrix notation.
+        complex_solutions = read_solutions_hdu_complex(solutions_raw)[0]
+        gx, dx, dy, gy = np.moveaxis(complex_solutions, -1, 0)
         gains = np.stack(
             [np.stack([gx, dx], axis=-1), np.stack([dy, gy], axis=-1)],
             axis=-2,
         )  # shape: (tile, chanblock, 2, 2)
 
-        precision = hdul["RESULTS"].data.astype(np.float64)[0]  # (chanblock,)
+        precision = read_results_hdu(hdul["RESULTS"].data)  # (chanblock,), timeblock 0
         chanblock_converged = ~np.isnan(precision)
 
         baseline_weights = hdul["BASELINES"].data.astype(np.float64)
@@ -182,19 +184,11 @@ def _tile_names_from_tiles_hdu(hdul: fits.HDUList, n_tiles: int) -> list[str]:
         logger.warning("Note: no TILES HDU found; falling back to generic tile names.")
         return [f"Tile{i}" for i in range(n_tiles)]
 
-    tiles_table = hdul["TILES"].data
-    antennas = tiles_table["Antenna"]
-    tile_names_raw = tiles_table["TileName"]
-
-    # Antenna indices should already be ascending, but sort explicitly to
-    # guarantee alignment with the SOLUTIONS HDU's tile axis regardless.
-    order = np.argsort(antennas)
-    return [str(tile_names_raw[i]) for i in order]
+    _antennas, tile_names, _flags = read_tiles_hdu(hdul["TILES"].data)
+    return tile_names
 
 
-def _tile_flags_from_baselines(
-    baseline_weights: np.ndarray, n_tiles: int
-) -> np.ndarray:
+def _tile_flags_from_baselines(baseline_weights: np.ndarray, n_tiles: int) -> np.ndarray:
     """Infer per-tile flagging from the BASELINES HDU's NaN pattern.
 
     Baselines are ordered ascending: (0,1), (0,2), ..., (0,N-1), (1,2), ...
@@ -222,6 +216,133 @@ def _tile_flags_from_baselines(
 # ---------------------------------------------------------------------------
 # Flagging
 # ---------------------------------------------------------------------------
+
+
+def _write_bad_gains_as_nan(solutions_path: str, bad_mask: np.ndarray) -> str:
+    """Back up a hyperdrive solutions file, then overwrite it with bad
+    entries set to NaN.
+
+    Makes a copy of the original file at `{solutions_path}.original`
+    before modifying anything (overwriting that backup if it already
+    exists, with a printed warning). Then opens the original path in
+    update mode and sets all 4 complex Jones matrix terms (8 underlying
+    floats) to NaN for every (tile, chanblock) flagged in bad_mask.
+
+    Args:
+        solutions_path: Path to the hyperdrive solutions FITS file to
+            back up and overwrite.
+        bad_mask: Boolean mask, shape (tile, chanblock), True where the
+            entry should be set to NaN. Assumes timeblock 0 (the only
+            timeblock this tool supports).
+
+    Returns:
+        The backup file path.
+    """
+    backup_path = f"{solutions_path}".replace(".fits", ".original.fits")
+    if os.path.exists(backup_path):
+        logger.warning(f"Warning: backup {backup_path} already exists and will be overwritten.")
+    shutil.copy2(solutions_path, backup_path)
+    logger.debug(f"Backed up original file to {backup_path}")
+
+    with fits.open(solutions_path, mode="update") as hdul:
+        # Force native byte order: FITS files are big-endian on disk, and
+        # we need a native-endian array to safely write NaN into the
+        # 8-float-per-entry layout without corrupting adjacent bytes.
+        data = np.array(hdul["SOLUTIONS"].data, dtype=np.float64)
+        # shape: (timeblock, tile, chanblock, 8)
+
+        # bad_mask covers timeblock 0 only (the only timeblock this tool
+        # supports). data[0][bad_mask] selects the (n_flagged, 8) rows of
+        # flagged (tile, chanblock) entries; broadcasting np.nan sets all
+        # 8 floats (gx, Dx, Dy, gy re/im) to NaN for each.
+        data[0][bad_mask] = np.nan
+
+        hdul["SOLUTIONS"].data = data
+        hdul.flush()
+
+    n_flagged = int(bad_mask.sum())
+    logger.info(f"Wrote NaN for {n_flagged} flagged (tile, chanblock) entries to {solutions_path}")
+
+    return backup_path
+
+
+def compute_outlier_gains(
+    solutions_path: str,
+    poly_degree: int = 2,
+    mad_residual_threshold: float = 10.0,
+    modify_gains: bool = False,
+) -> tuple[
+    CalSolutionQuality,
+    np.ndarray,
+    np.ndarray,
+    dict[str, tuple[np.ndarray, np.ndarray]],
+    dict[str, np.ndarray],
+    np.ndarray,
+    np.ndarray,
+]:
+    """Load a hyperdrive calibration solutions file and flag bad gains.
+
+    Args:
+        solutions_path: Path to a hyperdrive solutions FITS file.
+        poly_degree: Degree of the per-tile polynomial fit to gain
+            amplitude vs. chanblock index. See flag_bad_gains.
+        mad_residual_threshold: Number of residual-MADs beyond which a channel
+            is considered an outlier. See flag_bad_gains.
+        modify_gains: If True, every Jones matrix flagged as bad (per the
+            returned bad_mask) has all 4 complex terms (gx, Dx, Dy, gy --
+            i.e. all 8 underlying floats) set to NaN in the returned
+            quality.gains array (in memory), AND the same NaN-out is
+            written back to the FITS file on disk at solutions_path. The
+            original file is first backed up to
+            "{solutions_path}.original" (overwriting any existing backup
+            at that path, with a printed warning) before the original
+            path is overwritten.
+
+    Returns:
+        A 7-tuple `(quality, bad_mask, new_calvin_bad_mask, band, fit, hyperdrive_gains,
+        hyperdrive_bad_mask)`:
+
+        - quality (CalSolutionQuality): The loaded solution data. If
+          modify_gains=True, quality.gains has already had bad entries set
+          to NaN, both in memory and on disk.
+        - bad_mask (np.ndarray[bool], shape (n_tiles, n_chanblocks)): True
+          where an entry is bad for ANY reason -- convergence, tile
+          flagging, NaN gains, or the polynomial-fit outlier check.
+          Equivalent to `hyperdrive_bad_mask | new_calvin_bad_mask`.
+        - new_calvin_bad_mask (np.ndarray[bool], shape (n_tiles, n_chanblocks)): True
+          only where the polynomial-fit check caught an entry that wasn't
+          already bad in the original file. A subset of bad_mask.
+        - band (dict[str, tuple[np.ndarray, np.ndarray]]): Keys "gx" and
+          "gy". Each value is (lower, upper) -- the acceptable amplitude
+          range around that polarisation's polynomial fit, each of shape
+          (n_tiles, n_chanblocks). Values outside this band are what
+          triggered new_calvin_bad_mask. For plotting.
+        - fit (dict[str, np.ndarray]): Keys "gx" and "gy". Each value is
+          the fitted polynomial curve for that polarisation, shape
+          (n_tiles, n_chanblocks). For plotting.
+        - hyperdrive_gains (np.ndarray[complex], shape
+          (n_tiles, n_chanblocks, 2, 2)): quality.gains as it was BEFORE
+          modify_gains was applied. Pass this as display_gains to
+          plot_outlier_gains/plot_combined if you want plots to show the
+          original values even when modify_gains=True.
+        - hyperdrive_bad_mask (np.ndarray[bool], shape (n_tiles, n_chanblocks)):
+          True where an entry was already bad from convergence/tile/NaN
+          criteria alone, BEFORE the polynomial-fit check ran. Lets you
+          distinguish "broken in the original file" from "caught by our
+          own outlier detection" (new_calvin_bad_mask).
+    """
+    quality = load_hyperdrive_solutions(solutions_path)
+    bad_mask, new_calvin_bad_mask, band, hyperdrive_bad_mask, fit = flag_bad_gains(
+        quality, poly_degree=poly_degree, mad_residual_threshold=mad_residual_threshold
+    )
+
+    hyperdrive_gains = quality.gains.copy()
+
+    if modify_gains:
+        quality.gains[bad_mask] = np.nan + 1j * np.nan
+        _write_bad_gains_as_nan(solutions_path, bad_mask)
+
+    return quality, bad_mask, new_calvin_bad_mask, band, fit, hyperdrive_gains, hyperdrive_bad_mask
 
 
 def _iterative_poly_clip(
@@ -310,7 +431,7 @@ def _iterative_poly_clip(
 def flag_bad_gains(
     quality: CalSolutionQuality,
     poly_degree: int = 2,
-    residual_threshold: float = 5.0,
+    mad_residual_threshold: float = 5.0,
 ) -> tuple[
     np.ndarray,
     np.ndarray,
@@ -340,15 +461,15 @@ def flag_bad_gains(
             chanblock index, per tile per polarisation. Higher values fit
             more curvature (risk overfitting through a real anomaly);
             lower values risk false-flagging real bandpass curvature.
-        residual_threshold: Number of residual-MADs (dimensionless; see
+        mad_residual_threshold: Number of residual-MADs (dimensionless; see
             _iterative_poly_clip) beyond which a channel is an outlier.
 
     Returns:
-        A tuple (bad, new_flags, residual, original_bad, fit):
+        A tuple (bad, new_calvin_bad_mask, residual, original_bad, fit):
         - bad: Boolean array, shape (tile, chanblock), True where the gain
           should be treated as invalid (not just clipped). Combines
           convergence/tile/NaN criteria with the polynomial-fit check.
-        - new_flags: Boolean array, same shape, True only where the
+        - new_calvin_bad_mask: Boolean array, same shape, True only where the
           polynomial-fit check flagged an entry that wasn't already
           flagged by convergence/tile/NaN criteria -- i.e. flags added by
           our own outlier detection that weren't already present in the
@@ -356,7 +477,7 @@ def flag_bad_gains(
         - band: Dict with keys "gx" and "gy", each a (lower, upper) tuple
           of float arrays, shape (tile, chanblock) -- the acceptable
           range around the polynomial fit (fit + median_residual +/-
-          residual_threshold * mad), in the same units as gain amplitude.
+          mad_residual_threshold * mad), in the same units as gain amplitude.
           A value outside this band is what triggers a flag. NaN where no
           fit could be computed.
         - original_bad: Boolean array, shape (tile, chanblock), True where
@@ -393,10 +514,10 @@ def flag_bad_gains(
         initial_valid = ~original_bad[tile, :]
 
         valid_gx, _res_gx, fit_curve_gx, mad_gx, med_gx = _iterative_poly_clip(
-            chan_idx, gx_amp[tile, :], poly_degree, residual_threshold, initial_valid
+            chan_idx, gx_amp[tile, :], poly_degree, mad_residual_threshold, initial_valid
         )
         valid_gy, _res_gy, fit_curve_gy, mad_gy, med_gy = _iterative_poly_clip(
-            chan_idx, gy_amp[tile, :], poly_degree, residual_threshold, initial_valid
+            chan_idx, gy_amp[tile, :], poly_degree, mad_residual_threshold, initial_valid
         )
 
         poly_bad = initial_valid & (~valid_gx | ~valid_gy)
@@ -408,16 +529,16 @@ def flag_bad_gains(
         # Band = fit + median_residual +/- threshold * mad, in real gain
         # units -- reconstructs the accept/reject boundary that
         # _iterative_poly_clip applied in normalized (MAD-unit) space.
-        band_lower_gx[tile, :] = fit_curve_gx + med_gx - residual_threshold * mad_gx
-        band_upper_gx[tile, :] = fit_curve_gx + med_gx + residual_threshold * mad_gx
-        band_lower_gy[tile, :] = fit_curve_gy + med_gy - residual_threshold * mad_gy
-        band_upper_gy[tile, :] = fit_curve_gy + med_gy + residual_threshold * mad_gy
+        band_lower_gx[tile, :] = fit_curve_gx + med_gx - mad_residual_threshold * mad_gx
+        band_upper_gx[tile, :] = fit_curve_gx + med_gx + mad_residual_threshold * mad_gx
+        band_lower_gy[tile, :] = fit_curve_gy + med_gy - mad_residual_threshold * mad_gy
+        band_upper_gy[tile, :] = fit_curve_gy + med_gy + mad_residual_threshold * mad_gy
 
-    new_flags = bad & ~original_bad
+    new_calvin_bad_mask = bad & ~original_bad
     band = {"gx": (band_lower_gx, band_upper_gx), "gy": (band_lower_gy, band_upper_gy)}
     fit = {"gx": fit_gx, "gy": fit_gy}
 
-    return bad, new_flags, band, original_bad, fit
+    return bad, new_calvin_bad_mask, band, original_bad, fit
 
 
 # ---------------------------------------------------------------------------
@@ -444,9 +565,7 @@ def _grid_shape(n: int) -> tuple[int, int]:
     return rows, cols
 
 
-def _paged_output_path(
-    output_path: str, first_tile_index: int, last_tile_index: int
-) -> str:
+def _paged_output_path(output_path: str, first_tile_index: int, last_tile_index: int) -> str:
     """Build a per-page output filename with a tile-range suffix.
 
     E.g. _paged_output_path("test.png", 0, 63) -> "test_0-63.png"
@@ -466,7 +585,7 @@ def _paged_output_path(
 def plot_combined(
     quality: CalSolutionQuality,
     bad_mask: np.ndarray,
-    new_flags: np.ndarray,
+    new_calvin_bad_mask: np.ndarray,
     band: dict[str, tuple[np.ndarray, np.ndarray]],
     fit: dict[str, np.ndarray],
     original_bad: np.ndarray,
@@ -487,7 +606,7 @@ def plot_combined(
     Each shows the raw gain amplitude, the polynomial fit line, and a
     shaded band showing the acceptable range around the fit (values
     outside this band are what triggers a flag). Channels caught by the
-    polynomial-fit check (new_flags) are shaded with a translucent red
+    polynomial-fit check (new_calvin_bad_mask) are shaded with a translucent red
     vertical band so they stand out against the rest of the spectrum.
 
     Both subplots get a red border if the tile has any NEW flags.
@@ -495,7 +614,7 @@ def plot_combined(
     Args:
         quality: Parsed solution quality info (has gains and tile_names).
         bad_mask: Full 'bad' mask from flag_bad_gains, shape (tile, chanblock).
-        new_flags: 'new_flags' mask from flag_bad_gains, same shape.
+        new_calvin_bad_mask: 'new_calvin_bad_mask' mask from flag_bad_gains, same shape.
         band: Band dict from flag_bad_gains, keys "gx"/"gy", each a
             (lower, upper) tuple of arrays shape (tile, chanblock).
         fit: Fit dict from flag_bad_gains, keys "gx"/"gy", same shape.
@@ -527,9 +646,7 @@ def plot_combined(
     n_plotted = len(tile_range)
     n_rows, n_tile_cols = _grid_shape(n_tiles)
     n_cols = n_tile_cols * 2  # two subplots per tile: gx + gy
-    fig, axes = plt.subplots(
-        n_rows, n_cols, figsize=(6 * n_cols, 4 * n_rows), dpi=150, squeeze=False
-    )
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 4 * n_rows), dpi=150, squeeze=False)
 
     for i, tile in enumerate(tile_range):
         row = i // n_tile_cols
@@ -539,7 +656,7 @@ def plot_combined(
 
         flagged = bad_mask[tile, :]
         n_flagged_here = int(flagged.sum())
-        has_new_flags = bool(new_flags[tile, :].any())
+        has_new_calvin_bad_mask = bool(new_calvin_bad_mask[tile, :].any())
         tile_name = quality.tile_names[tile]
         tile_fully_flagged = bool(flagged.all())
 
@@ -577,7 +694,7 @@ def plot_combined(
             continue
 
         # -- shade NEW-flagged channels with a translucent vertical band --
-        new_flagged_chans = np.where(new_flags[tile, :])[0]
+        new_flagged_chans = np.where(new_calvin_bad_mask[tile, :])[0]
         for cb in new_flagged_chans:
             ax_gx.axvspan(cb - 0.5, cb + 0.5, color="red", alpha=0.15, zorder=0)
             ax_gy.axvspan(cb - 0.5, cb + 0.5, color="red", alpha=0.15, zorder=0)
@@ -674,7 +791,7 @@ def plot_combined(
         ax_gy.ticklabel_format(axis="y", style="plain")
         ax_gy.tick_params(labelsize=7)
 
-        if has_new_flags:
+        if has_new_calvin_bad_mask:
             for ax in (ax_gx, ax_gy):
                 for spine in ax.spines.values():
                     spine.set_edgecolor("red")
@@ -693,9 +810,7 @@ def plot_combined(
             handles.append(handle)
             labels.append(label)
     fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.97), ncol=4)
-    obsid_str = (
-        f"obsid {quality.obsid}" if quality.obsid is not None else "obsid unknown"
-    )
+    obsid_str = f"obsid {quality.obsid}" if quality.obsid is not None else "obsid unknown"
     chan_str = (
         f"channels {quality.first_coarse_channel}-{quality.last_coarse_channel}"
         if quality.first_coarse_channel >= 0
@@ -715,120 +830,10 @@ def plot_combined(
     return fig
 
 
-def _write_bad_gains_as_nan(solutions_path: str, bad_mask: np.ndarray) -> str:
-    """Back up a hyperdrive solutions file, then overwrite it with bad
-    entries set to NaN.
-
-    Makes a copy of the original file at `{solutions_path}.original`
-    before modifying anything (overwriting that backup if it already
-    exists, with a printed warning). Then opens the original path in
-    update mode and sets all 4 complex Jones matrix terms (8 underlying
-    floats) to NaN for every (tile, chanblock) flagged in bad_mask.
-
-    Args:
-        solutions_path: Path to the hyperdrive solutions FITS file to
-            back up and overwrite.
-        bad_mask: Boolean mask, shape (tile, chanblock), True where the
-            entry should be set to NaN. Assumes timeblock 0 (the only
-            timeblock this tool supports).
-
-    Returns:
-        The backup file path.
-    """
-    backup_path = f"{solutions_path}".replace(".fits", ".original.fits")
-    if os.path.exists(backup_path):
-        logger.warning(
-            f"Warning: backup {backup_path} already exists and will be overwritten."
-        )
-    shutil.copy2(solutions_path, backup_path)
-    logger.debug(f"Backed up original file to {backup_path}")
-
-    with fits.open(solutions_path, mode="update") as hdul:
-        # Force native byte order: FITS files are big-endian on disk, and
-        # we need a native-endian array to safely write NaN into the
-        # 8-float-per-entry layout without corrupting adjacent bytes.
-        data = np.array(hdul["SOLUTIONS"].data, dtype=np.float64)
-        # shape: (timeblock, tile, chanblock, 8)
-
-        # bad_mask covers timeblock 0 only (the only timeblock this tool
-        # supports). data[0][bad_mask] selects the (n_flagged, 8) rows of
-        # flagged (tile, chanblock) entries; broadcasting np.nan sets all
-        # 8 floats (gx, Dx, Dy, gy re/im) to NaN for each.
-        data[0][bad_mask] = np.nan
-
-        hdul["SOLUTIONS"].data = data
-        hdul.flush()
-
-    n_flagged = int(bad_mask.sum())
-    logger.info(
-        f"Wrote NaN for {n_flagged} flagged (tile, chanblock) entries to {solutions_path}"
-    )
-
-    return backup_path
-
-
-def compute_outlier_gains(
-    solutions_path: str,
-    poly_degree: int = 2,
-    residual_threshold: float = 5.0,
-    modify_gains: bool = False,
-) -> tuple[
-    CalSolutionQuality,
-    np.ndarray,
-    np.ndarray,
-    dict[str, tuple[np.ndarray, np.ndarray]],
-    dict[str, np.ndarray],
-    np.ndarray,
-    np.ndarray,
-]:
-    """Load a hyperdrive calibration solutions file and flag bad gains.
-
-    Args:
-        solutions_path: Path to a hyperdrive solutions FITS file.
-        poly_degree: Degree of the per-tile polynomial fit to gain
-            amplitude vs. chanblock index. See flag_bad_gains.
-        residual_threshold: Number of residual-MADs beyond which a channel
-            is considered an outlier. See flag_bad_gains.
-        modify_gains: If True, every Jones matrix flagged as bad (per the
-            returned bad_mask) has all 4 complex terms (gx, Dx, Dy, gy --
-            i.e. all 8 underlying floats) set to NaN in the returned
-            quality.gains array (in memory), AND the same NaN-out is
-            written back to the FITS file on disk at solutions_path. The
-            original file is first backed up to
-            "{solutions_path}.original" (overwriting any existing backup
-            at that path, with a printed warning) before the original
-            path is overwritten.
-
-    Returns:
-        A tuple (quality, bad_mask, new_flags, band, fit, original_gains,
-        original_bad). original_gains is a copy of quality.gains taken
-        BEFORE any modify_gains NaN-out is applied -- pass it as
-        display_gains to plot_bad_gains if you want plots to show the
-        original values even when modify_gains=True. original_bad is a
-        boolean mask of the entries that were already flagged in the
-        original file (convergence/tile/NaN criteria) before the
-        polynomial-fit check ran, so callers can distinguish "already
-        broken in the original file" from "newly caught by our own
-        outlier detection".
-    """
-    quality = load_hyperdrive_solutions(solutions_path)
-    bad_mask, new_flags, band, original_bad, fit = flag_bad_gains(
-        quality, poly_degree=poly_degree, residual_threshold=residual_threshold
-    )
-
-    original_gains = quality.gains.copy()
-
-    if modify_gains:
-        quality.gains[bad_mask] = np.nan + 1j * np.nan
-        _write_bad_gains_as_nan(solutions_path, bad_mask)
-
-    return quality, bad_mask, new_flags, band, fit, original_gains, original_bad
-
-
 def plot_outlier_gains(
     quality: CalSolutionQuality,
     bad_mask: np.ndarray,
-    new_flags: np.ndarray,
+    new_calvin_bad_mask: np.ndarray,
     band: dict[str, tuple[np.ndarray, np.ndarray]],
     fit: dict[str, np.ndarray],
     original_bad: np.ndarray,
@@ -842,7 +847,7 @@ def plot_outlier_gains(
     Args:
         quality: Parsed solution quality info.
         bad_mask: 'bad' mask from flag_bad_gains, shape (tile, chanblock).
-        new_flags: 'new_flags' mask from flag_bad_gains, same shape.
+        new_calvin_bad_mask: 'new_calvin_bad_mask' mask from flag_bad_gains, same shape.
         band: Band dict from flag_bad_gains, keys "gx"/"gy".
         fit: Fit dict from flag_bad_gains, keys "gx"/"gy".
         original_bad: original_bad mask from flag_bad_gains.
@@ -866,7 +871,7 @@ def plot_outlier_gains(
         fig = plot_combined(
             quality,
             bad_mask,
-            new_flags,
+            new_calvin_bad_mask,
             band,
             fit,
             original_bad,
@@ -878,17 +883,13 @@ def plot_outlier_gains(
         figures.append(fig)
 
         if output_path is not None:
-            page_path = _paged_output_path(
-                output_path, first_tile_index, last_tile_index
-            )
+            page_path = _paged_output_path(output_path, first_tile_index, last_tile_index)
             fig.savefig(page_path, dpi=150, bbox_inches="tight")
 
     return figures
 
 
-def clip_hyperdrive_solution_gains(
-    hyperdrive_fits_file: str, cut_off: float, mc: mwalib.MetafitsContext
-):
+def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc: mwalib.MetafitsContext):
     """Clip hyperdrive calibration solution gains exceeding a threshold.
 
     Opens a hyperdrive FITS solution file, finds any Jones matrices where at
@@ -910,13 +911,9 @@ def clip_hyperdrive_solution_gains(
 
     with fits.open(hyperdrive_fits_file, mode="update") as hdul:
         if HDU not in hdul:
-            raise Exception(
-                f"Warning: No SOLUTIONS HDU found in {hyperdrive_fits_file}"
-            )
+            raise Exception(f"Warning: No SOLUTIONS HDU found in {hyperdrive_fits_file}")
 
-        logger.info(
-            f"checking solutions file {hyperdrive_fits_file} for gains > {cut_off}"
-        )
+        logger.info(f"checking solutions file {hyperdrive_fits_file} for gains > {cut_off}")
 
         # The SOLUTIONS HDU stores each complex gain as two consecutive float64
         # values (real, imag), so the raw FITS column layout is:
@@ -944,9 +941,7 @@ def clip_hyperdrive_solution_gains(
 
         # Total counts used in logging below.
         total_samples = amp.size  # total (time, ant, chan, pol) samples
-        total_jones = (
-            amp.shape[0] * amp.shape[1] * amp.shape[2]
-        )  # total (time, ant, chan) Jones matrices
+        total_jones = amp.shape[0] * amp.shape[1] * amp.shape[2]  # total (time, ant, chan) Jones matrices
 
         # Boolean mask: True wherever an individual gain amplitude exceeds the
         # threshold. Kept separate from the Jones-matrix flag below so we can
@@ -1005,8 +1000,7 @@ def clip_hyperdrive_solution_gains(
                 # All four pols are shown regardless of which one(s) triggered the
                 # cutoff, since the entire Jones matrix has been set to NaN.
                 pol_details = ", ".join(
-                    f"{POL_NAMES[p]}(Gain={amp[:, ant_idx, chan_idx, p].max():.4f})"
-                    for p in range(4)
+                    f"{POL_NAMES[p]}(Gain={amp[:, ant_idx, chan_idx, p].max():.4f})" for p in range(4)
                 )
 
                 logger.debug(
@@ -1056,11 +1050,7 @@ def add_digital_gains_column(
     id_col = "Antenna"
 
     # Lookup: tile_id -> digital_gains, X pol only (X and Y are identical).
-    gains_by_tile = {
-        rf.ant: rf.digital_gains
-        for rf in metafits_context.rf_inputs
-        if rf.pol == mwalib.Pol.X
-    }
+    gains_by_tile = {rf.ant: rf.digital_gains for rf in metafits_context.rf_inputs if rf.pol == mwalib.Pol.X}
 
     with fits.open(hyperdrive_solution_filename, mode="update") as hdul:
         tile_hdu = hdul[hdu_name]
@@ -1068,20 +1058,14 @@ def add_digital_gains_column(
 
         # Does this column already exist? If so don't do anything but log a warning.
         if col_name in hdul[hdu_name].columns.names:
-            logger.warning(
-                f"Column '{col_name}' already exists in HDU '{hdu_name}'; skipping addition."
-            )
+            logger.warning(f"Column '{col_name}' already exists in HDU '{hdu_name}'; skipping addition.")
             return tile_hdu
 
         try:
-            gains_array = np.array(
-                [gains_by_tile[int(tid)] for tid in tile_ids], dtype=np.float32
-            )
+            gains_array = np.array([gains_by_tile[int(tid)] for tid in tile_ids], dtype=np.float32)
             print(gains_array)
         except KeyError as e:
-            raise KeyError(
-                f"Tile ID {e} in HDU '{hdu_name}' not found in metafits rf_inputs for pol='X'"
-            ) from e
+            raise KeyError(f"Tile ID {e} in HDU '{hdu_name}' not found in metafits rf_inputs for pol='X'") from e
 
         n_chans = gains_array.shape[1]
         new_col = fits.Column(
@@ -1090,9 +1074,7 @@ def add_digital_gains_column(
             array=gains_array,
         )
 
-        new_hdu = fits.BinTableHDU.from_columns(
-            tile_hdu.columns + new_col, header=tile_hdu.header
-        )
+        new_hdu = fits.BinTableHDU.from_columns(tile_hdu.columns + new_col, header=tile_hdu.header)
         new_hdu.name = hdu_name
 
         hdul[hdul.index_of(hdu_name)] = new_hdu
@@ -1101,9 +1083,7 @@ def add_digital_gains_column(
     return new_hdu
 
 
-def build_tile_summary_table(
-    quality: CalSolutionQuality, original_bad: np.ndarray
-) -> list[dict]:
+def build_tile_summary_table(quality: CalSolutionQuality, gains, bad_array: np.ndarray) -> list[dict]:
     """Build a per-tile summary for console display.
 
     A tile is only reported as fully flagged (with a reason string) if
@@ -1115,8 +1095,8 @@ def build_tile_summary_table(
 
     Args:
         quality: Parsed solution quality info.
-        original_bad: original_bad mask from flag_bad_gains, shape
-            (tile, chanblock).
+        gains: The gains to do stats on (pass in the originals or modified)
+        bad_array: array of bad data Shape (tile, chanblock).
 
     Returns:
         List of one dict per tile, each with keys:
@@ -1128,15 +1108,15 @@ def build_tile_summary_table(
           gy_std (float): NaN if fully_flagged, else computed over good
           channels only.
     """
-    gx_amp = np.abs(quality.gains[..., 0, 0])
-    gy_amp = np.abs(quality.gains[..., 1, 1])
+    gx_amp = np.abs(gains[..., 0, 0])
+    gy_amp = np.abs(gains[..., 1, 1])
 
     rows = []
     for tile in range(quality.n_tiles):
-        tile_bad = original_bad[tile, :]
-        good = ~tile_bad
-        n_good = int(good.sum())
-        n_excluded = int(tile_bad.sum())
+        tile_bad = bad_array[tile, :]
+        tile_good = ~tile_bad
+        n_good = int(tile_good.sum())
+        n_bad = int(tile_bad.sum())
         fully_flagged = n_good == 0
 
         row = {
@@ -1145,7 +1125,8 @@ def build_tile_summary_table(
             "fully_flagged": fully_flagged,
             "reason": "",
             "n_good": n_good,
-            "n_excluded": n_excluded,
+            "n_bad": n_bad,
+            "total_jones": quality.n_chanblocks * quality.n_tiles,
             "gx_min": np.nan,
             "gx_median": np.nan,
             "gx_max": np.nan,
@@ -1159,21 +1140,21 @@ def build_tile_summary_table(
         if fully_flagged:
             row["reason"] = tile_flag_reason(tile, quality)
         else:
-            row["gx_min"] = float(np.min(gx_amp[tile, good]))
-            row["gx_median"] = float(np.median(gx_amp[tile, good]))
-            row["gx_max"] = float(np.max(gx_amp[tile, good]))
-            row["gx_std"] = float(np.std(gx_amp[tile, good]))
-            row["gy_min"] = float(np.min(gy_amp[tile, good]))
-            row["gy_median"] = float(np.median(gy_amp[tile, good]))
-            row["gy_max"] = float(np.max(gy_amp[tile, good]))
-            row["gy_std"] = float(np.std(gy_amp[tile, good]))
+            row["gx_min"] = float(np.nanmin(gx_amp[tile, tile_good]))
+            row["gx_median"] = float(np.nanmedian(gx_amp[tile, tile_good]))
+            row["gx_max"] = float(np.nanmax(gx_amp[tile, tile_good]))
+            row["gx_std"] = float(np.nanstd(gx_amp[tile, tile_good]))
+            row["gy_min"] = float(np.nanmin(gy_amp[tile, tile_good]))
+            row["gy_median"] = float(np.nanmedian(gy_amp[tile, tile_good]))
+            row["gy_max"] = float(np.nanmax(gy_amp[tile, tile_good]))
+            row["gy_std"] = float(np.nanstd(gy_amp[tile, tile_good]))
 
         rows.append(row)
 
     return rows
 
 
-def write_tile_summary_table(rows: list[dict], file: TextIO = sys.stdout) -> None:
+def write_tile_summary_table(title: str, rows: list[dict], stats_fd: TextIO = sys.stdout) -> None:
     """Write a per-tile summary table to a file-like object.
 
     Tiles with zero good channels show their flag reason in place of gain
@@ -1182,8 +1163,9 @@ def write_tile_summary_table(rows: list[dict], file: TextIO = sys.stdout) -> Non
     a note if any channels were excluded from that calculation.
 
     Args:
+        title: title for this table of data
         rows: Output of build_tile_summary_table.
-        file: A writable, text-mode file-like object (anything with a
+        stats_fd: A writable, text-mode file-like object (anything with a
             .write() method taking str -- e.g. an open file, io.StringIO,
             or sys.stdout). Defaults to sys.stdout, so existing callers
             printing to the console need no changes. To write to a real
@@ -1193,23 +1175,197 @@ def write_tile_summary_table(rows: list[dict], file: TextIO = sys.stdout) -> Non
     name_w = max(10, max(len(r["tile_name"]) for r in rows) + 2)
     info_w = 100
 
-    header = f"{'TileID':<{id_w}} {'TileName':<{name_w}} {'Info':<{info_w}}"
-    print(header, file=file)
-    print("-" * len(header), file=file)
+    header = f"{title}:\n{'TileID':<{id_w}} {'TileName':<{name_w}} {'Info':<{info_w}}"
+    stats_fd.write(f"{header}\n")
+    stats_fd.write("-" * len(header))
+    stats_fd.write("\n")
+
+    n_bad = 0
+    n_total = 0
 
     for r in rows:
+        n_bad += r["n_bad"]
+        n_total += r["total_jones"]
+
+        info = f"good={r['n_good']} NaN={r['n_bad']} {100 * r['n_bad'] / r['total_jones']:.2f}%) "
+
         if r["fully_flagged"]:
-            info = f"FLAGGED (no good channels): {r['reason']}"
+            info += f"Tile fully flagged: {r['reason']}"
         else:
-            info = (
+            info += (
                 f"gx[min={r['gx_min']:.2f} med={r['gx_median']:.2f} "
                 f"max={r['gx_max']:.2f} std={r['gx_std']:.2f}]  "
                 f"gy[min={r['gy_min']:.2f} med={r['gy_median']:.2f} "
                 f"max={r['gy_max']:.2f} std={r['gy_std']:.2f}]"
             )
-            if r["n_excluded"] > 0:
-                info += f"  ({r['n_excluded']} channel(s) excluded)"
-        print(
-            f"{r['tile']:<{id_w}} {r['tile_name']:<{name_w}} {info:<{info_w}}",
-            file=file,
+
+        stats_fd.write(f"{r['tile']:<{id_w}} {r['tile_name']:<{name_w}} {info:<{info_w}}\n")
+
+    stats_fd.write(f"Flagged {n_bad}/{n_total} jones ({100 * n_bad / n_total:.2f}%)\n\n")
+
+
+def generate_hyperdrive_plots_and_stats(
+    metafits_context: mwalib.MetafitsContext,
+    solution_files: list[str],
+    job_output_path: str,
+    hyperdrive_binary_path: str,
+    obs_id: int,
+    gain_outlier_poly_degree: int,
+    gain_outlier_mad_residual_threshold: float,
+    gain_outlier_modify_gains: bool,
+    gain_outlier_plot_n_tiles_per_page: int,
+    gains_cut_off_max: float | None,
+):
+    """Post-process each hyperdrive solution file: gain-outlier detection,
+    optional gain clipping, and hyperdrive's own plots/stats.
+
+    For each solution file (one per contiguous coarse-channel band), adds a
+    digital-gains column, detects and plots per-tile gain outliers against a
+    robust polynomial fit (optionally NaN-ing the flagged entries in place),
+    clips any Jones matrix with a gain amplitude above gains_cut_off_max to
+    NaN if a cutoff is given, then runs hyperdrive's own plot/stats
+    generation and writes a combined summary + convergence stats text file.
+
+    Failures for an individual solution file are logged and swallowed so
+    that one bad file doesn't prevent processing of the rest; overall
+    success/failure across all files is logged at the end.
+
+    Args:
+        metafits_context: Metafits context used to add digital gains and to
+            translate antenna indices to tile ID/name during gain clipping.
+        solution_files: Paths to hyperdrive solution FITS files, one per
+            contiguous coarse-channel band.
+        job_output_path: Directory to write per-band stats and plot files to.
+        hyperdrive_binary_path: Path to the hyperdrive binary, used to
+            generate hyperdrive's own convergence plots.
+        obs_id: Observation ID, used for logging and stats output.
+        gain_outlier_poly_degree: Degree of the per-tile polynomial fit used
+            for gain-outlier detection (see flag_bad_gains).
+        gain_outlier_mad_residual_threshold: MAD-of-residual threshold
+            beyond which a gain is flagged as an outlier.
+        gain_outlier_modify_gains: If True, outlier-flagged gains are set to
+            NaN in the solution file; if False, they are reported/plotted
+            only.
+        gain_outlier_plot_n_tiles_per_page: Number of tiles per page in the
+            paginated gain-outlier plots.
+        gains_cut_off_max: Hard amplitude cutoff above which an entire Jones
+            matrix is set to NaN, or None to skip this clipping step.
+
+    Returns:
+        None. Results are written to files under job_output_path and
+        summarised via logger.info/logger.warning calls.
+    """
+    # produce stats/plots
+    logger.info(
+        f"{obs_id}: {len(solution_files)} contiguous bands detected."
+        f" Running hyperdrive stats {len(solution_files)} times...."
+    )
+
+    for hyperdrive_run, hyperdrive_solution_filename in enumerate(solution_files):
+        # Now add the digital gains to the solution file (for the beamformer to use)
+        add_digital_gains_column(
+            hyperdrive_solution_filename,
+            metafits_context,
         )
+
+        obsid_and_band = os.path.basename(hyperdrive_solution_filename).replace("_solutions.fits", "")
+
+        # Now compute and plot gains outside a certain MAD limit and write convergence stats
+        try:
+            (
+                quality,
+                bad_mask,
+                new_calvin_bad_mask,
+                band,
+                fit,
+                hyperdrive_gains,
+                hyperdrive_bad_mask,
+            ) = compute_outlier_gains(
+                hyperdrive_solution_filename,
+                gain_outlier_poly_degree,
+                gain_outlier_mad_residual_threshold,
+                gain_outlier_modify_gains,
+            )
+
+            # Build a summary table for later output
+            hyperdrive_stats_rows = build_tile_summary_table(quality, hyperdrive_gains, hyperdrive_bad_mask)
+            calvin_stats_rows = build_tile_summary_table(quality, quality.gains, bad_mask)
+
+            plot_outlier_gains(
+                quality,
+                bad_mask,
+                new_calvin_bad_mask,
+                band,
+                fit,
+                hyperdrive_bad_mask,
+                gain_outlier_plot_n_tiles_per_page,
+                os.path.join(
+                    job_output_path,
+                    f"{obsid_and_band}_gain_outliers_tiles",
+                ),
+                hyperdrive_gains,
+                solution_file_will_be_modified=gain_outlier_modify_gains,
+            )
+
+            # Now clip any large gains to NaNs if we have a cut off value set
+            if gains_cut_off_max is not None:
+                logger.info(f"Clipping Jones for gains > {gains_cut_off_max} to NaNs...")
+                clip_hyperdrive_solution_gains(
+                    hyperdrive_solution_filename,
+                    gains_cut_off_max,
+                    metafits_context,
+                )
+
+            # Do hyperdrive plots now
+            (
+                plots_success,
+                plots_error,
+            ) = generate_hyperdrive_plots(
+                obs_id,
+                hyperdrive_solution_filename,
+                hyperdrive_binary_path,
+                metafits_context.metafits_filename,
+                job_output_path,
+            )
+
+            if not plots_success:
+                logger.warning(
+                    f"{obs_id}: hyperdrive plots run {hyperdrive_run + 1}/{len(solution_files)} FAILED: {plots_error}."
+                )
+
+            # Now write the summary table to a text file
+            hyperdrive_stats_textfile = os.path.join(job_output_path, f"{obsid_and_band}_stats.txt")
+
+            with open(hyperdrive_stats_textfile, "w") as f:
+                # Write the hyperdrive stats to the output dir
+                write_tile_summary_table(
+                    "Hyperdrive solution stats",
+                    hyperdrive_stats_rows,
+                    f,
+                )
+
+                # Write the calvin stats to the output dir
+                write_tile_summary_table(
+                    "Post Calvin gain outlier stats",
+                    calvin_stats_rows,
+                    f,
+                )
+
+                # Write convergence stats to a text file
+                (
+                    stats_success,
+                    stats_error,
+                ) = write_hyperdrive_stats(
+                    obs_id,
+                    f,
+                    hyperdrive_solution_filename,
+                )
+
+            if not stats_success:
+                logger.warning(
+                    f"{obs_id}: hyperdrive stats run {hyperdrive_run + 1}/{len(solution_files)} FAILED: {stats_error}."
+                )
+        except Exception:
+            logger.exception(
+                "Failed to produce plots and stats for compute_bad_gains and plot_bad_gains. Ignoring and continuing."
+            )

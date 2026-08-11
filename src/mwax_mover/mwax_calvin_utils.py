@@ -61,6 +61,75 @@ AOCAL_HEADER_FORMAT = "<8s6I2d"
 MWA_NUM_COARSE_CHANS = 24
 
 
+def read_solutions_hdu_complex(solutions_data: NDArray[np.float64]) -> NDArray[np.complex128]:
+    """Convert a raw hyperdrive SOLUTIONS HDU array into complex Jones terms.
+
+    The SOLUTIONS HDU stores each of the four polarisation terms (XX, XY, YX,
+    YY -- equivalently gx, Dx, Dy, gy in hyperdrive's own Jones-matrix
+    notation) as a consecutive (real, imag) float64 pair, giving 8 floats per
+    (timeblock, tile, chanblock) entry. This collapses those 8 floats into 4
+    complex values without altering any leading axes, so it works whether
+    the caller wants a single timeblock or all of them.
+
+    Args:
+        solutions_data: Raw SOLUTIONS HDU data, shape (..., 8) -- typically
+            (timeblock, tile, chanblock, 8).
+
+    Returns:
+        Complex128 array, shape (..., 4), trailing axis ordered
+        [XX, XY, YX, YY].
+    """
+    data = np.asarray(solutions_data, dtype=np.float64)
+    return data[..., 0::2] + 1j * data[..., 1::2]
+
+
+def read_results_hdu(results_data: NDArray[np.float64], timeblock: int = 0) -> NDArray[np.float64]:
+    """Get one timeblock's convergence precision values from a RESULTS HDU.
+
+    RESULTS is a plain FITS ImageHDU (not a binary table), shape
+    (n_timeblocks, n_chanblocks). This selects a single timeblock's row.
+    Solution files with more than one timeblock are not currently supported
+    by this pipeline (see the single-timeblock assumption enforced
+    elsewhere, e.g. HyperfitsSolutionGroup.get_solns); this helper always
+    returns exactly one timeblock's row rather than merging several.
+
+    Args:
+        results_data: Raw RESULTS HDU data, shape (n_timeblocks, n_chanblocks).
+        timeblock: Which timeblock's row to return. Defaults to 0.
+
+    Returns:
+        1-D float64 array of convergence precision per chanblock, for the
+        requested timeblock. NaN entries mean that chanblock failed to
+        converge or was pre-flagged.
+    """
+    return np.asarray(results_data, dtype=np.float64)[timeblock]
+
+
+def read_tiles_hdu(tiles_data) -> tuple[NDArray[np.int_], list[str], NDArray[np.bool_]]:
+    """Read tile antenna indices, names, and flags from a TILES HDU.
+
+    Antenna indices should already be ascending in practice, but this sorts
+    explicitly to guarantee alignment with the SOLUTIONS HDU's tile axis
+    regardless, in case a file ever has them out of order.
+
+    Args:
+        tiles_data: Raw TILES HDU data (a FITS binary table with Antenna,
+            TileName, and Flag columns).
+
+    Returns:
+        A tuple (antennas, tile_names, flags), each ordered by ascending
+        antenna index:
+        - antennas: int array of antenna indices.
+        - tile_names: list of tile name strings.
+        - flags: bool array of tile flags (True = flagged).
+    """
+    antennas = np.asarray(tiles_data["Antenna"])
+    order = np.argsort(antennas)
+    tile_names = [str(tiles_data["TileName"][i]) for i in order]
+    flags = np.asarray(tiles_data["Flag"])[order].astype(bool)
+    return antennas[order], tile_names, flags
+
+
 class CalvinJobType(Enum):
     """Calvin Job Type"""
 
@@ -263,22 +332,12 @@ class HyperfitsSolution:
 
             return result
 
-    # @property
-    # def tile_names_flags(self) -> List[Tuple[str, bool]]:
-    #     """Get the tile names and flags ordered by index"""
-    #     with fits.open(self.filename) as hdus:
-    #         tile_data = hdus['TILES'].data
-    #         return [
-    #             (tile["TileName"], tile["Flag"])
-    #             for tile in tile_data
-    #         ]
-
     @property
-    def tile_flags(self) -> list[bool]:
+    def tile_flags(self) -> NDArray[np.bool_]:
         """Get tile flags ordered by antenna index."""
         with fits.open(self.filename) as hdus:
-            tile_data = hdus["TILES"].data
-            return tile_data["Flag"]
+            _antennas, _tile_names, flags = read_tiles_hdu(hdus["TILES"].data)
+            return flags
 
     def get_average_times(self) -> list[float]:
         """Get the average time for each timeblock.
@@ -297,13 +356,8 @@ class HyperfitsSolution:
             A list of four complex arrays (XX, XY, YX, YY) each with shape [time, tile, chan].
         """
         with fits.open(self.filename) as hdus:
-            solutions = hdus["SOLUTIONS"].data
-            return [
-                solutions[:, :, :, 0] + 1j * solutions[:, :, :, 1],
-                solutions[:, :, :, 2] + 1j * solutions[:, :, :, 3],
-                solutions[:, :, :, 4] + 1j * solutions[:, :, :, 5],
-                solutions[:, :, :, 6] + 1j * solutions[:, :, :, 7],
-            ]
+            complex_solutions = read_solutions_hdu_complex(hdus["SOLUTIONS"].data)
+            return [complex_solutions[..., i] for i in range(4)]
 
     def get_ref_solutions(self, ref_tile_idx=None) -> list[NDArray[np.complex128]]:
         """Get solutions divided by reference tile.
@@ -341,7 +395,8 @@ class HyperfitsSolution:
         """Get convergence results from the solution file.
 
         Returns:
-            1-D float64 array of per-channel convergence values.
+            1-D float64 array of per-channel convergence values, for
+            timeblock 0.
 
         Raises:
             KeyError: If the RESULTS HDU is not present. This is expected for
@@ -349,9 +404,7 @@ class HyperfitsSolution:
                 results should catch KeyError and fall back to uniform weights.
         """
         with fits.open(self.filename) as hdus:
-            # flatten() is required because astropy returns a structured array
-            # from FITS binary table columns, not a plain ndarray.
-            return hdus["RESULTS"].data.flatten()
+            return read_results_hdu(hdus["RESULTS"].data)
 
 
 class HyperfitsSolutionGroup:
@@ -1820,7 +1873,7 @@ def get_convergence_summary(solutions_fits_file: str):
     results = soln.results
     converged_channel_indices = np.where(~np.isnan(results))
     summary = []
-    summary.append(converged_channel_indices)
+    summary.append(("Converged channel indices", converged_channel_indices))
     summary.append(("Total number of channels", len(results)))
     summary.append(
         (
@@ -1844,10 +1897,7 @@ def get_convergence_summary(solutions_fits_file: str):
 
 
 def generate_hyperdrive_plots(
-    obs_id: int,
-    hyperdrive_solution_filename: str,
-    hyperdrive_binary_path: str,
-    metafits_filename: str,
+    obs_id: int, hyperdrive_solution_filename: str, hyperdrive_binary_path: str, metafits_filename: str, output_dir: str
 ) -> tuple[bool, str]:
     """Generate solution plots.
 
@@ -1856,6 +1906,7 @@ def generate_hyperdrive_plots(
         hyperdrive_solution_filename: Path to the hyperdrive solution FITS file.
         hyperdrive_binary_path: Path to the hyperdrive executable.
         metafits_filename: Path to the metafits file.
+        output_dir: path to where we write the plots
 
     Returns:
         A tuple of (success: bool, error_message: str).
@@ -1864,7 +1915,7 @@ def generate_hyperdrive_plots(
 
     try:
         # Now run hyperdrive again to do some plots
-        hyp_soln_plot_args = f" --output-directory {os.path.dirname(hyperdrive_solution_filename)}"
+        hyp_soln_plot_args = f" --output-directory {output_dir}"
         cmd = (
             f"{hyperdrive_binary_path} solutions-plot {hyp_soln_plot_args} "
             f"-m"
@@ -1884,30 +1935,27 @@ def generate_hyperdrive_plots(
 
 def write_hyperdrive_stats(
     obs_id: int,
-    stats_filename: str,
+    stats_fd,
     hyperdrive_solution_filename: str,
 ) -> tuple[bool, str]:
-    """Write convergence statistics.
+    """Write convergence statistics. (Append to existiing stats file if it exists.)
 
     Args:
         obs_id: Observation ID.
-        stats_filename: Path to write statistics to.
+        stats_fd: File descriptor for the statistics file.
         hyperdrive_solution_filename: Path to the hyperdrive solution FITS file.
 
     Returns:
         A tuple of (success: bool, error_message: str).
     """
-    logger.info(f"{obs_id} Writing stats for {hyperdrive_solution_filename} to {stats_filename}...")
-
+    logger.info(f"{obs_id} Writing convergence stats for {hyperdrive_solution_filename}.")
     try:
         conv_summary_list = get_convergence_summary(hyperdrive_solution_filename)
 
-        with open(stats_filename, "w", encoding="UTF-8") as stats:
-            stats.writelines(f"{row[0]}: {row[1]}\n" for row in conv_summary_list)
+        stats_fd.writelines(f"{row[0]}: {row[1]}\n" for row in conv_summary_list)
+        stats_fd.write("\n")
 
-            stats.write("\n")
-
-        logger.info(f"{obs_id} Finished running hyperdrive stats on {hyperdrive_solution_filename}.")
+        logger.info(f"{obs_id} Finished running convergence stats for {hyperdrive_solution_filename}.")
     except Exception as catch_all_exception:
         return False, str(catch_all_exception)
 
@@ -2225,93 +2273,6 @@ def run_hyperdrive(
         return False, calibration_command
 
     return True, calibration_command
-
-
-def run_hyperdrive_stats(
-    input_solution_files: list[str],
-    metafits_filename: str,
-    obs_id: int,
-    hyperdrive_binary_path: str,
-    hyperdrive_output_path: str,
-) -> bool:
-    """Generate statistics and plots from hyperdrive solution files.
-
-    Args:
-        input_solution_files: List of input hyperdrive solution files (full filename).
-        metafits_filename: Path to the metafits file.
-        obs_id: Observation ID.
-        hyperdrive_binary_path: Path to the hyperdrive executable.
-        hyperdrive_output_path: Directory containing hyperdrive outputs.
-    Returns:
-        True if all stats generation succeeded, False otherwise.
-    """
-    # produce stats/plots
-    plots_successful: int = 0
-    stats_successful: int = 0
-
-    logger.info(
-        f"{obs_id}: {len(input_solution_files)} contiguous bands detected."
-        f" Running hyperdrive stats {len(input_solution_files)} times...."
-    )
-
-    for hyperdrive_run, solution_filename in enumerate(input_solution_files):
-        # Take the filename which for picket fence will also have
-        # the band info and in all cases the obsid. We will use
-        # this as a base for other files we work with
-        obsid_and_band = os.path.basename(solution_filename).replace("_solutions.fits", "")
-
-        # Do hyperdrive plots now
-        (
-            plots_success,
-            plots_error,
-        ) = generate_hyperdrive_plots(
-            obs_id,
-            solution_filename,
-            hyperdrive_binary_path,
-            metafits_filename,
-        )
-
-        # Write the stats to the output dir
-        stats_filename = os.path.join(hyperdrive_output_path, f"{obsid_and_band}_stats.txt")
-
-        (
-            stats_success,
-            stats_error,
-        ) = write_hyperdrive_stats(
-            obs_id,
-            stats_filename,
-            solution_filename,
-        )
-
-        if plots_success:
-            plots_successful += 1
-        else:
-            logger.warning(
-                f"{obs_id}: hyperdrive plots run"
-                f" {hyperdrive_run + 1}/{len(input_solution_files)} FAILED:"
-                f" {plots_error}."
-            )
-
-        if stats_success:
-            stats_successful += 1
-        else:
-            logger.warning(
-                f"{obs_id}: hyperdrive stats run"
-                f" {hyperdrive_run + 1}/{len(input_solution_files)} FAILED:"
-                f" {stats_error}."
-            )
-
-    if plots_successful == len(input_solution_files):
-        logger.info(f"{obs_id}: All {plots_successful} hyperdrive plots runs successful")
-    else:
-        logger.warning(f"{obs_id}: Not all hyperdrive plots runs were successful.")
-
-    if stats_successful == len(input_solution_files):
-        logger.info(f"{obs_id}: All {stats_successful} hyperdrive stats runs successful")
-    else:
-        logger.warning(f"{obs_id}: Not all hyperdrive stats runs were successful.")
-
-    return plots_successful == stats_successful == len(input_solution_files)
 
 
 def process_phase_fits(
@@ -2710,198 +2671,6 @@ def estimate_birli_output_bytes(
     # print(f"{timesteps}ts * {coarse_channels * fine_channels}ch * {baselines}bl * {pols}pol * {bytes_per_visibility} bytes")
 
     return timesteps * coarse_channels * fine_channels * baselines * pols * bytes_per_r_and_i
-
-
-# def split_aocal_file_into_coarse_channels(
-#     obs_id: int, input_aocal_filename: str, input_rec_chans: list[int], output_dir: str
-# ) -> list[str]:
-#     """Split an AOCAL file into one file per coarse channel.
-
-#     Args:
-#         obs_id: Observation ID.
-#         input_aocal_filename: Path to the input AOCAL binary file.
-#         input_rec_chans: List of receiver channel numbers in the file.
-#         output_dir: Directory to write the split AOCAL files to.
-
-#     Returns:
-#         List of output AOCAL filenames written.
-
-#     Raises:
-#         ValueError: If the AOCAL file format is invalid.
-#     """
-#     # Given any aocal file which may have 1 - 24 coarse channels of data within, split it into 1 file per coarse channel
-#     # Since aocal files have minimal metadata in the file, give the function input_rec_chans which is a hint as to how many
-#     # and what the coarse chans are in the aocal file and what their receiver chan numbers are.
-#     #
-#     # Returns a list of new aocal filenames written
-#     #
-#     # Assuming a normal contiguous aocal file of 24 coarse chans, you would get 24 aocal files, all with the same header
-#     # called: obsid_chXXX_aocal.bin where XXX is the rec chan number
-
-#     # If it is picket fence and there are, say, 3 8 channel aocal files, you would run this function 3 times and each time
-#     # you would get 8 files, 1 per coarse chan
-
-#     # See: https://mwatelescope.atlassian.net/wiki/spaces/MP/pages/1190658052/aocal+File+Format for description of file format
-
-#     # get count of coarse channels worth of cal data provided
-#     input_aocal_coarse_chans = len(input_rec_chans)
-
-#     # Do some validity checks
-#     file_size_bytes: int = os.stat(input_aocal_filename).st_size
-
-#     # header size
-#     header_size_bytes = struct.calcsize(AOCAL_HEADER_FORMAT)
-
-#     # Data size
-#     data_size_bytes = file_size_bytes - header_size_bytes
-
-#     # Read the header of the file
-#     with open(input_aocal_filename, "rb") as in_file:
-#         header_bytes = in_file.read(header_size_bytes)
-#         (
-#             intro,
-#             file_type,
-#             structure_type,
-#             interval_count,
-#             antenna_count,
-#             input_aocal_fine_channel_count,
-#             polarisation_count,
-#             start_gpstime,
-#             end_gpstime,
-#         ) = struct.unpack(AOCAL_HEADER_FORMAT, header_bytes)
-
-#         if intro != AOCAL_INTRO:
-#             raise ValueError(f"aocal file {input_aocal_filename} does not start with expected string {AOCAL_INTRO}")
-
-#         if file_type != AOCAL_FILE_TYPE:
-#             raise ValueError(
-#                 f"aocal file {input_aocal_filename} has invalid file_type {file_type} expected {AOCAL_FILE_TYPE}"
-#             )
-
-#         if structure_type != AOCAL_STRUCTURE_TYPE:
-#             raise ValueError(
-#                 f"aocal file {input_aocal_filename} has invalid structure_type {structure_type} expected {AOCAL_STRUCTURE_TYPE}"
-#             )
-
-#         if interval_count != AOCAL_INTERVAL_COUNT:
-#             raise ValueError(
-#                 f"aocal file {input_aocal_filename} has invalid interval_count {interval_count} expected {AOCAL_INTERVAL_COUNT}"
-#             )
-
-#         if polarisation_count != AOCAL_POLS:
-#             raise ValueError(
-#                 f"aocal file {input_aocal_filename} has invalid polarisation_count {polarisation_count} expected {AOCAL_POLS}"
-#             )
-
-#         input_data = in_file.read()
-
-#     # Expected data size
-#     expected_input_data_size_bytes = (
-#         AOCAL_INTERVAL_COUNT
-#         * antenna_count
-#         * input_aocal_fine_channel_count
-#         * polarisation_count
-#         * AOCAL_VALUES
-#         * DOUBLE_SIZE
-#     )
-
-#     if expected_input_data_size_bytes != data_size_bytes:
-#         raise ValueError(
-#             f"aocal file {input_aocal_filename} data size of {data_size_bytes} doesn't match expected size of {expected_input_data_size_bytes}"
-#         )
-
-#     if expected_input_data_size_bytes != len(input_data):
-#         raise ValueError(
-#             f"aocal file {input_aocal_filename} read data size of {len(input_data)} which doesn't match expected size of {expected_input_data_size_bytes}"
-#         )
-
-#     fine_chans_per_coarse = int(input_aocal_fine_channel_count / input_aocal_coarse_chans)
-
-#     np_data = np.frombuffer(input_data, dtype=np.float64)
-#     np_data = np.reshape(
-#         np_data,
-#         (
-#             AOCAL_INTERVAL_COUNT,
-#             antenna_count,
-#             input_aocal_coarse_chans,
-#             fine_chans_per_coarse,
-#             polarisation_count,
-#             AOCAL_VALUES,
-#         ),
-#     )
-
-#     # This is the number of doubles
-#     values_per_coarse_chan = (
-#         AOCAL_INTERVAL_COUNT * antenna_count * fine_chans_per_coarse * polarisation_count * AOCAL_VALUES
-#     )
-#     bytes_per_coarse_chan = values_per_coarse_chan * 8
-
-#     out_filenames = []
-
-#     for c_idx, rec_chan_no in enumerate(input_rec_chans):
-#         out_filename = os.path.join(
-#             output_dir,
-#             get_aocal_filename(obs_id, antenna_count, fine_chans_per_coarse, rec_chan_no),
-#         )
-
-#         # create new file
-#         with open(out_filename, "wb") as out_file:
-#             out_file.write(
-#                 struct.pack(
-#                     AOCAL_HEADER_FORMAT,
-#                     AOCAL_INTRO,
-#                     AOCAL_FILE_TYPE,
-#                     AOCAL_STRUCTURE_TYPE,
-#                     interval_count,
-#                     antenna_count,
-#                     fine_chans_per_coarse,
-#                     polarisation_count,
-#                     start_gpstime,
-#                     end_gpstime,
-#                 )
-#             )
-
-#             # Write out just this coarse channel
-#             subarray_le = np.asarray(np_data[:, :, c_idx, :, :, :], dtype="<f8")
-
-#             bytes_written = out_file.write(subarray_le.tobytes(order="C"))
-
-#             if bytes_written != bytes_per_coarse_chan:
-#                 raise ValueError(
-#                     f"aocal file {input_aocal_filename}: wrote wrong number of bytes {bytes_written} (should have been {bytes_per_coarse_chan}) to new aocal file {out_filename}"
-#                 )
-
-#             out_filenames.append(out_filename)
-
-#     return out_filenames
-
-
-# def get_aocal_filename(obsid: int, num_tiles: int, num_fine_chans: int, rec_chan_no: int) -> str:
-#     """Generate the standard AOCAL filename.
-
-#     Args:
-#         obsid: Observation ID.
-#         num_tiles: Number of tiles in the array.
-#         num_fine_chans: Total number of fine channels.
-#         rec_chan_no: Receiver channel number.
-
-#     Returns:
-#         The AOCAL filename string.
-#     """
-#     return f"{obsid}_{num_tiles:03}_{num_fine_chans:04}_{rec_chan_no:03}_calfile.bin"
-
-
-# def get_partial_aocal_filename(obsid: int, rec_chan_no: int) -> str:
-#     """Generate a partial AOCAL filename pattern for globbing.
-
-#     Args:
-#         obsid: Observation ID.
-#         rec_chan_no: Receiver channel number.
-
-#     Returns:
-#         The AOCAL filename pattern string with wildcards.
-#     """
-#     return f"{obsid}_*_{rec_chan_no:03}_calfile.bin"
 
 
 def get_solution_fits_filename(solutions_dir: str, obs_id: int, rec_chan: int) -> str | None:

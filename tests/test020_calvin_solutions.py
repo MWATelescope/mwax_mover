@@ -894,11 +894,13 @@ def _make_synthetic_solution(path: str, coarse_chans: list, n_tiles: int = 3, ch
             chanblocks_hz.append(chan_center_hz + offset)
 
     n_chanblocks = len(chanblocks_hz)
+    antennas = [i for i in range(n_tiles)]  # 0-based antenna indices
     tile_names = [f"Tile{i + 1:02d}" for i in range(n_tiles)]
 
     tiles_hdu = astropy_fits.BinTableHDU.from_columns(
         astropy_fits.ColDefs(
             [
+                astropy_fits.Column(name="Antenna", format="I", array=np.array(antennas)),
                 astropy_fits.Column(name="TileName", format="10A", array=np.array(tile_names)),
                 astropy_fits.Column(name="Flag", format="J", array=np.zeros(n_tiles, dtype=np.int32)),
             ]

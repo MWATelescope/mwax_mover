@@ -1,6 +1,6 @@
 # Changelog
 
-# 1.8.0 6-Aug-2026
+# 1.8.0 12-Aug-2026
 
 * calvin_processor: generate gain outlier fit & residual MAD outlier plots.
 * calvin_processor: read gain outlier config params from config file.
@@ -13,6 +13,7 @@
 * Fixed formatting in many files (ruff).
 * Fixed broken tests.
 * mwax_subfile_distributor/subfile_processor: removed cli argument --mode which told mwax if it was intended to be runnning as bf or corr.
+* cal_utils: New cli tool. Now runs the same code as the real calvin_processor (post hyperdrive). NaN's outliers and generates outlier plots and hyperdrive stats and plots.
 
 # 1.7.30 5-Aug-2026
 
