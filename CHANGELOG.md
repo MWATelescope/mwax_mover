@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.8.1 12-Aug-2026
+
+* calvin_processor: Fixed bug where solutions files were not being added to the index.json.
+
 # 1.8.0 12-Aug-2026
 
 * calvin_processor: generate gain outlier fit & residual MAD outlier plots.

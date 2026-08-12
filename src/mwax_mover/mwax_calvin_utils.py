@@ -2928,7 +2928,7 @@ def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_
     path = Path(filename)
     _, ext = os.path.splitext(path.name)
 
-    if ext not in (".png", ".tsv", ".txt"):
+    if ext not in (".png", ".tsv", ".txt", ".fits"):
         return None
 
     stat = path.stat()
@@ -3016,12 +3016,13 @@ def upload_plot_files(job_output_path: str, upload_path: str):
             for file_no, pfile in enumerate(plot_files, start=1):
                 try:
                     dest_filename = os.path.join(upload_path, os.path.basename(pfile))
-                    logger.debug(f"Moving {pfile} to {dest_filename} [{file_no}/{len(plot_files)}]")
 
                     # We want to keep the solutions on calvin servers so copy them, don't move them!
                     if ext in ["*_solutions.fits", "*_solutions.original.fits"]:
+                        logger.debug(f"Copying {pfile} to {dest_filename} [{file_no}/{len(plot_files)}]")
                         shutil.copy(pfile, dest_filename)
                     else:
+                        logger.debug(f"Moving {pfile} to {dest_filename} [{file_no}/{len(plot_files)}]")
                         shutil.move(pfile, dest_filename)
 
                 except Exception as e:
