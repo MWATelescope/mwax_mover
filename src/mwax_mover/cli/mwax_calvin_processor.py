@@ -38,6 +38,8 @@ from mwax_mover.mwax_calvin_solutions import process_solutions
 from mwax_mover.mwax_calvin_utils import (
     CalvinJobType,
     estimate_birli_output_bytes,
+    export_calibration_solutions,
+    upload_plot_files,
 )
 from mwax_mover.mwax_db import (
     MWAXDBHandler,
@@ -371,7 +373,8 @@ class MWAXCalvinProcessor:
             )
 
             # Now export the calibration solution FITS files to the export directory if configured
-            self.export_calibration_solutions(solution_files)
+            if self.cal_export_path is not None:
+                export_calibration_solutions(solution_files, self.cal_export_path, self.cal_export_max_age_hours)
 
             # If that worked, process the solutions and insert into db
             self.current_task_name = "Processing"
@@ -411,7 +414,7 @@ class MWAXCalvinProcessor:
                         plot_upload_path = os.path.join(self.plot_upload_path, str(fit_id))
 
                         # Go and upload all the files (including the index)
-                        self.upload_plot_files(self.job_output_path, plot_upload_path)
+                        upload_plot_files(self.job_output_path, plot_upload_path)
 
                 else:
                     # We returned True (no unexpected errors occured)
@@ -492,47 +495,6 @@ class MWAXCalvinProcessor:
             else:
                 self.fail_job_downloading(error_message)
             self.stop(exit_code=-1)
-
-    def upload_plot_files(self, job_output_path: str, upload_path: str):
-        """Move all the plots and stats to the plots dir and include the fit_id as a folder.
-        It's a nice to have, so if we fail, log it and move on
-
-        Args:
-            job_output_path: The location of all the plots,txt,tsv files for this fit
-            upload_path: Intended destination directory for the plots and stats files to go
-        """
-        try:
-            # Create the dest dir
-            os.mkdir(upload_path)
-
-            exts = [
-                "*.png",
-                "*.txt",
-                "*.tsv",
-                "*.json",
-                "*_solutions.fits",
-                "*_solutions.original.fits",
-            ]
-            for ext in exts:
-                plot_files = glob.glob(os.path.join(job_output_path, ext))
-                for file_no, pfile in enumerate(plot_files, start=1):
-                    try:
-                        dest_filename = os.path.join(upload_path, os.path.basename(pfile))
-                        logger.debug(f"Moving {pfile} to {dest_filename} [{file_no}/{len(plot_files)}]")
-
-                        # We want to keep the solutions on calvin servers so copy them, don't move them!
-                        if ext in ["*_solutions.fits", "*_solutions.original.fits"]:
-                            shutil.copy(pfile, dest_filename)
-                        else:
-                            shutil.move(pfile, dest_filename)
-
-                    except Exception as e:
-                        logger.warning(f"Failed to move {pfile} to the {upload_path}. Error: {e!s}. Ignoring")
-                        # keep going and try the next file
-
-        except Exception as ee:
-            # Something went wrong- log it and keep going
-            logger.warning(f"Failed to move files to the {upload_path}. Error: {ee!s}. Ignoring")
 
     def release_mwax_files(self):
         """Release visibility files from MWAX boxes after processing.
@@ -968,36 +930,6 @@ class MWAXCalvinProcessor:
             return True, "", calibration_command
         else:
             return False, "Hyperdrive run failed. See logs", calibration_command
-
-    def export_calibration_solutions(self, solution_files: list[str]):
-        """Export calibration solution FITS files to the configured export directory."""
-        # if cal_export_path is set then:
-        # 1. copy the solution FITS files to the export dir
-        # 2. try to clean up old files
-        if self.cal_export_path is not None:
-            #
-            # copy the solution.fits file(s) to the export directory
-            logger.info(f"Found {len(solution_files)} solution FITS files in {self.job_output_path}.")
-
-            for f in solution_files:
-                # Copy solution fits files to the cal_export directory
-                cal_dest = os.path.join(self.cal_export_path, os.path.basename(f))
-                logger.info(f"Copying solution FITS file {f} to {cal_dest}")
-                shutil.copy(f, cal_dest)
-
-            # Clean up old files
-            ext_list = ["fits", "bin"]
-            files_removed = utils.delete_files_older_than(
-                self.cal_export_path, self.cal_export_max_age_hours * 3600, ext_list
-            )
-            if len(files_removed) > 0:
-                logger.debug(
-                    f"Removed the following files from {self.cal_export_path} as they were older than {self.cal_export_max_age_hours} hours: {files_removed}"
-                )
-            else:
-                logger.debug(
-                    f"No files older than {self.cal_export_max_age_hours} hours found in {self.cal_export_path} to remove."
-                )
 
     def stop(self, exit_code: int = 0):
         """Shutdown the processor and close all connections.

@@ -42,7 +42,7 @@ from mwax_mover.mwax_command import (
     run_command_ext,
     run_command_popen,
 )
-from mwax_mover.utils import extract_channels_from_filename, get_png_dimensions, is_int
+from mwax_mover.utils import delete_files_older_than, extract_channels_from_filename, get_png_dimensions, is_int
 
 logger = logging.getLogger(__name__)
 
@@ -2950,3 +2950,84 @@ def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_
         "description": get_file_description(str(path)),
         **({"image_width": width, "image_height": height} if is_png else {}),
     }
+
+
+def export_calibration_solutions(solution_files: list[str], cal_export_path: str, cal_export_max_age_hours: int):
+    """Export calibration solution FITS files to the configured export directory and delete stale files.
+
+    Args:
+        solution_files: List of hyperdrive solution filenames
+        cal_export_path: Path to copy solution files to
+        cal_export_max_age_hours: Files older than this many hours will be deleted from the cal_export_path
+
+    Returns:
+        Nothing
+    """
+    # if cal_export_path is set then:
+    # 1. copy the solution FITS files to the export dir
+    # 2. try to clean up old files
+
+    #
+    # copy the solution.fits file(s) to the export directory
+    logger.info(f"Found {len(solution_files)} solution FITS files to upload.")
+
+    for f in solution_files:
+        # Copy solution fits files to the cal_export directory
+        cal_dest = os.path.join(cal_export_path, os.path.basename(f))
+        logger.info(f"Copying solution FITS file {f} to {cal_dest}")
+        shutil.copy(f, cal_dest)
+
+    # Clean up old files
+    ext_list = ["fits", "bin"]
+    files_removed = delete_files_older_than(cal_export_path, cal_export_max_age_hours * 3600, ext_list)
+    if len(files_removed) > 0:
+        logger.debug(
+            f"Removed the following files from {cal_export_path} as they were older than {cal_export_max_age_hours} hours: {files_removed}"
+        )
+    else:
+        logger.debug(f"No files older than {cal_export_max_age_hours} hours found in {cal_export_path} to remove.")
+
+
+def upload_plot_files(job_output_path: str, upload_path: str):
+    """Move all the plots and stats to the plots dir and include the fit_id as a folder.
+    It's a nice to have, so if we fail, log it and move on
+
+    Args:
+        job_output_path: The location of all the plots,txt,tsv files for this fit
+        upload_path: Intended destination directory for the plots and stats files to go
+
+    Returns:
+        Nothing
+    """
+    try:
+        # Create the dest dir
+        os.mkdir(upload_path)
+
+        exts = [
+            "*.png",
+            "*.txt",
+            "*.tsv",
+            "*.json",
+            "*_solutions.fits",
+            "*_solutions.original.fits",
+        ]
+        for ext in exts:
+            plot_files = glob.glob(os.path.join(job_output_path, ext))
+            for file_no, pfile in enumerate(plot_files, start=1):
+                try:
+                    dest_filename = os.path.join(upload_path, os.path.basename(pfile))
+                    logger.debug(f"Moving {pfile} to {dest_filename} [{file_no}/{len(plot_files)}]")
+
+                    # We want to keep the solutions on calvin servers so copy them, don't move them!
+                    if ext in ["*_solutions.fits", "*_solutions.original.fits"]:
+                        shutil.copy(pfile, dest_filename)
+                    else:
+                        shutil.move(pfile, dest_filename)
+
+                except Exception as e:
+                    logger.warning(f"Failed to move {pfile} to the {upload_path}. Error: {e!s}. Ignoring")
+                    # keep going and try the next file
+
+    except Exception as ee:
+        # Something went wrong- log it and keep going
+        logger.warning(f"Failed to move files to the {upload_path}. Error: {ee!s}. Ignoring")

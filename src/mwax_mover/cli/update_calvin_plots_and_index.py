@@ -2,8 +2,10 @@ import argparse
 import glob
 import json
 import os
+import re
 import shutil
 import sys
+from configparser import ConfigParser
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -13,6 +15,8 @@ from mwax_mover.mwax_calvin_utils import (
     generate_hyperdrive_plots,
     populate_index_json_entry,
 )
+from mwax_mover.mwax_db import MWAXDBHandler, get_fitid_from_slurm_job_and_obsid
+from mwax_mover.utils import download_metafits_file, read_config
 
 
 def download_plot_index_file(fit_id: int, solution_directory: str) -> None:
@@ -107,6 +111,35 @@ def update_plot_index_file_entry(solution_directory: str, filename: str, fit_id:
         json.dump(index, f, indent=2)
 
 
+def parse_job_dir(directory: str) -> tuple[int, int]:
+    """Extract the SLURM job ID and observation ID from a job directory path.
+
+    Expects the final path component to be in the form ``SLURMJOBID_OBSID``,
+    where both are integers (no leading zeros, no extra underscores). Works
+    whether or not the path has a trailing slash.
+
+    Args:
+        directory: Path to the job directory, e.g.
+            "/data/calvin/jobs/1234567_1234567890" or the same with a
+            trailing slash.
+
+    Returns:
+        A tuple of (slurm_job_id, obs_id) as integers.
+
+    Raises:
+        ValueError: If the final path component doesn't match the expected
+            "<digits>_<digits>" pattern.
+    """
+    name = Path(directory).name  # pathlib handles trailing slash correctly
+
+    match = re.fullmatch(r"(\d+)_(\d+)", name)
+    if not match:
+        raise ValueError(f"Directory name '{name}' does not match expected 'SLURMJOBID_OBSID' pattern")
+
+    slurm_job_id, obs_id = match.groups()
+    return int(slurm_job_id), int(obs_id)
+
+
 def main() -> None:
     """Entry point for the update_hyperdrive_plots_and_index command line tool.
 
@@ -119,7 +152,7 @@ def main() -> None:
     parser.add_argument(
         "--solution-dir",
         required=True,
-        help="Path to the directory containing the solution files",
+        help="Path to the directory containing the solution files should end in SLURMJOBID_OBSID - e.g. /data/calvin/jobs/9176_",
     )
 
     parser.add_argument(
@@ -129,17 +162,9 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--obs-id",
+        "--cfg",
         required=True,
-        type=int,
-        help="Obs ID of the calibration fit to index",
-    )
-
-    parser.add_argument(
-        "--fit-id",
-        required=True,
-        type=int,
-        help="Fit ID of the calibration fit to index",
+        help="Path to the CalvinProcessor config file (for database credentials)",
     )
 
     parser.add_argument(
@@ -152,7 +177,7 @@ def main() -> None:
         "--plot-front-end-url",
         required=False,
         default="https://cal.mwatelescope.org",
-        help="Path to the hyperdrive binary",
+        help="Base URL where the fit files are stored in S3",
     )
 
     parser.add_argument(
@@ -164,18 +189,55 @@ def main() -> None:
     args = parser.parse_args()
 
     dry_run: bool = args.dry_run
-
     solution_dir: str = args.solution_dir
-
     plot_front_end_url = args.plot_front_end_url
 
     if not os.path.exists(solution_dir):
         print(f"Solution_directory: {solution_dir} does not exist. Exiting")
         sys.exit(1)
 
-    fit_id = int(args.fit_id)
+    # solution_dir should be in the form of: /data/calvin/jobs/SLURMJOBID_OBSID (with or without trailing slash)
+    slurm_job_id, obs_id = parse_job_dir(solution_dir)
 
-    obs_id = int(args.obs_id)
+    print(
+        f"Got Obs ID: {obs_id} and Slurm Job ID: {slurm_job_id} from solutions dir. Looking up fit_id from database..."
+    )
+
+    # Read database info from config file
+    if not os.path.exists(args.cfg):
+        print(f"Configuration file location {args.cfg} does not exist. Quitting.")
+        sys.exit(1)
+
+    # Parse config file
+    config = ConfigParser()
+    config.read_file(open(args.cfg, "r", encoding="utf-8"))
+    mro_metadatadb_host = read_config(config, "mro metadata database", "host")
+    mro_metadatadb_db = read_config(config, "mro metadata database", "db")
+    mro_metadatadb_user = read_config(config, "mro metadata database", "user")
+    # Don't require base64 encoded password if running a pytest
+    mro_metadatadb_pass = read_config(config, "mro metadata database", "pass", True)
+    mro_metadatadb_port = int(read_config(config, "mro metadata database", "port"))
+
+    # Initiate database connection for mro metadata db
+    db_handler = MWAXDBHandler(
+        host=mro_metadatadb_host,
+        port=mro_metadatadb_port,
+        db_name=mro_metadatadb_db,
+        user=mro_metadatadb_user,
+        password=mro_metadatadb_pass,
+        ssl_mode="?sslmode=require",
+    )
+
+    # Start db pool
+    db_handler.start_database_pool()
+
+    fit_id = get_fitid_from_slurm_job_and_obsid(db_handler, obs_id, slurm_job_id)
+
+    if fit_id is not None:
+        print(f"Got Fit ID: {fit_id} from calibration_request table in database.")
+    else:
+        print("Failed to get Fit ID from database. Exiting")
+        sys.exit(1)
 
     if dry_run:
         base_upload_dir = ""
@@ -205,8 +267,9 @@ def main() -> None:
             break
 
     if metafits_filename == "":
-        print(f"No metafits file could be found in {solution_dir}")
-        sys.exit(1)
+        print(f"No metafits file could be found in {solution_dir}. Downloading one now...")
+
+        metafits_filename = download_metafits_file(obs_id, solution_dir)
 
     try:
         # Download index file
@@ -238,7 +301,9 @@ def main() -> None:
     # Regenerate the plots for each solutions file
     for file in solution_files:
         print(f"Generating new plots for {file} in index.json")
-        success, error_message = generate_hyperdrive_plots(obs_id, file, hyperdrive_binary_path, metafits_filename)
+        success, error_message = generate_hyperdrive_plots(
+            obs_id, file, hyperdrive_binary_path, metafits_filename, solution_dir
+        )
 
         # Exit early on failure
         if not success:

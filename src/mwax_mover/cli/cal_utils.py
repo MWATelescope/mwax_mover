@@ -91,8 +91,7 @@ def main() -> None:
 
     parser.add_argument(
         "--modify-gains",
-        type=bool,
-        default=False,
+        action="store_true",
         help="Should the solution file(s) be modified to NaN out Jones of outlier gains? [DEFAULT=False]",
     )
 
