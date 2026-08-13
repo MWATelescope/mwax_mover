@@ -3,6 +3,8 @@
 # 1.8.1 12-Aug-2026
 
 * calvin_processor: Fixed bug where solutions files were not being added to the index.json.
+* TODO: calvin_processor: Fixed bug where the _stats.txt file had wrong stats if picket fence.
+* TODO: calvin_processor: NaN the entire tile which are noted as phase outliers.
 
 # 1.8.0 12-Aug-2026
 

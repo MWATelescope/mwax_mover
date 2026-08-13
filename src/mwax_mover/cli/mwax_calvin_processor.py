@@ -374,11 +374,12 @@ class MWAXCalvinProcessor:
 
             # Now export the calibration solution FITS files to the export directory if configured
             if self.cal_export_path is not None:
+                self.current_task_name = "Export solutions"
                 export_calibration_solutions(solution_files, self.cal_export_path, self.cal_export_max_age_hours)
 
             # If that worked, process the solutions and insert into db
             self.current_task_name = "Processing"
-            logger.info("Processing solutions...")
+            logger.info("Processing solutions for db")
             result, error_message, fit_id = process_solutions(
                 self.db_handler,
                 self.obs_id,

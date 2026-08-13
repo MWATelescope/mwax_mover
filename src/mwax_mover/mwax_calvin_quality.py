@@ -1118,6 +1118,7 @@ def build_tile_summary_table(quality: CalSolutionQuality, gains, bad_array: np.n
         n_good = int(tile_good.sum())
         n_bad = int(tile_bad.sum())
         fully_flagged = n_good == 0
+        n_fine_chans: int = bad_array.shape[1]  # bad_array is (tiles, chans)
 
         row = {
             "tile": tile,
@@ -1126,7 +1127,7 @@ def build_tile_summary_table(quality: CalSolutionQuality, gains, bad_array: np.n
             "reason": "",
             "n_good": n_good,
             "n_bad": n_bad,
-            "total_jones": quality.n_chanblocks * quality.n_tiles,
+            "total_jones": n_fine_chans * quality.n_tiles,
             "gx_min": np.nan,
             "gx_median": np.nan,
             "gx_max": np.nan,
