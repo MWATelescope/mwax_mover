@@ -534,6 +534,7 @@ def insert_calibration_fits_row(
     gain_outlier_poly_degree: int | None,
     gain_outlier_mad_residual_threshold: float | None,
     gain_outlier_modify_gains: bool | None,
+    phase_outlier_tile_bad_channel_fraction: float | None = None,
 ) -> tuple[bool, int | None]:
     """Inserts a new calibration_fits row and return the fit_id if successful
     This row represents the calibration 'header' for an obsid.
@@ -541,11 +542,10 @@ def insert_calibration_fits_row(
         Returns:
             Success (bool), fit_id (int or None)
     """
-
     sql = (
         "INSERT INTO calibration_fits"
-        " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit,source_list,num_sources,calibration_command,gain_max_cutoff,gain_outlier_poly_degree,gain_outlier_mad_residual_threshold,gain_outlier_modify_gains)"
-        " VALUES (%s,%s,%s,now(),%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
+        " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit,source_list,num_sources,calibration_command,gain_max_cutoff,gain_outlier_poly_degree,gain_outlier_mad_residual_threshold,gain_outlier_modify_gains,phase_tile_bad_channel_fraction)"
+        " VALUES (%s,%s,%s,now(),%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
     )
 
     # Fit ID is the Unix timestamp multiplied by 10**6 so it's an int
@@ -565,6 +565,7 @@ def insert_calibration_fits_row(
         gain_outlier_poly_degree,
         gain_outlier_mad_residual_threshold,
         gain_outlier_modify_gains,
+        phase_outlier_tile_bad_channel_fraction,
     )
 
     try:

@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.9.0 13-Aug-2026
+
+* calvin_processor: huge refactor to consolidate all flagging, outlier detections, fitting and plotting
+
 # 1.8.1 12-Aug-2026
 
 * calvin_processor: Fixed bug where solutions files were not being added to the index.json.

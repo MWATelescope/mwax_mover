@@ -42,9 +42,16 @@ import os
 import sys
 from pathlib import Path
 
-from mwalib import MetafitsContext
-
-from mwax_mover.mwax_calvin_quality import generate_hyperdrive_plots_and_stats
+from mwax_mover.mwax_calvin_plots import (
+    generate_hyperdrive_plots,
+    plot_outlier_gains,
+    write_hyperdrive_stats,
+)
+from mwax_mover.mwax_calvin_utils import Metafits
+from mwax_mover.mwax_hyperdrive_solutions import (
+    HyperfitsSolution,
+    HyperfitsSolutionGroup,
+)
 from mwax_mover.utils import download_metafits_file
 
 handler = logging.StreamHandler()
@@ -80,13 +87,6 @@ def main() -> None:
         type=float,
         default=10.0,
         help="MAD-of-residual threshold for flagging outliers from the polynomial fit. [DEFAULT=10.0]",
-    )
-
-    parser.add_argument(
-        "--gains-cutoff-max",
-        type=float,
-        default=None,
-        help="Use the old naive cut off gains value AND modify the solutions. [DEFAULT=None]",
     )
 
     parser.add_argument(
@@ -167,20 +167,55 @@ def main() -> None:
             print(f"Error: The metafits file provided '{metafits_filename}' does not exist")
             sys.exit(-1)
 
-    metafits_context = MetafitsContext(metafits_filename)
+    metafits = Metafits(str(metafits_filename))
+    soln_group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(f) for f in args.solution_filenames])
+    soln_group.load()
 
-    generate_hyperdrive_plots_and_stats(
-        metafits_context,
-        args.solution_filenames,
-        args.output_path,
-        args.hyperdrive_binary_path,
-        obs_id,
-        args.poly_degree,
-        args.mad_threshold,
-        args.modify_gains,
-        args.plot_n_tiles,
-        args.gains_cutoff_max,
-    )
+    # Capture the pristine Jones matrices before flagging, so the plots
+    # below can show flagged values as visible outlier points rather than
+    # gaps where the data's already been NaN'd in memory.
+    assert soln_group.jones is not None
+    pristine_jones = [file_jones.copy() for file_jones in soln_group.jones]
+
+    # This tool's scope has always been tile flags (metafits/TILES HDU/
+    # BASELINES-inferred) + amplitude-outlier detection -- NOT phase-outlier
+    # detection or the mostly-bad-tile-fraction promotion, which are part
+    # of the full mwax_calvin_processor pipeline but were never part of
+    # what this standalone tool did.
+    soln_group.apply_tile_flags()
+    soln_group.enforce_whole_jones_nan()
+    soln_group.flag_amplitude_outliers(args.poly_degree, args.mad_threshold)
+
+    for file_idx, f in enumerate(args.solution_filenames):
+        obsid_and_band = os.path.basename(f).replace("_solutions.fits", "")
+        plot_outlier_gains(
+            soln_group,
+            file_idx,
+            n_tiles=args.plot_n_tiles,
+            output_path=os.path.join(args.output_path, f"{obsid_and_band}_gain_outliers_tiles.png"),
+            pristine_jones=pristine_jones[file_idx],
+            solution_file_will_be_modified=args.modify_gains,
+        )
+
+    if args.modify_gains:
+        soln_group.commit(metafits.mwalib_context)
+
+    # hyperdrive's own plots/stats run regardless of --modify-gains,
+    # matching this tool's historical behaviour (that flag only ever
+    # controlled whether outlier-flagged gains were written to disk).
+    for f in args.solution_filenames:
+        plots_success, plots_error = generate_hyperdrive_plots(
+            obs_id, f, args.hyperdrive_binary_path, metafits_filename, args.output_path
+        )
+        if not plots_success:
+            print(f"Warning: hyperdrive plots failed for {f}: {plots_error}")
+
+    stats_path = os.path.join(args.output_path, f"{obs_id}_stats.txt")
+    with open(stats_path, "w", encoding="utf-8") as stats_fd:
+        for f in args.solution_filenames:
+            stats_success, stats_error = write_hyperdrive_stats(obs_id, stats_fd, f)
+            if not stats_success:
+                print(f"Warning: hyperdrive stats failed for {f}: {stats_error}")
 
 
 if __name__ == "__main__":

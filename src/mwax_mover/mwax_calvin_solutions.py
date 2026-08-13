@@ -1,9 +1,11 @@
 """Post-processing of hyperdrive calibration solutions for the Calvin pipeline.
 
 Provides process_solutions(), which loads hyperfits solution files and metafits,
-determines a reference antenna, fits phases and gains per coarse channel, and
-inserts the resulting calibration fit and solution records into the MWA metadata
-database.
+determines a reference antenna, runs the full flagging pipeline (tile flags,
+whole-Jones-NaN enforcement, phase-outlier detection, amplitude-outlier
+detection, mostly-bad-tile promotion), commits the result to disk, fits final
+phases and gains, and inserts the resulting calibration fit and solution
+records into the MWA metadata database.
 """
 
 import logging
@@ -13,23 +15,31 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
+from mwax_mover.mwax_calvin_plots import (
+    build_tile_stats_rows,
+    debug_phase_fits,
+    generate_hyperdrive_plots,
+    plot_outlier_gains,
+    write_hyperdrive_stats,
+    write_tile_stats_table,
+)
 from mwax_mover.mwax_calvin_utils import (
     GainFitInfo,
-    HyperfitsSolution,
-    HyperfitsSolutionGroup,
     Metafits,
     PhaseFitInfo,
-    debug_phase_fits,
     get_sorted_solution_files,
     pad_gain_fit_info,
-    process_gain_fits,
-    process_phase_fits,
     write_readme_file,
 )
 from mwax_mover.mwax_db import (
     MWAXDBHandler,
     insert_calibration_fits_row,
     insert_calibration_solutions_row,
+)
+from mwax_mover.mwax_hyperdrive_solutions import (
+    HyperfitsSolution,
+    HyperfitsSolutionGroup,
+    TileFlagReason,
 )
 from mwax_mover.version import get_mwax_mover_version_string
 
@@ -47,15 +57,21 @@ def process_solutions(
     produce_debug_plots: bool,
     calibration_command: str,
     gain_max_cutoff: float | None,
-    gain_outlier_poly_degree: int | None,
-    gain_outlier_mad_residual_threshold: float | None,
+    gain_outlier_poly_degree: int,
+    gain_outlier_mad_residual_threshold: float,
     gain_outlier_modify_gains: bool | None,
+    gain_outlier_plot_n_tiles_per_page: int,
+    tile_bad_channel_fraction_threshold: float,
+    hyperdrive_binary_path: str,
+    phase_outlier_nstd: float = 3.0,
 ) -> tuple[bool, str, int | None]:
     """Process hyperdrive calibration solutions and insert into the database.
 
-    Loads hyperfits solution files and metafits, determines a reference antenna,
-    fits phases and gains per coarse channel, and inserts the resulting calibration
-    fit and solution records into the MWA metadata database.
+    Loads hyperfits solution files and metafits, determines a reference
+    antenna, runs the full flagging pipeline, generates before/after plots
+    and a before/after per-tile stats text file, commits the final state
+    to disk, fits final phases and gains, and inserts the resulting
+    calibration fit and solution records into the MWA metadata database.
 
     Args:
         db_handler_object: Database handler for inserting calibration data.
@@ -65,12 +81,42 @@ def process_solutions(
         phase_fit_niter: Number of iterations for phase fitting.
         source_list: Source list identifier used for the calibration.
         num_sources: Number of sources in the calibration.
-        produce_debug_plots: Whether to produce debug plots.
+        produce_debug_plots: Whether to produce the debug_phase_fits RX/cable-
+            length diagnostic plots (a separate, already-working diagnostic,
+            unrelated to the per-tile before/after amplitude plots below).
         calibration_command: Full hyperdrive command line used to generate the calibration.
-        gain_max_cutoff: Gain cutoff value (or None)
-        gain_outlier_poly_degree: Degree of polynomial for gain outlier detection (or None)
-        gain_outlier_mad_residual_threshold: MAD residual threshold for gain outlier detection (or None)
-        gain_outlier_modify_gains: Whether to modify gains to NaN full Jones matrix for outliers (or None)
+        gain_max_cutoff: Gain cutoff value, kept for calibration_fits table
+            provenance only -- the clipping this used to drive
+            (clip_hyperdrive_solution_gains) is no longer called; always
+            pass None going forward.
+        gain_outlier_poly_degree: Degree of polynomial for gain-amplitude
+            outlier detection (see HyperfitsSolutionGroup.flag_amplitude_outliers).
+        gain_outlier_mad_residual_threshold: MAD residual threshold for
+            gain-amplitude outlier detection.
+        gain_outlier_modify_gains: Kept for calibration_fits table provenance
+            only, same as gain_max_cutoff -- the toggle it used to represent
+            (compute outlier flags but only write them to disk if True) no
+            longer exists: the new flagging pipeline always modifies
+            self.jones in memory and commit() always writes it. Pass
+            whatever the caller's config currently has, or True, since it
+            no longer changes any actual behaviour here.
+        gain_outlier_plot_n_tiles_per_page: Number of tiles per page in the
+            paginated before/after amplitude-outlier plots.
+        tile_bad_channel_fraction_threshold: Fraction (0-1) of a tile's
+            chanblocks that must already be flagged bad, combined across
+            all per-channel reasons, before the whole tile is promoted to
+            fully flagged (see HyperfitsSolutionGroup.promote_mostly_bad_tiles).
+            NOTE: accepted here and threaded through to
+            insert_calibration_fits_row, but not yet written to the DB --
+            see that function's docstring.
+        hyperdrive_binary_path: Path to the hyperdrive binary, used for its
+            own before/after solutions-plot generation.
+        phase_outlier_nstd: Number of standard deviations beyond the
+            population mean before a tile's phase fit is an outlier (see
+            HyperfitsSolutionGroup.flag_phase_outliers). Not currently
+            config-driven like the other thresholds -- worth wiring up to
+            [processing] in the cfg file too, if you want it tunable the
+            same way.
 
     Returns:
         A tuple containing:
@@ -89,24 +135,24 @@ def process_solutions(
 
         logger.debug(f"{output_data_path} - reading {fits_solution_files=}")
 
-        soln_group = HyperfitsSolutionGroup(
-            Metafits(metafits_file), [HyperfitsSolution(f) for f in fits_solution_files]
-        )
+        metafits = Metafits(metafits_file)
+        soln_group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(f) for f in fits_solution_files])
+        soln_group.load()
 
         # get tiles
         tiles = soln_group.metafits_tiles_df
         logger.debug(f"metafits tiles:\n{tiles.to_string(max_rows=999)}")
 
-        # determine refant
-        unflagged_tiles = tiles[tiles.flag == 0]
-
-        if not len(unflagged_tiles):
+        # Early-exit check, now against combined_tile_flags (metafits + TILES
+        # HDU + BASELINES-inferred) rather than metafits alone, matching the
+        # more complete check refant/apply_tile_flags use.
+        if not (~soln_group.combined_tile_flags).any():
             # Even though this is a "failure" we want to return True
             # so we can release the obs if it is realtime- i.e. there's
             # nothing more we can do
             return True, "No unflagged tiles found", None
 
-        refant = unflagged_tiles.sort_values(by=["id"]).iloc[0]
+        refant = soln_group.refant
         logger.debug(f"{refant['name']=} ({refant['id']})")
 
         # get channel info
@@ -122,8 +168,7 @@ def process_solutions(
 
         chanblocks_per_coarse = soln_group.chanblocks_per_coarse
 
-        # all_chanblocks_hz = soln_group.all_chanblocks_hz
-        all_chanblocks_hz = np.concatenate(soln_group.all_chanblocks_hz).astype(np.float64)
+        all_chanblocks_hz = soln_group.all_chanblocks_hz_concat
 
         # Build the full sorted list of coarse channel indices from the metafits.
         # This is used below to NaN-pad gains for any missing channels.
@@ -142,46 +187,106 @@ def process_solutions(
         logger.debug(f"First 32 fine channels: {[f'{x / 1e6:.3f}' for x in all_chanblocks_hz[0:32]]} MHz")
         logger.debug(f"Last 32 fine channels: {[f'{x / 1e6:.3f}' for x in all_chanblocks_hz[-32:]]} MHz")
 
-        (
-            soln_tile_ids,
-            all_xx_solns_noref,
-            all_yy_solns_noref,
-            all_xx_solns,
-            all_yy_solns,
-        ) = soln_group.get_solns_both(refant["name"])
+        # "Before" plots: hyperdrive's own binary-generated amp/phase plots,
+        # against the still-pristine on-disk files -- nothing has been
+        # touched yet. Written to a separate "before" subdirectory so the
+        # "after" run below (same filenames, since hyperdrive derives them
+        # from the input file) doesn't overwrite these. (This only touches
+        # the on-disk files via a read-only hyperdrive invocation; it's
+        # independent of the in-memory apply_tile_flags() below regardless
+        # of ordering, since nothing gets written to disk until commit().)
+        before_plots_dir = os.path.join(output_data_path, "before")
+        os.makedirs(before_plots_dir, exist_ok=True)
+        for f in fits_solution_files:
+            plots_success, plots_error = generate_hyperdrive_plots(
+                obs_id, f, hyperdrive_binary_path, metafits_file, before_plots_dir
+            )
+            if not plots_success:
+                logger.warning(f"{obs_id}: 'before' hyperdrive plots failed for {f}: {plots_error}")
 
-        weights = soln_group.weights
+        # apply_tile_flags() runs first (cheap, structural) so the "before"
+        # snapshot captured right after it reflects the pre-existing
+        # metafits/TILES-HDU/BASELINES-HDU flags -- i.e. "before OUR OWN
+        # outlier detection", not literally "before anything at all"
+        # (a metafits-flagged tile isn't meaningfully "pristine" anyway,
+        # since its data was never trustworthy in the first place).
+        soln_group.apply_tile_flags()
 
-        # Run phase and gain fitting concurrently — they are independent and each
-        # internally spawns os.cpu_count() threads, so running them sequentially
-        # wastes wall time during the startup / drain phases of each pool.
+        # Capture the "before" snapshot now: Jones matrices (for the
+        # "after" amplitude plots below, and for before-stats amplitude
+        # values), tile/channel flag reasons, and a phase fit against this
+        # same pristine-except-pre-flagged state -- all needed for the
+        # BEFORE half of the stats file, and pristine_jones is reused by
+        # the "after" plots too so flagged points still render as visible
+        # outliers rather than gaps.
+        assert soln_group.jones is not None
+        assert soln_group.tile_flag_reasons is not None
+        assert soln_group.channel_flag_reasons is not None
+        pristine_jones = [file_jones.copy() for file_jones in soln_group.jones]
+        before_tile_reasons = soln_group.tile_flag_reasons.copy()
+        before_channel_reasons = [reasons.copy() for reasons in soln_group.channel_flag_reasons]
+        before_tile_bad_mask = before_tile_reasons != TileFlagReason.NONE
+        before_phase_fits = soln_group.process_phase_fits(refant["name"], phase_fit_niter)
+
+        # --- Rest of the flagging pipeline --------------------------------
+        # Whole-Jones-NaN enforcement next (cheap, structural), then phase
+        # outliers (whole-tile, whole-observation), then amplitude outliers
+        # (per-file, per-tile), then the mostly-bad-tile promotion sees the
+        # combined result of everything before it.
+        soln_group.enforce_whole_jones_nan()
+        soln_group.flag_phase_outliers(refant["name"], phase_fit_niter, nstd=phase_outlier_nstd)
+        soln_group.flag_amplitude_outliers(gain_outlier_poly_degree, gain_outlier_mad_residual_threshold)
+        soln_group.promote_mostly_bad_tiles(tile_bad_channel_fraction_threshold)
+
+        # "After" plots: calvin's own outlier plots, from soln_group's
+        # final in-memory state -- no staleness, since nothing downstream
+        # changes the data further. One paginated set per solution file,
+        # matching the historical *_gain_outliers_tiles naming convention.
+        for file_idx, f in enumerate(fits_solution_files):
+            obsid_and_band = os.path.basename(f).replace("_solutions.fits", "")
+            plot_outlier_gains(
+                soln_group,
+                file_idx,
+                n_tiles=gain_outlier_plot_n_tiles_per_page,
+                output_path=os.path.join(output_data_path, f"{obsid_and_band}_gain_outliers_tiles.png"),
+                pristine_jones=pristine_jones[file_idx],
+                solution_file_will_be_modified=True,
+            )
+
+        soln_group.commit(metafits.mwalib_context)
+
+        # "After" plots/stats: hyperdrive's own binary-generated plots and
+        # convergence stats, against the now-committed files.
+        hyperdrive_stats_textfile = os.path.join(output_data_path, f"{obs_id}_stats.txt")
+        with open(hyperdrive_stats_textfile, "w") as stats_fd:
+            for f in fits_solution_files:
+                plots_success, plots_error = generate_hyperdrive_plots(
+                    obs_id, f, hyperdrive_binary_path, metafits_file, output_data_path
+                )
+                if not plots_success:
+                    logger.warning(f"{obs_id}: hyperdrive plots failed for {f}: {plots_error}")
+
+                stats_success, stats_error = write_hyperdrive_stats(obs_id, stats_fd, f)
+                if not stats_success:
+                    logger.warning(f"{obs_id}: hyperdrive stats failed for {f}: {stats_error}")
+
+        # Final phase/gain fit, computed on the fully-flagged, committed
+        # data -- this is what gets reported to the DB and (once built)
+        # the redesigned stats text file. Run concurrently since each
+        # internally spawns its own os.cpu_count() thread pool.
         with ThreadPoolExecutor(max_workers=2) as fitting_executor:
-            phase_future = fitting_executor.submit(
-                process_phase_fits,
-                unflagged_tiles,
-                all_chanblocks_hz,
-                all_xx_solns,
-                all_yy_solns,
-                weights,
-                soln_tile_ids,
-                phase_fit_niter,
-            )
-            gain_future = fitting_executor.submit(
-                process_gain_fits,
-                unflagged_tiles,
-                all_chanblocks_hz,
-                all_xx_solns_noref,
-                all_yy_solns_noref,
-                weights,
-                soln_tile_ids,
-                chanblocks_per_coarse,
-            )
+            phase_future = fitting_executor.submit(soln_group.process_phase_fits, refant["name"], phase_fit_niter)
+            gain_future = fitting_executor.submit(soln_group.process_gain_fits, refant["name"])
             phase_fits = phase_future.result()
             gain_fits = gain_future.result()
+
+        soln_tile_ids = tiles["id"].to_numpy()
 
         # Matplotlib stuff seems to break pytest so we will
         # pass false in for pytest stuff (or if we don't want debug)
         if produce_debug_plots:
+            _, _noref_xx, _noref_yy, ref_xx, ref_yy = soln_group.get_solns_both(refant["name"])
+            weights = soln_group.weights
             # This line was:
             # phase_fits_pivot = debug_phase_fits(...
             # But the phase_fits_pivot return value is not used
@@ -189,12 +294,43 @@ def process_solutions(
                 phase_fits,
                 tiles,
                 all_chanblocks_hz,
-                all_xx_solns[0],
-                all_yy_solns[0],
+                ref_xx,
+                ref_yy,
                 weights,
                 prefix=f"{output_data_path}/{obs_id}_",
                 plot_residual=True,
             )
+
+        # Write the before/after per-tile stats text file. "Before" uses
+        # the snapshot captured right after apply_tile_flags() above;
+        # "after" uses the group's final state (tile_flag_reasons/
+        # channel_flag_reasons now also carry PHASE_OUTLIER/
+        # AMPLITUDE_OUTLIER/MOSTLY_BAD_CHANNELS, jones is the fully-flagged
+        # array just committed, and phase_fits is the final fit above).
+        assert soln_group.tile_flag_reasons is not None
+        assert soln_group.channel_flag_reasons is not None
+        assert soln_group.jones is not None
+        stats_textfile = os.path.join(output_data_path, f"{obs_id}_tile_stats.txt")
+        with open(stats_textfile, "w") as tile_stats_fd:
+            before_rows = build_tile_stats_rows(
+                soln_group,
+                pristine_jones,
+                before_tile_bad_mask,
+                before_tile_reasons,
+                before_channel_reasons,
+                before_phase_fits,
+            )
+            write_tile_stats_table(f"{obs_id}: BEFORE any changes", before_rows, tile_stats_fd)
+
+            after_rows = build_tile_stats_rows(
+                soln_group,
+                soln_group.jones,
+                soln_group.tile_flag_reasons != TileFlagReason.NONE,
+                soln_group.tile_flag_reasons,
+                soln_group.channel_flag_reasons,
+                phase_fits,
+            )
+            write_tile_stats_table(f"{obs_id}: AFTER all flagging", after_rows, tile_stats_fd)
 
         # get a database connection, unless we are using dummy connection (for testing)
         with db_handler_object.pool.connection() as conn:
@@ -218,6 +354,7 @@ def process_solutions(
                     gain_outlier_poly_degree=gain_outlier_poly_degree,
                     gain_outlier_mad_residual_threshold=gain_outlier_mad_residual_threshold,
                     gain_outlier_modify_gains=gain_outlier_modify_gains,
+                    phase_outlier_tile_bad_channel_fraction=tile_bad_channel_fraction_threshold,
                 )
 
                 if fit_id is None or not success:

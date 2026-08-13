@@ -33,7 +33,6 @@ from mwax_mover import (
     version,
 )
 from mwax_mover.mwa_archiver import copy_file_rsync
-from mwax_mover.mwax_calvin_quality import generate_hyperdrive_plots_and_stats
 from mwax_mover.mwax_calvin_solutions import process_solutions
 from mwax_mover.mwax_calvin_utils import (
     CalvinJobType,
@@ -155,6 +154,7 @@ class MWAXCalvinProcessor:
         self.gain_outlier_mad_residual_threshold: float
         self.gain_outlier_modify_gains: bool
         self.gain_outlier_plot_n_tiles_per_page: int
+        self.tile_bad_channel_fraction_threshold: float
 
         # birli
         self.birli_timeout: int = 0
@@ -353,24 +353,8 @@ class MWAXCalvinProcessor:
                 self.fail_job_processing(error_message)
                 self.stop(exit_code=-1)
 
-            # Now generate stats and plots
-            self.current_task_name = "Hyperdrive Stats"
-
-            # Get the solution files
+            # Get the solution files (still needed below for the export step)
             solution_files = glob.glob(os.path.join(self.job_output_path, "*_solutions.fits"))
-
-            generate_hyperdrive_plots_and_stats(
-                self.metafits_context,
-                solution_files,
-                self.job_output_path,
-                self.hyperdrive_binary_path,
-                self.obs_id,
-                self.gain_outlier_poly_degree,
-                self.gain_outlier_mad_residual_threshold,
-                self.gain_outlier_modify_gains,
-                self.gain_outlier_plot_n_tiles_per_page,
-                self.gains_cut_off_max,
-            )
 
             # Now export the calibration solution FITS files to the export directory if configured
             if self.cal_export_path is not None:
@@ -394,6 +378,9 @@ class MWAXCalvinProcessor:
                 self.gain_outlier_poly_degree,
                 self.gain_outlier_mad_residual_threshold,
                 self.gain_outlier_modify_gains,
+                self.gain_outlier_plot_n_tiles_per_page,
+                self.tile_bad_channel_fraction_threshold,
+                self.hyperdrive_binary_path,
             )
 
             if result:
@@ -1415,6 +1402,13 @@ class MWAXCalvinProcessor:
                     config=config,
                     section="processing",
                     key="gain_outlier_plot_n_tiles_per_page",
+                )
+            )
+            self.tile_bad_channel_fraction_threshold = float(
+                utils.read_config(
+                    config=config,
+                    section="processing",
+                    key="tile_bad_channel_fraction_threshold",
                 )
             )
 

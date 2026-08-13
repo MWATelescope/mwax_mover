@@ -32,19 +32,12 @@ import pandas as pd
 import pytest
 from astropy import units as u
 from astropy.constants import c as speed_of_light  # ty: ignore[unresolved-import]
-from astropy.io import fits
 
 import mwax_mover
 import mwax_mover.mwax_calvin_utils
-from mwax_mover.mwax_calvin_quality import (
-    clip_hyperdrive_solution_gains,
-    load_hyperdrive_solutions,
-)
 from mwax_mover.mwax_calvin_utils import (
     MWA_NUM_COARSE_CHANS,
     GainFitInfo,
-    HyperfitsSolution,
-    HyperfitsSolutionGroup,
     PhaseFitInfo,
     ensure_system_byte_order,
     fit_gain,
@@ -55,8 +48,6 @@ from mwax_mover.mwax_calvin_utils import (
     pad_gains_to_full_coarse,
     parse_csv_header,
     parse_solution_channels,
-    process_gain_fits,
-    process_phase_fits,
     read_results_hdu,
     read_solutions_hdu_complex,
     read_tiles_hdu,
@@ -82,32 +73,6 @@ _CHANBLOCKS_PER_COARSE = 4
 _N_CHANBLOCKS = _N_COARSE * _CHANBLOCKS_PER_COARSE
 _GAIN_FREQS = np.linspace(138e6, 170e6, _N_CHANBLOCKS)
 
-_PROCESS_N_TILES = 3
-_PROCESS_FLAGGED = [3]  # tile ID 3 is flagged
-_PROCESS_N_CHANBLOCKS = _N_CHANBLOCKS  # 96
-
-_EXPECTED_PHASE_COLS = {
-    "tile_id",
-    "soln_idx",
-    "pol",
-    "length",
-    "intercept",
-    "sigma_resid",
-    "chi2dof",
-    "quality",
-    "stderr",
-}
-_EXPECTED_GAIN_COLS = {
-    "tile_id",
-    "soln_idx",
-    "pol",
-    "quality",
-    "gains",
-    "pol0",
-    "pol1",
-    "sigma_resid",
-}
-
 
 def _make_phase_ramp(freqs_hz: np.ndarray, length_m: float, intercept_rad: float) -> np.ndarray:
     """Construct a complex array representing a pure phase ramp.
@@ -123,49 +88,6 @@ def _make_phase_ramp(freqs_hz: np.ndarray, length_m: float, intercept_rad: float
     slope = (2 * np.pi * u.rad * (length_m * u.m) / speed_of_light).to(u.rad / u.Hz).value
     phase = slope * freqs_hz + intercept_rad
     return np.exp(1j * phase)
-
-
-def _make_tiles_df(n_tiles: int = 3, flagged_ids: list[int] | None = None) -> pd.DataFrame:
-    """Build a minimal tiles DataFrame for testing process_*_fits functions.
-
-    Args:
-        n_tiles: Total number of tiles.
-        flagged_ids: Tile IDs that should be flagged. Defaults to empty list.
-
-    Returns:
-        DataFrame with columns matching Tile._fields.
-    """
-    if flagged_ids is None:
-        flagged_ids = []
-    rows = [
-        {
-            "name": f"Tile{i:03d}",
-            "id": i,
-            "flag": i in flagged_ids,
-            "rx": (i - 1) // 8 + 1,
-            "slot": (i - 1) % 8 + 1,
-            "flavor": "RRI",
-        }
-        for i in range(1, n_tiles + 1)
-    ]
-    return pd.DataFrame(rows)
-
-
-def _make_solns_array(n_tiles: int, n_chanblocks: int, length_m: float = 5.0) -> np.ndarray:
-    """Build a synthetic (1, n_tiles, n_chanblocks) complex solutions array.
-
-    Args:
-        n_tiles: Number of tiles.
-        n_chanblocks: Number of channel blocks.
-        length_m: Cable length in metres for the synthetic ramp.
-
-    Returns:
-        Complex array of shape (1, n_tiles, n_chanblocks).
-    """
-    freqs = np.linspace(140e6, 170e6, n_chanblocks)
-    ramp = _make_phase_ramp(freqs, length_m, intercept_rad=0.3)
-    solns = np.tile(ramp, (1, n_tiles, 1))
-    return solns.astype(np.complex128)
 
 
 def _make_phase_fits_df(lengths: list[float], pol: str = "XX") -> pd.DataFrame:
@@ -964,10 +886,28 @@ def test_reject_outliers_per_pol_independent():
     # XX outlier should be flagged
     xx_outlier = result[(result["pol"] == "XX") & (result["chi2dof"] == 1000.0)]
     assert xx_outlier["outlier"].all()
-    # YY rows: all chi2dof values are 1.0 so std=0, threshold=1.0+0=1.0
-    # Values >= 1.0 are flagged — so all YY rows will be flagged too.
-    # The important thing is the function runs without error and XX outlier is detected.
-    assert "outlier" in result.columns
+    # YY rows all have chi2dof == 1.0, i.e. zero variance -- nothing stands
+    # out, so none of them should be flagged (see
+    # test_reject_outliers_zero_std_flags_nobody for the dedicated case).
+    yy_result = result[result["pol"] == "YY"]
+    assert not yy_result["outlier"].any()
+
+
+def test_reject_outliers_zero_std_flags_nobody():
+    """A population with zero variance flags no one, not everyone.
+
+    Regression test: threshold = mean + nstd*std collapses to threshold ==
+    mean when std == 0, and "value >= threshold" would otherwise flag
+    every row via trivial equality -- the opposite of correct behaviour
+    when nothing actually stands out. Found via a real pipeline failure:
+    a synthetic test fixture with identical (unit-gain) Jones matrices for
+    every tile produced identical chi2dof for all of them, which flagged
+    every tile as an outlier and NaN'd the entire observation.
+    """
+    lengths = [2.960881] * 6  # all rows identical, matching the real failure
+    df = _make_phase_fits_df(lengths)
+    result = reject_outliers(df, "chi2dof", nstd=3.0)
+    assert not result["outlier"].any()
 
 
 def test_reject_outliers_adds_outlier_column_if_missing():
@@ -1090,61 +1030,6 @@ def test_fit_phase_line_niter_stops_if_too_few_points():
 
 
 # ===========================================================================
-# NEW: HyperfitsSolutionGroup.weights property
-# ===========================================================================
-
-
-def _make_mock_soln_group_with_results(results_array: np.ndarray):
-    """Build a minimal HyperfitsSolutionGroup-like object for weights tests.
-
-    Rather than constructing real FITS files we patch the results property
-    directly on a MagicMock that exposes only what weights() needs.
-    """
-    from unittest.mock import MagicMock, PropertyMock
-
-    mock_group = MagicMock(spec=HyperfitsSolutionGroup)
-    # weights() accesses self.results and self.all_chanblocks_hz[0]
-    type(mock_group).results = PropertyMock(return_value=results_array.copy())
-    mock_group.all_chanblocks_hz = [np.linspace(138e6, 170e6, len(results_array))]
-    # Call the real weights property implementation bound to our mock
-    return HyperfitsSolutionGroup.weights.fget(mock_group)
-
-
-def test_weights_excludes_negative_results():
-    """Results < 0 should be treated as NaN and contribute zero weight."""
-    # Mix of good results and one negative (invalid) result
-    results = np.array([1e-5, 2e-5, 3e-5, -1.0, 5e-5])
-    weights = _make_mock_soln_group_with_results(results)
-    # The index corresponding to -1.0 (index 3) should be zero after nan_to_num
-    assert weights[3] == pytest.approx(0.0), f"Negative result should produce zero weight, got {weights[3]}"
-    # At least some other weights should be non-zero
-    assert np.any(weights > 0)
-
-
-def test_weights_excludes_large_results():
-    """Results > 1e-4 should be treated as NaN and contribute zero weight."""
-    results = np.array([1e-5, 2e-5, 3e-5, 1.0, 5e-5])  # index 3 is too large
-    weights = _make_mock_soln_group_with_results(results)
-    assert weights[3] == pytest.approx(0.0), f"Large result should produce zero weight, got {weights[3]}"
-    assert np.any(weights > 0)
-
-
-def test_weights_uniform_fallback():
-    """Missing RESULTS HDU (KeyError) should produce uniform weights of 1.0."""
-    from unittest.mock import MagicMock, PropertyMock
-
-    mock_group = MagicMock(spec=HyperfitsSolutionGroup)
-    n_chans = 96
-    type(mock_group).results = PropertyMock(side_effect=KeyError("RESULTS"))
-    mock_group.all_chanblocks_hz = [np.linspace(138e6, 170e6, n_chans)]
-
-    weights = HyperfitsSolutionGroup.weights.fget(mock_group)
-
-    assert len(weights) == n_chans
-    assert np.all(weights == pytest.approx(1.0))
-
-
-# ===========================================================================
 # NEW: fit_gain
 # ===========================================================================
 
@@ -1234,87 +1119,6 @@ def test_fit_gain_length_mismatch_raises():
     weights = np.ones(10)
     with pytest.raises(AssertionError):
         fit_gain(freqs, solns, weights, chanblocks_per_coarse=2)
-
-
-# ===========================================================================
-# NEW: process_phase_fits / process_gain_fits
-# ===========================================================================
-
-
-@pytest.fixture
-def process_fits_inputs():
-    """Shared inputs for process_phase_fits and process_gain_fits tests."""
-    tiles = _make_tiles_df(n_tiles=_PROCESS_N_TILES, flagged_ids=_PROCESS_FLAGGED)
-    weights = np.ones(_PROCESS_N_CHANBLOCKS)
-    soln_tile_ids = np.array([1, 2, 3])
-    all_xx = _make_solns_array(_PROCESS_N_TILES, _PROCESS_N_CHANBLOCKS, length_m=5.0)
-    all_yy = _make_solns_array(_PROCESS_N_TILES, _PROCESS_N_CHANBLOCKS, length_m=7.0)
-    return tiles, _GAIN_FREQS, weights, soln_tile_ids, all_xx, all_yy
-
-
-def test_process_phase_fits_returns_dataframe_with_correct_columns(process_fits_inputs, tmp_path):
-    tiles, freqs, weights, soln_tile_ids, all_xx, all_yy = process_fits_inputs
-    result = process_phase_fits(tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1)
-    assert isinstance(result, pd.DataFrame)
-    assert _EXPECTED_PHASE_COLS.issubset(set(result.columns))
-
-
-def test_process_phase_fits_skips_flagged_tile(process_fits_inputs, tmp_path):
-    tiles, freqs, weights, soln_tile_ids, all_xx, all_yy = process_fits_inputs
-    result = process_phase_fits(tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1)
-    assert 3 not in result["tile_id"].values
-
-
-def test_process_phase_fits_has_xx_and_yy_rows(process_fits_inputs, tmp_path):
-    """2 unflagged tiles × 2 pols = 4 rows."""
-    tiles, freqs, weights, soln_tile_ids, all_xx, all_yy = process_fits_inputs
-    result = process_phase_fits(tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1)
-    assert len(result) == 4
-    assert set(result["pol"].unique()) == {"XX", "YY"}
-
-
-def test_process_phase_fits_bad_solution_skipped_not_raised(tmp_path):
-    """A tile with all-NaN solutions should be skipped; others should still appear."""
-    tiles = _make_tiles_df(n_tiles=2, flagged_ids=[])
-    weights = np.ones(_PROCESS_N_CHANBLOCKS)
-    soln_tile_ids = np.array([1, 2])
-    all_xx = _make_solns_array(2, _PROCESS_N_CHANBLOCKS, length_m=5.0)
-    all_yy = _make_solns_array(2, _PROCESS_N_CHANBLOCKS, length_m=5.0)
-    # Corrupt tile 1 (index 0) with NaN
-    all_xx[0, 0, :] = np.nan
-    all_yy[0, 0, :] = np.nan
-    result = process_phase_fits(tiles, _GAIN_FREQS, all_xx, all_yy, weights, soln_tile_ids, phase_fit_niter=1)
-    assert 1 not in result["tile_id"].values
-    assert 2 in result["tile_id"].values
-
-
-def test_process_gain_fits_returns_dataframe_with_correct_columns(process_fits_inputs):
-    tiles, freqs, weights, soln_tile_ids, all_xx, all_yy = process_fits_inputs
-    result = process_gain_fits(tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, _CHANBLOCKS_PER_COARSE)
-    assert isinstance(result, pd.DataFrame)
-    assert _EXPECTED_GAIN_COLS.issubset(set(result.columns))
-
-
-def test_process_gain_fits_skips_flagged_tile(process_fits_inputs):
-    tiles, freqs, weights, soln_tile_ids, all_xx, all_yy = process_fits_inputs
-    result = process_gain_fits(tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, _CHANBLOCKS_PER_COARSE)
-    assert 3 not in result["tile_id"].values
-
-
-def test_process_gain_fits_has_xx_and_yy_rows(process_fits_inputs):
-    """2 unflagged tiles × 2 pols = 4 rows."""
-    tiles, freqs, weights, soln_tile_ids, all_xx, all_yy = process_fits_inputs
-    result = process_gain_fits(tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, _CHANBLOCKS_PER_COARSE)
-    assert len(result) == 4
-    assert set(result["pol"].unique()) == {"XX", "YY"}
-
-
-def test_process_gain_fits_gains_list_length(process_fits_inputs):
-    """Each row's gains list should have length == n_coarse."""
-    tiles, freqs, weights, soln_tile_ids, all_xx, all_yy = process_fits_inputs
-    result = process_gain_fits(tiles, freqs, all_xx, all_yy, weights, soln_tile_ids, _CHANBLOCKS_PER_COARSE)
-    for gains in result["gains"]:
-        assert len(gains) == _N_COARSE
 
 
 # ===========================================================================
@@ -1675,160 +1479,6 @@ class TestGetSortedSolutionFiles:
         ]
 
 
-#
-# tests for clipping gains
-#
-def make_solutions_fits(path: str, data: np.ndarray) -> None:
-    """Create a minimal FITS file containing a SOLUTIONS ImageHDU.
-
-    Args:
-        path: Output path for the FITS file.
-        data: Array of shape (time, antenna, chan, 8) with dtype float64.
-    """
-    primary = fits.PrimaryHDU()
-    solutions_hdu = fits.ImageHDU(data=data.astype(np.float64), name="SOLUTIONS")
-    fits.HDUList([primary, solutions_hdu]).writeto(path, overwrite=True)
-
-
-def read_solutions_complex(path: str) -> np.ndarray:
-    """Read the SOLUTIONS HDU from a FITS file and return as complex128.
-
-    Args:
-        path: Path to the FITS file.
-
-    Returns:
-        Array of shape (time, antenna, chan, 4) with dtype complex128.
-    """
-    with fits.open(path) as hdul:
-        return np.array(hdul["SOLUTIONS"].data, dtype=np.float64).view(np.complex128)
-
-
-# --- Tests ---
-
-
-def test_no_values_clipped_when_all_below_cutoff(tmp_path):
-    """No values should be NaN when all amplitudes are below cut_off."""
-    # amp = sqrt(1^2 + 1^2) = ~1.41, well below 100
-    data = np.ones((2, 3, 4, 8), dtype=np.float64)
-    path = str(tmp_path / "solutions.fits")
-    make_solutions_fits(path, data)
-
-    # setup dummy metafitscontext
-    mc = mwalib.MetafitsContext("tests/data/1457904016/1457904016_metafits.fits")
-
-    clip_hyperdrive_solution_gains(path, cut_off=100.0, mc=mc)
-
-    assert not np.any(np.isnan(read_solutions_complex(path)))
-
-
-def test_value_above_cutoff_set_to_nan(tmp_path):
-    """A single polarisation above cut_off should be set to NaN."""
-    data = np.ones((2, 3, 4, 8), dtype=np.float64)
-    # Set XX at (time=0, tile=1, chan=2): re=200, im=0 → amp=200
-    data[0, 1, 2, 0] = 200.0
-    data[0, 1, 2, 1] = 0.0
-    path = str(tmp_path / "solutions.fits")
-    make_solutions_fits(path, data)
-
-    # setup dummy metafitscontext
-    mc = mwalib.MetafitsContext("tests/data/1457904016/1457904016_metafits.fits")
-
-    clip_hyperdrive_solution_gains(path, cut_off=100.0, mc=mc)
-
-    result = read_solutions_complex(path)
-    assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
-
-    # XX was > cut off, so entire jones matrix is NaN
-    # lets check the r,i values first of XX
-    assert np.isnan(result[0, 1, 2, 0].real)
-    assert np.isnan(result[0, 1, 2, 0].imag)
-
-    # XY, YX, YY untouched — np.ones gives re=1, im=1 → 1+1j
-    assert np.isnan(result[0, 1, 2, 1])  # XY also clipped
-    assert np.isnan(result[0, 1, 2, 2])  # YX also clipped
-    assert np.isnan(result[0, 1, 2, 3])  # YY also clipped
-
-    # Other jones matrices are normal
-    assert result[0, 1, 1, 0] == complex(1, 1)  # XX not clipped
-    assert result[0, 1, 1, 1] == complex(1, 1)  # XY not clipped
-    assert result[0, 1, 1, 2] == complex(1, 1)  # YX not clipped
-    assert result[0, 1, 1, 3] == complex(1, 1)  # YY not clipped
-
-
-def test_all_values_clipped_when_all_above_cutoff(tmp_path):
-    """All values should be NaN when every amplitude exceeds cut_off."""
-    # amp = sqrt(200^2 + 200^2) = ~282.8, above 100
-    data = np.full((2, 3, 4, 8), 200.0, dtype=np.float64)
-    path = str(tmp_path / "solutions.fits")
-    make_solutions_fits(path, data)
-
-    # setup dummy metafitscontext
-    mc = mwalib.MetafitsContext("tests/data/1457904016/1457904016_metafits.fits")
-
-    clip_hyperdrive_solution_gains(path, cut_off=100.0, mc=mc)
-    result = read_solutions_complex(path)
-    assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
-    assert np.all(np.isnan(result))
-
-
-def test_preexisting_nans_are_preserved(tmp_path):
-    """Pre-existing NaN values should not be modified or trigger additional flagging."""
-    data = np.ones((2, 3, 4, 8), dtype=np.float64)
-    # Pre-existing NaN in XX real/imag at (time=1, tile=0, chan=0)
-    data[1, 0, 0, 0] = np.nan
-    data[1, 0, 0, 1] = np.nan
-    path = str(tmp_path / "solutions.fits")
-    make_solutions_fits(path, data)
-
-    # setup dummy metafitscontext
-    mc = mwalib.MetafitsContext("tests/data/1457904016/1457904016_metafits.fits")
-
-    clip_hyperdrive_solution_gains(path, cut_off=100.0, mc=mc)
-
-    result = read_solutions_complex(path)
-    assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
-    assert np.isnan(result[1, 0, 0, 0])  # pre-existing NaN preserved
-    assert not np.any(np.isnan(result[0, :, :]))  # other timestep untouched
-
-
-def test_value_exactly_at_cutoff_not_clipped(tmp_path):
-    """A value exactly equal to cut_off should not be clipped (mask is strictly >)."""
-    data = np.ones((1, 1, 1, 8), dtype=np.float64)
-    # Set XX: re=100, im=0 → amp=100.0 exactly
-    data[0, 0, 0, 0] = 100.0
-    data[0, 0, 0, 1] = 0.0
-    path = str(tmp_path / "solutions.fits")
-    make_solutions_fits(path, data)
-
-    # setup dummy metafitscontext
-    mc = mwalib.MetafitsContext("tests/data/1457904016/1457904016_metafits.fits")
-
-    clip_hyperdrive_solution_gains(path, cut_off=100.0, mc=mc)
-
-    result = read_solutions_complex(path)
-    assert result.dtype == np.complex128, f"Expected complex128, got {result.dtype}"
-    assert not np.isnan(result[0, 0, 0, 0])  # exactly at cutoff, not clipped
-
-
-def test_missing_solutions_hdu_raises(tmp_path):
-    """Should raise an exception if no SOLUTIONS HDU exists in the file."""
-    primary = fits.PrimaryHDU()
-    other = fits.ImageHDU(data=np.ones((2, 2), dtype=np.float64), name="OTHER")
-    path = str(tmp_path / "no_solutions.fits")
-    fits.HDUList([primary, other]).writeto(path, overwrite=True)
-
-    # setup dummy metafitscontext
-    mc = mwalib.MetafitsContext("tests/data/1457904016/1457904016_metafits.fits")
-
-    with pytest.raises(Exception, match="No SOLUTIONS HDU found"):
-        clip_hyperdrive_solution_gains(path, cut_off=100.0, mc=mc)
-
-
-# ===========================================================================
-# Tests for pad_gains_to_full_coarse and pad_gain_fit_info
-# ===========================================================================
-
-
 class TestPadGainsToFullCoarse:
     """Tests for the pad_gains_to_full_coarse() helper."""
 
@@ -2165,42 +1815,3 @@ class TestReadTilesHdu:
         _antennas, _names, flags = read_tiles_hdu(tiles_data)
 
         assert flags.dtype == np.bool_
-
-
-class TestSharedHduHelpersAgreeAcrossCallers:
-    """Cross-check: HyperfitsSolution and CalSolutionQuality must agree when
-    reading the same real solutions file, now that both go through the same
-    shared helpers.
-    """
-
-    # A real fixture whose filename parse_solution_channels() can parse.
-    SOLUTIONS_PATH = "tests/data/1391522232/1391522232_ch89_solutions.fits"
-
-    def test_gains_match_between_hyperfits_solution_and_cal_solution_quality(self):
-        """Every Jones-matrix term matches between the two independent readers."""
-        hs = HyperfitsSolution(self.SOLUTIONS_PATH)
-        xx, xy, yx, yy = hs.get_solutions()
-
-        quality = load_hyperdrive_solutions(self.SOLUTIONS_PATH)
-
-        assert np.allclose(xx[0], quality.gains[..., 0, 0], equal_nan=True)
-        assert np.allclose(xy[0], quality.gains[..., 0, 1], equal_nan=True)
-        assert np.allclose(yx[0], quality.gains[..., 1, 0], equal_nan=True)
-        assert np.allclose(yy[0], quality.gains[..., 1, 1], equal_nan=True)
-
-    def test_results_match_between_hyperfits_solution_and_cal_solution_quality(self):
-        """Convergence precision values agree between the two readers."""
-        hs = HyperfitsSolution(self.SOLUTIONS_PATH)
-        quality = load_hyperdrive_solutions(self.SOLUTIONS_PATH)
-
-        assert np.allclose(hs.results, quality.precision, equal_nan=True)
-
-    def test_tile_flags_match_tile_names_ordering(self):
-        """tile_flags (HyperfitsSolution) and tile_names (CalSolutionQuality)
-        are derived from the same antenna-sorted TILES HDU read, so their
-        lengths and implied tile ordering line up.
-        """
-        hs = HyperfitsSolution(self.SOLUTIONS_PATH)
-        quality = load_hyperdrive_solutions(self.SOLUTIONS_PATH)
-
-        assert len(hs.tile_flags) == len(quality.tile_names) == quality.n_tiles

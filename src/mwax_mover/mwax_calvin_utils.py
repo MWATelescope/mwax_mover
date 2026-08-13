@@ -17,10 +17,9 @@ import re
 import shutil
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import matplotlib as mpl
 import numpy as np
@@ -29,12 +28,10 @@ import pandas as pd
 import seaborn as sns
 from astropy import units as u
 from astropy.constants import c  # ty: ignore[unresolved-import]
-from astropy.io import fits
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from mwalib import MetafitsContext
 from numpy.typing import ArrayLike, NDArray
-from pandas import DataFrame
 from scipy.optimize import minimize
 
 from mwax_mover.mwax_command import (
@@ -42,7 +39,12 @@ from mwax_mover.mwax_command import (
     run_command_ext,
     run_command_popen,
 )
-from mwax_mover.utils import delete_files_older_than, extract_channels_from_filename, get_png_dimensions, is_int
+from mwax_mover.utils import (
+    delete_files_older_than,
+    extract_channels_from_filename,
+    get_png_dimensions,
+    is_int,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +132,37 @@ def read_tiles_hdu(tiles_data) -> tuple[NDArray[np.int_], list[str], NDArray[np.
     return antennas[order], tile_names, flags
 
 
+def read_baseline_tile_flags(baseline_weights: NDArray[np.float64], n_tiles: int) -> NDArray[np.bool_]:
+    """Infer per-tile flagging from a BASELINES HDU's NaN pattern.
+
+    Baselines are ordered ascending: (0,1), (0,2), ..., (0,N-1), (1,2), ...
+    (autocorrelations are not included in this HDU). A NaN weight on any
+    baseline involving a tile means that tile was flagged for the solve.
+
+    This is a third, independent source of tile flagging alongside the
+    TILES HDU's own Flag column and the metafits flag column: all three
+    come from the same hyperdrive run, but this one is derived rather than
+    stored directly, so it's worth keeping as a separate check in case it
+    and the TILES HDU flag column ever disagree within one file.
+
+    Args:
+        baseline_weights: 1D array of baseline weights (NaN = flagged).
+        n_tiles: Number of tiles/antennas in the observation.
+
+    Returns:
+        Boolean array of shape (n_tiles,), True where the tile is flagged.
+    """
+    tile_flagged = np.zeros(n_tiles, dtype=bool)
+    idx = 0
+    for i in range(n_tiles):
+        for j in range(i + 1, n_tiles):
+            if np.isnan(baseline_weights[idx]):
+                tile_flagged[i] = True
+                tile_flagged[j] = True
+            idx += 1
+    return tile_flagged
+
+
 class CalvinJobType(Enum):
     """Calvin Job Type"""
 
@@ -201,6 +234,16 @@ class Metafits:
         else:
             self.filename = metafits.metafits_filename
             self._mc = metafits
+
+    @property
+    def mwalib_context(self) -> MetafitsContext:
+        """Get the underlying mwalib MetafitsContext.
+
+        For callers that need the raw context directly -- e.g.
+        add_digital_gains_column, which reads rf_inputs digital gains --
+        rather than one of this class's own derived properties.
+        """
+        return self._mc
 
     @property
     def tiles(self) -> list[Tile]:
@@ -301,612 +344,6 @@ class Metafits:
     def obsid(self) -> int:
         """Get observation ID (GPS time) from metafits."""
         return self._mc.obs_id
-
-
-class HyperfitsSolution:
-    """A single calibration solution in hyperdrive FITS format"""
-
-    def __init__(self, filename) -> None:
-        """Initialize a HyperfitsSolution file reader.
-
-        Args:
-            filename: Path to the hyperdrive FITS solution file.
-        """
-        self.filename = filename
-
-    @property
-    def chanblocks_hz(self) -> NDArray[np.int_]:
-        """Get channel block frequencies from the solution file."""
-        with fits.open(self.filename) as hdus:
-            freq_data = hdus["CHANBLOCKS"].data["Freq"].astype(np.int_)
-            result = np.array(ensure_system_byte_order(freq_data))
-            assert len(result), f"no chanblocks found in {self.filename}"
-
-            # if multiple chanblocks, validate they are in order
-            if len(result) > 1:
-                diff = np.diff(result)
-                if not np.all(diff >= 0):
-                    raise RuntimeError(f"chanblocks are not in ascending order. {result=}")
-                if not np.all(diff[1:] == diff[0]):
-                    raise RuntimeError(f"chanblocks are not contiguous. {result=}")
-
-            return result
-
-    @property
-    def tile_flags(self) -> NDArray[np.bool_]:
-        """Get tile flags ordered by antenna index."""
-        with fits.open(self.filename) as hdus:
-            _antennas, _tile_names, flags = read_tiles_hdu(hdus["TILES"].data)
-            return flags
-
-    def get_average_times(self) -> list[float]:
-        """Get the average time for each timeblock.
-
-        Raises:
-            KeyError: If TIMEBLOCKS HDU is not present.
-        """
-        with fits.open(self.filename) as hdus:
-            time_data = hdus["TIMEBLOCKS"].data
-            return [time["Average"] for time in time_data]
-
-    def get_solutions(self) -> list[NDArray[np.complex128]]:
-        """Get solutions as complex arrays.
-
-        Returns:
-            A list of four complex arrays (XX, XY, YX, YY) each with shape [time, tile, chan].
-        """
-        with fits.open(self.filename) as hdus:
-            complex_solutions = read_solutions_hdu_complex(hdus["SOLUTIONS"].data)
-            return [complex_solutions[..., i] for i in range(4)]
-
-    def get_ref_solutions(self, ref_tile_idx=None) -> list[NDArray[np.complex128]]:
-        """Get solutions divided by reference tile.
-
-        Args:
-            ref_tile_idx: Index of the reference tile. If None, returns raw solutions.
-
-        Returns:
-            A list of four complex arrays (XX, XY, YX, YY) each with shape [time, tile, chan],
-            or raw solutions if ref_tile_idx is None.
-        """
-        solutions = self.get_solutions()
-
-        if ref_tile_idx is None:
-            return solutions
-
-        # divide solutions by reference
-        ref_solutions = [solution[:, ref_tile_idx, :] for solution in solutions]
-
-        # divide solutions jones matrix by reference jones matrix, via inverse determinant
-        ref_inv_det = np.divide(
-            1 + 0j,
-            ref_solutions[0] * ref_solutions[3] - ref_solutions[1] * ref_solutions[2],
-        )
-
-        return [
-            (solutions[0] * ref_solutions[3] - solutions[1] * ref_solutions[2]) * ref_inv_det,
-            (solutions[1] * ref_solutions[0] - solutions[0] * ref_solutions[1]) * ref_inv_det,
-            (solutions[2] * ref_solutions[3] - solutions[3] * ref_solutions[2]) * ref_inv_det,
-            (solutions[3] * ref_solutions[0] - solutions[2] * ref_solutions[1]) * ref_inv_det,
-        ]
-
-    @property
-    def results(self) -> NDArray[np.float64]:
-        """Get convergence results from the solution file.
-
-        Returns:
-            1-D float64 array of per-channel convergence values, for
-            timeblock 0.
-
-        Raises:
-            KeyError: If the RESULTS HDU is not present. This is expected for
-                older hyperdrive solution files. Callers that can tolerate missing
-                results should catch KeyError and fall back to uniform weights.
-        """
-        with fits.open(self.filename) as hdus:
-            return read_results_hdu(hdus["RESULTS"].data)
-
-
-class HyperfitsSolutionGroup:
-    """A group of Hyperdrive FITS calibration solutions and corresponding metafits files."""
-
-    def __init__(self, metafits: Metafits, solns: list[HyperfitsSolution]):
-        """Initialize a solution group with metafits and solution files.
-
-        Args:
-            metafits: List of Metafits file readers.
-            solns: List of HyperfitsSolution file readers.
-
-        Raises:
-            RuntimeError: If no metafits or solution files are provided.
-        """
-        self.metafits = metafits
-
-        if not len(solns):
-            raise RuntimeError("no solutions files provided")
-        self.solns = solns
-
-        self.metafits_tiles_df = self.metafits.tiles_df
-        self.metafits_chan_info = HyperfitsSolutionGroup.get_metafits_chan_info(self.metafits)
-        (
-            self.chanblocks_per_coarse,
-            self.all_chanblocks_hz,
-            self.all_solution_coarse_chan_indices,
-        ) = HyperfitsSolutionGroup.get_soln_chan_info(self.metafits_chan_info, self.solns)
-
-    @classmethod
-    def get_metafits_chan_info(cls, metafits: Metafits) -> ChanInfo:
-        """Get combined channel information from all metafits files.
-
-        Validates that channel ranges do not overlap and that channel info is consistent.
-
-        Args:
-            metafits: Metafits file object.
-
-        Returns:
-            Combined ChanInfo object.
-
-        Raises:
-            RuntimeError: If channel info is inconsistent or ranges overlap.
-        """
-        first_chan_info = metafits.chan_info
-        all_ranges = sorted([*first_chan_info.coarse_chan_ranges], key=lambda x: x[0])
-
-        # assert coarse channel ranges do not overlap
-        for left, right in zip(all_ranges[:-1], all_ranges[1:]):
-            if left[0] == right[0] or left[-1] >= right[0]:
-                raise RuntimeError(f"coarse channel ranges from metafits overlap. {[left, right]}, {metafits=}")
-
-        return ChanInfo(
-            coarse_chan_ranges=all_ranges,
-            fine_chan_width_hz=first_chan_info.fine_chan_width_hz,
-            fine_chans_per_coarse=first_chan_info.fine_chans_per_coarse,
-        )
-
-    @classmethod
-    def get_soln_chan_info(
-        cls, metafits_chan_info: ChanInfo, solns: list[HyperfitsSolution]
-    ) -> tuple[int, list[NDArray[np.int_]], list[int]]:
-        """Get channel block information for provided solutions.
-
-        Validates that channel info from metafits is consistent with solutions.
-
-        Args:
-            metafits_chan_info: Channel information from metafits files.
-            solns: List of solution files.
-
-        Returns:
-            A tuple of (chanblocks_per_coarse, list of chanblocks_hz arrays,
-            sorted list of coarse channel indices present across all solutions).
-
-        Raises:
-            RuntimeError: If channel info is inconsistent between solution and metafits.
-        """
-        chanblocks_per_coarse = None
-        all_chanblocks_hz = []
-        all_solution_coarse_chans: list[int] = []
-
-        metafits_coarse_chans = np.concatenate(metafits_chan_info.coarse_chan_ranges)
-        metafits_fine_chan_width_hz = metafits_chan_info.fine_chan_width_hz
-        metafits_fine_chans_per_coarse = metafits_chan_info.fine_chans_per_coarse
-        metafits_coarse_bandwidth_hz = metafits_fine_chan_width_hz * metafits_fine_chans_per_coarse
-
-        for soln in solns:
-            # coarse_chans = chaninfo.coarse_chan_ranges[coarse_chan_range_idx]
-            chanblocks_hz = soln.chanblocks_hz
-
-            if len(chanblocks_hz) < 2:
-                raise RuntimeError(f"{soln.filename} - not enough chanblocks found ({chanblocks_hz=})")
-
-            chanblock_width_hz = chanblocks_hz[1] - chanblocks_hz[0]
-
-            if chanblock_width_hz % metafits_fine_chan_width_hz != 0:
-                raise RuntimeError(
-                    f"{soln.filename} - chanblock width in solution file ({chanblock_width_hz})"
-                    f" is not a multiple of fine channel width in metafits ({metafits_fine_chan_width_hz})"
-                )
-
-            chans_per_block = int(chanblock_width_hz // metafits_fine_chan_width_hz)
-            chanblocks_per_coarse_ = int(metafits_fine_chans_per_coarse // chans_per_block)
-
-            if chanblocks_per_coarse is None:
-                chanblocks_per_coarse = chanblocks_per_coarse_
-            else:
-                if chanblocks_per_coarse != chanblocks_per_coarse_:
-                    raise RuntimeError(
-                        f"{soln.filename} - chanblocks_per_coarse {chanblocks_per_coarse_}"
-                        f" does not match previous value {chanblocks_per_coarse}"
-                    )
-
-            # break chanblocks into coarse channels
-            soln_coarse_chans = []
-            for coarse_chanblocks in np.split(chanblocks_hz, len(chanblocks_hz) // chanblocks_per_coarse):
-                if len(coarse_chanblocks) == 1:
-                    coarse_centroid_hz = coarse_chanblocks[0]
-                else:
-                    coarse_bandwidth_hz = coarse_chanblocks[-1] - coarse_chanblocks[0]
-                    if coarse_bandwidth_hz > metafits_coarse_bandwidth_hz:
-                        raise RuntimeError(
-                            f"{soln.filename} - solution {coarse_bandwidth_hz=} > {metafits_coarse_bandwidth_hz=}"
-                        )
-                    coarse_centroid_hz = np.mean(coarse_chanblocks + chanblock_width_hz / 2)
-
-                coarse_chan_idx = np.round(coarse_centroid_hz // metafits_coarse_bandwidth_hz)
-
-                if coarse_chan_idx not in metafits_coarse_chans:
-                    raise RuntimeError(
-                        f"{soln.filename} - solution coarse centroid {coarse_centroid_hz}Hz ({coarse_chan_idx=}) "
-                        "not found in metafits coarse channels"
-                    )
-
-                if coarse_chan_idx in soln_coarse_chans:
-                    raise RuntimeError(
-                        f"{soln.filename} - solution coarse centroid {coarse_centroid_hz}Hz ({coarse_chan_idx=}) "
-                        "already found in solution coarse channels"
-                    )
-
-                soln_coarse_chans.append(coarse_chan_idx)
-
-            range_ncoarse = len(soln_coarse_chans)
-            soln_ncoarse = len(chanblocks_hz) // chanblocks_per_coarse
-
-            if range_ncoarse != soln_ncoarse:
-                logger.warning(
-                    f"{soln.filename} - warning: number of coarse channels in solution file ({soln_ncoarse=})"
-                    f" does not match number of coarse channels in metafits for this range ({range_ncoarse=})"
-                    f" given {chanblocks_per_coarse=}, {chans_per_block=}"
-                )
-
-            # Accumulate coarse channel indices found in this solution file so
-            # we can later detect which metafits channels are missing solutions.
-            all_solution_coarse_chans.extend(int(c) for c in soln_coarse_chans)
-
-            all_chanblocks_hz.append(chanblocks_hz)
-
-        if all_chanblocks_hz is None:
-            raise RuntimeError("No valid channels found")
-
-        if chanblocks_per_coarse is None:
-            raise RuntimeError("chanblocks_per_coarse is none")
-
-        return (
-            chanblocks_per_coarse,
-            all_chanblocks_hz,
-            sorted(all_solution_coarse_chans),
-        )
-
-    @property
-    def refant(self) -> pd.Series:
-        """Get reference antenna (unflagged tile with lowest ID).
-
-        Returns the first unflagged tile in the solutions and metafits.
-
-        Returns:
-            A pandas Series representing the reference antenna row.
-
-        Raises:
-            ValueError: If no unflagged tiles are found.
-        """
-        # Start from metafits flags then OR-in the solution flags for each file,
-        # without copying the full DataFrame.
-        combined_flag = self.metafits_tiles_df["flag"].to_numpy(dtype=bool)
-        for soln in self.solns:
-            combined_flag = np.logical_or(combined_flag, soln.tile_flags)
-
-        unflagged_mask = ~combined_flag
-        if not unflagged_mask.any():
-            raise ValueError("No unflagged tiles found")
-
-        # Return the row with the lowest tile ID among unflagged tiles.
-        candidate_ids = self.metafits_tiles_df["id"].to_numpy()
-        best_idx = np.where(unflagged_mask)[0][np.argmin(candidate_ids[unflagged_mask])]
-        return self.metafits_tiles_df.iloc[best_idx]
-
-    @property
-    def calibrator(self):
-        """Get calibrator source name(s) from metafits file."""
-        return self.metafits.calibrator
-
-    @property
-    def results(self) -> NDArray[np.float64]:
-        """Get the combined results array from all solutions."""
-        for soln, chanblocks_hz in zip(self.solns, self.all_chanblocks_hz):
-            if len(chanblocks_hz) != len(soln.results):
-                raise RuntimeError(
-                    f"{soln.filename} - number of chanblocks ({len(chanblocks_hz)})"
-                    f" does not match number of results ({len(soln.results)})"
-                )
-
-        results = np.concatenate([soln.results for soln in self.solns])
-
-        if results.size == 0:
-            raise RuntimeError("No valid results found")
-
-        return results
-
-    @property
-    def weights(self) -> NDArray[np.float64]:
-        """Generate per-channel weights from hyperdrive convergence results.
-
-        Convergence values < 0 or > 1e-4 are treated as invalid (set to NaN)
-        and excluded from normalisation. The remaining values are transformed
-        via exp(-result) and normalised to [0, 1].
-
-        Returns:
-            Float64 array of weights in [0, 1], one per chanblock. Invalid
-            or NaN entries become 0.0 via np.nan_to_num.
-
-        Note:
-            Falls back to uniform weights of 1.0 if the solution file does
-            not contain a RESULTS HDU (older hyperdrive versions).
-        """
-        try:
-            results = self.results.copy()  # copy so we can mutate safely
-            results[results < 0] = np.nan
-            results[results > 1e-4] = np.nan
-            exp_results = np.exp(-results)
-            return np.nan_to_num(
-                (exp_results - np.nanmin(exp_results)) / (np.nanmax(exp_results) - np.nanmin(exp_results))
-            )
-        except KeyError:
-            return np.full(len(self.all_chanblocks_hz[0]), 1.0)
-
-    def get_solns(self, refant_name=None) -> tuple[NDArray[np.int_], NDArray[np.complex128], NDArray[np.complex128]]:
-        """Get tile IDs and XX/YY solutions for the reference antenna.
-
-        Args:
-            refant_name: Name of the reference antenna. If None, no reference normalization is applied.
-
-        Returns:
-            A tuple of (tile_ids, xx_solutions, yy_solutions).
-
-        Raises:
-            RuntimeError: If reference antenna is not found or flagged in solutions.
-        """
-        # Pre-extract metafits arrays once to avoid per-iteration DataFrame copies.
-        tile_names = self.metafits_tiles_df["name"].to_numpy()
-        tile_ids = self.metafits_tiles_df["id"].to_numpy()
-        metafits_flags = self.metafits_tiles_df["flag"].to_numpy(dtype=bool)
-
-        soln_tile_ids = None
-        ref_tile_idx = None
-        all_xx_solns = None
-        all_yy_solns = None
-
-        for chanblocks_hz, soln in zip(self.all_chanblocks_hz, self.solns):
-            # TODO: ch_flags = hdus['CHANBLOCKS'].data['Flag']
-            # TODO: results = hdus['RESULTS'].data.flatten()
-
-            # Merge metafits and solution flags without copying the full DataFrame.
-            combined_flag = np.logical_or(metafits_flags, soln.tile_flags)
-
-            if refant_name is not None:
-                ref_mask = tile_names == refant_name
-
-                if not ref_mask.any():
-                    raise RuntimeError(f"{soln.filename} - reference tile {refant_name} not found in solution file")
-
-                if ref_mask.sum() > 1:
-                    raise RuntimeError(
-                        f"{soln.filename} - more than one tile with name {refant_name} found in solution file"
-                    )
-
-                _ref_tile_idx = int(np.where(ref_mask)[0][0])
-
-                if combined_flag[_ref_tile_idx]:
-                    raise RuntimeError(
-                        f"{soln.filename} - reference tile {refant_name}"
-                        f" is flagged in solutions file (index {_ref_tile_idx})"
-                    )
-
-                # FIX 2: use `is None` instead of falsy check so that index 0 is handled correctly
-                if ref_tile_idx is None:
-                    ref_tile_idx = _ref_tile_idx
-                elif ref_tile_idx != _ref_tile_idx:
-                    raise RuntimeError(
-                        f"{soln.filename} - reference tile in solution file does not match previous solution files"
-                    )
-
-            _tile_ids = tile_ids
-
-            # _tile_ids, _ref_tile_idx = soln.validate_tiles(tiles_by_name, refant)
-            if soln_tile_ids is None or not len(soln_tile_ids):
-                soln_tile_ids = tile_ids
-            elif not np.array_equal(soln_tile_ids, _tile_ids):
-                raise RuntimeError(
-                    f"{soln.filename} - tile selection in solution file"
-                    f" does not match previous solution files.\n"
-                    f" previous:\n{_tile_ids}\n"
-                    f" this:\n{soln_tile_ids}"
-                )
-
-            # validate timeblocks
-            try:
-                avg_times = soln.get_average_times()
-            except KeyError:
-                # actual time values are not actually used anyway, just length.
-                solutions = soln.get_solutions()
-                n_times = solutions[0].shape[0]
-                avg_times = [float("nan")] * n_times
-
-            # TODO: support multiple timeblocks
-            if len(avg_times) != 1:
-                raise RuntimeError(f"{soln.filename} - exactly 1 timeblock must be provided: ({len(avg_times)})")
-
-            # TODO: compare with metafits times
-
-            # validate solutions
-            solutions = soln.get_ref_solutions(ref_tile_idx)
-
-            for solution in solutions:
-                if (ntimes := solution.shape[0]) != 1:
-                    raise RuntimeError(
-                        f"{soln.filename} - number of timeblocks in SOLUTIONS HDU ({ntimes})"
-                        f" does not match number of timeblocks in TIMEBLOCKS HDU ({len(avg_times)})"
-                    )
-
-                if (ntiles := solution.shape[1]) != len(soln_tile_ids):
-                    raise RuntimeError(
-                        f"{soln.filename} - number of tiles in SOLUTIONS HDU ({ntiles})"
-                        f" does not match number of tiles in TILES HDU ({len(soln_tile_ids)})"
-                    )
-
-                if (nchans := solution.shape[2]) != len(chanblocks_hz):
-                    raise RuntimeError(
-                        f"{soln.filename} - number of channels in SOLUTIONS HDU ({nchans})"
-                        f" does not match number of channels in CHANBLOCKS HDU ({len(chanblocks_hz)})"
-                    )
-
-            # TODO: sanity check, ref_solutions should be identity matrix or NaN
-
-            if all_xx_solns is None:
-                all_xx_solns = solutions[0]
-            else:
-                all_xx_solns = np.concatenate((all_xx_solns, solutions[0]), axis=2)
-
-            if all_yy_solns is None:
-                all_yy_solns = solutions[3]
-            else:
-                all_yy_solns = np.concatenate((all_yy_solns, solutions[3]), axis=2)
-
-        if soln_tile_ids is None or all_xx_solns is None or all_yy_solns is None:
-            raise RuntimeError("No valid solutions found")
-
-        return soln_tile_ids, all_xx_solns, all_yy_solns
-
-    def get_solns_both(
-        self, refant_name: str
-    ) -> tuple[
-        NDArray[np.int_],
-        NDArray[np.complex128],
-        NDArray[np.complex128],
-        NDArray[np.complex128],
-        NDArray[np.complex128],
-    ]:
-        """Return tile IDs, raw and reference-normalised XX/YY solutions in one FITS read pass.
-
-        Equivalent to calling ``get_solns()`` and ``get_solns(refant_name)``
-        back-to-back, but reads each solution FITS file only once instead of
-        twice.  The raw (un-normalised) solutions are needed for gain fitting;
-        the reference-normalised solutions are needed for phase fitting.
-
-        The reference normalisation replicates
-        ``HyperfitsSolution.get_ref_solutions()`` on the already-read raw data,
-        avoiding a second FITS open.  The Jones matrix inverse of the reference
-        tile is applied channel-wise via the standard 2×2 determinant formula.
-
-        Args:
-            refant_name: Name of the reference antenna (must not be flagged in
-                either the metafits or the solution file).
-
-        Returns:
-            A 5-tuple of ``(tile_ids, noref_xx, noref_yy, ref_xx, ref_yy)``.
-
-        Raises:
-            RuntimeError: If the reference antenna is not found, is flagged, or
-                if solution data is inconsistent across files.
-        """
-        # Pre-extract metafits arrays once so the per-file loop needs no
-        # DataFrame copies and no repeated column access.
-        tile_names = self.metafits_tiles_df["name"].to_numpy()
-        tile_ids = self.metafits_tiles_df["id"].to_numpy()
-        metafits_flags = self.metafits_tiles_df["flag"].to_numpy(dtype=bool)
-
-        soln_tile_ids = None
-        ref_tile_idx: int | None = None
-        all_noref_xx: NDArray[np.complex128] | None = None
-        all_noref_yy: NDArray[np.complex128] | None = None
-        all_ref_xx: NDArray[np.complex128] | None = None
-        all_ref_yy: NDArray[np.complex128] | None = None
-
-        for chanblocks_hz, soln in zip(self.all_chanblocks_hz, self.solns):
-            # Merge flags without a DataFrame copy.
-            combined_flag = np.logical_or(metafits_flags, soln.tile_flags)
-
-            # Find and validate the reference antenna.
-            ref_mask = tile_names == refant_name
-            if not ref_mask.any():
-                raise RuntimeError(f"{soln.filename} - reference tile {refant_name} not found in solution file")
-            if ref_mask.sum() > 1:
-                raise RuntimeError(
-                    f"{soln.filename} - more than one tile with name {refant_name} found in solution file"
-                )
-            _ref_tile_idx = int(np.where(ref_mask)[0][0])
-            if combined_flag[_ref_tile_idx]:
-                raise RuntimeError(
-                    f"{soln.filename} - reference tile {refant_name}"
-                    f" is flagged in solutions file (index {_ref_tile_idx})"
-                )
-            if ref_tile_idx is None:
-                ref_tile_idx = _ref_tile_idx
-            elif ref_tile_idx != _ref_tile_idx:
-                raise RuntimeError(
-                    f"{soln.filename} - reference tile in solution file does not match previous solution files"
-                )
-
-            # Tile ID consistency check.
-            if soln_tile_ids is None:
-                soln_tile_ids = tile_ids
-            elif not np.array_equal(soln_tile_ids, tile_ids):
-                raise RuntimeError(f"{soln.filename} - tile IDs do not match previous solution files")
-
-            # Single FITS read for all solution data — this is the key difference
-            # from two separate get_solns() calls.
-            raw_solutions = soln.get_solutions()
-
-            # Validate timeblock count directly from the solutions array,
-            # avoiding a separate FITS open for the TIMEBLOCKS HDU.
-            n_times = raw_solutions[0].shape[0]
-            if n_times != 1:
-                raise RuntimeError(f"{soln.filename} - exactly 1 timeblock must be provided: ({n_times})")
-
-            # Shape validation.
-            for solution in raw_solutions:
-                if (ntimes := solution.shape[0]) != 1:
-                    raise RuntimeError(f"{soln.filename} - SOLUTIONS HDU timeblock count ({ntimes}) != 1")
-                if (ntiles := solution.shape[1]) != len(soln_tile_ids):
-                    raise RuntimeError(
-                        f"{soln.filename} - number of tiles in SOLUTIONS HDU ({ntiles})"
-                        f" does not match TILES HDU ({len(soln_tile_ids)})"
-                    )
-                if (nchans := solution.shape[2]) != len(chanblocks_hz):
-                    raise RuntimeError(
-                        f"{soln.filename} - number of channels in SOLUTIONS HDU ({nchans})"
-                        f" does not match CHANBLOCKS HDU ({len(chanblocks_hz)})"
-                    )
-
-            # Raw (un-normalised) XX and YY for gain fitting.
-            noref_xx = raw_solutions[0]
-            noref_yy = raw_solutions[3]
-
-            # Reference-normalised XX and YY for phase fitting.
-            # Replicates HyperfitsSolution.get_ref_solutions() on already-read data.
-            # ref[i] has shape (1, n_chans); broadcasting over the tiles axis is implicit.
-            ref = [s[:, ref_tile_idx, :] for s in raw_solutions]
-            ref_inv_det = np.divide(1 + 0j, ref[0] * ref[3] - ref[1] * ref[2])
-            ref_xx = (raw_solutions[0] * ref[3] - raw_solutions[1] * ref[2]) * ref_inv_det
-            ref_yy = (raw_solutions[3] * ref[0] - raw_solutions[2] * ref[1]) * ref_inv_det
-
-            # Accumulate across solution files.
-            if all_noref_xx is None or all_noref_yy is None or all_ref_xx is None or all_ref_yy is None:
-                all_noref_xx, all_noref_yy = noref_xx, noref_yy
-                all_ref_xx, all_ref_yy = ref_xx, ref_yy
-            else:
-                all_noref_xx = np.concatenate((all_noref_xx, noref_xx), axis=2)
-                all_noref_yy = np.concatenate((all_noref_yy, noref_yy), axis=2)
-                all_ref_xx = np.concatenate((all_ref_xx, ref_xx), axis=2)
-                all_ref_yy = np.concatenate((all_ref_yy, ref_yy), axis=2)
-
-        if (
-            soln_tile_ids is None
-            or all_noref_xx is None
-            or all_noref_yy is None
-            or all_ref_xx is None
-            or all_ref_yy is None
-        ):
-            raise RuntimeError("No valid solutions found")
-
-        return soln_tile_ids, all_noref_xx, all_noref_yy, all_ref_xx, all_ref_yy
 
 
 class PhaseFitInfo(NamedTuple):
@@ -1356,6 +793,92 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse: int) -> GainF
     )
 
 
+def iterative_poly_clip(
+    x: np.ndarray,
+    y: np.ndarray,
+    degree: int,
+    residual_threshold: float,
+    initial_valid: np.ndarray,
+    max_iter: int = 10,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float, float]:
+    """Fit a robust, sigma-clipped polynomial to y(x) and flag outliers.
+
+    Iteratively fits a degree-N polynomial on the currently-valid points,
+    computes residuals against that fit, rejects points whose residual
+    exceeds residual_threshold MADs (median absolute deviations) from the
+    median residual, and refits -- repeating until the valid set stops
+    changing (or max_iter is reached). This guards against a single
+    extreme outlier dragging a one-shot least-squares fit far enough off
+    course that it masks the very outlier it should catch.
+
+    Ported from the now-deleted mwax_calvin_quality._iterative_poly_clip as
+    a standalone pure function, for reuse by
+    HyperfitsSolutionGroup.flag_amplitude_outliers.
+
+    Args:
+        x: 1D array of independent variable values (e.g. chanblock index).
+        y: 1D array of dependent variable values (e.g. gain amplitude).
+        degree: Polynomial degree to fit.
+        residual_threshold: Number of residual-MADs beyond which a point
+            is considered an outlier. Dimensionless -- e.g. 5.0 means "5x
+            the typical residual scatter for this tile/pol", not an
+            absolute gain value.
+        initial_valid: Boolean mask of points eligible to be fit at all
+            (e.g. already excludes points flagged for unrelated reasons
+            like non-convergence). Outliers found here are only ever a
+            subset of this mask.
+        max_iter: Maximum number of fit/clip iterations.
+
+    Returns:
+        A tuple (valid, residual, fit, mad, med):
+        - valid: Boolean array, True for points considered good (within
+          initial_valid and not rejected as an outlier).
+        - residual: Float array, |y - fit - median_residual| / mad at
+          every point (including points outside initial_valid, computed
+          against the final fit). NaN everywhere if no fit could ever be
+          computed (too few valid points).
+        - fit: Float array, the final polynomial fit evaluated at every x.
+          NaN everywhere if no fit could be computed at all.
+        - mad: The median absolute deviation of residuals from the final
+          fit iteration (scalar, same units as y). NaN if no fit could be
+          computed.
+        - med: The median residual from the final fit iteration (scalar,
+          same units as y). NaN if no fit could be computed.
+    """
+    n = len(y)
+    valid = initial_valid.copy()
+    residual = np.full(n, np.nan, dtype=np.float64)
+    fit = np.full(n, np.nan, dtype=np.float64)
+    mad = np.nan
+    med = np.nan
+
+    if valid.sum() < degree + 2:
+        return valid, residual, fit, mad, med
+
+    for _ in range(max_iter):
+        coeffs = np.polyfit(x[valid], y[valid], degree)
+        fit = np.polyval(coeffs, x)
+        resid_all = y - fit
+
+        med = np.median(resid_all[valid])
+        mad = np.median(np.abs(resid_all[valid] - med))
+        if mad == 0:
+            residual[:] = 0.0
+            break
+
+        residual = np.abs(resid_all - med) / mad
+        new_valid = initial_valid & (residual <= residual_threshold)
+
+        if new_valid.sum() < degree + 2:
+            break
+        if np.array_equal(new_valid, valid):
+            valid = new_valid
+            break
+        valid = new_valid
+
+    return valid, residual, fit, mad, med
+
+
 def poly_str(coeffs, independent_var="x"):
     """Format polynomial coefficients as a string expression.
 
@@ -1535,7 +1058,16 @@ def reject_outliers(data, quality_key, nstd=3.0):
         data["outlier"] = False
     for pol in data["pol"].unique():
         idx_pol_good = np.where(np.logical_and(data["pol"] == pol, ~data["outlier"]))[0]
-        quality_thresh = data.loc[idx_pol_good, quality_key].mean() + nstd * data.loc[idx_pol_good, quality_key].std()
+        pol_std = data.loc[idx_pol_good, quality_key].std()
+        if pol_std == 0 or np.isnan(pol_std):
+            # No variation across this pol's population (or too few points
+            # to compute a meaningful std, e.g. a single row) -- nothing
+            # stands out, so don't flag anyone. Without this guard, a
+            # population with zero spread gives threshold == mean, and
+            # "value >= threshold" trivially flags every row as an
+            # outlier via equality -- the opposite of correct behaviour.
+            continue
+        quality_thresh = data.loc[idx_pol_good, quality_key].mean() + nstd * pol_std
         if nstd >= 0:
             data.loc[data[quality_key] >= quality_thresh, "outlier"] = True
         else:
@@ -1869,6 +1401,12 @@ def get_convergence_summary(solutions_fits_file: str):
     Returns:
         List of tuples with convergence statistics.
     """
+    # Local import to avoid a module-level circular dependency: HyperfitsSolution
+    # now lives in mwax_hyperdrive_solutions.py, which itself imports several
+    # symbols from this module (ChanInfo, Metafits, ensure_system_byte_order,
+    # etc.). This is the only remaining usage of HyperfitsSolution here.
+    from mwax_mover.mwax_hyperdrive_solutions import HyperfitsSolution
+
     soln = HyperfitsSolution(solutions_fits_file)
     results = soln.results
     converged_channel_indices = np.where(~np.isnan(results))
@@ -2273,193 +1811,6 @@ def run_hyperdrive(
         return False, calibration_command
 
     return True, calibration_command
-
-
-def process_phase_fits(
-    tiles,
-    chanblocks_hz,
-    all_xx_solns,
-    all_yy_solns,
-    weights,
-    soln_tile_ids,
-    phase_fit_niter,
-):
-    """Fit linear phase ramps to each tile and polarization.
-
-    Args:
-        tiles: DataFrame with tile information.
-        chanblocks_hz: Array of channel block frequencies in Hz.
-        all_xx_solns: XX polarization solutions for all tiles.
-        all_yy_solns: YY polarization solutions for all tiles.
-        weights: Weight values for each solution.
-        soln_tile_ids: Tile IDs in the solutions.
-        phase_fit_niter: Number of iterations for fitting.
-
-    Returns:
-        DataFrame with phase fit parameters for each tile and polarization.
-    """
-    futures = {}
-
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
-            for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
-                future = executor.submit(
-                    _phase_fit_one,
-                    soln_idx,
-                    tile_id,
-                    pol,
-                    solns,
-                    chanblocks_hz,
-                    weights,
-                    phase_fit_niter,
-                    tiles,
-                )
-                futures[future] = (soln_idx, tile_id, pol)
-
-    fits = [result for future in as_completed(futures) if (result := future.result()) is not None]
-
-    return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])
-
-
-def _phase_fit_one(
-    soln_idx: int,
-    tile_id: int,
-    pol: str,
-    solns: NDArray[np.complex128],
-    chanblocks_hz: NDArray[np.float64],
-    weights: NDArray[np.float64],
-    phase_fit_niter: int,
-    tiles: DataFrame,
-) -> list | None:
-    """Fit a phase ramp for a single tile and polarization.
-
-    Looks up the tile in the tiles DataFrame, skips flagged or missing tiles,
-    and calls fit_phase_line to perform the fit. Intended to be called
-    concurrently via ThreadPoolExecutor.
-
-    Args:
-        soln_idx: Index of this tile in the solutions array.
-        tile_id: The tile ID to look up in the tiles DataFrame.
-        pol: Polarization label, either "XX" or "YY".
-        solns: Complex calibration solutions for this tile and polarization.
-        chanblocks_hz: Array of channel block frequencies in Hz.
-        weights: Weight values for each solution.
-        phase_fit_niter: Number of iterations for phase fitting.
-        tiles: DataFrame containing tile metadata including flags and names.
-
-    Returns:
-        A list of [tile_id, soln_idx, pol, *PhaseFitInfo fields] if the fit
-        succeeded, or None if the tile was skipped or the fit failed.
-    """
-    id_matches = tiles[tiles.id == tile_id]
-    if len(id_matches) != 1:
-        return None
-    tile = id_matches.iloc[0]
-    if tile.flag:
-        return None
-    name = tile.name
-    try:
-        fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)
-    except Exception:
-        logger.exception(f"Error: {tile_id=:4} {pol} ({name})")
-        return None
-    # uncomment me for verbose debug
-    # logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
-    return [tile_id, soln_idx, pol, *fit]
-
-
-def _gain_fit_one(
-    soln_idx: int,
-    tile_id: int,
-    pol: str,
-    solns: NDArray[np.complex128],
-    chanblocks_hz: NDArray[np.float64],
-    weights: NDArray[np.float64],
-    chanblocks_per_coarse: int,
-    tiles: DataFrame,
-) -> list | None:
-    """Fit gain solutions for a single tile and polarization.
-
-    Looks up the tile in the tiles DataFrame, skips flagged or missing tiles,
-    and calls fit_gain to perform the fit. Intended to be called
-    concurrently via ThreadPoolExecutor.
-
-    Args:
-        soln_idx: Index of this tile in the solutions array.
-        tile_id: The tile ID to look up in the tiles DataFrame.
-        pol: Polarization label, either "XX" or "YY".
-        solns: Complex calibration solutions for this tile and polarization.
-        chanblocks_hz: Array of channel block frequencies in Hz.
-        weights: Weight values for each solution.
-        chanblocks_per_coarse: Number of channel blocks per coarse channel.
-        tiles: DataFrame containing tile metadata including flags and names.
-
-    Returns:
-        A list of [tile_id, soln_idx, pol, *GainFitInfo fields] if the fit
-        succeeded, or None if the tile was skipped or the fit failed.
-    """
-    id_matches = tiles[tiles.id == tile_id]
-    if len(id_matches) != 1:
-        return None
-    tile = id_matches.iloc[0]
-    if tile.flag:
-        return None
-    name = tile.name
-    try:
-        fit = fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse)
-        # uncomment me for verbose debug
-        # logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
-        # logger.debug(f"gains: {fit.gains}")
-    except Exception:
-        logger.exception(f"Error: {tile_id=:4} {pol} ({name})")
-        return None
-    return [tile_id, soln_idx, pol, *fit]
-
-
-def process_gain_fits(
-    tiles: DataFrame,
-    chanblocks_hz: NDArray[np.float64],
-    all_xx_solns: NDArray[np.complex128],
-    all_yy_solns: NDArray[np.complex128],
-    weights: NDArray[np.float64],
-    soln_tile_ids: NDArray[np.signedinteger[Any]],
-    chanblocks_per_coarse: int,
-) -> DataFrame:
-    """Fit gain solutions to each tile and polarization.
-
-    Args:
-        tiles: DataFrame with tile information.
-        chanblocks_hz: Array of channel block frequencies in Hz.
-        all_xx_solns: XX polarization solutions for all tiles.
-        all_yy_solns: YY polarization solutions for all tiles.
-        weights: Weight values for each solution.
-        soln_tile_ids: Tile IDs in the solutions.
-        chanblocks_per_coarse: Number of channel blocks per coarse channel.
-
-    Returns:
-        DataFrame with gain fit parameters for each tile and polarization.
-    """
-    futures = {}
-
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
-            for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
-                future = executor.submit(
-                    _gain_fit_one,
-                    soln_idx,
-                    tile_id,
-                    pol,
-                    solns,
-                    chanblocks_hz,
-                    weights,
-                    chanblocks_per_coarse,
-                    tiles,
-                )
-                futures[future] = (soln_idx, tile_id, pol)
-
-    fits = [result for future in as_completed(futures) if (result := future.result()) is not None]
-
-    return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *GainFitInfo._fields])
 
 
 def create_sbatch_script(
@@ -3032,3 +2383,4 @@ def upload_plot_files(job_output_path: str, upload_path: str):
     except Exception as ee:
         # Something went wrong- log it and keep going
         logger.warning(f"Failed to move files to the {upload_path}. Error: {ee!s}. Ignoring")
+
