@@ -137,8 +137,8 @@ def _phase_fit_one(
     name = tile.name
     try:
         fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)
-    except Exception:
-        logger.exception(f"Error: {tile_id=:4} {pol} ({name})")
+    except Exception as exc:
+        logger.warning(f"Skipping phase fit for {tile_id=:4} {pol} ({name}): {exc}")
         return None
     return [tile_id, soln_idx, pol, *fit]
 
@@ -182,8 +182,8 @@ def _gain_fit_one(
     name = tile.name
     try:
         fit = fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse)
-    except Exception:
-        logger.exception(f"Error: {tile_id=:4} {pol} ({name})")
+    except Exception as exc:
+        logger.warning(f"Skipping gain fit for {tile_id=:4} {pol} ({name}): {exc}")
         return None
     return [tile_id, soln_idx, pol, *fit]
 
@@ -526,6 +526,20 @@ class HyperfitsSolutionGroup:
         self.amplitude_band: list[dict[str, tuple[NDArray[np.float64], NDArray[np.float64]]]] | None = None
         self.phase_fits: DataFrame | None = None
 
+        # Populated by run_flagging_pipeline(): a snapshot of jones/tile
+        # flag reasons/channel flag reasons/phase fits taken right after
+        # apply_tile_flags() (structural flags only), before the rest of
+        # the pipeline runs. Used by
+        # mwax_calvin_plots.write_stats_and_debug_plots() to report a
+        # "before" state alongside the group's final "after" state, and
+        # by callers needing a not-yet-fully-flagged snapshot for
+        # amplitude-outlier plots (see plot_outlier_gains's pristine_jones
+        # argument).
+        self.before_jones: list[NDArray[np.complex128]] | None = None
+        self.before_tile_flag_reasons: NDArray[np.object_] | None = None
+        self.before_channel_flag_reasons: list[NDArray[np.object_]] | None = None
+        self.before_phase_fits: DataFrame | None = None
+
     def _ensure_loaded(self) -> None:
         """Raise a clear error if load() hasn't been called yet.
 
@@ -534,8 +548,7 @@ class HyperfitsSolutionGroup:
         """
         if self.jones is None:
             raise RuntimeError(
-                "HyperfitsSolutionGroup.load() must be called before this method "
-                "(self.jones is not yet populated)."
+                "HyperfitsSolutionGroup.load() must be called before this method (self.jones is not yet populated)."
             )
 
     def load(self) -> None:
@@ -997,6 +1010,7 @@ class HyperfitsSolutionGroup:
             DataFrame with phase fit parameters for each tile and polarization,
             columns ["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields].
         """
+        logger.info("process_phase_fits")
         self._ensure_loaded()
         soln_tile_ids, _noref_xx, _noref_yy, ref_xx, ref_yy = self.get_solns_both(refant_name)
         chanblocks_hz = self.all_chanblocks_hz_concat
@@ -1032,6 +1046,7 @@ class HyperfitsSolutionGroup:
             DataFrame with gain fit parameters for each tile and polarization,
             columns ["tile_id", "soln_idx", "pol", *GainFitInfo._fields].
         """
+        logger.info("process_gain_fits")
         self._ensure_loaded()
         soln_tile_ids, noref_xx, noref_yy, _ref_xx, _ref_yy = self.get_solns_both(refant_name)
         chanblocks_hz = self.all_chanblocks_hz_concat
@@ -1088,6 +1103,8 @@ class HyperfitsSolutionGroup:
             mad_residual_threshold: Number of residual-MADs beyond which a
                 channel is an outlier (see iterative_poly_clip).
         """
+        logger.info("flag_amplitude_outliers")
+
         self._ensure_loaded()
         assert self.jones is not None
         assert self.channel_flag_reasons is not None
@@ -1138,9 +1155,7 @@ class HyperfitsSolutionGroup:
                 band_upper_gy[tile, :] = curve_gy + med_gy + mad_residual_threshold * mad_gy
 
             self.amplitude_fit.append({"gx": fit_gx, "gy": fit_gy})
-            self.amplitude_band.append(
-                {"gx": (band_lower_gx, band_upper_gx), "gy": (band_lower_gy, band_upper_gy)}
-            )
+            self.amplitude_band.append({"gx": (band_lower_gx, band_upper_gx), "gy": (band_lower_gy, band_upper_gy)})
 
     def flag_phase_outliers(self, refant_name: str, phase_fit_niter: int, nstd: float = 3.0) -> None:
         """Flag whole tiles whose phase fit is a population outlier.
@@ -1162,6 +1177,8 @@ class HyperfitsSolutionGroup:
             nstd: Number of standard deviations beyond the population mean
                 (per metric, per polarisation) before a tile is an outlier.
         """
+        logger.info("flag_phase_outliers")
+
         self._ensure_loaded()
         assert self.jones is not None
         assert self.tile_flag_reasons is not None
@@ -1182,7 +1199,7 @@ class HyperfitsSolutionGroup:
         for file_jones in self.jones:
             file_jones[outlier_mask, :, :, :] = np.nan + 1j * np.nan
 
-    def promote_mostly_bad_tiles(self, threshold: float = 0.5) -> None:
+    def flag_mostly_bad_tiles(self, threshold: float = 0.5) -> None:
         """Promote a partially-flagged tile to fully flagged if too much of it is bad.
 
         For each tile not already tile-flagged, computes the fraction of
@@ -1196,6 +1213,8 @@ class HyperfitsSolutionGroup:
             threshold: Fraction of chanblocks that must be bad (0-1) before
                 the whole tile is flagged.
         """
+        logger.info("flag_mostly_bad_tiles")
+
         self._ensure_loaded()
         assert self.jones is not None
         assert self.tile_flag_reasons is not None
@@ -1209,9 +1228,7 @@ class HyperfitsSolutionGroup:
             bad_channels += np.sum(file_reasons != ChannelFlagReason.NONE, axis=1)
 
         already_tile_flagged = self.tile_flag_reasons != TileFlagReason.NONE
-        bad_fraction = np.divide(
-            bad_channels, total_channels, out=np.zeros(n_tiles), where=total_channels > 0
-        )
+        bad_fraction = np.divide(bad_channels, total_channels, out=np.zeros(n_tiles), where=total_channels > 0)
         to_promote = (~already_tile_flagged) & (bad_fraction >= threshold)
         if not to_promote.any():
             return
@@ -1219,6 +1236,69 @@ class HyperfitsSolutionGroup:
         self.tile_flag_reasons[to_promote] |= TileFlagReason.MOSTLY_BAD_CHANNELS
         for file_jones in self.jones:
             file_jones[to_promote, :, :, :] = np.nan + 1j * np.nan
+
+    def run_flagging_pipeline(
+        self,
+        refant_name: str,
+        phase_fit_niter: int,
+        poly_degree: int = 2,
+        mad_residual_threshold: float = 5.0,
+        phase_outlier_nstd: float = 3.0,
+        tile_bad_channel_fraction_threshold: float = 0.5,
+    ) -> None:
+        """Run the full flagging pipeline in the standard order, capturing a
+        "before" snapshot along the way.
+
+        Consolidates the sequence previously duplicated between
+        mwax_calvin_processor and cal_utils: apply_tile_flags() (cheap,
+        structural), a "before" snapshot for later before/after reporting
+        (see self.before_jones etc.), enforce_whole_jones_nan(),
+        flag_phase_outliers() (whole-tile, whole-observation),
+        flag_amplitude_outliers() (per-file, per-tile), then
+        promote_mostly_bad_tiles() sees the combined result of everything
+        before it.
+
+        The "before" snapshot is captured right after apply_tile_flags() --
+        i.e. before any of the phase/amplitude/mostly-bad-tile outlier
+        detection has run, but with the cheap structural flags (metafits/
+        TILES HDU/BASELINES-inferred) already applied. It's stored as
+        self.before_jones, self.before_tile_flag_reasons,
+        self.before_channel_flag_reasons, and self.before_phase_fits, for
+        use by mwax_calvin_plots.write_stats_and_debug_plots() (or a
+        caller's own amplitude-outlier plots, e.g. plot_outlier_gains's
+        pristine_jones argument).
+
+        Args:
+            refant_name: Name of the reference antenna, used for both the
+                "before" phase fit captured here and flag_phase_outliers().
+            phase_fit_niter: Number of iterations for the phase ramp fit.
+            poly_degree: Degree of the polynomial fit to gain amplitude vs.
+                chanblock index (see flag_amplitude_outliers).
+            mad_residual_threshold: MAD residual threshold for gain-
+                amplitude outlier detection (see flag_amplitude_outliers).
+            phase_outlier_nstd: Number of standard deviations beyond the
+                population mean before a tile's phase fit is an outlier
+                (see flag_phase_outliers).
+            tile_bad_channel_fraction_threshold: Fraction (0-1) of a
+                tile's chanblocks that must already be flagged bad before
+                the whole tile is promoted to fully flagged (see
+                promote_mostly_bad_tiles).
+        """
+        self._ensure_loaded()
+        self.apply_tile_flags()
+
+        assert self.jones is not None
+        assert self.tile_flag_reasons is not None
+        assert self.channel_flag_reasons is not None
+        self.before_jones = [file_jones.copy() for file_jones in self.jones]
+        self.before_tile_flag_reasons = self.tile_flag_reasons.copy()
+        self.before_channel_flag_reasons = [reasons.copy() for reasons in self.channel_flag_reasons]
+        self.before_phase_fits = self.process_phase_fits(refant_name, phase_fit_niter)
+
+        self.enforce_whole_jones_nan()
+        self.flag_phase_outliers(refant_name, phase_fit_niter, nstd=phase_outlier_nstd)
+        self.flag_amplitude_outliers(poly_degree, mad_residual_threshold)
+        self.flag_mostly_bad_tiles(tile_bad_channel_fraction_threshold)
 
     def commit(self, metafits_context: mwalib.MetafitsContext) -> list[str | None]:
         """Write all in-memory changes to disk: one backup + one write per file.
@@ -1238,6 +1318,8 @@ class HyperfitsSolutionGroup:
             self.solns), or None for any file written with backup=False
             (not currently used here, but write_jones supports it).
         """
+        logger.info("writing solutions back to solutions files")
+
         self._ensure_loaded()
         assert self.jones is not None
 
@@ -1247,4 +1329,3 @@ class HyperfitsSolutionGroup:
             add_digital_gains_column(soln.filename, metafits_context)
 
         return backup_paths
-

@@ -1041,13 +1041,42 @@ def debug_phase_fits(
     return phase_fits_pivot
 
 
-def reject_outliers(data, quality_key, nstd=3.0):
+def reject_outliers(data, quality_key, nstd=3.0, max_iter=10):
     """Mark outliers in a DataFrame based on a quality metric.
+
+    Uses a robust, iteratively-refined threshold per polarisation:
+    threshold = median + nstd * 1.4826 * MAD, computed from that
+    polarisation's not-yet-flagged rows, with newly-flagged rows removed
+    from the population before recomputing the threshold and repeating
+    (until nothing new is flagged, or max_iter is reached).
+
+    This replaces a single-pass mean + nstd*std threshold, which is
+    vulnerable to masking (aka swamping): if several rows are comparably
+    bad, they inflate the population mean/std together, raising the
+    threshold enough that only the single most extreme one crosses it
+    while the rest hide beneath it. A robust median/MAD centre and scale
+    resists being dragged by the very outliers it's meant to catch, and
+    iterating lets the threshold tighten again each time an outlier is
+    set aside, so a cluster of comparably-bad rows gets caught round by
+    round instead of masking each other. Mirrors the median/MAD +
+    iterative-clip approach already used by iterative_poly_clip for
+    amplitude-outlier detection.
+
+    Also fixes a pre-existing bug: the previous implementation computed
+    quality_thresh from a `pol`-specific population but then applied it
+    via a mask with no `pol` filter, so a threshold derived from one
+    polarisation's population could incorrectly flag rows of the other.
+    Flagging is now scoped to the current `pol` throughout.
 
     Args:
         data: Input DataFrame with a 'pol' column and quality column.
         quality_key: Name of the column to use for outlier detection.
-        nstd: Number of standard deviations for outlier threshold (default: 3.0).
+        nstd: Number of (MAD-derived, approximately Gaussian-equivalent)
+            standard deviations beyond the population median before a
+            row is an outlier (default: 3.0). Negative flags low
+            outliers instead of high ones.
+        max_iter: Maximum number of threshold/clip iterations per
+            polarisation.
 
     Returns:
         DataFrame with an 'outlier' column added/updated marking outliers.
@@ -1056,23 +1085,62 @@ def reject_outliers(data, quality_key, nstd=3.0):
         return data
     if "outlier" not in data.columns:
         data["outlier"] = False
-    for pol in data["pol"].unique():
-        idx_pol_good = np.where(np.logical_and(data["pol"] == pol, ~data["outlier"]))[0]
-        pol_std = data.loc[idx_pol_good, quality_key].std()
-        if pol_std == 0 or np.isnan(pol_std):
-            # No variation across this pol's population (or too few points
-            # to compute a meaningful std, e.g. a single row) -- nothing
-            # stands out, so don't flag anyone. Without this guard, a
-            # population with zero spread gives threshold == mean, and
-            # "value >= threshold" trivially flags every row as an
-            # outlier via equality -- the opposite of correct behaviour.
-            continue
-        quality_thresh = data.loc[idx_pol_good, quality_key].mean() + nstd * pol_std
-        if nstd >= 0:
-            data.loc[data[quality_key] >= quality_thresh, "outlier"] = True
-        else:
-            data.loc[data[quality_key] <= quality_thresh, "outlier"] = True
 
+    # Scales a normal-distribution MAD to be comparable to a standard
+    # deviation, so nstd keeps roughly the same meaning as the previous
+    # mean+nstd*std threshold for a population with few/no outliers.
+    mad_to_std = 1.4826
+
+    quality_values = data[quality_key].to_numpy()
+    outlier_values = data["outlier"].to_numpy().copy()
+
+    for pol in data["pol"].unique():
+        pol_mask = (data["pol"] == pol).to_numpy()
+
+        for _ in range(max_iter):
+            idx_pol_good = np.where(pol_mask & ~outlier_values)[0]
+            if len(idx_pol_good) == 0:
+                break
+
+            pol_values = quality_values[idx_pol_good]
+            pol_median = np.median(pol_values)
+            pol_mad = np.median(np.abs(pol_values - pol_median))
+
+            if pol_mad == 0 or np.isnan(pol_mad):
+                if np.ptp(pol_values) == 0:
+                    # Truly zero spread across this pol's currently-good
+                    # population (or too few points to compute a
+                    # meaningful spread, e.g. a single row) -- nothing
+                    # stands out, so stop iterating for this pol. Without
+                    # this guard, zero spread gives threshold == median,
+                    # and ">=" trivially flags every remaining row via
+                    # equality -- the opposite of correct behaviour.
+                    break
+                # MAD's ~50% breakdown point means a minority of extreme
+                # values can collapse it to zero even though real spread
+                # exists (e.g. 9 identical values + 1 extreme one: the
+                # median residual is 0 for the majority, so is the MAD).
+                # Fall back to a mean+std threshold for this round only,
+                # as a safety net -- std isn't fooled by a minority
+                # outlier the way MAD's breakdown point is here.
+                pol_mean = np.mean(pol_values)
+                pol_std = np.std(pol_values, ddof=1)
+                if pol_std == 0:
+                    break
+                quality_thresh = pol_mean + nstd * pol_std
+            else:
+                quality_thresh = pol_median + nstd * mad_to_std * pol_mad
+
+            if nstd >= 0:
+                newly_bad = pol_mask & ~outlier_values & (quality_values >= quality_thresh)
+            else:
+                newly_bad = pol_mask & ~outlier_values & (quality_values <= quality_thresh)
+
+            if not newly_bad.any():
+                break
+            outlier_values[newly_bad] = True
+
+    data["outlier"] = outlier_values
     return data
 
 

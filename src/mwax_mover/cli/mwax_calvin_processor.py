@@ -61,6 +61,11 @@ logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
+# font_manager's "failed to find font weight X, using Y instead" notices
+# are cosmetic font-substitution fallbacks, not signs of a problem --
+# silence that specific logger rather than raising "matplotlib"'s whole
+# threshold (which would hide other, potentially useful warnings).
+logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 
 
 def _pool_worker_init() -> None:
@@ -139,7 +144,6 @@ class MWAXCalvinProcessor:
         self.source_list_type: str = ""
         self.phase_fit_niter: int = 0
         self.num_sources: int = 0
-        self.produce_debug_plots: bool = True  # default to true- for now only off if running via pytest
         self.keep_completed_visibility_files: bool = False
         self.cal_export_path: str | None = None
         self.cal_export_max_age_hours: int = 24  # default to 24 hours
@@ -356,11 +360,6 @@ class MWAXCalvinProcessor:
             # Get the solution files (still needed below for the export step)
             solution_files = glob.glob(os.path.join(self.job_output_path, "*_solutions.fits"))
 
-            # Now export the calibration solution FITS files to the export directory if configured
-            if self.cal_export_path is not None:
-                self.current_task_name = "Export solutions"
-                export_calibration_solutions(solution_files, self.cal_export_path, self.cal_export_max_age_hours)
-
             # If that worked, process the solutions and insert into db
             self.current_task_name = "Processing"
             logger.info("Processing solutions for db")
@@ -372,7 +371,6 @@ class MWAXCalvinProcessor:
                 self.phase_fit_niter,
                 os.path.basename(self.source_list_filename),
                 self.num_sources,
-                self.produce_debug_plots,
                 calibration_command,
                 self.gains_cut_off_max,
                 self.gain_outlier_poly_degree,
@@ -384,6 +382,11 @@ class MWAXCalvinProcessor:
             )
 
             if result:
+                # Now export the calibration solution FITS files to the export directory if configured
+                if self.cal_export_path is not None:
+                    self.current_task_name = "Export solutions"
+                    export_calibration_solutions(solution_files, self.cal_export_path, self.cal_export_max_age_hours)
+
                 if fit_id:
                     self.succeed_job_processing(fit_id)
 

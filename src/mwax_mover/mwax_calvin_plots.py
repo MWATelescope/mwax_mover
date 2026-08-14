@@ -19,6 +19,8 @@ Two families of functions live here:
 import logging
 import os
 import sys
+import warnings
+from pathlib import Path
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -56,7 +58,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def debug_phase_fits(
+def plot_debug_phase_fits(
     phase_fits: pd.DataFrame,
     tiles: pd.DataFrame,
     freqs: NDArray[np.float64],
@@ -394,7 +396,14 @@ def plot_phase_residual(
             raise RuntimeError(f"wut pol? {pol}")
         models = gradients[:, np.newaxis] * freqs[np.newaxis, :] + intercepts_arr[:, np.newaxis]
         resids = wrap_angle(np.angle(solns) - models)
-        medians = np.nanmedian(resids, axis=0)
+        # A whole frequency bin can legitimately be all-NaN here (e.g. every
+        # tile in this flavor/pol group is flagged at that chanblock) --
+        # already handled below via the isfinite `mask`, so the resulting
+        # "All-NaN slice encountered" RuntimeWarning is expected noise, not
+        # a sign of a problem.
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="All-NaN slice encountered", category=RuntimeWarning)
+            medians = np.nanmedian(resids, axis=0)
         min_mse = np.inf
         best_coeffs = None
         best_indep = None
@@ -408,7 +417,15 @@ def plot_phase_residual(
 
             for order in range(1, 9):
                 try:
-                    coeffs = np.polyfit(xs, medians[mask], order)
+                    # Orders up to 8 are deliberately tried against
+                    # however many points happen to be valid; a
+                    # poorly-conditioned high-order fit is expected here
+                    # and gets discarded by the MSE comparison below, so
+                    # numpy's RankWarning is expected noise, not a sign
+                    # of a problem.
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", category=np.exceptions.RankWarning)
+                        coeffs = np.polyfit(xs, medians[mask], order)
                 except ValueError:
                     logger.exception(
                         f"plot_residual(): Error in np.polyfit. Skipping polyfit({order=}, {indep_var=}) due to "
@@ -445,7 +462,12 @@ def plot_phase_residual(
 
 
 def generate_hyperdrive_plots(
-    obs_id: int, hyperdrive_solution_filename: str, hyperdrive_binary_path: str, metafits_filename: str, output_dir: str
+    obs_id: int,
+    hyperdrive_solution_filename: str,
+    hyperdrive_binary_path: str,
+    metafits_filename: str,
+    output_dir: str,
+    before: bool,
 ) -> tuple[bool, str]:
     """Generate solution plots via the hyperdrive binary itself.
 
@@ -455,11 +477,14 @@ def generate_hyperdrive_plots(
         hyperdrive_binary_path: Path to the hyperdrive executable.
         metafits_filename: Path to the metafits file.
         output_dir: path to where we write the plots
+        before: bool specifying if this run is the BEFORE or AFTER calvin flags outliers- only used to generate correct filenames
 
     Returns:
         A tuple of (success: bool, error_message: str).
     """
-    logger.info(f"{obs_id} generating plots for {hyperdrive_solution_filename}...")
+    logger.info(
+        f"{obs_id} generating {'original unmodified' if before else 'after flagging'} hyperdrive plots for {hyperdrive_solution_filename}..."
+    )
 
     try:
         hyp_soln_plot_args = f" --output-directory {output_dir}"
@@ -470,6 +495,20 @@ def generate_hyperdrive_plots(
         )
 
         return_value, _ = run_command_ext(cmd, -1, timeout=60, use_shell=False)
+
+        if before:
+            # Rename files so the AFTER run does not overwrite them
+            directory = Path(output_dir)  # change to your target directory
+
+            # rename "*_solutions_amps.png" to "_solutions_amps_original.png"
+            for file in directory.glob("*_solutions_amps.png"):
+                new_name = file.with_name(file.stem + "_original" + file.suffix)
+                file.rename(new_name)
+
+            # rename "*_solutions_phases.png" to "_solutions_phases_original.png"
+            for file in directory.glob("*_solutions_phases.png"):
+                new_name = file.with_name(file.stem + "_original" + file.suffix)
+                file.rename(new_name)
 
         logger.info(
             f"{obs_id} Finished running hyperdrive plots on {hyperdrive_solution_filename}. Return={return_value}"
@@ -1070,3 +1109,93 @@ def write_tile_stats_table(title: str, rows: list[dict], stats_fd) -> None:
         )
     else:
         stats_fd.write("\n")
+
+
+def write_stats_and_debug_plots(
+    group: HyperfitsSolutionGroup,
+    refant_name: str,
+    phase_fit_niter: int,
+    output_path: str,
+    obs_id: int,
+) -> pd.DataFrame:
+    """Write the before/after per-tile stats file and (optionally) the
+    phase-fit debug plots, for the group's final flagged state.
+
+    Consolidates reporting previously duplicated between
+    mwax_calvin_processor and cal_utils. Must be called after
+    HyperfitsSolutionGroup.run_flagging_pipeline() has run -- its
+    before_jones/before_tile_flag_reasons/before_channel_flag_reasons/
+    before_phase_fits attributes are required here. Typically called
+    after commit() too, so the debug plots and the phase fit computed
+    here reflect data that's actually been written to disk (in-memory
+    state is otherwise identical either side of commit()).
+
+    Args:
+        group: The solution group, after run_flagging_pipeline() (and
+            typically commit()) have run.
+        refant_name: Name of the reference antenna.
+        phase_fit_niter: Number of iterations for the phase ramp fit.
+        output_path: Directory to write {obs_id}_tile_stats.txt into, and
+            (if produce_debug_plots) the {obs_id}_rx_lengths.png,
+            _phase_fits_xx.png, _phase_fits_yy.png, _intercepts.png, and
+            _residual.png debug plots.
+        obs_id: The observation ID, used for output filenames.
+
+    Returns:
+        The final phase fit DataFrame (from process_phase_fits), so
+        callers that also need it (e.g. for a DB insert) don't have to
+        recompute it.
+    """
+    assert group.before_jones is not None
+    assert group.before_tile_flag_reasons is not None
+    assert group.before_channel_flag_reasons is not None
+    assert group.before_phase_fits is not None
+    assert group.jones is not None
+    assert group.tile_flag_reasons is not None
+    assert group.channel_flag_reasons is not None
+
+    final_phase_fits = group.process_phase_fits(refant_name, phase_fit_niter)
+
+    before_tile_bad_mask = group.before_tile_flag_reasons != TileFlagReason.NONE
+    after_tile_bad_mask = group.tile_flag_reasons != TileFlagReason.NONE
+
+    stats_path = os.path.join(output_path, f"{obs_id}_tile_stats.txt")
+    with open(stats_path, "w", encoding="utf-8") as tile_stats_fd:
+        before_rows = build_tile_stats_rows(
+            group,
+            group.before_jones,
+            before_tile_bad_mask,
+            group.before_tile_flag_reasons,
+            group.before_channel_flag_reasons,
+            group.before_phase_fits,
+        )
+        write_tile_stats_table(
+            f"{obs_id}: BEFORE any changes (unchanged hyperdrive solutions file)", before_rows, tile_stats_fd
+        )
+
+        after_rows = build_tile_stats_rows(
+            group,
+            group.jones,
+            after_tile_bad_mask,
+            group.tile_flag_reasons,
+            group.channel_flag_reasons,
+            final_phase_fits,
+        )
+        write_tile_stats_table(f"{obs_id}: AFTER all Calvin flagging", after_rows, tile_stats_fd)
+
+    tiles = group.metafits_tiles_df
+    all_chanblocks_hz = group.all_chanblocks_hz_concat
+    _, _noref_xx, _noref_yy, ref_xx, ref_yy = group.get_solns_both(refant_name)
+    weights = group.weights
+    plot_debug_phase_fits(
+        final_phase_fits,
+        tiles,
+        all_chanblocks_hz,
+        ref_xx,
+        ref_yy,
+        weights,
+        prefix=os.path.join(output_path, f"{obs_id}_"),
+        plot_residual=True,
+    )
+
+    return final_phase_fits

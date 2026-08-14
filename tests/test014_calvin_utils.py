@@ -917,6 +917,44 @@ def test_reject_outliers_adds_outlier_column_if_missing():
     assert "outlier" in result.columns
 
 
+def test_reject_outliers_catches_clustered_bad_tiles_without_masking():
+    """Several comparably-bad tiles must not mask each other.
+
+    Regression test for a real pipeline failure: a mean+nstd*std
+    threshold is inflated by a cluster of comparably-bad tiles (they drag
+    the population mean/std along with them), which can push the
+    threshold high enough that none of them cross it -- even though each
+    is obviously anomalous next to the many well-behaved tiles. With 20
+    good tiles (~1.0) and 4 clustered bad tiles (20.0) here, mean+std
+    gives threshold ~= 25.4 (catching nobody); the median/MAD threshold
+    stays anchored to the majority-good population and catches all 4.
+    """
+    lengths = [1.0, 0.95, 1.05, 0.9, 1.1] * 4 + [20.0] * 4
+    df = _make_phase_fits_df(lengths)
+    result = reject_outliers(df, "chi2dof", nstd=3.0)
+    assert result.loc[result["chi2dof"] == 20.0, "outlier"].all()
+    assert not result.loc[result["chi2dof"] != 20.0, "outlier"].any()
+
+
+def test_reject_outliers_does_not_leak_threshold_across_pols():
+    """A threshold computed from one pol's population must not flag the other.
+
+    Regression test for a pre-existing bug: the previous implementation
+    computed quality_thresh from a pol-specific population but applied it
+    via a mask with no pol filter, so XX's threshold could incorrectly
+    flag YY rows (and vice versa) if their scales differed enough.
+    """
+    # XX: tight population around 1.0 (low threshold).
+    xx_rows = _make_phase_fits_df([1.0, 0.95, 1.05, 0.9, 1.1], pol="XX")
+    # YY: a much larger but internally-consistent population around 15.0
+    # -- none of these are outliers within YY's own population, but they
+    # would all exceed a threshold derived from XX's tight spread.
+    yy_rows = _make_phase_fits_df([15.0, 14.0, 16.0, 13.0, 17.0], pol="YY")
+    df = pd.concat([xx_rows, yy_rows], ignore_index=True)
+    result = reject_outliers(df, "chi2dof", nstd=3.0)
+    assert not result["outlier"].any()
+
+
 # ===========================================================================
 # NEW: fit_phase_line
 # ===========================================================================

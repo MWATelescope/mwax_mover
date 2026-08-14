@@ -21,6 +21,15 @@ file itself:
    frequency but differ tile-to-tile (cable length, dipole position, beam
    response, etc.), so comparing a tile against its OWN smooth frequency
    trend is a cleaner signal than comparing it against other tiles.
+5. A whole-observation phase-fit outlier check: a tile's cable-delay phase
+   ramp fit (chi2dof, sigma_resid) is compared against the population of
+   all tiles in the observation, and flagged if it's a population outlier.
+6. Promotion of a partially-flagged tile to fully flagged, if too large a
+   fraction of its chanblocks already carry a per-channel flag reason.
+
+This mirrors the full flagging pipeline used by mwax_calvin_processor
+(HyperfitsSolutionGroup.apply_tile_flags -> enforce_whole_jones_nan ->
+flag_phase_outliers -> flag_amplitude_outliers -> promote_mostly_bad_tiles).
 
 Bad entries are then replaced via frequency interpolation rather than
 clipped to an arbitrary ceiling, since clipping only touches amplitude
@@ -46,6 +55,7 @@ from mwax_mover.mwax_calvin_plots import (
     generate_hyperdrive_plots,
     plot_outlier_gains,
     write_hyperdrive_stats,
+    write_stats_and_debug_plots,
 )
 from mwax_mover.mwax_calvin_utils import Metafits
 from mwax_mover.mwax_hyperdrive_solutions import (
@@ -61,6 +71,11 @@ logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
 for noisy_logger in ("PIL", "matplotlib", "urllib3"):
     logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+# font_manager's "failed to find font weight X, using Y instead" notices
+# are cosmetic font-substitution fallbacks, not signs of a problem --
+# silence that specific logger rather than raising "matplotlib"'s whole
+# threshold (which would hide other, potentially useful warnings).
+logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 
 
 def main() -> None:
@@ -90,9 +105,30 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--modify-gains",
+        "--modify-solutions",
         action="store_true",
         help="Should the solution file(s) be modified to NaN out Jones of outlier gains? [DEFAULT=False]",
+    )
+
+    parser.add_argument(
+        "--phase-fit-niter",
+        type=int,
+        default=3,
+        help="Number of iterations for the phase ramp fit. [DEFAULT=3]",
+    )
+
+    parser.add_argument(
+        "--phase-outlier-nstd",
+        type=float,
+        default=3.0,
+        help="Number of standard deviations beyond the population mean before a tile's phase fit is an outlier. [DEFAULT=3.0]",
+    )
+
+    parser.add_argument(
+        "--tile-bad-channel-fraction-threshold",
+        type=float,
+        default=0.5,
+        help="Fraction (0-1) of a tile's chanblocks that must already be flagged bad before the whole tile is promoted to fully flagged. [DEFAULT=0.5]",
     )
 
     parser.add_argument(
@@ -108,10 +144,12 @@ def main() -> None:
         help="Base path for saved figures and stats, e.g. test.png -> test_0-15.png, test_16-31.png, ... DEFAULT=[.]",
     )
 
+    DEFAULT_HYPERDRIVE_BIN = "../mwa_hyperdrive/target/release/hyperdrive"
+
     parser.add_argument(
         "--hyperdrive-binary-path",
-        default="../mwa_hyperdrive/target/release/hyperdrive",
-        help="Location of hyperdrive binary. [DEFAULT='./mwa_hyperdrive/target/release/hyperdrive']",
+        default=DEFAULT_HYPERDRIVE_BIN,
+        help=f"Location of hyperdrive binary. [DEFAULT='{DEFAULT_HYPERDRIVE_BIN}']",
     )
 
     parser.add_argument(
@@ -177,14 +215,20 @@ def main() -> None:
     assert soln_group.jones is not None
     pristine_jones = [file_jones.copy() for file_jones in soln_group.jones]
 
-    # This tool's scope has always been tile flags (metafits/TILES HDU/
-    # BASELINES-inferred) + amplitude-outlier detection -- NOT phase-outlier
-    # detection or the mostly-bad-tile-fraction promotion, which are part
-    # of the full mwax_calvin_processor pipeline but were never part of
-    # what this standalone tool did.
-    soln_group.apply_tile_flags()
-    soln_group.enforce_whole_jones_nan()
-    soln_group.flag_amplitude_outliers(args.poly_degree, args.mad_threshold)
+    refant = soln_group.refant
+
+    # Full flagging pipeline, matching mwax_calvin_processor's
+    # process_solutions() -- both now share the same
+    # HyperfitsSolutionGroup.run_flagging_pipeline() implementation rather
+    # than each duplicating the call sequence.
+    soln_group.run_flagging_pipeline(
+        refant["name"],
+        args.phase_fit_niter,
+        poly_degree=args.poly_degree,
+        mad_residual_threshold=args.mad_threshold,
+        phase_outlier_nstd=args.phase_outlier_nstd,
+        tile_bad_channel_fraction_threshold=args.tile_bad_channel_fraction_threshold,
+    )
 
     for file_idx, f in enumerate(args.solution_filenames):
         obsid_and_band = os.path.basename(f).replace("_solutions.fits", "")
@@ -194,18 +238,18 @@ def main() -> None:
             n_tiles=args.plot_n_tiles,
             output_path=os.path.join(args.output_path, f"{obsid_and_band}_gain_outliers_tiles.png"),
             pristine_jones=pristine_jones[file_idx],
-            solution_file_will_be_modified=args.modify_gains,
+            solution_file_will_be_modified=args.modify_solutions,
         )
 
-    if args.modify_gains:
+    if args.modify_solutions:
         soln_group.commit(metafits.mwalib_context)
 
-    # hyperdrive's own plots/stats run regardless of --modify-gains,
+    # hyperdrive's own plots/stats run regardless of --modify-solutions,
     # matching this tool's historical behaviour (that flag only ever
     # controlled whether outlier-flagged gains were written to disk).
     for f in args.solution_filenames:
         plots_success, plots_error = generate_hyperdrive_plots(
-            obs_id, f, args.hyperdrive_binary_path, metafits_filename, args.output_path
+            obs_id, f, args.hyperdrive_binary_path, metafits_filename, args.output_path, before=False
         )
         if not plots_success:
             print(f"Warning: hyperdrive plots failed for {f}: {plots_error}")
@@ -216,6 +260,18 @@ def main() -> None:
             stats_success, stats_error = write_hyperdrive_stats(obs_id, stats_fd, f)
             if not stats_success:
                 print(f"Warning: hyperdrive stats failed for {f}: {stats_error}")
+
+    # Before/after per-tile stats (obs_id_tile_stats.txt) and the
+    # phase-fit debug plots (rx_lengths/phase_fits_xx/yy/intercepts/
+    # residual) -- shared with mwax_calvin_processor via
+    # write_stats_and_debug_plots().
+    write_stats_and_debug_plots(
+        soln_group,
+        refant["name"],
+        args.phase_fit_niter,
+        args.output_path,
+        obs_id,
+    )
 
 
 if __name__ == "__main__":

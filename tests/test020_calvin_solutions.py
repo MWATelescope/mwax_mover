@@ -158,7 +158,7 @@ def test_process_solutions_success(real_data_paths, tmp_path):
             gain_outlier_mad_residual_threshold=10,
             gain_outlier_modify_gains=False,
             gain_outlier_plot_n_tiles_per_page=16,
-            tile_bad_channel_fraction_threshold=0.5,
+            phase_outlier_tile_bad_channel_fraction=0.5,
             hyperdrive_binary_path="/nonexistent/hyperdrive",
         )
 
@@ -204,7 +204,7 @@ def test_process_solutions_all_tiles_flagged(tmp_path):
         gain_outlier_mad_residual_threshold=10,
         gain_outlier_modify_gains=False,
         gain_outlier_plot_n_tiles_per_page=16,
-        tile_bad_channel_fraction_threshold=0.5,
+        phase_outlier_tile_bad_channel_fraction=0.5,
         hyperdrive_binary_path="/nonexistent/hyperdrive",
     )
 
@@ -243,7 +243,7 @@ def test_process_solutions_soln_count_mismatch(real_data_paths, tmp_path):
         gain_outlier_mad_residual_threshold=10,
         gain_outlier_modify_gains=False,
         gain_outlier_plot_n_tiles_per_page=16,
-        tile_bad_channel_fraction_threshold=0.5,
+        phase_outlier_tile_bad_channel_fraction=0.5,
         hyperdrive_binary_path="/nonexistent/hyperdrive",
     )
 
@@ -292,7 +292,7 @@ def test_process_solutions_db_fit_insert_fails(real_data_paths, tmp_path):
             gain_outlier_mad_residual_threshold=10,
             gain_outlier_modify_gains=False,
             gain_outlier_plot_n_tiles_per_page=16,
-            tile_bad_channel_fraction_threshold=0.5,
+            phase_outlier_tile_bad_channel_fraction=0.5,
             hyperdrive_binary_path="/nonexistent/hyperdrive",
         )
 
@@ -344,7 +344,7 @@ def test_process_solutions_db_soln_insert_fails(real_data_paths, tmp_path):
             gain_outlier_mad_residual_threshold=10,
             gain_outlier_modify_gains=False,
             gain_outlier_plot_n_tiles_per_page=16,
-            tile_bad_channel_fraction_threshold=0.5,
+            phase_outlier_tile_bad_channel_fraction=0.5,
             hyperdrive_binary_path="/nonexistent/hyperdrive",
         )
 
@@ -392,7 +392,7 @@ def test_process_solutions_readme_written_on_any_exception(real_data_paths, tmp_
             gain_outlier_mad_residual_threshold=10,
             gain_outlier_modify_gains=False,
             gain_outlier_plot_n_tiles_per_page=16,
-            tile_bad_channel_fraction_threshold=0.5,
+            phase_outlier_tile_bad_channel_fraction=0.5,
             hyperdrive_binary_path="/nonexistent/hyperdrive",
         )
 
@@ -428,7 +428,7 @@ def test_process_solutions_no_solution_files_in_output(real_data_paths, tmp_path
         gain_outlier_mad_residual_threshold=10,
         gain_outlier_modify_gains=False,
         gain_outlier_plot_n_tiles_per_page=16,
-        tile_bad_channel_fraction_threshold=0.5,
+        phase_outlier_tile_bad_channel_fraction=0.5,
         hyperdrive_binary_path="/nonexistent/hyperdrive",
     )
 
@@ -437,7 +437,11 @@ def test_process_solutions_no_solution_files_in_output(real_data_paths, tmp_path
 
 
 def test_process_solutions_produce_debug_plots_false_does_not_import_matplotlib(real_data_paths, tmp_path):
-    """Passing produce_debug_plots=False must not call debug_phase_fits (which uses matplotlib)."""
+    """Passing produce_debug_plots=False must not call debug_phase_fits (which uses
+    matplotlib). debug_phase_fits is invoked via
+    mwax_calvin_plots.write_stats_and_debug_plots(), not directly from
+    mwax_calvin_solutions, since the two are now shared with cal_utils.
+    """
     input_path, _ = real_data_paths
     output_path = str(tmp_path)
 
@@ -462,7 +466,7 @@ def test_process_solutions_produce_debug_plots_false_does_not_import_matplotlib(
             "mwax_mover.mwax_calvin_solutions.insert_calibration_solutions_row",
             return_value=True,
         ),
-        patch("mwax_mover.mwax_calvin_solutions.debug_phase_fits") as mock_debug,
+        patch("mwax_mover.mwax_calvin_plots.debug_phase_fits") as mock_debug,
     ):
         process_solutions(
             db_handler_object=mock_db,
@@ -479,7 +483,7 @@ def test_process_solutions_produce_debug_plots_false_does_not_import_matplotlib(
             gain_outlier_mad_residual_threshold=10,
             gain_outlier_modify_gains=False,
             gain_outlier_plot_n_tiles_per_page=16,
-            tile_bad_channel_fraction_threshold=0.5,
+            phase_outlier_tile_bad_channel_fraction=0.5,
             hyperdrive_binary_path="/nonexistent/hyperdrive",
         )
 
@@ -616,7 +620,7 @@ def test_process_solutions_success_2():
             gain_outlier_mad_residual_threshold=10,
             gain_outlier_modify_gains=False,
             gain_outlier_plot_n_tiles_per_page=16,
-            tile_bad_channel_fraction_threshold=0.5,
+            phase_outlier_tile_bad_channel_fraction=0.5,
             hyperdrive_binary_path="/nonexistent/hyperdrive",
         )
 
@@ -1068,7 +1072,7 @@ def test_process_solutions_partial_coarse_channels(tmp_path):
             gain_outlier_mad_residual_threshold=10,
             gain_outlier_modify_gains=False,
             gain_outlier_plot_n_tiles_per_page=16,
-            tile_bad_channel_fraction_threshold=0.5,
+            phase_outlier_tile_bad_channel_fraction=0.5,
             hyperdrive_binary_path="/nonexistent/hyperdrive",
         )
 
