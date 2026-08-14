@@ -7,7 +7,7 @@ migration.
 
 Two families of functions live here:
 
-- Phase-fit diagnostics (debug_phase_fits and its helpers) -- moved
+- Phase-fit diagnostics (plot_debug_phase_fits and its helpers) -- moved
   essentially unchanged, since they already operated on plain
   arrays/DataFrames rather than the old CalSolutionQuality model.
 - Amplitude-outlier plots (plot_outlier_gains/plot_combined_gains) --
@@ -20,10 +20,20 @@ import logging
 import os
 import sys
 import warnings
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import matplotlib as mpl
-import matplotlib.pyplot as plt
+
+# This is a batch/server-side pipeline that never displays a figure
+# interactively -- only ever saves to file. Force the headless Agg
+# backend explicitly (must happen before pyplot's first import, which is
+# when backend selection is locked in) rather than letting matplotlib
+# resolve to whatever interactive backend happens to be available (e.g.
+# TkAgg), which wastes real time on GUI-toolkit overhead for every figure.
+mpl.use("Agg")
+
+import matplotlib.pyplot as plt  # noqa: E402
 import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
@@ -52,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Phase-fit diagnostics (debug_phase_fits and helpers) -- moved from
+# Phase-fit diagnostics (plot_debug_phase_fits and helpers) -- moved from
 # mwax_calvin_utils.py essentially unchanged; already worked on plain
 # arrays/DataFrames, not CalSolutionQuality.
 # ---------------------------------------------------------------------------
@@ -494,25 +504,31 @@ def generate_hyperdrive_plots(
             f" {metafits_filename} {hyperdrive_solution_filename}"
         )
 
-        return_value, _ = run_command_ext(cmd, -1, timeout=60, use_shell=False)
+        success, output = run_command_ext(cmd, -1, timeout=60, use_shell=False)
+
+        if not success:
+            logger.warning(f"{obs_id} hyperdrive solutions-plot failed for {hyperdrive_solution_filename}: {output}")
+            return False, output
 
         if before:
-            # Rename files so the AFTER run does not overwrite them
+            # Rename files so the AFTER run does not overwrite them.
+            # Glob results are materialized into a list first -- renaming
+            # a file while a generator is still scanning the same
+            # directory for the same pattern is mutating the directory
+            # mid-iteration, which isn't guaranteed to behave consistently.
             directory = Path(output_dir)  # change to your target directory
 
             # rename "*_solutions_amps.png" to "_solutions_amps_original.png"
-            for file in directory.glob("*_solutions_amps.png"):
+            for file in list(directory.glob("*_solutions_amps.png")):
                 new_name = file.with_name(file.stem + "_original" + file.suffix)
                 file.rename(new_name)
 
             # rename "*_solutions_phases.png" to "_solutions_phases_original.png"
-            for file in directory.glob("*_solutions_phases.png"):
+            for file in list(directory.glob("*_solutions_phases.png")):
                 new_name = file.with_name(file.stem + "_original" + file.suffix)
                 file.rename(new_name)
 
-        logger.info(
-            f"{obs_id} Finished running hyperdrive plots on {hyperdrive_solution_filename}. Return={return_value}"
-        )
+        logger.info(f"{obs_id} Finished running hyperdrive plots on {hyperdrive_solution_filename}.")
     except Exception as catch_all_exception:
         return False, str(catch_all_exception)
 
@@ -622,6 +638,44 @@ def _tile_flag_reason_text(tile_idx: int, tile_reasons: NDArray[np.object_]) -> 
     return "; ".join(parts)
 
 
+def _extract_combined_gains_bundle(group: HyperfitsSolutionGroup, file_idx: int) -> dict:
+    """Extract the plain, picklable data _render_combined_gains_figure
+    needs from a HyperfitsSolutionGroup.
+
+    Exists so plot_outlier_gains can dispatch page rendering to worker
+    processes: a HyperfitsSolutionGroup itself isn't picklable (it holds
+    mwalib's Rust-backed MetafitsContext), but everything actually needed
+    to render a page is plain numpy arrays/dicts/primitives, which are.
+    Called once per file (not per page) since the same bundle is reused
+    for every page of that file.
+
+    Args:
+        group: The solution group, after apply_tile_flags,
+            enforce_whole_jones_nan, flag_phase_outliers,
+            flag_amplitude_outliers, and flag_mostly_bad_tiles have run.
+        file_idx: Which solution file (index into group.jones/solns).
+
+    Returns:
+        A dict of everything _render_combined_gains_figure needs.
+    """
+    assert group.jones is not None
+    assert group.channel_flag_reasons is not None
+    assert group.tile_flag_reasons is not None
+    assert group.amplitude_fit is not None
+    assert group.amplitude_band is not None
+
+    return {
+        "file_idx": file_idx,
+        "file_jones": group.jones[file_idx],
+        "tile_names": group.metafits_tiles_df["name"].to_numpy(),
+        "fit": group.amplitude_fit[file_idx],
+        "band": group.amplitude_band[file_idx],
+        "file_reasons": group.channel_flag_reasons[file_idx],
+        "tile_reasons": group.tile_flag_reasons,
+        "obsid": group.metafits.obsid,
+    }
+
+
 def plot_combined_gains(
     group: HyperfitsSolutionGroup,
     file_idx: int,
@@ -638,22 +692,17 @@ def plot_combined_gains(
     flagging methods have run) instead of the old bad_mask/band/fit tuple
     from flag_bad_gains.
 
-    Tiles fully flagged (every channel bad, from any combination of
-    per-channel reasons and/or a whole-tile reason) have nothing meaningful
-    to plot -- both subplots instead show the flag reason as text.
-
-    For all other tiles, each gets two adjacent subplots (gx, then gy),
-    showing the raw gain amplitude, the polynomial fit line, and a shaded
-    band showing the acceptable range around the fit (see
-    HyperfitsSolutionGroup.flag_amplitude_outliers). Channels caught by
-    amplitude-outlier detection specifically are shaded with a translucent
-    red vertical band. Both subplots get a red border if the tile has any
-    such new flags.
+    Thin wrapper around _render_combined_gains_figure: extracts the plain
+    data that function needs from group, then delegates to it. Kept
+    separate so plot_outlier_gains can extract the bundle once per file
+    and reuse it across every page (and across worker processes, when
+    saving to disk), rather than needing group itself in each page's
+    rendering call.
 
     Args:
         group: The solution group, after apply_tile_flags,
             enforce_whole_jones_nan, flag_phase_outliers,
-            flag_amplitude_outliers, and promote_mostly_bad_tiles have run.
+            flag_amplitude_outliers, and flag_mostly_bad_tiles have run.
         file_idx: Which solution file (index into group.jones/solns) to plot.
         first_tile_index: Index of the first tile to include in this page.
         n_tiles: Number of tiles to plot starting from first_tile_index.
@@ -671,26 +720,70 @@ def plot_combined_gains(
     Returns:
         The matplotlib Figure containing the grid of per-tile subplot pairs.
     """
-    assert group.jones is not None
-    assert group.channel_flag_reasons is not None
-    assert group.tile_flag_reasons is not None
-    assert group.amplitude_fit is not None
-    assert group.amplitude_band is not None
+    bundle = _extract_combined_gains_bundle(group, file_idx)
+    return _render_combined_gains_figure(bundle, first_tile_index, n_tiles, pristine_jones, solution_file_will_be_modified)
 
-    file_jones = group.jones[file_idx]
+
+def _render_combined_gains_figure(
+    bundle: dict,
+    first_tile_index: int,
+    n_tiles: int,
+    pristine_jones: NDArray[np.complex128] | None,
+    solution_file_will_be_modified: bool,
+) -> plt.Figure:
+    """Render one page of the combined gx/gy amplitude plot from an
+    extracted data bundle (see _extract_combined_gains_bundle).
+
+    This is the actual rendering logic behind plot_combined_gains, kept
+    as a standalone function (touching only plain data, never a
+    HyperfitsSolutionGroup) so it can run directly inside a
+    ProcessPoolExecutor worker.
+
+    Tiles fully flagged (every channel bad, from any combination of
+    per-channel reasons and/or a whole-tile reason) have nothing meaningful
+    to plot -- both subplots instead show the flag reason as text.
+
+    For all other tiles, each gets two adjacent subplots (gx, then gy),
+    showing the raw gain amplitude, the polynomial fit line, and a shaded
+    band showing the acceptable range around the fit (see
+    HyperfitsSolutionGroup.flag_amplitude_outliers). Channels caught by
+    amplitude-outlier detection specifically are shaded with a translucent
+    red vertical band. Both subplots get a red border if the tile has any
+    such new flags.
+
+    Args:
+        bundle: Extracted data from _extract_combined_gains_bundle.
+        first_tile_index: Index of the first tile to include in this page.
+        n_tiles: Number of tiles to plot starting from first_tile_index.
+            Also determines the subplot grid shape (see _grid_shape).
+        pristine_jones: Jones matrices to plot amplitudes from, shape
+            (n_tiles, n_chanblocks, 2, 2) -- e.g. a copy of the file's
+            jones taken before any flagging ran, so flagged-but-not-yet-
+            NaN'd values are still visible on the plot. Defaults to
+            bundle["file_jones"] (its current state) if not given -- if
+            flagging has already run, flagged entries will show as gaps
+            rather than visible outlier points.
+        solution_file_will_be_modified: If True, a note is added to the
+            figure title.
+
+    Returns:
+        The matplotlib Figure containing the grid of per-tile subplot pairs.
+    """
+    file_idx = bundle["file_idx"]
+    file_jones = bundle["file_jones"]
     n_tiles_total, n_chanblocks = file_jones.shape[:2]
-    tile_names = group.metafits_tiles_df["name"].to_numpy()
+    tile_names = bundle["tile_names"]
 
     gains_for_plot = pristine_jones if pristine_jones is not None else file_jones
     before_gx = np.abs(gains_for_plot[:, :, 0, 0])
     before_gy = np.abs(gains_for_plot[:, :, 1, 1])
 
-    fit = group.amplitude_fit[file_idx]
-    band_lower_gx, band_upper_gx = group.amplitude_band[file_idx]["gx"]
-    band_lower_gy, band_upper_gy = group.amplitude_band[file_idx]["gy"]
+    fit = bundle["fit"]
+    band_lower_gx, band_upper_gx = bundle["band"]["gx"]
+    band_lower_gy, band_upper_gy = bundle["band"]["gy"]
 
-    file_reasons = group.channel_flag_reasons[file_idx]
-    tile_reasons = group.tile_flag_reasons
+    file_reasons = bundle["file_reasons"]
+    tile_reasons = bundle["tile_reasons"]
 
     last_tile_index = min(first_tile_index + n_tiles, n_tiles_total)
     tile_range = range(first_tile_index, last_tile_index)
@@ -822,7 +915,7 @@ def plot_combined_gains(
             labels.append(label)
     fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.97), ncol=4)
 
-    obsid = group.metafits.obsid
+    obsid = bundle["obsid"]
     obsid_str = f"obsid {obsid}" if obsid is not None else "obsid unknown"
     modification_str = (
         "Jones matrices of outlier gains will be NaNed"
@@ -837,6 +930,45 @@ def plot_combined_gains(
     fig.tight_layout(rect=(0, 0, 1, 0.90))
 
     return fig
+
+
+def _render_and_save_combined_gains_page(
+    bundle: dict,
+    first_tile_index: int,
+    n_tiles: int,
+    pristine_jones: NDArray[np.complex128] | None,
+    solution_file_will_be_modified: bool,
+    page_path: str,
+) -> tuple[bool, str]:
+    """Render one page and save it to disk -- a ProcessPoolExecutor worker
+    entry point for plot_outlier_gains.
+
+    Returns (success, error) rather than the Figure itself: a matplotlib
+    Figure doesn't survive a process boundary usefully (and every current
+    caller of plot_outlier_gains only wants the on-disk file anyway).
+
+    Args:
+        bundle: Extracted data from _extract_combined_gains_bundle.
+        first_tile_index: See _render_combined_gains_figure.
+        n_tiles: See _render_combined_gains_figure.
+        pristine_jones: See _render_combined_gains_figure.
+        solution_file_will_be_modified: See _render_combined_gains_figure.
+        page_path: Where to save this page.
+
+    Returns:
+        (True, "") on success, or (False, error message) if rendering or
+        saving raised -- logged by the caller rather than propagated, so
+        one bad page doesn't take down the rest of the batch.
+    """
+    try:
+        fig = _render_combined_gains_figure(
+            bundle, first_tile_index, n_tiles, pristine_jones, solution_file_will_be_modified
+        )
+        fig.savefig(page_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        return True, ""
+    except Exception as exc:  # noqa: BLE001 -- reported to the caller, not raised in the worker
+        return False, str(exc)
 
 
 def plot_outlier_gains(
@@ -859,39 +991,63 @@ def plot_outlier_gains(
         solution_file_will_be_modified: See plot_combined_gains.
 
     Returns:
-        A list of matplotlib Figures, one per page, in tile order. Each
-        figure is already closed (via plt.close) if output_path was given,
-        since every current caller only needs the on-disk file.
+        When output_path is None: a list of matplotlib Figures, one per
+        page, in tile order (rendered sequentially in-process). When
+        output_path is given (every current caller): pages are instead
+        rendered and saved in parallel worker processes (see
+        _render_and_save_combined_gains_page), and this returns an empty
+        list -- no Figure objects survive the process boundary, and
+        nothing currently uses the return value in that case anyway.
     """
     assert group.jones is not None
     n_tiles_total = group.jones[file_idx].shape[0]
     n_pages = int(np.ceil(n_tiles_total / n_tiles))
-    figures: list[plt.Figure] = []
 
-    for page in range(n_pages):
-        first_tile_index = page * n_tiles
-        last_tile_index = min(first_tile_index + n_tiles, n_tiles_total) - 1
+    if output_path is None:
+        # Rare/unused in practice -- no current caller relies on getting
+        # live Figure objects back. Keep this path simple and sequential
+        # rather than adding process-pool complexity for a case nothing
+        # exercises.
+        figures: list[plt.Figure] = []
+        for page in range(n_pages):
+            first_tile_index = page * n_tiles
+            figures.append(
+                plot_combined_gains(
+                    group,
+                    file_idx,
+                    first_tile_index=first_tile_index,
+                    n_tiles=n_tiles,
+                    pristine_jones=pristine_jones,
+                    solution_file_will_be_modified=solution_file_will_be_modified,
+                )
+            )
+        return figures
 
-        fig = plot_combined_gains(
-            group,
-            file_idx,
-            first_tile_index=first_tile_index,
-            n_tiles=n_tiles,
-            pristine_jones=pristine_jones,
-            solution_file_will_be_modified=solution_file_will_be_modified,
-        )
-        figures.append(fig)
+    bundle = _extract_combined_gains_bundle(group, file_idx)
 
-        if output_path is not None:
+    with ProcessPoolExecutor() as executor:
+        futures = {}
+        for page in range(n_pages):
+            first_tile_index = page * n_tiles
+            last_tile_index = min(first_tile_index + n_tiles, n_tiles_total) - 1
             page_path = _paged_output_path(output_path, first_tile_index, last_tile_index)
-            fig.savefig(page_path, dpi=150, bbox_inches="tight")
-            # Close immediately once saved: every current caller only wants
-            # the on-disk file, and a long-running pipeline daemon calling
-            # this repeatedly would otherwise accumulate open figures in
-            # matplotlib's global state indefinitely.
-            plt.close(fig)
+            future = executor.submit(
+                _render_and_save_combined_gains_page,
+                bundle,
+                first_tile_index,
+                n_tiles,
+                pristine_jones,
+                solution_file_will_be_modified,
+                page_path,
+            )
+            futures[future] = page_path
 
-    return figures
+        for future in as_completed(futures):
+            success, error = future.result()
+            if not success:
+                logger.warning(f"Failed to render/save {futures[future]}: {error}")
+
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -1118,7 +1274,7 @@ def write_stats_and_debug_plots(
     output_path: str,
     obs_id: int,
 ) -> pd.DataFrame:
-    """Write the before/after per-tile stats file and (optionally) the
+    """Write the before/after per-tile stats file and the
     phase-fit debug plots, for the group's final flagged state.
 
     Consolidates reporting previously duplicated between
@@ -1136,7 +1292,7 @@ def write_stats_and_debug_plots(
         refant_name: Name of the reference antenna.
         phase_fit_niter: Number of iterations for the phase ramp fit.
         output_path: Directory to write {obs_id}_tile_stats.txt into, and
-            (if produce_debug_plots) the {obs_id}_rx_lengths.png,
+            the {obs_id}_rx_lengths.png,
             _phase_fits_xx.png, _phase_fits_yy.png, _intercepts.png, and
             _residual.png debug plots.
         obs_id: The observation ID, used for output filenames.

@@ -4,13 +4,13 @@ Tests for the mwax_hyperdrive_solutions.py module.
 Covers:
   - HyperfitsSolution.get_jones / chanblock_converged / baseline_tile_flags / write_jones
   - HyperfitsSolutionGroup.load / combined_tile_flags / apply_tile_flags /
-    enforce_whole_jones_nan / weights / process_phase_fits / process_gain_fits
+    enforce_whole_jones_nan / weights / process_phase_fits / process_gain_fits_for_db
 
 NOTE: HyperfitsSolution/HyperfitsSolutionGroup were moved out of
 mwax_calvin_utils.py into this module's source file
 (mwax_hyperdrive_solutions.py). Several tests below moved with them from
 test014_calvin_utils.py, where they previously lived (the weights tests,
-and process_phase_fits/process_gain_fits -- the latter now methods on
+and process_phase_fits/process_gain_fits_for_db -- the latter now methods on
 HyperfitsSolutionGroup rather than free functions, so their tests were
 rewritten rather than moved verbatim).
 
@@ -426,7 +426,7 @@ def test_enforce_whole_jones_nan_leaves_fully_finite_entry_untouched():
 
 
 # ===========================================================================
-# HyperfitsSolutionGroup.process_phase_fits / process_gain_fits
+# HyperfitsSolutionGroup.process_phase_fits / process_gain_fits_for_db
 # ===========================================================================
 
 _FIT_N_CHANBLOCKS = 96
@@ -467,7 +467,7 @@ def _make_phase_ramp(freqs_hz: np.ndarray, length_m: float, intercept_rad: float
 
 
 def _make_fake_group(n_tiles, n_chanblocks, flagged_ids=None, xx_length_m=5.0, yy_length_m=7.0):
-    """Build a minimal HyperfitsSolutionGroup for process_phase_fits/process_gain_fits tests.
+    """Build a minimal HyperfitsSolutionGroup for process_phase_fits/process_gain_fits_for_db tests.
 
     Bypasses __init__/load() (no real FITS files); sets exactly the
     attributes those methods and their dependencies (get_solns_both,
@@ -480,7 +480,7 @@ def _make_fake_group(n_tiles, n_chanblocks, flagged_ids=None, xx_length_m=5.0, y
     this is what lets these tests construct "already reference-normalised"
     data directly, matching how the pre-refactor tests fed such arrays
     straight into the (now-removed) free process_phase_fits/
-    process_gain_fits functions.
+    process_gain_fits_for_db functions.
     """
     if flagged_ids is None:
         flagged_ids = []
@@ -518,7 +518,7 @@ def _make_fake_group(n_tiles, n_chanblocks, flagged_ids=None, xx_length_m=5.0, y
 def _patched_uniform_weights(n_chanblocks):
     """Context manager patching HyperfitsSolutionGroup.weights to return all-1.0.
 
-    process_phase_fits/process_gain_fits read self.weights internally;
+    process_phase_fits/process_gain_fits_for_db read self.weights internally;
     the fake group above has no real solns to derive it from, so this
     patches the property directly for the duration of a test.
     """
@@ -566,35 +566,35 @@ def test_process_phase_fits_bad_solution_skipped_not_raised():
     assert 3 in result["tile_id"].values
 
 
-def test_process_gain_fits_returns_dataframe_with_correct_columns():
+def test_process_gain_fits_for_db_returns_dataframe_with_correct_columns():
     group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[3])
     with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
-        result = group.process_gain_fits(refant_name="Tile001")
+        result = group.process_gain_fits_for_db(refant_name="Tile001")
     assert isinstance(result, pd.DataFrame)
     assert _EXPECTED_GAIN_COLS.issubset(set(result.columns))
 
 
-def test_process_gain_fits_skips_flagged_tile():
+def test_process_gain_fits_for_db_skips_flagged_tile():
     group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[3])
     with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
-        result = group.process_gain_fits(refant_name="Tile001")
+        result = group.process_gain_fits_for_db(refant_name="Tile001")
     assert 3 not in result["tile_id"].values
 
 
-def test_process_gain_fits_has_xx_and_yy_rows():
+def test_process_gain_fits_for_db_has_xx_and_yy_rows():
     """2 unflagged tiles (1 and 2) x 2 pols = 4 rows."""
     group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[3])
     with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
-        result = group.process_gain_fits(refant_name="Tile001")
+        result = group.process_gain_fits_for_db(refant_name="Tile001")
     assert len(result) == 4
     assert set(result["pol"].unique()) == {"XX", "YY"}
 
 
-def test_process_gain_fits_gains_list_length():
+def test_process_gain_fits_for_db_gains_list_length():
     """Each row's gains list should have length == n_coarse."""
     group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[3])
     with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
-        result = group.process_gain_fits(refant_name="Tile001")
+        result = group.process_gain_fits_for_db(refant_name="Tile001")
     n_coarse = _FIT_N_CHANBLOCKS // _FIT_CHANBLOCKS_PER_COARSE
     for gains in result["gains"]:
         assert len(gains) == n_coarse
@@ -718,11 +718,11 @@ def test_flag_phase_outliers_stores_phase_fits():
 
 
 # ===========================================================================
-# HyperfitsSolutionGroup.promote_mostly_bad_tiles
+# HyperfitsSolutionGroup.flag_mostly_bad_tiles
 # ===========================================================================
 
 
-def test_promote_mostly_bad_tiles_promotes_when_threshold_exceeded():
+def test_flag_mostly_bad_tiles_promotes_when_threshold_exceeded():
     """A tile with >= threshold fraction of bad channels is promoted to fully flagged."""
     group = _make_fake_group(n_tiles=3, n_chanblocks=10, flagged_ids=[])
     group.tile_flag_reasons = np.full(3, TileFlagReason.NONE, dtype=object)
@@ -730,14 +730,14 @@ def test_promote_mostly_bad_tiles_promotes_when_threshold_exceeded():
     reasons[1, :6] = ChannelFlagReason.NON_CONVERGED  # 6/10 = 60%, tile index 1
     group.channel_flag_reasons = [reasons]
 
-    group.promote_mostly_bad_tiles(threshold=0.5)
+    group.flag_mostly_bad_tiles(threshold=0.5)
 
     assert group.tile_flag_reasons[1] & TileFlagReason.MOSTLY_BAD_CHANNELS
     assert np.all(np.isnan(group.jones[0][1]))
     assert group.tile_flag_reasons[0] == TileFlagReason.NONE
 
 
-def test_promote_mostly_bad_tiles_leaves_below_threshold_tile_untouched():
+def test_flag_mostly_bad_tiles_leaves_below_threshold_tile_untouched():
     """A tile below the threshold fraction is left as partially flagged."""
     group = _make_fake_group(n_tiles=3, n_chanblocks=10, flagged_ids=[])
     group.tile_flag_reasons = np.full(3, TileFlagReason.NONE, dtype=object)
@@ -746,13 +746,13 @@ def test_promote_mostly_bad_tiles_leaves_below_threshold_tile_untouched():
     group.channel_flag_reasons = [reasons]
     original = group.jones[0][1].copy()
 
-    group.promote_mostly_bad_tiles(threshold=0.5)
+    group.flag_mostly_bad_tiles(threshold=0.5)
 
     assert group.tile_flag_reasons[1] == TileFlagReason.NONE
     assert np.array_equal(group.jones[0][1], original, equal_nan=True)
 
 
-def test_promote_mostly_bad_tiles_skips_already_tile_flagged():
+def test_flag_mostly_bad_tiles_skips_already_tile_flagged():
     """A tile already tile-flagged for another reason is not double-processed."""
     group = _make_fake_group(n_tiles=3, n_chanblocks=10, flagged_ids=[])
     group.tile_flag_reasons = np.full(3, TileFlagReason.NONE, dtype=object)
@@ -761,7 +761,7 @@ def test_promote_mostly_bad_tiles_skips_already_tile_flagged():
     reasons[1, :6] = ChannelFlagReason.NON_CONVERGED
     group.channel_flag_reasons = [reasons]
 
-    group.promote_mostly_bad_tiles(threshold=0.5)
+    group.flag_mostly_bad_tiles(threshold=0.5)
 
     # Still just METAFITS -- MOSTLY_BAD_CHANNELS was not additionally OR'd in.
     assert group.tile_flag_reasons[1] == TileFlagReason.METAFITS

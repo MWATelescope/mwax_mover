@@ -14,6 +14,7 @@ mwax_calvin_plots.py for plotting.
 import logging
 import os
 import shutil
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import IntFlag, auto
 
@@ -31,7 +32,7 @@ from mwax_mover.mwax_calvin_utils import (
     ensure_system_byte_order,
     fit_gain,
     fit_phase_line,
-    iterative_poly_clip,
+    iterative_poly_clip_batch,
     read_baseline_tile_flags,
     read_results_hdu,
     read_solutions_hdu_complex,
@@ -90,7 +91,16 @@ def _ref_normalise_xx_yy(
     """
     ref = jones[ref_tile_idx]  # shape (n_chanblocks, 2, 2)
     ref_gx, ref_dx, ref_dy, ref_gy = ref[..., 0, 0], ref[..., 0, 1], ref[..., 1, 0], ref[..., 1, 1]
-    ref_inv_det = np.divide(1 + 0j, ref_gx * ref_gy - ref_dx * ref_dy)  # shape (n_chanblocks,)
+    # The reference tile can legitimately be NaN (or have a zero
+    # determinant) at some chanblocks -- e.g. a non-converged or
+    # pre-existing-NaN entry -- in which case this division correctly
+    # propagates NaN for that chanblock. The resulting "invalid value
+    # encountered in divide" RuntimeWarning is expected noise, not a
+    # sign of a problem.
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="invalid value encountered in divide", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", message="divide by zero encountered in divide", category=RuntimeWarning)
+        ref_inv_det = np.divide(1 + 0j, ref_gx * ref_gy - ref_dx * ref_dy)  # shape (n_chanblocks,)
 
     gx, dx, dy, gy = jones[..., 0, 0], jones[..., 0, 1], jones[..., 1, 0], jones[..., 1, 1]
     ref_xx = (gx * ref_gy - dx * ref_dy) * ref_inv_det
@@ -807,7 +817,7 @@ class HyperfitsSolutionGroup:
         """Get all_chanblocks_hz concatenated into a single flat array.
 
         all_chanblocks_hz is a list of one array per solution file;
-        several methods (process_phase_fits, process_gain_fits) need the
+        several methods (process_phase_fits, process_gain_fits_for_db) need the
         whole group's chanblocks as a single array matching self.jones's
         concatenated tile/chanblock layout.
         """
@@ -1010,7 +1020,6 @@ class HyperfitsSolutionGroup:
             DataFrame with phase fit parameters for each tile and polarization,
             columns ["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields].
         """
-        logger.info("process_phase_fits")
         self._ensure_loaded()
         soln_tile_ids, _noref_xx, _noref_yy, ref_xx, ref_yy = self.get_solns_both(refant_name)
         chanblocks_hz = self.all_chanblocks_hz_concat
@@ -1036,7 +1045,7 @@ class HyperfitsSolutionGroup:
         fits = [result for future in as_completed(futures) if (result := future.result()) is not None]
         return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])
 
-    def process_gain_fits(self, refant_name: str) -> DataFrame:
+    def process_gain_fits_for_db(self, refant_name: str) -> DataFrame:
         """Fit gain solutions to each tile and polarization.
 
         Args:
@@ -1046,7 +1055,6 @@ class HyperfitsSolutionGroup:
             DataFrame with gain fit parameters for each tile and polarization,
             columns ["tile_id", "soln_idx", "pol", *GainFitInfo._fields].
         """
-        logger.info("process_gain_fits")
         self._ensure_loaded()
         soln_tile_ids, noref_xx, noref_yy, _ref_xx, _ref_yy = self.get_solns_both(refant_name)
         chanblocks_hz = self.all_chanblocks_hz_concat
@@ -1077,7 +1085,8 @@ class HyperfitsSolutionGroup:
 
         For each tile in each file, gx and gy amplitude are each fit
         independently with a sigma-clipped polynomial vs. chanblock index
-        (see iterative_poly_clip in mwax_calvin_utils.py). A channel is
+        (see iterative_poly_clip_batch in mwax_calvin_utils.py, which fits
+        all tiles for a pol/file at once). A channel is
         flagged if EITHER polarisation's fit residual exceeds
         mad_residual_threshold -- if one polarisation's gain is corrupted,
         the other usually can't be trusted either.
@@ -1101,7 +1110,7 @@ class HyperfitsSolutionGroup:
             poly_degree: Degree of the polynomial fit to gain amplitude vs.
                 chanblock index, per tile per polarisation.
             mad_residual_threshold: Number of residual-MADs beyond which a
-                channel is an outlier (see iterative_poly_clip).
+                channel is an outlier (see iterative_poly_clip_batch).
         """
         logger.info("flag_amplitude_outliers")
 
@@ -1113,7 +1122,7 @@ class HyperfitsSolutionGroup:
         self.amplitude_band = []
 
         for file_jones, file_reasons in zip(self.jones, self.channel_flag_reasons):
-            n_tiles, n_chanblocks = file_jones.shape[:2]
+            n_chanblocks = file_jones.shape[1]
             gx_amp = np.abs(file_jones[..., 0, 0])
             gy_amp = np.abs(file_jones[..., 1, 1])
             chan_idx = np.arange(n_chanblocks, dtype=np.float64)
@@ -1124,35 +1133,24 @@ class HyperfitsSolutionGroup:
             # fall out of this NaN check automatically) are excluded from
             # the fit.
             already_bad = (file_reasons != ChannelFlagReason.NONE) | np.any(np.isnan(file_jones), axis=(-2, -1))
+            initial_valid = ~already_bad
 
-            fit_gx = np.full((n_tiles, n_chanblocks), np.nan)
-            fit_gy = np.full((n_tiles, n_chanblocks), np.nan)
-            band_lower_gx = np.full((n_tiles, n_chanblocks), np.nan)
-            band_upper_gx = np.full((n_tiles, n_chanblocks), np.nan)
-            band_lower_gy = np.full((n_tiles, n_chanblocks), np.nan)
-            band_upper_gy = np.full((n_tiles, n_chanblocks), np.nan)
+            valid_gx, _res_gx, fit_gx, mad_gx, med_gx = iterative_poly_clip_batch(
+                chan_idx, gx_amp, poly_degree, mad_residual_threshold, initial_valid
+            )
+            valid_gy, _res_gy, fit_gy, mad_gy, med_gy = iterative_poly_clip_batch(
+                chan_idx, gy_amp, poly_degree, mad_residual_threshold, initial_valid
+            )
 
-            for tile in range(n_tiles):
-                initial_valid = ~already_bad[tile, :]
+            poly_bad = initial_valid & (~valid_gx | ~valid_gy)
+            if poly_bad.any():
+                file_jones[poly_bad, :, :] = np.nan + 1j * np.nan
+                file_reasons[poly_bad] |= ChannelFlagReason.AMPLITUDE_OUTLIER
 
-                valid_gx, _res_gx, curve_gx, mad_gx, med_gx = iterative_poly_clip(
-                    chan_idx, gx_amp[tile, :], poly_degree, mad_residual_threshold, initial_valid
-                )
-                valid_gy, _res_gy, curve_gy, mad_gy, med_gy = iterative_poly_clip(
-                    chan_idx, gy_amp[tile, :], poly_degree, mad_residual_threshold, initial_valid
-                )
-
-                poly_bad = initial_valid & (~valid_gx | ~valid_gy)
-                if poly_bad.any():
-                    file_jones[tile, poly_bad, :, :] = np.nan + 1j * np.nan
-                    file_reasons[tile, poly_bad] |= ChannelFlagReason.AMPLITUDE_OUTLIER
-
-                fit_gx[tile, :] = curve_gx
-                fit_gy[tile, :] = curve_gy
-                band_lower_gx[tile, :] = curve_gx + med_gx - mad_residual_threshold * mad_gx
-                band_upper_gx[tile, :] = curve_gx + med_gx + mad_residual_threshold * mad_gx
-                band_lower_gy[tile, :] = curve_gy + med_gy - mad_residual_threshold * mad_gy
-                band_upper_gy[tile, :] = curve_gy + med_gy + mad_residual_threshold * mad_gy
+            band_lower_gx = fit_gx + med_gx[:, None] - mad_residual_threshold * mad_gx[:, None]
+            band_upper_gx = fit_gx + med_gx[:, None] + mad_residual_threshold * mad_gx[:, None]
+            band_lower_gy = fit_gy + med_gy[:, None] - mad_residual_threshold * mad_gy[:, None]
+            band_upper_gy = fit_gy + med_gy[:, None] + mad_residual_threshold * mad_gy[:, None]
 
             self.amplitude_fit.append({"gx": fit_gx, "gy": fit_gy})
             self.amplitude_band.append({"gx": (band_lower_gx, band_upper_gx), "gy": (band_lower_gy, band_upper_gy)})
@@ -1255,7 +1253,7 @@ class HyperfitsSolutionGroup:
         (see self.before_jones etc.), enforce_whole_jones_nan(),
         flag_phase_outliers() (whole-tile, whole-observation),
         flag_amplitude_outliers() (per-file, per-tile), then
-        promote_mostly_bad_tiles() sees the combined result of everything
+        flag_mostly_bad_tiles() sees the combined result of everything
         before it.
 
         The "before" snapshot is captured right after apply_tile_flags() --
@@ -1282,7 +1280,7 @@ class HyperfitsSolutionGroup:
             tile_bad_channel_fraction_threshold: Fraction (0-1) of a
                 tile's chanblocks that must already be flagged bad before
                 the whole tile is promoted to fully flagged (see
-                promote_mostly_bad_tiles).
+                flag_mostly_bad_tiles).
         """
         self._ensure_loaded()
         self.apply_tile_flags()
@@ -1305,7 +1303,7 @@ class HyperfitsSolutionGroup:
 
         Call this exactly once, after every flagging stage (apply_tile_flags,
         enforce_whole_jones_nan, flag_phase_outliers, flag_amplitude_outliers,
-        promote_mostly_bad_tiles) has run and any "after" plots have already
+        flag_mostly_bad_tiles) has run and any "after" plots have already
         been generated from self.jones -- nothing written here should be
         modified further afterwards.
 

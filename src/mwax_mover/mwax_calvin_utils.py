@@ -17,22 +17,36 @@ import re
 import shutil
 import sys
 import time
+import warnings
 from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
 
 import matplotlib as mpl
+
+# This is a batch/server-side pipeline that never displays a figure
+# interactively -- only ever saves to file. Force the headless Agg
+# backend explicitly (must happen before pyplot's first import, which is
+# when backend selection is locked in) rather than letting matplotlib
+# resolve to whatever interactive backend happens to be available (e.g.
+# TkAgg), which wastes real time on GUI-toolkit overhead for every
+# figure. This module is imported by nearly everything else in the
+# package, so it's likely the actual first place pyplot gets touched
+# regardless of overall import order; harmless if some other module
+# (e.g. mwax_calvin_plots) already set this first.
+mpl.use("Agg")
+
 import numpy as np
-import numpy.typing as npt  # noqa: F401
-import pandas as pd
-import seaborn as sns
-from astropy import units as u
-from astropy.constants import c  # ty: ignore[unresolved-import]
-from matplotlib import pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
-from mwalib import MetafitsContext
-from numpy.typing import ArrayLike, NDArray
-from scipy.optimize import minimize
+import numpy.typing as npt  # noqa: F401,E402
+import pandas as pd  # noqa: E402
+import seaborn as sns  # noqa: E402
+from astropy import units as u  # noqa: E402
+from astropy.constants import c  # ty: ignore[unresolved-import]  # noqa: E402
+from matplotlib import pyplot as plt  # noqa: E402
+from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
+from mwalib import MetafitsContext  # noqa: E402
+from numpy.typing import ArrayLike, NDArray  # noqa: E402
+from scipy.optimize import minimize  # noqa: E402
 
 from mwax_mover.mwax_command import (
     check_popen_finished,
@@ -520,6 +534,41 @@ def wrap_angle(angle):
     return np.mod(angle + np.pi, 2 * np.pi) - np.pi
 
 
+# Floor for fit_phase_line's sigma-clip threshold (2 * max(resid_std, this)),
+# in radians. See its use in fit_phase_line for why it's needed.
+_MIN_CLIP_THRESHOLD_RAD = 1e-6
+
+
+def _phase_fit_hess_inv(ν: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Exact inverse Hessian of the phase-ramp fit objective w.r.t. (m, c).
+
+    residual_i(m, c) = wrap(θ_i - m·ν_i - c) is piecewise-linear in (m, c)
+    almost everywhere (wrap's derivative is exactly 1 a.e.; see
+    wrap_angle), so for cost = Σ residual_i², the Gauss-Newton Hessian
+    approximation (2·JᵗJ, where J is the residual Jacobian) is not an
+    approximation here -- it's the exact Hessian, independent of (m, c)
+    and of how many optimizer iterations were taken to get there.
+
+    This replaces relying on scipy.optimize.minimize's own internal BFGS
+    hess_inv, which is only a running approximation built up from
+    gradient differences across iterations -- accurate after enough
+    iterations, but meaningless if the optimizer (now given an exact
+    analytic gradient, so converging in far fewer steps) terminates
+    before that approximation has accumulated real curvature information.
+
+    Args:
+        ν: Frequencies (Hz) of the currently-valid points.
+
+    Returns:
+        The 2x2 inverse Hessian, ordered (m, c) to match `params`.
+    """
+    n = len(ν)
+    sum_ν = np.sum(ν)
+    sum_ν2 = np.sum(ν**2)
+    hessian = 2.0 * np.array([[sum_ν2, sum_ν], [sum_ν, n]])
+    return np.linalg.inv(hessian)
+
+
 def fit_phase_line(
     freqs_hz: NDArray[np.float64],
     solution: NDArray[np.complex128],
@@ -539,7 +588,7 @@ def fit_phase_line(
         solution: Complex array of calibration solutions.
         weights: Array of weights for each solution.
         niter: Number of fitting iterations. Each iteration refits after
-            rejecting outliers beyond 2*stderr. Must be >= 1.
+            rejecting outliers beyond 2*resid_std. Must be >= 1.
         fit_iono: Whether to fit ionospheric dispersion (currently unused).
 
     Returns:
@@ -557,12 +606,14 @@ def fit_phase_line(
     #              Values near 1.0 indicate a good fit; much larger suggests poor fit
     #              or RFI; much smaller suggests over-fitting or too few points.
     #
-    # stderr:      Standard error on the fitted slope (rad/Hz), estimated from the
-    #              optimiser's inverse Hessian scaled by residual variance. Used above
-    #              to sigma-clip outlier channels (|residual| < 2 * stderr[0]).
+    # stderr:      Standard error of the fitted slope m (rad/Hz), from the
+    #              objective's exact analytic Hessian (see
+    #              _phase_fit_hess_inv) scaled by residual variance. Not
+    #              used elsewhere in the pipeline -- purely informational.
     #
-    # quality:     Fraction of original frequency channels surviving the sigma-clip
-    #              (len(mask) / nfreqs). Ranges 0–1; 1.0 means all channels were used.
+    # quality:     Fraction of original frequency channels surviving the
+    #              sigma-clip (|residual| < 2*resid_std) (len(mask) /
+    #              nfreqs). Ranges 0-1; 1.0 means all channels were used.
 
     # original number of frequencies
     nfreqs = len(freqs_hz)
@@ -656,11 +707,25 @@ def fit_phase_line(
     y_int = np.angle(np.mean(solution / model(ν.to(u.Hz).value, slope.value, 0)))
     params = (slope.value, y_int)
 
-    def objective(params, ν, data):
+    def objective_and_grad(params, ν, data):
+        # Combines cost and its exact gradient into one call (jac=True
+        # below) so minimize() never falls back to finite-difference
+        # gradient estimation -- which was re-evaluating this same
+        # objective ~500+ times per fit (once per finite-difference step,
+        # repeated by BFGS's line search) and dominating overall runtime.
+        #
+        # wrap_angle(x) = mod(x + pi, 2*pi) - pi has derivative exactly 1
+        # almost everywhere (it's flat with slope 1 between discontinuous
+        # -2*pi jumps at the wrap points, a measure-zero set the
+        # optimizer won't land on), so d(residual_i)/dm = -ν_i and
+        # d(residual_i)/dc = -1, giving:
+        #   d(cost)/dm = -2 * sum(residual_i * ν_i)
+        #   d(cost)/dc = -2 * sum(residual_i)
         constructed = model(ν, *params)
         residuals = wrap_angle(np.angle(data) - np.angle(constructed))
         cost = np.sum(np.abs(residuals) ** 2)
-        return cost
+        grad = np.array([-2.0 * np.sum(residuals * ν), -2.0 * np.sum(residuals)])
+        return cost, grad
 
     if niter < 1:
         raise ValueError(f"niter must be >= 1, got {niter}")
@@ -674,7 +739,16 @@ def fit_phase_line(
 
     while niter > 0:
         niter -= 1
-        res = minimize(objective, params, args=(ν.to(u.Hz).value, solution))
+        # A line-search failure inside minimize() doesn't stop it from
+        # returning a result -- just possibly a worse one, which the
+        # chi2dof/sigma_resid quality metrics below already reflect. The
+        # resulting LineSearchWarning is expected noise for a difficult
+        # fit, not a sign minimize() failed outright.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message="The line search algorithm did not converge", category=RuntimeWarning
+            )
+            res = minimize(objective_and_grad, params, args=(ν.to(u.Hz).value, solution), jac=True)
         params = res.x
 
         constructed = model(ν.to(u.Hz).value, *params)
@@ -682,9 +756,62 @@ def fit_phase_line(
         chi2dof = np.sum(np.abs(residuals) ** 2) / (len(residuals) - len(params))
         resid_std = residuals.std()
         resid_var = residuals.var(ddof=len(params))
-        stderr = np.sqrt(np.diag(res.hess_inv * resid_var))
+        stderr = np.sqrt(np.diag(_phase_fit_hess_inv(ν.to(u.Hz).value)) * resid_var)
 
-        mask = np.where(np.abs(residuals) < 2 * stderr[0])[0]
+        # Sigma-clip using a robust median+MAD scale of residuals
+        # (radians), not stderr[0] (rad/Hz). stderr[0] is the standard
+        # error of the fitted SLOPE m, not a residual-scale quantity --
+        # comparing it against |residuals| (also radians) is a units
+        # mismatch (rad/Hz vs rad). It used to "work" only by a numerical
+        # coincidence specific to scipy.optimize.minimize's default
+        # (numerical-gradient) BFGS: on this badly-conditioned problem
+        # (m ~1e-9, c ~O(1)), BFGS's own hess_inv approximation never
+        # moves far from its near-identity starting point, which happens
+        # to make stderr[0] land close to resid_std anyway -- not because
+        # it reflects m's true uncertainty, but because BFGS's
+        # bookkeeping stays close to its own initial scale. That
+        # coincidence breaks once an exact analytic gradient lets the
+        # optimizer converge in far fewer iterations: stderr[0] (now
+        # computed exactly via _phase_fit_hess_inv, decoupled from BFGS's
+        # convergence path) correctly reflects m's real, tiny rad/Hz-
+        # scale uncertainty, which is meaningless as a radians threshold.
+        #
+        # resid_std itself can collapse towards machine noise for a
+        # (near-)exact fit -- e.g. clean synthetic data, or any tile
+        # whose residuals converge extremely tightly -- which would
+        # otherwise make the clipping threshold degenerate (almost no
+        # residual satisfies it, tripping the "too few points" early
+        # exit and reporting near-zero quality for an excellent fit).
+        # _MIN_CLIP_THRESHOLD_RAD guards against that; it's far below any
+        # physically meaningful phase noise, so it has no effect on
+        # realistic (noisy) data where resid_std is orders of magnitude
+        # larger than this.
+        #
+        # The clip itself uses a robust median + MAD scale, not resid_std
+        # and not zero as the comparison centre. Two related reasons:
+        #
+        # 1. std is not robust to the very outliers it's meant to catch
+        #    (the same masking/swamping issue fixed in reject_outliers):
+        #    a large contaminated fraction inflates std in proportion to
+        #    its own presence, so the "2*std" threshold grows permissive
+        #    exactly when it should tighten. E.g. with 25% of channels
+        #    flipped by pi, the outlier residuals (~2.1-2.6 rad) and the
+        #    clean residuals (~-0.55 to -1.0 rad) separate cleanly, but
+        #    2*resid_std (~2.7 rad) ends up just barely above the
+        #    outliers' own max -- letting them all survive by
+        #    coincidence, not because they're not outliers.
+        # 2. A single non-robust least-squares fit over contaminated data
+        #    is itself biased towards the outliers, so even the CLEAN
+        #    residuals end up centred away from zero (e.g. ~-0.7 rad
+        #    above, not 0). Comparing |residuals| against a threshold
+        #    (implicitly centred at zero) would then wrongly reject the
+        #    clean majority too; centring on the residuals' own median
+        #    instead correctly separates the two groups regardless of
+        #    where the (biased) fit put them.
+        resid_median = np.median(residuals)
+        resid_mad = np.median(np.abs(residuals - resid_median))
+        clip_scale = max(1.4826 * resid_mad, _MIN_CLIP_THRESHOLD_RAD)
+        mask = np.where(np.abs(residuals - resid_median) < 2 * clip_scale)[0]
         if len(mask) < 2:
             break
         solution = solution[mask]
@@ -875,6 +1002,164 @@ def iterative_poly_clip(
             valid = new_valid
             break
         valid = new_valid
+
+    return valid, residual, fit, mad, med
+
+
+def iterative_poly_clip_batch(
+    x: np.ndarray,
+    Y: np.ndarray,
+    degree: int,
+    residual_threshold: float,
+    initial_valid: np.ndarray,
+    max_iter: int = 10,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Vectorized, batched equivalent of iterative_poly_clip, fitting every
+    row (tile) at once instead of looping and calling np.polyfit per tile.
+
+    Mathematically identical to calling iterative_poly_clip(x, Y[t], ...)
+    for each tile t independently -- same per-tile stopping conditions,
+    same MAD-based clipping -- but replaces what was previously up to
+    (n_tiles * max_iter) separate np.polyfit/np.polyval calls with a
+    handful of batched numpy operations per outer iteration. Since every
+    tile shares the same x-grid (chanblock index), a per-tile weighted
+    least-squares fit is just a per-tile (degree+1)x(degree+1) normal-
+    equations solve against a shared design matrix, which batches
+    trivially across tiles via einsum + batched np.linalg.solve, instead
+    of paying np.polyfit's (comparatively large) fixed per-call overhead
+    thousands of times over.
+
+    Args:
+        x: 1D array of independent variable values (e.g. chanblock
+            index), shape (n_chan,), shared across all tiles.
+        Y: 2D array of dependent variable values, shape (n_tiles, n_chan).
+        degree: Polynomial degree to fit.
+        residual_threshold: Number of residual-MADs beyond which a point
+            is considered an outlier.
+        initial_valid: Boolean array, shape (n_tiles, n_chan), of points
+            eligible to be fit at all per tile.
+        max_iter: Maximum number of fit/clip iterations.
+
+    Returns:
+        A tuple (valid, residual, fit, mad, med), each matching
+        iterative_poly_clip's per-tile return but with an added leading
+        tile axis: valid/residual/fit shape (n_tiles, n_chan), mad/med
+        shape (n_tiles,).
+    """
+    n_tiles, n = Y.shape
+    valid = initial_valid.copy()
+    residual = np.full((n_tiles, n), np.nan, dtype=np.float64)
+    fit = np.full((n_tiles, n), np.nan, dtype=np.float64)
+    mad = np.full(n_tiles, np.nan, dtype=np.float64)
+    med = np.full(n_tiles, np.nan, dtype=np.float64)
+
+    min_points = degree + 2
+    # Mirrors the per-tile early return: a tile with too few initially-
+    # valid points is never fit at all, and keeps its original valid mask.
+    done = valid.sum(axis=1) < min_points
+
+    # Shared design matrix (every tile has the same x-grid).
+    design = np.vander(x, degree + 1, increasing=True)  # (n, degree+1)
+
+    for _ in range(max_iter):
+        active = np.where(~done)[0]
+        if len(active) == 0:
+            break
+
+        weights = valid[active].astype(np.float64)  # (n_active, n)
+        # Y can contain NaN at invalid positions (e.g. a pre-existing-NaN
+        # Jones entry) -- weight=0 there doesn't zero out a NaN
+        # (0 * nan == nan), so replace those entries before weighting.
+        # The per-tile version never has this problem since it indexes
+        # y[valid] directly, never touching the invalid entries at all.
+        y_true = Y[active]
+        y_for_fit = np.where(weights > 0, y_true, 0.0)
+
+        # Batched normal equations: A[t] = designᵗ diag(weights[t]) design;
+        # b[t] = designᵗ diag(weights[t]) y_for_fit[t]. Exact for a
+        # weighted least-squares fit against the shared design matrix --
+        # same answer np.polyfit(x[valid], y[valid], degree) would give.
+        gram = np.einsum("tk,ki,kj->tij", weights, design, design)
+        rhs = (weights * y_for_fit) @ design  # (n_active, degree+1)
+
+        try:
+            coeffs = np.linalg.solve(gram, rhs[..., np.newaxis])[..., 0]
+        except np.linalg.LinAlgError:
+            # Extremely unlikely given the min_points guard above (would
+            # need a degenerate x-distribution among the valid points),
+            # but fall back tile-by-tile rather than losing the whole
+            # batch if it ever happens.
+            coeffs = np.full((len(active), degree + 1), np.nan)
+            for i in range(len(active)):
+                try:
+                    coeffs[i] = np.linalg.solve(gram[i], rhs[i])
+                except np.linalg.LinAlgError:
+                    pass
+
+        fit_active = coeffs @ design.T  # (n_active, n)
+        # Residuals use the TRUE y, not y_for_fit -- a point temporarily
+        # excluded this round (weight=0, but still within initial_valid,
+        # i.e. not NaN) must be re-evaluated against its real value each
+        # iteration so it can rejoin if the updated fit now passes it.
+        # Using the zeroed y_for_fit here instead would compare a fake
+        # zero against the fit for every currently-excluded point,
+        # corrupting exactly the re-inclusion check the iteration depends
+        # on. Genuinely-NaN positions still propagate NaN here, same as
+        # the per-tile version's resid_all = y - fit.
+        resid_all = y_true - fit_active
+
+        # Per-tile median/MAD over that tile's currently-valid points only.
+        masked_resid = np.where(weights > 0, resid_all, np.nan)
+        med_active = np.nanmedian(masked_resid, axis=1)
+        mad_active = np.nanmedian(np.abs(masked_resid - med_active[:, None]), axis=1)
+
+        fit[active] = fit_active
+        med[active] = med_active
+        mad[active] = mad_active
+
+        # A tolerance, not exact equality: a genuinely (near-)perfect fit
+        # can land at a different tiny floating-point residue (~1e-15 to
+        # 1e-16) depending on the numerical method used -- np.polyfit's
+        # SVD-based approach per-tile vs. this function's batched normal-
+        # equations solve are mathematically equivalent but not
+        # bit-identical. Dividing by an almost-but-not-exactly-zero MAD
+        # would otherwise amplify that noise unpredictably in `residual`
+        # below. 1e-9 is far below any real measurement noise in gain
+        # amplitude data (realistically ~1e-2 to 1e0 in these units).
+        zero_mad = mad_active < 1e-9
+        if zero_mad.any():
+            zero_idx = active[zero_mad]
+            residual[zero_idx] = 0.0
+            done[zero_idx] = True
+
+        nonzero = ~zero_mad
+        if nonzero.any():
+            nz_idx = active[nonzero]
+            residual_nz = np.abs(resid_all[nonzero] - med_active[nonzero, None]) / mad_active[nonzero, None]
+            residual[nz_idx] = residual_nz
+
+            new_valid_nz = initial_valid[nz_idx] & (residual_nz <= residual_threshold)
+            too_few = new_valid_nz.sum(axis=1) < min_points
+            done[nz_idx[too_few]] = True
+
+            keep_going = ~too_few
+            kg_idx = nz_idx[keep_going]
+            new_valid_kg = new_valid_nz[keep_going]
+            unchanged = np.all(new_valid_kg == valid[kg_idx], axis=1)
+
+            # Apply new_valid regardless of whether it changed (matches
+            # iterative_poly_clip's `valid = new_valid` in both the
+            # "unchanged" and "keep going" branches); only the stopping
+            # decision differs between them.
+            valid[kg_idx] = new_valid_kg
+            done[kg_idx[unchanged]] = True
+
+    # Y positions that were never valid may have been zeroed internally
+    # above to avoid 0*NaN propagation; the per-tile version's residual
+    # is NaN wherever the original Y is NaN (resid_all = y - fit, and y
+    # itself is NaN there), so match that here even though nothing
+    # currently consumes this field.
+    residual = np.where(np.isnan(Y), np.nan, residual)
 
     return valid, residual, fit, mad, med
 

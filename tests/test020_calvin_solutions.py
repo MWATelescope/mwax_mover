@@ -151,7 +151,6 @@ def test_process_solutions_success(real_data_paths, tmp_path):
             phase_fit_niter=1,
             source_list="test_srclist",
             num_sources=100,
-            produce_debug_plots=False,
             calibration_command="",
             gain_max_cutoff=None,
             gain_outlier_poly_degree=2,
@@ -197,7 +196,6 @@ def test_process_solutions_all_tiles_flagged(tmp_path):
         phase_fit_niter=1,
         source_list="test_srclist",
         num_sources=100,
-        produce_debug_plots=False,
         calibration_command="",
         gain_max_cutoff=None,
         gain_outlier_poly_degree=2,
@@ -236,7 +234,6 @@ def test_process_solutions_soln_count_mismatch(real_data_paths, tmp_path):
         phase_fit_niter=1,
         source_list="test_srclist",
         num_sources=100,
-        produce_debug_plots=False,
         calibration_command="",
         gain_max_cutoff=None,
         gain_outlier_poly_degree=2,
@@ -285,7 +282,6 @@ def test_process_solutions_db_fit_insert_fails(real_data_paths, tmp_path):
             phase_fit_niter=1,
             source_list="test_srclist",
             num_sources=100,
-            produce_debug_plots=False,
             calibration_command="",
             gain_max_cutoff=None,
             gain_outlier_poly_degree=2,
@@ -337,7 +333,6 @@ def test_process_solutions_db_soln_insert_fails(real_data_paths, tmp_path):
             phase_fit_niter=1,
             source_list="test_srclist",
             num_sources=100,
-            produce_debug_plots=False,
             calibration_command="",
             gain_max_cutoff=None,
             gain_outlier_poly_degree=2,
@@ -385,7 +380,6 @@ def test_process_solutions_readme_written_on_any_exception(real_data_paths, tmp_
             phase_fit_niter=1,
             source_list="test_srclist",
             num_sources=100,
-            produce_debug_plots=False,
             calibration_command="",
             gain_max_cutoff=None,
             gain_outlier_poly_degree=2,
@@ -421,7 +415,6 @@ def test_process_solutions_no_solution_files_in_output(real_data_paths, tmp_path
         phase_fit_niter=1,
         source_list="test_srclist",
         num_sources=100,
-        produce_debug_plots=False,
         calibration_command="",
         gain_max_cutoff=None,
         gain_outlier_poly_degree=2,
@@ -436,11 +429,11 @@ def test_process_solutions_no_solution_files_in_output(real_data_paths, tmp_path
     assert fit_id is None
 
 
-def test_process_solutions_produce_debug_plots_false_does_not_import_matplotlib(real_data_paths, tmp_path):
-    """Passing produce_debug_plots=False must not call debug_phase_fits (which uses
-    matplotlib). debug_phase_fits is invoked via
-    mwax_calvin_plots.write_stats_and_debug_plots(), not directly from
-    mwax_calvin_solutions, since the two are now shared with cal_utils.
+def test_process_solutions_calls_plot_debug_phase_fits(real_data_paths, tmp_path):
+    """process_solutions() must call plot_debug_phase_fits (via
+    write_stats_and_debug_plots()) unconditionally -- there's no longer a
+    produce_debug_plots toggle to skip it. Mocked here so the test stays
+    fast and doesn't require real matplotlib rendering.
     """
     input_path, _ = real_data_paths
     output_path = str(tmp_path)
@@ -466,7 +459,7 @@ def test_process_solutions_produce_debug_plots_false_does_not_import_matplotlib(
             "mwax_mover.mwax_calvin_solutions.insert_calibration_solutions_row",
             return_value=True,
         ),
-        patch("mwax_mover.mwax_calvin_plots.debug_phase_fits") as mock_debug,
+        patch("mwax_mover.mwax_calvin_plots.plot_debug_phase_fits") as mock_debug,
     ):
         process_solutions(
             db_handler_object=mock_db,
@@ -476,7 +469,6 @@ def test_process_solutions_produce_debug_plots_false_does_not_import_matplotlib(
             phase_fit_niter=1,
             source_list="test_srclist",
             num_sources=100,
-            produce_debug_plots=False,
             calibration_command="",
             gain_max_cutoff=None,
             gain_outlier_poly_degree=2,
@@ -487,7 +479,7 @@ def test_process_solutions_produce_debug_plots_false_does_not_import_matplotlib(
             hyperdrive_binary_path="/nonexistent/hyperdrive",
         )
 
-    mock_debug.assert_not_called()
+    mock_debug.assert_called_once()
 
 
 def test_some_fits_false_logs_warning():
@@ -613,7 +605,6 @@ def test_process_solutions_success_2():
             phase_fit_niter=1,
             source_list="test_srclist",
             num_sources=100,
-            produce_debug_plots=True,
             calibration_command="",
             gain_max_cutoff=None,
             gain_outlier_poly_degree=2,
@@ -1065,7 +1056,6 @@ def test_process_solutions_partial_coarse_channels(tmp_path):
             phase_fit_niter=1,
             source_list="test_srclist",
             num_sources=10,
-            produce_debug_plots=False,
             calibration_command="",
             gain_max_cutoff=None,
             gain_outlier_poly_degree=2,

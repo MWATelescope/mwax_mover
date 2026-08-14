@@ -98,7 +98,7 @@ def process_solutions(
         phase_outlier_tile_bad_channel_fraction: Fraction (0-1) of a tile's
             chanblocks that must already be flagged bad, combined across
             all per-channel reasons, before the whole tile is promoted to
-            fully flagged (see HyperfitsSolutionGroup.promote_mostly_bad_tiles).
+            fully flagged (see HyperfitsSolutionGroup.flag_mostly_bad_tiles).
             NOTE: accepted here and threaded through to
             insert_calibration_fits_row, but not yet written to the DB --
             see that function's docstring.
@@ -202,7 +202,7 @@ def process_solutions(
         #
         # Runs the full flagging pipeline (apply_tile_flags ->
         # enforce_whole_jones_nan -> flag_phase_outliers ->
-        # flag_amplitude_outliers -> promote_mostly_bad_tiles) and
+        # flag_amplitude_outliers -> flag_mostly_bad_tiles) and
         # captures the "before" snapshot (soln_group.before_jones etc.)
         # along the way -- shared with cal_utils via
         # HyperfitsSolutionGroup.run_flagging_pipeline() rather than each
@@ -256,7 +256,7 @@ def process_solutions(
         # debug plots -- shared with cal_utils rather than each duplicating
         # this reporting.
         with ThreadPoolExecutor(max_workers=1) as fitting_executor:
-            gain_future = fitting_executor.submit(soln_group.process_gain_fits, refant["name"])
+            gain_future = fitting_executor.submit(soln_group.process_gain_fits_for_db, refant["name"])
             phase_fits = write_stats_and_debug_plots(
                 soln_group,
                 refant["name"],

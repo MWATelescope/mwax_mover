@@ -5,7 +5,7 @@ Covers:
   - build_tile_stats_rows / write_tile_stats_table
 
 NOTE: the matplotlib-heavy plotting functions in this module
-(plot_combined_gains, plot_outlier_gains, debug_phase_fits, etc.) are
+(plot_combined_gains, plot_outlier_gains, plot_debug_phase_fits, etc.) are
 exercised indirectly via tests/test020_calvin_solutions.py's real-fixture
 integration tests and manual smoke tests during development, rather than
 duplicated here as isolated unit tests -- rendering full figures against

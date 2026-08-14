@@ -29,7 +29,7 @@ file itself:
 
 This mirrors the full flagging pipeline used by mwax_calvin_processor
 (HyperfitsSolutionGroup.apply_tile_flags -> enforce_whole_jones_nan ->
-flag_phase_outliers -> flag_amplitude_outliers -> promote_mostly_bad_tiles).
+flag_phase_outliers -> flag_amplitude_outliers -> flag_mostly_bad_tiles).
 
 Bad entries are then replaced via frequency interpolation rather than
 clipped to an arbitrary ceiling, since clipping only touches amplitude
@@ -46,8 +46,10 @@ Usage
 """
 
 import argparse
+import cProfile
 import logging
 import os
+import pstats
 import sys
 from pathlib import Path
 
@@ -76,6 +78,103 @@ for noisy_logger in ("PIL", "matplotlib", "urllib3"):
 # silence that specific logger rather than raising "matplotlib"'s whole
 # threshold (which would hide other, potentially useful warnings).
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
+
+
+def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str | Path) -> None:
+    """Load, flag, plot, and report on a set of hyperdrive solution files.
+
+    Split out from main() so --profile can wrap just this actual work with
+    cProfile, without profiling argument parsing/validation or the
+    metafits download (network-bound, not interesting to profile).
+
+    Args:
+        args: Parsed command-line arguments.
+        obs_id: Observation ID, derived from the solution filenames.
+        metafits_filename: Path to the metafits file to use.
+    """
+    metafits = Metafits(str(metafits_filename))
+    soln_group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(f) for f in args.solution_filenames])
+    soln_group.load()
+
+    # Capture the pristine Jones matrices before flagging, so the plots
+    # below can show flagged values as visible outlier points rather than
+    # gaps where the data's already been NaN'd in memory.
+    assert soln_group.jones is not None
+    pristine_jones = [file_jones.copy() for file_jones in soln_group.jones]
+
+    refant = soln_group.refant
+
+    # "Before" plots: hyperdrive's own binary-generated amp/phase plots,
+    # against the still-pristine on-disk files -- nothing has been
+    # touched yet. Written with "_original" filenames (see
+    # generate_hyperdrive_plots) so the "after" run below (same
+    # filenames, since hyperdrive derives them from the input file)
+    # doesn't overwrite these. (This only touches the on-disk files via
+    # a read-only hyperdrive invocation; it's independent of the
+    # in-memory run_flagging_pipeline() below regardless of ordering,
+    # since nothing gets written to disk until commit().)
+    for f in args.solution_filenames:
+        plots_success, plots_error = generate_hyperdrive_plots(
+            obs_id, f, args.hyperdrive_binary_path, metafits_filename, args.output_path, before=True
+        )
+        if not plots_success:
+            print(f"Warning: 'before' hyperdrive plots failed for {f}: {plots_error}")
+
+    # Full flagging pipeline, matching mwax_calvin_processor's
+    # process_solutions() -- both now share the same
+    # HyperfitsSolutionGroup.run_flagging_pipeline() implementation rather
+    # than each duplicating the call sequence.
+    soln_group.run_flagging_pipeline(
+        refant["name"],
+        args.phase_fit_niter,
+        poly_degree=args.poly_degree,
+        mad_residual_threshold=args.mad_threshold,
+        phase_outlier_nstd=args.phase_outlier_nstd,
+        tile_bad_channel_fraction_threshold=args.tile_bad_channel_fraction_threshold,
+    )
+
+    for file_idx, f in enumerate(args.solution_filenames):
+        obsid_and_band = os.path.basename(f).replace("_solutions.fits", "")
+        plot_outlier_gains(
+            soln_group,
+            file_idx,
+            n_tiles=args.plot_n_tiles,
+            output_path=os.path.join(args.output_path, f"{obsid_and_band}_gain_outliers_tiles.png"),
+            pristine_jones=pristine_jones[file_idx],
+            solution_file_will_be_modified=args.modify_solutions,
+        )
+
+    if args.modify_solutions:
+        soln_group.commit(metafits.mwalib_context)
+
+    # hyperdrive's own plots/stats run regardless of --modify-solutions,
+    # matching this tool's historical behaviour (that flag only ever
+    # controlled whether outlier-flagged gains were written to disk).
+    for f in args.solution_filenames:
+        plots_success, plots_error = generate_hyperdrive_plots(
+            obs_id, f, args.hyperdrive_binary_path, metafits_filename, args.output_path, before=False
+        )
+        if not plots_success:
+            print(f"Warning: hyperdrive plots failed for {f}: {plots_error}")
+
+    stats_path = os.path.join(args.output_path, f"{obs_id}_stats.txt")
+    with open(stats_path, "w", encoding="utf-8") as stats_fd:
+        for f in args.solution_filenames:
+            stats_success, stats_error = write_hyperdrive_stats(obs_id, stats_fd, f)
+            if not stats_success:
+                print(f"Warning: hyperdrive stats failed for {f}: {stats_error}")
+
+    # Before/after per-tile stats (obs_id_tile_stats.txt) and the
+    # phase-fit debug plots (rx_lengths/phase_fits_xx/yy/intercepts/
+    # residual) -- shared with mwax_calvin_processor via
+    # write_stats_and_debug_plots().
+    write_stats_and_debug_plots(
+        soln_group,
+        refant["name"],
+        args.phase_fit_niter,
+        args.output_path,
+        obs_id,
+    )
 
 
 def main() -> None:
@@ -160,6 +259,35 @@ def main() -> None:
         help="Path to the metafits FITS file. If not provided, the dir where the solutions files reside will be searched and if not found a new metafits will be downloaded there and used.",
     )
 
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help=(
+            "Profile the flag/plot/report pipeline with cProfile. Prints the top "
+            "--profile-top-n functions by cumulative and by self (tottime) time, and "
+            "saves the full stats to --profile-output for deeper inspection (e.g. with "
+            "snakeviz or `python -m pstats`). Argument parsing/validation and metafits "
+            "download are not profiled -- only the actual load/flag/plot/report work. "
+            "[DEFAULT=False]"
+        ),
+    )
+
+    parser.add_argument(
+        "--profile-output",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help="Path to save the full cProfile stats to (only used with --profile). "
+        "[DEFAULT={output-path}/{obsid}_profile.pstats]",
+    )
+
+    parser.add_argument(
+        "--profile-top-n",
+        type=int,
+        default=40,
+        help="Number of top functions to print when --profile is used. [DEFAULT=40]",
+    )
+
     args = parser.parse_args()
 
     #
@@ -205,73 +333,38 @@ def main() -> None:
             print(f"Error: The metafits file provided '{metafits_filename}' does not exist")
             sys.exit(-1)
 
-    metafits = Metafits(str(metafits_filename))
-    soln_group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(f) for f in args.solution_filenames])
-    soln_group.load()
+    if args.profile:
+        profiler = cProfile.Profile()
+        profiler.enable()
+        try:
+            run_pipeline(args, obs_id, metafits_filename)
+        finally:
+            profiler.disable()
 
-    # Capture the pristine Jones matrices before flagging, so the plots
-    # below can show flagged values as visible outlier points rather than
-    # gaps where the data's already been NaN'd in memory.
-    assert soln_group.jones is not None
-    pristine_jones = [file_jones.copy() for file_jones in soln_group.jones]
+        profile_output = args.profile_output or os.path.join(args.output_path, f"{obs_id}_profile.pstats")
+        stats = pstats.Stats(profiler)
+        stats.dump_stats(str(profile_output))
 
-    refant = soln_group.refant
-
-    # Full flagging pipeline, matching mwax_calvin_processor's
-    # process_solutions() -- both now share the same
-    # HyperfitsSolutionGroup.run_flagging_pipeline() implementation rather
-    # than each duplicating the call sequence.
-    soln_group.run_flagging_pipeline(
-        refant["name"],
-        args.phase_fit_niter,
-        poly_degree=args.poly_degree,
-        mad_residual_threshold=args.mad_threshold,
-        phase_outlier_nstd=args.phase_outlier_nstd,
-        tile_bad_channel_fraction_threshold=args.tile_bad_channel_fraction_threshold,
-    )
-
-    for file_idx, f in enumerate(args.solution_filenames):
-        obsid_and_band = os.path.basename(f).replace("_solutions.fits", "")
-        plot_outlier_gains(
-            soln_group,
-            file_idx,
-            n_tiles=args.plot_n_tiles,
-            output_path=os.path.join(args.output_path, f"{obsid_and_band}_gain_outliers_tiles.png"),
-            pristine_jones=pristine_jones[file_idx],
-            solution_file_will_be_modified=args.modify_solutions,
+        print(
+            f"\n{'=' * 88}\n"
+            f"Profile: top {args.profile_top_n} functions by CUMULATIVE time "
+            f"(function + everything it calls)\n{'=' * 88}"
         )
+        stats.sort_stats("cumulative").print_stats(args.profile_top_n)
 
-    if args.modify_solutions:
-        soln_group.commit(metafits.mwalib_context)
-
-    # hyperdrive's own plots/stats run regardless of --modify-solutions,
-    # matching this tool's historical behaviour (that flag only ever
-    # controlled whether outlier-flagged gains were written to disk).
-    for f in args.solution_filenames:
-        plots_success, plots_error = generate_hyperdrive_plots(
-            obs_id, f, args.hyperdrive_binary_path, metafits_filename, args.output_path, before=False
+        print(
+            f"\n{'=' * 88}\n"
+            f"Profile: top {args.profile_top_n} functions by SELF time "
+            f"(time in the function itself, excluding sub-calls)\n{'=' * 88}"
         )
-        if not plots_success:
-            print(f"Warning: hyperdrive plots failed for {f}: {plots_error}")
+        stats.sort_stats("tottime").print_stats(args.profile_top_n)
 
-    stats_path = os.path.join(args.output_path, f"{obs_id}_stats.txt")
-    with open(stats_path, "w", encoding="utf-8") as stats_fd:
-        for f in args.solution_filenames:
-            stats_success, stats_error = write_hyperdrive_stats(obs_id, stats_fd, f)
-            if not stats_success:
-                print(f"Warning: hyperdrive stats failed for {f}: {stats_error}")
-
-    # Before/after per-tile stats (obs_id_tile_stats.txt) and the
-    # phase-fit debug plots (rx_lengths/phase_fits_xx/yy/intercepts/
-    # residual) -- shared with mwax_calvin_processor via
-    # write_stats_and_debug_plots().
-    write_stats_and_debug_plots(
-        soln_group,
-        refant["name"],
-        args.phase_fit_niter,
-        args.output_path,
-        obs_id,
-    )
+        print(
+            f"Full profile data saved to {profile_output} "
+            f"(view with e.g. `snakeviz {profile_output}` or `python -m pstats {profile_output}`)"
+        )
+    else:
+        run_pipeline(args, obs_id, metafits_filename)
 
 
 if __name__ == "__main__":

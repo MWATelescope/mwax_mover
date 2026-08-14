@@ -15,7 +15,7 @@ Covers:
   - fit_phase_line()
   - fit_gain()
   - process_phase_fits()
-  - process_gain_fits()
+  - process_gain_fits_for_db()
   - write_readme_file()
 
 NOTE: some tests use real files from tests/data/. Tests that need files which

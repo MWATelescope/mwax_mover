@@ -16,7 +16,6 @@ def test_mwax_calvin_processor():
 
     # Start mwax_subfile_distributor using our test config
     mcal = MWAXCalvinProcessor()
-    mcal.produce_debug_plots = False
 
     # Override the hostname
     mcal.hostname = "calvin99"
@@ -82,7 +81,6 @@ def test_mwax_calvin_processor_no_gains_cutoff():
 
     # Start mwax_subfile_distributor using our test config
     mcal = MWAXCalvinProcessor()
-    mcal.produce_debug_plots = False
 
     # Override the hostname
     mcal.hostname = "calvin99"
