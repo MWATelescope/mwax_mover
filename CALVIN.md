@@ -65,7 +65,7 @@ Before any statistics are computed, Calvin NaNs out every channel of any tile al
 | **hyperdrive TILES HDU** | `hyperdrive` itself flagged the tile (e.g. it was flagged in the calibration source/model setup) |
 | **hyperdrive BASELINES HDU (inferred)** | Every baseline involving this tile was flagged by `hyperdrive`, implying the tile itself should be treated as flagged even though it isn't explicitly marked in the TILES HDU |
 
-NOTE: some flagged tiles or baselines may be from the `Birli` step when doing RFI detection with `AOFlagger`.
+NOTE: some flagged tiles or baselines may be from the `Birli` step where it does RFI detection with `AOFlagger`.
 
 A tile can be flagged by more than one of these at once; all three reasons are recorded independently so it's always possible to see *why* a given tile was excluded.
 
@@ -76,6 +76,16 @@ A snapshot of the data is taken immediately after this step (before any of the s
 ## Step 2: Enforce whole-Jones NaN
 
 `hyperdrive` occasionally leaves a Jones matrix only *partially* NaN — for example `Dx` is NaN but `gx`/`Dy`/`gy` are still finite numbers. A partial Jones matrix isn't physically meaningful (you can't calibrate with only 3 of the 4 terms), so any entry with at least one — but not all — of its four terms NaN is promoted to fully NaN.
+
+**Example** — a single (tile, channel) Jones matrix, before and after this step:
+
+```text
+Before:                                     After:
+[ gx = 0.98+0.10j    Dx = NaN        ]      [ NaN   NaN ]
+[ Dy = 0.01-0.02j    gy = 0.95-0.05j ]      [ NaN   NaN ]
+```
+
+Only `Dx` was NaN going in — but since a Jones matrix is only meaningful as a complete 2×2 block, the other three terms are promoted to NaN too.
 
 ---
 
@@ -94,6 +104,14 @@ Every tile's χ²/dof and σ residual (separately for XX and YY) is then compare
 
 The underlying line-fit method was originally written to find each tile's cable length; it works by transforming the (frequency, phase) solution into "delay space" via an FFT to get a fast, robust first estimate of the slope, then refining that estimate with a proper least-squares fit. Credit for the phase-fitting method: Dr. Sammy McSweeny.
 
+**Example** — a well-behaved tile's phase tightly hugs its fitted delay line (low χ²/dof, low σ residual). A tile with a faulty connector or receiver scatters widely around its own fitted line instead (illustrative data, not a real observation):
+
+![Phase fit: good tile vs. outlier tile](docs/img/step3a_phase_fit_example.png)
+
+That fit-quality metric is then compared across every tile in the observation. Here, "Tile 057" (from the plot above) sits well above the robust median+MAD threshold on χ²/dof, so it gets flagged (illustrative data):
+
+![Population outlier test across all tiles](docs/img/step3b_population_outlier_test.png)
+
 ---
 
 ## Step 4: Amplitude-outlier flagging
@@ -110,6 +128,10 @@ This deliberately:
 
 **Default sensitivity:** a channel must deviate by more than **10 residual-MADs** from the fitted curve to be flagged (`gain_outlier_mad_residual_threshold = 10.0`; a MAD is the median absolute deviation — a robust stand-in for a standard deviation, explained below).
 
+**Example** — one tile's gain amplitude vs. channel, with the fitted parabola, its ±10-MAD acceptance band, and a handful of narrowband RFI-like spikes sitting outside the band and getting flagged (illustrative data):
+
+![Amplitude outlier flagging example](docs/img/step4_amplitude_outliers.png)
+
 ---
 
 ## Step 5: Mostly-bad-tile promotion
@@ -122,7 +144,7 @@ After the previous steps, a tile might have most — but not literally all — o
 
 ## Step 6: Commit to disk
 
-Once all of the above has run, the (now partly-NaN'd) solutions are written back to disk. A backup of the original, unmodified file is always kept (see [Output files](#output-files)) so nothing is destructively lost — the outlier flagging can always be inspected against, or reverted from, the pristine original.
+Once all of the above has run, the (now partly-NaN'd) solutions are written back to disk. A backup of the original, unmodified file is always kept (see [Output files](#output-files)) so nothing is destructively lost — the outlier flagging can always be inspected against, or reverted from, the pristine original without rerunning `hyperdrive` and `Birli`. 
 
 ---
 
@@ -132,6 +154,21 @@ After committing, Calvin computes two further sets of per-tile fits against the 
 
 - A final **phase fit** (same method as Step 3), recorded for quality-monitoring and included in the tile stats output.
 - A **gain fit**: a per-tile, per-polarisation weighted-mean gain and associated quality/scatter metrics, computed independently per contiguous coarse-channel block and combined, which is what gets recorded in the calibration database against this observation.
+
+**Example** — a couple of rows from each fit's output (columns abbreviated; illustrative values):
+
+```text
+Final phase fit (one row per tile per pol)          Final gain fit (one row per tile per pol, PER COARSE CHANNEL)
+tile_id  pol  chi2dof  sigma_resid  length           tile_id  pol  coarse_ch  gain(=1/amp)  pol0    pol1       sigma_resid
+   11    XX     0.94       0.09     -1.203               11    XX      0        1.021       1.019  -2.1e-09       0.006
+   11    XX     0.94       0.09     -1.203               11    XX      1        1.018       1.016  -1.8e-09       0.007
+   11    YY     1.02       0.11     -1.198               11    YY      0        0.998       0.996  -0.9e-09       0.005
+   12    XX     0.88       0.08      0.451               12    XX      0        1.010       1.008  -1.2e-09       0.006
+```
+
+The phase fit is one row per tile per polarisation — a single delay/quality summary across the whole observation. The gain fit is one row per tile per polarisation **per coarse channel** (`pol0`/`pol1` are the intercept/slope of a small linear fit *within* that coarse channel, used only to compute `sigma_resid`; `gain` itself is the weighted-mean inverse amplitude for that coarse channel) — this is what actually gets written to the calibration database.
+
+The phase and gain fits in the database can then be used by MWA ASVO (or researchers via [Calibration Web Services](https://mwatelescope.atlassian.net/wiki/spaces/MP/pages/24969461/Calibration+web+services)) to download an [AOCal](https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_ao.html) or [Hyperdrive FITS](https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_hyp.html) solution file. NOTE: the real-time MWAX beamformer uses the Calvin-modified `Hyperdrive FITS` file for it's calibration solutions as beamforming requires the highest precision calibration information.
 
 ---
 
