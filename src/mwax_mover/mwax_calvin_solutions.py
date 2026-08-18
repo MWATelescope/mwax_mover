@@ -106,10 +106,7 @@ def process_solutions(
             own before/after solutions-plot generation.
         phase_outlier_nstd: Number of standard deviations beyond the
             population mean before a tile's phase fit is an outlier (see
-            HyperfitsSolutionGroup.flag_phase_outliers). Not currently
-            config-driven like the other thresholds -- worth wiring up to
-            [processing] in the cfg file too, if you want it tunable the
-            same way.
+            HyperfitsSolutionGroup.flag_phase_outliers).
 
     Returns:
         A tuple containing:
@@ -160,8 +157,6 @@ def process_solutions(
             )
 
         chanblocks_per_coarse = soln_group.chanblocks_per_coarse
-
-        all_chanblocks_hz = soln_group.all_chanblocks_hz_concat
 
         # Build the full sorted list of coarse channel indices from the metafits.
         # This is used below to NaN-pad gains for any missing channels.
@@ -234,37 +229,44 @@ def process_solutions(
 
         soln_group.commit(metafits.mwalib_context)
 
-        # "After" plots/stats: hyperdrive's own binary-generated plots and
-        # convergence stats, against the now-committed files.
-        hyperdrive_stats_textfile = os.path.join(output_data_path, f"{obs_id}_stats.txt")
-        with open(hyperdrive_stats_textfile, "w") as stats_fd:
-            for f in fits_solution_files:
-                plots_success, plots_error = generate_hyperdrive_plots(
-                    obs_id, f, hyperdrive_binary_path, metafits_file, output_data_path, before=False
-                )
-                if not plots_success:
-                    logger.warning(f"{obs_id}: hyperdrive plots failed for {f}: {plots_error}")
+        # "After" plots: hyperdrive's own binary-generated amp/phase plots,
+        # against the now-committed files.
+        for f in fits_solution_files:
+            plots_success, plots_error = generate_hyperdrive_plots(
+                obs_id, f, hyperdrive_binary_path, metafits_file, output_data_path, before=False
+            )
+            if not plots_success:
+                logger.warning(f"{obs_id}: hyperdrive plots failed for {f}: {plots_error}")
 
-                stats_success, stats_error = write_hyperdrive_stats(obs_id, stats_fd, f)
-                if not stats_success:
-                    logger.warning(f"{obs_id}: hyperdrive stats failed for {f}: {stats_error}")
-
+        # Single combined stats file: before/after per-tile stats first,
+        # hyperdrive convergence stats below -- written by
+        # write_stats_and_debug_plots() (shared with cal_utils) and
+        # write_hyperdrive_stats() into the same fd, in that order.
+        #
         # Final phase/gain fit, computed on the fully-flagged, committed
         # data -- this is what gets reported to the DB. write_stats_and_
         # debug_plots() computes the final phase fit, writes the
-        # before/after per-tile stats file, and generates the phase-fit
+        # before/after per-tile stats section, and generates the phase-fit
         # debug plots -- shared with cal_utils rather than each duplicating
         # this reporting.
-        with ThreadPoolExecutor(max_workers=1) as fitting_executor:
-            gain_future = fitting_executor.submit(soln_group.process_gain_fits_for_db, refant["name"])
-            phase_fits = write_stats_and_debug_plots(
-                soln_group,
-                refant["name"],
-                phase_fit_niter,
-                output_data_path,
-                obs_id,
-            )
-            gain_fits = gain_future.result()
+        stats_path = os.path.join(output_data_path, f"{obs_id}_stats.txt")
+        with open(stats_path, "w", encoding="utf-8") as stats_fd:
+            with ThreadPoolExecutor(max_workers=1) as fitting_executor:
+                gain_future = fitting_executor.submit(soln_group.process_gain_fits_for_db, refant["name"])
+                phase_fits = write_stats_and_debug_plots(
+                    soln_group,
+                    refant["name"],
+                    phase_fit_niter,
+                    output_data_path,
+                    obs_id,
+                    stats_fd,
+                )
+                gain_fits = gain_future.result()
+
+            for f in fits_solution_files:
+                stats_success, stats_error = write_hyperdrive_stats(obs_id, stats_fd, f)
+                if not stats_success:
+                    logger.warning(f"{obs_id}: hyperdrive stats failed for {f}: {stats_error}")
 
         soln_tile_ids = tiles["id"].to_numpy()
 

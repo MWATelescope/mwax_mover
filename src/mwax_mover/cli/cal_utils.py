@@ -92,7 +92,8 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
         obs_id: Observation ID, derived from the solution filenames.
         metafits_filename: Path to the metafits file to use.
     """
-    metafits = Metafits(str(metafits_filename))
+    metafits_filename = str(metafits_filename)
+    metafits = Metafits(metafits_filename)
     soln_group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(f) for f in args.solution_filenames])
     soln_group.load()
 
@@ -157,24 +158,25 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
         if not plots_success:
             print(f"Warning: hyperdrive plots failed for {f}: {plots_error}")
 
+    # Single combined stats file: before/after per-tile stats first, then
+    # hyperdrive convergence stats below -- write_stats_and_debug_plots()
+    # (shared with mwax_calvin_processor) also generates the phase-fit
+    # debug plots (rx_lengths/phase_fits_xx/yy/intercepts/residual).
     stats_path = os.path.join(args.output_path, f"{obs_id}_stats.txt")
     with open(stats_path, "w", encoding="utf-8") as stats_fd:
+        write_stats_and_debug_plots(
+            soln_group,
+            refant["name"],
+            args.phase_fit_niter,
+            args.output_path,
+            obs_id,
+            stats_fd,
+        )
+
         for f in args.solution_filenames:
             stats_success, stats_error = write_hyperdrive_stats(obs_id, stats_fd, f)
             if not stats_success:
                 print(f"Warning: hyperdrive stats failed for {f}: {stats_error}")
-
-    # Before/after per-tile stats (obs_id_tile_stats.txt) and the
-    # phase-fit debug plots (rx_lengths/phase_fits_xx/yy/intercepts/
-    # residual) -- shared with mwax_calvin_processor via
-    # write_stats_and_debug_plots().
-    write_stats_and_debug_plots(
-        soln_group,
-        refant["name"],
-        args.phase_fit_niter,
-        args.output_path,
-        obs_id,
-    )
 
 
 def main() -> None:

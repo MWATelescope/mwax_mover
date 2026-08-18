@@ -142,7 +142,6 @@ class MWAXCalvinProcessor:
         self.job_output_path: str = ""  # e.g. /data/calvin/jobs/SLURM_JOB_ID_OBSID
         self.source_list_filename: str = ""
         self.source_list_type: str = ""
-        self.phase_fit_niter: int = 0
         self.num_sources: int = 0
         self.keep_completed_visibility_files: bool = False
         self.cal_export_path: str | None = None
@@ -159,6 +158,8 @@ class MWAXCalvinProcessor:
         self.gain_outlier_modify_gains: bool
         self.gain_outlier_plot_n_tiles_per_page: int
         self.tile_bad_channel_fraction_threshold: float
+        self.phase_fit_niter: int = 0
+        self.phase_outlier_nstd: float
 
         # birli
         self.birli_timeout: int = 0
@@ -379,6 +380,7 @@ class MWAXCalvinProcessor:
                 self.gain_outlier_plot_n_tiles_per_page,
                 self.tile_bad_channel_fraction_threshold,
                 self.hyperdrive_binary_path,
+                self.phase_outlier_nstd,
             )
 
             if result:
@@ -1348,6 +1350,14 @@ class MWAXCalvinProcessor:
                     config,
                     "processing",
                     "phase_fit_niter",
+                )
+            )
+
+            self.phase_outlier_nstd = float(
+                utils.read_config(
+                    config,
+                    "processing",
+                    "phase_outlier_nstd",
                 )
             )
 

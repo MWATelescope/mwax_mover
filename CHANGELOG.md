@@ -1,25 +1,24 @@
 # Changelog
 
-# 1.9.0 13-Aug-2026
+# 1.9.0 18-Aug-2026
 
 * calvin_processor: huge refactor to consolidate all flagging, outlier detections, fitting and plotting
 * cal_utils: added missing "before" hyperdrive plots (was only ever generating "after" plots).
-* Fixed bug where generate_hyperdrive_plots() always returned success even when hyperdrive failed.
-* Renamed process_gain_fits to process_gain_fits_for_db.
-* Suppressed extraneous warnings/log noise (redundant INFO logs, expected RuntimeWarning, scipy LineSearchWarning).
-* Forced headless Agg matplotlib backend (was silently using an interactive backend).
-* Added --profile flag to cal_utils for performance profiling.
-* Fixed major bug where fit_phase_line()'s optimizer was silently failing to refine phase fits on every input (finite-difference gradient issue); fixed by supplying an exact analytic gradient. ~3.8x faster phase fitting.
-* Fixed sigma-clip threshold in fit_phase_line() (was comparing mismatched units by coincidence); replaced with robust median+MAD threshold.
-* Vectorized amplitude-outlier flagging (iterative_poly_clip_batch) instead of per-tile fitting. ~1.5-2.6x faster.
-* Parallelized per-page plot rendering across processes instead of one at a time.
-* Overall pipeline wall time reduced from 549s to 197s (2.8x) on real data.
+* calvin_processor: Fixed bug where generate_hyperdrive_plots() always returned success even when hyperdrive failed.
+* calvin_processor: Renamed process_gain_fits to process_gain_fits_for_db.
+* calvin_processor: Suppressed extraneous warnings/log noise (redundant INFO logs, expected RuntimeWarning, scipy LineSearchWarning).
+* calvin_processor: Forced headless Agg matplotlib backend (was silently using an interactive backend).
+* cal_utils: Added --profile flag to cal_utils for performance profiling.
+* calvin_processor: Fixed major bug where fit_phase_line()'s optimizer was silently failing to refine phase fits on every input (finite-difference gradient issue); fixed by supplying an exact analytic gradient. ~3.8x faster phase fitting.
+* calvin_processor: Fixed sigma-clip threshold in fit_phase_line() (was comparing mismatched units by coincidence); replaced with robust median+MAD threshold.
+* calvin_processor: Vectorized amplitude-outlier flagging (iterative_poly_clip_batch) instead of per-tile fitting. ~1.5-2.6x faster.
+* calvin_processor: Parallelized per-page plot rendering across processes instead of one at a time.
+* calvin_processor: Overall pipeline wall time reduced from 549s to 197s (2.8x) on real data.
+* calvin_processor: Added phase_outlier_nstd in calvin_processor config file and db.
 
 # 1.8.1 12-Aug-2026
 
 * calvin_processor: Fixed bug where solutions files were not being added to the index.json.
-* TODO: calvin_processor: Fixed bug where the _stats.txt file had wrong stats if picket fence.
-* TODO: calvin_processor: NaN the entire tile which are noted as phase outliers.
 
 # 1.8.0 12-Aug-2026
 

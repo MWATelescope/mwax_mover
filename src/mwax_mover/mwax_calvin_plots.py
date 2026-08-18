@@ -33,7 +33,7 @@ import matplotlib as mpl
 # TkAgg), which wastes real time on GUI-toolkit overhead for every figure.
 mpl.use("Agg")
 
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
@@ -1273,8 +1273,9 @@ def write_stats_and_debug_plots(
     phase_fit_niter: int,
     output_path: str,
     obs_id: int,
+    stats_fd,
 ) -> pd.DataFrame:
-    """Write the before/after per-tile stats file and the
+    """Write the before/after per-tile stats table and the
     phase-fit debug plots, for the group's final flagged state.
 
     Consolidates reporting previously duplicated between
@@ -1291,11 +1292,14 @@ def write_stats_and_debug_plots(
             typically commit()) have run.
         refant_name: Name of the reference antenna.
         phase_fit_niter: Number of iterations for the phase ramp fit.
-        output_path: Directory to write {obs_id}_tile_stats.txt into, and
-            the {obs_id}_rx_lengths.png,
+        output_path: Directory to write the {obs_id}_rx_lengths.png,
             _phase_fits_xx.png, _phase_fits_yy.png, _intercepts.png, and
-            _residual.png debug plots.
+            _residual.png debug plots into.
         obs_id: The observation ID, used for output filenames.
+        stats_fd: Open file descriptor to write the before/after
+            per-tile stats table into. Callers write this as the first
+            section of the combined {obs_id}_stats.txt file, with
+            write_hyperdrive_stats() convergence stats appended below.
 
     Returns:
         The final phase fit DataFrame (from process_phase_fits), so
@@ -1315,29 +1319,27 @@ def write_stats_and_debug_plots(
     before_tile_bad_mask = group.before_tile_flag_reasons != TileFlagReason.NONE
     after_tile_bad_mask = group.tile_flag_reasons != TileFlagReason.NONE
 
-    stats_path = os.path.join(output_path, f"{obs_id}_tile_stats.txt")
-    with open(stats_path, "w", encoding="utf-8") as tile_stats_fd:
-        before_rows = build_tile_stats_rows(
-            group,
-            group.before_jones,
-            before_tile_bad_mask,
-            group.before_tile_flag_reasons,
-            group.before_channel_flag_reasons,
-            group.before_phase_fits,
-        )
-        write_tile_stats_table(
-            f"{obs_id}: BEFORE any changes (unchanged hyperdrive solutions file)", before_rows, tile_stats_fd
-        )
+    before_rows = build_tile_stats_rows(
+        group,
+        group.before_jones,
+        before_tile_bad_mask,
+        group.before_tile_flag_reasons,
+        group.before_channel_flag_reasons,
+        group.before_phase_fits,
+    )
+    write_tile_stats_table(
+        f"{obs_id}: BEFORE any changes (unchanged hyperdrive solutions file)", before_rows, stats_fd
+    )
 
-        after_rows = build_tile_stats_rows(
-            group,
-            group.jones,
-            after_tile_bad_mask,
-            group.tile_flag_reasons,
-            group.channel_flag_reasons,
-            final_phase_fits,
-        )
-        write_tile_stats_table(f"{obs_id}: AFTER all Calvin flagging", after_rows, tile_stats_fd)
+    after_rows = build_tile_stats_rows(
+        group,
+        group.jones,
+        after_tile_bad_mask,
+        group.tile_flag_reasons,
+        group.channel_flag_reasons,
+        final_phase_fits,
+    )
+    write_tile_stats_table(f"{obs_id}: AFTER all Calvin flagging", after_rows, stats_fd)
 
     tiles = group.metafits_tiles_df
     all_chanblocks_hz = group.all_chanblocks_hz_concat

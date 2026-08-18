@@ -37,16 +37,15 @@ import matplotlib as mpl
 mpl.use("Agg")
 
 import numpy as np
-import numpy.typing as npt  # noqa: F401,E402
-import pandas as pd  # noqa: E402
-import seaborn as sns  # noqa: E402
-from astropy import units as u  # noqa: E402
-from astropy.constants import c  # ty: ignore[unresolved-import]  # noqa: E402
-from matplotlib import pyplot as plt  # noqa: E402
-from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
-from mwalib import MetafitsContext  # noqa: E402
-from numpy.typing import ArrayLike, NDArray  # noqa: E402
-from scipy.optimize import minimize  # noqa: E402
+import pandas as pd
+import seaborn as sns
+from astropy import units as u
+from astropy.constants import c  # ty: ignore[unresolved-import]
+from matplotlib import pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
+from mwalib import MetafitsContext
+from numpy.typing import ArrayLike, NDArray
+from scipy.optimize import minimize
 
 from mwax_mover.mwax_command import (
     check_popen_finished,
@@ -2529,7 +2528,7 @@ def get_file_description(filename: str) -> str:
     elif "solutions_phases.png" in filename:
         desc = "Calibration solution phase vs fine channel per tile"
     elif "stats.txt" in filename:
-        desc = "Hyperdrive fine channel convergence statistics"
+        desc = "Before/after per-tile flagging stats, followed by Hyperdrive fine channel convergence statistics"
     elif "residual.tsv" in filename:
         desc = "Tab separated value (TSV) file of phase residuals vs frequency by receiver type and polarisation"
     elif "residual.png" in filename:
@@ -2539,7 +2538,7 @@ def get_file_description(filename: str) -> str:
     elif "_solutions.fits" in filename:
         desc = "Hyperdrive calibration solutions in FITS format. If a '*_solutions.original.fits' also exists, then this file has had outlier gains flagged (entire Jones matrix is NaNed)"
     elif "_solutions.original.fits" in filename:
-        desc = "Original unmodified Hyperdrive calibration solutions out of Hyperdrive in FITS format (gain outliers not flagged)"
+        desc = "Original unmodified Hyperdrive calibration solutions out of Hyperdrive in FITS format"
 
     if desc == "":
         return "Miscellaneous file"
@@ -2736,4 +2735,3 @@ def upload_plot_files(job_output_path: str, upload_path: str):
     except Exception as ee:
         # Something went wrong- log it and keep going
         logger.warning(f"Failed to move files to the {upload_path}. Error: {ee!s}. Ignoring")
-
