@@ -545,7 +545,7 @@ def insert_calibration_fits_row(
     """
     sql = (
         "INSERT INTO calibration_fits"
-        " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit,source_list,num_sources,calibration_command,gain_max_cutoff,gain_outlier_poly_degree,gain_outlier_mad_residual_threshold,gain_outlier_modify_gains,phase_tile_bad_channel_fraction,phase_outlier_nstd_threshold)"
+        " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit,source_list,num_sources,calibration_command,gain_max_cutoff,gain_outlier_poly_degree,gain_outlier_mad_residual_threshold,gain_outlier_modify_gains,phase_outlier_tile_bad_channel_fraction,phase_outlier_nstd_threshold)"
         " VALUES (%s,%s,%s,now(),%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
     )
 

@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.9.1 18-Aug-2026
+
+* calvin_processor: fixed wrong db column name 'phase_outlier_tile_bad_channel_fraction'.
+
 # 1.9.0 18-Aug-2026
 
 * calvin_processor: huge refactor to consolidate all flagging, outlier detections, fitting and plotting
