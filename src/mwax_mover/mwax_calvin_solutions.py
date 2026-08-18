@@ -99,9 +99,6 @@ def process_solutions(
             chanblocks that must already be flagged bad, combined across
             all per-channel reasons, before the whole tile is promoted to
             fully flagged (see HyperfitsSolutionGroup.flag_mostly_bad_tiles).
-            NOTE: accepted here and threaded through to
-            insert_calibration_fits_row, but not yet written to the DB --
-            see that function's docstring.
         hyperdrive_binary_path: Path to the hyperdrive binary, used for its
             own before/after solutions-plot generation.
         phase_outlier_nstd: Number of standard deviations beyond the

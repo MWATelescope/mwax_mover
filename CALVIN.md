@@ -35,11 +35,11 @@ Calvin calibration solution processing starts with the calibrator observation ta
   - RFI flagging using [AOFlagger](https://gitlab.com/aroffringa/aoflagger)
   - Applies 40 kHz fine channel and 2 second time averaging
   - Writes out one UVFITS file per contiguous coarse channel band
-- For each UVFITS file (one for non-picket fence observations, >1 otherwise), hyperdrive is run to generate calibration solution fits files.
+- For each UVFITS file (one for non-picket fence observations, >1 otherwise), `hyperdrive` (see: [hyperdrive github](https://github.com/MWATelescope/mwa_hyperdrive)) is run to generate calibration solution fits files.
 
 For each observation, Calvin reads:
 
-- One or more `hyperdrive` (see: [hyperdrive github](https://github.com/MWATelescope/mwa_hyperdrive)) calibration solutions FITS files (one per contiguous frequency band).
+- One or more `hyperdrive` calibration solutions FITS files (one per contiguous frequency band).
 - The observation's metafits file, which supplies tile positions, receiver/cable info, and any tiles already flagged bad at the metafits level.
 
 Each solutions file contains, per tile and per frequency channel ("chanblock"), a 2×2 complex **Jones matrix**:
@@ -168,7 +168,17 @@ tile_id  pol  chi2dof  sigma_resid  length           tile_id  pol  coarse_ch  ga
 
 The phase fit is one row per tile per polarisation — a single delay/quality summary across the whole observation. The gain fit is one row per tile per polarisation **per coarse channel** (`pol0`/`pol1` are the intercept/slope of a small linear fit *within* that coarse channel, used only to compute `sigma_resid`; `gain` itself is the weighted-mean inverse amplitude for that coarse channel) — this is what actually gets written to the calibration database.
 
-The phase and gain fits in the database can then be used by MWA ASVO (or researchers via [Calibration Web Services](https://mwatelescope.atlassian.net/wiki/spaces/MP/pages/24969461/Calibration+web+services)) to download an [AOCal](https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_ao.html) or [Hyperdrive FITS](https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_hyp.html) solution file. NOTE: the real-time MWAX beamformer uses the Calvin-modified `Hyperdrive FITS` file for it's calibration solutions as beamforming requires the highest precision calibration information.
+The phase and gain fits in the database can then be used by MWA ASVO (or researchers via [Calibration Web Services](https://mwatelescope.atlassian.net/wiki/spaces/MP/pages/24969461/Calibration+web+services)) to download an [AOCal](https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_ao.html) or [Hyperdrive FITS](https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_hyp.html) solution file. The database also contains a record of the parameters used by Calvin for generated `hyperdrive` solutions and detecting and flagging outliers:
+- source_list: Skymodel used by `hyperdrive`
+- num_sources: Number of sources from the skymodel for `hyperdrive` to use 
+- calibration_command: Dump of the command line args used in this `hyperdrive` run
+- (phase) fit_niter: Number of times the phase fit should be iterated
+- phase_outlier_nstd_threshold: tiles more than 3 standard-deviation-equivalents beyond the population's robust centre to be flagged
+- gain_outlier_poly_degree: Nth order polynomial used for gain outlier detection
+- gain_outlier_mad_residual_threshold: Number of MADs +/- the fit considered ok for a tile
+- tile_bad_channel_fraction: Fraction (0-1) of a tile's chanblocks that must already be flagged bad before the whole tile is promoted to fully flagged
+
+NOTE: the real-time MWAX beamformer uses the Calvin-modified `Hyperdrive FITS` file for it's calibration solutions as beamforming requires the highest precision calibration information.
 
 ---
 
