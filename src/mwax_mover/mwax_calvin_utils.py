@@ -2634,6 +2634,11 @@ def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_
     if ext not in (".png", ".tsv", ".txt", ".fits"):
         return None
 
+    # Now check for other files which slip through
+    if ext == ".fits" and not (str(path).endswith("solutions.fits") and str(path).endswith("solutions.original.fits")):
+        # Ignore the visibility FITS files and metafits files
+        return None
+
     stat = path.stat()
     last_modified = datetime.datetime.fromtimestamp(stat.st_mtime, tz=datetime.UTC)
     mime_type, _ = mimetypes.guess_type(path.name)

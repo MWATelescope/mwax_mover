@@ -131,7 +131,7 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
         poly_degree=args.poly_degree,
         mad_residual_threshold=args.mad_threshold,
         phase_outlier_nstd=args.phase_outlier_nstd,
-        tile_bad_channel_fraction_threshold=args.tile_bad_channel_fraction_threshold,
+        tile_bad_channel_fraction=args.tile_bad_channel_fraction,
     )
 
     for file_idx, f in enumerate(args.solution_filenames):
@@ -226,7 +226,7 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--tile-bad-channel-fraction-threshold",
+        "--tile-bad-channel-fraction",
         type=float,
         default=0.5,
         help="Fraction (0-1) of a tile's chanblocks that must already be flagged bad before the whole tile is promoted to fully flagged. [DEFAULT=0.5]",

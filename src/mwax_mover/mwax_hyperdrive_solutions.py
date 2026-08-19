@@ -1242,7 +1242,7 @@ class HyperfitsSolutionGroup:
         poly_degree: int = 2,
         mad_residual_threshold: float = 5.0,
         phase_outlier_nstd: float = 3.0,
-        tile_bad_channel_fraction_threshold: float = 0.5,
+        tile_bad_channel_fraction: float = 0.5,
     ) -> None:
         """Run the full flagging pipeline in the standard order, capturing a
         "before" snapshot along the way.
@@ -1277,7 +1277,7 @@ class HyperfitsSolutionGroup:
             phase_outlier_nstd: Number of standard deviations beyond the
                 population mean before a tile's phase fit is an outlier
                 (see flag_phase_outliers).
-            tile_bad_channel_fraction_threshold: Fraction (0-1) of a
+            tile_bad_channel_fraction: Fraction (0-1) of a
                 tile's chanblocks that must already be flagged bad before
                 the whole tile is promoted to fully flagged (see
                 flag_mostly_bad_tiles).
@@ -1296,7 +1296,7 @@ class HyperfitsSolutionGroup:
         self.enforce_whole_jones_nan()
         self.flag_phase_outliers(refant_name, phase_fit_niter, nstd=phase_outlier_nstd)
         self.flag_amplitude_outliers(poly_degree, mad_residual_threshold)
-        self.flag_mostly_bad_tiles(tile_bad_channel_fraction_threshold)
+        self.flag_mostly_bad_tiles(tile_bad_channel_fraction)
 
     def commit(self, metafits_context: mwalib.MetafitsContext) -> list[str | None]:
         """Write all in-memory changes to disk: one backup + one write per file.

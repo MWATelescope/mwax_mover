@@ -157,7 +157,7 @@ class MWAXCalvinProcessor:
         self.gain_outlier_mad_residual_threshold: float
         self.gain_outlier_modify_gains: bool
         self.gain_outlier_plot_n_tiles_per_page: int
-        self.tile_bad_channel_fraction_threshold: float
+        self.tile_bad_channel_fraction: float
         self.phase_fit_niter: int = 0
         self.phase_outlier_nstd: float
 
@@ -378,7 +378,7 @@ class MWAXCalvinProcessor:
                 self.gain_outlier_mad_residual_threshold,
                 self.gain_outlier_modify_gains,
                 self.gain_outlier_plot_n_tiles_per_page,
-                self.tile_bad_channel_fraction_threshold,
+                self.tile_bad_channel_fraction,
                 self.hyperdrive_binary_path,
                 self.phase_outlier_nstd,
             )
@@ -1417,11 +1417,11 @@ class MWAXCalvinProcessor:
                     key="gain_outlier_plot_n_tiles_per_page",
                 )
             )
-            self.tile_bad_channel_fraction_threshold = float(
+            self.tile_bad_channel_fraction = float(
                 utils.read_config(
                     config=config,
                     section="processing",
-                    key="tile_bad_channel_fraction_threshold",
+                    key="tile_bad_channel_fraction",
                 )
             )
 

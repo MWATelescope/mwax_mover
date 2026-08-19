@@ -57,7 +57,7 @@ def process_solutions(
     gain_outlier_mad_residual_threshold: float,
     gain_outlier_modify_gains: bool | None,
     gain_outlier_plot_n_tiles_per_page: int,
-    phase_outlier_tile_bad_channel_fraction: float,
+    tile_bad_channel_fraction: float,
     hyperdrive_binary_path: str,
     phase_outlier_nstd: float = 3.0,
 ) -> tuple[bool, str, int | None]:
@@ -95,7 +95,7 @@ def process_solutions(
             no longer changes any actual behaviour here.
         gain_outlier_plot_n_tiles_per_page: Number of tiles per page in the
             paginated before/after amplitude-outlier plots.
-        phase_outlier_tile_bad_channel_fraction: Fraction (0-1) of a tile's
+        tile_bad_channel_fraction: Fraction (0-1) of a tile's
             chanblocks that must already be flagged bad, combined across
             all per-channel reasons, before the whole tile is promoted to
             fully flagged (see HyperfitsSolutionGroup.flag_mostly_bad_tiles).
@@ -205,7 +205,7 @@ def process_solutions(
             poly_degree=gain_outlier_poly_degree,
             mad_residual_threshold=gain_outlier_mad_residual_threshold,
             phase_outlier_nstd=phase_outlier_nstd,
-            tile_bad_channel_fraction_threshold=phase_outlier_tile_bad_channel_fraction,
+            tile_bad_channel_fraction=tile_bad_channel_fraction,
         )
         assert soln_group.before_jones is not None
 
@@ -289,7 +289,7 @@ def process_solutions(
                     gain_outlier_poly_degree=gain_outlier_poly_degree,
                     gain_outlier_mad_residual_threshold=gain_outlier_mad_residual_threshold,
                     gain_outlier_modify_gains=gain_outlier_modify_gains,
-                    phase_outlier_tile_bad_channel_fraction=phase_outlier_tile_bad_channel_fraction,
+                    tile_bad_channel_fraction=tile_bad_channel_fraction,
                 )
 
                 if fit_id is None or not success:

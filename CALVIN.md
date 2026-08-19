@@ -138,7 +138,7 @@ This deliberately:
 
 After the previous steps, a tile might have most — but not literally all — of its channels flagged individually (e.g. lots of scattered RFI). If **50% or more** of a tile's channels (summed across every file/band, and counting any per-channel bad reason — non-convergence, amplitude outliers, etc.) are already bad, the whole tile is promoted to fully flagged, rather than being left as a "mostly-holes" tile that would otherwise still nominally count as usable.
 
-**Default sensitivity:** `tile_bad_channel_fraction_threshold = 0.5` (50%).
+**Default sensitivity:** `tile_bad_channel_fraction = 0.5` (50%).
 
 ---
 

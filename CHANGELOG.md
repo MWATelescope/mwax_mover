@@ -1,5 +1,10 @@
 # Changelog
 
+# 1.9.2 19-Aug-2026
+
+* calvin_processor: rename of db column name 'phase_outlier_tile_bad_channel_fraction' to 'tile_bad_channel_fraction' (same for config file).
+* calvin_processor: Fix to ensure unintended files don't get indexed as "miscellaneous files".
+
 # 1.9.1 18-Aug-2026
 
 * calvin_processor: fixed wrong db column name 'phase_outlier_tile_bad_channel_fraction'.

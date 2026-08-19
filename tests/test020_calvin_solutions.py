@@ -157,7 +157,7 @@ def test_process_solutions_success(real_data_paths, tmp_path):
             gain_outlier_mad_residual_threshold=10,
             gain_outlier_modify_gains=False,
             gain_outlier_plot_n_tiles_per_page=16,
-            phase_outlier_tile_bad_channel_fraction=0.5,
+            tile_bad_channel_fraction=0.5,
             hyperdrive_binary_path="/nonexistent/hyperdrive",
         )
 
@@ -202,7 +202,7 @@ def test_process_solutions_all_tiles_flagged(tmp_path):
         gain_outlier_mad_residual_threshold=10,
         gain_outlier_modify_gains=False,
         gain_outlier_plot_n_tiles_per_page=16,
-        phase_outlier_tile_bad_channel_fraction=0.5,
+        tile_bad_channel_fraction=0.5,
         hyperdrive_binary_path="/nonexistent/hyperdrive",
     )
 
@@ -240,7 +240,7 @@ def test_process_solutions_soln_count_mismatch(real_data_paths, tmp_path):
         gain_outlier_mad_residual_threshold=10,
         gain_outlier_modify_gains=False,
         gain_outlier_plot_n_tiles_per_page=16,
-        phase_outlier_tile_bad_channel_fraction=0.5,
+        tile_bad_channel_fraction=0.5,
         hyperdrive_binary_path="/nonexistent/hyperdrive",
     )
 
@@ -288,7 +288,7 @@ def test_process_solutions_db_fit_insert_fails(real_data_paths, tmp_path):
             gain_outlier_mad_residual_threshold=10,
             gain_outlier_modify_gains=False,
             gain_outlier_plot_n_tiles_per_page=16,
-            phase_outlier_tile_bad_channel_fraction=0.5,
+            tile_bad_channel_fraction=0.5,
             hyperdrive_binary_path="/nonexistent/hyperdrive",
         )
 
@@ -339,7 +339,7 @@ def test_process_solutions_db_soln_insert_fails(real_data_paths, tmp_path):
             gain_outlier_mad_residual_threshold=10,
             gain_outlier_modify_gains=False,
             gain_outlier_plot_n_tiles_per_page=16,
-            phase_outlier_tile_bad_channel_fraction=0.5,
+            tile_bad_channel_fraction=0.5,
             hyperdrive_binary_path="/nonexistent/hyperdrive",
         )
 
@@ -386,7 +386,7 @@ def test_process_solutions_readme_written_on_any_exception(real_data_paths, tmp_
             gain_outlier_mad_residual_threshold=10,
             gain_outlier_modify_gains=False,
             gain_outlier_plot_n_tiles_per_page=16,
-            phase_outlier_tile_bad_channel_fraction=0.5,
+            tile_bad_channel_fraction=0.5,
             hyperdrive_binary_path="/nonexistent/hyperdrive",
         )
 
@@ -421,7 +421,7 @@ def test_process_solutions_no_solution_files_in_output(real_data_paths, tmp_path
         gain_outlier_mad_residual_threshold=10,
         gain_outlier_modify_gains=False,
         gain_outlier_plot_n_tiles_per_page=16,
-        phase_outlier_tile_bad_channel_fraction=0.5,
+        tile_bad_channel_fraction=0.5,
         hyperdrive_binary_path="/nonexistent/hyperdrive",
     )
 
@@ -475,7 +475,7 @@ def test_process_solutions_calls_plot_debug_phase_fits(real_data_paths, tmp_path
             gain_outlier_mad_residual_threshold=10,
             gain_outlier_modify_gains=False,
             gain_outlier_plot_n_tiles_per_page=16,
-            phase_outlier_tile_bad_channel_fraction=0.5,
+            tile_bad_channel_fraction=0.5,
             hyperdrive_binary_path="/nonexistent/hyperdrive",
         )
 
@@ -611,7 +611,7 @@ def test_process_solutions_success_2():
             gain_outlier_mad_residual_threshold=10,
             gain_outlier_modify_gains=False,
             gain_outlier_plot_n_tiles_per_page=16,
-            phase_outlier_tile_bad_channel_fraction=0.5,
+            tile_bad_channel_fraction=0.5,
             hyperdrive_binary_path="/nonexistent/hyperdrive",
         )
 
@@ -1062,7 +1062,7 @@ def test_process_solutions_partial_coarse_channels(tmp_path):
             gain_outlier_mad_residual_threshold=10,
             gain_outlier_modify_gains=False,
             gain_outlier_plot_n_tiles_per_page=16,
-            phase_outlier_tile_bad_channel_fraction=0.5,
+            tile_bad_channel_fraction=0.5,
             hyperdrive_binary_path="/nonexistent/hyperdrive",
         )
 
