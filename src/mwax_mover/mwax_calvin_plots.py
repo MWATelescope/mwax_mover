@@ -767,6 +767,79 @@ def _tile_flag_reason_text(tile_idx: int, tile_reasons: NDArray[np.object_]) -> 
     return "; ".join(parts)
 
 
+# Human-readable label for each ChannelFlagReason bit, used by
+# _fully_flagged_channel_summary_text below. AMPLITUDE_OUTLIER isn't
+# here -- its label needs the actual mad_residual_threshold value, built
+# separately where it's used.
+_CHANNEL_REASON_LABELS = {
+    ChannelFlagReason.PRE_EXISTING_NAN: "NaN",
+    ChannelFlagReason.NON_CONVERGED: "not converged",
+    ChannelFlagReason.PARTIAL_JONES: "partial Jones",
+    ChannelFlagReason.GAIN_MAX_CUTOFF: "above gain cutoff",
+}
+
+
+def _fully_flagged_channel_summary_text(
+    tile_idx: int, file_reasons: NDArray[np.object_], mad_residual_threshold: float
+) -> str:
+    """Build the 1-2 line top-centre summary for a Calvin-fully-flagged tile.
+
+    Unlike _tile_flag_reason_text (used for a tile flagged structurally,
+    before Calvin's own analysis ever ran, where there's no per-channel
+    data to break down), this is for a tile Calvin itself fully flagged --
+    e.g. promoted via flag_mostly_bad_tiles, or simply 100%
+    per-channel-flagged without a specific whole-tile reason -- where
+    real per-channel data exists and is worth summarising.
+
+    Line 1 is the fraction of this tile's channels that were never
+    individually flagged for their own reason -- i.e. would have been
+    usable on their own, before a whole-tile promotion (if any) swept
+    them into NaN regardless -- as "{pct}% Good (n_good/n_total)". A
+    tile promoted by flag_mostly_bad_tiles always has n_good > 0 for at
+    least some fraction below the promotion threshold; a tile that
+    reached 100% individually-flagged channels without ever needing
+    promotion has n_good = 0.
+
+    Line 2 lists every distinct per-channel reason actually present on
+    this tile as "{count} {label}", comma-separated, in ascending
+    reason-bit order (matching ChannelFlagReason's declaration order,
+    which happens to roughly match pipeline order too) -- omitted
+    entirely if line 1 already covers everything (n_good == n_total,
+    which can't actually happen here since this function is only
+    called for a fully-flagged tile, but handled defensively anyway).
+
+    Args:
+        tile_idx: Tile index (row position in metafits_tiles_df).
+        file_reasons: This file's ChannelFlagReason array, shape
+            (n_tiles, n_chanblocks) -- e.g. bundle["file_reasons"].
+        mad_residual_threshold: The actual MAD-residual threshold used
+            by flag_amplitude_outliers (see HyperfitsSolutionGroup.
+            mad_residual_threshold), for an accurate "outside N MAD"
+            label rather than a hardcoded guess.
+
+    Returns:
+        A 1-2 line string, ready to hand straight to ax.text().
+    """
+    reasons_here = file_reasons[tile_idx, :]
+    n_total = len(reasons_here)
+    n_good = int(np.sum(reasons_here == ChannelFlagReason.NONE))
+    pct_good = 100 * n_good / n_total if n_total else 0.0
+    line1 = f"{pct_good:.0f}% Good ({n_good}/{n_total})"
+
+    parts = []
+    for flag in ChannelFlagReason:
+        if flag == ChannelFlagReason.NONE:
+            continue
+        label = f"outside {mad_residual_threshold:g} MAD" if flag == ChannelFlagReason.AMPLITUDE_OUTLIER else _CHANNEL_REASON_LABELS[flag]
+        n = int(np.sum([bool(r & flag) for r in reasons_here]))
+        if n:
+            parts.append(f"{n} {label}")
+
+    if not parts:
+        return line1
+    return line1 + "\n" + ", ".join(parts)
+
+
 def _extract_combined_gains_bundle(group: HyperfitsSolutionGroup, file_idx: int) -> dict:
     """Extract the plain, picklable data _render_combined_gains_figure
     needs from a HyperfitsSolutionGroup.
@@ -792,6 +865,7 @@ def _extract_combined_gains_bundle(group: HyperfitsSolutionGroup, file_idx: int)
     assert group.tile_flag_reasons is not None
     assert group.amplitude_fit is not None
     assert group.amplitude_band is not None
+    assert group.mad_residual_threshold is not None
 
     return {
         "file_idx": file_idx,
@@ -802,6 +876,7 @@ def _extract_combined_gains_bundle(group: HyperfitsSolutionGroup, file_idx: int)
         "file_reasons": group.channel_flag_reasons[file_idx],
         "tile_reasons": group.tile_flag_reasons,
         "obsid": group.metafits.obsid,
+        "mad_residual_threshold": group.mad_residual_threshold,
     }
 
 
@@ -882,9 +957,19 @@ def _render_combined_gains_figure(
     - Flagged by Calvin itself (e.g. promoted via flag_mostly_bad_tiles,
       or simply 100% per-channel-flagged without a specific whole-tile
       reason): real pristine data still exists, so both subplots get the
-      normal plot (below) *plus* the same red top-centre reason text and
-      red border overlaid on top -- the point being flagged, not the
-      absence of data. If the underlying polynomial fit has no valid
+      normal plot (below) *plus* a red top-centre summary and red border
+      overlaid on top -- the point being flagged, not the absence of
+      data. Unlike the structural case's single-line reason, this
+      summary is built by _fully_flagged_channel_summary_text: a "{pct}%
+      Good (n_good/n_total)" line (the fraction of channels that were
+      never individually flagged for their own reason, before whatever
+      whole-tile promotion swept them into NaN regardless), then a
+      second line breaking down every distinct per-channel reason
+      actually present as "{count} {label}", comma-separated (e.g. "100
+      NaN, 200 above gain cutoff, 22 outside 10 MAD"). Titles say "gx
+      amplitude - FULLY FLAGGED"/"gy amplitude - FULLY FLAGGED", matching
+      the structural case's "FULLY FLAGGED" suffix. If the underlying
+      polynomial fit has no valid
       channels left to fit against (e.g. a tile where every channel was
       already excluded by something else before flag_amplitude_outliers
       ran), the band/fit legitimately have nothing to show and are left
@@ -945,6 +1030,7 @@ def _render_combined_gains_figure(
 
     file_reasons = bundle["file_reasons"]
     tile_reasons = bundle["tile_reasons"]
+    mad_residual_threshold = bundle["mad_residual_threshold"]
 
     last_tile_index = min(first_tile_index + n_tiles, n_tiles_total)
     tile_range = range(first_tile_index, last_tile_index)
@@ -1137,10 +1223,17 @@ def _render_combined_gains_figure(
             # Calvin fully flagged this tile itself (e.g. promoted via
             # flag_mostly_bad_tiles) -- real pristine data has still been
             # plotted above with the normal styling, but a red border and
-            # the reason text (also red, top-centre so it doesn't sit
+            # a summary of why (also red, top-centre so it doesn't sit
             # over the middle of the data) make the fully-flagged status
             # visually unambiguous, matching the structural-flag case's
             # colour even though that one has no data to plot alongside it.
+            # Unlike the structural case, real per-channel data exists
+            # here, so the summary is the actual channel breakdown
+            # (_fully_flagged_channel_summary_text), not the simpler
+            # single-line _tile_flag_reason_text used above.
+            calvin_fully_flagged_summary = _fully_flagged_channel_summary_text(
+                tile, file_reasons, mad_residual_threshold
+            )
             for ax in (ax_gx, ax_gy):
                 for spine in ax.spines.values():
                     spine.set_edgecolor("red")
@@ -1148,7 +1241,7 @@ def _render_combined_gains_figure(
                 ax.text(
                     0.5,
                     0.92,
-                    reason,
+                    calvin_fully_flagged_summary,
                     ha="center",
                     va="top",
                     wrap=True,
@@ -1158,6 +1251,10 @@ def _render_combined_gains_figure(
                     zorder=10,
                     bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
                 )
+            gx_title += " - FULLY FLAGGED"
+            gy_title += " - FULLY FLAGGED"
+            ax_gx.set_title(gx_title, fontsize=9)
+            ax_gy.set_title(gy_title, fontsize=9)
         elif has_new_gain_cutoff_bad_mask or has_new_amplitude_bad_mask:
             # Orange for a partially-flagged tile, regardless of which
             # reason -- red is reserved for fully flagged (above), not

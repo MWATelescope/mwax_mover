@@ -543,6 +543,7 @@ class HyperfitsSolutionGroup:
         # used, rather than recomputing against already-cleaned data.
         self.amplitude_fit: list[dict[str, NDArray[np.float64]]] | None = None
         self.amplitude_band: list[dict[str, tuple[NDArray[np.float64], NDArray[np.float64]]]] | None = None
+        self.mad_residual_threshold: float | None = None
         self.phase_fits: DataFrame | None = None
 
         # Populated by run_flagging_pipeline(): a snapshot of jones/tile
@@ -1174,6 +1175,10 @@ class HyperfitsSolutionGroup:
         self.amplitude_band -- one dict per file, keys "gx"/"gy") so a
         later plotting step can show exactly what was used to make this
         decision, rather than a fit recomputed against already-cleaned data.
+        Also stores mad_residual_threshold itself (self.mad_residual_
+        threshold), for that same plotting step to describe an
+        amplitude-outlier reason accurately (e.g. "outside 10 MAD")
+        without needing it threaded through as a separate parameter.
 
         Args:
             poly_degree: Degree of the polynomial fit to gain amplitude vs.
@@ -1189,6 +1194,7 @@ class HyperfitsSolutionGroup:
 
         self.amplitude_fit = []
         self.amplitude_band = []
+        self.mad_residual_threshold = mad_residual_threshold
 
         for file_jones, file_reasons in zip(self.jones, self.channel_flag_reasons):
             n_chanblocks = file_jones.shape[1]
