@@ -21,6 +21,7 @@ deleted -- there's no longer a second independent reader to cross-check
 against.
 """
 
+import io
 import os
 from unittest.mock import MagicMock, PropertyMock, patch
 
@@ -1060,6 +1061,97 @@ def test_run_flagging_pipeline_gain_max_cutoff_none_preserves_prior_behaviour():
     assert not np.any(
         [reasons[1, 5] & ChannelFlagReason.GAIN_MAX_CUTOFF for reasons in group.channel_flag_reasons]
     )
+
+
+def test_run_flagging_pipeline_detect_phase_outliers_runs_last():
+    """detect_phase_outliers runs after flag_amplitude_outliers and
+    flag_mostly_bad_tiles, not third -- confirmed by call order, not just
+    by checking the end result (which can't distinguish the two orderings
+    on its own, since detect_phase_outliers never affects flagging either
+    way). This ordering is what lets group.phase_fits end up equal to the
+    truly final state, which write_stats_and_debug_plots then reuses
+    instead of recomputing (see the dedicated test for that).
+    """
+    n_tiles = 5
+    group = _make_fake_group(n_tiles=n_tiles, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.tile_flag_reasons = np.full(n_tiles, TileFlagReason.NONE, dtype=object)
+    group.channel_flag_reasons = [np.full((n_tiles, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+
+    call_order = []
+    method_names = ("flag_gain_max_cutoff", "flag_amplitude_outliers", "flag_mostly_bad_tiles", "detect_phase_outliers")
+    originals = {name: getattr(HyperfitsSolutionGroup, name) for name in method_names}
+
+    def make_recorder(name, fn):
+        def recorder(self, *args, **kwargs):
+            call_order.append(name)
+            return fn(self, *args, **kwargs)
+
+        return recorder
+
+    for name in method_names:
+        setattr(HyperfitsSolutionGroup, name, make_recorder(name, originals[name]))
+
+    try:
+        with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+            group.run_flagging_pipeline(refant_name="Tile001", phase_fit_niter=1)
+    finally:
+        # Restore the real methods -- setattr back to the saved originals,
+        # not delattr, which would leave the class permanently missing
+        # them and break every test that runs after this one.
+        for name in method_names:
+            setattr(HyperfitsSolutionGroup, name, originals[name])
+
+    assert call_order == [
+        "flag_gain_max_cutoff",
+        "flag_amplitude_outliers",
+        "flag_mostly_bad_tiles",
+        "detect_phase_outliers",
+    ]
+
+
+def test_write_stats_and_debug_plots_reuses_final_phase_fit_without_recomputing():
+    """write_stats_and_debug_plots must not call process_phase_fits again
+    for the "after" state -- group.phase_fits (populated by
+    detect_phase_outliers, now running last in run_flagging_pipeline) is
+    already the final state and should be reused directly, not
+    recomputed. Regression test for the whole point of the reordering:
+    phase fitting is expensive (~2 minutes for a 256-tile real
+    observation in testing), so silently recomputing it a second time
+    for reporting is a real cost, not just a theoretical one.
+    """
+    from mwax_mover.mwax_calvin_plots import write_stats_and_debug_plots
+
+    n_tiles = 5
+    group = _make_fake_group(n_tiles=n_tiles, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.tile_flag_reasons = np.full(n_tiles, TileFlagReason.NONE, dtype=object)
+    group.channel_flag_reasons = [np.full((n_tiles, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        group.run_flagging_pipeline(refant_name="Tile001", phase_fit_niter=1)
+
+        original_process_phase_fits = HyperfitsSolutionGroup.process_phase_fits
+        call_count = 0
+
+        def counting_process_phase_fits(self, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return original_process_phase_fits(self, *args, **kwargs)
+
+        with (
+            patch.object(HyperfitsSolutionGroup, "process_phase_fits", counting_process_phase_fits),
+            patch("mwax_mover.mwax_calvin_plots.plot_debug_phase_fits", return_value=None),
+        ):
+            write_stats_and_debug_plots(
+                group,
+                "Tile001",
+                phase_fit_niter=1,
+                output_path="/tmp",
+                obs_id=1,
+                stats_fd=io.StringIO(),
+                phase_outlier_nstd=3.0,
+            )
+
+    assert call_count == 0, "write_stats_and_debug_plots should reuse group.phase_fits, not recompute it"
 
 
 # ===========================================================================

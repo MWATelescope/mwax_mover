@@ -29,9 +29,8 @@ file itself:
 
 This mirrors the full flagging pipeline used by mwax_calvin_processor
 (HyperfitsSolutionGroup.apply_tile_flags -> enforce_whole_jones_nan ->
-flag_gain_max_cutoff -> detect_phase_outliers (report-only) ->
-flag_amplitude_outliers ->
-flag_mostly_bad_tiles).
+flag_gain_max_cutoff -> flag_amplitude_outliers -> flag_mostly_bad_tiles ->
+detect_phase_outliers (report-only, runs last -- see its docstring for why)).
 
 Bad entries are then replaced via frequency interpolation rather than
 clipped to an arbitrary ceiling, since clipping only touches amplitude

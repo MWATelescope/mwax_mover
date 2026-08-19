@@ -1253,13 +1253,23 @@ class HyperfitsSolutionGroup:
         Deliberately does NOT flag or modify anything: unlike
         flag_amplitude_outliers, this never touches self.jones or
         self.tile_flag_reasons, and a tile found to be a phase outlier is
-        neither NaN'd nor excluded from any later stage of the pipeline.
-        This was a permanent policy decision (not a config toggle):
-        researchers wanted phase-outlier status reported (stats.txt's
-        Flavor/PhOutlier columns, and the phase-fit debug plots) without
-        the underlying calibration solution being touched. The result is
-        stored in self.phase_fits purely for that reporting -- see
-        mwax_calvin_plots.write_stats_and_debug_plots.
+        never NaN'd or excluded. This was a permanent policy decision
+        (not a config toggle): researchers wanted phase-outlier status
+        reported (stats.txt's Flavor/PhOutlier columns, and the
+        phase-fit debug plots) without the underlying calibration
+        solution being touched.
+
+        Runs last in run_flagging_pipeline (after flag_amplitude_outliers
+        and flag_mostly_bad_tiles), specifically so self.phase_fits ends
+        up equal to the truly final, fully-cleaned state --
+        mwax_calvin_plots.write_stats_and_debug_plots reuses it directly
+        for the "after" stats-table row and every phase-fit plot, rather
+        than paying for a second, equally expensive process_phase_fits()
+        call to get the same thing (phase fitting isn't cheap: roughly
+        2 minutes for a 256-tile observation in testing). If this method
+        moves earlier again for some reason, that reuse silently becomes
+        wrong -- self.phase_fits would then reflect a mid-pipeline state,
+        not the final one write_stats_and_debug_plots's callers expect.
 
         Args:
             refant_name: Name of the reference antenna.
@@ -1333,15 +1343,33 @@ class HyperfitsSolutionGroup:
         flag_gain_max_cutoff() (absolute sanity ceiling, does flag/NaN --
         run first so neither of the next two stages is misled by a
         diverged tile's garbage values; see its docstring),
-        detect_phase_outliers() (whole-observation, report-only -- see its
-        docstring for why this doesn't flag anything),
         flag_amplitude_outliers() (per-file, per-tile, does flag/NaN),
-        then flag_mostly_bad_tiles() sees the combined result of
-        everything before it (phase-outlier status plays no part, since
-        detect_phase_outliers never touches channel_flag_reasons; a tile
-        cut off entirely by flag_gain_max_cutoff is promoted to fully
-        flagged here via the ordinary bad-channel-fraction mechanism, with
-        no separate whole-tile logic needed).
+        flag_mostly_bad_tiles() (sees the combined result of everything
+        before it -- a tile cut off entirely by flag_gain_max_cutoff is
+        promoted to fully flagged here via the ordinary
+        bad-channel-fraction mechanism, with no separate whole-tile logic
+        needed), then finally detect_phase_outliers() (whole-observation,
+        report-only -- see its docstring for why this doesn't flag
+        anything).
+
+        detect_phase_outliers() deliberately runs last, not third: its
+        result (self.phase_fits) is only ever actually consumed by
+        mwax_calvin_plots.write_stats_and_debug_plots() for the "after"
+        stats-table row and every phase-fit plot, all of which want the
+        truly final, fully-cleaned state -- the same state
+        write_stats_and_debug_plots used to recompute for itself via a
+        second, equally expensive process_phase_fits() call (phase
+        fitting is not cheap: ~2 minutes for a 256-tile observation in
+        testing). Running detect_phase_outliers after flag_amplitude_
+        outliers/flag_mostly_bad_tiles makes self.phase_fits already
+        equal to that final state, so write_stats_and_debug_plots can
+        reuse it directly instead of paying that cost twice. (Running it
+        before flag_gain_max_cutoff would be actively wrong -- a
+        gain-diverged tile's phase fit, and the population statistics
+        every other tile's outlier status is judged against, would be
+        computed on visibly garbage data -- but there's no such
+        dependency on flag_amplitude_outliers or flag_mostly_bad_tiles;
+        it was simply never moved after them until now.)
 
         The "before" snapshot is captured right after apply_tile_flags() --
         i.e. before any of the phase/amplitude/mostly-bad-tile outlier
@@ -1351,7 +1379,9 @@ class HyperfitsSolutionGroup:
         self.before_channel_flag_reasons, and self.before_phase_fits, for
         use by mwax_calvin_plots.write_stats_and_debug_plots() (or a
         caller's own amplitude-outlier plots, e.g. plot_outlier_gains's
-        pristine_jones argument).
+        pristine_jones argument). This one can't be reused for anything
+        else -- it deliberately reflects the true pre-Calvin state, not
+        the final one.
 
         Args:
             refant_name: Name of the reference antenna, used for both the
@@ -1364,7 +1394,11 @@ class HyperfitsSolutionGroup:
             phase_outlier_nstd: Number of standard deviations beyond the
                 population mean before a tile's phase fit is reported as
                 an outlier (see detect_phase_outliers). Purely advisory --
-                does not affect flagging.
+                does not affect flagging. Must match the phase_outlier_nstd
+                passed to a later write_stats_and_debug_plots() call, or
+                its "after" reporting will silently reflect this value
+                instead of whatever it was itself given (see that
+                function's docstring).
             tile_bad_channel_fraction: Fraction (0-1) of a
                 tile's chanblocks that must already be flagged bad before
                 the whole tile is promoted to fully flagged (see
@@ -1385,16 +1419,16 @@ class HyperfitsSolutionGroup:
 
         self.enforce_whole_jones_nan()
         self.flag_gain_max_cutoff(gain_max_cutoff)
-        self.detect_phase_outliers(refant_name, phase_fit_niter, nstd=phase_outlier_nstd)
         self.flag_amplitude_outliers(poly_degree, mad_residual_threshold)
         self.flag_mostly_bad_tiles(tile_bad_channel_fraction)
+        self.detect_phase_outliers(refant_name, phase_fit_niter, nstd=phase_outlier_nstd)
 
     def commit(self, metafits_context: mwalib.MetafitsContext) -> list[str | None]:
         """Write all in-memory changes to disk: one backup + one write per file.
 
         Call this exactly once, after every flagging stage (apply_tile_flags,
-        enforce_whole_jones_nan, flag_gain_max_cutoff, detect_phase_outliers,
-        flag_amplitude_outliers, flag_mostly_bad_tiles) has run and any
+        enforce_whole_jones_nan, flag_gain_max_cutoff, flag_amplitude_outliers,
+        flag_mostly_bad_tiles, detect_phase_outliers) has run and any
         "after" plots have already been generated from self.jones --
         nothing written here should be modified further afterwards.
 

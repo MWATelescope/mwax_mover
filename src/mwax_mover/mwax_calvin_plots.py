@@ -1418,26 +1418,33 @@ def write_stats_and_debug_plots(
     mwax_calvin_processor and cal_utils. Must be called after
     HyperfitsSolutionGroup.run_flagging_pipeline() has run -- its
     before_jones/before_tile_flag_reasons/before_channel_flag_reasons/
-    before_phase_fits attributes are required here. Typically called
-    after commit() too, so the debug plots and the phase fit computed
-    here reflect data that's actually been written to disk (in-memory
-    state is otherwise identical either side of commit()).
+    before_phase_fits/phase_fits attributes are all required here.
+    Typically called after commit() too, so the debug plots reflect data
+    that's actually been written to disk (in-memory state is otherwise
+    identical either side of commit()).
 
-    The before/after phase fits are each annotated once, here, via
-    mwax_calvin_utils.annotate_phase_outliers (flavour merged in,
-    population-outlier status marked per (pol, flavor)), and that same
-    annotated DataFrame is handed to both build_tile_stats_rows (the
-    stats.txt Flavor/PhOutlier columns) and plot_debug_phase_fits (the
-    phase-fit debug plots) -- so the two reports always agree on which
-    tiles are outliers, rather than each independently recomputing it
-    (previously the plotting path used a hardcoded nstd, decoupled from
-    this function's own phase_outlier_nstd).
+    The "after" phase fit is not recomputed here: group.phase_fits is
+    already the final, fully-cleaned, flavour/outlier-annotated state,
+    because run_flagging_pipeline() runs detect_phase_outliers() last
+    for exactly this reason (see its docstring). This function reuses it
+    directly for both build_tile_stats_rows (the stats.txt AFTER row's
+    Flavor/PhOutlier columns) and plot_debug_phase_fits (the phase-fit
+    debug plots), so the two reports can't disagree with each other --
+    and, since phase fitting costs real time (roughly 2 minutes for a
+    256-tile observation in testing), doesn't pay for a second fit of
+    the same data. Only the "before" phase fit is annotated here, since
+    it's a genuinely different (deliberately unflagged) snapshot that
+    nothing else computes.
 
     Args:
         group: The solution group, after run_flagging_pipeline() (and
             typically commit()) have run.
         refant_name: Name of the reference antenna.
-        phase_fit_niter: Number of iterations for the phase ramp fit.
+        phase_fit_niter: No longer used internally -- the "after" phase
+            fit is reused from group.phase_fits rather than recomputed,
+            so this has nothing left to control. Kept as a parameter
+            only for call-site compatibility; existing callers can leave
+            it as-is.
         output_path: Directory to write the {obs_id}_rx_lengths.png,
             _phase_fits_xx.png, _phase_fits_yy.png, _intercepts.png, and
             _residual.png debug plots into.
@@ -1448,17 +1455,20 @@ def write_stats_and_debug_plots(
             write_hyperdrive_stats() convergence stats appended below.
         phase_outlier_nstd: Number of standard deviations beyond the
             population mean before a tile's phase fit is reported as an
-            outlier -- must match the value passed to
-            HyperfitsSolutionGroup.run_flagging_pipeline()'s
-            detect_phase_outliers() call, or the stats table/plots will
-            disagree with a different reporting threshold than the one
-            actually used. Purely advisory -- does not affect flagging.
+            outlier -- only affects the BEFORE table's annotation now
+            (the AFTER table/plots reuse group.phase_fits, already
+            annotated with whatever nstd run_flagging_pipeline was given).
+            Pass the same value to both calls, or the BEFORE and AFTER
+            sections will silently reflect two different thresholds.
+            Purely advisory -- does not affect flagging either way.
 
     Returns:
-        The final phase fit DataFrame (from process_phase_fits, not the
-        flavour/outlier-annotated version used for reporting here), so
+        group.phase_fits (the final, annotated phase fit DataFrame), so
         callers that also need it (e.g. for a DB insert) don't have to
-        recompute it.
+        recompute it. Note this now includes the flavour/outlier
+        annotation columns, unlike the bare process_phase_fits() result
+        this used to return -- harmless for the DB-insert caller, which
+        only reads specific known columns by name.
     """
     assert group.before_jones is not None
     assert group.before_tile_flag_reasons is not None
@@ -1467,12 +1477,12 @@ def write_stats_and_debug_plots(
     assert group.jones is not None
     assert group.tile_flag_reasons is not None
     assert group.channel_flag_reasons is not None
-
-    final_phase_fits = group.process_phase_fits(refant_name, phase_fit_niter)
+    assert group.phase_fits is not None
 
     tiles = group.metafits_tiles_df
     annotated_before_phase_fits = annotate_phase_outliers(group.before_phase_fits, tiles, nstd=phase_outlier_nstd)
-    annotated_after_phase_fits = annotate_phase_outliers(final_phase_fits, tiles, nstd=phase_outlier_nstd)
+    annotated_after_phase_fits = group.phase_fits
+    final_phase_fits = annotated_after_phase_fits
 
     before_tile_bad_mask = group.before_tile_flag_reasons != TileFlagReason.NONE
     after_tile_bad_mask = group.tile_flag_reasons != TileFlagReason.NONE

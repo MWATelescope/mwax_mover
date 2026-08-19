@@ -200,8 +200,9 @@ def process_solutions(
         #
         # Runs the full flagging pipeline (apply_tile_flags ->
         # enforce_whole_jones_nan -> flag_gain_max_cutoff ->
-        # detect_phase_outliers (report-only) -> flag_amplitude_outliers ->
-        # flag_mostly_bad_tiles) and
+        # flag_amplitude_outliers -> flag_mostly_bad_tiles ->
+        # detect_phase_outliers (report-only, runs last -- see its
+        # docstring for why)) and
         # captures the "before" snapshot (soln_group.before_jones etc.)
         # along the way -- shared with cal_utils via
         # HyperfitsSolutionGroup.run_flagging_pipeline() rather than each
