@@ -1,11 +1,9 @@
 # Changelog
 
-# Unreleased
-
-* calvin_processor: phase-outlier flagging (`flag_phase_outliers`) now scopes its population-outlier threshold per receiver flavour (rx_type) as well as per polarisation, instead of pooling every flavour together. Different flavours (e.g. RRI/SHAO/NI) have measurably different natural chi2dof/sigma_resid distributions, so pooling let a numerically-dominant flavour's spread set a threshold too strict for a naturally-noisier minority flavour and too lenient for a naturally-tighter one. See CALVIN.md's "Phase-outlier flagging" section for a worked example. `reject_outliers()` gained a `group_cols` parameter (default `("pol",)`, preserving prior behaviour for any other callers) to support this.
-
 # 1.9.2 19-Aug-2026
 
+* calvin_processor: removed dead code from mwax_calvin_utils.py left over from the mwax_calvin_plots.py migration -- `debug_phase_fits`, `plot_rx_lengths`, `plot_phase_fits`, `plot_phase_intercepts`, `plot_phase_residual` were unused duplicates of functions already live in mwax_calvin_plots.py. Also removes the now-unused matplotlib/seaborn imports (and the `mpl.use("Agg")` backend-forcing call) that existed only to support them -- every other module importing mwax_calvin_utils.py no longer pays that import cost for nothing.
+* calvin_processor: phase-outlier flagging (`flag_phase_outliers`) now scopes its population-outlier threshold per receiver flavour (rx_type) as well as per polarisation, instead of pooling every flavour together. Different flavours (e.g. RRI/SHAO/NI) have measurably different natural chi2dof/sigma_resid distributions, so pooling let a numerically-dominant flavour's spread set a threshold too strict for a naturally-noisier minority flavour and too lenient for a naturally-tighter one. See CALVIN.md's "Phase-outlier flagging" section for a worked example. `reject_outliers()` gained a `group_cols` parameter (default `("pol",)`, preserving prior behaviour for any other callers) to support this.
 * calvin_processor: rename of db column name 'phase_outlier_tile_bad_channel_fraction' to 'tile_bad_channel_fraction' (same for config file).
 * calvin_processor: Fix to ensure unintended files don't get indexed as "miscellaneous files".
 
