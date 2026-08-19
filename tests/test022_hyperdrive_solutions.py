@@ -30,7 +30,7 @@ import pytest
 from astropy import units as u
 from astropy.constants import c as speed_of_light  # ty: ignore[unresolved-import]
 
-from mwax_mover.mwax_calvin_utils import Metafits
+from mwax_mover.mwax_calvin_utils import Metafits, reject_outliers
 from mwax_mover.mwax_hyperdrive_solutions import (
     ChannelFlagReason,
     HyperfitsSolution,
@@ -466,7 +466,7 @@ def _make_phase_ramp(freqs_hz: np.ndarray, length_m: float, intercept_rad: float
     return np.exp(1j * phase)
 
 
-def _make_fake_group(n_tiles, n_chanblocks, flagged_ids=None, xx_length_m=5.0, yy_length_m=7.0):
+def _make_fake_group(n_tiles, n_chanblocks, flagged_ids=None, xx_length_m=5.0, yy_length_m=7.0, flavors=None):
     """Build a minimal HyperfitsSolutionGroup for process_phase_fits/process_gain_fits_for_db tests.
 
     Bypasses __init__/load() (no real FITS files); sets exactly the
@@ -481,9 +481,17 @@ def _make_fake_group(n_tiles, n_chanblocks, flagged_ids=None, xx_length_m=5.0, y
     data directly, matching how the pre-refactor tests fed such arrays
     straight into the (now-removed) free process_phase_fits/
     process_gain_fits_for_db functions.
+
+    Args:
+        flavors: Optional per-tile receiver flavour, as a list of length
+            n_tiles (index 0 = tile ID 1). Defaults to "RRI" for every
+            tile, matching every test written before flavour-scoped
+            outlier rejection existed.
     """
     if flagged_ids is None:
         flagged_ids = []
+    if flavors is None:
+        flavors = ["RRI"] * n_tiles
     group = HyperfitsSolutionGroup.__new__(HyperfitsSolutionGroup)
     tile_ids = np.arange(1, n_tiles + 1)
     group.metafits_tiles_df = pd.DataFrame(
@@ -493,7 +501,7 @@ def _make_fake_group(n_tiles, n_chanblocks, flagged_ids=None, xx_length_m=5.0, y
             "flag": [i in flagged_ids for i in tile_ids],
             "rx": [(i - 1) // 8 + 1 for i in tile_ids],
             "slot": [(i - 1) % 8 + 1 for i in tile_ids],
-            "flavor": "RRI",
+            "flavor": flavors,
         }
     )
     group.solns = []  # combined_tile_flags then reduces to just the metafits flag column
@@ -703,6 +711,73 @@ def test_flag_phase_outliers_catches_noisy_tile():
     # A tile with a clean ramp (index 1) is untouched.
     assert group.tile_flag_reasons[1] == TileFlagReason.NONE
     assert not np.any(np.isnan(group.jones[0][1]))
+
+
+def test_flag_phase_outliers_flavor_scoping_avoids_cross_flavor_false_positive():
+    """A tile that's normal for its own flavour isn't flagged just because another flavour is tighter.
+
+    Regression/feature test for flavour-scoped outlier rejection: builds a
+    group with a large, very tight-fitting "SHAO" population and a
+    smaller, moderately-noisier-but-internally-consistent "RRI"
+    population -- mirroring the real observation this was based on,
+    where SHAO's tight, numerically-dominant population would otherwise
+    set a pooled threshold too strict for RRI's naturally wider spread.
+
+    Confirms two things against the same data:
+      1. flag_phase_outliers (flavour-scoped) does NOT flag the RRI tiles
+         -- they're unremarkable within their own flavour's population.
+      2. The old pol-only pooled reject_outliers call (group_cols=("pol",),
+         the default) WOULD have flagged them -- confirming this is a
+         real behavioural difference, not a vacuous test.
+    """
+    n_tiles = 20
+    # Index 0 = reference tile (always). Indices 1-14 (14 tiles) = a
+    # tight-fitting "SHAO" population. Indices 15-19 (5 tiles) = a
+    # moderately-noisier-but-consistent "RRI" population -- normal for
+    # RRI, but well outside SHAO's tight spread.
+    flavors = ["SHAO"] * n_tiles
+    for i in range(15, n_tiles):
+        flavors[i] = "RRI"
+
+    group = _make_fake_group(n_tiles=n_tiles, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[], flavors=flavors)
+    group.tile_flag_reasons = np.full(n_tiles, TileFlagReason.NONE, dtype=object)
+
+    rng = np.random.default_rng(2)
+    for i in range(1, 15):  # SHAO: very tight
+        phase_noise = rng.normal(scale=0.005, size=_FIT_N_CHANBLOCKS)
+        group.jones[0][i, :, 0, 0] *= np.exp(1j * phase_noise)
+        group.jones[0][i, :, 1, 1] *= np.exp(1j * phase_noise)
+    for i in range(15, n_tiles):  # RRI: moderately noisier, but consistent amongst themselves
+        phase_noise = rng.normal(scale=0.05, size=_FIT_N_CHANBLOCKS)
+        group.jones[0][i, :, 0, 0] *= np.exp(1j * phase_noise)
+        group.jones[0][i, :, 1, 1] *= np.exp(1j * phase_noise)
+
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        # 1. Flavour-scoped (actual production behaviour): RRI tiles
+        # should be untouched.
+        group.flag_phase_outliers(refant_name="Tile001", phase_fit_niter=1, nstd=3.0)
+
+        # 2. For comparison, the old pol-only pooled call on a fresh
+        # (unflagged) copy of the same phase fits data.
+        pooled_phase_fits = group.process_phase_fits(refant_name="Tile001", phase_fit_niter=1)
+
+    pooled_phase_fits = reject_outliers(pooled_phase_fits, "chi2dof", nstd=3.0)
+    pooled_phase_fits = reject_outliers(pooled_phase_fits, "sigma_resid", nstd=3.0)
+    rri_tile_ids = {i + 1 for i in range(15, n_tiles)}
+    pooled_rri_outliers = set(
+        pooled_phase_fits.loc[
+            pooled_phase_fits["outlier"] & pooled_phase_fits["tile_id"].isin(rri_tile_ids), "tile_id"
+        ]
+    )
+    assert pooled_rri_outliers, (
+        "expected the pol-only pooled threshold to flag at least one RRI tile "
+        "as a false positive -- if not, this test no longer demonstrates a "
+        "real behavioural difference and should be revisited"
+    )
+
+    for i in range(15, n_tiles):
+        assert group.tile_flag_reasons[i] == TileFlagReason.NONE
+        assert not np.any(np.isnan(group.jones[0][i]))
 
 
 def test_flag_phase_outliers_stores_phase_fits():

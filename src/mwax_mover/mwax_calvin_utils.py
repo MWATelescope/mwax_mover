@@ -1325,12 +1325,12 @@ def debug_phase_fits(
     return phase_fits_pivot
 
 
-def reject_outliers(data, quality_key, nstd=3.0, max_iter=10):
+def reject_outliers(data, quality_key, group_cols=("pol",), nstd=3.0, max_iter=10):
     """Mark outliers in a DataFrame based on a quality metric.
 
-    Uses a robust, iteratively-refined threshold per polarisation:
-    threshold = median + nstd * 1.4826 * MAD, computed from that
-    polarisation's not-yet-flagged rows, with newly-flagged rows removed
+    Uses a robust, iteratively-refined threshold per group (see
+    group_cols): threshold = median + nstd * 1.4826 * MAD, computed from
+    that group's not-yet-flagged rows, with newly-flagged rows removed
     from the population before recomputing the threshold and repeating
     (until nothing new is flagged, or max_iter is reached).
 
@@ -1350,17 +1350,36 @@ def reject_outliers(data, quality_key, nstd=3.0, max_iter=10):
     quality_thresh from a `pol`-specific population but then applied it
     via a mask with no `pol` filter, so a threshold derived from one
     polarisation's population could incorrectly flag rows of the other.
-    Flagging is now scoped to the current `pol` throughout.
+    Flagging is now scoped to the current group throughout.
+
+    Grouping only by `pol` (the default, and the only behaviour before
+    group_cols was added) pools every tile of every receiver flavour into
+    one population per polarisation before thresholding. On real MWA
+    observations, different receiver flavours (e.g. RRI/SHAO/NI) have
+    measurably different natural chi2dof/sigma_resid distributions even
+    after each tile's own cable delay is fit out -- so pooling them
+    together lets whichever flavour has the most tiles set a threshold
+    that's too strict for a naturally-noisier minority flavour
+    (over-flagging it) and too lenient for a naturally-tighter one
+    (under-flagging it). Passing group_cols=("pol", "flavor") scopes the
+    threshold to each flavour's own population instead. See CALVIN.md's
+    "Phase-outlier flagging" section for a worked example on a real
+    observation.
 
     Args:
-        data: Input DataFrame with a 'pol' column and quality column.
+        data: Input DataFrame with the columns named in group_cols, plus
+            the quality column.
         quality_key: Name of the column to use for outlier detection.
+        group_cols: Column name(s) defining the population each row is
+            compared against -- a separate threshold is computed and
+            applied independently per unique combination of these
+            columns' values (default: ("pol",), i.e. one threshold per
+            polarisation, matching this function's original behaviour).
         nstd: Number of (MAD-derived, approximately Gaussian-equivalent)
             standard deviations beyond the population median before a
             row is an outlier (default: 3.0). Negative flags low
             outliers instead of high ones.
-        max_iter: Maximum number of threshold/clip iterations per
-            polarisation.
+        max_iter: Maximum number of threshold/clip iterations per group.
 
     Returns:
         DataFrame with an 'outlier' column added/updated marking outliers.
@@ -1378,27 +1397,35 @@ def reject_outliers(data, quality_key, nstd=3.0, max_iter=10):
     quality_values = data[quality_key].to_numpy()
     outlier_values = data["outlier"].to_numpy().copy()
 
-    for pol in data["pol"].unique():
-        pol_mask = (data["pol"] == pol).to_numpy()
+    # A single string key per row, combining every group_cols value --
+    # lets the loop below treat any number of grouping columns the same
+    # way it previously treated just "pol", with one iteration per unique
+    # combination rather than one nested loop per column.
+    group_cols = list(group_cols)
+    group_key = data[group_cols].astype(str).agg("|".join, axis=1).to_numpy()
+
+    for grp in np.unique(group_key):
+        grp_mask = group_key == grp
 
         for _ in range(max_iter):
-            idx_pol_good = np.where(pol_mask & ~outlier_values)[0]
-            if len(idx_pol_good) == 0:
+            idx_grp_good = np.where(grp_mask & ~outlier_values)[0]
+            if len(idx_grp_good) == 0:
                 break
 
-            pol_values = quality_values[idx_pol_good]
-            pol_median = np.median(pol_values)
-            pol_mad = np.median(np.abs(pol_values - pol_median))
+            grp_values = quality_values[idx_grp_good]
+            grp_median = np.median(grp_values)
+            grp_mad = np.median(np.abs(grp_values - grp_median))
 
-            if pol_mad == 0 or np.isnan(pol_mad):
-                if np.ptp(pol_values) == 0:
-                    # Truly zero spread across this pol's currently-good
+            if grp_mad == 0 or np.isnan(grp_mad):
+                if np.ptp(grp_values) == 0:
+                    # Truly zero spread across this group's currently-good
                     # population (or too few points to compute a
                     # meaningful spread, e.g. a single row) -- nothing
-                    # stands out, so stop iterating for this pol. Without
-                    # this guard, zero spread gives threshold == median,
-                    # and ">=" trivially flags every remaining row via
-                    # equality -- the opposite of correct behaviour.
+                    # stands out, so stop iterating for this group.
+                    # Without this guard, zero spread gives threshold ==
+                    # median, and ">=" trivially flags every remaining
+                    # row via equality -- the opposite of correct
+                    # behaviour.
                     break
                 # MAD's ~50% breakdown point means a minority of extreme
                 # values can collapse it to zero even though real spread
@@ -1407,18 +1434,18 @@ def reject_outliers(data, quality_key, nstd=3.0, max_iter=10):
                 # Fall back to a mean+std threshold for this round only,
                 # as a safety net -- std isn't fooled by a minority
                 # outlier the way MAD's breakdown point is here.
-                pol_mean = np.mean(pol_values)
-                pol_std = np.std(pol_values, ddof=1)
-                if pol_std == 0:
+                grp_mean = np.mean(grp_values)
+                grp_std = np.std(grp_values, ddof=1)
+                if grp_std == 0:
                     break
-                quality_thresh = pol_mean + nstd * pol_std
+                quality_thresh = grp_mean + nstd * grp_std
             else:
-                quality_thresh = pol_median + nstd * mad_to_std * pol_mad
+                quality_thresh = grp_median + nstd * mad_to_std * grp_mad
 
             if nstd >= 0:
-                newly_bad = pol_mask & ~outlier_values & (quality_values >= quality_thresh)
+                newly_bad = grp_mask & ~outlier_values & (quality_values >= quality_thresh)
             else:
-                newly_bad = pol_mask & ~outlier_values & (quality_values <= quality_thresh)
+                newly_bad = grp_mask & ~outlier_values & (quality_values <= quality_thresh)
 
             if not newly_bad.any():
                 break

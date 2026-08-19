@@ -1160,10 +1160,25 @@ class HyperfitsSolutionGroup:
 
         Runs process_phase_fits (a whole-group delay-line fit per tile per
         polarisation -- see fit_phase_line), then flags a tile as bad if
-        either its XX or YY fit is a population outlier (mean + nstd*std
-        across this observation's tiles) on either chi2dof or sigma_resid.
-        Mirrors mwax_calvin_utils.reject_outliers's existing use in
-        debug_phase_fits (chi2dof then sigma_resid, sequentially).
+        either its XX or YY fit is a population outlier (median +
+        nstd*MAD, robust and iteratively refined -- see reject_outliers)
+        on either chi2dof or sigma_resid, relative to other tiles sharing
+        both its polarisation *and* its receiver flavour (rx_type, e.g.
+        RRI/SHAO/NI). Mirrors mwax_calvin_utils.reject_outliers's existing
+        use in debug_phase_fits (chi2dof then sigma_resid, sequentially).
+
+        Grouping by flavour in addition to polarisation matters because
+        different receiver flavours have measurably different natural
+        chi2dof/sigma_resid distributions even after each tile's own
+        cable delay is fit out -- confirmed on a real MWA observation,
+        where one flavour's population was visibly tighter than another's
+        even excluding genuine outliers. Pooling every flavour into one
+        population before thresholding lets whichever flavour has the
+        most tiles set a threshold that's too strict for a
+        naturally-noisier minority flavour (over-flagging it) and too
+        lenient for a naturally-tighter one (under-flagging it). See
+        CALVIN.md's "Phase-outlier flagging" section for the worked
+        example this was based on.
 
         A tile flagged this way is NaN'd across every chanblock in every
         file in the group -- phase (cable delay) is a physical property of
@@ -1173,7 +1188,8 @@ class HyperfitsSolutionGroup:
             refant_name: Name of the reference antenna.
             phase_fit_niter: Number of iterations for the phase ramp fit.
             nstd: Number of standard deviations beyond the population mean
-                (per metric, per polarisation) before a tile is an outlier.
+                (per metric, per polarisation, per receiver flavour)
+                before a tile is an outlier.
         """
         logger.info("flag_phase_outliers")
 
@@ -1182,8 +1198,15 @@ class HyperfitsSolutionGroup:
         assert self.tile_flag_reasons is not None
 
         phase_fits = self.process_phase_fits(refant_name, phase_fit_niter)
-        phase_fits = reject_outliers(phase_fits, "chi2dof", nstd=nstd)
-        phase_fits = reject_outliers(phase_fits, "sigma_resid", nstd=nstd)
+
+        # process_phase_fits doesn't carry flavor itself (it's keyed only
+        # by tile_id), so pull it in from metafits_tiles_df before scoping
+        # the outlier threshold to (pol, flavor) groups below.
+        tile_flavors = self.metafits_tiles_df[["id", "flavor"]].rename(columns={"id": "tile_id"})
+        phase_fits = phase_fits.merge(tile_flavors, on="tile_id", how="left")
+
+        phase_fits = reject_outliers(phase_fits, "chi2dof", group_cols=("pol", "flavor"), nstd=nstd)
+        phase_fits = reject_outliers(phase_fits, "sigma_resid", group_cols=("pol", "flavor"), nstd=nstd)
         self.phase_fits = phase_fits
 
         outlier_tile_ids = set(phase_fits.loc[phase_fits["outlier"], "tile_id"])

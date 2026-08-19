@@ -86,9 +86,16 @@ def plot_debug_phase_fits(
     Produces plots and TSV files for phase fit intercepts, residuals, and RX lengths,
     and returns a pivoted dataframe with per-antenna fit information.
 
+    Its own outlier verdict (chi2dof/sigma_resid vs. reject_outliers) is
+    scoped per (pol, flavor) -- the same grouping flag_phase_outliers uses
+    for the actual flagging decision -- so the "outlier" tiles shown in
+    these debug plots agree with what was actually flagged, rather than
+    being computed against a flavour-blind population that could disagree
+    with it.
+
     Args:
         phase_fits: DataFrame with phase fit results per tile and polarization.
-        tiles: DataFrame with tile metadata.
+        tiles: DataFrame with tile metadata (must include a 'flavor' column).
         freqs: Array of frequency values in Hz.
         soln_xx: XX polarization solutions.
         soln_yy: YY polarization solutions.
@@ -106,14 +113,27 @@ def plot_debug_phase_fits(
     if n_total == 0:
         return None
 
-    phase_fits = reject_outliers(phase_fits, "chi2dof")
-    phase_fits = reject_outliers(phase_fits, "sigma_resid")
+    # Merge tile flavor in now (rather than after outlier rejection, as
+    # before) so the threshold below can be scoped to (pol, flavor) --
+    # see reject_outliers's docstring for why flavour matters, and
+    # flag_phase_outliers, which this mirrors so the debug plots/report
+    # produced here agree with what was actually flagged. Kept as a
+    # separate flavor_fits frame; the plain phase_fits frame (no tile
+    # columns) is preserved for pivot_phase_fits() below, which does its
+    # own tiles merge and would collide with a second one.
+    flavor_fits = pd.merge(phase_fits, tiles, left_on="tile_id", right_on="id")
+    flavor_fits = reject_outliers(flavor_fits, "chi2dof", group_cols=("pol", "flavor"))
+    flavor_fits = reject_outliers(flavor_fits, "sigma_resid", group_cols=("pol", "flavor"))
 
-    n_good = len(phase_fits[~phase_fits["outlier"]])
+    # Propagate the outlier verdict back onto the un-merged phase_fits
+    # frame too, since pivot_phase_fits (further down) expects that
+    # column and receives phase_fits, not flavor_fits.
+    phase_fits = phase_fits.merge(flavor_fits[["tile_id", "pol", "outlier"]], on=["tile_id", "pol"], how="left")
+
+    n_good = len(flavor_fits[~flavor_fits["outlier"]])
     if n_good == 0:
         return None
 
-    flavor_fits = pd.merge(phase_fits, tiles, left_on="tile_id", right_on="id")
     bad_fits = flavor_fits[flavor_fits["outlier"]]
     if len(bad_fits) > 0:
         logger.debug(f"flagged {len(bad_fits)} of {n_total} fits as outliers:")
