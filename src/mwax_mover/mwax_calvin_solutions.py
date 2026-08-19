@@ -102,8 +102,9 @@ def process_solutions(
         hyperdrive_binary_path: Path to the hyperdrive binary, used for its
             own before/after solutions-plot generation.
         phase_outlier_nstd: Number of standard deviations beyond the
-            population mean before a tile's phase fit is an outlier (see
-            HyperfitsSolutionGroup.flag_phase_outliers).
+            population mean before a tile's phase fit is reported as an
+            outlier (see HyperfitsSolutionGroup.detect_phase_outliers).
+            Purely advisory -- does not affect flagging.
 
     Returns:
         A tuple containing:
@@ -193,7 +194,7 @@ def process_solutions(
         # since its data was never trustworthy in the first place).
         #
         # Runs the full flagging pipeline (apply_tile_flags ->
-        # enforce_whole_jones_nan -> flag_phase_outliers ->
+        # enforce_whole_jones_nan -> detect_phase_outliers (report-only) ->
         # flag_amplitude_outliers -> flag_mostly_bad_tiles) and
         # captures the "before" snapshot (soln_group.before_jones etc.)
         # along the way -- shared with cal_utils via
@@ -257,6 +258,7 @@ def process_solutions(
                     output_data_path,
                     obs_id,
                     stats_fd,
+                    phase_outlier_nstd=phase_outlier_nstd,
                 )
                 gain_fits = gain_future.result()
 

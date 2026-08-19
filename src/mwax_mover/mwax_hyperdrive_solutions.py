@@ -29,6 +29,7 @@ from mwax_mover.mwax_calvin_utils import (
     GainFitInfo,
     Metafits,
     PhaseFitInfo,
+    annotate_phase_outliers,
     ensure_system_byte_order,
     fit_gain,
     fit_phase_line,
@@ -37,7 +38,6 @@ from mwax_mover.mwax_calvin_utils import (
     read_results_hdu,
     read_solutions_hdu_complex,
     read_tiles_hdu,
-    reject_outliers,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,6 +48,14 @@ class TileFlagReason(IntFlag):
 
     Multiple bits may be set for the same tile (e.g. flagged in both the
     metafits and the TILES HDU).
+
+    PHASE_OUTLIER is defined but never set by the automatic pipeline:
+    HyperfitsSolutionGroup.detect_phase_outliers reports population-outlier
+    phase fits (stats.txt's Flavor/PhOutlier columns, the phase-fit debug
+    plots) without flagging or modifying the tile -- a deliberate,
+    permanent policy decision, not a config toggle. The bit is kept
+    defined (rather than removed) since removing an IntFlag member would
+    silently renumber every later member's value.
     """
 
     NONE = 0
@@ -528,10 +536,10 @@ class HyperfitsSolutionGroup:
         self.tile_flag_reasons: NDArray[np.object_] | None = None
         self.channel_flag_reasons: list[NDArray[np.object_]] | None = None
 
-        # Populated by flag_amplitude_outliers() / flag_phase_outliers(),
-        # for a later plotting step to show exactly what was used to make
-        # each flagging decision, rather than recomputing against
-        # already-cleaned data.
+        # Populated by flag_amplitude_outliers() (a flagging decision) /
+        # detect_phase_outliers() (report-only, no flagging decision
+        # attached), for a later plotting step to show exactly what was
+        # used, rather than recomputing against already-cleaned data.
         self.amplitude_fit: list[dict[str, NDArray[np.float64]]] | None = None
         self.amplitude_band: list[dict[str, tuple[NDArray[np.float64], NDArray[np.float64]]]] | None = None
         self.phase_fits: DataFrame | None = None
@@ -1155,17 +1163,18 @@ class HyperfitsSolutionGroup:
             self.amplitude_fit.append({"gx": fit_gx, "gy": fit_gy})
             self.amplitude_band.append({"gx": (band_lower_gx, band_upper_gx), "gy": (band_lower_gy, band_upper_gy)})
 
-    def flag_phase_outliers(self, refant_name: str, phase_fit_niter: int, nstd: float = 3.0) -> None:
-        """Flag whole tiles whose phase fit is a population outlier.
+    def detect_phase_outliers(self, refant_name: str, phase_fit_niter: int, nstd: float = 3.0) -> None:
+        """Detect tiles whose phase fit is a population outlier, for reporting only.
 
         Runs process_phase_fits (a whole-group delay-line fit per tile per
-        polarisation -- see fit_phase_line), then flags a tile as bad if
-        either its XX or YY fit is a population outlier (median +
-        nstd*MAD, robust and iteratively refined -- see reject_outliers)
-        on either chi2dof or sigma_resid, relative to other tiles sharing
-        both its polarisation *and* its receiver flavour (rx_type, e.g.
-        RRI/SHAO/NI). Mirrors mwax_calvin_utils.reject_outliers's existing
-        use in debug_phase_fits (chi2dof then sigma_resid, sequentially).
+        polarisation -- see fit_phase_line), then marks a tile as an
+        outlier if either its XX or YY fit is a population outlier
+        (median + nstd*MAD, robust and iteratively refined -- see
+        reject_outliers) on either chi2dof or sigma_resid, relative to
+        other tiles sharing both its polarisation *and* its receiver
+        flavour (rx_type, e.g. RRI/SHAO/NI). Mirrors
+        mwax_calvin_utils.reject_outliers's existing use in
+        debug_phase_fits (chi2dof then sigma_resid, sequentially).
 
         Grouping by flavour in addition to polarisation matters because
         different receiver flavours have measurably different natural
@@ -1177,12 +1186,19 @@ class HyperfitsSolutionGroup:
         most tiles set a threshold that's too strict for a
         naturally-noisier minority flavour (over-flagging it) and too
         lenient for a naturally-tighter one (under-flagging it). See
-        CALVIN.md's "Phase-outlier flagging" section for the worked
+        CALVIN.md's "Phase-outlier detection" section for the worked
         example this was based on.
 
-        A tile flagged this way is NaN'd across every chanblock in every
-        file in the group -- phase (cable delay) is a physical property of
-        the whole tile, not something that varies file to file.
+        Deliberately does NOT flag or modify anything: unlike
+        flag_amplitude_outliers, this never touches self.jones or
+        self.tile_flag_reasons, and a tile found to be a phase outlier is
+        neither NaN'd nor excluded from any later stage of the pipeline.
+        This was a permanent policy decision (not a config toggle):
+        researchers wanted phase-outlier status reported (stats.txt's
+        Flavor/PhOutlier columns, and the phase-fit debug plots) without
+        the underlying calibration solution being touched. The result is
+        stored in self.phase_fits purely for that reporting -- see
+        mwax_calvin_plots.write_stats_and_debug_plots.
 
         Args:
             refant_name: Name of the reference antenna.
@@ -1191,34 +1207,12 @@ class HyperfitsSolutionGroup:
                 (per metric, per polarisation, per receiver flavour)
                 before a tile is an outlier.
         """
-        logger.info("flag_phase_outliers")
+        logger.info("detect_phase_outliers")
 
         self._ensure_loaded()
-        assert self.jones is not None
-        assert self.tile_flag_reasons is not None
 
         phase_fits = self.process_phase_fits(refant_name, phase_fit_niter)
-
-        # process_phase_fits doesn't carry flavor itself (it's keyed only
-        # by tile_id), so pull it in from metafits_tiles_df before scoping
-        # the outlier threshold to (pol, flavor) groups below.
-        tile_flavors = self.metafits_tiles_df[["id", "flavor"]].rename(columns={"id": "tile_id"})
-        phase_fits = phase_fits.merge(tile_flavors, on="tile_id", how="left")
-
-        phase_fits = reject_outliers(phase_fits, "chi2dof", group_cols=("pol", "flavor"), nstd=nstd)
-        phase_fits = reject_outliers(phase_fits, "sigma_resid", group_cols=("pol", "flavor"), nstd=nstd)
-        self.phase_fits = phase_fits
-
-        outlier_tile_ids = set(phase_fits.loc[phase_fits["outlier"], "tile_id"])
-        if not outlier_tile_ids:
-            return
-
-        tile_ids_all = self.metafits_tiles_df["id"].to_numpy()
-        outlier_mask = np.isin(tile_ids_all, list(outlier_tile_ids))
-
-        self.tile_flag_reasons[outlier_mask] |= TileFlagReason.PHASE_OUTLIER
-        for file_jones in self.jones:
-            file_jones[outlier_mask, :, :, :] = np.nan + 1j * np.nan
+        self.phase_fits = annotate_phase_outliers(phase_fits, self.metafits_tiles_df, nstd=nstd)
 
     def flag_mostly_bad_tiles(self, threshold: float = 0.5) -> None:
         """Promote a partially-flagged tile to fully flagged if too much of it is bad.
@@ -1274,10 +1268,12 @@ class HyperfitsSolutionGroup:
         mwax_calvin_processor and cal_utils: apply_tile_flags() (cheap,
         structural), a "before" snapshot for later before/after reporting
         (see self.before_jones etc.), enforce_whole_jones_nan(),
-        flag_phase_outliers() (whole-tile, whole-observation),
-        flag_amplitude_outliers() (per-file, per-tile), then
-        flag_mostly_bad_tiles() sees the combined result of everything
-        before it.
+        detect_phase_outliers() (whole-observation, report-only -- see its
+        docstring for why this doesn't flag anything),
+        flag_amplitude_outliers() (per-file, per-tile, does flag/NaN),
+        then flag_mostly_bad_tiles() sees the combined result of
+        everything before it (phase-outlier status plays no part, since
+        detect_phase_outliers never touches channel_flag_reasons).
 
         The "before" snapshot is captured right after apply_tile_flags() --
         i.e. before any of the phase/amplitude/mostly-bad-tile outlier
@@ -1291,15 +1287,16 @@ class HyperfitsSolutionGroup:
 
         Args:
             refant_name: Name of the reference antenna, used for both the
-                "before" phase fit captured here and flag_phase_outliers().
+                "before" phase fit captured here and detect_phase_outliers().
             phase_fit_niter: Number of iterations for the phase ramp fit.
             poly_degree: Degree of the polynomial fit to gain amplitude vs.
                 chanblock index (see flag_amplitude_outliers).
             mad_residual_threshold: MAD residual threshold for gain-
                 amplitude outlier detection (see flag_amplitude_outliers).
             phase_outlier_nstd: Number of standard deviations beyond the
-                population mean before a tile's phase fit is an outlier
-                (see flag_phase_outliers).
+                population mean before a tile's phase fit is reported as
+                an outlier (see detect_phase_outliers). Purely advisory --
+                does not affect flagging.
             tile_bad_channel_fraction: Fraction (0-1) of a
                 tile's chanblocks that must already be flagged bad before
                 the whole tile is promoted to fully flagged (see
@@ -1317,7 +1314,7 @@ class HyperfitsSolutionGroup:
         self.before_phase_fits = self.process_phase_fits(refant_name, phase_fit_niter)
 
         self.enforce_whole_jones_nan()
-        self.flag_phase_outliers(refant_name, phase_fit_niter, nstd=phase_outlier_nstd)
+        self.detect_phase_outliers(refant_name, phase_fit_niter, nstd=phase_outlier_nstd)
         self.flag_amplitude_outliers(poly_degree, mad_residual_threshold)
         self.flag_mostly_bad_tiles(tile_bad_channel_fraction)
 
@@ -1325,7 +1322,7 @@ class HyperfitsSolutionGroup:
         """Write all in-memory changes to disk: one backup + one write per file.
 
         Call this exactly once, after every flagging stage (apply_tile_flags,
-        enforce_whole_jones_nan, flag_phase_outliers, flag_amplitude_outliers,
+        enforce_whole_jones_nan, detect_phase_outliers, flag_amplitude_outliers,
         flag_mostly_bad_tiles) has run and any "after" plots have already
         been generated from self.jones -- nothing written here should be
         modified further afterwards.

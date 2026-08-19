@@ -11,7 +11,7 @@ Everything below applies per-observation. If an observation spans more than one 
 1. [Inputs](#inputs)
 2. [Step 1: Structural tile flags](#step-1-structural-tile-flags)
 3. [Step 2: Enforce whole-Jones NaN](#step-2-enforce-whole-jones-nan)
-4. [Step 3: Phase-outlier flagging](#step-3-phase-outlier-flagging)
+4. [Step 3: Phase-outlier detection](#step-3-phase-outlier-detection)
 5. [Step 4: Amplitude-outlier flagging](#step-4-amplitude-outlier-flagging)
 6. [Step 5: Mostly-bad-tile promotion](#step-5-mostly-bad-tile-promotion)
 7. [Step 6: Commit to disk](#step-6-commit-to-disk)
@@ -89,20 +89,22 @@ Only `Dx` was NaN going in — but since a Jones matrix is only meaningful as a 
 
 ---
 
-## Step 3: Phase-outlier flagging
+## Step 3: Phase-outlier detection
 
 **What it catches:** a tile whose overall cable/electronic delay is wrong (e.g. a mislabelled or physically incorrect cable length), which shows up as an anomalous *phase slope with frequency* across the whole band.
+
+**Important — this step is report-only.** Unlike every other step in this document, a tile found here is **never flagged or modified**: its solution is left exactly as `hyperdrive` produced it, all the way through to the committed FITS file and the database. The result is only ever *reported* — in the `{obs_id}_stats.txt` tile table's `PhOutlier` column, and in the phase-fit debug plots (below). This was a deliberate decision: researchers wanted visibility into which tiles have anomalous phase fits without Calvin silently removing them from the data. (Earlier versions of Calvin did flag and NaN a tile found here; if you're comparing against an older `{obs_id}_stats.txt` or `Reason(s)` column that says `phase fit is a population outlier`, that reflects the old behaviour.)
 
 **How:** For each tile and polarisation (XX and YY), Calvin fits a linear phase ramp — physically, a **group delay** — to that tile's calibration solution across the whole observation (across all frequency bands in the group, not just one file). Two quality metrics come out of that fit:
 
 - **χ²/dof (chi-squared per degree of freedom)** — how well the data actually follows a straight line in phase. Close to 1.0 means a good fit; much larger suggests the tile is noisy or RFI-affected; much smaller suggests too few points or over-fitting.
 - **σ residual** — the scatter (standard deviation) of the residuals left over after subtracting the fitted line, in radians. Lower is better.
 
-Every tile's χ²/dof and σ residual (separately for XX and YY) is then compared against the population of all *other* tiles in the same observation **and of the same receiver flavour** (rx_type, e.g. RRI/SHAO/NI), using a robust outlier test (see [Median/MAD outlier rejection](#medianmad-outlier-rejection) below). Any tile whose XX **or** YY fit is a population outlier on **either** metric is flagged bad — for every channel, in every file in the group. This is a whole-tile decision: cable delay is a physical property of the tile, not something that can vary from file to file.
+Every tile's χ²/dof and σ residual (separately for XX and YY) is then compared against the population of all *other* tiles in the same observation **and of the same receiver flavour** (rx_type, e.g. RRI/SHAO/NI), using a robust outlier test (see [Median/MAD outlier rejection](#medianmad-outlier-rejection) below). A tile whose XX **or** YY fit is a population outlier on **either** metric is reported as a phase outlier — but, as above, nothing is flagged or changed as a result.
 
-**Default sensitivity:** a tile must sit more than **3 standard-deviation-equivalents** beyond the population's robust centre to be flagged (`phase_outlier_nstd = 3.0`).
+**Default sensitivity:** a tile is reported as an outlier once it sits more than **3 standard-deviation-equivalents** beyond the population's robust centre (`phase_outlier_nstd = 3.0`).
 
-**Why scope by receiver flavour as well as polarisation:** different receiver flavours have measurably different natural χ²/dof and σ residual distributions, even after each tile's own cable delay has been fit out and removed. On a real observation (`1471082824`, three flavours — SHAO, RRI, NI), SHAO's population was visibly tighter than RRI's and NI's even excluding genuine outliers (e.g. XX median χ²/dof: SHAO 0.0048, RRI 0.0121, NI 0.0099). Pooling every flavour into one population before thresholding — as earlier versions of this pipeline did — lets whichever flavour has the most tiles set a threshold that's too strict for a naturally-noisier minority flavour (over-flagging it) and too lenient for a naturally-tighter one (under-flagging it). On that same observation, pooling flagged 29 tiles, of which roughly 18 turned out to be unremarkable once compared against their own flavour's population, while 4 tiles from the tighter flavour that were genuinely anomalous for their own population went undetected, hidden by the noisier flavours' wider pooled spread. Scoping the threshold per (polarisation, flavour) instead brought the total down to 15 tiles — the same handful of extreme, unambiguous outliers either way, plus a smaller and more accurate set of borderline cases.
+**Why scope by receiver flavour as well as polarisation:** different receiver flavours have measurably different natural χ²/dof and σ residual distributions, even after each tile's own cable delay has been fit out and removed. On a real observation (`1471082824`, three flavours — SHAO, RRI, NI), SHAO's population was visibly tighter than RRI's and NI's even excluding genuine outliers (e.g. XX median χ²/dof: SHAO 0.0048, RRI 0.0121, NI 0.0099). Pooling every flavour into one population before thresholding — as earlier versions of this pipeline did — lets whichever flavour has the most tiles set a threshold that's too strict for a naturally-noisier minority flavour (over-reporting it) and too lenient for a naturally-tighter one (under-reporting it). On that same observation, pooling reported 29 tiles, of which roughly 18 turned out to be unremarkable once compared against their own flavour's population, while 4 tiles from the tighter flavour that were genuinely anomalous for their own population went undetected, hidden by the noisier flavours' wider pooled spread. Scoping the threshold per (polarisation, flavour) instead brought the total down to 15 tiles — the same handful of extreme, unambiguous outliers either way, plus a smaller and more accurate set of borderline cases.
 
 The underlying line-fit method was originally written to find each tile's cable length; it works by transforming the (frequency, phase) solution into "delay space" via an FFT to get a fast, robust first estimate of the slope, then refining that estimate with a proper least-squares fit. Credit for the phase-fitting method: Dr. Sammy McSweeny.
 
@@ -110,15 +112,17 @@ The underlying line-fit method was originally written to find each tile's cable 
 
 ![Phase fit: good tile vs. outlier tile](docs/img/step3a_phase_fit_example.png)
 
-That fit-quality metric is then compared across every tile in the observation. Here, "Tile 057" (from the plot above) sits well above the robust median+MAD threshold on χ²/dof, so it gets flagged (illustrative data):
+That fit-quality metric is then compared across every tile in the observation. Here, "Tile 057" (from the plot above) sits well above the robust median+MAD threshold on χ²/dof, so it's reported as an outlier — but not flagged or modified (illustrative data):
 
 ![Population outlier test across all tiles](docs/img/step3b_population_outlier_test.png)
+
+The `{obs_id}_residual.png` debug plot (see [Output files](#output-files) below) also shades a band on each receiver-flavour/polarisation facet showing that group's outlier range (±`phase_outlier_nstd`×MAD around the median σ residual), so an individual tile's scatter can be visually compared against the actual reporting threshold.
 
 ---
 
 ## Step 4: Amplitude-outlier flagging
 
-**What it catches:** individual bad *channels* within an otherwise-good tile — narrowband RFI, a single corrupted fine channel, a spike in gain amplitude, etc. Unlike phase-outlier flagging, this does not throw away the whole tile — only the specific channels that look wrong.
+**What it catches:** individual bad *channels* within an otherwise-good tile — narrowband RFI, a single corrupted fine channel, a spike in gain amplitude, etc. Unlike Step 3's phase-outlier detection, this step does flag and modify data: it NaNs the specific channels that look wrong (never the whole tile).
 
 **How:** For each tile, in each file (frequency band) separately, Calvin fits a smooth polynomial curve (degree 2 by default — i.e. a parabola) to that tile's gain amplitude (`|gx|` and `|gy|` separately) as a function of channel number, then iteratively rejects any channel whose residual from that curve is unusually large, refits without them, and repeats until the set of accepted channels stops changing. This is a form of **iterative sigma-clipping** (see [Statistical background](#statistical-background)).
 
@@ -175,7 +179,7 @@ The phase and gain fits in the database can then be used by MWA ASVO (or researc
 - num_sources: Number of sources from the skymodel for `hyperdrive` to use 
 - calibration_command: Dump of the command line args used in this `hyperdrive` run
 - (phase) fit_niter: Number of times the phase fit should be iterated
-- phase_outlier_nstd_threshold: tiles more than 3 standard-deviation-equivalents beyond the population's robust centre to be flagged
+- phase_outlier_nstd_threshold: tiles more than this many standard-deviation-equivalents beyond their flavour/polarisation population's robust centre are reported as phase outliers (see [Step 3](#step-3-phase-outlier-detection)) -- report-only, does not affect flagging
 - gain_outlier_poly_degree: Nth order polynomial used for gain outlier detection
 - gain_outlier_mad_residual_threshold: Number of MADs +/- the fit considered ok for a tile
 - tile_bad_channel_fraction: Fraction (0-1) of a tile's chanblocks that must already be flagged bad before the whole tile is promoted to fully flagged
@@ -195,7 +199,7 @@ For each observation, Calvin (and the underlying `hyperdrive` plotting) writes o
 | `{obs_id}_rx_lengths.png` | Cable length offsets in metres, per receiver — a sanity-check plot for the phase/delay fitting in Step 3. |
 | `{obs_id}_phase_fits_xx.png` / `_phase_fits_yy.png` | Per-tile phase-vs-frequency plots with the fitted delay line overlaid, for XX and YY respectively. |
 | `{obs_id}_intercepts.png` | Per receiver-type/polarisation plot of phase intercepts in polar coordinates vs. cable length — another view of the Step 3 delay fit. |
-| `{obs_id}_residual.png` / `_residual.tsv` | Phase residuals vs. frequency, by receiver type and polarisation (plot and the underlying data as TSV). |
+| `{obs_id}_residual.png` / `_residual.tsv` | Phase residuals vs. frequency, by receiver type and polarisation, with a shaded band showing that group's phase-outlier reporting range (plot and the underlying data as TSV). |
 | `{obs_id}_phase_fits.tsv` | All phase-fit statistics (χ²/dof, σ residual, fitted delay, etc.) per tile, as TSV. |
 | `{obs_id}_*_solutions_amps.png` / `_solutions_phases.png` | `hyperdrive`'s own plots of calibration solution amplitude/phase vs. fine channel, per tile. |
 | `{obs_id}_*_solutions.fits` | The final calibration solutions FITS file. If a matching `*_solutions.original.fits` also exists alongside it, this file has had outlier gains flagged (i.e. entire Jones matrices NaN'd per Steps 1–5). |
@@ -209,12 +213,14 @@ The first part of `{obs_id}_stats.txt` is a per-tile table, printed twice — on
 | Column | Meaning |
 |---|---|
 | Tile ID / name | Which tile |
+| Flavor | The tile's receiver flavour/type (e.g. RRI/SHAO/NI) — see [Step 3](#step-3-phase-outlier-detection) for why this matters for phase-outlier detection |
 | Fully flagged? | Whether the *whole* tile ended up flagged |
 | % channels flagged, bad/total channels | How much of the tile is flagged, and out of how many channels |
 | gx/gy min, median, max | Gain amplitude statistics over the tile's still-good channels only |
 | χ²/dof (XX, YY) | Phase-fit goodness-of-fit per polarisation (see Step 3) |
 | σ residual (XX, YY) | Phase-fit residual scatter per polarisation (see Step 3) |
-| Reason | Which flag source(s) caused a fully-flagged tile to be flagged (metafits / hyperdrive tile / hyperdrive baseline / phase outlier / mostly-bad-channels), or a breakdown of per-channel reasons for a partially-flagged tile |
+| PhOutlier | Which polarisation(s), if any, are population outliers on the Step 3 phase fit — `XX`, `YY`, `XX,YY`, or blank. Report-only: never causes flagging, and independent of the Reason column below |
+| Reason | Which flag source(s) caused a fully-flagged tile to be flagged (metafits / hyperdrive tile / hyperdrive baseline / mostly-bad-channels), or a breakdown of per-channel reasons for a partially-flagged tile |
 
 ---
 

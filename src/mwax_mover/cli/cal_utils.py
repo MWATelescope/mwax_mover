@@ -29,7 +29,8 @@ file itself:
 
 This mirrors the full flagging pipeline used by mwax_calvin_processor
 (HyperfitsSolutionGroup.apply_tile_flags -> enforce_whole_jones_nan ->
-flag_phase_outliers -> flag_amplitude_outliers -> flag_mostly_bad_tiles).
+detect_phase_outliers (report-only) -> flag_amplitude_outliers ->
+flag_mostly_bad_tiles).
 
 Bad entries are then replaced via frequency interpolation rather than
 clipped to an arbitrary ceiling, since clipping only touches amplitude
@@ -171,6 +172,7 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
             args.output_path,
             obs_id,
             stats_fd,
+            phase_outlier_nstd=args.phase_outlier_nstd,
         )
 
         for f in args.solution_filenames:

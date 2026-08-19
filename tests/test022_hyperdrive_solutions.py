@@ -667,12 +667,19 @@ def test_flag_amplitude_outliers_stores_fit_and_band():
 
 
 # ===========================================================================
-# HyperfitsSolutionGroup.flag_phase_outliers
+# HyperfitsSolutionGroup.detect_phase_outliers
 # ===========================================================================
 
 
-def test_flag_phase_outliers_catches_noisy_tile():
-    """A tile with pure noise (no coherent phase ramp) is a population outlier.
+def test_detect_phase_outliers_catches_noisy_tile_but_does_not_flag_it():
+    """A tile with pure noise (no coherent phase ramp) is reported as a
+    population outlier, but is neither flagged nor NaN'd.
+
+    Regression test for the permanent policy change: detect_phase_outliers
+    (formerly flag_phase_outliers) now only reports population-outlier
+    phase fits -- it must never touch tile_flag_reasons or self.jones.
+    Researchers wanted this status visible in stats.txt/plots without the
+    underlying calibration solution being modified.
 
     Uses 10 tiles rather than a handful: with too few "good" tiles, a
     single severe outlier can inflate its own population mean/std enough
@@ -702,21 +709,30 @@ def test_flag_phase_outliers_catches_noisy_tile():
     noisy = rng.normal(size=_FIT_N_CHANBLOCKS) + 1j * rng.normal(size=_FIT_N_CHANBLOCKS)
     group.jones[0][-1, :, 0, 0] = noisy  # last tile: incoherent gx
     group.jones[0][-1, :, 1, 1] = noisy  # incoherent gy too
+    before_jones = group.jones[0][-1].copy()
 
     with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
-        group.flag_phase_outliers(refant_name="Tile001", phase_fit_niter=1, nstd=2.0)
+        group.detect_phase_outliers(refant_name="Tile001", phase_fit_niter=1, nstd=2.0)
 
-    assert group.tile_flag_reasons[-1] & TileFlagReason.PHASE_OUTLIER
-    assert np.all(np.isnan(group.jones[0][-1]))
-    # A tile with a clean ramp (index 1) is untouched.
+    # Reported as an outlier in self.phase_fits (tile_id = index + 1)...
+    noisy_tile_id = n_tiles
+    outlier_rows = group.phase_fits.loc[group.phase_fits["tile_id"] == noisy_tile_id, "outlier"]
+    assert outlier_rows.any(), "expected the incoherent tile to be reported as a phase outlier"
+
+    # ...but NOT flagged or modified: no TileFlagReason bit set, no NaN'ing.
+    assert group.tile_flag_reasons[-1] == TileFlagReason.NONE
+    np.testing.assert_array_equal(group.jones[0][-1], before_jones)
+
+    # A tile with a clean ramp (index 1) is untouched either way.
     assert group.tile_flag_reasons[1] == TileFlagReason.NONE
     assert not np.any(np.isnan(group.jones[0][1]))
 
 
-def test_flag_phase_outliers_flavor_scoping_avoids_cross_flavor_false_positive():
-    """A tile that's normal for its own flavour isn't flagged just because another flavour is tighter.
+def test_detect_phase_outliers_flavor_scoping_avoids_cross_flavor_false_positive():
+    """A tile that's normal for its own flavour isn't reported as an outlier
+    just because another flavour is tighter.
 
-    Regression/feature test for flavour-scoped outlier rejection: builds a
+    Regression/feature test for flavour-scoped outlier detection: builds a
     group with a large, very tight-fitting "SHAO" population and a
     smaller, moderately-noisier-but-internally-consistent "RRI"
     population -- mirroring the real observation this was based on,
@@ -724,8 +740,10 @@ def test_flag_phase_outliers_flavor_scoping_avoids_cross_flavor_false_positive()
     set a pooled threshold too strict for RRI's naturally wider spread.
 
     Confirms two things against the same data:
-      1. flag_phase_outliers (flavour-scoped) does NOT flag the RRI tiles
-         -- they're unremarkable within their own flavour's population.
+      1. detect_phase_outliers (flavour-scoped) does NOT report the RRI
+         tiles as outliers -- they're unremarkable within their own
+         flavour's population -- and (per the permanent policy change)
+         never touches tile_flag_reasons/self.jones regardless.
       2. The old pol-only pooled reject_outliers call (group_cols=("pol",),
          the default) WOULD have flagged them -- confirming this is a
          real behavioural difference, not a vacuous test.
@@ -754,8 +772,8 @@ def test_flag_phase_outliers_flavor_scoping_avoids_cross_flavor_false_positive()
 
     with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
         # 1. Flavour-scoped (actual production behaviour): RRI tiles
-        # should be untouched.
-        group.flag_phase_outliers(refant_name="Tile001", phase_fit_niter=1, nstd=3.0)
+        # should not be reported as outliers.
+        group.detect_phase_outliers(refant_name="Tile001", phase_fit_niter=1, nstd=3.0)
 
         # 2. For comparison, the old pol-only pooled call on a fresh
         # (unflagged) copy of the same phase fits data.
@@ -775,18 +793,59 @@ def test_flag_phase_outliers_flavor_scoping_avoids_cross_flavor_false_positive()
         "real behavioural difference and should be revisited"
     )
 
+    flavor_scoped_rri_outliers = group.phase_fits.loc[
+        group.phase_fits["tile_id"].isin(rri_tile_ids) & group.phase_fits["outlier"]
+    ]
+    assert flavor_scoped_rri_outliers.empty, "flavour-scoped detection should not report any RRI tile as an outlier"
+
+    # detect_phase_outliers never flags or modifies anything, regardless
+    # of outlier status -- confirmed for these RRI tiles specifically,
+    # even though they're the ones a pooled threshold would have caught.
     for i in range(15, n_tiles):
         assert group.tile_flag_reasons[i] == TileFlagReason.NONE
         assert not np.any(np.isnan(group.jones[0][i]))
 
 
-def test_flag_phase_outliers_stores_phase_fits():
+def test_detect_phase_outliers_never_flags_or_modifies_jones():
+    """detect_phase_outliers never sets a TileFlagReason bit or NaNs jones,
+    even for a tile whose phase fit is an extreme, unambiguous outlier.
+
+    Direct regression test for the permanent policy change (formerly
+    flag_phase_outliers's whole point was to do exactly this) -- kept as
+    its own minimal test, separate from the noisy-tile test above, so a
+    future change to that test's construction can't accidentally stop
+    covering this guarantee.
+    """
+    n_tiles = 10
+    group = _make_fake_group(n_tiles=n_tiles, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.tile_flag_reasons = np.full(n_tiles, TileFlagReason.NONE, dtype=object)
+
+    rng = np.random.default_rng(3)
+    for i in range(1, n_tiles - 1):
+        phase_noise = rng.normal(scale=0.02, size=_FIT_N_CHANBLOCKS)
+        group.jones[0][i, :, 0, 0] *= np.exp(1j * phase_noise)
+        group.jones[0][i, :, 1, 1] *= np.exp(1j * phase_noise)
+    noisy = rng.normal(size=_FIT_N_CHANBLOCKS) + 1j * rng.normal(size=_FIT_N_CHANBLOCKS)
+    group.jones[0][-1, :, 0, 0] = noisy
+    group.jones[0][-1, :, 1, 1] = noisy
+    before_all_jones = [j.copy() for j in group.jones]
+    before_tile_flag_reasons = group.tile_flag_reasons.copy()
+
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        group.detect_phase_outliers(refant_name="Tile001", phase_fit_niter=1, nstd=2.0)
+
+    np.testing.assert_array_equal(before_tile_flag_reasons, group.tile_flag_reasons)
+    for before_file_jones, after_file_jones in zip(before_all_jones, group.jones):
+        assert np.array_equal(before_file_jones, after_file_jones, equal_nan=True)
+
+
+def test_detect_phase_outliers_stores_phase_fits():
     """phase_fits is populated with an 'outlier' column after the call."""
     group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
     group.tile_flag_reasons = np.full(3, TileFlagReason.NONE, dtype=object)
 
     with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
-        group.flag_phase_outliers(refant_name="Tile001", phase_fit_niter=1, nstd=3.0)
+        group.detect_phase_outliers(refant_name="Tile001", phase_fit_niter=1, nstd=3.0)
 
     assert group.phase_fits is not None
     assert "outlier" in group.phase_fits.columns

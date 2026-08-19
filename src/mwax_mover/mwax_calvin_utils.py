@@ -1329,6 +1329,49 @@ def reject_outliers(data, quality_key, group_cols=("pol",), nstd=3.0, max_iter=1
     return data
 
 
+def annotate_phase_outliers(
+    phase_fits: pd.DataFrame,
+    tiles: pd.DataFrame,
+    nstd: float = 3.0,
+) -> pd.DataFrame:
+    """Merge tile metadata into a phase-fits DataFrame and mark population outliers.
+
+    Merges tiles (e.g. HyperfitsSolutionGroup.metafits_tiles_df or
+    Metafits.tiles_df -- anything with 'id' and 'flavor' columns) into
+    phase_fits on tile_id/id, then scopes reject_outliers's
+    population-outlier test to (pol, flavor) groups, on chi2dof then
+    sigma_resid, sequentially.
+
+    This is the single, shared definition of "phase outlier" used
+    everywhere in the Calvin pipeline: HyperfitsSolutionGroup.
+    detect_phase_outliers (which only reports the result -- see its
+    docstring for why phase outliers are no longer flagged or modified),
+    and mwax_calvin_plots.write_stats_and_debug_plots (which feeds the
+    same annotated DataFrame to both the stats.txt Flavor/PhOutlier
+    columns and the phase-fit debug plots). Routing every caller through
+    one function keeps that definition consistent -- previously the
+    plotting path independently recomputed this with a hardcoded nstd,
+    which could silently disagree with the actual detection threshold.
+
+    Args:
+        phase_fits: DataFrame from process_phase_fits (or a snapshot of
+            it), with columns tile_id/soln_idx/pol/chi2dof/sigma_resid/etc.
+        tiles: DataFrame with tile metadata, including 'id' and 'flavor'.
+        nstd: Number of (MAD-derived) standard deviations beyond each
+            (pol, flavor) population's robust centre before a tile's fit
+            is an outlier on that metric (default: 3.0). See
+            reject_outliers.
+
+    Returns:
+        phase_fits merged with tiles (on tile_id/id) and with an
+        'outlier' column marking population-outlier rows.
+    """
+    merged = phase_fits.merge(tiles, left_on="tile_id", right_on="id", how="left")
+    merged = reject_outliers(merged, "chi2dof", group_cols=("pol", "flavor"), nstd=nstd)
+    merged = reject_outliers(merged, "sigma_resid", group_cols=("pol", "flavor"), nstd=nstd)
+    return merged
+
+
 def pivot_phase_fits(
     phase_fits: pd.DataFrame,
     tiles: pd.DataFrame,

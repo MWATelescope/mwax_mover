@@ -65,12 +65,22 @@ def _make_jones(n_tiles=_N_TILES, n_chanblocks=_N_CHANBLOCKS, amp=1.0):
     return jones
 
 
-def _make_phase_fits(tile_ids, chi2dof=0.01, sigma_resid=0.05):
-    """Build a minimal phase_fits DataFrame with XX/YY rows for each tile."""
+def _make_phase_fits(tile_ids, chi2dof=0.01, sigma_resid=0.05, outliers=None):
+    """Build a minimal phase_fits DataFrame with XX/YY rows for each tile.
+
+    Args:
+        outliers: Optional set of (tile_id, pol) tuples to mark as
+            population outliers. If None (default), no 'outlier' column
+            is added at all -- matching a bare process_phase_fits()
+            result, and every existing caller of this helper.
+    """
     rows = []
     for tile_id in tile_ids:
         for pol in ("XX", "YY"):
-            rows.append({"tile_id": tile_id, "pol": pol, "chi2dof": chi2dof, "sigma_resid": sigma_resid})
+            row = {"tile_id": tile_id, "pol": pol, "chi2dof": chi2dof, "sigma_resid": sigma_resid}
+            if outliers is not None:
+                row["outlier"] = (tile_id, pol) in outliers
+            rows.append(row)
     return pd.DataFrame(rows)
 
 
@@ -189,6 +199,103 @@ def test_good_tile_reports_amplitude_and_phase_stats():
     assert rows[0]["flagged_pct"] == pytest.approx(0.0)
 
 
+def test_flavor_field_comes_from_metafits_tiles_df():
+    """Every row's flavor matches the tile's flavor in metafits_tiles_df,
+    formatted without the ReceiverType. enum-class prefix."""
+    group = _make_stats_group()
+    group.metafits_tiles_df["flavor"] = ["SHAO", "RRI", "NI"]
+    jones = [_make_jones()]
+    channel_reasons = [np.full((_N_TILES, _N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+    tile_reasons = np.full(_N_TILES, TileFlagReason.NONE, dtype=object)
+    tile_bad_mask = tile_reasons != TileFlagReason.NONE
+    phase_fits = _make_phase_fits(group.metafits_tiles_df["id"].to_numpy())
+
+    rows = build_tile_stats_rows(group, jones, tile_bad_mask, tile_reasons, channel_reasons, phase_fits)
+
+    assert [r["flavor"] for r in rows] == ["SHAO", "RRI", "NI"]
+
+
+def test_flavor_field_strips_receiver_type_enum_prefix():
+    """A flavor value stringified as "ReceiverType.SHAO" (mwalib's actual
+    enum repr) displays as just "SHAO"."""
+    group = _make_stats_group()
+    group.metafits_tiles_df["flavor"] = "ReceiverType.SHAO"
+    jones = [_make_jones()]
+    channel_reasons = [np.full((_N_TILES, _N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+    tile_reasons = np.full(_N_TILES, TileFlagReason.NONE, dtype=object)
+    tile_bad_mask = tile_reasons != TileFlagReason.NONE
+    phase_fits = _make_phase_fits(group.metafits_tiles_df["id"].to_numpy())
+
+    rows = build_tile_stats_rows(group, jones, tile_bad_mask, tile_reasons, channel_reasons, phase_fits)
+
+    assert rows[0]["flavor"] == "SHAO"
+
+
+def test_phase_outlier_field_blank_when_neither_pol_is_an_outlier():
+    """No outlier column produced at all when neither XX nor YY is flagged."""
+    group = _make_stats_group()
+    jones = [_make_jones()]
+    channel_reasons = [np.full((_N_TILES, _N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+    tile_reasons = np.full(_N_TILES, TileFlagReason.NONE, dtype=object)
+    tile_bad_mask = tile_reasons != TileFlagReason.NONE
+    tile_ids = group.metafits_tiles_df["id"].to_numpy()
+    phase_fits = _make_phase_fits(tile_ids, outliers=set())
+
+    rows = build_tile_stats_rows(group, jones, tile_bad_mask, tile_reasons, channel_reasons, phase_fits)
+
+    assert all(r["phase_outlier"] == "" for r in rows)
+
+
+def test_phase_outlier_field_reports_single_pol():
+    """A tile whose XX (but not YY) fit is an outlier reports just 'XX'."""
+    group = _make_stats_group()
+    jones = [_make_jones()]
+    channel_reasons = [np.full((_N_TILES, _N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+    tile_reasons = np.full(_N_TILES, TileFlagReason.NONE, dtype=object)
+    tile_bad_mask = tile_reasons != TileFlagReason.NONE
+    tile_ids = group.metafits_tiles_df["id"].to_numpy()
+    phase_fits = _make_phase_fits(tile_ids, outliers={(tile_ids[0], "XX")})
+
+    rows = build_tile_stats_rows(group, jones, tile_bad_mask, tile_reasons, channel_reasons, phase_fits)
+
+    assert rows[0]["phase_outlier"] == "XX"
+    assert rows[1]["phase_outlier"] == ""
+
+
+def test_phase_outlier_field_reports_both_pols():
+    """A tile whose XX and YY fits are both outliers reports 'XX,YY'."""
+    group = _make_stats_group()
+    jones = [_make_jones()]
+    channel_reasons = [np.full((_N_TILES, _N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+    tile_reasons = np.full(_N_TILES, TileFlagReason.NONE, dtype=object)
+    tile_bad_mask = tile_reasons != TileFlagReason.NONE
+    tile_ids = group.metafits_tiles_df["id"].to_numpy()
+    phase_fits = _make_phase_fits(tile_ids, outliers={(tile_ids[0], "XX"), (tile_ids[0], "YY")})
+
+    rows = build_tile_stats_rows(group, jones, tile_bad_mask, tile_reasons, channel_reasons, phase_fits)
+
+    assert rows[0]["phase_outlier"] == "XX,YY"
+
+
+def test_phase_outlier_field_does_not_affect_flagging_or_status():
+    """A phase-outlier tile is still reported as PARTIAL/OK, per the
+    permanent policy that phase-outlier status is advisory only and
+    never causes flagging (see HyperfitsSolutionGroup.detect_phase_outliers).
+    """
+    group = _make_stats_group()
+    jones = [_make_jones()]
+    channel_reasons = [np.full((_N_TILES, _N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+    tile_reasons = np.full(_N_TILES, TileFlagReason.NONE, dtype=object)
+    tile_bad_mask = tile_reasons != TileFlagReason.NONE
+    tile_ids = group.metafits_tiles_df["id"].to_numpy()
+    phase_fits = _make_phase_fits(tile_ids, outliers={(tile_ids[0], "XX"), (tile_ids[0], "YY")})
+
+    rows = build_tile_stats_rows(group, jones, tile_bad_mask, tile_reasons, channel_reasons, phase_fits)
+
+    assert rows[0]["fully_flagged"] is False
+    assert rows[0]["flagged_pct"] == pytest.approx(0.0)
+
+
 # ===========================================================================
 # write_tile_stats_table
 # ===========================================================================
@@ -215,3 +322,48 @@ def test_write_tile_stats_table_produces_readable_output():
     assert "FULLY_FLAGGED" in output
     assert "flagged in metafits" in output
     assert "Flagged" in output  # footer summary line
+
+
+def test_write_tile_stats_table_includes_flavor_column():
+    """The Flavor header and each tile's flavor value both appear in the output."""
+    group = _make_stats_group()
+    group.metafits_tiles_df["flavor"] = ["SHAO", "RRI", "NI"]
+    jones = [_make_jones()]
+    channel_reasons = [np.full((_N_TILES, _N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+    tile_reasons = np.full(_N_TILES, TileFlagReason.NONE, dtype=object)
+    tile_bad_mask = tile_reasons != TileFlagReason.NONE
+    phase_fits = _make_phase_fits(group.metafits_tiles_df["id"].to_numpy())
+
+    rows = build_tile_stats_rows(group, jones, tile_bad_mask, tile_reasons, channel_reasons, phase_fits)
+
+    buf = io.StringIO()
+    write_tile_stats_table("TEST TABLE", rows, buf)
+    output = buf.getvalue()
+
+    assert "Flavor" in output
+    assert "SHAO" in output
+    assert "RRI" in output
+    assert "NI" in output
+
+
+def test_write_tile_stats_table_includes_phoutlier_column():
+    """The PhOutlier header appears, and a flagged pol shows up against
+    the right tile without affecting its Status column."""
+    group = _make_stats_group()
+    jones = [_make_jones()]
+    channel_reasons = [np.full((_N_TILES, _N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+    tile_reasons = np.full(_N_TILES, TileFlagReason.NONE, dtype=object)
+    tile_bad_mask = tile_reasons != TileFlagReason.NONE
+    tile_ids = group.metafits_tiles_df["id"].to_numpy()
+    phase_fits = _make_phase_fits(tile_ids, outliers={(tile_ids[0], "XX")})
+
+    rows = build_tile_stats_rows(group, jones, tile_bad_mask, tile_reasons, channel_reasons, phase_fits)
+
+    buf = io.StringIO()
+    write_tile_stats_table("TEST TABLE", rows, buf)
+    output = buf.getvalue()
+
+    assert "PhOutlier" in output
+    tile001_line = next(line for line in output.splitlines() if "Tile001" in line.split())
+    assert "XX" in tile001_line
+    assert "OK" in tile001_line  # phase-outlier status never affects Status

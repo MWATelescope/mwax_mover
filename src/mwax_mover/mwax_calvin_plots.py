@@ -44,10 +44,10 @@ from matplotlib.colors import LinearSegmentedColormap
 from numpy.typing import NDArray
 
 from mwax_mover.mwax_calvin_utils import (
+    annotate_phase_outliers,
     get_convergence_summary,
     pivot_phase_fits,
     poly_str,
-    reject_outliers,
     textwrap,
     wrap_angle,
 )
@@ -80,22 +80,26 @@ def plot_debug_phase_fits(
     title: str = "",
     plot_residual: bool = False,
     residual_vmax=None,
+    phase_outlier_nstd: float = 3.0,
 ) -> pd.DataFrame | None:
     """Generate debug plots and analysis for phase fits.
 
     Produces plots and TSV files for phase fit intercepts, residuals, and RX lengths,
     and returns a pivoted dataframe with per-antenna fit information.
 
-    Its own outlier verdict (chi2dof/sigma_resid vs. reject_outliers) is
-    scoped per (pol, flavor) -- the same grouping flag_phase_outliers uses
-    for the actual flagging decision -- so the "outlier" tiles shown in
-    these debug plots agree with what was actually flagged, rather than
-    being computed against a flavour-blind population that could disagree
-    with it.
-
     Args:
-        phase_fits: DataFrame with phase fit results per tile and polarization.
-        tiles: DataFrame with tile metadata (must include a 'flavor' column).
+        phase_fits: Already flavour-merged and outlier-annotated phase
+            fits -- i.e. the output of
+            mwax_calvin_utils.annotate_phase_outliers, not a bare
+            process_phase_fits() result. Must include 'flavor' and
+            'outlier' columns (a bare process_phase_fits() result will
+            raise a KeyError). Callers needing "the" outlier verdict
+            should compute it once via annotate_phase_outliers and reuse
+            it here and for the stats table (see
+            write_stats_and_debug_plots), so the two reports can't
+            disagree with each other.
+        tiles: DataFrame with tile metadata, passed through unchanged to
+            pivot_phase_fits()'s own (separate) merge below.
         freqs: Array of frequency values in Hz.
         soln_xx: XX polarization solutions.
         soln_yy: YY polarization solutions.
@@ -105,6 +109,10 @@ def plot_debug_phase_fits(
         title: Title for plots (default: '').
         plot_residual: Whether to plot residuals (default: False).
         residual_vmax: Maximum value for residual plot y-axis (default: None).
+        phase_outlier_nstd: Must match the nstd used to produce
+            phase_fits's 'outlier' column -- passed through to
+            plot_phase_residual so its shaded outlier-range band reflects
+            the actual reporting threshold (default: 3.0).
 
     Returns:
         Pivoted DataFrame with combined fit data, or None if no valid fits.
@@ -113,22 +121,7 @@ def plot_debug_phase_fits(
     if n_total == 0:
         return None
 
-    # Merge tile flavor in now (rather than after outlier rejection, as
-    # before) so the threshold below can be scoped to (pol, flavor) --
-    # see reject_outliers's docstring for why flavour matters, and
-    # flag_phase_outliers, which this mirrors so the debug plots/report
-    # produced here agree with what was actually flagged. Kept as a
-    # separate flavor_fits frame; the plain phase_fits frame (no tile
-    # columns) is preserved for pivot_phase_fits() below, which does its
-    # own tiles merge and would collide with a second one.
-    flavor_fits = pd.merge(phase_fits, tiles, left_on="tile_id", right_on="id")
-    flavor_fits = reject_outliers(flavor_fits, "chi2dof", group_cols=("pol", "flavor"))
-    flavor_fits = reject_outliers(flavor_fits, "sigma_resid", group_cols=("pol", "flavor"))
-
-    # Propagate the outlier verdict back onto the un-merged phase_fits
-    # frame too, since pivot_phase_fits (further down) expects that
-    # column and receives phase_fits, not flavor_fits.
-    phase_fits = phase_fits.merge(flavor_fits[["tile_id", "pol", "outlier"]], on=["tile_id", "pol"], how="left")
+    flavor_fits = phase_fits
 
     n_good = len(flavor_fits[~flavor_fits["outlier"]])
     if n_good == 0:
@@ -136,7 +129,7 @@ def plot_debug_phase_fits(
 
     bad_fits = flavor_fits[flavor_fits["outlier"]]
     if len(bad_fits) > 0:
-        logger.debug(f"flagged {len(bad_fits)} of {n_total} fits as outliers:")
+        logger.debug(f"{len(bad_fits)} of {n_total} fits are phase-outliers (reported only, not flagged):")
         logger.debug(bad_fits[["name", "pol"]].to_string(index=False))
 
     # make a new colormap for weighted data
@@ -170,11 +163,28 @@ def plot_debug_phase_fits(
             plot_residual,
             residual_vmax,
             flavor_fits,
+            nstd=phase_outlier_nstd,
         )
     if len(flavor_fits):
         plot_phase_intercepts(prefix, show, title, flavor_fits)
 
-    phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
+    # pivot_phase_fits() does its own tiles merge -- pass it only the
+    # plain phase-fit columns (not the tile-metadata/outlier columns
+    # already merged in above), to avoid duplicate-column collisions
+    # with that merge.
+    plain_columns = [
+        "tile_id",
+        "soln_idx",
+        "pol",
+        "length",
+        "intercept",
+        "sigma_resid",
+        "chi2dof",
+        "quality",
+        "stderr",
+        "outlier",
+    ]
+    phase_fits_pivot = pivot_phase_fits(phase_fits[plain_columns], tiles)
     weights2 = weights**2
 
     if prefix:
@@ -379,6 +389,7 @@ def plot_phase_residual(
     plot_res,
     residual_vmax,
     flavor_fits,
+    nstd=3.0,
 ):
     """Plot and analyze phase residuals across frequencies.
 
@@ -391,7 +402,14 @@ def plot_phase_residual(
         title: Title for plots.
         plot_res: Whether to plot residuals.
         residual_vmax: Maximum value for residual plot y-axis.
-        flavor_fits: DataFrame with phase fit results per receiver flavor.
+        flavor_fits: DataFrame with phase fit results per receiver
+            flavor, already annotated with an 'outlier' column (see
+            mwax_calvin_utils.annotate_phase_outliers).
+        nstd: Number of (MAD-derived) standard deviations used for the
+            shaded outlier-range band on each facet -- must match the
+            nstd that produced flavor_fits's 'outlier' column, or the
+            band drawn here won't reflect the actual reporting threshold
+            (default: 3.0, matching reject_outliers's own default).
     """
     plt.clf()
     g = sns.FacetGrid(flavor_fits, row="flavor", col="pol", hue="flavor", sharex=True, sharey=False)
@@ -405,6 +423,29 @@ def plot_phase_residual(
             "weights": weights,
         }
     )
+
+    # Per-(flavor, pol) sigma_resid outlier-range band, mirroring
+    # reject_outliers's own median + nstd*1.4826*MAD formula computed
+    # over that group's surviving (non-outlier) population -- shown as a
+    # shaded band on each facet so a tile's residual scatter can be
+    # visually compared against the actual threshold that would mark it
+    # a population outlier, the same way the amplitude/gain-outlier plots
+    # shade an acceptance band (see plot_outlier_gains).
+    mad_to_std = 1.4826
+    sigma_resid_bands: dict[tuple[str, str], float] = {}
+    for (flav, pol), grp in flavor_fits.groupby(["flavor", "pol"]):
+        good = grp.loc[~grp["outlier"], "sigma_resid"]
+        if len(good) == 0:
+            continue
+        med = good.median()
+        mad = (good - med).abs().median()
+        if mad == 0 or np.isnan(mad):
+            std = good.std(ddof=1) if len(good) > 1 else 0.0
+            if not std:
+                continue
+            sigma_resid_bands[(flav, pol)] = med + nstd * std
+        else:
+            sigma_resid_bands[(flav, pol)] = med + nstd * mad_to_std * mad
 
     def plot_residual(
         soln_idxs: pd.Series,
@@ -439,6 +480,11 @@ def plot_phase_residual(
         best_indep = None
         mask = np.where(np.logical_and(np.isfinite(medians), np.logical_not(np.isnan(medians)), weights > 0))[0]
         df[f"{flav}_{pol}"] = medians
+
+        band = sigma_resid_bands.get((flav, pol))
+        if band is not None:
+            plt.axhspan(-band, band, color="tab:blue", alpha=0.12, zorder=0)
+
         for indep_var in ["ν", "λ"]:
             if indep_var == "ν":
                 xs = freqs[mask]
@@ -476,6 +522,15 @@ def plot_phase_residual(
             eqn = poly_str(best_coeffs, independent_var=best_indep)
             poly_wrap = textwrap(f"[{len(best_coeffs)}] {eqn}", width=40)
             plt.text(0.05, 0.1, poly_wrap, transform=plt.gca().transAxes, fontsize=7)
+        if band is not None:
+            plt.text(
+                0.05,
+                0.9,
+                f"±{nstd:g}·MAD range: {band:.3f} rad",
+                transform=plt.gca().transAxes,
+                fontsize=7,
+                color="tab:blue",
+            )
         if residual_vmax is not None:
             ylim = float(residual_vmax)
             plt.ylim(-ylim, ylim)
@@ -627,6 +682,25 @@ def _paged_output_path(output_path: str, first_tile_index: int, last_tile_index:
     return f"{base}_{first_tile_index}-{last_tile_index}{ext}"
 
 
+def _format_flavor(flavor: str) -> str:
+    """Format a receiver flavour for display in the stats table.
+
+    mwalib's ReceiverType enum stringifies as e.g. "ReceiverType.SHAO" --
+    strip the class-name prefix so the stats table just shows "SHAO",
+    matching the short form used everywhere else (CALVIN.md, log
+    messages, etc.). Passes through unchanged if there's no such prefix
+    (e.g. an empty string, or a plain str already).
+
+    Args:
+        flavor: A tile's flavor value, e.g. from metafits_tiles_df.
+
+    Returns:
+        Display-formatted flavour string.
+    """
+    text = str(flavor)
+    return text.rsplit(".", 1)[-1] if "." in text else text
+
+
 def _tile_flag_reason_text(tile_idx: int, tile_reasons: NDArray[np.object_]) -> str:
     """Build a human-readable reason string for a fully-flagged tile.
 
@@ -671,7 +745,7 @@ def _extract_combined_gains_bundle(group: HyperfitsSolutionGroup, file_idx: int)
 
     Args:
         group: The solution group, after apply_tile_flags,
-            enforce_whole_jones_nan, flag_phase_outliers,
+            enforce_whole_jones_nan, detect_phase_outliers,
             flag_amplitude_outliers, and flag_mostly_bad_tiles have run.
         file_idx: Which solution file (index into group.jones/solns).
 
@@ -721,7 +795,7 @@ def plot_combined_gains(
 
     Args:
         group: The solution group, after apply_tile_flags,
-            enforce_whole_jones_nan, flag_phase_outliers,
+            enforce_whole_jones_nan, detect_phase_outliers,
             flag_amplitude_outliers, and flag_mostly_bad_tiles have run.
         file_idx: Which solution file (index into group.jones/solns) to plot.
         first_tile_index: Index of the first tile to include in this page.
@@ -1122,7 +1196,7 @@ def build_tile_stats_rows(
     jones_snapshot/tile_bad_mask/tile_reasons/channel_reasons/phase_fits.
 
     Args:
-        group: The solution group (used for tile names/IDs).
+        group: The solution group (used for tile names/IDs/flavours).
         jones_snapshot: One complex array per file, shape (n_tiles,
             n_chanblocks, 2, 2) -- e.g. group.jones itself (current state)
             or a copy taken at an earlier point.
@@ -1134,10 +1208,15 @@ def build_tile_stats_rows(
             if this isn't the group's current/final state).
         channel_reasons: One array per file, shape (n_tiles, n_chanblocks) --
             e.g. group.channel_flag_reasons at the point of this snapshot.
-        phase_fits: DataFrame from process_phase_fits, computed against the
-            same snapshot (pristine data for "before", final data for
-            "after") -- NOT necessarily group.phase_fits, which reflects
-            whatever flag_phase_outliers last computed.
+        phase_fits: Ideally already flavour-merged and outlier-annotated
+            phase fits -- i.e. the output of
+            mwax_calvin_utils.annotate_phase_outliers, computed against
+            the same snapshot (pristine data for "before", final data
+            for "after") -- NOT necessarily group.phase_fits, which
+            reflects whatever detect_phase_outliers last computed. If
+            'outlier' isn't present (e.g. a bare process_phase_fits()
+            result), the 'phase_outlier' row field is silently left
+            blank -- chi2dof/sigma_resid are read regardless.
 
     Returns:
         List of one dict per tile, matching the columns in
@@ -1146,6 +1225,7 @@ def build_tile_stats_rows(
     n_tiles = len(group.metafits_tiles_df)
     tile_names = group.metafits_tiles_df["name"].to_numpy()
     tile_ids = group.metafits_tiles_df["id"].to_numpy()
+    tile_flavors = group.metafits_tiles_df["flavor"].to_numpy()
 
     total_channels = np.zeros(n_tiles, dtype=int)
     bad_channels = np.zeros(n_tiles, dtype=int)
@@ -1161,10 +1241,10 @@ def build_tile_stats_rows(
     for tile in range(n_tiles):
         n_total = int(total_channels[tile])
         if tile_bad_mask[tile]:
-            # A whole-tile flag (e.g. PHASE_OUTLIER) NaNs every channel via
-            # self.jones directly, without ever touching channel_reasons --
-            # so every channel is bad here regardless of what the
-            # per-channel reason count says.
+            # A whole-tile flag (e.g. METAFITS, MOSTLY_BAD_CHANNELS) NaNs
+            # every channel via self.jones directly, without ever
+            # touching channel_reasons -- so every channel is bad here
+            # regardless of what the per-channel reason count says.
             fully_flagged = True
             n_bad = n_total
         else:
@@ -1175,6 +1255,7 @@ def build_tile_stats_rows(
         row = {
             "tile": int(tile_ids[tile]),
             "name": tile_names[tile],
+            "flavor": _format_flavor(tile_flavors[tile]),
             "fully_flagged": fully_flagged,
             "flagged_pct": flagged_pct,
             "n_bad_channels": n_bad,
@@ -1189,6 +1270,7 @@ def build_tile_stats_rows(
             "chi2dof_y": np.nan,
             "sigma_resid_x": np.nan,
             "sigma_resid_y": np.nan,
+            "phase_outlier": "",
             "tile_reason": _tile_flag_reason_text(tile, tile_reasons) if fully_flagged else "",
             "channel_reasons": "" if fully_flagged else _channel_reason_counts_text(tile, channel_reasons),
         }
@@ -1218,16 +1300,26 @@ def build_tile_stats_rows(
 
         if phase_indexed is not None:
             tile_id = int(tile_ids[tile])
+            outlier_pols = []
             try:
                 row["chi2dof_x"] = float(phase_indexed.loc[(tile_id, "XX"), "chi2dof"])
                 row["sigma_resid_x"] = float(phase_indexed.loc[(tile_id, "XX"), "sigma_resid"])
+                if bool(phase_indexed.loc[(tile_id, "XX"), "outlier"]):
+                    outlier_pols.append("XX")
             except KeyError:
                 pass
             try:
                 row["chi2dof_y"] = float(phase_indexed.loc[(tile_id, "YY"), "chi2dof"])
                 row["sigma_resid_y"] = float(phase_indexed.loc[(tile_id, "YY"), "sigma_resid"])
+                if bool(phase_indexed.loc[(tile_id, "YY"), "outlier"]):
+                    outlier_pols.append("YY")
             except KeyError:
                 pass
+            # Advisory only -- reported here (and in the phase-fit debug
+            # plots), never flagged. See HyperfitsSolutionGroup.
+            # detect_phase_outliers's docstring for why.
+            if outlier_pols:
+                row["phase_outlier"] = ",".join(outlier_pols)
 
         rows.append(row)
 
@@ -1249,14 +1341,17 @@ def write_tile_stats_table(title: str, rows: list[dict], stats_fd) -> None:
 
     id_w = 6
     name_w = max(10, max((len(r["name"]) for r in rows), default=10) + 2)
+    flavor_w = max(8, max((len(r["flavor"]) for r in rows), default=8) + 2)
     num_w = 8
+    phout_w = 9
 
     header = (
         f"{title}:\n"
-        f"{'Tile':<{id_w}} {'Name':<{name_w}} {'Status':<14} {'Flagged%':>9} "
+        f"{'Tile':<{id_w}} {'Name':<{name_w}} {'Flavor':<{flavor_w}} {'Status':<14} {'Flagged%':>9} "
         f"{'gx_med':>{num_w}} {'gx_min':>{num_w}} {'gx_max':>{num_w}} "
         f"{'gy_med':>{num_w}} {'gy_min':>{num_w}} {'gy_max':>{num_w}} "
-        f"{'chi2_x':>{num_w}} {'chi2_y':>{num_w}} {'sres_x':>{num_w}} {'sres_y':>{num_w}}  Reason(s)"
+        f"{'chi2_x':>{num_w}} {'chi2_y':>{num_w}} {'sres_x':>{num_w}} {'sres_y':>{num_w}} "
+        f"{'PhOutlier':>{phout_w}}  Reason(s)"
     )
     stats_fd.write(f"{header}\n")
     stats_fd.write("-" * len(header) + "\n")
@@ -1271,11 +1366,13 @@ def write_tile_stats_table(title: str, rows: list[dict], stats_fd) -> None:
         reason = r["tile_reason"] if r["fully_flagged"] else r["channel_reasons"]
 
         line = (
-            f"{r['tile']:<{id_w}} {r['name']:<{name_w}} {status:<14} {r['flagged_pct']:>8.1f}% "
+            f"{r['tile']:<{id_w}} {r['name']:<{name_w}} {r['flavor']:<{flavor_w}} {status:<14} "
+            f"{r['flagged_pct']:>8.1f}% "
             f"{fmt(r['gx_median'], f'{num_w}.2f')} {fmt(r['gx_min'], f'{num_w}.2f')} {fmt(r['gx_max'], f'{num_w}.2f')} "
             f"{fmt(r['gy_median'], f'{num_w}.2f')} {fmt(r['gy_min'], f'{num_w}.2f')} {fmt(r['gy_max'], f'{num_w}.2f')} "
             f"{fmt(r['chi2dof_x'], f'{num_w}.3f')} {fmt(r['chi2dof_y'], f'{num_w}.3f')} "
-            f"{fmt(r['sigma_resid_x'], f'{num_w}.4f')} {fmt(r['sigma_resid_y'], f'{num_w}.4f')}  {reason}"
+            f"{fmt(r['sigma_resid_x'], f'{num_w}.4f')} {fmt(r['sigma_resid_y'], f'{num_w}.4f')} "
+            f"{r['phase_outlier']:>{phout_w}}  {reason}"
         )
         stats_fd.write(f"{line}\n")
 
@@ -1294,6 +1391,7 @@ def write_stats_and_debug_plots(
     output_path: str,
     obs_id: int,
     stats_fd,
+    phase_outlier_nstd: float = 3.0,
 ) -> pd.DataFrame:
     """Write the before/after per-tile stats table and the
     phase-fit debug plots, for the group's final flagged state.
@@ -1306,6 +1404,16 @@ def write_stats_and_debug_plots(
     after commit() too, so the debug plots and the phase fit computed
     here reflect data that's actually been written to disk (in-memory
     state is otherwise identical either side of commit()).
+
+    The before/after phase fits are each annotated once, here, via
+    mwax_calvin_utils.annotate_phase_outliers (flavour merged in,
+    population-outlier status marked per (pol, flavor)), and that same
+    annotated DataFrame is handed to both build_tile_stats_rows (the
+    stats.txt Flavor/PhOutlier columns) and plot_debug_phase_fits (the
+    phase-fit debug plots) -- so the two reports always agree on which
+    tiles are outliers, rather than each independently recomputing it
+    (previously the plotting path used a hardcoded nstd, decoupled from
+    this function's own phase_outlier_nstd).
 
     Args:
         group: The solution group, after run_flagging_pipeline() (and
@@ -1320,9 +1428,17 @@ def write_stats_and_debug_plots(
             per-tile stats table into. Callers write this as the first
             section of the combined {obs_id}_stats.txt file, with
             write_hyperdrive_stats() convergence stats appended below.
+        phase_outlier_nstd: Number of standard deviations beyond the
+            population mean before a tile's phase fit is reported as an
+            outlier -- must match the value passed to
+            HyperfitsSolutionGroup.run_flagging_pipeline()'s
+            detect_phase_outliers() call, or the stats table/plots will
+            disagree with a different reporting threshold than the one
+            actually used. Purely advisory -- does not affect flagging.
 
     Returns:
-        The final phase fit DataFrame (from process_phase_fits), so
+        The final phase fit DataFrame (from process_phase_fits, not the
+        flavour/outlier-annotated version used for reporting here), so
         callers that also need it (e.g. for a DB insert) don't have to
         recompute it.
     """
@@ -1336,6 +1452,10 @@ def write_stats_and_debug_plots(
 
     final_phase_fits = group.process_phase_fits(refant_name, phase_fit_niter)
 
+    tiles = group.metafits_tiles_df
+    annotated_before_phase_fits = annotate_phase_outliers(group.before_phase_fits, tiles, nstd=phase_outlier_nstd)
+    annotated_after_phase_fits = annotate_phase_outliers(final_phase_fits, tiles, nstd=phase_outlier_nstd)
+
     before_tile_bad_mask = group.before_tile_flag_reasons != TileFlagReason.NONE
     after_tile_bad_mask = group.tile_flag_reasons != TileFlagReason.NONE
 
@@ -1345,7 +1465,7 @@ def write_stats_and_debug_plots(
         before_tile_bad_mask,
         group.before_tile_flag_reasons,
         group.before_channel_flag_reasons,
-        group.before_phase_fits,
+        annotated_before_phase_fits,
     )
     write_tile_stats_table(
         f"{obs_id}: BEFORE any changes (unchanged hyperdrive solutions file)", before_rows, stats_fd
@@ -1357,16 +1477,15 @@ def write_stats_and_debug_plots(
         after_tile_bad_mask,
         group.tile_flag_reasons,
         group.channel_flag_reasons,
-        final_phase_fits,
+        annotated_after_phase_fits,
     )
     write_tile_stats_table(f"{obs_id}: AFTER all Calvin flagging", after_rows, stats_fd)
 
-    tiles = group.metafits_tiles_df
     all_chanblocks_hz = group.all_chanblocks_hz_concat
     _, _noref_xx, _noref_yy, ref_xx, ref_yy = group.get_solns_both(refant_name)
     weights = group.weights
     plot_debug_phase_fits(
-        final_phase_fits,
+        annotated_after_phase_fits,
         tiles,
         all_chanblocks_hz,
         ref_xx,
@@ -1374,6 +1493,7 @@ def write_stats_and_debug_plots(
         weights,
         prefix=os.path.join(output_path, f"{obs_id}_"),
         plot_residual=True,
+        phase_outlier_nstd=phase_outlier_nstd,
     )
 
     return final_phase_fits
