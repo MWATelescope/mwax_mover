@@ -21,7 +21,7 @@ import pytest
 
 from mwax_mover.mwax_calvin_plots import (
     _channel_reason_counts_text,
-    _fully_flagged_channel_summary_text,
+    _channel_summary_text,
     build_tile_stats_rows,
     write_tile_stats_table,
 )
@@ -111,11 +111,11 @@ def test_channel_reason_counts_text_empty_when_no_reasons():
 
 
 # ===========================================================================
-# _fully_flagged_channel_summary_text
+# _channel_summary_text
 # ===========================================================================
 
 
-def test_fully_flagged_channel_summary_text_percentage_and_breakdown():
+def test_channel_summary_text_percentage_and_breakdown():
     """Matches the requested format: '{pct}% Good (n/n)' then a
     comma-separated, count-first breakdown of every distinct reason
     present, using the actual mad_residual_threshold for the MAD label."""
@@ -126,45 +126,57 @@ def test_fully_flagged_channel_summary_text_percentage_and_breakdown():
     # Remaining 9/20 channels are NONE -- "good" on their own, just swept
     # in by whatever whole-tile promotion made this tile fully flagged.
 
-    text = _fully_flagged_channel_summary_text(0, reasons, mad_residual_threshold=10.0)
+    text = _channel_summary_text(0, reasons, mad_residual_threshold=10.0)
     lines = text.split("\n")
 
     assert lines[0] == "45% Good (9/20)"
     assert lines[1] == "4 NaN, 6 above gain cutoff, 1 outside 10 MAD"
 
 
-def test_fully_flagged_channel_summary_text_zero_good_when_all_individually_flagged():
+def test_channel_summary_text_zero_good_when_all_individually_flagged():
     """A tile that's 100% individually flagged (not just swept in by
     promotion) correctly shows 0% good."""
     reasons = np.full((_N_TILES, 10), ChannelFlagReason.NONE, dtype=object)
     reasons[0, :] = ChannelFlagReason.GAIN_MAX_CUTOFF
 
-    text = _fully_flagged_channel_summary_text(0, reasons, mad_residual_threshold=10.0)
+    text = _channel_summary_text(0, reasons, mad_residual_threshold=10.0)
 
     assert text == "0% Good (0/10)\n10 above gain cutoff"
 
 
-def test_fully_flagged_channel_summary_text_uses_actual_mad_threshold():
+def test_channel_summary_text_uses_actual_mad_threshold():
     """The MAD label reflects whatever threshold was actually used, not a
     hardcoded value."""
     reasons = np.full((_N_TILES, 10), ChannelFlagReason.NONE, dtype=object)
     reasons[0, :3] = ChannelFlagReason.AMPLITUDE_OUTLIER
 
-    text = _fully_flagged_channel_summary_text(0, reasons, mad_residual_threshold=5.0)
+    text = _channel_summary_text(0, reasons, mad_residual_threshold=5.0)
 
     assert "3 outside 5 MAD" in text
 
 
-def test_fully_flagged_channel_summary_text_only_reports_reasons_present():
+def test_channel_summary_text_only_reports_reasons_present():
     """A reason with zero channels doesn't appear in the breakdown at all."""
     reasons = np.full((_N_TILES, 10), ChannelFlagReason.NONE, dtype=object)
     reasons[0, :10] = ChannelFlagReason.PRE_EXISTING_NAN
 
-    text = _fully_flagged_channel_summary_text(0, reasons, mad_residual_threshold=10.0)
+    text = _channel_summary_text(0, reasons, mad_residual_threshold=10.0)
 
     assert text == "0% Good (0/10)\n10 NaN"
     assert "gain cutoff" not in text
     assert "MAD" not in text
+
+
+def test_channel_summary_text_clean_tile_shows_100_percent_no_second_line():
+    """A tile with no flagged channels at all shows just '100% Good',
+    with no second line -- this is the case now also shown on ordinary
+    (non-fully-flagged) tiles, not just fully-flagged ones."""
+    reasons = np.full((_N_TILES, 10), ChannelFlagReason.NONE, dtype=object)
+
+    text = _channel_summary_text(0, reasons, mad_residual_threshold=10.0)
+
+    assert text == "100% Good (10/10)"
+    assert "\n" not in text
 
 
 # ===========================================================================
