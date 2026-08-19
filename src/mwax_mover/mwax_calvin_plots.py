@@ -418,7 +418,12 @@ def plot_phase_residual(
             (default: 3.0, matching reject_outliers's own default).
 
     Rows are ordered alphabetically by receiver flavour, columns as XX
-    then YY, matching plot_phase_intercepts.
+    then YY, matching plot_phase_intercepts. XX and YY share the same
+    y-axis scale (and therefore the same tick decimal formatting) within
+    each flavour row, so the two columns are directly comparable -- but
+    different flavour rows are not forced to share a scale with each
+    other, since their typical residual magnitudes can genuinely differ
+    (see Step 3's rationale in CALVIN.md).
     """
     plt.clf()
     g = sns.FacetGrid(
@@ -429,8 +434,20 @@ def plot_phase_residual(
         row_order=sorted(flavor_fits["flavor"].unique()),
         col_order=["XX", "YY"],
         sharex=True,
-        sharey=False,
+        sharey="row",
     )
+    # sharey="row" ties XX/YY's y-limits (and therefore tick values/decimal
+    # formatting) together within each flavour row, but seaborn also hides
+    # the y-tick labels on the second (YY) column by default (via
+    # FacetGrid.__init__'s own `if sharey in [True, 'row']: ... label.set_
+    # visible(False)` for every non-leftmost axis) -- appropriate when a
+    # row has many columns to save space, but not here, where seeing both
+    # columns' matching numbers side by side is the actual point. Undo it
+    # with the same mechanism seaborn used to hide them.
+    for ax in g.axes.flat:
+        for label in ax.get_yticklabels():
+            label.set_visible(True)
+        ax.yaxis.offsetText.set_visible(True)
 
     if len(freqs) != len(weights):
         raise RuntimeError(f"({len(freqs)=}) and ({len(weights)=}) must be the same length")
