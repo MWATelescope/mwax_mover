@@ -877,8 +877,13 @@ def _render_combined_gains_figure(
     band showing the acceptable range around the fit (see
     HyperfitsSolutionGroup.flag_amplitude_outliers). Channels caught by
     amplitude-outlier detection specifically are shaded with a translucent
-    red vertical band. Both subplots get a red border if the tile has any
-    such new flags.
+    red vertical band and marked with a black 'x'. Channels caught by the
+    absolute gain-magnitude sanity cutoff instead (see
+    HyperfitsSolutionGroup.flag_gain_max_cutoff) are shaded orange and
+    marked with a black '+', distinguishing a numerical divergence from an
+    ordinary statistical outlier. Both subplots get a red border if the
+    tile has any new amplitude-outlier flags, or an orange border (taking
+    precedence) if it has any gain-cutoff flags.
 
     Args:
         bundle: Extracted data from _extract_combined_gains_bundle.
@@ -925,6 +930,14 @@ def _render_combined_gains_figure(
     new_amplitude_bad_mask = np.array(
         [[bool(reason & ChannelFlagReason.AMPLITUDE_OUTLIER) for reason in row] for row in file_reasons]
     )
+    # Channels caught specifically by the absolute gain-magnitude sanity
+    # cutoff (see HyperfitsSolutionGroup.flag_gain_max_cutoff) -- shown
+    # distinctly from ordinary amplitude outliers, since a value large
+    # enough to trip this is a numerical divergence, not a borderline
+    # statistical call.
+    new_gain_cutoff_bad_mask = np.array(
+        [[bool(reason & ChannelFlagReason.GAIN_MAX_CUTOFF) for reason in row] for row in file_reasons]
+    )
 
     n_plotted = len(tile_range)
     n_rows, n_tile_cols = _grid_shape(n_tiles)
@@ -940,6 +953,7 @@ def _render_combined_gains_figure(
         flagged = bad_mask[tile, :]
         n_flagged_here = int(flagged.sum())
         has_new_amplitude_bad_mask = bool(new_amplitude_bad_mask[tile, :].any())
+        has_new_gain_cutoff_bad_mask = bool(new_gain_cutoff_bad_mask[tile, :].any())
         tile_name = tile_names[tile]
         tile_fully_flagged = bool(flagged.all())
 
@@ -974,6 +988,14 @@ def _render_combined_gains_figure(
             ax_gx.axvspan(cb - 0.5, cb + 0.5, color="red", alpha=0.15, zorder=0)
             ax_gy.axvspan(cb - 0.5, cb + 0.5, color="red", alpha=0.15, zorder=0)
 
+        # -- shade gain-max-cutoff-flagged channels with a translucent
+        # orange band, distinct from the red used for ordinary
+        # amplitude outliers above --
+        new_gain_cutoff_chans = np.where(new_gain_cutoff_bad_mask[tile, :])[0]
+        for cb in new_gain_cutoff_chans:
+            ax_gx.axvspan(cb - 0.5, cb + 0.5, color="orange", alpha=0.15, zorder=0)
+            ax_gy.axvspan(cb - 0.5, cb + 0.5, color="orange", alpha=0.15, zorder=0)
+
         # -- gx subplot: data, fit line, shaded acceptance band --
         ax_gx.fill_between(
             chan_idx,
@@ -986,9 +1008,26 @@ def _render_combined_gains_figure(
         )
         ax_gx.plot(chan_idx, before_gx[tile], color="tab:blue", alpha=0.7, linewidth=0.8, label="gx")
         ax_gx.plot(chan_idx, fit["gx"][tile], color="black", linestyle="--", alpha=0.8, linewidth=0.8, label="gx fit")
-        if flagged.any():
+        flagged_other_gx = flagged & ~new_gain_cutoff_bad_mask[tile, :]
+        if flagged_other_gx.any():
             ax_gx.scatter(
-                chan_idx[flagged], before_gx[tile][flagged], color="black", marker="x", s=15, zorder=3, label="flagged"
+                chan_idx[flagged_other_gx],
+                before_gx[tile][flagged_other_gx],
+                color="black",
+                marker="x",
+                s=15,
+                zorder=3,
+                label="flagged",
+            )
+        if new_gain_cutoff_bad_mask[tile, :].any():
+            ax_gx.scatter(
+                chan_idx[new_gain_cutoff_bad_mask[tile, :]],
+                before_gx[tile][new_gain_cutoff_bad_mask[tile, :]],
+                color="black",
+                marker="+",
+                s=30,
+                zorder=3,
+                label="gain cutoff",
             )
 
         gx_title = f"Tile {tile} ({tile_name}) - gx amplitude"
@@ -1011,9 +1050,26 @@ def _render_combined_gains_figure(
         )
         ax_gy.plot(chan_idx, before_gy[tile], color="tab:green", alpha=0.7, linewidth=0.8, label="gy")
         ax_gy.plot(chan_idx, fit["gy"][tile], color="gray", linestyle="--", alpha=0.8, linewidth=0.8, label="gy fit")
-        if flagged.any():
+        flagged_other_gy = flagged & ~new_gain_cutoff_bad_mask[tile, :]
+        if flagged_other_gy.any():
             ax_gy.scatter(
-                chan_idx[flagged], before_gy[tile][flagged], color="black", marker="x", s=15, zorder=3, label="flagged"
+                chan_idx[flagged_other_gy],
+                before_gy[tile][flagged_other_gy],
+                color="black",
+                marker="x",
+                s=15,
+                zorder=3,
+                label="flagged",
+            )
+        if new_gain_cutoff_bad_mask[tile, :].any():
+            ax_gy.scatter(
+                chan_idx[new_gain_cutoff_bad_mask[tile, :]],
+                before_gy[tile][new_gain_cutoff_bad_mask[tile, :]],
+                color="black",
+                marker="+",
+                s=30,
+                zorder=3,
+                label="gain cutoff",
             )
 
         gy_title = f"Tile {tile} ({tile_name}) - gy amplitude"
@@ -1024,7 +1080,12 @@ def _render_combined_gains_figure(
         ax_gy.ticklabel_format(axis="y", style="plain")
         ax_gy.tick_params(labelsize=7)
 
-        if has_new_amplitude_bad_mask:
+        if has_new_gain_cutoff_bad_mask:
+            for ax in (ax_gx, ax_gy):
+                for spine in ax.spines.values():
+                    spine.set_edgecolor("orange")
+                    spine.set_linewidth(2.5)
+        elif has_new_amplitude_bad_mask:
             for ax in (ax_gx, ax_gy):
                 for spine in ax.spines.values():
                     spine.set_edgecolor("red")
@@ -1036,12 +1097,12 @@ def _render_combined_gains_figure(
         axes[row, col_pair].axis("off")
         axes[row, col_pair + 1].axis("off")
 
-    handles, labels = axes[0, 0].get_legend_handles_labels()
-    res_handles, res_labels = axes[0, 1].get_legend_handles_labels()
-    for handle, label in zip(res_handles, res_labels):
-        if label not in labels:
-            handles.append(handle)
-            labels.append(label)
+    handles, labels = [], []
+    for ax in axes.flat:
+        for handle, label in zip(*ax.get_legend_handles_labels()):
+            if label not in labels:
+                handles.append(handle)
+                labels.append(label)
     fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.97), ncol=4)
 
     obsid = bundle["obsid"]
