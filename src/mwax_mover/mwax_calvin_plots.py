@@ -876,28 +876,41 @@ def _render_combined_gains_figure(
       (metafits / TILES-HDU / BASELINES-HDU-inferred -- apply_tile_flags()
       NaNs these immediately): there's no real data to show even in the
       pristine snapshot, so both subplots show only the flag reason as
-      red text, top-centre, with a red border.
+      red text, top-centre, with a red border. Titles still say "gx
+      amplitude"/"gy amplitude" (plus "FULLY FLAGGED"), even with no
+      data plotted, so the two subplots remain distinguishable.
     - Flagged by Calvin itself (e.g. promoted via flag_mostly_bad_tiles,
       or simply 100% per-channel-flagged without a specific whole-tile
       reason): real pristine data still exists, so both subplots get the
       normal plot (below) *plus* the same red top-centre reason text and
       red border overlaid on top -- the point being flagged, not the
-      absence of data.
+      absence of data. If the underlying polynomial fit has no valid
+      channels left to fit against (e.g. a tile where every channel was
+      already excluded by something else before flag_amplitude_outliers
+      ran), the band/fit legitimately have nothing to show and are left
+      blank -- this is an inherent data limitation, not a bug to work
+      around with a fabricated fallback.
 
     For all other (non-fully-flagged) tiles, each gets two adjacent
     subplots (gx, then gy), showing the raw gain amplitude, the
     polynomial fit line, and a shaded band showing the acceptable range
     around the fit (see HyperfitsSolutionGroup.flag_amplitude_outliers).
-    Channels caught by amplitude-outlier detection specifically are
-    shaded with a translucent red vertical band and marked with a black
-    'x'. Channels caught by the
-    absolute gain-magnitude sanity cutoff instead (see
-    HyperfitsSolutionGroup.flag_gain_max_cutoff) are shaded orange and
-    marked with a black '+', distinguishing a numerical divergence from an
-    ordinary statistical outlier. Border colour precedence: red if the
-    tile is fully flagged (regardless of why -- see above), else orange
-    if it has any new gain-cutoff flags, else red if it has any new
-    amplitude-outlier flags.
+    Colour tracks severity, not which check caught a channel: orange for
+    a partial (some-channels) flag, red reserved for a fully flagged
+    tile. Channels caught by amplitude-outlier detection are shaded
+    orange and marked with a black 'x'; channels caught by the absolute
+    gain-magnitude sanity cutoff instead (see HyperfitsSolutionGroup.
+    flag_gain_max_cutoff) are also shaded orange, but marked with a
+    black '+' -- the two reasons are told apart by marker shape, not
+    colour. Shading (and the 'x'/'+' markers) is restricted to channels
+    with their own genuine per-channel reason, not every channel of a
+    fully-flagged tile (flag_mostly_bad_tiles NaNs every channel of a
+    promoted tile regardless of whether that specific channel ever
+    earned its own reason, so blindly using the tile-wide bad mask here
+    would mark innocent channels as if they had been individually
+    caught). Border colour: red if the tile is fully flagged (regardless
+    of why -- see above), else orange if it has any new gain-cutoff or
+    amplitude-outlier flags, else the default axes colour.
 
     Args:
         bundle: Extracted data from _extract_combined_gains_bundle.
@@ -1004,19 +1017,35 @@ def _render_combined_gains_figure(
                         spine.set_edgecolor("red")
                         spine.set_linewidth(2.5)
 
-                ax_gx.set_title(f"Tile {tile} ({tile_name}) - FULLY FLAGGED", fontsize=9)
-                ax_gy.set_title(f"Tile {tile} ({tile_name}) - FULLY FLAGGED", fontsize=9)
+                ax_gx.set_title(f"Tile {tile} ({tile_name}) - gx amplitude - FULLY FLAGGED", fontsize=9)
+                ax_gy.set_title(f"Tile {tile} ({tile_name}) - gy amplitude - FULLY FLAGGED", fontsize=9)
                 continue
 
-        # -- shade amplitude-outlier-flagged channels with a translucent band --
+        # Channels with a genuine per-channel reason of their own, as
+        # opposed to `flagged` (bad_mask), which also broadcasts a
+        # whole-tile reason (e.g. MOSTLY_BAD_CHANNELS) across every
+        # chanblock regardless of that channel's own history. Used below
+        # to keep the black 'x' marker restricted to channels that were
+        # actually individually flagged -- a channel only NaN'd because
+        # flag_mostly_bad_tiles promoted the whole tile never earned its
+        # own reason and shouldn't look like it did.
+        channel_level_flagged = file_reasons[tile, :] != ChannelFlagReason.NONE
+
+        # -- shade amplitude-outlier-flagged channels with a translucent
+        # orange band -- orange indicates partial (some-channels)
+        # flagging regardless of reason; red is reserved for a fully
+        # flagged tile (see the border-colour logic below), not for
+        # which specific check caught the channel.
         new_flagged_chans = np.where(new_amplitude_bad_mask[tile, :])[0]
         for cb in new_flagged_chans:
-            ax_gx.axvspan(cb - 0.5, cb + 0.5, color="red", alpha=0.15, zorder=0)
-            ax_gy.axvspan(cb - 0.5, cb + 0.5, color="red", alpha=0.15, zorder=0)
+            ax_gx.axvspan(cb - 0.5, cb + 0.5, color="orange", alpha=0.15, zorder=0)
+            ax_gy.axvspan(cb - 0.5, cb + 0.5, color="orange", alpha=0.15, zorder=0)
 
-        # -- shade gain-max-cutoff-flagged channels with a translucent
-        # orange band, distinct from the red used for ordinary
-        # amplitude outliers above --
+        # -- shade gain-max-cutoff-flagged channels the same translucent
+        # orange -- the two reasons are still told apart by marker shape
+        # ('x' vs '+' below), not colour, since colour here tracks
+        # severity (partial vs fully flagged) rather than which specific
+        # check caught the channel --
         new_gain_cutoff_chans = np.where(new_gain_cutoff_bad_mask[tile, :])[0]
         for cb in new_gain_cutoff_chans:
             ax_gx.axvspan(cb - 0.5, cb + 0.5, color="orange", alpha=0.15, zorder=0)
@@ -1034,7 +1063,7 @@ def _render_combined_gains_figure(
         )
         ax_gx.plot(chan_idx, before_gx[tile], color="tab:blue", alpha=0.7, linewidth=0.8, label="gx")
         ax_gx.plot(chan_idx, fit["gx"][tile], color="black", linestyle="--", alpha=0.8, linewidth=0.8, label="gx fit")
-        flagged_other_gx = flagged & ~new_gain_cutoff_bad_mask[tile, :]
+        flagged_other_gx = channel_level_flagged & ~new_gain_cutoff_bad_mask[tile, :]
         if flagged_other_gx.any():
             ax_gx.scatter(
                 chan_idx[flagged_other_gx],
@@ -1060,8 +1089,7 @@ def _render_combined_gains_figure(
         if n_flagged_here == 0:
             gx_title += " (no flags)"
         ax_gx.set_title(gx_title, fontsize=9)
-        ax_gx.yaxis.set_major_formatter(mticker.ScalarFormatter(useOffset=False))
-        ax_gx.ticklabel_format(axis="y", style="plain")
+        ax_gx.yaxis.set_major_formatter(mticker.ScalarFormatter(useOffset=False, useMathText=True))
         ax_gx.tick_params(labelsize=7)
 
         # -- gy subplot: data, fit line, shaded acceptance band --
@@ -1076,7 +1104,7 @@ def _render_combined_gains_figure(
         )
         ax_gy.plot(chan_idx, before_gy[tile], color="tab:green", alpha=0.7, linewidth=0.8, label="gy")
         ax_gy.plot(chan_idx, fit["gy"][tile], color="gray", linestyle="--", alpha=0.8, linewidth=0.8, label="gy fit")
-        flagged_other_gy = flagged & ~new_gain_cutoff_bad_mask[tile, :]
+        flagged_other_gy = channel_level_flagged & ~new_gain_cutoff_bad_mask[tile, :]
         if flagged_other_gy.any():
             ax_gy.scatter(
                 chan_idx[flagged_other_gy],
@@ -1102,8 +1130,7 @@ def _render_combined_gains_figure(
         if n_flagged_here == 0:
             gy_title += " (no flags)"
         ax_gy.set_title(gy_title, fontsize=9)
-        ax_gy.yaxis.set_major_formatter(mticker.ScalarFormatter(useOffset=False))
-        ax_gy.ticklabel_format(axis="y", style="plain")
+        ax_gy.yaxis.set_major_formatter(mticker.ScalarFormatter(useOffset=False, useMathText=True))
         ax_gy.tick_params(labelsize=7)
 
         if tile_fully_flagged:
@@ -1131,15 +1158,13 @@ def _render_combined_gains_figure(
                     zorder=10,
                     bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
                 )
-        elif has_new_gain_cutoff_bad_mask:
+        elif has_new_gain_cutoff_bad_mask or has_new_amplitude_bad_mask:
+            # Orange for a partially-flagged tile, regardless of which
+            # reason -- red is reserved for fully flagged (above), not
+            # for a specific check.
             for ax in (ax_gx, ax_gy):
                 for spine in ax.spines.values():
                     spine.set_edgecolor("orange")
-                    spine.set_linewidth(2.5)
-        elif has_new_amplitude_bad_mask:
-            for ax in (ax_gx, ax_gy):
-                for spine in ax.spines.values():
-                    spine.set_edgecolor("red")
                     spine.set_linewidth(2.5)
 
     for i in range(n_plotted, n_rows * n_tile_cols):
