@@ -868,22 +868,36 @@ def _render_combined_gains_figure(
     HyperfitsSolutionGroup) so it can run directly inside a
     ProcessPoolExecutor worker.
 
-    Tiles fully flagged (every channel bad, from any combination of
-    per-channel reasons and/or a whole-tile reason) have nothing meaningful
-    to plot -- both subplots instead show the flag reason as text.
+    Fully-flagged tiles (every channel bad, from any combination of
+    per-channel reasons and/or a whole-tile reason) are handled one of
+    two ways, depending on *why* they're fully flagged:
 
-    For all other tiles, each gets two adjacent subplots (gx, then gy),
-    showing the raw gain amplitude, the polynomial fit line, and a shaded
-    band showing the acceptable range around the fit (see
-    HyperfitsSolutionGroup.flag_amplitude_outliers). Channels caught by
-    amplitude-outlier detection specifically are shaded with a translucent
-    red vertical band and marked with a black 'x'. Channels caught by the
+    - Flagged structurally, before Calvin's own analysis ever ran
+      (metafits / TILES-HDU / BASELINES-HDU-inferred -- apply_tile_flags()
+      NaNs these immediately): there's no real data to show even in the
+      pristine snapshot, so both subplots show only the flag reason as
+      red text, top-centre, with a red border.
+    - Flagged by Calvin itself (e.g. promoted via flag_mostly_bad_tiles,
+      or simply 100% per-channel-flagged without a specific whole-tile
+      reason): real pristine data still exists, so both subplots get the
+      normal plot (below) *plus* the same red top-centre reason text and
+      red border overlaid on top -- the point being flagged, not the
+      absence of data.
+
+    For all other (non-fully-flagged) tiles, each gets two adjacent
+    subplots (gx, then gy), showing the raw gain amplitude, the
+    polynomial fit line, and a shaded band showing the acceptable range
+    around the fit (see HyperfitsSolutionGroup.flag_amplitude_outliers).
+    Channels caught by amplitude-outlier detection specifically are
+    shaded with a translucent red vertical band and marked with a black
+    'x'. Channels caught by the
     absolute gain-magnitude sanity cutoff instead (see
     HyperfitsSolutionGroup.flag_gain_max_cutoff) are shaded orange and
     marked with a black '+', distinguishing a numerical divergence from an
-    ordinary statistical outlier. Both subplots get a red border if the
-    tile has any new amplitude-outlier flags, or an orange border (taking
-    precedence) if it has any gain-cutoff flags.
+    ordinary statistical outlier. Border colour precedence: red if the
+    tile is fully flagged (regardless of why -- see above), else orange
+    if it has any new gain-cutoff flags, else red if it has any new
+    amplitude-outlier flags.
 
     Args:
         bundle: Extracted data from _extract_combined_gains_bundle.
@@ -959,28 +973,40 @@ def _render_combined_gains_figure(
 
         if tile_fully_flagged:
             reason = _tile_flag_reason_text(tile, tile_reasons)
+            # Tiles flagged before Calvin's own analysis ever ran
+            # (apply_tile_flags() NaNs them immediately) have no real
+            # data to show even in the pristine snapshot -- text only,
+            # same as before. A tile Calvin itself fully flagged (e.g.
+            # promoted via flag_mostly_bad_tiles) still has real pristine
+            # data, so it falls through to the normal plotting path below
+            # instead, with the reason text and border added on top.
+            structural_reason = bool(
+                tile_reasons[tile]
+                & (TileFlagReason.METAFITS | TileFlagReason.HYPERDRIVE_TILE | TileFlagReason.HYPERDRIVE_BASELINE)
+            )
+            if structural_reason:
+                for ax in (ax_gx, ax_gy):
+                    ax.axis("on")
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+                    ax.text(
+                        0.5,
+                        0.92,
+                        reason,
+                        ha="center",
+                        va="top",
+                        wrap=True,
+                        fontsize=8,
+                        color="red",
+                        transform=ax.transAxes,
+                    )
+                    for spine in ax.spines.values():
+                        spine.set_edgecolor("red")
+                        spine.set_linewidth(2.5)
 
-            for ax in (ax_gx, ax_gy):
-                ax.axis("on")
-                ax.set_xticks([])
-                ax.set_yticks([])
-                ax.text(
-                    0.5,
-                    0.5,
-                    reason,
-                    ha="center",
-                    va="center",
-                    wrap=True,
-                    fontsize=8,
-                    transform=ax.transAxes,
-                )
-                for spine in ax.spines.values():
-                    spine.set_edgecolor("black")
-                    spine.set_linewidth(0.8)
-
-            ax_gx.set_title(f"Tile {tile} ({tile_name}) - FULLY FLAGGED", fontsize=9)
-            ax_gy.set_title(f"Tile {tile} ({tile_name}) - FULLY FLAGGED", fontsize=9)
-            continue
+                ax_gx.set_title(f"Tile {tile} ({tile_name}) - FULLY FLAGGED", fontsize=9)
+                ax_gy.set_title(f"Tile {tile} ({tile_name}) - FULLY FLAGGED", fontsize=9)
+                continue
 
         # -- shade amplitude-outlier-flagged channels with a translucent band --
         new_flagged_chans = np.where(new_amplitude_bad_mask[tile, :])[0]
@@ -1080,7 +1106,32 @@ def _render_combined_gains_figure(
         ax_gy.ticklabel_format(axis="y", style="plain")
         ax_gy.tick_params(labelsize=7)
 
-        if has_new_gain_cutoff_bad_mask:
+        if tile_fully_flagged:
+            # Calvin fully flagged this tile itself (e.g. promoted via
+            # flag_mostly_bad_tiles) -- real pristine data has still been
+            # plotted above with the normal styling, but a red border and
+            # the reason text (also red, top-centre so it doesn't sit
+            # over the middle of the data) make the fully-flagged status
+            # visually unambiguous, matching the structural-flag case's
+            # colour even though that one has no data to plot alongside it.
+            for ax in (ax_gx, ax_gy):
+                for spine in ax.spines.values():
+                    spine.set_edgecolor("red")
+                    spine.set_linewidth(2.5)
+                ax.text(
+                    0.5,
+                    0.92,
+                    reason,
+                    ha="center",
+                    va="top",
+                    wrap=True,
+                    fontsize=8,
+                    color="red",
+                    transform=ax.transAxes,
+                    zorder=10,
+                    bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
+                )
+        elif has_new_gain_cutoff_bad_mask:
             for ax in (ax_gx, ax_gy):
                 for spine in ax.spines.values():
                     spine.set_edgecolor("orange")
