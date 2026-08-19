@@ -29,7 +29,8 @@ file itself:
 
 This mirrors the full flagging pipeline used by mwax_calvin_processor
 (HyperfitsSolutionGroup.apply_tile_flags -> enforce_whole_jones_nan ->
-detect_phase_outliers (report-only) -> flag_amplitude_outliers ->
+flag_gain_max_cutoff -> detect_phase_outliers (report-only) ->
+flag_amplitude_outliers ->
 flag_mostly_bad_tiles).
 
 Bad entries are then replaced via frequency interpolation rather than
@@ -133,6 +134,7 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
         mad_residual_threshold=args.mad_threshold,
         phase_outlier_nstd=args.phase_outlier_nstd,
         tile_bad_channel_fraction=args.tile_bad_channel_fraction,
+        gain_max_cutoff=args.gain_max_cutoff,
     )
 
     for file_idx, f in enumerate(args.solution_filenames):
@@ -232,6 +234,21 @@ def main() -> None:
         type=float,
         default=0.5,
         help="Fraction (0-1) of a tile's chanblocks that must already be flagged bad before the whole tile is promoted to fully flagged. [DEFAULT=0.5]",
+    )
+
+    parser.add_argument(
+        "--gain-max-cutoff",
+        type=float,
+        default=100.0,
+        help="Absolute gain-amplitude ceiling: any (tile, chanblock) entry whose gx or gy amplitude exceeds this is flagged, run before phase-outlier detection and amplitude-outlier flagging. Pass a negative value or use --no-gain-max-cutoff to disable. [DEFAULT=100.0]",
+    )
+
+    parser.add_argument(
+        "--no-gain-max-cutoff",
+        dest="gain_max_cutoff",
+        action="store_const",
+        const=None,
+        help="Disable the absolute gain-amplitude cutoff entirely.",
     )
 
     parser.add_argument(

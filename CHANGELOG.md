@@ -1,5 +1,11 @@
 # Changelog
 
+# Unreleased
+
+* calvin_processor: reinstated `gain_max_cutoff` (config: `gains_cut_off_max`, default 100) as a real, absolute gain-amplitude sanity check -- previously accepted only for calibration_fits table provenance and never actually applied. Runs early in the flagging pipeline (right after enforce_whole_jones_nan, before phase-outlier detection and amplitude-outlier flagging): any (tile, chanblock) entry whose gx or gy amplitude exceeds the cutoff is flagged (whole Jones NaN'd) with the new `ChannelFlagReason.GAIN_MAX_CUTOFF` bit. Catches a failure mode neither `hyperdrive`'s own per-chanblock convergence flag nor `flag_amplitude_outliers`'s per-tile fit can: a tile's solve diverging to a spurious-but-numerically-stable value (e.g. gain amplitudes of 1e10+) that hyperdrive still marks "converged," and that an amplitude fit adapts to (and hides within) rather than flagging. `HyperfitsSolutionGroup.run_flagging_pipeline()` gained a `gain_max_cutoff: float | None = 100.0` parameter; `cli/cal_utils.py` gained `--gain-max-cutoff`/`--no-gain-max-cutoff`.
+* calvin_processor: `{obs_id}_intercepts.png` and `{obs_id}_residual.png` now have a fixed, deterministic facet ordering -- rows alphabetical by receiver flavour, columns XX then YY -- instead of whatever order pandas/seaborn happened to produce.
+* CALVIN.md: renumbered Steps 3-7 to 4-8 to make room for the new Step 3 (gain-magnitude sanity cutoff); updated the DB parameters list and output-files table accordingly.
+
 # 1.9.2 19-Aug-2026
 
 * calvin_processor: phase-outlier detection (renamed from `flag_phase_outliers` to `detect_phase_outliers`) no longer flags or modifies a tile's calibration solution -- permanent policy change, not a config toggle. Researchers wanted phase-outlier status visible for review without Calvin silently removing the affected tile's solution from the committed FITS file / database. The result is now report-only: shown in `{obs_id}_stats.txt`'s new `Flavor` and `PhOutlier` columns, and in the phase-fit debug plots. `TileFlagReason.PHASE_OUTLIER` is kept defined but is never set by the automatic pipeline anymore.

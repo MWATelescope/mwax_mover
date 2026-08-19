@@ -78,16 +78,21 @@ def process_solutions(
         source_list: Source list identifier used for the calibration.
         num_sources: Number of sources in the calibration.
         calibration_command: Full hyperdrive command line used to generate the calibration.
-        gain_max_cutoff: Gain cutoff value, kept for calibration_fits table
-            provenance only -- the clipping this used to drive
-            (clip_hyperdrive_solution_gains) is no longer called; always
-            pass None going forward.
+        gain_max_cutoff: Absolute gain-amplitude ceiling (see
+            HyperfitsSolutionGroup.flag_gain_max_cutoff) -- any (tile,
+            chanblock) entry whose gx or gy amplitude exceeds this is
+            flagged bad, run early in the flagging pipeline (before
+            phase-outlier detection and amplitude-outlier flagging).
+            None disables this check. Reinstated after a period where it
+            was accepted here only for calibration_fits table provenance
+            and never actually applied (via the now-removed
+            clip_hyperdrive_solution_gains); it's real again.
         gain_outlier_poly_degree: Degree of polynomial for gain-amplitude
             outlier detection (see HyperfitsSolutionGroup.flag_amplitude_outliers).
         gain_outlier_mad_residual_threshold: MAD residual threshold for
             gain-amplitude outlier detection.
         gain_outlier_modify_gains: Kept for calibration_fits table provenance
-            only, same as gain_max_cutoff -- the toggle it used to represent
+            only -- unlike gain_max_cutoff, this one's toggle
             (compute outlier flags but only write them to disk if True) no
             longer exists: the new flagging pipeline always modifies
             self.jones in memory and commit() always writes it. Pass
@@ -194,8 +199,9 @@ def process_solutions(
         # since its data was never trustworthy in the first place).
         #
         # Runs the full flagging pipeline (apply_tile_flags ->
-        # enforce_whole_jones_nan -> detect_phase_outliers (report-only) ->
-        # flag_amplitude_outliers -> flag_mostly_bad_tiles) and
+        # enforce_whole_jones_nan -> flag_gain_max_cutoff ->
+        # detect_phase_outliers (report-only) -> flag_amplitude_outliers ->
+        # flag_mostly_bad_tiles) and
         # captures the "before" snapshot (soln_group.before_jones etc.)
         # along the way -- shared with cal_utils via
         # HyperfitsSolutionGroup.run_flagging_pipeline() rather than each
@@ -207,6 +213,7 @@ def process_solutions(
             mad_residual_threshold=gain_outlier_mad_residual_threshold,
             phase_outlier_nstd=phase_outlier_nstd,
             tile_bad_channel_fraction=tile_bad_channel_fraction,
+            gain_max_cutoff=gain_max_cutoff,
         )
         assert soln_group.before_jones is not None
 

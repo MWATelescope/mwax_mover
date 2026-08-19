@@ -609,6 +609,97 @@ def test_process_gain_fits_for_db_gains_list_length():
 
 
 # ===========================================================================
+# HyperfitsSolutionGroup.flag_gain_max_cutoff
+# ===========================================================================
+
+
+def test_flag_gain_max_cutoff_flags_whole_jones_when_gy_exceeds_cutoff():
+    """A channel whose gy amplitude exceeds the cutoff gets its whole
+    Jones (gx included, even though gx itself is fine) NaN'd and tagged.
+
+    Mirrors the real failure mode this was reinstated for: one
+    polarisation's calibration solve diverges to a spurious value while
+    the other stays sane -- both must be discarded together, matching
+    every other whole-Jones flag in this pipeline (a Jones matrix with
+    only one sane polarisation isn't meaningfully usable).
+    """
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.channel_flag_reasons = [np.full((3, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+
+    diverged_chan = 5
+    group.jones[0][1, diverged_chan, 1, 1] = 1e10 + 0j  # gy diverged; gx (index [...,0,0]) left alone
+
+    group.flag_gain_max_cutoff(gain_max_cutoff=100.0)
+
+    assert np.isnan(group.jones[0][1, diverged_chan, 0, 0])  # gx NaN'd too
+    assert np.isnan(group.jones[0][1, diverged_chan, 1, 1])
+    assert group.channel_flag_reasons[0][1, diverged_chan] & ChannelFlagReason.GAIN_MAX_CUTOFF
+    # An unaffected channel on the same tile is untouched.
+    assert not np.isnan(group.jones[0][1, 0, 0, 0])
+    assert group.channel_flag_reasons[0][1, 0] == ChannelFlagReason.NONE
+
+
+def test_flag_gain_max_cutoff_catches_uniformly_diverged_tile():
+    """A tile whose entire trace sits far above the cutoff gets every
+    channel flagged -- the exact scenario flag_amplitude_outliers cannot
+    catch (its per-tile fit would otherwise adapt to the enormous
+    baseline). Confirms the fix actually addresses that failure mode,
+    not just an isolated spike.
+    """
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.channel_flag_reasons = [np.full((3, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+
+    rng = np.random.default_rng(11)
+    diverged = 2e10 * (1.0 + rng.normal(scale=0.05, size=_FIT_N_CHANBLOCKS))
+    group.jones[0][1, :, 1, 1] = diverged
+
+    group.flag_gain_max_cutoff(gain_max_cutoff=100.0)
+
+    assert np.all(np.isnan(group.jones[0][1]))
+    assert np.all(group.channel_flag_reasons[0][1] & ChannelFlagReason.GAIN_MAX_CUTOFF)
+
+
+def test_flag_gain_max_cutoff_leaves_normal_tile_untouched():
+    """A tile with ordinary gain amplitudes is not modified or flagged."""
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.channel_flag_reasons = [np.full((3, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+    original = group.jones[0][1].copy()
+
+    group.flag_gain_max_cutoff(gain_max_cutoff=100.0)
+
+    assert np.array_equal(group.jones[0][1], original, equal_nan=True)
+    assert np.all(group.channel_flag_reasons[0][1] == ChannelFlagReason.NONE)
+
+
+def test_flag_gain_max_cutoff_none_disables_check():
+    """gain_max_cutoff=None skips the check entirely, matching the
+    historical 'gains cut off/clipping disabled' config behaviour."""
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.channel_flag_reasons = [np.full((3, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+    group.jones[0][1, 5, 1, 1] = 1e10 + 0j
+
+    group.flag_gain_max_cutoff(gain_max_cutoff=None)
+
+    assert not np.isnan(group.jones[0][1, 5, 1, 1])
+    assert group.channel_flag_reasons[0][1, 5] == ChannelFlagReason.NONE
+
+
+def test_flag_gain_max_cutoff_does_not_affect_already_nan_entries():
+    """A pre-existing NaN entry is left alone (NaN comparisons are always
+    False, so it can't spuriously be marked GAIN_MAX_CUTOFF too)."""
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    channel_reasons = np.full((3, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)
+    channel_reasons[1, 5] = ChannelFlagReason.PRE_EXISTING_NAN
+    group.channel_flag_reasons = [channel_reasons]
+    group.jones[0][1, 5, :, :] = np.nan + 1j * np.nan
+
+    group.flag_gain_max_cutoff(gain_max_cutoff=100.0)
+
+    assert group.channel_flag_reasons[0][1, 5] == ChannelFlagReason.PRE_EXISTING_NAN
+    assert not (group.channel_flag_reasons[0][1, 5] & ChannelFlagReason.GAIN_MAX_CUTOFF)
+
+
+# ===========================================================================
 # HyperfitsSolutionGroup.flag_amplitude_outliers
 # ===========================================================================
 
@@ -899,6 +990,76 @@ def test_flag_mostly_bad_tiles_skips_already_tile_flagged():
 
     # Still just METAFITS -- MOSTLY_BAD_CHANNELS was not additionally OR'd in.
     assert group.tile_flag_reasons[1] == TileFlagReason.METAFITS
+
+
+# ===========================================================================
+# HyperfitsSolutionGroup.run_flagging_pipeline
+# ===========================================================================
+
+
+def test_run_flagging_pipeline_gain_max_cutoff_runs_before_other_stages():
+    """A uniformly-diverged tile (gain_max_cutoff's target failure mode)
+    is cut off early enough to be promoted to MOSTLY_BAD_CHANNELS by the
+    ordinary bad-channel-fraction mechanism, and is never marked a phase
+    outlier -- confirming flag_gain_max_cutoff really does run before
+    detect_phase_outliers and flag_amplitude_outliers, not just that it
+    works in isolation (see the dedicated flag_gain_max_cutoff tests for
+    that).
+    """
+    n_tiles = 10
+    group = _make_fake_group(n_tiles=n_tiles, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.tile_flag_reasons = np.full(n_tiles, TileFlagReason.NONE, dtype=object)
+    group.channel_flag_reasons = [np.full((n_tiles, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+
+    rng = np.random.default_rng(13)
+    for i in range(1, n_tiles - 1):  # ordinary tiles, small phase noise
+        phase_noise = rng.normal(scale=0.02, size=_FIT_N_CHANBLOCKS)
+        group.jones[0][i, :, 0, 0] *= np.exp(1j * phase_noise)
+        group.jones[0][i, :, 1, 1] *= np.exp(1j * phase_noise)
+
+    # Last tile: uniformly diverged gy, like the real observation this
+    # was reinstated for (gain amplitudes ~1e10, not just a few spikes).
+    diverged = 2e10 * (1.0 + rng.normal(scale=0.05, size=_FIT_N_CHANBLOCKS))
+    group.jones[0][-1, :, 1, 1] = diverged
+
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        group.run_flagging_pipeline(
+            refant_name="Tile001",
+            phase_fit_niter=1,
+            phase_outlier_nstd=2.0,
+            gain_max_cutoff=100.0,
+        )
+
+    assert group.tile_flag_reasons[-1] & TileFlagReason.MOSTLY_BAD_CHANNELS
+    assert not (group.tile_flag_reasons[-1] & TileFlagReason.PHASE_OUTLIER)
+    assert np.all(np.isnan(group.jones[0][-1]))
+    assert np.any(group.channel_flag_reasons[0][-1] & ChannelFlagReason.GAIN_MAX_CUTOFF)
+
+    # An ordinary tile is untouched.
+    assert group.tile_flag_reasons[1] == TileFlagReason.NONE
+    assert not np.any(np.isnan(group.jones[0][1]))
+
+
+def test_run_flagging_pipeline_gain_max_cutoff_none_preserves_prior_behaviour():
+    """Passing gain_max_cutoff=None to run_flagging_pipeline disables the
+    check, matching behaviour before it was reinstated."""
+    n_tiles = 5
+    group = _make_fake_group(n_tiles=n_tiles, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.tile_flag_reasons = np.full(n_tiles, TileFlagReason.NONE, dtype=object)
+    group.channel_flag_reasons = [np.full((n_tiles, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+    group.jones[0][1, 5, 1, 1] = 1e10 + 0j
+
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        group.run_flagging_pipeline(
+            refant_name="Tile001",
+            phase_fit_niter=1,
+            gain_max_cutoff=None,
+        )
+
+    assert not (group.tile_flag_reasons[1] & TileFlagReason.MOSTLY_BAD_CHANNELS)
+    assert not np.any(
+        [reasons[1, 5] & ChannelFlagReason.GAIN_MAX_CUTOFF for reasons in group.channel_flag_reasons]
+    )
 
 
 # ===========================================================================

@@ -78,6 +78,7 @@ class ChannelFlagReason(IntFlag):
     PRE_EXISTING_NAN = auto()
     NON_CONVERGED = auto()
     PARTIAL_JONES = auto()
+    GAIN_MAX_CUTOFF = auto()
     AMPLITUDE_OUTLIER = auto()
 
 
@@ -1088,6 +1089,66 @@ class HyperfitsSolutionGroup:
         fits = [result for future in as_completed(futures) if (result := future.result()) is not None]
         return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *GainFitInfo._fields])
 
+    def flag_gain_max_cutoff(self, gain_max_cutoff: float | None) -> None:
+        """Flag any (tile, chanblock) entry whose gx or gy amplitude
+        exceeds an absolute sanity ceiling, regardless of population or
+        per-tile trend.
+
+        This catches a failure mode flag_amplitude_outliers cannot:
+        hyperdrive's own per-chanblock convergence flag is shared across
+        every tile at that chanblock, so it can't detect one tile's
+        solve diverging to a spurious-but-numerically-stable value (e.g.
+        gain amplitudes of 1e10+) while every other tile at the same
+        chanblock converges normally. flag_amplitude_outliers wouldn't
+        catch this either -- it fits each tile's own channel-to-channel
+        trend, so if the whole trace is uniformly enormous, the fit (and
+        its acceptance band) simply tracks the enormous baseline,
+        flagging at most a handful of the most extreme points on top of
+        it. An absolute ceiling, run first, removes the whole diverged
+        trace before that per-tile fit ever sees it.
+
+        Deliberately whole-Jones (both gx and gy NaN'd together, matching
+        every other channel-level flag in this pipeline) even if only one
+        polarisation exceeds the ceiling -- a Jones matrix with only one
+        sane polarisation isn't meaningfully usable either.
+
+        Run early enough (right after enforce_whole_jones_nan, before
+        detect_phase_outliers and flag_amplitude_outliers) that neither of
+        those later stages is misled by a diverged tile's garbage values:
+        detect_phase_outliers's phase fit is computed from the same
+        underlying complex Jones entries this removes, and
+        flag_amplitude_outliers's per-tile fit would otherwise adapt to
+        (and hide within) the same diverged baseline described above.
+
+        If enough of a tile's channels exceed the ceiling,
+        flag_mostly_bad_tiles (running after flag_amplitude_outliers)
+        promotes it to fully flagged automatically -- no separate
+        whole-tile logic is needed here.
+
+        Args:
+            gain_max_cutoff: Absolute gain-amplitude ceiling. None
+                disables this check entirely (matches the historical
+                "gains cut off/clipping disabled" config behaviour).
+        """
+        logger.info("flag_gain_max_cutoff")
+
+        self._ensure_loaded()
+        assert self.jones is not None
+        assert self.channel_flag_reasons is not None
+
+        if gain_max_cutoff is None:
+            return
+
+        for file_jones, file_reasons in zip(self.jones, self.channel_flag_reasons):
+            gx_amp = np.abs(file_jones[..., 0, 0])
+            gy_amp = np.abs(file_jones[..., 1, 1])
+            # NaN comparisons are always False, so already-NaN (already
+            # bad) entries are naturally excluded without an explicit check.
+            exceeds_cutoff = (gx_amp > gain_max_cutoff) | (gy_amp > gain_max_cutoff)
+            if exceeds_cutoff.any():
+                file_jones[exceeds_cutoff, :, :] = np.nan + 1j * np.nan
+                file_reasons[exceeds_cutoff] |= ChannelFlagReason.GAIN_MAX_CUTOFF
+
     def flag_amplitude_outliers(self, poly_degree: int = 2, mad_residual_threshold: float = 5.0) -> None:
         """Flag per-channel gain-amplitude outliers, one contiguous file at a time.
 
@@ -1260,6 +1321,7 @@ class HyperfitsSolutionGroup:
         mad_residual_threshold: float = 5.0,
         phase_outlier_nstd: float = 3.0,
         tile_bad_channel_fraction: float = 0.5,
+        gain_max_cutoff: float | None = 100.0,
     ) -> None:
         """Run the full flagging pipeline in the standard order, capturing a
         "before" snapshot along the way.
@@ -1268,12 +1330,18 @@ class HyperfitsSolutionGroup:
         mwax_calvin_processor and cal_utils: apply_tile_flags() (cheap,
         structural), a "before" snapshot for later before/after reporting
         (see self.before_jones etc.), enforce_whole_jones_nan(),
+        flag_gain_max_cutoff() (absolute sanity ceiling, does flag/NaN --
+        run first so neither of the next two stages is misled by a
+        diverged tile's garbage values; see its docstring),
         detect_phase_outliers() (whole-observation, report-only -- see its
         docstring for why this doesn't flag anything),
         flag_amplitude_outliers() (per-file, per-tile, does flag/NaN),
         then flag_mostly_bad_tiles() sees the combined result of
         everything before it (phase-outlier status plays no part, since
-        detect_phase_outliers never touches channel_flag_reasons).
+        detect_phase_outliers never touches channel_flag_reasons; a tile
+        cut off entirely by flag_gain_max_cutoff is promoted to fully
+        flagged here via the ordinary bad-channel-fraction mechanism, with
+        no separate whole-tile logic needed).
 
         The "before" snapshot is captured right after apply_tile_flags() --
         i.e. before any of the phase/amplitude/mostly-bad-tile outlier
@@ -1301,6 +1369,8 @@ class HyperfitsSolutionGroup:
                 tile's chanblocks that must already be flagged bad before
                 the whole tile is promoted to fully flagged (see
                 flag_mostly_bad_tiles).
+            gain_max_cutoff: Absolute gain-amplitude ceiling (see
+                flag_gain_max_cutoff). None disables this check.
         """
         self._ensure_loaded()
         self.apply_tile_flags()
@@ -1314,6 +1384,7 @@ class HyperfitsSolutionGroup:
         self.before_phase_fits = self.process_phase_fits(refant_name, phase_fit_niter)
 
         self.enforce_whole_jones_nan()
+        self.flag_gain_max_cutoff(gain_max_cutoff)
         self.detect_phase_outliers(refant_name, phase_fit_niter, nstd=phase_outlier_nstd)
         self.flag_amplitude_outliers(poly_degree, mad_residual_threshold)
         self.flag_mostly_bad_tiles(tile_bad_channel_fraction)
@@ -1322,10 +1393,10 @@ class HyperfitsSolutionGroup:
         """Write all in-memory changes to disk: one backup + one write per file.
 
         Call this exactly once, after every flagging stage (apply_tile_flags,
-        enforce_whole_jones_nan, detect_phase_outliers, flag_amplitude_outliers,
-        flag_mostly_bad_tiles) has run and any "after" plots have already
-        been generated from self.jones -- nothing written here should be
-        modified further afterwards.
+        enforce_whole_jones_nan, flag_gain_max_cutoff, detect_phase_outliers,
+        flag_amplitude_outliers, flag_mostly_bad_tiles) has run and any
+        "after" plots have already been generated from self.jones --
+        nothing written here should be modified further afterwards.
 
         Args:
             metafits_context: Populated mwalib.MetafitsContext, used to add

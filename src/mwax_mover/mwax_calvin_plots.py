@@ -345,6 +345,10 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fi
 def plot_phase_intercepts(prefix, show, title, flavor_fits):
     """Plot phase intercepts in polar coordinates.
 
+    Rows are ordered alphabetically by receiver flavour, columns as XX
+    then YY, regardless of the order flavours/pols happen to appear in
+    flavor_fits.
+
     Args:
         prefix: Output directory prefix for saving plot.
         show: Whether to display the plot.
@@ -357,6 +361,8 @@ def plot_phase_intercepts(prefix, show, title, flavor_fits):
         row="flavor",
         col="pol",
         hue="flavor",
+        row_order=sorted(flavor_fits["flavor"].unique()),
+        col_order=["XX", "YY"],
         subplot_kws={"projection": "polar"},
         sharex=False,
         sharey=False,
@@ -410,9 +416,21 @@ def plot_phase_residual(
             nstd that produced flavor_fits's 'outlier' column, or the
             band drawn here won't reflect the actual reporting threshold
             (default: 3.0, matching reject_outliers's own default).
+
+    Rows are ordered alphabetically by receiver flavour, columns as XX
+    then YY, matching plot_phase_intercepts.
     """
     plt.clf()
-    g = sns.FacetGrid(flavor_fits, row="flavor", col="pol", hue="flavor", sharex=True, sharey=False)
+    g = sns.FacetGrid(
+        flavor_fits,
+        row="flavor",
+        col="pol",
+        hue="flavor",
+        row_order=sorted(flavor_fits["flavor"].unique()),
+        col_order=["XX", "YY"],
+        sharex=True,
+        sharey=False,
+    )
 
     if len(freqs) != len(weights):
         raise RuntimeError(f"({len(freqs)=}) and ({len(weights)=}) must be the same length")

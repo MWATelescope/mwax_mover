@@ -4,20 +4,21 @@ This document describes what happens to an MWA calibration solutions file (or se
 
 The goal of this stage is to catch calibration solutions that `hyperdrive` produced but that are not physically trustworthy — non-converged channels, tiles with broken cables or receivers, RFI-corrupted channels, etc. — and flag them so they are not used downstream, while leaving good solutions untouched.
 
-Everything below applies per-observation. If an observation spans more than one contiguous frequency band (a "picket-fence" observation), each band's solutions file is processed together as a group, sharing a single reference antenna and a single set of tile-level decisions, but each file's amplitude fit is done independently (see [Step 4](#step-4-amplitude-outlier-flagging)).
+Everything below applies per-observation. If an observation spans more than one contiguous frequency band (a "picket-fence" observation), each band's solutions file is processed together as a group, sharing a single reference antenna and a single set of tile-level decisions, but each file's amplitude fit is done independently (see [Step 5](#step-5-amplitude-outlier-flagging)).
 
 ## Contents
 
 1. [Inputs](#inputs)
 2. [Step 1: Structural tile flags](#step-1-structural-tile-flags)
 3. [Step 2: Enforce whole-Jones NaN](#step-2-enforce-whole-jones-nan)
-4. [Step 3: Phase-outlier detection](#step-3-phase-outlier-detection)
-5. [Step 4: Amplitude-outlier flagging](#step-4-amplitude-outlier-flagging)
-6. [Step 5: Mostly-bad-tile promotion](#step-5-mostly-bad-tile-promotion)
-7. [Step 6: Commit to disk](#step-6-commit-to-disk)
-8. [Step 7: Final reporting fits](#step-7-final-reporting-fits)
-9. [Output files](#output-files)
-10. [Statistical background](#statistical-background)
+4. [Step 3: Gain-magnitude sanity cutoff](#step-3-gain-magnitude-sanity-cutoff)
+5. [Step 4: Phase-outlier detection](#step-4-phase-outlier-detection)
+6. [Step 5: Amplitude-outlier flagging](#step-5-amplitude-outlier-flagging)
+7. [Step 6: Mostly-bad-tile promotion](#step-6-mostly-bad-tile-promotion)
+8. [Step 7: Commit to disk](#step-7-commit-to-disk)
+9. [Step 8: Final reporting fits](#step-8-final-reporting-fits)
+10. [Output files](#output-files)
+11. [Statistical background](#statistical-background)
 
 ---
 
@@ -89,7 +90,21 @@ Only `Dx` was NaN going in — but since a Jones matrix is only meaningful as a 
 
 ---
 
-## Step 3: Phase-outlier detection
+## Step 3: Gain-magnitude sanity cutoff
+
+**What it catches:** a tile whose calibration solve has diverged to a spurious-but-numerically-"converged" gain value — amplitudes of 10¹⁰ or more, rather than the physically sensible range around 1 that a real gain should sit in. This is different from a bad-but-plausible amplitude; it's a numerical failure, not a statistical judgement call.
+
+**Why this needs its own step:** `hyperdrive`'s own convergence flag is recorded per chanblock, shared across every tile at that frequency — it has no way to know that *one* tile's solve diverged while every other tile at the same chanblock converged normally, so it can't catch this. [Step 5](#step-5-amplitude-outlier-flagging)'s amplitude check can't catch it either, for a different reason: it fits each tile's own channel-to-channel trend, so if the *whole* trace is uniformly enormous, the fit (and its acceptance band) simply tracks the enormous baseline — only a handful of the most extreme points get flagged on top of it, and the bulk of the garbage sails through untouched. A real example from an affected observation: one tile's `gy` amplitude sat at a median of 2×10¹⁰ across 654 channels (a normal tile sits around 0.9), and every one of those channels was marked "converged" by `hyperdrive`.
+
+**How:** any (tile, chanblock) entry whose `gx` or `gy` amplitude exceeds an absolute ceiling is flagged bad and NaN'd — both polarisations together, matching every other whole-Jones flag in this pipeline (a Jones matrix with only one sane polarisation isn't meaningfully usable either). This runs early, right after [Step 2](#step-2-enforce-whole-jones-nan) and before phase-outlier detection or amplitude-outlier flagging, so neither of those later stages is misled by a diverged tile's garbage values.
+
+**Default sensitivity:** any amplitude above **100** (`gain_max_cutoff = 100`). Set to `None`/omitted to disable this check entirely.
+
+If enough of a tile's channels are cut off here, [Step 6](#step-6-mostly-bad-tile-promotion) promotes it to fully flagged automatically, the same way it would for any other per-channel flagging reason — no separate whole-tile logic is needed.
+
+---
+
+## Step 4: Phase-outlier detection
 
 **What it catches:** a tile whose overall cable/electronic delay is wrong (e.g. a mislabelled or physically incorrect cable length), which shows up as an anomalous *phase slope with frequency* across the whole band.
 
@@ -120,9 +135,9 @@ The `{obs_id}_residual.png` debug plot (see [Output files](#output-files) below)
 
 ---
 
-## Step 4: Amplitude-outlier flagging
+## Step 5: Amplitude-outlier flagging
 
-**What it catches:** individual bad *channels* within an otherwise-good tile — narrowband RFI, a single corrupted fine channel, a spike in gain amplitude, etc. Unlike Step 3's phase-outlier detection, this step does flag and modify data: it NaNs the specific channels that look wrong (never the whole tile).
+**What it catches:** individual bad *channels* within an otherwise-good tile — narrowband RFI, a single corrupted fine channel, a spike in gain amplitude, etc. Unlike Step 4's phase-outlier detection, this step does flag and modify data: it NaNs the specific channels that look wrong (never the whole tile).
 
 **How:** For each tile, in each file (frequency band) separately, Calvin fits a smooth polynomial curve (degree 2 by default — i.e. a parabola) to that tile's gain amplitude (`|gx|` and `|gy|` separately) as a function of channel number, then iteratively rejects any channel whose residual from that curve is unusually large, refits without them, and repeats until the set of accepted channels stops changing. This is a form of **iterative sigma-clipping** (see [Statistical background](#statistical-background)).
 
@@ -140,7 +155,7 @@ This deliberately:
 
 ---
 
-## Step 5: Mostly-bad-tile promotion
+## Step 6: Mostly-bad-tile promotion
 
 After the previous steps, a tile might have most — but not literally all — of its channels flagged individually (e.g. lots of scattered RFI). If **50% or more** of a tile's channels (summed across every file/band, and counting any per-channel bad reason — non-convergence, amplitude outliers, etc.) are already bad, the whole tile is promoted to fully flagged, rather than being left as a "mostly-holes" tile that would otherwise still nominally count as usable.
 
@@ -148,17 +163,17 @@ After the previous steps, a tile might have most — but not literally all — o
 
 ---
 
-## Step 6: Commit to disk
+## Step 7: Commit to disk
 
 Once all of the above has run, the (now partly-NaN'd) solutions are written back to disk. A backup of the original, unmodified file is always kept (see [Output files](#output-files)) so nothing is destructively lost — the outlier flagging can always be inspected against, or reverted from, the pristine original without rerunning `hyperdrive` and `Birli`. 
 
 ---
 
-## Step 7: Final reporting fits
+## Step 8: Final reporting fits
 
 After committing, Calvin computes two further sets of per-tile fits against the now-fully-flagged, final data, purely for reporting/database purposes (these do not flag anything further):
 
-- A final **phase fit** (same method as Step 3), recorded for quality-monitoring and included in the tile stats output.
+- A final **phase fit** (same method as Step 4), recorded for quality-monitoring and included in the tile stats output.
 - A **gain fit**: a per-tile, per-polarisation weighted-mean gain and associated quality/scatter metrics, computed independently per contiguous coarse-channel block and combined, which is what gets recorded in the calibration database against this observation.
 
 **Example** — a couple of rows from each fit's output (columns abbreviated; illustrative values):
@@ -179,7 +194,8 @@ The phase and gain fits in the database can then be used by MWA ASVO (or researc
 - num_sources: Number of sources from the skymodel for `hyperdrive` to use 
 - calibration_command: Dump of the command line args used in this `hyperdrive` run
 - (phase) fit_niter: Number of times the phase fit should be iterated
-- phase_outlier_nstd_threshold: tiles more than this many standard-deviation-equivalents beyond their flavour/polarisation population's robust centre are reported as phase outliers (see [Step 3](#step-3-phase-outlier-detection)) -- report-only, does not affect flagging
+- gain_max_cutoff: Absolute gain-amplitude ceiling above which a (tile, chanblock) entry is flagged (see [Step 3](#step-3-gain-magnitude-sanity-cutoff)) -- unlike the other outlier-detection parameters below, this one does still control real flagging behaviour
+- phase_outlier_nstd_threshold: tiles more than this many standard-deviation-equivalents beyond their flavour/polarisation population's robust centre are reported as phase outliers (see [Step 4](#step-4-phase-outlier-detection)) -- report-only, does not affect flagging
 - gain_outlier_poly_degree: Nth order polynomial used for gain outlier detection
 - gain_outlier_mad_residual_threshold: Number of MADs +/- the fit considered ok for a tile
 - tile_bad_channel_fraction: Fraction (0-1) of a tile's chanblocks that must already be flagged bad before the whole tile is promoted to fully flagged
@@ -195,11 +211,11 @@ For each observation, Calvin (and the underlying `hyperdrive` plotting) writes o
 | File | Description |
 |---|---|
 | `{obs_id}_stats.txt` | **The main human-readable summary.** Before/after per-tile flagging statistics (see below), followed by `hyperdrive`'s own fine-channel convergence statistics. |
-| `{obs_id}_*_gain_outliers_tiles.png` | Plot of the amplitude-outlier gains that were detected and removed (Step 4), shown against the fitted curve and acceptance band, per tile. |
-| `{obs_id}_rx_lengths.png` | Cable length offsets in metres, per receiver — a sanity-check plot for the phase/delay fitting in Step 3. |
+| `{obs_id}_*_gain_outliers_tiles.png` | Plot of the amplitude-outlier gains that were detected and removed (Step 5) and any channels cut off by the Step 3 gain-magnitude sanity check, shown against the fitted curve and acceptance band, per tile. A tile promoted to fully flagged (e.g. because Step 3 cut off most of its channels) shows a placeholder panel with the reason instead. |
+| `{obs_id}_rx_lengths.png` | Cable length offsets in metres, per receiver — a sanity-check plot for the phase/delay fitting in Step 4. |
 | `{obs_id}_phase_fits_xx.png` / `_phase_fits_yy.png` | Per-tile phase-vs-frequency plots with the fitted delay line overlaid, for XX and YY respectively. |
-| `{obs_id}_intercepts.png` | Per receiver-type/polarisation plot of phase intercepts in polar coordinates vs. cable length — another view of the Step 3 delay fit. |
-| `{obs_id}_residual.png` / `_residual.tsv` | Phase residuals vs. frequency, by receiver type and polarisation, with a shaded band showing that group's phase-outlier reporting range (plot and the underlying data as TSV). |
+| `{obs_id}_intercepts.png` | Per receiver-type/polarisation plot of phase intercepts in polar coordinates vs. cable length — another view of the Step 4 delay fit. Rows ordered alphabetically by receiver flavour, columns XX then YY. |
+| `{obs_id}_residual.png` / `_residual.tsv` | Phase residuals vs. frequency, by receiver type and polarisation, with a shaded band showing that group's phase-outlier reporting range (plot and the underlying data as TSV). Same row/column ordering as `intercepts.png`. |
 | `{obs_id}_phase_fits.tsv` | All phase-fit statistics (χ²/dof, σ residual, fitted delay, etc.) per tile, as TSV. |
 | `{obs_id}_*_solutions_amps.png` / `_solutions_phases.png` | `hyperdrive`'s own plots of calibration solution amplitude/phase vs. fine channel, per tile. |
 | `{obs_id}_*_solutions.fits` | The final calibration solutions FITS file. If a matching `*_solutions.original.fits` also exists alongside it, this file has had outlier gains flagged (i.e. entire Jones matrices NaN'd per Steps 1–5). |
@@ -213,13 +229,13 @@ The first part of `{obs_id}_stats.txt` is a per-tile table, printed twice — on
 | Column | Meaning |
 |---|---|
 | Tile ID / name | Which tile |
-| Flavor | The tile's receiver flavour/type (e.g. RRI/SHAO/NI) — see [Step 3](#step-3-phase-outlier-detection) for why this matters for phase-outlier detection |
+| Flavor | The tile's receiver flavour/type (e.g. RRI/SHAO/NI) — see [Step 4](#step-4-phase-outlier-detection) for why this matters for phase-outlier detection |
 | Fully flagged? | Whether the *whole* tile ended up flagged |
 | % channels flagged, bad/total channels | How much of the tile is flagged, and out of how many channels |
 | gx/gy min, median, max | Gain amplitude statistics over the tile's still-good channels only |
-| χ²/dof (XX, YY) | Phase-fit goodness-of-fit per polarisation (see Step 3) |
-| σ residual (XX, YY) | Phase-fit residual scatter per polarisation (see Step 3) |
-| PhOutlier | Which polarisation(s), if any, are population outliers on the Step 3 phase fit — `XX`, `YY`, `XX,YY`, or blank. Report-only: never causes flagging, and independent of the Reason column below |
+| χ²/dof (XX, YY) | Phase-fit goodness-of-fit per polarisation (see Step 4) |
+| σ residual (XX, YY) | Phase-fit residual scatter per polarisation (see Step 4) |
+| PhOutlier | Which polarisation(s), if any, are population outliers on the Step 4 phase fit — `XX`, `YY`, `XX,YY`, or blank. Report-only: never causes flagging, and independent of the Reason column below |
 | Reason | Which flag source(s) caused a fully-flagged tile to be flagged (metafits / hyperdrive tile / hyperdrive baseline / mostly-bad-channels), or a breakdown of per-channel reasons for a partially-flagged tile |
 
 ---
@@ -228,7 +244,7 @@ The first part of `{obs_id}_stats.txt` is a per-tile table, printed twice — on
 
 ### Median/MAD outlier rejection
 
-Rather than the traditional "mean ± N standard deviations" test, Calvin's tile-level outlier tests (Step 3) use the **median** and the **median absolute deviation (MAD)** as a robust stand-in for the mean and standard deviation:
+Rather than the traditional "mean ± N standard deviations" test, Calvin's tile-level outlier tests (Step 4) use the **median** and the **median absolute deviation (MAD)** as a robust stand-in for the mean and standard deviation:
 
 ```
 MAD = median( |x - median(x)| )
@@ -241,13 +257,13 @@ The reason for using median/MAD instead of mean/standard deviation is that the m
 
 Calvin applies this iteratively: after flagging the outliers found in one pass, the threshold is recomputed from the remaining (still-good) population and applied again, repeating until nothing new is flagged. This lets a cluster of comparably-bad tiles get caught round by round, rather than only ever catching the single worst one.
 
-The population a tile is compared against is itself scoped: a separate threshold is computed and applied independently within each group of rows sharing the same value(s) of one or more grouping columns, rather than pooling every row into one population. Step 3 groups by polarisation and receiver flavour together, for the reasons given above; Step 4's amplitude-outlier check goes further and doesn't compare tiles against each other at all — see [Step 4](#step-4-amplitude-outlier-flagging).
+The population a tile is compared against is itself scoped: a separate threshold is computed and applied independently within each group of rows sharing the same value(s) of one or more grouping columns, rather than pooling every row into one population. Step 4 groups by polarisation and receiver flavour together, for the reasons given above; Step 5's amplitude-outlier check goes further and doesn't compare tiles against each other at all — see [Step 5](#step-5-amplitude-outlier-flagging).
 
 Reference: [Median absolute deviation (Wikipedia)](https://en.wikipedia.org/wiki/Median_absolute_deviation), [Robust measures of scale](https://en.wikipedia.org/wiki/Robust_statistics#Measures_of_scale).
 
 ### Iterative sigma-clipped polynomial fitting
 
-Calvin's per-channel amplitude test (Step 4) uses the same median/MAD-based idea, but against a smooth curve instead of a flat population:
+Calvin's per-channel amplitude test (Step 5) uses the same median/MAD-based idea, but against a smooth curve instead of a flat population:
 
 1. Fit a low-order polynomial (default: degree 2, i.e. a parabola) to gain amplitude vs. channel number, using only the currently-accepted channels.
 2. Compute each channel's residual from that fit, and its MAD.
@@ -258,12 +274,12 @@ This is a standard technique generally known as **iterative sigma-clipping** (he
 
 ### Phase (delay) fitting
 
-The phase-vs-frequency fit in Step 3 is fundamentally a search for the best-fit **slope** of phase against frequency, which corresponds to a physical time delay (equivalently, an effective cable length). Rather than fitting the slope directly (which is easy to get stuck in a locally-wrong solution when phase wraps around every 2π), Calvin:
+The phase-vs-frequency fit in Step 4 is fundamentally a search for the best-fit **slope** of phase against frequency, which corresponds to a physical time delay (equivalently, an effective cable length). Rather than fitting the slope directly (which is easy to get stuck in a locally-wrong solution when phase wraps around every 2π), Calvin:
 
 1. Transforms the frequency-domain calibration solution into "delay space" via an inverse FFT, where the true delay shows up as a clear peak — this gives a robust, wrap-immune starting estimate.
 2. Refines that estimate with a standard least-squares minimisation to get the final slope and intercept.
 
-Two goodness-of-fit metrics are reported for every tile/polarisation: χ²/dof (a standard [reduced chi-squared statistic](https://en.wikipedia.org/wiki/Goodness_of_fit#Pearson's_chi-squared_test)) and the residual standard deviation, both of which feed into the Step 3 outlier test described above.
+Two goodness-of-fit metrics are reported for every tile/polarisation: χ²/dof (a standard [reduced chi-squared statistic](https://en.wikipedia.org/wiki/Goodness_of_fit#Pearson's_chi-squared_test)) and the residual standard deviation, both of which feed into the Step 4 outlier test described above.
 
 ### Weights
 
