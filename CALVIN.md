@@ -191,6 +191,11 @@ tile_id  pol  chi2dof  sigma_resid  length           tile_id  pol  coarse_ch  ga
 
 The phase fit is one row per tile per polarisation — a single delay/quality summary across the whole observation. The gain fit is one row per tile per polarisation **per coarse channel** (`pol0`/`pol1` are the intercept/slope of a small linear fit *within* that coarse channel, used only to compute `sigma_resid`; `gain` itself is the weighted-mean inverse amplitude for that coarse channel) — this is what actually gets written to the calibration database.
 
+**Flagged fine channels are excluded, not interpolated.** Both fits run against the fully-flagged, final `self.jones` (every entry NaN'd by Steps 1–5 is genuinely NaN by this point), and both drop flagged/zero-weight fine channels from their inputs before fitting:
+
+- The phase fit (`x_delay_m`/`y_delay_m`, `x_intercept`/`y_intercept`) masks out non-finite and zero-weight fine channels across the whole band, then fits a single straight line (delay-space FFT estimate, refined by least squares) through only the surviving points. The result is a genuine fit through the good data, not a curve that fills in the gaps left by flagged channels.
+- The gain fit (`x_gains`/`y_gains`) masks out non-finite and zero-weight fine channels *within each coarse channel* and takes a weighted mean of the remainder. If a coarse channel has fewer than 2 surviving fine channels, its gain is left as `NaN` rather than filled in from neighbouring coarse channels. A whole coarse channel missing from the solution files entirely (e.g. a gap in a picket-fence observation) is likewise `NaN`, not interpolated — see `pad_gain_fit_info` in mwax_calvin_utils.py.
+
 The phase and gain fits in the database can then be used by MWA ASVO (or researchers via [Calibration Web Services](https://mwatelescope.atlassian.net/wiki/spaces/MP/pages/24969461/Calibration+web+services)) to download an [AOCal](https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_ao.html) or [Hyperdrive FITS](https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_hyp.html) solution file. The database also contains a record of the parameters used by Calvin for generated `hyperdrive` solutions and detecting and flagging outliers:
 - source_list: Skymodel used by `hyperdrive`
 - num_sources: Number of sources from the skymodel for `hyperdrive` to use 
