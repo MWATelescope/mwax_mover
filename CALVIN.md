@@ -196,7 +196,11 @@ The phase fit is one row per tile per polarisation — a single delay/quality su
 - The phase fit (`x_delay_m`/`y_delay_m`, `x_intercept`/`y_intercept`) masks out non-finite and zero-weight fine channels across the whole band, then fits a single straight line (delay-space FFT estimate, refined by least squares) through only the surviving points. The result is a genuine fit through the good data, not a curve that fills in the gaps left by flagged channels.
 - The gain fit (`x_gains`/`y_gains`) masks out non-finite and zero-weight fine channels *within each coarse channel* and takes a weighted mean of the remainder. If a coarse channel has fewer than 2 surviving fine channels, its gain is left as `NaN` rather than filled in from neighbouring coarse channels. A whole coarse channel missing from the solution files entirely (e.g. a gap in a picket-fence observation) is likewise `NaN`, not interpolated — see `pad_gain_fit_info` in mwax_calvin_utils.py.
 
-The phase and gain fits in the database can then be used by MWA ASVO (or researchers via [Calibration Web Services](https://mwatelescope.atlassian.net/wiki/spaces/MP/pages/24969461/Calibration+web+services)) to download an [AOCal](https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_ao.html) or [Hyperdrive FITS](https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_hyp.html) solution file. The database also contains a record of the parameters used by Calvin for generated `hyperdrive` solutions and detecting and flagging outliers:
+The phase and gain fits in the database can then be used by MWA ASVO (or researchers via [Calibration Web Services](https://mwatelescope.atlassian.net/wiki/spaces/MP/pages/24969461/Calibration+web+services)) to download an [AOCal](https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_ao.html) or [Hyperdrive FITS](https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_hyp.html) solution file.
+
+### The `calibration_fits` table
+
+One row per Calvin run (per observation), keyed by `fitid` (a Unix-timestamp-derived integer, generated when the row is inserted). Holds provenance and the parameters used by Calvin for this run, but none of the per-tile numbers themselves:
 - source_list: Skymodel used by `hyperdrive`
 - num_sources: Number of sources from the skymodel for `hyperdrive` to use 
 - calibration_command: Dump of the command line args used in this `hyperdrive` run
@@ -206,6 +210,28 @@ The phase and gain fits in the database can then be used by MWA ASVO (or researc
 - gain_outlier_poly_degree: Nth order polynomial used for gain outlier detection
 - gain_outlier_mad_residual_threshold: Number of MADs +/- the fit considered ok for a tile
 - tile_bad_channel_fraction: Fraction (0-1) of a tile's chanblocks that must already be flagged bad before the whole tile is promoted to fully flagged
+
+### The `calibration_solutions` table
+
+One row per tile per fit (`fitid` foreign-keys back to `calibration_fits`; `obsid`/`tileid` identify the observation and tile), holding the actual Step 8 fit results described above. All XX/YY pairs below come from the same phase/gain fit, just for the two different polarisations.
+
+| Column | Source | Meaning |
+|---|---|---|
+| `x_delay_m` / `y_delay_m` | `-1 * x_phase.length` / `-1 * y_phase.length` | Fitted equivalent cable length, in metres, for XX/YY. Negated relative to the internal `PhaseFitInfo.length` value to match the sign convention the legacy calibration pipeline used -- this is a units/convention flip, not a different quantity. |
+| `x_intercept` / `y_intercept` | `x_phase.intercept` / `y_phase.intercept` | Fitted phase intercept, in radians (wrapped to [-π, π]), for XX/YY. |
+| `x_gains` / `y_gains` | `x_gains.gains` / `y_gains.gains` | Per-coarse-channel array: the weighted-mean inverse amplitude (`gain = 1/amp`) for XX/YY -- the actual gain values used downstream for calibration. |
+| `x_gains_pol0` / `y_gains_pol0` | `x_gains.pol0` / `y_gains.pol0` | Per-coarse-channel array: intercept of the small linear fit to gain amplitude *within* that coarse channel (diagnostic only -- not applied to `x_gains`/`y_gains` itself; see [Step 8](#step-8-final-reporting-fits) above and the note on `pol0`/`pol1` naming in `GainFitInfo`). |
+| `x_gains_pol1` / `y_gains_pol1` | `x_gains.pol1` / `y_gains.pol1` | Per-coarse-channel array: slope of that same within-coarse-channel linear fit, for XX/YY. Also diagnostic only. |
+| `x_gains_sigma_resid` / `y_gains_sigma_resid` | `x_gains.sigma_resid` / `y_gains.sigma_resid` | Per-coarse-channel array: residual standard deviation of the within-coarse-channel linear fit, for XX/YY. |
+| `x_gains_fit_quality` / `y_gains_fit_quality` | `x_gains.quality` / `y_gains.quality` | Fraction (0-1) of all chanblocks (including already-flagged ones) within 2×sigma_resid of their coarse channel's linear fit, for XX/YY. Higher is better. |
+| `x_phase_sigma_resid` / `y_phase_sigma_resid` | `x_phase.sigma_resid` / `y_phase.sigma_resid` | Standard deviation of phase residuals (radians) after subtracting the fitted delay line, for XX/YY. Lower is better. |
+| `x_phase_chi2dof` / `y_phase_chi2dof` | `x_phase.chi2dof` / `y_phase.chi2dof` | Reduced chi-squared (χ²/dof) of the phase fit, for XX/YY -- close to 1.0 is a good fit (see [Phase (delay) fitting](#phase-delay-fitting) below). |
+| `x_phase_fit_quality` / `y_phase_fit_quality` | `x_phase.quality` / `y_phase.quality` | Fraction (0-1) of frequency channels that survived the phase fit's own internal sigma-clip, for XX/YY. 1.0 means every channel used was kept. |
+
+Notes:
+- **Flagged channels are excluded from all of the above, not interpolated** -- see the "Flagged fine channels are excluded, not interpolated" note above.
+- If a tile has no phase fit and/or no gain fit for a given polarisation (e.g. the tile was fully flagged, or the fit failed), the corresponding columns are filled with `NaN` (`PhaseFitInfo.nan()` / `GainFitInfo.nan()`) rather than the row being skipped -- so a fully-flagged tile still gets a `calibration_solutions` row, just an all-`NaN` one.
+- If the solution files cover fewer coarse channels than the observation's metafits expects (e.g. a gap in a picket-fence observation), the per-coarse-channel gain arrays (`x_gains`, `y_gains`, `x_gains_pol0/1`, `y_gains_sigma_resid`, etc.) are padded with `NaN` at the missing channels' positions (`pad_gain_fit_info` in mwax_calvin_utils.py) so every row has one array entry per metafits coarse channel, in the same order.
 
 NOTE: the real-time MWAX beamformer uses the Calvin-modified `Hyperdrive FITS` file for it's calibration solutions as beamforming requires the highest precision calibration information.
 
