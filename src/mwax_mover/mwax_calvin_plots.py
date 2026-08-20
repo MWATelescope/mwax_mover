@@ -18,7 +18,6 @@ Two families of functions live here:
 
 import logging
 import os
-import sys
 import warnings
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
@@ -45,6 +44,7 @@ from numpy.typing import NDArray
 
 from mwax_mover.mwax_calvin_utils import (
     annotate_phase_outliers,
+    ensure_system_byte_order,
     get_convergence_summary,
     pivot_phase_fits,
     poly_str,
@@ -140,12 +140,6 @@ def plot_debug_phase_fits(
 
     if len(flavor_fits):
         _rx_means = plot_rx_lengths(flavor_fits, prefix, show, title)
-
-    def ensure_system_byte_order(arr):
-        system_byte_order = ">" if sys.byteorder == "big" else "<"
-        if arr.dtype.byteorder != system_byte_order and arr.dtype.byteorder not in "|=":
-            return arr.newbyteorder(system_byte_order)
-        return arr
 
     freqs = ensure_system_byte_order(freqs)
     weights = ensure_system_byte_order(weights)
@@ -854,8 +848,10 @@ def _extract_combined_gains_bundle(group: HyperfitsSolutionGroup, file_idx: int)
 
     Args:
         group: The solution group, after apply_tile_flags,
-            enforce_whole_jones_nan, detect_phase_outliers,
-            flag_amplitude_outliers, and flag_mostly_bad_tiles have run.
+            enforce_whole_jones_nan, flag_gain_max_cutoff,
+            flag_amplitude_outliers, and flag_mostly_bad_tiles have run
+            (detect_phase_outliers is not required -- this bundle doesn't
+            use group.phase_fits).
         file_idx: Which solution file (index into group.jones/solns).
 
     Returns:
@@ -906,8 +902,10 @@ def plot_combined_gains(
 
     Args:
         group: The solution group, after apply_tile_flags,
-            enforce_whole_jones_nan, detect_phase_outliers,
-            flag_amplitude_outliers, and flag_mostly_bad_tiles have run.
+            enforce_whole_jones_nan, flag_gain_max_cutoff,
+            flag_amplitude_outliers, and flag_mostly_bad_tiles have run
+            (detect_phase_outliers is not required -- this plot doesn't
+            use group.phase_fits).
         file_idx: Which solution file (index into group.jones/solns) to plot.
         first_tile_index: Index of the first tile to include in this page.
         n_tiles: Number of tiles to plot starting from first_tile_index.
@@ -1489,8 +1487,28 @@ def build_tile_stats_rows(
             blank -- chi2dof/sigma_resid are read regardless.
 
     Returns:
-        List of one dict per tile, matching the columns in
-        write_tile_stats_table's expected row format.
+        List of one dict per tile, each with keys:
+            tile (int): Tile ID.
+            name (str): Tile name.
+            flavor (str): Formatted receiver flavour (see _format_flavor).
+            fully_flagged (bool): Whether the whole tile is flagged.
+            flagged_pct (float): Percentage of this tile's channels flagged.
+            n_bad_channels (int): Count of flagged channels, across all files.
+            n_total_channels (int): Total channel count, across all files.
+            gx_min, gx_median, gx_max (float): Gain amplitude stats over
+                this tile's still-good gx channels (NaN if fully flagged).
+            gy_min, gy_median, gy_max (float): Same, for gy.
+            chi2dof_x, chi2dof_y (float): Phase-fit chi2/dof, XX/YY (NaN
+                if no phase fit for that pol).
+            sigma_resid_x, sigma_resid_y (float): Phase-fit residual std
+                dev, XX/YY (NaN if no phase fit for that pol).
+            phase_outlier (str): Comma-separated pols ("XX", "YY", or
+                "XX,YY") flagged as phase-fit population outliers, or "".
+            tile_reason (str): Whole-tile flag reason text, if fully
+                flagged (see _tile_flag_reason_text), else "".
+            channel_reasons (str): Per-channel flag reason counts, if not
+                fully flagged (see _channel_reason_counts_text), else "".
+        Matches the columns write_tile_stats_table expects.
     """
     n_tiles = len(group.metafits_tiles_df)
     tile_names = group.metafits_tiles_df["name"].to_numpy()
@@ -1705,9 +1723,10 @@ def write_stats_and_debug_plots(
             per-tile stats table into. Callers write this as the first
             section of the combined {obs_id}_stats.txt file, with
             write_hyperdrive_stats() convergence stats appended below.
-        phase_outlier_nstd: Number of standard deviations beyond the
-            population mean before a tile's phase fit is reported as an
-            outlier -- only affects the BEFORE table's annotation now
+        phase_outlier_nstd: Number of (MAD-derived) standard-deviation-
+            equivalents beyond the population's robust median before a
+            tile's phase fit is reported as an outlier -- only affects
+            the BEFORE table's annotation now
             (the AFTER table/plots reuse group.phase_fits, already
             annotated with whatever nstd run_flagging_pipeline was given).
             Pass the same value to both calls, or the BEFORE and AFTER

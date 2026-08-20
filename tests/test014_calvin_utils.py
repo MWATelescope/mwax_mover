@@ -746,12 +746,21 @@ def test_ensure_system_byte_order_native():
 
 
 def test_ensure_system_byte_order_swapped():
-    """An array in non-native byte order should be returned in system byte order."""
+    """A genuinely non-native-byte-order array must be converted to the
+    correct native values, not just have its dtype label changed.
+
+    Uses .astype() to build the fixture (an actual byte-swap, changing the
+    underlying bytes), not .view() (which only relabels the dtype while
+    leaving the bytes untouched) -- .view() would make this test pass
+    trivially without ever exercising a real byte-swapped array, the way
+    real big-endian FITS data actually arrives.
+    """
     native = np.array([1.0, 2.0, 3.0], dtype=np.float64)
-    non_native_dt = native.dtype.newbyteorder("S")  # swap byte order
-    arr = native.view(non_native_dt)
-    result = ensure_system_byte_order(arr)
-    # After conversion the numeric values must match the original native array
+    swapped_dt = native.dtype.newbyteorder("S")
+    genuinely_swapped = native.astype(swapped_dt)
+    assert genuinely_swapped.tobytes() != native.tobytes()  # sanity: bytes actually differ
+
+    result = ensure_system_byte_order(genuinely_swapped)
     np.testing.assert_array_equal(result, native)
 
 

@@ -179,7 +179,7 @@ class Tile(NamedTuple):
 
 
 class Input(NamedTuple):
-    """Info about an MWA tile"""
+    """Info about a single MWA rf_input (one polarisation's signal chain for a tile)."""
 
     name: str
     id: int
@@ -195,7 +195,7 @@ class Input(NamedTuple):
 class ChanInfo(NamedTuple):
     """channel selection info"""
 
-    coarse_chan_ranges: list[NDArray[np.int_]]  # List[Tuple(int, int)]
+    coarse_chan_ranges: list[NDArray[np.int_]]  # each element is a contiguous run of coarse channel numbers (from np.split)
     fine_chans_per_coarse: int
     fine_chan_width_hz: float
 
@@ -343,8 +343,29 @@ class Metafits:
 
 
 class PhaseFitInfo(NamedTuple):
+    """Result of fitting a linear phase ramp to one tile/polarisation's calibration solution.
+
+    See fit_phase_line for how these are computed.
+
+    Fields:
+        length: Fitted equivalent cable length, in metres (derived from the
+            fitted phase slope via delay = length / c).
+        intercept: Fitted phase intercept, in radians, wrapped to [-pi, pi].
+        sigma_resid: Standard deviation of phase residuals (radians) after
+            subtracting the best-fit model. Lower is better.
+        chi2dof: Chi-squared per degree of freedom = sum(residuals**2) /
+            (N - 2). Values near 1.0 indicate a good fit; much larger
+            suggests a poor fit or RFI; much smaller suggests over-fitting
+            or too few points.
+        quality: Fraction of original frequency channels surviving the
+            sigma-clip, in [0, 1]. 1.0 means every channel was used.
+        stderr: Standard error of the fitted slope (rad/Hz), from the exact
+            analytic Hessian (see _phase_fit_hess_inv) scaled by residual
+            variance. Not used elsewhere in the pipeline -- purely
+            informational.
+    """
+
     length: float
-    # Intercept is in radians
     intercept: float
     sigma_resid: float
     chi2dof: float
@@ -371,6 +392,33 @@ class PhaseFitInfo(NamedTuple):
 
 
 class GainFitInfo(NamedTuple):
+    """Result of fitting gain amplitude vs. frequency for one tile/polarisation.
+
+    One instance covers all coarse channels: every field except `quality`
+    is a per-coarse-channel list. See fit_gain for how these are computed.
+
+    Note on naming: despite the names, `pol0`/`pol1` are NOT related to
+    polarisation (XX/YY) -- a separate GainFitInfo is already computed per
+    polarisation (see e.g. x_gains/y_gains in mwax_calvin_solutions.py).
+    Within a single GainFitInfo, `pol0`/`pol1` are the order-0 (intercept)
+    and order-1 (slope) coefficients of a small linear polynomial fit to
+    gain amplitude vs. chanblock index, done *within* each coarse channel
+    solely to compute `sigma_resid`.
+
+    Fields:
+        quality: Fraction of all chanblocks (including flagged ones)
+            within 2*sigma_resid of their coarse channel's linear fit,
+            across all coarse channels. Range [0, 1]; higher is better.
+        gains: Per-coarse-channel weighted-mean inverse amplitude
+            (1/amp), i.e. the actual gain value used downstream.
+        pol0: Per-coarse-channel intercept of the within-coarse-channel
+            linear amplitude fit (see note above). Diagnostic only.
+        pol1: Per-coarse-channel slope of the within-coarse-channel
+            linear amplitude fit (see note above). Diagnostic only.
+        sigma_resid: Per-coarse-channel residual standard deviation of
+            that linear fit.
+    """
+
     quality: float
     gains: list[float]
     pol0: list[float]
@@ -487,7 +535,7 @@ def ensure_system_byte_order(arr):
     """
     system_byte_order = ">" if sys.byteorder == "big" else "<"
     if arr.dtype.byteorder not in f"{system_byte_order}|=":
-        return np.frombuffer(arr.tobytes(), dtype=arr.dtype.newbyteorder("="))
+        return arr.astype(arr.dtype.newbyteorder("="))
     return arr
 
 
@@ -824,6 +872,8 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse: int) -> GainF
 
     Returns:
         GainFitInfo object containing fitted gains and quality metrics.
+        See GainFitInfo's docstring -- in particular, its pol0/pol1
+        fields are polynomial-fit coefficients, not polarisation labels.
     """
     # length check- should be the number of fine channels
     n_freqs = len(chanblocks_hz)
@@ -1237,7 +1287,7 @@ def reject_outliers(data, quality_key, group_cols=("pol",), nstd=3.0, max_iter=1
     (over-flagging it) and too lenient for a naturally-tighter one
     (under-flagging it). Passing group_cols=("pol", "flavor") scopes the
     threshold to each flavour's own population instead. See CALVIN.md's
-    "Phase-outlier flagging" section for a worked example on a real
+    "Phase-outlier detection" section for a worked example on a real
     observation.
 
     Args:

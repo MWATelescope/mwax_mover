@@ -1280,9 +1280,10 @@ class HyperfitsSolutionGroup:
         Args:
             refant_name: Name of the reference antenna.
             phase_fit_niter: Number of iterations for the phase ramp fit.
-            nstd: Number of standard deviations beyond the population mean
-                (per metric, per polarisation, per receiver flavour)
-                before a tile is an outlier.
+            nstd: Number of (MAD-derived) standard-deviation-equivalents
+                beyond the population's robust median (per metric, per
+                polarisation, per receiver flavour) before a tile is an
+                outlier.
         """
         logger.info("detect_phase_outliers")
 
@@ -1397,9 +1398,10 @@ class HyperfitsSolutionGroup:
                 chanblock index (see flag_amplitude_outliers).
             mad_residual_threshold: MAD residual threshold for gain-
                 amplitude outlier detection (see flag_amplitude_outliers).
-            phase_outlier_nstd: Number of standard deviations beyond the
-                population mean before a tile's phase fit is reported as
-                an outlier (see detect_phase_outliers). Purely advisory --
+            phase_outlier_nstd: Number of (MAD-derived) standard-deviation-
+                equivalents beyond the population's robust median before a
+                tile's phase fit is reported as an outlier (see
+                detect_phase_outliers). Purely advisory --
                 does not affect flagging. Must match the phase_outlier_nstd
                 passed to a later write_stats_and_debug_plots() call, or
                 its "after" reporting will silently reflect this value

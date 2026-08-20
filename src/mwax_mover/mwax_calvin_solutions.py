@@ -106,10 +106,11 @@ def process_solutions(
             fully flagged (see HyperfitsSolutionGroup.flag_mostly_bad_tiles).
         hyperdrive_binary_path: Path to the hyperdrive binary, used for its
             own before/after solutions-plot generation.
-        phase_outlier_nstd: Number of standard deviations beyond the
-            population mean before a tile's phase fit is reported as an
-            outlier (see HyperfitsSolutionGroup.detect_phase_outliers).
-            Purely advisory -- does not affect flagging.
+        phase_outlier_nstd: Number of (MAD-derived) standard-deviation-
+            equivalents beyond the population's robust median before a
+            tile's phase fit is reported as an outlier (see
+            HyperfitsSolutionGroup.detect_phase_outliers). Purely
+            advisory -- does not affect flagging.
 
     Returns:
         A tuple containing:
@@ -300,6 +301,7 @@ def process_solutions(
                     gain_outlier_mad_residual_threshold=gain_outlier_mad_residual_threshold,
                     gain_outlier_modify_gains=gain_outlier_modify_gains,
                     tile_bad_channel_fraction=tile_bad_channel_fraction,
+                    phase_outlier_nstd_threshold=phase_outlier_nstd,
                 )
 
                 if fit_id is None or not success:

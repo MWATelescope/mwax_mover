@@ -981,8 +981,17 @@ class MWAXCalvinProcessor:
         """Return status of the processor as a dictionary.
 
         Returns:
-            A dictionary containing process status information including running
-            state, job parameters, and current task.
+            A dict with a single key, "main", mapping to a dict with keys:
+                unix_timestamp (float): Current time (time.time()).
+                process (str): This class's name.
+                version (str): mwax_mover version string.
+                host (str): This host's hostname.
+                running (bool): Whether the processor is running.
+                slurm_job_id (int): Current Slurm job ID (0 if none/not set).
+                obs_id (int): Observation ID currently being processed (0 if none).
+                job_type (str): CalvinJobType value ("realtime" or "mwa_asvo").
+                task (str): Name of the current processing task/stage.
+                requests (str): Comma-separated request IDs.
         """
         requests = ",".join(str(r) for r in self.request_id_list)
 

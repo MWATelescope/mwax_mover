@@ -225,7 +225,10 @@ def main() -> None:
         "--phase-outlier-nstd",
         type=float,
         default=3.0,
-        help="Number of standard deviations beyond the population mean before a tile's phase fit is an outlier. [DEFAULT=3.0]",
+        help=(
+            "Number of (MAD-derived) standard-deviation-equivalents beyond the population's robust "
+            "median before a tile's phase fit is an outlier. [DEFAULT=3.0]"
+        ),
     )
 
     parser.add_argument(

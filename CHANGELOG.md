@@ -1,5 +1,13 @@
 # Changelog
 
+# 1.9.3 20-Aug-2026
+
+* calvin_processor: Correclty insert `phase_outlier_nstd` into the calibration_fits table (instead of NULL)
+* calvin_processor: fixed `ensure_system_byte_order()` silently returning wrong values on genuinely byte-swapped input (e.g. real FITS data) -- it relabelled the dtype without actually swapping the bytes. Fixed via `.astype()`. The existing test didn't catch this since its fixture used `.view()`, which doesn't produce a real byte-swap; rewritten accordingly.
+* calvin_processor: removed a duplicate, independently broken copy of `ensure_system_byte_order()` in `plot_debug_phase_fits()` that used `ndarray.newbyteorder()` (removed in numpy 2.0, would crash on real byte-swapped input on the pinned numpy version). Not caught by tests since they mock this function out. Now uses the shared (fixed) implementation; added a regression test.
+* calvin_processor: fixed several stale docstrings found during review -- `nstd`/`phase_outlier_nstd` wrongly described as "beyond the population mean" (it's the robust median) in five places; `GainFitInfo`/`PhaseFitInfo` had no field docs, and `pol0`/`pol1` are polynomial coefficients, not polarisations, despite the name; a couple of functions listed a stale flagging-pipeline order; one docstring pointed to a since-renamed CALVIN.md section. No behaviour changes.
+* CALVIN.md: clarified Step 4's documented default MAD threshold (10.0) is the shipped config value, not the underlying function's own default (5.0).
+
 # 1.9.2 19-Aug-2026
 
 * calvin_processor: `{obs_id}_*_gain_outliers_tiles.png` -- the "{pct}% Good (n_good/n_total)" + per-channel-reason-breakdown summary introduced for Calvin-fully-flagged tiles now shows on every tile except one flagged structurally (metafits/TILES-HDU/BASELINES-HDU, which still has no per-channel data to break down). A clean tile shows "100% Good" with no second line, in black with no border colour change; a partially-flagged tile shows its actual good fraction and reason breakdown in orange, matching its border; a fully flagged tile (structural or Calvin-caused) still shows it in red. `_fully_flagged_channel_summary_text` renamed to `_channel_summary_text` to reflect this broader use.
