@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.9.7 21-Aug-2026
+
+* update_calvin_plots_and_index: Fixed bug where existing file entries were not updated in index.json.
+
 # 1.9.6 21-Aug-2026
 
 * update_calvin_plots_and_index: Fixed so solutions are copied to the upload dir, never moved. (We always keep them)

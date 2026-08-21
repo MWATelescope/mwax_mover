@@ -95,16 +95,16 @@ def update_plot_index_file_entry(solution_directory: str, filename: str, fit_id:
     entries = index.get("files", [])
     matching = [entry for entry in entries if entry["filename"] == filename]
 
+    new_entry = populate_index_json_entry(file_path, fit_id, plot_front_end_url)
+    if new_entry is None:
+        return
+
     if matching:
-        entry = matching[0]
+        idx = entries.index(matching[0])
+        entries[idx] = new_entry
     else:
-        # add it
-        entry = populate_index_json_entry(file_path, fit_id, plot_front_end_url)
-        if entry is not None:
-            entries.append(entry)
-        else:
-            # Entry is none so skip it
-            return
+        entries.append(new_entry)
+    entry = new_entry
 
     if file_path.suffix.lower() == ".png" and int(index["version"]) == 1:
         #
@@ -238,9 +238,6 @@ def main() -> None:
         ssl_mode="?sslmode=require",
     )
 
-    # Start db pool
-    db_handler.start_database_pool()
-
     if dry_run:
         base_upload_dir = ""
     else:
@@ -254,6 +251,9 @@ def main() -> None:
     if not os.path.exists(hyperdrive_binary_path):
         print(f"hyperdrive binary path: {hyperdrive_binary_path} does not exist. Exiting")
         sys.exit(1)
+
+    # Start db pool
+    db_handler.start_database_pool()
 
     #
     # if recursive let's find all the solution dirs
