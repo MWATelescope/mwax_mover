@@ -390,8 +390,14 @@ def main() -> None:
             try:
                 for f in files_to_upload:
                     dest_filename = os.path.join(upload_dir, os.path.basename(f))
-                    shutil.move(f, dest_filename)
-                    print(f"Moved {f} to {dest_filename}")
+
+                    # copy the solutions files, move the rest
+                    if "_solutions.fits" in dest_filename or "_solutions.original.fits" in dest_filename:
+                        shutil.copy(f, dest_filename)
+                        sol.log(f"Copied {f} to {dest_filename}")
+                    else:
+                        shutil.move(f, dest_filename)
+                        sol.log(f"Moved {f} to {dest_filename}")
 
             except Exception as e:
                 print(f"Error moving files to upload dir {upload_dir}: {e!s}")

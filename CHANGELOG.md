@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.9.6 21-Aug-2026
+
+* update_calvin_plots_and_index: Fixed so solutions are copied to the upload dir, never moved. (We always keep them)
+
 # 1.9.5 21-Aug-2026
 
 * calvin_processor: correctly describe the original phase and amp plots from hyperdrive in index.json.
