@@ -358,10 +358,23 @@ def main() -> None:
         # Update index file for each solution file
         png_files = glob.glob(os.path.join(sol.dir_path, "*.png"))
         for png in png_files:
-            print(f"Updating {png} in index.json")
+            sol.log(f"Updating {png} in index.json")
             update_plot_index_file_entry(sol.dir_path, os.path.basename(png), sol.fit_id, plot_front_end_url)
             files_to_upload.append(png)
 
+        # upload the solutions
+        for sol_fits in solution_files:
+            sol.log(f"Adding {sol_fits} in index.json")
+            update_plot_index_file_entry(sol.dir_path, os.path.basename(sol_fits), sol.fit_id, plot_front_end_url)
+            files_to_upload.append(sol_fits)
+
+        orig_solution_files = glob.glob(os.path.join(sol.dir_path, "*_solutions.original.fits"))
+        for orig_sol_fits in orig_solution_files:
+            sol.log(f"Adding {orig_sol_fits} in index.json")
+            update_plot_index_file_entry(sol.dir_path, os.path.basename(orig_sol_fits), sol.fit_id, plot_front_end_url)
+            files_to_upload.append(orig_sol_fits)
+
+        # upload the index
         files_to_upload.append(os.path.join(sol.dir_path, "index.json"))
 
         if not args.dry_run:

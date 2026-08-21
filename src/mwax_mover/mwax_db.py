@@ -1148,6 +1148,6 @@ def get_fitid_from_slurm_job_and_obsid(db_handler_object: MWAXDBHandler, obs_id:
 
     # Return a list or None if no rows
     if len(rows) > 0:
-        return int(rows["fit_id"])
+        return int(rows["calibration_fit_id"])
     else:
         return None

@@ -2245,7 +2245,7 @@ def get_file_description(filename: str) -> str:
     elif "gain_outliers_tiles" in filename:
         desc = "Plot of outlier gains that were removed from the calibration solutions"
     elif "_solutions.fits" in filename:
-        desc = "Hyperdrive calibration solutions in FITS format. If a '*_solutions.original.fits' also exists, then this file has had outlier gains flagged (entire Jones matrix is NaNed)"
+        desc = "Hyperdrive calibration solutions in FITS format."
     elif "_solutions.original.fits" in filename:
         desc = "Original unmodified Hyperdrive calibration solutions out of Hyperdrive in FITS format"
 
@@ -2344,7 +2344,7 @@ def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_
         return None
 
     # Now check for other files which slip through
-    if ext == ".fits" and not (str(path).endswith("solutions.fits") and str(path).endswith("solutions.original.fits")):
+    if ext == ".fits" and not (str(path).endswith("solutions.fits") or str(path).endswith("solutions.original.fits")):
         # Ignore the visibility FITS files and metafits files
         return None
 

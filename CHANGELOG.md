@@ -1,5 +1,10 @@
 # Changelog
 
+# 1.9.4 21-Aug-2026
+
+* update_calvin_plots_and_index: fixed fit_id db column name being wrong when looking up fit_id.
+* calvin_processor: correcly indexes the solution FITS files now for index.json on the cal.mwatelescope.org index.json.
+
 # 1.9.3 20-Aug-2026
 
 * update_calvin_plots_and_index.py: Refactor to recursively find solutions from a root dir so the db connection can be shared when dealing with many solutions to process.
