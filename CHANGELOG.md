@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.9.5 21-Aug-2026
+
+* calvin_processor: correctly describe the original phase and amp plots from hyperdrive in index.json.
+
 # 1.9.4 21-Aug-2026
 
 * update_calvin_plots_and_index: fixed fit_id db column name being wrong when looking up fit_id.

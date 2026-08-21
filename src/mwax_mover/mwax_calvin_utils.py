@@ -2236,6 +2236,10 @@ def get_file_description(filename: str) -> str:
         desc = "Calibration solution amplitudes vs fine channel per tile"
     elif "solutions_phases.png" in filename:
         desc = "Calibration solution phase vs fine channel per tile"
+    elif "solutions_amps_original.png" in filename:
+        desc = "Original unmodified Hyperdrive calibration solution amplitudes vs fine channel per tile"
+    elif "solutions_phases_original.png" in filename:
+        desc = "Original unmodified Hyperdrive calibration solution phase vs fine channel per tile"
     elif "stats.txt" in filename:
         desc = "Before/after per-tile flagging stats, followed by Hyperdrive fine channel convergence statistics"
     elif "residual.tsv" in filename:
