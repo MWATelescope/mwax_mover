@@ -2,6 +2,7 @@
 
 # 1.9.3 20-Aug-2026
 
+* update_calvin_plots_and_index.py: Refactor to recursively find solutions from a root dir so the db connection can be shared when dealing with many solutions to process.
 * calvin_processor: Correclty insert `phase_outlier_nstd` into the calibration_fits table (instead of NULL)
 * calvin_processor: fixed `ensure_system_byte_order()` silently returning wrong values on genuinely byte-swapped input (e.g. real FITS data) -- it relabelled the dtype without actually swapping the bytes. Fixed via `.astype()`. The existing test didn't catch this since its fixture used `.view()`, which doesn't produce a real byte-swap; rewritten accordingly.
 * calvin_processor: removed a duplicate, independently broken copy of `ensure_system_byte_order()` in `plot_debug_phase_fits()` that used `ndarray.newbyteorder()` (removed in numpy 2.0, would crash on real byte-swapped input on the pinned numpy version). Not caught by tests since they mock this function out. Now uses the shared (fixed) implementation; added a regression test.

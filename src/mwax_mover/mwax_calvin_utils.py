@@ -27,7 +27,7 @@ import pandas as pd
 from astropy import units as u
 from astropy.constants import c  # ty: ignore[unresolved-import]
 from mwalib import MetafitsContext
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import NDArray
 from scipy.optimize import minimize
 
 from mwax_mover.mwax_command import (
@@ -195,7 +195,9 @@ class Input(NamedTuple):
 class ChanInfo(NamedTuple):
     """channel selection info"""
 
-    coarse_chan_ranges: list[NDArray[np.int_]]  # each element is a contiguous run of coarse channel numbers (from np.split)
+    coarse_chan_ranges: list[
+        NDArray[np.int_]
+    ]  # each element is a contiguous run of coarse channel numbers (from np.split)
     fine_chans_per_coarse: int
     fine_chan_width_hz: float
 

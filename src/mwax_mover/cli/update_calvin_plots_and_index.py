@@ -19,6 +19,16 @@ from mwax_mover.mwax_db import MWAXDBHandler, get_fitid_from_slurm_job_and_obsid
 from mwax_mover.utils import download_metafits_file, read_config
 
 
+class SolutionDir:
+    slurm_job_id: int
+    obs_id: int
+    fit_id: int = -1
+    dir_path: str
+
+    def log(self, message: str):
+        print(f"{self.obs_id} {self.slurm_job_id} {self.fit_id}: {message}")
+
+
 def download_plot_index_file(fit_id: int, solution_directory: str) -> None:
     """Downloads the plot index JSON file for a given fit ID from the MWA calibration portal.
 
@@ -147,12 +157,12 @@ def main() -> None:
     updates index.json then copies the files to the local upload directory for calvin controller to upload, printing a summary on success or an error message on failure.
     """
     parser = argparse.ArgumentParser(
-        description="calls generate_hyperdrive_plots(), downloads the old index.json, updates index.json then re-uploads it",
+        description="Scans recursively for solution directories. For each solution directory, calls generate_hyperdrive_plots(), downloads the old index.json, updates index.json then re-uploads it",
     )
     parser.add_argument(
         "--solution-dir",
         required=True,
-        help="Path to the directory containing the solution files should end in SLURMJOBID_OBSID - e.g. /data/calvin/jobs/9176_",
+        help="Path to the directory to start recursively looking for solution files. Solution dirs should end in SLURMJOBID_OBSID - e.g. /data/calvin/jobs/9176_1234567890",
     )
 
     parser.add_argument(
@@ -181,6 +191,12 @@ def main() -> None:
     )
 
     parser.add_argument(
+        "--recursive",
+        action="store_true",
+        help="Search the --solution-dir recursively for solution directories. Default FALSE.",
+    )
+
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Don't actually upload anything.",
@@ -189,19 +205,13 @@ def main() -> None:
     args = parser.parse_args()
 
     dry_run: bool = args.dry_run
-    solution_dir: str = args.solution_dir
+    recursive: bool = args.recursive
+    solution_root: str = args.solution_dir
     plot_front_end_url = args.plot_front_end_url
 
-    if not os.path.exists(solution_dir):
-        print(f"Solution_directory: {solution_dir} does not exist. Exiting")
+    if not os.path.exists(solution_root):
+        print(f"Solution_directory: {solution_root} does not exist. Exiting")
         sys.exit(1)
-
-    # solution_dir should be in the form of: /data/calvin/jobs/SLURMJOBID_OBSID (with or without trailing slash)
-    slurm_job_id, obs_id = parse_job_dir(solution_dir)
-
-    print(
-        f"Got Obs ID: {obs_id} and Slurm Job ID: {slurm_job_id} from solutions dir. Looking up fit_id from database..."
-    )
 
     # Read database info from config file
     if not os.path.exists(args.cfg):
@@ -231,14 +241,6 @@ def main() -> None:
     # Start db pool
     db_handler.start_database_pool()
 
-    fit_id = get_fitid_from_slurm_job_and_obsid(db_handler, obs_id, slurm_job_id)
-
-    if fit_id is not None:
-        print(f"Got Fit ID: {fit_id} from calibration_request table in database.")
-    else:
-        print("Failed to get Fit ID from database. Exiting")
-        sys.exit(1)
-
     if dry_run:
         base_upload_dir = ""
     else:
@@ -253,93 +255,138 @@ def main() -> None:
         print(f"hyperdrive binary path: {hyperdrive_binary_path} does not exist. Exiting")
         sys.exit(1)
 
-    metafits_filename = ""
-    possible_metafits_filenames = [
-        f"{obs_id}_metafits.fits",
-        f"{obs_id}.metafits",
-        f"{obs_id}_metafits_ppds.fits",
-    ]
+    #
+    # if recursive let's find all the solution dirs
+    #
+    solutions: list[SolutionDir] = []
+    if recursive:
+        for root, dirs, files in os.walk(solution_root):
+            # root is the directory of this iteration
+            try:
+                new_slurm_job_id, new_obs_id = parse_job_dir(root)
 
-    for mf in possible_metafits_filenames:
-        temp_filename = os.path.join(solution_dir, mf)
-        if os.path.exists(temp_filename):
-            metafits_filename = temp_filename
-            break
+                s = SolutionDir()
+                s.dir_path = root
+                s.slurm_job_id = new_slurm_job_id
+                s.obs_id = new_obs_id
+                solutions.append(s)
 
-    if metafits_filename == "":
-        print(f"No metafits file could be found in {solution_dir}. Downloading one now...")
+            except ValueError:
+                # Ignore- not a valid solution dir
+                pass
+    else:
+        new_slurm_job_id, new_obs_id = parse_job_dir(solution_root)
 
-        metafits_filename = download_metafits_file(obs_id, solution_dir)
+        s = SolutionDir()
+        s.dir_path = solution_root
+        s.slurm_job_id = new_slurm_job_id
+        s.obs_id = new_obs_id
+        solutions.append(s)
 
-    try:
-        # Download index file
-        download_plot_index_file(
-            fit_id,
-            solution_dir,
-        )
-    except requests.HTTPError as httpe:
-        resp = httpe.response
-        if resp is not None:
-            if resp.status_code == 404:
-                print(f"Fit id {fit_id} not found in S3")
-                sys.exit(1)
+    for sol_no, sol in enumerate(solutions):
+        sol.log(f"Processing {sol_no} / {len(solutions)}")
+
+        sol.log("Getting Fit ID...")
+        new_fit_id = get_fitid_from_slurm_job_and_obsid(db_handler, sol.obs_id, sol.slurm_job_id)
+        if new_fit_id is not None:
+            sol.log(f"Got Fit ID {new_fit_id} from calibration_request table in database.")
+            sol.fit_id = new_fit_id
+        else:
+            print("Failed to get Fit ID from database. Exiting")
+            sys.exit(1)
+
+        metafits_filename = ""
+        possible_metafits_filenames = [
+            f"{sol.obs_id}_metafits.fits",
+            f"{sol.obs_id}.metafits",
+            f"{sol.obs_id}_metafits_ppds.fits",
+        ]
+
+        for mf in possible_metafits_filenames:
+            temp_filename = os.path.join(sol.dir_path, mf)
+            if os.path.exists(temp_filename):
+                metafits_filename = temp_filename
+                break
+
+        if metafits_filename == "":
+            sol.log(f"No metafits file could be found in {sol.dir_path}. Downloading one now...")
+
+            metafits_filename = download_metafits_file(sol.obs_id, sol.dir_path)
+
+        sol.log(f"Using {metafits_filename} for metadata.")
+
+        try:
+            sol.log("Downloading plot index file...")
+            # Download index file
+            download_plot_index_file(
+                sol.fit_id,
+                sol.dir_path,
+            )
+        except requests.HTTPError as httpe:
+            resp = httpe.response
+            if resp is not None:
+                if resp.status_code == 404:
+                    print(f"Fit id {sol.fit_id} not found in S3")
+                    sys.exit(1)
+                else:
+                    print(f"HTTP error when downloading the index.json file: {resp.status_code}")
+                    sys.exit(1)
             else:
-                print(f"HTTP error when downloading the index.json file: {resp.status_code}")
+                print(f"HTTP error when downloading the index.json file: no response received {httpe!s}")
+        except Exception as e:
+            print(f"Error downloading plot file: {e}")
+            sys.exit(1)
+
+        # Get all the solution files
+        solution_files = glob.glob(os.path.join(sol.dir_path, "*_solutions.fits"))
+        sol.log(f"{len(solution_files)} solution files found.")
+
+        files_to_upload = []
+
+        # Regenerate the plots for each solutions file
+        for file in solution_files:
+            sol.log(f"Generating new plots for {file} in index.json...")
+            success, error_message = generate_hyperdrive_plots(
+                sol.obs_id, file, hyperdrive_binary_path, metafits_filename, sol.dir_path
+            )
+
+            # Exit early on failure
+            if not success:
+                sol.log(f"Error generating plots for {file}: {error_message}")
+                sys.exit(1)
+
+        # Update index file for each solution file
+        png_files = glob.glob(os.path.join(sol.dir_path, "*.png"))
+        for png in png_files:
+            print(f"Updating {png} in index.json")
+            update_plot_index_file_entry(sol.dir_path, os.path.basename(png), sol.fit_id, plot_front_end_url)
+            files_to_upload.append(png)
+
+        files_to_upload.append(os.path.join(sol.dir_path, "index.json"))
+
+        if not args.dry_run:
+            upload_dir = os.path.join(base_upload_dir, str(sol.fit_id))
+
+            # Make Upload dir and move files there
+            try:
+                os.mkdir(upload_dir)
+            except FileExistsError:
+                # dir already exists, no worries
+                pass
+
+            try:
+                for f in files_to_upload:
+                    dest_filename = os.path.join(upload_dir, os.path.basename(f))
+                    shutil.move(f, dest_filename)
+                    print(f"Moved {f} to {dest_filename}")
+
+            except Exception as e:
+                print(f"Error moving files to upload dir {upload_dir}: {e!s}")
                 sys.exit(1)
         else:
-            print(f"HTTP error when downloading the index.json file: no response received {httpe!s}")
-    except Exception as e:
-        print(f"Error downloading plot file: {e}")
-        sys.exit(1)
+            print(f"Not uploading files: {len(files_to_upload)} to S3 (bucket={sol.fit_id}) as dry-run = true.")
 
-    # Get all the solution files
-    solution_files = glob.glob(os.path.join(solution_dir, "*_solutions.fits"))
-    print(f"{len(solution_files)} solution files found.")
-
-    files_to_upload = []
-
-    # Regenerate the plots for each solutions file
-    for file in solution_files:
-        print(f"Generating new plots for {file} in index.json")
-        success, error_message = generate_hyperdrive_plots(
-            obs_id, file, hyperdrive_binary_path, metafits_filename, solution_dir
-        )
-
-        # Exit early on failure
-        if not success:
-            print(f"Error generating plots for {file}: {error_message}")
-            sys.exit(1)
-
-    # Update index file for each solution file
-    png_files = glob.glob(os.path.join(solution_dir, "*.png"))
-    for png in png_files:
-        print(f"Updating {png} in index.json")
-        update_plot_index_file_entry(solution_dir, os.path.basename(png), fit_id, plot_front_end_url)
-        files_to_upload.append(png)
-
-    files_to_upload.append(os.path.join(solution_dir, "index.json"))
-
-    if not args.dry_run:
-        upload_dir = os.path.join(base_upload_dir, str(fit_id))
-
-        # Make Upload dir and move files there
-        try:
-            os.mkdir(upload_dir)
-        except FileExistsError:
-            # dir already exists, no worries
-            pass
-
-        try:
-            for f in files_to_upload:
-                dest_filename = os.path.join(upload_dir, os.path.basename(f))
-                shutil.move(f, dest_filename)
-                print(f"Moved {f} to {dest_filename}")
-
-        except Exception as e:
-            print(f"Error moving files to upload dir {upload_dir}: {e!s}")
-            sys.exit(1)
-    else:
-        print(f"Not uploading files: {files_to_upload} to S3 (bucket={fit_id}) as dry-run = true.")
+        sol.log("Complete.")
 
     print("Completed successfully")
 
