@@ -1496,7 +1496,12 @@ def get_convergence_summary(solutions_fits_file: str):
 
 
 def generate_hyperdrive_plots(
-    obs_id: int, hyperdrive_solution_filename: str, hyperdrive_binary_path: str, metafits_filename: str, output_dir: str
+    obs_id: int,
+    hyperdrive_solution_filename: str,
+    hyperdrive_binary_path: str,
+    metafits_filename: str,
+    output_dir: str,
+    max_amp: int | None = None,
 ) -> tuple[bool, str]:
     """Generate solution plots.
 
@@ -1506,6 +1511,7 @@ def generate_hyperdrive_plots(
         hyperdrive_binary_path: Path to the hyperdrive executable.
         metafits_filename: Path to the metafits file.
         output_dir: path to where we write the plots
+        max_amp: Optionally pass a max value for Hyperdrive to clip to when plotting amps. None means let Hyperdrive figure it out.
 
     Returns:
         A tuple of (success: bool, error_message: str).
@@ -1515,6 +1521,10 @@ def generate_hyperdrive_plots(
     try:
         # Now run hyperdrive again to do some plots
         hyp_soln_plot_args = f" --output-directory {output_dir}"
+
+        if not max_amp is None:
+            hyp_soln_plot_args += f" --max-amp {max_amp}"
+
         cmd = (
             f"{hyperdrive_binary_path} solutions-plot {hyp_soln_plot_args} "
             f"-m"

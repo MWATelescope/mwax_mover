@@ -1131,14 +1131,19 @@ def update_calsolution_request_calibration_complete_status(
         raise
 
 
-def get_fitid_from_slurm_job_and_obsid(db_handler_object: MWAXDBHandler, obs_id: int, slurm_job_id: int) -> int | None:
-    # This SQL looks up a fitid from the calibration_request table based on
-    # an obsid and a slurm jobid.
+def get_fit_info_from_slurm_job_and_obsid(
+    db_handler_object: MWAXDBHandler, obs_id: int, slurm_job_id: int
+) -> tuple[int, int | None] | None:
+    # This SQL looks up a fitid and determines if a max amp is needed to be passed to hyperdrive amp plots
+    # from the calibration_request and fits table based on an obsid and a slurm jobid.
     # This will be unique for calvin fits.
     # Won't work for any fits prior to the introduction of the calibration_request table
-    sql = """SELECT calibration_fit_id
-             FROM calibration_request
-             WHERE cal_id = %s AND slurm_job_id=%s"""
+    sql = """SELECT r.calibration_fit_id, f.creator, f.code_version, 
+                CASE WHEN f.gain_max_cutoff IS NULL AND r.calibration_fit_id IS NOT NULL AND f.gain_outlier_modify_gains IS NULL THEN 100 		 
+                ELSE NULL END as amp_plot_max
+            FROM calibration_request r
+            LEFT OUTER JOIN calibration_fits f ON f.fitid=r.calibration_fit_id AND f.obsid=r.cal_id
+            WHERE cal_id = %s AND slurm_job_id=%s"""
 
     # Run SQL
     rows = db_handler_object.select_one_row_postgres(
@@ -1148,6 +1153,13 @@ def get_fitid_from_slurm_job_and_obsid(db_handler_object: MWAXDBHandler, obs_id:
 
     # Return a list or None if no rows
     if len(rows) > 0:
-        return int(rows["calibration_fit_id"])
+        fit_id = rows["calibration_fit_id"]
+        if fit_id is None:
+            return None
+        else:
+            amp_plot_max = rows["amp_plot_max"]
+            if amp_plot_max is not None:
+                amp_plot_max = int(amp_plot_max)
+            return (int(fit_id), amp_plot_max)
     else:
         return None

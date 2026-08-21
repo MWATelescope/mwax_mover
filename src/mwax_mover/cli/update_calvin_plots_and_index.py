@@ -15,7 +15,7 @@ from mwax_mover.mwax_calvin_utils import (
     generate_hyperdrive_plots,
     populate_index_json_entry,
 )
-from mwax_mover.mwax_db import MWAXDBHandler, get_fitid_from_slurm_job_and_obsid
+from mwax_mover.mwax_db import MWAXDBHandler, get_fit_info_from_slurm_job_and_obsid
 from mwax_mover.utils import download_metafits_file, read_config
 
 
@@ -287,13 +287,17 @@ def main() -> None:
         sol.log(f"Processing {sol_no} / {len(solutions)}")
 
         sol.log("Getting Fit ID...")
-        new_fit_id = get_fitid_from_slurm_job_and_obsid(db_handler, sol.obs_id, sol.slurm_job_id)
-        if new_fit_id is not None:
-            sol.log(f"Got Fit ID {new_fit_id} from calibration_request table in database.")
-            sol.fit_id = new_fit_id
+        result = get_fit_info_from_slurm_job_and_obsid(db_handler, sol.obs_id, sol.slurm_job_id)
+
+        if result is not None:
+            new_fit_id, fit_hyperdrive_plot_max = result
+            if new_fit_id is not None:
+                sol.log(f"Got Fit ID {new_fit_id} from calibration_request table in database.")
+                sol.fit_id = new_fit_id
         else:
-            print("Failed to get Fit ID from database. Exiting")
-            sys.exit(1)
+            # No fit- ignore and move on
+            sol.log("Failed to get Fit ID from database. Exiting")
+            continue
 
         metafits_filename = ""
         possible_metafits_filenames = [
@@ -347,7 +351,12 @@ def main() -> None:
         for file in solution_files:
             sol.log(f"Generating new plots for {file} in index.json...")
             success, error_message = generate_hyperdrive_plots(
-                sol.obs_id, file, hyperdrive_binary_path, metafits_filename, sol.dir_path
+                sol.obs_id,
+                file,
+                hyperdrive_binary_path,
+                metafits_filename,
+                sol.dir_path,
+                max_amp=fit_hyperdrive_plot_max,
             )
 
             # Exit early on failure

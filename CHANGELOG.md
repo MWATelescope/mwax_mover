@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.9.8 21-Aug-2026
+
+* update_calvin_plots_and_index: Fixed bug where a null fitid would cause the process to fail. When no max_gain specified for a fit, pass max-amp of 100 to Hyperdrive solutions-plot. Otherwise let Hyperdrive figure it out.
+
 # 1.9.7 21-Aug-2026
 
 * update_calvin_plots_and_index: Fixed bug where existing file entries were not updated in index.json.
