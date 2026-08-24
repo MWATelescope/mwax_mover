@@ -317,10 +317,17 @@ def archive_file_rclone(
 # not exceed this limit or HAProxy may kill the connection before rclone finishes.
 _HAPROXY_MAX_TIMEOUT_MINS = 60
 
-# Number of times to retry rclone check if it fails, and how long to wait between
-# retries. This handles the case where HAProxy routes copyto and check to different
-# VSS nodes and replication lag causes the check to fail transiently.
+# Number of times to retry rclone check if it fails. Retries back off
+# exponentially (see _RCLONE_CHECK_BACKOFF_BASE_SECS below) rather than waiting
+# a fixed amount, since with balance uri routing in haproxy.cfg (Aug 2026) a
+# given object's requests all land on the same VSS node, so most files are
+# already consistent by the time the first check runs and pay no wait at all;
+# only the rare lagging case pays an escalating, still-small cost.
 _RCLONE_CHECK_RETRIES = 3
+
+# Starting point for exponential backoff between failed rclone check retries:
+# 1s, then 2s, then 4s, ... doubling each time, capped at rclone_check_wait_secs.
+_RCLONE_CHECK_BACKOFF_BASE_SECS = 1
 
 
 def archive_file_rclone_haproxy(
@@ -356,7 +363,11 @@ def archive_file_rclone_haproxy(
         rclone_retries: Number of times rclone will retry a failed transfer or
             check before giving up. Handles transient errors on live endpoints.
             Defaults to 3.
-        rclone_check_wait_secs: Number of seconds to wait between rclone copy and rclone check.
+        rclone_check_wait_secs: Maximum backoff cap, in seconds, for retrying a
+            failed rclone check. No wait occurs before the first check attempt
+            (immediately after copyto succeeds); subsequent retries back off
+            exponentially starting at 1s, doubling each time, capped at this
+            value. Defaults to 15.
 
     Returns:
         True if upload succeeded and checksum verified.
@@ -415,12 +426,36 @@ def archive_file_rclone_haproxy(
     # http://127.0.0.1:8080 in rclone.conf.
     # NOTE: --ignore-checksum skips the post-copy checksum verification in rclone
     # itself, which is safe here because we run a separate rclone check afterwards.
+    # NOTE: --low-level-retries governs retries of individual HTTP calls (e.g. a
+    # single part upload) and is set explicitly rather than relying on rclone's
+    # default of 10, since transient errors against a load-balanced HAProxy
+    # backend are expected and cheap to retry at this level.
+    # NOTE: --retries-sleep is deliberately left at rclone's default (0, i.e.
+    # immediate retry) rather than backing off. HAProxy transparently reroutes
+    # each new attempt to a (possibly different) live backend node, so there is
+    # no value in waiting before retrying - unlike the check step below, where
+    # the delay exists specifically to wait out VSS replication lag rather than
+    # to back off from a busy endpoint.
+    # NOTE: --s3-chunk-size 512M (up from 128M) and --s3-upload-concurrency 16
+    # (down from 32) - Aug 2026 testing against Versity/Banksia via HAProxy on
+    # mwacache20 found the server-side multipart completion tail scales with
+    # part count: ~73s at 16M chunks (640 parts), ~22s at 128M (80 parts),
+    # ~1-6s at 512M (20 parts) for a 10GB test file. Concurrency above the
+    # resulting part count for a file is wasted (a 13.5GB file has ~27 parts
+    # at 512M chunks), and 32 concurrency at 512M chunks would mean up to 16GiB
+    # of chunk buffers per worker in the worst case across 6 workers. The
+    # concurrency comparison itself (8 vs 16) was inconclusive - runs showed
+    # stalled individual chunks consistent with contention from the other 8
+    # mwacache servers sharing the same 100Gbps trunk, not a concurrency
+    # effect - so 16 is a reasonable default given the part-count ceiling
+    # rather than a value pinned by a clean throughput measurement.
     try:
         cmdline = (
             f'/usr/bin/rclone copyto -M --metadata-set "md5={md5hash}"'
             f" --retries {rclone_retries}"
-            f" --s3-upload-concurrency 32"
-            f" --s3-chunk-size 128M"
+            f" --low-level-retries 20"
+            f" --s3-upload-concurrency 16"
+            f" --s3-chunk-size 512M"
             f" --ignore-checksum"
             f" --timeout {rclone_timeout}"
             f" --contimeout 30s"
@@ -434,20 +469,29 @@ def archive_file_rclone_haproxy(
         if return_val:
             elapsed = time.time() - start_time
 
-            # Wait before checking to allow for VSS replication lag. HAProxy may
-            # route copyto and check to different VSS nodes, and the file may not
-            # yet be visible on all nodes immediately after the upload completes.
-            logger.debug(
-                f"{full_filename}: Waiting {rclone_check_wait_secs} seconds before running rclone check."
-            )
-            time.sleep(rclone_check_wait_secs)
+            # Check immediately - no blind pre-sleep. With balance uri routing
+            # in haproxy.cfg, this file's copyto and the check below hash to
+            # the same VSS node, so there is no cross-node replication lag to
+            # wait out. If that node's own write-to-read consistency has a
+            # small lag, the retry loop below (exponential backoff) absorbs
+            # it without penalising every file with an up-front wait.
 
-            # Verify the file at the remote, retrying a few times to allow for
-            # replication lag across VSS nodes when HAProxy routes to a different
-            # node than the one that received the copyto.
+            # Verify the file at the remote, retrying with exponential backoff
+            # to absorb any small node-local write-to-read lag (see comment
+            # above - cross-node lag is no longer a factor once balance uri
+            # is in use in haproxy.cfg).
+            #
+            # --no-traverse: without this, rclone check lists the entire destination
+            # bucket (paginated) to find the single matching file, even though a HEAD
+            # for the exact object would suffice. With it, rclone does a single HEAD
+            # per side and skips the listing entirely. Confirmed via -vv --dump=headers
+            # against Versity Gateway (Aug 2026) - only HEAD calls are made, no
+            # ListObjects/list-type requests.
             cmdline = (
                 f"/usr/bin/rclone check"
+                f" --no-traverse"
                 f" --retries {rclone_retries}"
+                f" --low-level-retries 20"
                 f" --timeout {rclone_timeout}"
                 f" --contimeout 30s"
                 f" {full_filename} {rclone_profile}:/{bucket_name}"
@@ -456,6 +500,7 @@ def archive_file_rclone_haproxy(
             check_start = time.time()
             check_attempt = 0
             return_val = False
+            backoff_secs = _RCLONE_CHECK_BACKOFF_BASE_SECS
 
             while check_attempt < _RCLONE_CHECK_RETRIES and not return_val:
                 check_attempt += 1
@@ -472,9 +517,10 @@ def archive_file_rclone_haproxy(
                     logger.warning(
                         f"{full_filename}: rclone check attempt {check_attempt}"
                         f" of {_RCLONE_CHECK_RETRIES} failed, retrying in"
-                        f" {rclone_check_wait_secs} seconds. Output: {stdout}"
+                        f" {backoff_secs} seconds. Output: {stdout}"
                     )
-                    time.sleep(rclone_check_wait_secs)
+                    time.sleep(backoff_secs)
+                    backoff_secs = min(backoff_secs * 2, rclone_check_wait_secs)
 
             if return_val:
                 check_elapsed = time.time() - check_start

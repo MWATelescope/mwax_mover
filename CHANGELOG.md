@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.9.9 24-Aug-2026
+
+* mwacache_archive: Reworked the ingest code to optimise the calls and speed it up, combined with haproxy.cfg changes to eliminate the wait we had before when dealing with different VSS servers not being in sync with each other.
+
 # 1.9.8 21-Aug-2026
 
 * update_calvin_plots_and_index: Fixed bug where a null fitid would cause the process to fail. When no max_gain specified for a fit, pass max-amp of 100 to Hyperdrive solutions-plot. Otherwise let Hyperdrive figure it out.
