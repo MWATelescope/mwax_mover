@@ -29,7 +29,7 @@ class SolutionDir:
         print(f"{self.obs_id} {self.slurm_job_id} {self.fit_id}: {message}")
 
 
-def download_plot_index_file(fit_id: int, solution_directory: str) -> None:
+def download_plot_index_file(fit_id: int, solution_directory: str) -> Path:
     """Downloads the plot index JSON file for a given fit ID from the MWA calibration portal.
 
     Fetches the index file from https://cal.mwatelescope.org/{fit_id} and writes
@@ -38,6 +38,9 @@ def download_plot_index_file(fit_id: int, solution_directory: str) -> None:
     Args:
         fit_id: The integer fit ID used to construct the download URL.
         solution_directory: Path to the directory where index.json will be saved.
+
+    Returns:
+        Full path and filename of index.json
 
     Raises:
         requests.HTTPError: If the server returns an unsuccessful HTTP status code.
@@ -55,8 +58,12 @@ def download_plot_index_file(fit_id: int, solution_directory: str) -> None:
 
     output_path.write_bytes(response.content)
 
+    return output_path
 
-def update_plot_index_file_entry(solution_directory: str, filename: str, fit_id: int, plot_front_end_url: str) -> None:
+
+def update_plot_index_file_entry(
+    index, solution_directory: str, filename: str, fit_id: int, plot_front_end_url: str
+) -> None:
     """Updates metadata fields for a named entry in a solution directory's index.json.
 
     Reads the index.json file from the given solution directory, locates the entry
@@ -67,6 +74,7 @@ def update_plot_index_file_entry(solution_directory: str, filename: str, fit_id:
     back to index.json in place.
 
     Args:
+        index: JSON from the index file.
         solution_directory: Path to the directory containing both index.json and
             the file to be stat'd.
         filename: The filename value to match against entries in the ``files`` list.
@@ -83,11 +91,7 @@ def update_plot_index_file_entry(solution_directory: str, filename: str, fit_id:
             cannot be written back to disk.
     """
     directory = Path(solution_directory)
-    index_path = directory / "index.json"
     file_path = directory / filename
-
-    with index_path.open("r", encoding="utf-8") as f:
-        index = json.load(f)
 
     # update generated at
     index["generated_at"] = datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -104,21 +108,6 @@ def update_plot_index_file_entry(solution_directory: str, filename: str, fit_id:
         entries[idx] = new_entry
     else:
         entries.append(new_entry)
-    entry = new_entry
-
-    if file_path.suffix.lower() == ".png" and int(index["version"]) == 1:
-        #
-        # if we are a v1 json file the width and height are swapped
-        # - I would upgrade the version to 2 and fix it but there may be other
-        # unmodified files in the index.json and we don't want to mix v1 and v2 conventions
-        #
-        width = entry["image_width"]
-        height = entry["image_height"]
-        entry["image_height"] = width
-        entry["image_width"] = height
-
-    with index_path.open("w", encoding="utf-8") as f:
-        json.dump(index, f, indent=2)
 
 
 def parse_job_dir(directory: str) -> tuple[int, int]:
@@ -322,7 +311,7 @@ def main() -> None:
         try:
             sol.log("Downloading plot index file...")
             # Download index file
-            download_plot_index_file(
+            index_filename = download_plot_index_file(
                 sol.fit_id,
                 sol.dir_path,
             )
@@ -337,6 +326,8 @@ def main() -> None:
                     sys.exit(1)
             else:
                 print(f"HTTP error when downloading the index.json file: no response received {httpe!s}")
+                sys.exit(1)
+
         except Exception as e:
             print(f"Error downloading plot file: {e}")
             sys.exit(1)
@@ -364,24 +355,48 @@ def main() -> None:
                 sol.log(f"Error generating plots for {file}: {error_message}")
                 sys.exit(1)
 
+        # Open and read the JSON
+        with open(index_filename, "r") as f:
+            index_json = json.load(f)
+
+        # if the json file is a "version 1" then the png width and height are flipped and need to be fixed!
+        if index_json.get("version") == 1:
+            sol.log("This is a v1 file, so we'll fix all the png width and heights...")
+            for file_entry in index_json.get("files", []):
+                if file_entry.get("content_type") == "image/png":
+                    width = file_entry.get("image_width")
+                    height = file_entry.get("image_height")
+                    file_entry["image_width"], file_entry["image_height"] = height, width
+            index_json["version"] = 2
+
         # Update index file for each solution file
         png_files = glob.glob(os.path.join(sol.dir_path, "*.png"))
         for png in png_files:
             sol.log(f"Updating {png} in index.json")
-            update_plot_index_file_entry(sol.dir_path, os.path.basename(png), sol.fit_id, plot_front_end_url)
+            update_plot_index_file_entry(
+                index_json, sol.dir_path, os.path.basename(png), sol.fit_id, plot_front_end_url
+            )
             files_to_upload.append(png)
 
         # upload the solutions
         for sol_fits in solution_files:
             sol.log(f"Adding {sol_fits} in index.json")
-            update_plot_index_file_entry(sol.dir_path, os.path.basename(sol_fits), sol.fit_id, plot_front_end_url)
+            update_plot_index_file_entry(
+                index_json, sol.dir_path, os.path.basename(sol_fits), sol.fit_id, plot_front_end_url
+            )
             files_to_upload.append(sol_fits)
 
         orig_solution_files = glob.glob(os.path.join(sol.dir_path, "*_solutions.original.fits"))
         for orig_sol_fits in orig_solution_files:
             sol.log(f"Adding {orig_sol_fits} in index.json")
-            update_plot_index_file_entry(sol.dir_path, os.path.basename(orig_sol_fits), sol.fit_id, plot_front_end_url)
+            update_plot_index_file_entry(
+                index_json, sol.dir_path, os.path.basename(orig_sol_fits), sol.fit_id, plot_front_end_url
+            )
             files_to_upload.append(orig_sol_fits)
+
+        # Write index file back
+        with index_filename.open("w", encoding="utf-8") as f:
+            json.dump(index_json, f, indent=2)
 
         # upload the index
         files_to_upload.append(os.path.join(sol.dir_path, "index.json"))
@@ -412,7 +427,7 @@ def main() -> None:
                 print(f"Error moving files to upload dir {upload_dir}: {e!s}")
                 sys.exit(1)
         else:
-            print(f"Not uploading files: {len(files_to_upload)} to S3 (bucket={sol.fit_id}) as dry-run = true.")
+            print(f"Not uploading files: {files_to_upload} to S3 (bucket={sol.fit_id}) as dry-run = true.")
 
         sol.log("Complete.")
 

@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.9.10 25-Aug-2026
+
+* update_calvin_plots_and_index: upgrade existing v1 to v2 to fix height and width swap of pngs
+
 # 1.9.9 24-Aug-2026
 
 * mwacache_archive: Reworked the ingest code to optimise the calls and speed it up, combined with haproxy.cfg changes to eliminate the wait we had before when dealing with different VSS servers not being in sync with each other.
