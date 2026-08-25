@@ -25,6 +25,7 @@ section if that happens.
 
 import logging
 import os
+from pathlib import Path
 
 import mwalib
 import numpy as np
@@ -1237,7 +1238,7 @@ def test_write_readme_success_exit_code_zero(tmp_path):
     fname = str(tmp_path / "readme_ok.txt")
     write_readme_file(fname, cmd="my_command arg1", exit_code=0, output="some output", error="")
     assert os.path.exists(fname)
-    content = open(fname).read()
+    content = Path(fname).read_text()
     assert "succeeded" in content  # typo fixed in source: was "succeded"
     assert "my_command arg1" in content
     assert "some output" in content
@@ -1246,7 +1247,7 @@ def test_write_readme_success_exit_code_zero(tmp_path):
 def test_write_readme_failure_exit_code_nonzero(tmp_path):
     fname = str(tmp_path / "readme_fail.txt")
     write_readme_file(fname, cmd="bad_command", exit_code=1, output="", error="something went wrong")
-    content = open(fname).read()
+    content = Path(fname).read_text()
     assert "failed" in content
     assert "something went wrong" in content
 
@@ -1254,7 +1255,7 @@ def test_write_readme_failure_exit_code_nonzero(tmp_path):
 def test_write_readme_includes_exit_code(tmp_path):
     fname = str(tmp_path / "readme_code.txt")
     write_readme_file(fname, cmd="cmd", exit_code=42, output="out", error="err")
-    content = open(fname).read()
+    content = Path(fname).read_text()
     assert "42" in content
 
 

@@ -509,7 +509,7 @@ def test_config_get_list_valid():
 
     config_filename = render_test_config("test005")
     config = ConfigParser()
-    config.read_file(open(config_filename, "r", encoding="utf-8"))
+    config.read(config_filename, encoding="utf-8")
 
     return_list = utils.read_config_list(config, "correlator", "high_priority_vcs_projectids")
 
@@ -520,7 +520,7 @@ def test_config_get_bool_true():
 
     config_filename = render_test_config("test005")
     config = ConfigParser()
-    config.read_file(open(config_filename, "r", encoding="utf-8"))
+    config.read(config_filename, encoding="utf-8")
 
     true_bool = utils.read_config_bool(config, "mwax mover", "archiving_enabled")
 
@@ -531,7 +531,7 @@ def test_config_get_bool_false():
 
     config_filename = render_test_config("test005")
     config = ConfigParser()
-    config.read_file(open(config_filename, "r", encoding="utf-8"))
+    config.read(config_filename, encoding="utf-8")
 
     false_bool = utils.read_config_bool(config, "beamformer", "bf_keep_original_files_after_stitching")
 
@@ -547,7 +547,7 @@ def test_config_get_list_empty():
 
     config_filename = render_test_config("test005")
     config = ConfigParser()
-    config.read_file(open(config_filename, "r", encoding="utf-8"))
+    config.read(config_filename, encoding="utf-8")
 
     return_list = utils.read_config_list(config, "correlator", "high_priority_correlator_projectids")
 
@@ -560,7 +560,7 @@ def test_config_get_optional_value():
 
     config_filename = render_test_config("test005")
     config = ConfigParser()
-    config.read_file(open(config_filename, "r", encoding="utf-8"))
+    config.read(config_filename, encoding="utf-8")
 
     empty_return_val = utils.read_optional_config(config, "correlator", "high_priority_correlator_projectids")
 
@@ -583,7 +583,7 @@ def test_config_get_optional_value_spaces_not_empty_string():
 
     config_filename = render_test_config("test005")
     config = ConfigParser()
-    config.read_file(open(config_filename, "r", encoding="utf-8"))
+    config.read(config_filename, encoding="utf-8")
 
     empty_return_val = utils.read_optional_config(config, "correlator", "test_with_spaces")
 

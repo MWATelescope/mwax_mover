@@ -11,7 +11,6 @@ mode. Renames processed subfiles to .free so the ringbuffer slot can be reused.
 import logging
 import os
 import shutil
-import sys
 import time
 
 from mwax_mover import utils
@@ -407,8 +406,13 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                             pass
 
                     except Exception as move_exception:  # pylint: disable=broad-except
-                        logger.error(f"{item}: Could not rename {item} back to {free_filename}. Error {move_exception}")
-                        sys.exit(2)
+                        # NOTE: this used to be sys.exit(2), which on a worker
+                        # thread only kills the thread and discards the code.
+                        self.sd_ctx.request_fatal_shutdown(
+                            2,
+                            f"{item}: Could not rename {item} back to {free_filename}. Error {move_exception}",
+                        )
+                        return False
 
             handler_elapsed = time.time() - handler_starttime
 
@@ -453,8 +457,18 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
             return True
 
         except Exception:
+            # push_message_to_redis already retried 3 times, so reaching here
+            # means redis is genuinely unavailable. That is fatal: without it the
+            # beamformer never learns about new subfiles, so we shut the whole
+            # processor down (exit code 3) rather than silently continuing to
+            # drop signals. NOTE: this used to be sys.exit(3), which on a worker
+            # thread only kills the thread and discards the code, leaving the
+            # daemon running and reporting success.
             logger.exception(f"{item}: signal_beamformer failed.")
-            sys.exit(3)
+            self.sd_ctx.request_fatal_shutdown(
+                3, f"{item}: could not signal the beamformer via redis {self.bf_redis_host}."
+            )
+            return False
 
     def handle_next_keep_file(self) -> bool:
         """Process and write a kept voltage dump subfile to disk.
@@ -504,8 +518,13 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
             try:
                 shutil.move(keep_filename, free_filename)
             except Exception as move_exception:  # pylint: disable=broad-except
-                logger.error(f"Could not rename {keep_filename} back to {free_filename}. Error {move_exception}")
-                sys.exit(2)
+                # NOTE: this used to be sys.exit(2), which on a worker thread
+                # only kills the thread and discards the code.
+                self.sd_ctx.request_fatal_shutdown(
+                    2,
+                    f"Could not rename {keep_filename} back to {free_filename}. Error {move_exception}",
+                )
+                return False
 
         else:
             # Reqeuue file to try again later

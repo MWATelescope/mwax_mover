@@ -10,6 +10,7 @@ import time
 
 from tests_common import setup_test_directories
 
+from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
 from mwax_mover.mwax_queue_worker import QueueWorker, calculate_backoff_seconds
 from mwax_mover.mwax_watch_queue_worker import (
@@ -156,3 +157,40 @@ def test_queue_worker_start_clears_backoff_event(tmp_path):
     worker.start()
 
     assert observed == [False], f"event should be cleared by start(), saw is_set()={observed}"
+
+
+#
+# Fatal shutdown from a worker thread
+#
+
+
+def test_request_fatal_shutdown_records_code_and_stops_running():
+    """A worker thread's fatal error must reach the main thread.
+
+    Regression test: worker code used to call sys.exit(N) directly, which on a
+    non-main thread only raises SystemExit in that thread -- the thread dies,
+    the exit code is discarded, and the daemon carries on. The main loop then
+    logged "Completed Successfully" and main() exited 0, so a fatal error looked
+    like a clean shutdown to systemd and to the alerting on top of it.
+    """
+    sd = MWAXSubfileDistributor()
+    assert sd.fatal_exit_code == 0, "a fresh processor has no pending failure"
+
+    sd.running = True
+    sd.request_fatal_shutdown(3, "could not signal the beamformer via redis")
+
+    assert sd.fatal_exit_code == 3, "main() must be able to exit with this code"
+    assert sd.running is False, "the main loop must be asked to stop"
+    assert "redis" in sd.fatal_reason
+
+
+def test_request_fatal_shutdown_keeps_the_root_cause():
+    """A knock-on failure must not overwrite the original exit code."""
+    sd = MWAXSubfileDistributor()
+    sd.running = True
+
+    sd.request_fatal_shutdown(3, "root cause")
+    sd.request_fatal_shutdown(2, "knock-on failure while shutting down")
+
+    assert sd.fatal_exit_code == 3, "first caller wins"
+    assert sd.fatal_reason == "root cause"

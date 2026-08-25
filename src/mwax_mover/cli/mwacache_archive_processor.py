@@ -91,6 +91,12 @@ class MWACacheArchiveProcessor:
         # MWAX servers will copy in a temp file, then rename once it is good
         self.running: bool = False
 
+        # See request_fatal_shutdown(). Non-zero means we did NOT complete
+        # successfully, and is what main() exits with so systemd (and the
+        # alerting on top of it) sees a failure rather than a clean stop.
+        self.fatal_exit_code: int = 0
+        self.fatal_reason: str = ""
+
         self.mro_db_handler: mwax_db.MWAXDBHandler
         self.remote_db_handler: mwax_db.MWAXDBHandler
 
@@ -166,14 +172,45 @@ class MWACacheArchiveProcessor:
             for w in self.workers:
                 if self.running:
                     if not w.is_running():
-                        logger.error(f"Worker {w.name} has stopped unexpectedly.")
-                        self.running = False
+                        self.request_fatal_shutdown(4, f"Worker {w.name} has stopped unexpectedly.")
                         break
 
             time.sleep(0.1)
 
-        # Final log message
-        logger.info("Completed Successfully")
+        # Final log message. NOTE: this used to unconditionally log "Completed
+        # Successfully" even when we got here because a worker died, which
+        # combined with main()'s sys.exit(0) made a fatal error look like a
+        # clean shutdown.
+        if self.fatal_exit_code:
+            logger.error(f"Shutting down with exit code {self.fatal_exit_code}: {self.fatal_reason}")
+        else:
+            logger.info("Completed Successfully")
+
+    def request_fatal_shutdown(self, exit_code: int, reason: str) -> None:
+        """Ask the main thread to shut the whole processor down and exit non-zero.
+
+        Worker threads cannot terminate the process themselves: sys.exit() on a
+        non-main thread raises SystemExit in that thread only, killing the thread
+        and discarding the exit code. Worker code that hits an unrecoverable
+        error should call this instead, then stop what it is doing.
+
+        The first caller wins, so the exit code reflects the original cause
+        rather than any knock-on failure. Safe to call more than once and from
+        any thread.
+
+        Args:
+            exit_code: Non-zero process exit code for main() to exit with.
+            reason: Human-readable description, logged and included in the
+                final shutdown message.
+        """
+        if self.fatal_exit_code:
+            logger.warning(f"Additional fatal error while shutting down: {reason}")
+            return
+
+        logger.error(f"FATAL: {reason} Requesting shutdown with exit code {exit_code}.")
+        self.fatal_exit_code = exit_code
+        self.fatal_reason = reason
+        self.running = False
 
     def stop(self):
         """Stop the processor and shutdown all workers and connections.
@@ -512,9 +549,13 @@ def main():
     try:
         processor.initialise_from_command_line()
         processor.start()
-        sys.exit(0)
     except Exception:
         logger.exception("Exited with error")
+        sys.exit(1)
+
+    # Surface a worker thread's fatal exit code (see request_fatal_shutdown).
+    # This used to be an unconditional sys.exit(0).
+    sys.exit(processor.fatal_exit_code)
 
 
 if __name__ == "__main__":
