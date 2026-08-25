@@ -97,14 +97,14 @@ def main(argv: list[str] | None = None) -> int:
             key = (int(m.group("rec_chan")), int(m.group("beam")))
             groups[key].append(i)
         else:
-            logger.info(f"Not an 8 second VDIF file of {args.obs_id}- {i}. Skipping")
+            logger.info(f"Not an 8 second VDIF file of {obs_id}- {i}. Skipping")
 
     # For debug, log the list of lists
     logger.info(groups)
 
     # Do the stitching
     for file_list in groups.values():
-        out_vdif, out_hdr = stitch_vdif_files_and_write_hdr(str(args.metafits_file), file_list, args.output_dir)
+        stitch_vdif_files_and_write_hdr(str(args.metafits_file), file_list, args.output_dir)
 
     return 0
 

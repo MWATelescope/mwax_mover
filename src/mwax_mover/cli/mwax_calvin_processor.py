@@ -241,9 +241,16 @@ class MWAXCalvinProcessor:
             try:
                 utils.download_metafits_file(self.obs_id, self.job_input_path)
             except Exception as catch_all_exception:  # pylint: disable=broad-except
-                error_message = f"Metafits file {self.metafits_filename} did not exist and"
-                " could not download one from web service. Exiting."
-                f" {catch_all_exception}"
+                # NOTE: the continuation lines here were previously separate
+                # statements rather than an implicit concatenation, so
+                # error_message contained only the first fragment and the
+                # exception detail never reached the log or the DB failure
+                # record. Parenthesised so they actually join.
+                error_message = (
+                    f"Metafits file {self.metafits_filename} did not exist and"
+                    " could not download one from web service. Exiting."
+                    f" {catch_all_exception}"
+                )
                 logger.exception(error_message)
                 self.fail_job_downloading(error_message)
                 self.stop(exit_code=-1)

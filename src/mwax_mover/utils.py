@@ -303,12 +303,13 @@ def validate_filename(
     file_ext_part: str = ""
 
     # 1. Is there an extension?
-    split_filename = os.path.splitext(filename)
-    if len(split_filename) == 2:
-        file_name_part = os.path.basename(split_filename[0])
-        file_ext_part = split_filename[1]
-    else:
-        # Error no extension
+    # NOTE: this used to test `len(os.path.splitext(filename)) == 2`, which is
+    # always true (splitext always returns a 2-tuple), so the "no extension"
+    # branch was unreachable and such filenames fell through to be reported as
+    # "Unknown file extension " by step 3 instead. Test the extension itself.
+    file_name_part, file_ext_part = os.path.splitext(filename)
+    file_name_part = os.path.basename(file_name_part)
+    if not file_ext_part:
         valid = False
         validation_error = "Filename has no extension- ignoring"
 
@@ -1396,11 +1397,16 @@ def read_subfile_values(filename: str, keys: list[str]) -> dict:
         any keyword not found in the header.
     """
     subfile_values = {}
-    found = 0
 
     # Create the dict with None values for all keys
     for key in keys:
         subfile_values[key] = None
+
+    # Track which keys we have actually resolved. NOTE: this used to be a plain
+    # counter incremented on every matching line, so a keyword appearing twice
+    # in the header counted twice and could satisfy the early exit below before
+    # every requested key had been seen.
+    remaining = set(keys)
 
     with open(filename, "rb") as subfile:
         subfile_text = subfile.read(PSRDADA_HEADER_BYTES).decode()
@@ -1414,11 +1420,11 @@ def read_subfile_values(filename: str, keys: list[str]) -> dict:
                 keyword = split_line[0].strip()
                 value = split_line[1].strip()
 
-                if keyword in keys:
+                if keyword in remaining:
                     subfile_values[keyword] = value
-                    found += 1
+                    remaining.discard(keyword)
 
-                    if found == len(keys):
+                    if not remaining:
                         # Exit loop early if we have all the values
                         break
 

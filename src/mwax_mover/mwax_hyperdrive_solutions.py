@@ -210,7 +210,7 @@ def _gain_fit_one(
 def add_digital_gains_column(
     hyperdrive_solution_filename: str,
     metafits_context: mwalib.MetafitsContext,
-):
+) -> bool:
     """Add a float32[24] digital-gains column to a FITS binary table HDU.
 
     Builds the 24-element (one per coarse channel) digital gain array for
@@ -229,7 +229,14 @@ def add_digital_gains_column(
             the caller is responsible for constructing/populating it.
 
     Returns:
-        The new fits.BinTableHDU with the digital gains column added.
+        True if the column was added, False if it was already present and
+        nothing was changed.
+
+        NOTE: this previously returned the fits.BinTableHDU itself, which
+        escaped the `with fits.open(...)` block. astropy loads HDU data
+        lazily, so touching .data on the returned object after the file had
+        been closed was unsafe. No caller used the return value, so it now
+        reports only whether a change was made.
 
     Raises:
         KeyError: If a tile ID present in the HDU cannot be found among
@@ -249,7 +256,7 @@ def add_digital_gains_column(
         # Does this column already exist? If so don't do anything but log a warning.
         if col_name in hdul[hdu_name].columns.names:
             logger.warning(f"Column '{col_name}' already exists in HDU '{hdu_name}'; skipping addition.")
-            return tile_hdu
+            return False
 
         try:
             gains_array = np.array([gains_by_tile[int(tid)] for tid in tile_ids], dtype=np.float32)
@@ -269,7 +276,7 @@ def add_digital_gains_column(
         hdul[hdul.index_of(hdu_name)] = new_hdu
         hdul.flush()
 
-    return new_hdu
+    return True
 
 
 class HyperfitsSolution:
@@ -908,7 +915,13 @@ class HyperfitsSolutionGroup:
                 (exp_results - np.nanmin(exp_results)) / (np.nanmax(exp_results) - np.nanmin(exp_results))
             )
         except KeyError:
-            return np.full(len(self.all_chanblocks_hz[0]), 1.0)
+            # No RESULTS HDU (older hyperdrive files): fall back to uniform
+            # weights. Must cover EVERY file's chanblocks, not just the first
+            # one's -- callers index this alongside all_chanblocks_hz_concat,
+            # so for a picket-fence observation with several solution files a
+            # first-file-only length gave a silently mismatched array.
+            n_chanblocks_total = sum(len(chanblocks_hz) for chanblocks_hz in self.all_chanblocks_hz)
+            return np.full(n_chanblocks_total, 1.0)
 
     def _find_ref_tile_idx(self, refant_name: str) -> int:
         """Find and validate the reference antenna's tile index.

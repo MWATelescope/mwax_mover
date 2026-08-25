@@ -304,6 +304,28 @@ def test_weights_uniform_fallback():
     assert np.all(weights == pytest.approx(1.0))
 
 
+def test_weights_uniform_fallback_spans_all_solution_files():
+    """Missing RESULTS HDU across a multi-file (picket fence) group.
+
+    Regression test: the fallback used to return an array sized from the FIRST
+    solution file's chanblocks only, so for a group of several files it was
+    silently shorter than the concatenated chanblock axis that callers index it
+    against.
+    """
+    mock_group = MagicMock(spec=HyperfitsSolutionGroup)
+    type(mock_group).results = PropertyMock(side_effect=KeyError("RESULTS"))
+    mock_group.all_chanblocks_hz = [
+        np.linspace(138e6, 140e6, 32),
+        np.linspace(150e6, 152e6, 32),
+        np.linspace(168e6, 170e6, 32),
+    ]
+
+    weights = HyperfitsSolutionGroup.weights.fget(mock_group)
+
+    assert len(weights) == 96, "weights must cover every file's chanblocks, not just the first"
+    assert np.all(weights == pytest.approx(1.0))
+
+
 # ===========================================================================
 # HyperfitsSolutionGroup.load
 # ===========================================================================

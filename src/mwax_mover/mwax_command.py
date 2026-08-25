@@ -14,6 +14,24 @@ import subprocess
 logger = logging.getLogger(__name__)
 
 
+def _apply_numa_binding(command: str, numa_node: int | None) -> str:
+    """Prefix a command with numactl bindings, if a NUMA node was requested.
+
+    Args:
+        command: The command to execute.
+        numa_node: NUMA node to bind CPU and memory to. Use None, or any
+            negative value, to run without binding. Note that node 0 is a
+            valid node and IS bound.
+
+    Returns:
+        The command, prefixed with ``numactl --cpunodebind=N --membind=N`` if
+        *numa_node* is a valid node number, otherwise unchanged.
+    """
+    if numa_node is None or int(numa_node) < 0:
+        return command
+    return f"numactl --cpunodebind={numa_node!s} --membind={numa_node!s} {command}"
+
+
 def run_command_ext(
     command: str,
     numa_node: int | None,
@@ -25,12 +43,13 @@ def run_command_ext(
     """Execute a command synchronously with optional NUMA pinning.
 
     Runs a command via subprocess with optional NUMA node binding,
-    timeout enforcement, and shell mode support. Returns the exit code
-    and combined stdout/stderr output.
+    timeout enforcement, and shell mode support. Returns a success flag
+    (not the exit code) and the combined stdout/stderr output.
 
     Args:
         command: The command to execute as a string.
-        numa_node: NUMA node to bind to, or None for no binding.
+        numa_node: NUMA node to bind CPU and memory to. Use None, or any
+            negative value, for no binding. Node 0 is a valid node.
         timeout: Maximum time in seconds to wait for command. Defaults to 60.
         use_shell: Whether to execute via shell. Defaults to False.
         copy_user_env: Whether to copy user's environment variables. Defaults to False.
@@ -54,13 +73,7 @@ def run_command_ext(
         myenv.update(extra_env_vars)
 
     # Example: ["dada_diskdb", "-k 1234", "-f 1216447872_02_256_201.sub -s"]
-    if numa_node is None:
-        cmdline = f"{command}"
-    else:
-        if int(numa_node) >= 0:
-            cmdline = f"numactl --cpunodebind={numa_node!s} --membind={numa_node!s} {command}"
-        else:
-            cmdline = f"{command}"
+    cmdline = _apply_numa_binding(command, numa_node)
 
     try:
         logger.debug(f"Executing {cmdline}...")
@@ -124,7 +137,7 @@ def run_command_ext(
 # features
 def run_command_popen(
     command: str,
-    numa_node: int,
+    numa_node: int | None,
     use_shell: bool = False,
     copy_user_env: bool = False,
 ):
@@ -135,7 +148,8 @@ def run_command_popen(
 
     Args:
         command: The command to execute as a string.
-        numa_node: NUMA node to bind to, or None for no binding.
+        numa_node: NUMA node to bind CPU and memory to. Use None, or any
+            negative value, for no binding. Node 0 is a valid node.
         use_shell: Whether to execute via shell. Defaults to False.
         copy_user_env: Whether to copy user's environment variables. Defaults to False.
 
@@ -149,13 +163,7 @@ def run_command_popen(
         myenv = os.environ.copy()
 
     # Example: ["dada_diskdb", "-k 1234", "-f 1216447872_02_256_201.sub -s"]
-    if numa_node is None:
-        cmdline = f"{command}"
-    else:
-        if int(numa_node) > 0:
-            cmdline = f"numactl --cpunodebind={numa_node!s} --membind={numa_node!s} {command}"
-        else:
-            cmdline = f"{command}"
+    cmdline = _apply_numa_binding(command, numa_node)
 
     logger.debug(f"Executing {cmdline}...")
 

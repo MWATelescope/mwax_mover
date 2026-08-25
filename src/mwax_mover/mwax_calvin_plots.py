@@ -555,7 +555,15 @@ def plot_phase_residual(
         min_mse = np.inf
         best_coeffs = None
         best_indep = None
-        mask = np.where(np.logical_and(np.isfinite(medians), np.logical_not(np.isnan(medians)), weights > 0))[0]
+        # NOTE: this was previously
+        #   np.logical_and(np.isfinite(medians), np.logical_not(np.isnan(medians)), weights > 0)
+        # which does NOT do what it looks like: np.logical_and is a binary
+        # ufunc, so the third positional argument is `out=`, not a third
+        # condition. The `weights > 0` filter was therefore silently ignored
+        # and zero-weight channels were included in the polyfit below.
+        # np.isfinite() already excludes NaN (and inf), so the isnan() term
+        # was redundant as well.
+        mask = np.where(np.isfinite(medians) & (weights > 0))[0]
         df[f"{flav}_{pol}"] = medians
 
         band = sigma_resid_bands.get((flav, pol))

@@ -23,7 +23,9 @@ file itself:
    trend is a cleaner signal than comparing it against other tiles.
 5. A whole-observation phase-fit outlier check: a tile's cable-delay phase
    ramp fit (chi2dof, sigma_resid) is compared against the population of
-   all tiles in the observation, and flagged if it's a population outlier.
+   other tiles sharing its polarisation and receiver flavour. This is
+   REPORT-ONLY -- an outlier here is never flagged or modified. See
+   HyperfitsSolutionGroup.detect_phase_outliers.
 6. Promotion of a partially-flagged tile to fully flagged, if too large a
    fraction of its chanblocks already carry a per-channel flag reason.
 
@@ -32,7 +34,7 @@ This mirrors the full flagging pipeline used by mwax_calvin_processor
 flag_gain_max_cutoff -> flag_amplitude_outliers -> flag_mostly_bad_tiles ->
 detect_phase_outliers (report-only, runs last -- see its docstring for why)).
 
-Bad entries are then replaced via frequency interpolation rather than
+Bad entries have their whole Jones matrix set to NaN rather than being
 clipped to an arbitrary ceiling, since clipping only touches amplitude
 (leaving a corrupted phase in place) and discards the "was this actually
 bad" diagnostic information.
@@ -42,8 +44,8 @@ Assumes a single timeblock per solutions file (index 0 is used throughout).
 Usage
 -----
     cal_utils solutions.fits
-    cal_utils solutions.fits --poly-degree 3 --residual-threshold 4.0
-    cal_utils solutions.fits --output out.png --no-show
+    cal_utils solutions.fits --poly-degree 3 --mad-threshold 4.0
+    cal_utils solutions.fits --output-path ./out --modify-solutions
 """
 
 import argparse
@@ -242,7 +244,7 @@ def main() -> None:
         "--gain-max-cutoff",
         type=float,
         default=100.0,
-        help="Absolute gain-amplitude ceiling: any (tile, chanblock) entry whose gx or gy amplitude exceeds this is flagged, run before phase-outlier detection and amplitude-outlier flagging. Pass a negative value or use --no-gain-max-cutoff to disable. [DEFAULT=100.0]",
+        help="Absolute gain-amplitude ceiling: any (tile, chanblock) entry whose gx or gy amplitude exceeds this is flagged, run before phase-outlier detection and amplitude-outlier flagging. Use --no-gain-max-cutoff to disable. [DEFAULT=100.0]",
     )
 
     parser.add_argument(
@@ -324,18 +326,26 @@ def main() -> None:
         print(f"Error --hyperdrive-binary-path not found: {args.hyperdrive_binary_path}")
         sys.exit(-1)
 
-    if len(args.solution_filenames) == 0:
-        print(f"No Hyperdrive solution files found with pattern: {args.solution_path}")
+    # argparse nargs="+" guarantees at least one filename, so there is no
+    # empty case to handle here (the previous code had one, and it referenced
+    # a non-existent args.solution_path).
+    print(f"Found {len(args.solution_filenames)} solution file(s):")
+
+    # NOTE: this used to compare solution_filenames[0] against itself inside
+    # the loop, so the "must all be the same obsid" check never actually
+    # fired. It also assigned the 10-character string to an int-annotated
+    # variable without converting it.
+    obs_id_str = os.path.basename(args.solution_filenames[0])[0:10]
+    if not obs_id_str.isdigit():
+        print(f"Error: Could not parse a 10 digit obs_id from: {args.solution_filenames[0]}")
         sys.exit(-1)
-    else:
-        # Get obsid from hyperdrive solution files
-        print(f"Found {len(args.solution_filenames)} solution file(s):")
-        obs_id: int = os.path.basename(args.solution_filenames[0])[0:10]
-        for f in args.solution_filenames:
-            print(f)
-            if os.path.basename(args.solution_filenames[0])[0:10] != obs_id:
-                print(f"Error: The solution files passed all must be for the same obsid '{obs_id}'")
-                sys.exit(-1)
+    obs_id: int = int(obs_id_str)
+
+    for f in args.solution_filenames:
+        print(f)
+        if os.path.basename(f)[0:10] != obs_id_str:
+            print(f"Error: The solution files passed all must be for the same obsid '{obs_id}'. Got: {f}")
+            sys.exit(-1)
 
     if args.metafits_filename is None:
         # user did not pass a metafits filename
