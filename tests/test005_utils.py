@@ -234,9 +234,7 @@ def test_get_metafits_values_correlator():
     #
     # Run test
     #
-    is_calibrator, project_id, calib_src = utils.get_metafits_values(
-        "tests/data/1347318488/1347318488_metafits.fits"
-    )
+    is_calibrator, project_id, calib_src = utils.get_metafits_values("tests/data/1347318488/1347318488_metafits.fits")
     assert is_calibrator is True
     assert project_id == "G0080"
     assert calib_src == "J063633-204225"
@@ -248,9 +246,7 @@ def test_get_metafits_values_non_cal():
     metafits which is not a calibrator- i.e. it has
     CALIBRAT=False and no CALIBSRC key
     """
-    is_calibrator, project_id, calib_src = utils.get_metafits_values(
-        "tests/data/1244973688/1244973688_metafits.fits"
-    )
+    is_calibrator, project_id, calib_src = utils.get_metafits_values("tests/data/1244973688/1244973688_metafits.fits")
     assert is_calibrator is False
     assert project_id == "C001"
     assert calib_src == ""
@@ -266,18 +262,14 @@ def test_scan_for_existing_files_and_add_to_queue():
     #
     # Run test
     #
-    utils.scan_for_existing_files_and_add_to_queue(
-        watch_dir, pattern, recursive, queue_target
-    )
+    utils.scan_for_existing_files_and_add_to_queue(watch_dir, pattern, recursive, queue_target)
 
     assert queue_target.qsize() == 2
     assert queue_target.get() == os.path.join(
         os.getcwd(),
         os.path.join(watch_dir, "1244973688_20190619100110_ch114_000.fits"),
     )
-    assert queue_target.get() == os.path.join(
-        os.getcwd(), os.path.join(watch_dir, "1244973688_metafits.fits")
-    )
+    assert queue_target.get() == os.path.join(os.getcwd(), os.path.join(watch_dir, "1244973688_metafits.fits"))
 
 
 def test_scan_for_existing_files_and_add_to_priority_queue():
@@ -306,9 +298,7 @@ def test_scan_for_existing_files_and_add_to_priority_queue():
     # Get first item
     item1 = queue_target.get()
 
-    assert str(item1[1]) == os.path.join(
-        os.getcwd(), os.path.join(watch_dir, "1244973688_metafits.fits")
-    )
+    assert str(item1[1]) == os.path.join(os.getcwd(), os.path.join(watch_dir, "1244973688_metafits.fits"))
     assert item1[0] == 1  # metafits ppd file
 
     # get second item
@@ -330,9 +320,7 @@ def test_scan_directory():
     #
     # Run test
     #
-    list_of_files = utils.scan_directory(
-        watch_dir, pattern, recursive, exclude_pattern=None
-    )
+    list_of_files = utils.scan_directory(watch_dir, pattern, recursive, exclude_pattern=None)
 
     assert len(list_of_files) == 2
     assert (
@@ -342,10 +330,7 @@ def test_scan_directory():
         )
         in list_of_files
     )
-    assert (
-        os.path.join(os.getcwd(), os.path.join(watch_dir, "1244973688_metafits.fits"))
-        in list_of_files
-    )
+    assert os.path.join(os.getcwd(), os.path.join(watch_dir, "1244973688_metafits.fits")) in list_of_files
 
 
 def test_get_priority_correlator_calibrator():
@@ -526,9 +511,7 @@ def test_config_get_list_valid():
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    return_list = utils.read_config_list(
-        config, "correlator", "high_priority_vcs_projectids"
-    )
+    return_list = utils.read_config_list(config, "correlator", "high_priority_vcs_projectids")
 
     assert return_list == ["D0006", "G0058"]
 
@@ -550,9 +533,7 @@ def test_config_get_bool_false():
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    false_bool = utils.read_config_bool(
-        config, "beamformer", "bf_keep_original_files_after_stitching"
-    )
+    false_bool = utils.read_config_bool(config, "beamformer", "bf_keep_original_files_after_stitching")
 
     assert false_bool is False
 
@@ -568,9 +549,7 @@ def test_config_get_list_empty():
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    return_list = utils.read_config_list(
-        config, "correlator", "high_priority_correlator_projectids"
-    )
+    return_list = utils.read_config_list(config, "correlator", "high_priority_correlator_projectids")
 
     assert return_list == []
 
@@ -583,17 +562,11 @@ def test_config_get_optional_value():
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    empty_return_val = utils.read_optional_config(
-        config, "correlator", "high_priority_correlator_projectids"
-    )
+    empty_return_val = utils.read_optional_config(config, "correlator", "high_priority_correlator_projectids")
 
-    non_empty_return_val = utils.read_optional_config(
-        config, "correlator", "mwax_stats_timeout_sec"
-    )
+    non_empty_return_val = utils.read_optional_config(config, "correlator", "mwax_stats_timeout_sec")
 
-    non_existing_key = utils.read_optional_config(
-        config, "correlator", "non_existant_key"
-    )
+    non_existing_key = utils.read_optional_config(config, "correlator", "non_existant_key")
 
     assert empty_return_val is None
     assert non_empty_return_val is not None
@@ -601,9 +574,7 @@ def test_config_get_optional_value():
 
     # Section that doesn't exist raises error
     with pytest.raises(KeyError):
-        non_existing_key = utils.read_optional_config(
-            config, "non_existant_section", "non_existant_key"
-        )
+        non_existing_key = utils.read_optional_config(config, "non_existant_section", "non_existant_key")
 
 
 def test_config_get_optional_value_spaces_not_empty_string():
@@ -614,9 +585,7 @@ def test_config_get_optional_value_spaces_not_empty_string():
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
-    empty_return_val = utils.read_optional_config(
-        config, "correlator", "test_with_spaces"
-    )
+    empty_return_val = utils.read_optional_config(config, "correlator", "test_with_spaces")
 
     assert empty_return_val is None
 
@@ -783,9 +752,7 @@ def test_inject_beamformer_headers():
     utils.inject_beamformer_headers(subfile_name, beamformer_settings_string)
 
     # Check file size
-    assert os.path.getsize(subfile_name) == utils.PSRDADA_HEADER_BYTES + len(
-        bytearray(data_padding)
-    )
+    assert os.path.getsize(subfile_name) == utils.PSRDADA_HEADER_BYTES + len(bytearray(data_padding))
 
     # we can also test utils.read_subfile_value(item, key)
     assert utils.read_subfile_value(subfile_name, utils.PSRDADA_MODE) == "NO_CAPTURE"
@@ -971,9 +938,7 @@ def test_run_giant_squid():
     subcmd = "list"
     args = ""
 
-    stdout = run_giant_squid(
-        path_to_binary, subcmd, args, timeout_secs, max_retries=1, retry_delay_seconds=1
-    )
+    stdout = run_giant_squid(path_to_binary, subcmd, args, timeout_secs, max_retries=1, retry_delay_seconds=1)
     assert stdout != ""
 
 
@@ -1019,10 +984,7 @@ def test_extract_tar():
 def test_get_filename_from_url():
     filename_in_url = "https://projects.pawsey org au/mwa-asvo/1444927824_1021186_vis.tar?AWSAccessKeyId=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX&Signature=YYYYYYYYYYYYYYYYY%3D&Expires=1777533409"
 
-    assert (
-        extract_filename_from_mwa_asvo_signed_url(filename_in_url)
-        == "1444927824_1021186_vis.tar"
-    )
+    assert extract_filename_from_mwa_asvo_signed_url(filename_in_url) == "1444927824_1021186_vis.tar"
 
     no_filename_url = "https://something.com"
     with pytest.RaisesExc(Exception):

@@ -65,9 +65,7 @@ def main() -> None:
         try:
             fit_id = int(p.name)
         except Exception:
-            print(
-                f"Could not infer FitID from {args.directory}- please specify fit-id instead."
-            )
+            print(f"Could not infer FitID from {args.directory}- please specify fit-id instead.")
             sys.exit(-3)
     else:
         fit_id = int(args.fit_id)

@@ -17,9 +17,7 @@ logger = logging.getLogger(__name__)
 def test_get_jobid_from_giant_squid_stdout():
     with pytest.raises(Exception) as excinfo:
         get_job_id_from_giant_squid_stdout("abc123\ndef456\n")
-        assert str(excinfo.value).startswith(
-            "No job_id could be found in the output from giant-squid"
-        )
+        assert str(excinfo.value).startswith("No job_id could be found in the output from giant-squid")
 
     assert (
         get_job_id_from_giant_squid_stdout(
@@ -78,9 +76,7 @@ def test_get_job_info_from_giant_squid_json_valid():
         job_state = None
         url = None
 
-        obs_id, job_id, job_state, url = get_job_info_from_giant_squid_json(
-            json_stdout, json_one_job
-        )
+        obs_id, job_id, job_state, url = get_job_info_from_giant_squid_json(json_stdout, json_one_job)
 
         match i:
             case 1:
@@ -116,13 +112,9 @@ def test_get_status_from_giant_squid_stdout_invalid():
 
     for json_one_job in json_stdout:
         with pytest.raises(Exception) as excinfo:
-            obs_id, job_id, job_state, url = get_job_info_from_giant_squid_json(
-                json_stdout, json_one_job
-            )
+            obs_id, job_id, job_state, url = get_job_info_from_giant_squid_json(json_stdout, json_one_job)
 
-            assert str(excinfo.value) == (
-                "766227: giant-squid unknown job status code UnhandledErrorCode."
-            )
+            assert str(excinfo.value) == ("766227: giant-squid unknown job status code UnhandledErrorCode.")
 
 
 @pytest.mark.integration

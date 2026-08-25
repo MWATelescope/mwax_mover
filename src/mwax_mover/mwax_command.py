@@ -58,9 +58,7 @@ def run_command_ext(
         cmdline = f"{command}"
     else:
         if int(numa_node) >= 0:
-            cmdline = (
-                f"numactl --cpunodebind={numa_node!s} --membind={numa_node!s} {command}"
-            )
+            cmdline = f"numactl --cpunodebind={numa_node!s} --membind={numa_node!s} {command}"
         else:
             cmdline = f"{command}"
 
@@ -155,9 +153,7 @@ def run_command_popen(
         cmdline = f"{command}"
     else:
         if int(numa_node) > 0:
-            cmdline = (
-                f"numactl --cpunodebind={numa_node!s} --membind={numa_node!s} {command}"
-            )
+            cmdline = f"numactl --cpunodebind={numa_node!s} --membind={numa_node!s} {command}"
         else:
             cmdline = f"{command}"
 

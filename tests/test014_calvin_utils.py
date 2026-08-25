@@ -1892,9 +1892,7 @@ class TestReadTilesHdu:
 
     def test_already_ascending_antennas_unchanged(self):
         """When Antenna is already ascending, order is preserved."""
-        tiles_data = self._tiles_recarray(
-            antennas=[0, 1, 2], tile_names=["Tile0", "Tile1", "Tile2"], flags=[0, 1, 0]
-        )
+        tiles_data = self._tiles_recarray(antennas=[0, 1, 2], tile_names=["Tile0", "Tile1", "Tile2"], flags=[0, 1, 0])
 
         antennas, names, flags = read_tiles_hdu(tiles_data)
 
@@ -1904,9 +1902,7 @@ class TestReadTilesHdu:
 
     def test_out_of_order_antennas_are_sorted(self):
         """When Antenna is out of order, names/flags are reordered to match."""
-        tiles_data = self._tiles_recarray(
-            antennas=[2, 0, 1], tile_names=["TileC", "TileA", "TileB"], flags=[1, 0, 1]
-        )
+        tiles_data = self._tiles_recarray(antennas=[2, 0, 1], tile_names=["TileC", "TileA", "TileB"], flags=[1, 0, 1])
 
         antennas, names, flags = read_tiles_hdu(tiles_data)
 

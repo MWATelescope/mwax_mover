@@ -140,9 +140,7 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
 
         return None
 
-    def _get_destination(
-        self, item: str, val: ValidationData, archive: bool
-    ) -> str | None:
+    def _get_destination(self, item: str, val: ValidationData, archive: bool) -> str | None:
         """Determine the destination directory for the file.
 
         Routes files based on type and archive flag. Visibilities always go to
@@ -159,20 +157,12 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
         basename = os.path.basename(item)
 
         if val.filetype_id == MWADataFileType.MWAX_VOLTAGES.value:
-            dest_dir = (
-                self.voltdata_outgoing_path
-                if archive
-                else self.voltdata_dont_archive_path
-            )
+            dest_dir = self.voltdata_outgoing_path if archive else self.voltdata_dont_archive_path
         elif val.filetype_id == MWADataFileType.MWAX_VISIBILITIES.value:
             # Stats are always produced, even for no-archive projects.
             dest_dir = self.visdata_processing_stats_path
         elif val.filetype_id == MWADataFileType.MWA_PPD_FILE.value:
-            dest_dir = (
-                self.visdata_outgoing_path
-                if archive
-                else self.visdata_dont_archive_path
-            )
+            dest_dir = self.visdata_outgoing_path if archive else self.visdata_dont_archive_path
         elif val.filetype_id in (
             MWADataFileType.VDIF.value,
             MWADataFileType.FILTERBANK.value,
@@ -210,22 +200,16 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
             if result is not None:
                 return result
 
-        should_archive = (
-            utils.should_project_be_archived(val.project_id) and self.archiving_enabled
-        )
+        should_archive = utils.should_project_be_archived(val.project_id) and self.archiving_enabled
         dest = self._get_destination(item, val, archive=should_archive)
 
         if dest is None:
-            logger.error(
-                f"{item}: not a valid file extension {val.filetype_id} / {val.file_ext}"
-            )
+            logger.error(f"{item}: not a valid file extension {val.filetype_id} / {val.file_ext}")
             return False
 
         logger.debug(f"{item}: moving file to {os.path.dirname(dest)}")
         os.rename(item, dest)
-        logger.info(
-            f"{item}: moved file to {os.path.dirname(dest)}. Queue size: {self.pqueue.qsize()}"
-        )
+        logger.info(f"{item}: moved file to {os.path.dirname(dest)}. Queue size: {self.pqueue.qsize()}")
 
         logger.info(f"{item}: Finished")
         return True

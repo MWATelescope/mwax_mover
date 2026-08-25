@@ -875,9 +875,7 @@ def test_detect_phase_outliers_flavor_scoping_avoids_cross_flavor_false_positive
     pooled_phase_fits = reject_outliers(pooled_phase_fits, "sigma_resid", nstd=3.0)
     rri_tile_ids = {i + 1 for i in range(15, n_tiles)}
     pooled_rri_outliers = set(
-        pooled_phase_fits.loc[
-            pooled_phase_fits["outlier"] & pooled_phase_fits["tile_id"].isin(rri_tile_ids), "tile_id"
-        ]
+        pooled_phase_fits.loc[pooled_phase_fits["outlier"] & pooled_phase_fits["tile_id"].isin(rri_tile_ids), "tile_id"]
     )
     assert pooled_rri_outliers, (
         "expected the pol-only pooled threshold to flag at least one RRI tile "
@@ -1058,9 +1056,7 @@ def test_run_flagging_pipeline_gain_max_cutoff_none_preserves_prior_behaviour():
         )
 
     assert not (group.tile_flag_reasons[1] & TileFlagReason.MOSTLY_BAD_CHANNELS)
-    assert not np.any(
-        [reasons[1, 5] & ChannelFlagReason.GAIN_MAX_CUTOFF for reasons in group.channel_flag_reasons]
-    )
+    assert not np.any([reasons[1, 5] & ChannelFlagReason.GAIN_MAX_CUTOFF for reasons in group.channel_flag_reasons])
 
 
 def test_run_flagging_pipeline_detect_phase_outliers_runs_last():

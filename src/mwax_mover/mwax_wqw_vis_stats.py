@@ -93,9 +93,7 @@ class VisStatsProcessor(MWAXWatchQueueWorker):
             ):
                 logger.warning(f"{item}: mwax_stats failed. Skipping.")
         else:
-            logger.debug(
-                f"{item}: skipping mwax_stats as file does not end in _000.fits"
-            )
+            logger.debug(f"{item}: skipping mwax_stats as file does not end in _000.fits")
 
         # If observation is a calibrator AND this host is enabled as an archiver then
         # we should put the obs into the cal_outgoing dir so that calvin can
@@ -113,32 +111,24 @@ class VisStatsProcessor(MWAXWatchQueueWorker):
                 if obs_info.calibrator:
                     # Send to cal_outgoing
                     # Take the input filename - strip the path, then append the output path
-                    outgoing_filename = os.path.join(
-                        self.visdata_outgoing_cal_path, os.path.basename(item)
-                    )
+                    outgoing_filename = os.path.join(self.visdata_outgoing_cal_path, os.path.basename(item))
                     logger.debug(f"{item}: moving file to outgoing cal dir")
                     os.rename(item, outgoing_filename)
                 else:
                     # Not a calibrator just archive it
                     # Send to vis_outgoing
                     # Take the input filename - strip the path, then append the output path
-                    outgoing_filename = os.path.join(
-                        self.visdata_outgoing_path, os.path.basename(item)
-                    )
+                    outgoing_filename = os.path.join(self.visdata_outgoing_path, os.path.basename(item))
                     logger.debug(f"{item}: moving file to outgoing vis dir")
                     os.rename(item, outgoing_filename)
             else:
                 # This project doesn't get archived or calibrated, move to dont_archive
-                outgoing_filename = os.path.join(
-                    self.visdata_dont_archive_path, os.path.basename(item)
-                )
+                outgoing_filename = os.path.join(self.visdata_dont_archive_path, os.path.basename(item))
                 logger.debug(f"{item}: moving file to {self.visdata_dont_archive_path}")
                 os.rename(item, outgoing_filename)
         else:
             # This host is not doing any archiving, move to dont_archive
-            outgoing_filename = os.path.join(
-                self.visdata_dont_archive_path, os.path.basename(item)
-            )
+            outgoing_filename = os.path.join(self.visdata_dont_archive_path, os.path.basename(item))
             logger.debug(f"{item}: moving file to {self.visdata_dont_archive_path}")
             os.rename(item, outgoing_filename)
 

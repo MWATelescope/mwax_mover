@@ -3,6 +3,7 @@
 # Unpublished
 
 * Removed stale, unused code and dependencies.
+* Reformatted all of `src/` and `tests/` with `ruff format` at the configured 120 character line length. Many files had been formatted at 88 characters previously, so line wrapping was inconsistent across the codebase. No code changes: verified by comparing the AST of every file before and after. Also added a `[tool.ruff.format]` section to `pyproject.toml` recording the intended style, so this does not drift again.
 
 # 1.9.12 25-Aug-2026
 

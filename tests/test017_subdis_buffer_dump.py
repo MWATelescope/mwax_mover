@@ -17,7 +17,6 @@ from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
 from mwax_mover.utils import running_under_pytest
 
 
-
 def test_running_under_pytest():
     assert running_under_pytest()
 

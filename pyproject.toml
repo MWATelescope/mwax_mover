@@ -72,6 +72,26 @@ target-version = "py312"
 # findings in those categories have been worked through.
 select = ["E", "F", "B"]
 
+[tool.ruff.format]
+# The whole of src/ and tests/ is kept formatted by `ruff format` at the
+# line-length above. Before committing, run:
+#
+#     ruff format src/ tests/
+#     ruff check src/ tests/
+#
+# and in CI (or as a pre-commit hook) use the non-mutating check:
+#
+#     ruff format --check src/ tests/
+#
+# These are ruff's defaults, stated explicitly so the intended style is
+# recorded in the repo rather than being implicit in whatever ruff version
+# happens to be installed.
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = false
+
 [tool.uv]
 package = true
 

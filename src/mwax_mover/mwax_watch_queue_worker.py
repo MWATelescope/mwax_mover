@@ -134,9 +134,7 @@ class MWAXWatchQueueWorker(ABC):
             requeue_to_eoq_on_failure,
         )
 
-        self.queue_worker_thread = Thread(
-            name="worker_thread", target=self.queue_worker.start, daemon=True
-        )
+        self.queue_worker_thread = Thread(name="worker_thread", target=self.queue_worker.start, daemon=True)
         self.threads.append(self.queue_worker_thread)
 
         # Create a watcher and watcher thread for each path we're watching
@@ -334,9 +332,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
             requeue_to_eoq_on_failure,
         )
 
-        self.pqueue_worker_thread = Thread(
-            name="worker_thread", target=self.pqueue_worker.start, daemon=True
-        )
+        self.pqueue_worker_thread = Thread(name="worker_thread", target=self.pqueue_worker.start, daemon=True)
         self.threads.append(self.pqueue_worker_thread)
 
         # Create a watcher and watcher thread for each path we're watching

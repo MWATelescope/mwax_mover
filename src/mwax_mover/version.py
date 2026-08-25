@@ -12,5 +12,3 @@ def get_mwax_mover_version_string() -> str:
         The package version as a string (e.g., "1.2.3").
     """
     return _get_version("mwax_mover")
-
-
