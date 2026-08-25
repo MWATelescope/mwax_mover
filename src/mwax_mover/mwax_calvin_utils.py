@@ -1,10 +1,12 @@
 """Calibration support utilities for the Calvin pipeline.
 
-Provides data structures (Tile, Metafits, HyperfitsSolution, HyperfitsSolutionGroup,
-GainFitInfo, PhaseFitInfo), the CalvinJobType enum (realtime / mwa_asvo), AOCAL
-binary format constants and read/write helpers, SBATCH script generation
-(create_sbatch_script) and submission (submit_sbatch), phase and gain fitting
-functions, and estimate_birli_output_bytes() for storage pre-checks.
+Provides data structures (Tile, Input, Metafits, ChanInfo, TimeInfo, GainFitInfo,
+PhaseFitInfo), the CalvinJobType enum (realtime / mwa_asvo), SBATCH script
+generation (create_sbatch_script) and submission (submit_sbatch), phase and gain
+fitting functions, and estimate_birli_output_bytes() for storage pre-checks.
+
+HyperfitsSolution and HyperfitsSolutionGroup live in mwax_hyperdrive_solutions.py;
+all plotting lives in mwax_calvin_plots.py.
 """
 
 import datetime
@@ -43,17 +45,6 @@ from mwax_mover.utils import (
 )
 
 logger = logging.getLogger(__name__)
-
-V_LIGHT_M_S = 299792458.0
-
-AOCAL_INTRO = b"MWAOCAL\0"
-AOCAL_FILE_TYPE = 0
-AOCAL_STRUCTURE_TYPE = 0
-AOCAL_INTERVAL_COUNT = 1
-AOCAL_POLS = 4  # XX,XY,YX,YY
-AOCAL_VALUES = 2  # real and imaginary
-DOUBLE_SIZE = 8  # 8 bytes for a float64
-AOCAL_HEADER_FORMAT = "<8s6I2d"
 
 # Standard number of MWA coarse channels.
 MWA_NUM_COARSE_CHANS = 24

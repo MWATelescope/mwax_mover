@@ -1,19 +1,15 @@
 """Stateless file transfer utilities for archiving MWA data to remote storage.
 
 Provides three transfer backends:
-- copy_file_rsync(): copies a file to a remote host over SSH/rsync (AES128-CTR).
+- copy_file_rsync(): copies a file between hosts over SSH/rsync (AES128-CTR).
 - archive_file_xrootd(): uploads to an xrootd server with atomic temp-file rename.
-- archive_file_rclone(): uploads to Pawsey S3 (Acacia/Banksia) via rclone, with
-  checksum verification and multi-endpoint retry.
-
-Also provides ceph_get_s3_md5_etag() to compute the Ceph multipart ETag for S3
-integrity verification.
+- archive_file_rclone_haproxy(): uploads to Pawsey S3 (Acacia/Banksia) via
+  rclone through a local HAProxy instance, which handles endpoint selection,
+  health checking and failover. Checksum verified afterwards with rclone check.
 """
 
-import hashlib
 import logging
 import os
-import random
 import time
 import uuid
 
@@ -177,138 +173,6 @@ def archive_file_xrootd(
             return False
     else:
         logger.error(f"{full_filename}: archive_file_xrootd failed. Error {stdout}")
-        return False
-
-
-def archive_file_rclone(
-    rclone_profile: str,
-    endpoints: list,
-    full_filename: str,
-    bucket_name: str,
-    md5hash: str,
-) -> bool:
-    """Upload a file to Pawsey S3 (Acacia/Banksia) via rclone with retry.
-
-    Attempts upload to random endpoints from the provided list with checksum
-    verification. Retries on failure with remaining endpoints until all are
-    exhausted.
-
-    if running under pytest, will automatically return True
-
-    Args:
-        rclone_profile: The rclone profile/remote name to use.
-        endpoints: List of S3 endpoint URLs to try.
-        full_filename: Path to the file to archive.
-        bucket_name: S3 bucket name for the upload.
-        md5hash: MD5 checksum hash for verification.
-
-    Returns:
-        True if upload succeeded and checksum verified, False after all endpoints exhausted.
-    """
-    logger.debug(f"{full_filename}: attempting archive_file_rclone...")
-
-    # Get just the filename
-    filename = os.path.basename(full_filename)
-
-    # get file size
-    try:
-        file_size = os.path.getsize(full_filename)
-        size_gigabytes = float(file_size) / (1000.0 * 1000.0 * 1000.0)
-    except Exception:
-        logger.exception(f"{full_filename}: Error determining file size.")
-        return False
-
-    # Start fresh with a list of all possible endpoints (from the config file)
-    endpoints = endpoints.copy()
-    start_time = time.time()
-
-    while len(endpoints) > 0:
-        # Get a random endpoint
-        endpoint_url = random.choice(endpoints)
-
-        # rclone will create bucket if required
-        logger.debug(
-            f"{full_filename}: attempting upload to {rclone_profile} {endpoint_url} bucket {bucket_name}..."
-        )
-
-        # Do upload
-        #
-        # rclone copyto -M --metadata-set "md5=123abc" --s3-endpoint=https://vss-1.pawsey.org.au:9000
-        #  test.txt banksia:/mwaingest-14322
-        #
-        try:
-            #
-            # TODO: Ugly solution here for testing- should replace this with a Mock pattern
-            #
-            if running_under_pytest():
-                # Return true
-                elapsed = 1.0
-                gbps_per_sec = (size_gigabytes * 8.0) / elapsed
-                check_elapsed = 1.0
-
-                logger.info(
-                    f"{full_filename}: archive_file_rclone success."
-                    f"Copied ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at"
-                    f" {gbps_per_sec:.3f} Gbps). Check took {check_elapsed:.3f} seconds."
-                )
-                return True
-            else:
-                cmdline = f'/usr/bin/rclone copyto -M --metadata-set "md5={md5hash}" --s3-endpoint={endpoint_url} {full_filename} {rclone_profile}:/{bucket_name}/{filename}'
-
-                # run rclone copyto
-                return_val, stdout = run_command_ext(cmdline, None, 600, False)
-
-                if return_val:
-                    elapsed = time.time() - start_time
-                    gbps_per_sec = (size_gigabytes * 8) / elapsed
-
-                    # Success - now verify the file at the remote
-                    logger.debug(
-                        f"{full_filename}: attempting check against {rclone_profile} {endpoint_url} bucket {bucket_name}..."
-                    )
-                    cmdline = f"/usr/bin/rclone check --s3-endpoint={endpoint_url} {full_filename} {rclone_profile}:/{bucket_name}"
-
-                    # run rclone check
-                    return_val, stdout = run_command_ext(cmdline, None, 600, False)
-
-                    if return_val:
-                        # If checksums match then rclone returns exit code 0. Otherwise !=0.
-                        # run_command_ext returns True for 0 and False for anything else
-                        check_elapsed = time.time() - start_time
-
-                        logger.info(
-                            f"{full_filename}: archive_file_rclone success."
-                            f"Copied ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at"
-                            f" {gbps_per_sec:.3f} Gbps). Check took {check_elapsed:.3f} seconds."
-                        )
-                        return True
-                    else:
-                        raise Exception(stdout)
-                else:
-                    raise Exception(stdout)
-        except Exception:
-            logger.exception(
-                f"{full_filename}: Error uploading to {endpoint_url} bucket {bucket_name} via rclone."
-                f"Endpoint: {1 + len(endpoints) - len(endpoints)} of {len(endpoints)}."
-            )
-            # Remove this endpoint from the list for this file and try again if there are more
-            # endpoints left.
-            # It is possible the error is nothing to do with THIS endpoint but it's very difficult
-            # to go down to that level. If we blow through all endpoints (e.g. Banksia has 6) and
-            # We still hit the exception, then either all endpoints are down or it's some other
-            # error in which case we return False which will put us in a retry/backoff cycle
-            endpoints.remove(endpoint_url)
-            continue
-
-    if len(endpoints) > 0:
-        raise Exception(
-            f"{full_filename}: Transfer failed but some endpoints ({len(endpoints)}) are unused. This should not happen!"
-        )
-    else:
-        # We tried with all available endpoints but still did not succeed
-        logger.warning(
-            f"{full_filename}: could not be archived via rclone after trying all {len(endpoints)} endpoint(s)."
-        )
         return False
 
 
@@ -551,56 +415,3 @@ def archive_file_rclone_haproxy(
             f"{full_filename}: Error uploading to bucket {bucket_name} via rclone_haproxy."
         )
         return False
-
-
-#
-# NOTE: this code relies on the fact that the machine/user running this code
-# should already have a valid
-# cat ~/.aws/config file which provides:
-#
-# [default]
-# aws_access_key_id=XXXXXXXXXXXXXX
-# aws_secret_access_key=XXXXXXXXXXXXXXXXXXXXXXXXX
-#
-# Boto3 will use this file to authenticate and fail if it is not there or is
-# not valid
-#
-#
-# Dervied from: https://github.com/tlastowka/calculate_multipart_etag/blob
-# /master/calculate_multipart_etag.py
-#
-def ceph_get_s3_md5_etag(filename: str, chunk_size_bytes: int) -> str:
-    """Compute the Ceph multipart ETag for S3 integrity verification.
-
-    Calculates the expected S3 ETag for a file uploaded with multipart
-    transfers, based on chunk size. Used to verify files in Ceph storage.
-
-    Args:
-        filename: Path to the file to compute ETag for.
-        chunk_size_bytes: Size of each chunk in bytes.
-
-    Returns:
-        The computed ETag string in the format '"hexdigest-partcount"' or '""' for empty files.
-    """
-    md5s = []
-
-    with open(filename, "rb") as file_handle:
-        while True:
-            data = file_handle.read(chunk_size_bytes)
-
-            if not data:
-                break
-            md5s.append(hashlib.md5(data))
-
-    if len(md5s) > 1:
-        digests = b"".join(m.digest() for m in md5s)
-        new_md5 = hashlib.md5(digests)
-        new_etag = f'"{new_md5.hexdigest()}-{len(md5s)}"'
-
-    elif len(md5s) == 1:  # file smaller than chunk size
-        new_etag = f'"{md5s[0].hexdigest()}"'
-
-    else:  # empty file
-        new_etag = '""'
-
-    return new_etag

@@ -23,7 +23,6 @@ classifiers = [
 dependencies = [
     "astropy",
     "flask",
-    "importlib_metadata",
     "inotify",
     "matplotlib",
     "mwalib>=2.0.3",

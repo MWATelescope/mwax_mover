@@ -17,7 +17,6 @@ import os
 import queue
 import random
 import re
-import shutil
 import socket
 import struct
 import subprocess
@@ -1139,34 +1138,6 @@ def get_ip_address(ifname: str) -> str:
     )
 
 
-def get_primary_ip_address() -> str:
-    """
-    Return the primary IPv4 address of this host.
-
-    Resolves the fully-qualified domain name of the host and returns the
-    corresponding IP address.
-
-    Returns:
-        The primary IPv4 address as a dotted-decimal string.
-    """
-    return socket.gethostbyname(socket.getfqdn())
-
-
-def get_disk_space_bytes(path: str) -> tuple[int, int, int]:
-    """
-    Return disk usage statistics for the filesystem containing ``path``.
-
-    Args:
-        path: Any path on the filesystem to query (file or directory).
-
-    Returns:
-        A named tuple ``(total, used, free)`` with values in bytes, as
-        returned by ``shutil.disk_usage``.
-    """
-    # Get disk space: total, used and free
-    return shutil.disk_usage(path)
-
-
 def do_checksum_md5(full_filename: str, numa_node: int | None, timeout: int) -> str:
     """
     Compute the MD5 checksum of a file by running the system ``md5sum`` command.
@@ -2021,52 +1992,6 @@ def push_message_to_redis(redis_host: str, redis_queue_key: str, message_data):
         attempt += 1
 
 
-def copy_subfile_to_disk_cp(
-    filename: str,
-    numa_node: int,
-    destination_path: str,
-    timeout: int,
-    destination_filename: str = ".",
-) -> bool:
-    """
-    Copy a subfile to a destination directory using the system ``cp`` command.
-
-    .. deprecated::
-        Replaced by ``copy_subfile_to_disk_dd()``. Retained for reference.
-
-    Args:
-        filename: Full path to the source subfile.
-        numa_node: NUMA node to pin the subprocess to, or None for no pinning.
-        destination_path: Destination directory path.
-        timeout: Maximum number of seconds to wait for the command to complete.
-        destination_filename: Destination filename within ``destination_path``.
-            Defaults to ``'.'`` (i.e. preserve the source filename).
-
-    Returns:
-        True if ``cp`` exited successfully, False otherwise.
-    """
-    logger.info(f"{filename}- Copying file into {destination_path}")
-
-    command = f"cp {filename} {destination_path}/{destination_filename}"
-
-    start_time = time.time()
-    retval, stdout = mwax_command.run_command_ext(command, numa_node, timeout, False)
-    elapsed = time.time() - start_time
-
-    if retval:
-        logger.info(
-            f"{filename}- Copying file into"
-            f" {destination_path}/{destination_filename} was successful"
-            f" (took {elapsed:.3f} secs)."
-        )
-    else:
-        logger.error(
-            f"{filename}- Copying file into {destination_path}/{destination_filename} failed with error {stdout}"
-        )
-
-    return retval
-
-
 def copy_subfile_to_disk_dd(
     filename: str,
     numa_node: int,
@@ -2086,8 +2011,8 @@ def copy_subfile_to_disk_dd(
     Uses ``oflag=direct`` and ``iflag=count_bytes`` for efficient I/O, and logs
     the transfer rate in GB/sec on success.
 
-    Note: Unlike ``copy_subfile_to_disk_cp``, ``destination_filename`` must be
-    an actual filename — ``dd`` does not accept ``'.'`` as a destination.
+    Note: ``destination_filename`` must be an actual filename — ``dd`` does not
+    accept ``'.'`` as a destination.
 
     Args:
         filename: Full (or relative) path to the source subfile.
@@ -2139,19 +2064,6 @@ def running_under_pytest() -> bool:
     """
     # Returns True if we are running as part of pytest
     return ("PYTEST_CURRENT_TEST" in os.environ) or ("pytest" in sys.modules)
-
-
-def get_gbps_from_elapsed(size_gigabytes: float, elapsed_seconds: float) -> float:
-    """Calculate throughput in Gbps.
-
-    Args:
-        size_gigabytes: Transfer size in gigabytes.
-        elapsed_seconds: Elapsed time in seconds.
-
-    Returns:
-        Throughput in Gbps, or 0.0 if elapsed time is zero.
-    """
-    return (size_gigabytes * 8) / elapsed_seconds if elapsed_seconds > 0 else 0.0
 
 
 def get_gbps(size_gigabytes: float, start_time: float) -> float:
@@ -2414,75 +2326,6 @@ def rclone_move(
 
     # pass back transfers, transferred_bytes
     return transfers, bytes_moved
-
-
-# def rclone_copy(
-#     path: str,
-#     filenames_no_path: list[str],
-#     profile: str,
-#     bucket: str,
-# ) -> tuple[int, int]:
-#     """Run rclone copy files to an S3 bucket destination.
-
-#     Args:
-#         path: local directory that `filenames` lives in
-#         filenames: List of local files to copy (no directories/paths).
-#         profile: The rclone profile to use (see rclone.conf).
-#         bucket: Destination bucket name.
-
-#     Returns:
-#         tuple of transfers and bytes_transferred
-
-#     Raises:
-#         subprocess.CalledProcessError: If rclone exits with a non-zero return code.
-#     """
-#     dest = f"{profile}:{bucket}"
-#     cmd = [
-#         "rclone",
-#         "copy",
-#         path,
-#         "-v",  # This is needed to get any json output
-#         "--use-json-log",  # structured JSON lines on stderr
-#         "--stats",
-#         "1h",  # suppress periodic stats, only emit at end
-#     ]
-#     # append each filename
-#     for f in filenames_no_path:
-#         cmd.append("--include")
-#         cmd.append(os.path.basename(f))
-
-#     # now append the destination
-#     cmd.append(dest)
-#     logger.debug(f"Running rclone: {' '.join(cmd)}")
-
-#     result = subprocess.run(cmd, capture_output=True, text=True)
-
-#     #  get rclone stats - skip if we hit an error
-#     try:
-#         stats = parse_rclone_stats(result.stderr)
-#         transfers = stats.get("transfers", 0)
-#         bytes_copied = 0
-#         if transfers > 0:
-#             bytes_copied = stats.get("bytes", 0)
-#             elapsed = stats.get("elapsedTime", 0.0)
-#             logger.info(
-#                 f"rclone moved {transfers} file(s) ({bytes_copied / 1000.0:.1f} KB) in {elapsed:.1f}s",
-#             )
-#         else:
-#             logger.debug("rclone: nothing to copy")
-#     except Exception:
-#         bytes_copied = 0
-#         transfers = 0
-#         logger.exception("Error getting stats from rclone. Skipping.")
-
-#     if result.returncode != 0:
-#         raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
-
-#     if result.stdout:
-#         logger.debug(f"rclone stdout: {result.stdout.strip()}")
-
-#     # pass back transfers, transferred_bytes
-#     return transfers, bytes_copied
 
 
 def extract_channels_from_filename(filename: str) -> dict | None:

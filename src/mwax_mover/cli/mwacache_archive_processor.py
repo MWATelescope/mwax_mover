@@ -91,7 +91,6 @@ class MWACacheArchiveProcessor:
         self.high_priority_vcs_projectids: list[str] = []
 
         # MWAX servers will copy in a temp file, then rename once it is good
-        self.archiving_paused: bool = False
         self.running: bool = False
 
         self.mro_db_handler: mwax_db.MWAXDBHandler
@@ -181,24 +180,6 @@ class MWACacheArchiveProcessor:
 
         # Final log message
         logger.info("Completed Successfully")
-
-    def pause_archiving(self, paused: bool):
-        """Pause or resume archiving operations across all workers.
-
-        Args:
-            paused: True to pause archiving, False to resume.
-        """
-        if self.archiving_paused != paused:
-            if paused:
-                logger.info("Pausing archiving")
-            else:
-                logger.info("Resuming archiving")
-
-            for worker in self.workers:
-                if worker:
-                    worker.pause(paused)
-
-            self.archiving_paused = paused
 
     def stop(self):
         """Stop the processor and shutdown all workers and connections.
