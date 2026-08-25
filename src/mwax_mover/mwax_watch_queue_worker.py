@@ -90,8 +90,8 @@ class MWAXWatchQueueWorker(ABC):
     This class is responsible for watching a set of paths and putting any files
     that are found into an ordinary Python queue for processing.
 
-    watch_path_exts: a list of tuples, where each tuple contains a path to watch and a pattern to match files against.
-                     For example: [("/data/level7", ".fits"), ("/data/level8", ".txt")]
+    watch_paths_exts: a list of tuples, where each tuple contains a path to watch and a pattern to match files against.
+                      For example: [("/data/level7", ".fits"), ("/data/level8", ".txt")]
     """
 
     def __init__(

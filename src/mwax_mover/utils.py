@@ -1,7 +1,7 @@
 """Shared utility functions, enumerations, and helper classes for mwax_mover.
 
-Key enumerations: MWAXSubfileDistirbutorMode, CorrelatorMode, MWADataFileType,
-ArchiveLocation. Key classes: ValidationData (filename validation result).
+Key enumerations: CorrelatorMode, MWADataFileType, ArchiveLocation.
+Key classes: ValidationData (filename validation result).
 Key functions: validate_filename(), metafits creation/reading, MD5 checksumming,
 PSRDADA header parsing, Redis-based beamformer signalling, UDP multicast sending,
 and config file helpers (read_config, read_optional_config, read_config_list).
@@ -222,6 +222,14 @@ class ValidationData:
 
 
 class ArchiveLocation(Enum):
+    """Where a data file is (or should be) archived at Pawsey.
+
+    The integer values are the ones stored in the MWA metadata database's
+    data_files.remote_archived location column, so they must not be renumbered.
+    DMF and Versity are defined for historical/database completeness but are not
+    implemented by determine_bucket().
+    """
+
     Unknown = 0
     DMF = 1
     AcaciaIngest = 2
@@ -329,7 +337,7 @@ def validate_filename(
             filetype_id = MWADataFileType.MWAX_VOLTAGES.value
         elif file_ext_part.lower() == ".fits":
             # Could be metafits (e.g. 1316906688_metafits_ppds.fits) or
-            # visibilitlies
+            # visibilities
             if file_name_part[10:] == "_metafits_ppds" or file_name_part[10:] == "_metafits":
                 filetype_id = MWADataFileType.MWA_PPD_FILE.value
             else:
@@ -441,7 +449,7 @@ def validate_filename(
         # Obtain a lock so we can only do this inside one thread
         with metafits_file_lock:
             if not os.path.exists(metafits_filename):
-                logger.info(f"Metafits file {metafits_filename} not found. Atempting to download it")
+                logger.info(f"Metafits file {metafits_filename} not found. Attempting to download it")
                 try:
                     download_metafits_file(obs_id, metafits_path)
                 except requests.RequestException as download_exception:
@@ -1331,9 +1339,11 @@ def inject_subfile_header(subfile_filename: str, key_value_pairs: str):
 
 def inject_beamformer_headers(subfile_filename: str, beamformer_settings: str):
     """
-    Append beamformer settings to the existing PSRDADA subfile header.
+    Write beamformer settings into a PSRDADA subfile header.
 
     A thin wrapper around ``inject_subfile_header`` for the beamformer use case.
+    NOTE: despite the name, this OVERWRITES the last line of the existing header
+    rather than appending to it -- see inject_subfile_header.
 
     Args:
         subfile_filename: Path to the ``.sub`` subfile to modify in place.
@@ -1470,7 +1480,7 @@ def write_mock_subfile_from_header(output_filename, header):
     remainder_len = 4096 - len(header)
     padding = [0x0 for _ in range(remainder_len)]
     assert len(padding) == remainder_len
-    # add 255 bytes of data to this subfile
+    # add 256 bytes of data to this subfile
     data_padding = [x for x in range(256)]
     assert len(data_padding) == 256
 
@@ -1754,7 +1764,7 @@ def get_data_files_with_hostname_for_obsid_from_webservice(
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
 def remove_file(filename: str, raise_error: bool) -> bool:
     """
-    Delete a file from the filesystem, with up to 5 automatic retries.
+    Delete a file from the filesystem, with up to 3 automatic attempts.
 
     Retries are handled by tenacity with a 10-second fixed wait between
     attempts. Retries only occur when ``raise_error`` is True and the deletion
@@ -2204,7 +2214,7 @@ def extract_tar(tar_filename: str, dest_path: str) -> None:
     using the 'data' filter to reject unsafe paths (absolute paths,
     '../' traversal, symlinks pointing outside the destination).
 
-    NOTE: tar.extractall() sliently overwrites existing files.
+    NOTE: tar.extractall() silently overwrites existing files.
 
     For our purposes this is fine so I don't care, but be warned!
 

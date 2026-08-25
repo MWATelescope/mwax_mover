@@ -1,3 +1,11 @@
+"""generate_index_json: build an index.json manifest for a calibration fit directory.
+
+Scans a fit directory and writes an index.json describing each file (size,
+modification time, MIME type, PNG dimensions and a description), suitable for
+upload to S3 alongside the files themselves. See
+mwax_calvin_utils.generate_plot_index_file.
+"""
+
 import argparse
 import json
 import os
@@ -8,10 +16,10 @@ from mwax_mover.mwax_calvin_utils import generate_plot_index_file
 
 
 def main() -> None:
-    """Entry point for the generate-directory-index command line tool.
+    """Entry point for the generate_index_json command line tool.
 
-    Parses arguments and calls generate_directory_index, printing a summary
-    on success or an error message on failure.
+    Parses arguments and calls mwax_calvin_utils.generate_plot_index_file(),
+    printing a summary on success or an error message on failure.
     """
     parser = argparse.ArgumentParser(
         description="Generate an index.json manifest for a local directory, "
@@ -39,7 +47,9 @@ def main() -> None:
         "--output",
         default=None,
         metavar="PATH",
-        help="Path to write index.json to. Defaults to index.json inside the target directory.",
+        help=(
+            "Directory to write index.json into (the filename is always index.json). Defaults to the target directory."
+        ),
     )
     parser.add_argument(
         "--dry-run",

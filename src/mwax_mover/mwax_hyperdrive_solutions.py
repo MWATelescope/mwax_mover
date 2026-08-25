@@ -516,11 +516,13 @@ class HyperfitsSolutionGroup:
         """Initialize a solution group with metafits and solution files.
 
         Args:
-            metafits: List of Metafits file readers.
-            solns: List of HyperfitsSolution file readers.
+            metafits: The observation's Metafits reader (a single instance, not
+                a list).
+            solns: List of HyperfitsSolution file readers, one per contiguous
+                coarse-channel band.
 
         Raises:
-            RuntimeError: If no metafits or solution files are provided.
+            RuntimeError: If no solution files are provided.
         """
         self.metafits = metafits
 
@@ -613,12 +615,12 @@ class HyperfitsSolutionGroup:
 
     @classmethod
     def get_metafits_chan_info(cls, metafits: Metafits) -> ChanInfo:
-        """Get combined channel information from all metafits files.
+        """Get coarse channel information from the observation's metafits.
 
-        Validates that channel ranges do not overlap and that channel info is consistent.
+        Validates that the coarse channel ranges do not overlap.
 
         Args:
-            metafits: Metafits file object.
+            metafits: The observation's Metafits reader.
 
         Returns:
             Combined ChanInfo object.
@@ -766,12 +768,10 @@ class HyperfitsSolutionGroup:
         - each file's BASELINES-HDU-inferred flagging (see
           read_baseline_tile_flags).
 
-        Note: this is a new, more complete check than the metafits-OR-TILES
-        combination `refant` computes locally today. `refant` is left as-is
-        for now rather than refactored to use this, to avoid changing its
-        behaviour in the same step that introduces this property; revisit
-        once the flagging pipeline (apply_tile_flags etc.) is built and
-        actually consumes this.
+        Note: `refant` and `apply_tile_flags` both use this, so all three
+        sources are honoured consistently. (An earlier version of this
+        docstring said `refant` still computed its own weaker metafits-OR-TILES
+        check; that stopped being true once `refant` was switched over.)
 
         Returns:
             Boolean array, shape (n_tiles,). True where the tile is flagged
@@ -1312,8 +1312,9 @@ class HyperfitsSolutionGroup:
 
         For each tile not already tile-flagged, computes the fraction of
         its chanblocks (summed across all files) carrying any per-channel
-        flag reason (pre-existing NaN, non-converged, partial-Jones, or
-        amplitude-outlier -- combined total, regardless of which reason),
+        flag reason (pre-existing NaN, non-converged, partial-Jones, above the
+        gain-max cutoff, or amplitude-outlier -- combined total, regardless of
+        which reason),
         and promotes it to fully flagged (MOSTLY_BAD_CHANNELS) if that
         fraction is >= threshold.
 

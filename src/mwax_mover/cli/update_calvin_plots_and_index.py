@@ -18,12 +18,19 @@ from mwax_mover.utils import download_metafits_file, read_config
 
 
 class SolutionDir:
+    """One solution directory found under the search root, plus its fit_id."""
+
     slurm_job_id: int
     obs_id: int
     fit_id: int = -1
     dir_path: str
 
     def log(self, message: str):
+        """Print a message prefixed with this solution's identifying IDs.
+
+        Args:
+            message: The message to print.
+        """
         print(f"{self.obs_id} {self.slurm_job_id} {self.fit_id}: {message}")
 
 

@@ -16,6 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 class OutgoingProcessor(MWAXPriorityWatchQueueWorker):
+    """Archives outgoing MWAX files to the mwacache servers via xrootd.
+
+    Instantiated by MWAXSubfileDistributor. See the module docstring for detail.
+    """
+
     def __init__(
         self,
         metafits_path: str,

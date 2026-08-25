@@ -155,11 +155,11 @@ The underlying line-fit method was originally written to find each tile's cable 
 
 **Example** — a well-behaved tile's phase tightly hugs its fitted delay line (low χ²/dof, low σ residual). A tile with a faulty connector or receiver scatters widely around its own fitted line instead (illustrative data, not a real observation):
 
-![Phase fit: good tile vs. outlier tile](docs/img/step3a_phase_fit_example.png)
+![Phase fit: good tile vs. outlier tile](docs/img/step6a_phase_fit_example.png)
 
 That fit-quality metric is then compared across every tile in the observation. Here, "Tile 057" (from the plot above) sits well above the robust median+MAD threshold on χ²/dof, so it's reported as an outlier — but not flagged or modified (illustrative data):
 
-![Population outlier test across all tiles](docs/img/step3b_population_outlier_test.png)
+![Population outlier test across all tiles](docs/img/step6b_population_outlier_test.png)
 
 The `{obs_id}_residual.png` debug plot (see [Output files](#output-files) below) also shades a band on each receiver-flavour/polarisation facet showing that group's outlier range (±`phase_outlier_nstd`×MAD around the median σ residual), so an individual tile's scatter can be visually compared against the actual reporting threshold.
 

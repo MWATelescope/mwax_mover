@@ -2,7 +2,7 @@
 """Inspect a FITS file: print header key values, and table or image data.
 
 Usage:
-    python fits_inspect.py <filename> <hdu>
+    fits_inspect <filename> <hdu>
 
 Where <hdu> is either an integer HDU index (e.g. 1) or an HDU
 EXTNAME/name string (e.g. SOLUTIONS).

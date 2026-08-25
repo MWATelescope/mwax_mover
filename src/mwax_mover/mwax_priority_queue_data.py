@@ -6,9 +6,9 @@ the full filepath.
 E.g.
 without this class:
 q = PriorityQueue()
-q.put(1, 'path1/file1.dat')
-q.put(1, 'path2/file2.dat')
-q.put(1, 'path1/file3.dat')
+q.put((1, 'path1/file1.dat'))
+q.put((1, 'path2/file2.dat'))
+q.put((1, 'path1/file3.dat'))
 print(q.get()[1])
     path1/file1.dat
 print(q.get()[1])

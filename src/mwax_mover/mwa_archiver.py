@@ -24,14 +24,22 @@ def copy_file_rsync(
     destination_dir: str,
     timeout: int,
 ):
-    """Copy a file to a remote host using rsync over SSH.
+    """Copy a file between hosts using rsync over SSH.
 
     Uses rsync with AES128-CTR encryption and compression disabled.
     Logs transfer speed and file size on success.
 
+    NOTE: the only caller (mwax_calvin_processor.download_realtime_data) uses
+    this to PULL a file from an MWAX box to the local calvin node, so in
+    practice it is *source_filename* that carries the ``user@host:/path``
+    prefix and *destination_dir* that is local. The file size is measured
+    locally at destination_dir after the transfer.
+
     Args:
-        source_filename: Path to the source file to copy.
-        destination_dir: Remote destination directory (host:/path format).
+        source_filename: Path to the source file to copy. May be remote, in
+            ``user@host:/path/file`` form.
+        destination_dir: Destination directory. Must be reachable locally, as
+            os.path.getsize() is called on the copied file.
         timeout: Maximum time in seconds to wait for the transfer.
 
     Returns:

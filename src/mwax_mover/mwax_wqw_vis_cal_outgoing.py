@@ -16,6 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 class VisCalOutgoingProcessor(MWAXWatchQueueWorker):
+    """Collects outgoing calibrator visibility files for the Calvin pipeline.
+
+    Instantiated by MWAXSubfileDistributor. See the module docstring for detail.
+    """
+
     def __init__(
         self,
         visdata_outgoing_cal_path: str,

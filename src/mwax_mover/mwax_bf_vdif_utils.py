@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 class VDIFHeader:
+    """A VDIF beamformer file header, populated from an observation's metafits."""
+
     def __init__(self):
         """Initialize a VDIF header with default values and metadata.
 

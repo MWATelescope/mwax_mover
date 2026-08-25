@@ -2,10 +2,11 @@
 
 Provides process_solutions(), which loads hyperfits solution files and metafits,
 determines a reference antenna, runs the full flagging pipeline (tile flags,
-whole-Jones-NaN enforcement, phase-outlier detection, amplitude-outlier
-detection, mostly-bad-tile promotion), commits the result to disk, fits final
-phases and gains, and inserts the resulting calibration fit and solution
-records into the MWA metadata database.
+whole-Jones-NaN enforcement, gain-magnitude cutoff, amplitude-outlier
+flagging, mostly-bad-tile promotion, then report-only phase-outlier detection
+last -- see HyperfitsSolutionGroup.run_flagging_pipeline), commits the result
+to disk, fits final phases and gains, and inserts the resulting calibration fit
+and solution records into the MWA metadata database.
 """
 
 import logging

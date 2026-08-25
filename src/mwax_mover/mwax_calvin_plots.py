@@ -465,7 +465,7 @@ def plot_phase_residual(
     each flavour row, so the two columns are directly comparable -- but
     different flavour rows are not forced to share a scale with each
     other, since their typical residual magnitudes can genuinely differ
-    (see Step 3's rationale in CALVIN.md).
+    (see Step 6's rationale in CALVIN.md).
     """
     plt.clf()
     g = sns.FacetGrid(
@@ -1498,9 +1498,10 @@ def plot_outlier_gains(
 def _channel_reason_counts_text(tile_idx: int, channel_reasons: list[NDArray[np.object_]]) -> str:
     """Summarise a tile's per-channel flag reasons as counts, across all files.
 
-    E.g. "AMPLITUDE_OUTLIER(20ch), NON_CONVERGED(4ch)" -- deliberately does
+    E.g. "NON_CONVERGED(4ch), AMPLITUDE_OUTLIER(20ch)" -- deliberately does
     NOT list every individual flagged channel, per the "counts per reason,
-    not a full channel list" requirement.
+    not a full channel list" requirement. Reasons appear in the order first
+    encountered, not a fixed order.
 
     Args:
         tile_idx: Tile index (row position in the group's metafits_tiles_df).
@@ -1543,8 +1544,8 @@ def build_tile_stats_rows(
             n_chanblocks, 2, 2) -- e.g. group.jones itself (current state)
             or a copy taken at an earlier point.
         tile_bad_mask: Boolean array, shape (n_tiles,). True where the tile
-            is (or will be) fully flagged -- e.g. combined_tile_flags for
-            a "before" snapshot, or tile_flag_reasons != NONE for "after".
+            is fully flagged. Both callers in write_stats_and_debug_plots pass
+            `<snapshot>_tile_flag_reasons != TileFlagReason.NONE`.
         tile_reasons: A TileFlagReason array, shape (n_tiles,) -- e.g.
             group.tile_flag_reasons at the point of this snapshot (a copy,
             if this isn't the group's current/final state).

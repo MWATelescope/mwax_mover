@@ -22,6 +22,11 @@ logger = logging.getLogger(__name__)
 
 
 class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
+    """Stitches beamformer subobservation files into a complete observation file.
+
+    Instantiated by MWAXSubfileDistributor. See the module docstring for detail.
+    """
+
     def __init__(
         self,
         metafits_path: str,

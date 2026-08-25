@@ -26,6 +26,11 @@ logger = logging.getLogger(__name__)
 
 
 class SubfileIncomingProcessor(MWAXWatchQueueWorker):
+    """Handles raw PSRDADA subfiles arriving from the MWAX DSP hardware.
+
+    Instantiated by MWAXSubfileDistributor. See the module docstring for detail.
+    """
+
     def __init__(
         self,
         sd_ctx,

@@ -673,6 +673,19 @@ def insert_calibration_solutions_row(
 
 
 def get_unattempted_unrequested_cal_obsids(db_handler_object: MWAXDBHandler, oldest_obs_id: int) -> list[int] | None:
+    """Find calibrator observations with no calibration_request row yet.
+
+    Args:
+        db_handler_object: A populated database handler (dummy or real).
+        oldest_obs_id: Ignore any observation older than this obs_id, so we do
+            not keep reconsidering the entire archive.
+
+    Returns:
+        A list of obs_ids needing a calibration request, or None if none found.
+
+    Raises:
+        Exception: If the database query fails.
+    """
     # This SQL gets all calibrator obs which have not yet been calibrated and
     # have not had a cal request added yet
     sql = """SELECT m.starttime as obs_id
@@ -717,14 +730,17 @@ def get_unattempted_unrequested_cal_obsids(db_handler_object: MWAXDBHandler, old
 def get_unattempted_calibration_requests(
     db_handler_object: MWAXDBHandler,
 ) -> list[tuple[int, int, bool, bool]] | None:
-    """Returns the deatils of the next oldest unattempted calibration_requests.
+    """Return the details of the next oldest unattempted calibration_requests.
 
-    Parameters:
-            db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
-            hostname (str): The name of the current host so we can specify who is working on this request
+    Args:
+        db_handler_object: A populated database handler (dummy or real).
 
     Returns:
-            list of Tuple(request_id, cal_id, realtime,bulk_request) OR None if none found. Raises exceptions on error
+        A list of (request_id, cal_id, realtime, bulk_request) tuples, or None if
+        none were found.
+
+    Raises:
+        Exception: If the database query fails.
     """
 
     # How this works!
@@ -865,6 +881,19 @@ def update_calibration_request_slurm_status(
     slurm_job_submitted_error_datetime: datetime.datetime | None,
     slurm_job_submitted_error_message: str | None,
 ):
+    """Record the outcome of submitting a Slurm job for one or more requests.
+
+    Args:
+        db_handler_object: A populated database handler (dummy or real).
+        request_ids: The calibration request IDs to update.
+        slurm_job_id: The submitted Slurm job ID, or None on failure.
+        slurm_job_submitted_datetime: When the job was submitted, or None on failure.
+        slurm_job_submitted_error_datetime: When submission failed, or None on success.
+        slurm_job_submitted_error_message: Why submission failed, or None on success.
+
+    Raises:
+        Exception: If the database update fails.
+    """
     sql = """
     UPDATE public.calibration_request
     SET
@@ -976,6 +1005,17 @@ def update_calibration_request_assign_hostname_start_download(
     slurm_hostname: str,
     download_started_datetime: datetime.datetime,
 ):
+    """Record which host a Slurm job landed on, and that its download has begun.
+
+    Args:
+        db_handler_object: A populated database handler (dummy or real).
+        slurm_job_id: The Slurm job ID whose request row should be updated.
+        slurm_hostname: The calvin host now working on this request.
+        download_started_datetime: When the download started.
+
+    Raises:
+        Exception: If the database update fails.
+    """
     sql = """
     UPDATE public.calibration_request
     SET
@@ -1129,6 +1169,22 @@ def update_calsolution_request_calibration_complete_status(
 def get_fit_info_from_slurm_job_and_obsid(
     db_handler_object: MWAXDBHandler, obs_id: int, slurm_job_id: int
 ) -> tuple[int, int | None] | None:
+    """Look up a fit_id, and whether hyperdrive's amp plots need a max-amp clip.
+
+    Args:
+        db_handler_object: A populated database handler (dummy or real).
+        obs_id: The observation ID of the fit.
+        slurm_job_id: The Slurm job ID that produced the fit. Together with
+            obs_id this is unique for calvin fits.
+
+    Returns:
+        A (fit_id, amp_plot_max) tuple, where amp_plot_max is 100 or None, or
+        None if no matching fit was found. Will not find fits from before the
+        calibration_request table was introduced.
+
+    Raises:
+        Exception: If the database query fails.
+    """
     # This SQL looks up a fitid and determines if a max amp is needed to be passed to hyperdrive amp plots
     # from the calibration_request and fits table based on an obsid and a slurm jobid.
     # This will be unique for calvin fits.

@@ -2,7 +2,7 @@
 """Print fine channel frequencies and coarse channel info from a metafits file.
 
 Usage:
-    python metafits_fine_chans.py <metafits_filename>
+    print_metafits_info <metafits_filename>
 """
 
 import argparse

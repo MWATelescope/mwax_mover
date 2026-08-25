@@ -38,9 +38,9 @@ plt.rcParams.update({"font.size": 11, "figure.dpi": 130})
 
 
 # ---------------------------------------------------------------------------
-# Step 3a: phase-vs-frequency, good tile vs. outlier (wrong-delay) tile
+# Step 6a: phase-vs-frequency, good tile vs. outlier (wrong-delay) tile
 # ---------------------------------------------------------------------------
-def step3a_phase_fits():
+def step6a_phase_fits():
     n_chan = 200
     freqs_hz = np.linspace(150e6, 180e6, n_chan)
     weights = np.ones(n_chan)
@@ -100,15 +100,15 @@ def step3a_phase_fits():
 
     fig.suptitle("Step 3 — phase-vs-frequency delay fit: good tile vs. outlier tile (illustrative data)")
     fig.tight_layout()
-    fig.savefig(f"{OUT}/step3a_phase_fit_example.png", bbox_inches="tight")
+    fig.savefig(f"{OUT}/step6a_phase_fit_example.png", bbox_inches="tight")
     plt.close(fig)
     return fit_good, fit_bad
 
 
 # ---------------------------------------------------------------------------
-# Step 3b: population scatter of chi2dof with median/MAD threshold, outlier tile marked
+# Step 6b: population scatter of chi2dof with median/MAD threshold, outlier tile marked
 # ---------------------------------------------------------------------------
-def step3b_population():
+def step6b_population():
     n_tiles = 128
     # Most tiles cluster near chi2dof ~ 1 with normal-ish scatter.
     chi2dof = np.abs(rng.normal(1.0, 0.25, n_tiles))
@@ -116,7 +116,7 @@ def step3b_population():
 
     # Two illustrative bad tiles, well above the robust threshold. These
     # are independent, hand-picked illustrative values -- not required to
-    # numerically match step3a_phase_fits's "Tile 057" example, which is
+    # numerically match step6a_phase_fits's "Tile 057" example, which is
     # deliberately a lower-noise case chosen so its fitted delay line
     # stays visually clean (no within-band wrap).
     outlier_idx = [56, 91]
@@ -150,7 +150,7 @@ def step3b_population():
     ax.set_title("Step 3 — population outlier test across all tiles (illustrative data)")
     ax.legend(loc="upper left", fontsize=8)
     fig.tight_layout()
-    fig.savefig(f"{OUT}/step3b_population_outlier_test.png", bbox_inches="tight")
+    fig.savefig(f"{OUT}/step6b_population_outlier_test.png", bbox_inches="tight")
     plt.close(fig)
 
 
@@ -207,7 +207,7 @@ def step4_amplitude_outliers():
 
 
 if __name__ == "__main__":
-    step3a_phase_fits()
-    step3b_population()
+    step6a_phase_fits()
+    step6b_population()
     step4_amplitude_outliers()
     print("Wrote illustrations to", OUT)

@@ -557,8 +557,9 @@ def wrap_angle(angle):
     return np.mod(angle + np.pi, 2 * np.pi) - np.pi
 
 
-# Floor for fit_phase_line's sigma-clip threshold (2 * max(resid_std, this)),
-# in radians. See its use in fit_phase_line for why it's needed.
+# Floor for fit_phase_line's sigma-clip scale: the threshold is
+# 2 * max(1.4826 * MAD, this), in radians. See its use in fit_phase_line for
+# why the floor is needed.
 _MIN_CLIP_THRESHOLD_RAD = 1e-6
 
 
@@ -611,14 +612,18 @@ def fit_phase_line(
         solution: Complex array of calibration solutions.
         weights: Array of weights for each solution.
         niter: Number of fitting iterations. Each iteration refits after
-            rejecting outliers beyond 2*resid_std. Must be >= 1.
-        fit_iono: Whether to fit ionospheric dispersion (currently unused).
+            rejecting outliers more than 2 robust scale units (median + MAD, see
+            the sigma-clip comment in the loop below) from the median residual.
+            Must be >= 1.
+        fit_iono: Accepted but currently unused; ionospheric dispersion is not
+            fitted.
 
     Returns:
         PhaseFitInfo object containing fitted parameters and quality metrics.
 
     Raises:
         RuntimeError: If not enough valid phases are available to fit.
+        ValueError: If niter is less than 1.
     """
     # Quality metrics for the phase fit:
     #
@@ -635,8 +640,9 @@ def fit_phase_line(
     #              used elsewhere in the pipeline -- purely informational.
     #
     # quality:     Fraction of original frequency channels surviving the
-    #              sigma-clip (|residual| < 2*resid_std) (len(mask) /
-    #              nfreqs). Ranges 0-1; 1.0 means all channels were used.
+    #              sigma-clip (|residual - median| < 2 * 1.4826 * MAD; see the
+    #              detailed comment at the clip itself) (len(mask) / nfreqs).
+    #              Ranges 0-1; 1.0 means all channels were used.
 
     # original number of frequencies
     nfreqs = len(freqs_hz)
@@ -1042,9 +1048,17 @@ def iterative_poly_clip_batch(
     """Vectorized, batched equivalent of iterative_poly_clip, fitting every
     row (tile) at once instead of looping and calling np.polyfit per tile.
 
-    Mathematically identical to calling iterative_poly_clip(x, Y[t], ...)
-    for each tile t independently -- same per-tile stopping conditions,
-    same MAD-based clipping -- but replaces what was previously up to
+    Equivalent to calling iterative_poly_clip(x, Y[t], ...) for each tile t
+    independently -- same per-tile stopping conditions, same MAD-based
+    clipping -- with one deliberate difference: the per-tile version treats a
+    residual MAD of exactly 0 as "perfect fit", whereas this one uses a 1e-9
+    tolerance (see the zero_mad comment below), because the batched
+    normal-equations solve and np.polyfit's SVD land on different tiny
+    floating-point residues for the same data. This is also why
+    docs/img/make_illustrations.py uses this function rather than the per-tile
+    one -- so the illustrations show what the pipeline actually does.
+
+    Replaces what was previously up to
     (n_tiles * max_iter) separate np.polyfit/np.polyval calls with a
     handful of batched numpy operations per outer iteration. Since every
     tile shares the same x-grid (chanblock index), a per-tile weighted
@@ -1491,7 +1505,7 @@ def write_hyperdrive_stats(
     stats_fd,
     hyperdrive_solution_filename: str,
 ) -> tuple[bool, str]:
-    """Write convergence statistics. (Append to existiing stats file if it exists.)
+    """Write convergence statistics. (Append to existing stats file if it exists.)
 
     Args:
         obs_id: Observation ID.
@@ -1704,7 +1718,9 @@ def run_hyperdrive(
     """Run hyperdrive calibration on UV FITS files.
 
     Args:
-        input_uvfits_files: List of input UV FITS files (one per coarse channel).
+        input_uvfits_files: List of input UV FITS files, one per contiguous
+            coarse-channel band (so 1 for a normal observation, up to 24 for a
+            picket fence).
         metafits_filename: Path to the metafits file.
         job_output_path: Output directory for hyperdrive.
         obs_id: Observation ID.
@@ -1729,15 +1745,15 @@ def run_hyperdrive(
     elapsed = -1
     cmdline = ""
     exit_code = 0
-    # FIX 1: initialise calibration_command so it is always bound, even if
-    # input_uvfits_files is empty, preventing UnboundLocalError at the return sites.
+    # Initialised here so it is always bound, even if input_uvfits_files is
+    # empty, which would otherwise be an UnboundLocalError at the return sites.
     calibration_command = ""
 
     for hyperdrive_run, uvfits_file in enumerate(input_uvfits_files):
         obsid_and_band = os.path.basename(uvfits_file.replace(".uvfits", ""))
 
-        # FIX 2: move start_time above the try block so it is always bound
-        # before the exception handler references elapsed.
+        # Outside the try block so it is always bound before the exception
+        # handler below computes `elapsed` from it.
         start_time = time.time()
 
         try:
@@ -1775,8 +1791,8 @@ def run_hyperdrive(
                     f" in {elapsed:.3f} seconds"
                 )
 
-                # FIX 3: include job_output_path so the readme is written to
-                # the correct output directory, not the current working directory.
+                # Joined with job_output_path so the readme lands in the job's
+                # output directory rather than the current working directory.
                 readme_filename = os.path.join(job_output_path, f"{obsid_and_band}_hyperdrive_readme.txt")
                 write_readme_file(
                     readme_filename,
@@ -1991,7 +2007,7 @@ def count_slurm_asvo_jobs() -> int:
         return -1
 
     if not success:
-        logger.error("count_slurm_asvo_jobs() retured -1")
+        logger.error("count_slurm_asvo_jobs() returned -1")
         return -1
 
     return sum(1 for line in output.splitlines() if line.startswith("asvo"))
@@ -2017,7 +2033,7 @@ def estimate_birli_output_bytes(
     #
     # bytes_per_visibility comes from Birli
     #
-    # baselines = (tiles * tiles + 1)
+    # baselines = tiles * (tiles + 1) / 2  (autocorrelations included)
     # timesteps = duration / birli_int_time_res_sec
     # coarse_chans = 24
     # fine_channels = 30.72 MHz / birli_freq_res_khz
@@ -2182,7 +2198,7 @@ def get_file_description(filename: str) -> str:
         desc = "Full log output of the Hyperdrive run"
     elif "intercepts.png" in filename:
         desc = (
-            "Plots showing, for each reciever type and polarisation, a plot of the"
+            "Plots showing, for each receiver type and polarisation, a plot of the"
             " phase intercepts in polar coordinates vs cable length"
         )
     elif "phase_fits_xx.png" in filename:
@@ -2279,8 +2295,10 @@ def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_
     time, MIME type, and PNG dimensions where applicable), and returns a dict
     suitable for inclusion in the ``files`` list of an index.json file.
 
-    Only ``.png``, ``.tsv``, and ``.txt`` files are supported; all other
-    extensions return ``None``.
+    Only ``.png``, ``.tsv``, ``.txt`` and ``.fits`` files are supported; all
+    other extensions return ``None``. Of the ``.fits`` files, only those ending
+    ``solutions.fits`` or ``solutions.original.fits`` are accepted -- this
+    deliberately excludes the visibility and metafits FITS files.
 
     Args:
         filename: A str or Path representing the file to describe.

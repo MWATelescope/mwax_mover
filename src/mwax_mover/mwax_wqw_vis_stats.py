@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 
 
 class VisStatsProcessor(MWAXWatchQueueWorker):
+    """Runs visibility statistics, then routes files to archive or calibration.
+
+    Instantiated by MWAXSubfileDistributor. See the module docstring for detail.
+    """
+
     def __init__(
         self,
         metafits_path: str,
@@ -73,7 +78,10 @@ class VisStatsProcessor(MWAXWatchQueueWorker):
             item: Full path of the visibility FITS file to process.
 
         Returns:
-            True if file was successfully processed and routed.
+            True. NOTE: a failed mwax_stats run is deliberately tolerated -- it
+            is logged as a warning and the file is still routed onward, since
+            the statistics are a diagnostic aid rather than a precondition for
+            archiving.
         """
         logger.info(f"{item}: Started...")
 

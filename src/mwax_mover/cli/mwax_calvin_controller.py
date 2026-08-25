@@ -58,11 +58,13 @@ logger.addHandler(handler)
 
 
 class CalibrationRequest:
+    """One row of work read from the calibration_request table."""
+
     def __init__(self):
         """Initialize a CalibrationRequest instance.
 
         Stores information about a calibration request including observation ID,
-        request ID, and job type and if it is a bulk requyest.
+        request ID, and job type and if it is a bulk request.
         """
         self.obs_id: int = 0
         self.request_id: int = 0
@@ -234,6 +236,8 @@ class MWAXCalvinController:
         # we keep track of failures for each path
         @dataclass
         class UploadPathTracker:
+            """Per-path upload state, so one failing path does not stall the others."""
+
             plot_upload_path: str
             consecutive_failures: int = 0
             next_attempt_time: float = 0.0
@@ -801,7 +805,7 @@ class MWAXCalvinController:
                 # Submit job and add to the ones we are tracking
                 new_job = self.mwax_asvo_helper.submit_download_job(request_id, obs_id, bulk_request)
 
-                # We submmited a new MWA ASVO job, update the request table so we know we're on it!
+                # We submitted a new MWA ASVO job, update the request table so we know we're on it!
                 # Update database
                 try:
                     update_calsolution_request_submit_mwa_asvo_job_status(

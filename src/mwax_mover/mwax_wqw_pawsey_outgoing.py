@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 
 
 class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
+    """Validates and archives mwacache files to Pawsey Long-Term Storage.
+
+    Instantiated by MWACacheArchiveProcessor. See the module docstring for detail.
+    """
+
     def __init__(
         self,
         name: str,
@@ -117,7 +122,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
                 # with the item and it should not be requeued
                 return True
 
-            logger.debug(f"{item}: File size matches metadata. Checking md5sum... database")
+            logger.debug(f"{item}: File size matches metadata. Checking md5sum...")
 
             # Check md5sum
             actual_checksum = utils.do_checksum_md5(item, None, 600)

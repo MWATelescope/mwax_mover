@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 
 class MWAASVOJobState(Enum):
+    """The states an MWA ASVO job can be in, as reported by giant-squid."""
+
     Queued = "Queued"
     Waitcal = "WaitCal"
     Staging = "Staging"
@@ -219,7 +221,7 @@ class MWAASVOHelper:
             GiantSquidMWAASVOOutageException: If MWA ASVO is in an outage.
             GiantSquidException: If an error occurs during job submission.
         """
-        logger.info(f"{obs_id}: Submitting MWA ASVO job to dowload for request {request_id}")
+        logger.info(f"{obs_id}: Submitting MWA ASVO job to download for request {request_id}")
 
         try:
             stdout = run_giant_squid(

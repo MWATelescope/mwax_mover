@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 
 
 class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
+    """Checksums an incoming file, records it in the metadata DB, and routes it onward.
+
+    Instantiated by MWAXSubfileDistributor. See the module docstring for detail.
+    """
+
     def __init__(
         self,
         metafits_path: str,
@@ -106,12 +111,15 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
             val: Validated filename metadata including filetype_id and obs_id.
 
         Returns:
-            True if the file disappeared before or after DB insert.
-            False if the DB insert failed.
-            None if checksum and DB insert both succeeded and file still exists.
+            None if the checksum and DB insert both succeeded and the file still
+            exists -- i.e. None means SUCCESS and the caller should carry on.
+            True if the file disappeared before or after the DB insert; the
+            caller should stop and report success, as there is nothing left to
+            do with it.
+            False if the DB insert failed; the caller should report failure.
 
-        Raises:
-            FileNotFoundError: Caught and logged; returns True to continue processing.
+            (A FileNotFoundError while checksumming is caught here and reported
+            as True, not propagated.)
         """
         try:
             file_size = os.stat(item).st_size
