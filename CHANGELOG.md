@@ -4,6 +4,7 @@
 
 * Removed stale, unused code and dependencies.
 * Reformatted all of `src/` and `tests/` with `ruff format` at the configured 120 character line length. Many files had been formatted at 88 characters previously, so line wrapping was inconsistent across the codebase. No code changes: verified by comparing the AST of every file before and after. Also added a `[tool.ruff.format]` section to `pyproject.toml` recording the intended style, so this does not drift again.
+* Added a `ruff format` pre-commit hook (`.pre-commit-config.yaml`) so formatting stays consistent automatically rather than relying on remembering to run it. Enable it in a clone with `uv run pre-commit install`. The hook version is pinned deliberately, since `ruff format` output can change between ruff releases. `ruff check` is not part of the hook yet: the codebase still has ~90 outstanding lint findings, which would block commits to any file containing one.
 
 # 1.9.12 25-Aug-2026
 

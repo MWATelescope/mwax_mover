@@ -1,0 +1,42 @@
+# Pre-commit hooks for mwax_mover.
+#
+# One-time setup, per clone:
+#
+#     uv sync                 # installs pre-commit into the dev group
+#     uv run pre-commit install
+#
+# After that, `ruff format` runs automatically on every staged Python file.
+# If it reformats anything the commit is aborted so you can review the change
+# and `git add` it before committing again.
+#
+# To run against the whole repo without committing (e.g. the first time, or in
+# CI):
+#
+#     uv run pre-commit run --all-files
+#
+# To bypass the hook for a single commit:
+#
+#     git commit --no-verify
+#
+# NOTE: `rev` is pinned deliberately. `ruff format` output can change between
+# releases, so an unpinned hook would silently reformat the codebase whenever a
+# contributor happened to have a newer ruff. Bump this and the `ruff` dev
+# dependency in pyproject.toml together, and run
+# `uv run pre-commit run --all-files` in the same commit as the bump.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.4
+    hooks:
+      # Formatting only, for now. Line length and style come from the
+      # [tool.ruff] / [tool.ruff.format] sections of pyproject.toml, so this
+      # hook and a manual `ruff format src/ tests/` always agree.
+      - id: ruff-format
+
+      # `ruff check` is deliberately NOT enabled yet: the codebase currently
+      # has ~90 outstanding lint findings (mostly E501 on long string
+      # literals, which the formatter cannot split). Enabling it now would
+      # block commits to any file that still contains one. Add:
+      #
+      #   - id: ruff-check
+      #
+      # once `ruff check .` is clean.

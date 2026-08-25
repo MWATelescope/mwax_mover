@@ -38,6 +38,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "pre-commit",
     "pytest",
     "pytest-cov",
     "ruff>=0.16.1",
@@ -74,14 +75,16 @@ select = ["E", "F", "B"]
 
 [tool.ruff.format]
 # The whole of src/ and tests/ is kept formatted by `ruff format` at the
-# line-length above. Before committing, run:
+# line-length above. This is enforced automatically by the ruff-format
+# pre-commit hook (see .pre-commit-config.yaml); to set it up in a fresh
+# clone run:
+#
+#     uv run pre-commit install
+#
+# To format or check by hand:
 #
 #     ruff format src/ tests/
-#     ruff check src/ tests/
-#
-# and in CI (or as a pre-commit hook) use the non-mutating check:
-#
-#     ruff format --check src/ tests/
+#     ruff format --check src/ tests/     # non-mutating, for CI
 #
 # These are ruff's defaults, stated explicitly so the intended style is
 # recorded in the repo rather than being implicit in whatever ruff version
