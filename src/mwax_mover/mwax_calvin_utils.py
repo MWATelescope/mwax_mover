@@ -2419,20 +2419,140 @@ def export_calibration_solutions(solution_files: list[str], cal_export_path: str
         logger.debug(f"No files older than {cal_export_max_age_hours} hours found in {cal_export_path} to remove.")
 
 
-def upload_plot_files(job_output_path: str, upload_path: str):
-    """Move all the plots and stats to the plots dir and include the fit_id as a folder.
-    It's a nice to have, so if we fail, log it and move on
+STAGING_DIR_PREFIX = ".staging-"
+
+
+def get_staging_path(upload_path: str) -> str:
+    """Build the staging directory path used to assemble an upload directory.
 
     Args:
-        job_output_path: The location of all the plots,txt,tsv files for this fit
-        upload_path: Intended destination directory for the plots and stats files to go
+        upload_path: The final, published directory, e.g.
+            ``/data/calvin/plots/1768401673707300``.
 
     Returns:
-        Nothing
+        A sibling directory of *upload_path* prefixed with
+        ``STAGING_DIR_PREFIX``, e.g.
+        ``/data/calvin/plots/.staging-1768401673707300``. The dot prefix is what
+        the controller's upload thread uses to tell an in-progress directory
+        from a published one.
     """
+    base_path = os.path.dirname(upload_path)
+    fit_dir_name = os.path.basename(upload_path)
+    return os.path.join(base_path, f"{STAGING_DIR_PREFIX}{fit_dir_name}")
+
+
+def reap_orphaned_staging_dirs(base_path: str, max_age_hours: int = 24) -> list[str]:
+    """Delete staging directories left behind by a previous, crashed run.
+
+    ``upload_plot_files`` assembles each fit's files in a ``.staging-*``
+    directory and then publishes it with a single atomic rename. If the process
+    dies partway through, the staging directory is orphaned: nothing will ever
+    publish or consume it, so it must be cleaned up here.
+
+    Intended to be called once at processor startup. Only directories older
+    than *max_age_hours* are removed, so a staging directory belonging to a
+    concurrently-running job is never touched. The Slurm walltime for a Calvin
+    job is at most 10 hours (see create_sbatch_script), so the 24 hour default
+    is comfortably beyond the lifetime of any legitimate in-flight job.
+
+    Args:
+        base_path: The plot upload base directory to scan, e.g.
+            ``/data/calvin/plots``. Missing or non-directory paths are ignored.
+        max_age_hours: Only remove staging directories whose modification time
+            is at least this many hours in the past. Defaults to 24.
+
+    Returns:
+        A list of the staging directory paths that were successfully removed.
+    """
+    removed: list[str] = []
+
+    base = Path(base_path)
+    if not base.is_dir():
+        logger.debug(f"reap_orphaned_staging_dirs: {base_path} is not a directory. Nothing to do.")
+        return removed
+
+    cutoff_seconds = max_age_hours * 3600
+    now = time.time()
+
+    for entry in base.iterdir():
+        if not entry.name.startswith(STAGING_DIR_PREFIX):
+            continue
+
+        try:
+            if not entry.is_dir():
+                continue
+
+            age_seconds = now - entry.stat().st_mtime
+            if age_seconds < cutoff_seconds:
+                logger.info(
+                    f"reap_orphaned_staging_dirs: leaving {entry} alone"
+                    f" ({age_seconds / 3600:.1f}h old, threshold is {max_age_hours}h)"
+                )
+                continue
+
+            shutil.rmtree(entry)
+            removed.append(str(entry))
+            logger.warning(
+                f"reap_orphaned_staging_dirs: removed orphaned staging dir {entry}"
+                f" ({age_seconds / 3600:.1f}h old). Its plots were never published."
+            )
+        except Exception:
+            # One bad entry must not stop us reaping the rest
+            logger.exception(f"reap_orphaned_staging_dirs: could not remove {entry}. Ignoring.")
+
+    return removed
+
+
+def upload_plot_files(job_output_path: str, upload_path: str) -> bool:
+    """Assemble this fit's plots and stats in a staging dir, then publish atomically.
+
+    Files are gathered into a sibling ``.staging-<fit_id>`` directory and only
+    then renamed into place as *upload_path*. Directory rename is atomic within
+    a filesystem, so the controller's upload thread never observes a partially
+    populated fit directory -- it either does not exist yet, or it is complete.
+
+    This matters because the controller uploads and then deletes these
+    directories from a different host over a network filesystem. Any scheme
+    based on inferring completion (checking whether a directory is empty, or
+    comparing file/directory mtimes against a wall clock that belongs to
+    another machine) can delete a directory that is still being written to,
+    losing every plot for that fit. Publishing atomically removes the
+    possibility rather than narrowing the window.
+
+    Failures are logged and reported via the return value rather than raised:
+    the plots are a diagnostic aid, and losing them must not fail an otherwise
+    successful calibration.
+
+    Args:
+        job_output_path: The location of all the plots, txt, tsv files for this fit.
+        upload_path: Final destination directory for this fit's plots and stats,
+            conventionally ``<plot_upload_path>/<fit_id>``.
+
+    Returns:
+        True if the directory was published successfully, False otherwise.
+    """
+    staging_path = get_staging_path(upload_path)
+
     try:
-        # Create the dest dir
-        os.mkdir(upload_path)
+        # Refuse to overwrite an already-published fit. Checked before anything
+        # is moved, so a collision costs nothing: the files stay in
+        # job_output_path where they can be inspected or retried by hand.
+        if os.path.exists(upload_path):
+            logger.error(
+                f"upload_plot_files: {upload_path} already exists. Aborting without"
+                " uploading anything. The files remain in"
+                f" {job_output_path}. This needs manual investigation."
+            )
+            return False
+
+        # A staging dir surviving from a previous crashed attempt for this same
+        # fit contains nothing of value (it was never published), so start clean
+        # rather than merging stale files into this attempt.
+        if os.path.exists(staging_path):
+            logger.warning(f"upload_plot_files: removing stale staging dir {staging_path} before starting.")
+            shutil.rmtree(staging_path)
+
+        os.makedirs(staging_path)
 
         exts = [
             "*.png",
@@ -2446,7 +2566,7 @@ def upload_plot_files(job_output_path: str, upload_path: str):
             plot_files = glob.glob(os.path.join(job_output_path, ext))
             for file_no, pfile in enumerate(plot_files, start=1):
                 try:
-                    dest_filename = os.path.join(upload_path, os.path.basename(pfile))
+                    dest_filename = os.path.join(staging_path, os.path.basename(pfile))
 
                     # We want to keep the solutions on calvin servers so copy them, don't move them!
                     if ext in ["*_solutions.fits", "*_solutions.original.fits"]:
@@ -2457,9 +2577,21 @@ def upload_plot_files(job_output_path: str, upload_path: str):
                         shutil.move(pfile, dest_filename)
 
                 except Exception as e:
-                    logger.warning(f"Failed to move {pfile} to the {upload_path}. Error: {e!s}. Ignoring")
+                    logger.warning(f"Failed to move {pfile} to the {staging_path}. Error: {e!s}. Ignoring")
                     # keep going and try the next file
 
+        # Publish. os.replace() on a directory requires the target not to exist
+        # (or to be an empty directory), which the check above ensures. This is
+        # the point at which the controller becomes able to see the files.
+        os.replace(staging_path, upload_path)
+        logger.info(f"upload_plot_files: published {upload_path} for upload.")
+        return True
+
     except Exception as ee:
-        # Something went wrong- log it and keep going
-        logger.warning(f"Failed to move files to the {upload_path}. Error: {ee!s}. Ignoring")
+        # Something went wrong- log it and keep going. Deliberately leave the
+        # staging dir in place for inspection; reap_orphaned_staging_dirs will
+        # remove it on a later processor startup if it is genuinely abandoned.
+        logger.warning(
+            f"Failed to publish {upload_path} (staging dir {staging_path} left in place). Error: {ee!s}. Ignoring"
+        )
+        return False

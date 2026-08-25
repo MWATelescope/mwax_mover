@@ -2330,18 +2330,35 @@ def parse_rclone_stats(stderr: str) -> dict:
     return last_stats
 
 
-def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 120) -> tuple[int, int]:
+def rclone_move(
+    path: str,
+    profile: str,
+    bucket: str,
+    dest_subpath: str | None = None,
+    min_file_age_secs: int = 0,
+) -> tuple[int, int]:
     """Run rclone move for files in a directory to the S3 destination.
 
-    Uses --min-age to skip files that are too new, and --no-traverse for
-    efficiency on large buckets.
+    Uses --no-traverse for efficiency on large buckets.
 
     Args:
         path: Local directory path to move files from.
         profile: The rclone profile to use (see rclone.conf).
         bucket: Destination bucket name.
-        min_file_age_secs: Do not attempt to move any file which is newer than this many seconds.
-            This prevents moving files before they are finished being written.
+        dest_subpath: Optional path within the bucket to move into. Use this to
+            preserve a directory name that would otherwise be lost by moving the
+            directory's *contents* rather than the directory itself -- e.g. pass
+            the fit_id when moving ``<base>/<fit_id>`` so the objects land under
+            ``<bucket>/<fit_id>/`` and match the URLs written into index.json.
+        min_file_age_secs: Do not attempt to move any file which is newer than
+            this many seconds. Defaults to 0 (no age filter).
+
+            NOTE: this is not a safe way to detect "the writer has finished".
+            A file moved into ``path`` with os.rename keeps its original mtime,
+            so it can arrive already older than any threshold set here. Callers
+            that need completion detection should have the writer publish a
+            fully-populated directory atomically instead -- see
+            mwax_calvin_utils.upload_plot_files.
 
     Returns:
         tuple of transfers and bytes_transferred
@@ -2351,6 +2368,9 @@ def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 1
     """
 
     dest = f"{profile}:{bucket}"
+    if dest_subpath:
+        dest = f"{dest}/{dest_subpath}"
+
     cmd = [
         "rclone",
         "move",

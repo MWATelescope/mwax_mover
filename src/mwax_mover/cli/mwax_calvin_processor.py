@@ -38,6 +38,7 @@ from mwax_mover.mwax_calvin_utils import (
     CalvinJobType,
     estimate_birli_output_bytes,
     export_calibration_solutions,
+    reap_orphaned_staging_dirs,
     upload_plot_files,
 )
 from mwax_mover.mwax_db import (
@@ -193,6 +194,13 @@ class MWAXCalvinProcessor:
             if os.path.exists(self.temp_working_path):
                 logger.info(f"Cleaning old working path ({self.temp_working_path}/)")
                 shutil.rmtree(f"{self.temp_working_path}/")
+
+            # Clean up any .staging-* plot dirs orphaned by a previously crashed
+            # job on this host. This process is the only writer of those dirs, so
+            # it is the right place to reap them. Anything younger than the
+            # threshold is left alone so a concurrently running job is never
+            # affected.
+            reap_orphaned_staging_dirs(self.plot_upload_path)
 
             # creating database connection pool(s)
             logger.info("Starting database connection pool...")
@@ -398,16 +406,28 @@ class MWAXCalvinProcessor:
                         self.release_mwax_files()
 
                     # Try and generate an index file
-                    if mwax_calvin_utils.generate_plot_index_file(
+                    # NOTE: generate_plot_index_file returns a (success, index)
+                    # tuple. Unpack it- a bare `if` on the tuple is always True.
+                    index_success, _index = mwax_calvin_utils.generate_plot_index_file(
                         fit_id,
                         self.plot_front_end_url,
                         self.job_output_path,
                         os.path.join(self.job_output_path, "index.json"),
-                    ):
+                    )
+                    if index_success:
                         plot_upload_path = os.path.join(self.plot_upload_path, str(fit_id))
 
                         # Go and upload all the files (including the index)
-                        upload_plot_files(self.job_output_path, plot_upload_path)
+                        if not upload_plot_files(self.job_output_path, plot_upload_path):
+                            logger.warning(
+                                f"{self.obs_id}: could not publish plots to {plot_upload_path}."
+                                " Calibration itself succeeded; continuing."
+                            )
+                    else:
+                        logger.warning(
+                            f"{self.obs_id}: index.json generation failed, so plots were not"
+                            " published for upload. Calibration itself succeeded; continuing."
+                        )
 
                 else:
                     # We returned True (no unexpected errors occured)

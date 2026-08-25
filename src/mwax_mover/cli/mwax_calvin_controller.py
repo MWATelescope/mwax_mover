@@ -222,14 +222,23 @@ class MWAXCalvinController:
     def plot_upload_handler(self, stop_event: threading.Event) -> None:
         """Main loop for the background upload thread.
 
-        Iterates over all paths every UPLOAD_INTERVAL_SECS seconds, respecting
-        per-path exponential backoff on failure.
+        Every ``self.plot_upload_interval_secs`` seconds, walks each path in
+        ``self.plot_upload_paths`` looking for published fit directories, uploads
+        each one's contents to S3, and removes the directory once it is empty.
+        Per-path exponential backoff is applied on failure.
+
+        A directory is "published" if its name does not start with a dot.
+        ``mwax_calvin_utils.upload_plot_files`` assembles each fit in a
+        ``.staging-<fit_id>`` directory and publishes it with a single atomic
+        rename, so any directory we can see here is complete. That is what makes
+        it safe to delete: this thread runs on a different host to the processor
+        that writes these files, so there is no reliable way to *infer*
+        completion from emptiness or from mtimes set by another machine's clock.
+        Do not reintroduce such a check here.
 
         Args:
-            plot_upload_paths: List of local directory paths to upload from.
             stop_event: Threading event that signals the loop to exit cleanly.
         """
-        MIN_AGE_SECS = 60
 
         # we keep track of failures for each path
         @dataclass
@@ -262,40 +271,16 @@ class MWAXCalvinController:
 
                 if now < tracker.next_attempt_time:
                     remaining = tracker.next_attempt_time - now
-                    logger.debug(
-                        f"Skipping {tracker.plot_upload_path} — backoff active, {remaining:.1f}s remaining"
-                    )
+                    logger.debug(f"Skipping {tracker.plot_upload_path} — backoff active, {remaining:.1f}s remaining")
                     continue
 
                 try:
-                    utils.rclone_move(
-                        tracker.plot_upload_path,
-                        self.s3_profile,
-                        self.s3_bucket,
-                        min_file_age_secs=MIN_AGE_SECS,
-                    )
-
-                    # rclone move will leave behind empty dirs so clean them up
-                    # this will rmdir any empty subdirs of tracker.plot_upload_path which are older than 60 seconds
-                    # (This is to prevent removing a dir that a calvin_processor might be creating!)
-                    try:
-                        for path in sorted(
-                            Path(tracker.plot_upload_path).rglob("*"), reverse=True
-                        ):
-                            if (
-                                path.is_dir()
-                                and not any(path.iterdir())
-                                and time.time() - path.stat().st_mtime > 60
-                            ):
-                                path.rmdir()
-                    except Exception as e:
-                        logger.warning(
-                            f"Error clearing empty dirs under {tracker.plot_upload_path}. Error {e!s}"
-                        )
+                    self.upload_published_fit_dirs(tracker.plot_upload_path)
 
                     if tracker.consecutive_failures > 0:
                         logger.info(
-                            f"rclone move succeeded for {tracker.plot_upload_path} after {tracker.consecutive_failures} failure(s)",
+                            f"Upload succeeded for {tracker.plot_upload_path} "
+                            f"after {tracker.consecutive_failures} failure(s)",
                         )
                     tracker.consecutive_failures = 0
                     tracker.next_attempt_time = time.monotonic()
@@ -306,19 +291,75 @@ class MWAXCalvinController:
                     tracker.next_attempt_time = time.monotonic() + delay
 
                     logger.warning(
-                        f"rclone move failed for {tracker.plot_upload_path} (failure #{tracker.consecutive_failures}, retrying in {delay:.0f}s): {e.stderr.strip() if e.stderr else str(e)}"
+                        f"rclone move failed for {tracker.plot_upload_path} "
+                        f"(failure #{tracker.consecutive_failures}, retrying in {delay:.0f}s): "
+                        f"{e.stderr.strip() if e.stderr else str(e)}"
                     )
                 except Exception as e:
                     tracker.consecutive_failures += 1
                     delay = tracker.get_backoff_delay()
                     tracker.next_attempt_time = time.monotonic() + delay
                     logger.warning(
-                        f"Unexpected error uploading {tracker.plot_upload_path} (failure #{tracker.consecutive_failures}, retrying in {delay:.0f}s): {e}",
+                        f"Unexpected error uploading {tracker.plot_upload_path} "
+                        f"(failure #{tracker.consecutive_failures}, retrying in {delay:.0f}s): {e}",
                     )
 
             stop_event.wait(timeout=self.plot_upload_interval_secs)
 
         logger.debug("Plot upload thread completed successfully.")
+
+    def upload_published_fit_dirs(self, plot_upload_path: str) -> None:
+        """Upload every published fit directory under a base path, then remove it.
+
+        Each fit directory's contents are moved into ``<bucket>/<fit_dir_name>``
+        so the resulting object keys match the URLs written into that fit's
+        index.json by ``populate_index_json_entry``.
+
+        A directory is only removed after rclone reports success for it *and*
+        the directory is confirmed empty, so a partial upload leaves the
+        remaining files in place to be retried on the next pass.
+
+        Args:
+            plot_upload_path: Base directory containing published fit
+                directories, e.g. ``/shared/data/calvin11/calvin/plots``.
+
+        Raises:
+            subprocess.CalledProcessError: If rclone exits non-zero for any fit
+                directory. Propagated so the caller can apply backoff to this
+                whole path.
+        """
+        base = Path(plot_upload_path)
+        if not base.is_dir():
+            logger.warning(f"Plot upload path {plot_upload_path} does not exist or is not a directory. Skipping.")
+            return
+
+        for fit_dir in sorted(base.iterdir()):
+            # Skip staging dirs (and anything else hidden): these are still
+            # being written to by a calvin_processor. See upload_plot_files.
+            if fit_dir.name.startswith("."):
+                logger.debug(f"Skipping in-progress staging dir {fit_dir}")
+                continue
+
+            if not fit_dir.is_dir():
+                logger.warning(f"Unexpected file (not a directory) in {plot_upload_path}: {fit_dir}. Skipping.")
+                continue
+
+            transfers, bytes_moved = utils.rclone_move(
+                str(fit_dir),
+                self.s3_profile,
+                self.s3_bucket,
+                dest_subpath=fit_dir.name,
+            )
+            logger.info(f"Uploaded {transfers} file(s) ({bytes_moved / 1000.0:.1f} KB) from {fit_dir}")
+
+            # rclone move leaves the (now empty) source dir behind. Only remove
+            # it if it really is empty- if rclone skipped anything, we want to
+            # keep the dir so the next pass picks up the remainder.
+            try:
+                fit_dir.rmdir()
+                logger.debug(f"Removed uploaded fit dir {fit_dir}")
+            except OSError as e:
+                logger.warning(f"Not removing {fit_dir}: {e}. Will retry on the next pass.")
 
     def main_loop_handler(self):
         """Handle a single iteration of the main control loop.

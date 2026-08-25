@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.9.12 25-Aug-2026
+
+* calvin_controller: Fixed race condition bugs which can lead to some files not being uploaded or errors when dirs get removed before we're done. Implemented an atomic operaiton instead.
+
 # 1.9.11 25-Aug-2026
 
 * Removed developer specific paths and dependencies from unit tests.
