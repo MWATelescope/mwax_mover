@@ -125,6 +125,7 @@ def test_get_status_from_giant_squid_stdout_invalid():
             )
 
 
+@pytest.mark.integration
 def test_mwax_asvo_helper():
     asvo: MWAASVOHelper = MWAASVOHelper()
 

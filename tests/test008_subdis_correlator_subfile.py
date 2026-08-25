@@ -9,12 +9,16 @@ import signal
 import threading
 import time
 
-from tests_common import create_observation_subfiles, setup_test_directories
+from tests_common import (
+    create_observation_subfiles,
+    get_test_bin_dir,
+    render_test_config,
+    setup_test_directories,
+)
 from tests_fakedb import FakeMWAXDBHandler
 
 from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
 
-TEST_CONFIG_FILE = "tests/data/test008/test008.cfg"
 TEST_METAFITS = "tests/data/1369821496/1369821496_metafits.fits"
 
 
@@ -32,7 +36,7 @@ def test_correlator_config_file():
     # e.g. fake_db_handler.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
 
     # Call to read config <-- this is what we're testing!
-    sd.initialise(TEST_CONFIG_FILE, fake_db_handler)
+    sd.initialise(render_test_config("test008"), fake_db_handler)
 
     #
     # Now confirm the params all match the config file
@@ -59,7 +63,7 @@ def test_correlator_config_file():
     assert sd.cfg_corr_visdata_dont_archive_path == os.path.join(base_dir, "visdata/dont_archive")
     assert sd.cfg_corr_visdata_processing_stats_path == os.path.join(base_dir, "visdata/processing_stats")
     assert sd.cfg_corr_visdata_outgoing_path == os.path.join(base_dir, "visdata/outgoing")
-    assert sd.cfg_corr_mwax_stats_binary_dir == "../mwax_stats/target/release"
+    assert sd.cfg_corr_mwax_stats_binary_dir == get_test_bin_dir("test008")
 
     assert sd.cfg_corr_mwax_stats_dump_dir == os.path.join(base_dir, "vulcan/mwax_stats_dump")
     assert sd.cfg_corr_mwax_stats_timeout_sec == 600
@@ -91,7 +95,7 @@ def test_process_correlator_subfile():
     sd = MWAXSubfileDistributor()
 
     # Call to read config <-- this is what we're testing!
-    sd.initialise(TEST_CONFIG_FILE)
+    sd.initialise(render_test_config("test008"))
     # Override db_handler with a fake one
     sd.db_handler = FakeMWAXDBHandler()
     # Add any select results (in order in the code below-or keep commented if none)

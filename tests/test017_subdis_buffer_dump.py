@@ -10,13 +10,12 @@ import threading
 import time
 
 import requests
-from tests_common import create_observation_subfiles, setup_test_directories
+from tests_common import create_observation_subfiles, render_test_config, setup_test_directories
 from tests_fakedb import FakeMWAXDBHandler
 
 from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
 from mwax_mover.utils import running_under_pytest
 
-TEST_CONFIG_FILE = "tests/data/test017/test017.cfg"
 
 
 def test_running_under_pytest():
@@ -97,7 +96,7 @@ def do_buffer_dump(
     fakedb = FakeMWAXDBHandler()
 
     # Call to read config <-- this is what we're testing!
-    sd.initialise(TEST_CONFIG_FILE, fakedb)
+    sd.initialise(render_test_config("test017"), fakedb)
 
     # Override db_handler with a fake one
     sd.db_handler = FakeMWAXDBHandler()

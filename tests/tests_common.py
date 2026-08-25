@@ -1,26 +1,145 @@
 import os
 import shutil
+import tempfile
 import time
-from configparser import ConfigParser
 from pathlib import Path
 
-from mwax_mover.mwax_db import MWAXDBHandler
 from mwax_mover.utils import write_mock_subfile
 
+# Environment variable used to override where the tests create their scratch
+# directory tree. Set this in CI (or locally) to relocate the tree; if it is
+# not set, DEFAULT_TEST_BASE_DIR is used.
+TEST_BASE_DIR_ENV_VAR = "MWAX_MOVER_TEST_DIR"
 
-def setup_test_directories(
-    test_code: str, base_dir: str = "/home/gsleap/mwax_mover_testing"
-) -> str:
+# Default scratch location. Deliberately under the system temp dir rather than
+# a developer's home directory so the suite runs anywhere (including CI)
+# without per-machine configuration.
+DEFAULT_TEST_BASE_DIR = str(Path(tempfile.gettempdir()) / "mwax_mover_testing")
+
+# Tokens used in the tests/data/*/*.cfg template files. render_test_config()
+# substitutes these for real, per-test paths before the config is handed to a
+# processor's initialise() method.
+CONFIG_TOKEN_BASE_DIR = "@TEST_BASE_DIR@"
+CONFIG_TOKEN_BIN_DIR = "@TEST_BIN_DIR@"
+
+# Stub files created inside the per-test bin directory. The processors under
+# test only check that these paths exist (via os.path.exists) during
+# initialise(); nothing is ever executed or read, so empty files suffice.
+STUB_BIN_FILENAMES = (
+    "mwax_stats",
+    "giant-squid",
+    "birli",
+    "hyperdrive",
+    "srclist.txt",
+)
+
+
+def get_test_base_dir() -> str:
+    """Return the root directory the tests use for their scratch directory tree.
+
+    Returns:
+        The value of the ``MWAX_MOVER_TEST_DIR`` environment variable if it is
+        set and non-empty, otherwise ``DEFAULT_TEST_BASE_DIR``.
     """
-    Ensure all configured directories exist. If a directory already exists,
-    clear its contents (files/subdirectories) but keep the directory itself.
+    return os.environ.get(TEST_BASE_DIR_ENV_VAR) or DEFAULT_TEST_BASE_DIR
+
+
+def get_test_bin_dir(test_code: str) -> str:
+    """Return the stub binary directory for a given test.
+
+    Args:
+        test_code: Short test identifier, e.g. ``"test001"``.
+
+    Returns:
+        Full path to the test's stub binary directory (no trailing slash).
     """
+    return os.path.join(get_test_base_dir(), test_code, "bin")
+
+
+def render_test_config(test_code: str, cfg_filename: str | None = None) -> str:
+    """Render a test config template into the test's own scratch directory.
+
+    Reads ``tests/data/<test_code>/<cfg_filename>``, substitutes
+    ``CONFIG_TOKEN_BASE_DIR`` and ``CONFIG_TOKEN_BIN_DIR`` for this test's real
+    paths, and writes the result alongside the test's scratch directories. Also
+    creates the stub binary directory and the empty files named in
+    ``STUB_BIN_FILENAMES``, so the ``os.path.exists`` guards in each processor's
+    ``initialise()`` are satisfied without needing real Rust binaries or
+    sibling repository checkouts.
+
+    Call this *after* ``setup_test_directories()`` for the same ``test_code``,
+    since that function clears the directory tree this writes into.
+
+    Args:
+        test_code: Short test identifier, e.g. ``"test001"``.
+        cfg_filename: Name of the template config file within
+            ``tests/data/<test_code>/``. Defaults to ``"<test_code>.cfg"``.
+
+    Returns:
+        Full path to the rendered config file, ready to pass to an
+        ``initialise()`` method.
+
+    Raises:
+        FileNotFoundError: If the template config file does not exist.
+    """
+    if cfg_filename is None:
+        cfg_filename = f"{test_code}.cfg"
+
+    template_path = Path("tests") / "data" / test_code / cfg_filename
+    if not template_path.is_file():
+        raise FileNotFoundError(f"Test config template not found: {template_path}")
+
+    test_root = Path(get_test_base_dir()) / test_code
+    bin_dir = Path(get_test_bin_dir(test_code))
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    for stub_filename in STUB_BIN_FILENAMES:
+        (bin_dir / stub_filename).touch(exist_ok=True)
+
+    rendered = (
+        template_path.read_text(encoding="utf-8")
+        .replace(CONFIG_TOKEN_BASE_DIR, str(test_root))
+        .replace(CONFIG_TOKEN_BIN_DIR, str(bin_dir))
+    )
+
+    rendered_path = test_root / cfg_filename
+    rendered_path.parent.mkdir(parents=True, exist_ok=True)
+    rendered_path.write_text(rendered, encoding="utf-8")
+
+    return str(rendered_path)
+
+
+def setup_test_directories(test_code: str, base_dir: str | None = None) -> str:
+    """Create (or clear) the scratch directory tree used by a test.
+
+    Ensures every directory the test configs refer to exists. If a directory
+    already exists its contents are removed but the directory itself is kept.
+
+    Args:
+        test_code: Short test identifier, e.g. ``"test001"``. Used as the name
+            of this test's subdirectory so tests do not interfere with each
+            other.
+        base_dir: Root directory to create the tree under. Defaults to
+            ``get_test_base_dir()``.
+
+    Returns:
+        The test's base directory, with a trailing slash.
+
+    Raises:
+        ValueError: If a path resolves somewhere shallow enough to be
+            dangerous to clear.
+        NotADirectoryError: If one of the expected paths exists but is not a
+            directory.
+    """
+    if base_dir is None:
+        base_dir = get_test_base_dir()
+
     # The directories we create will be based on the test file name
-    # e.g. /data/mwax_mover_testing/test001
+    # e.g. /tmp/mwax_mover_testing/test001
     base = f"{base_dir}/{test_code}/"
 
     paths = [
         "/tmp",
+        "/bin",
         "/dev/shm/mwax",
         "/logs",
         "/logs/scripts",
@@ -91,46 +210,6 @@ def setup_test_directories(
             p.mkdir(parents=True, exist_ok=True)
 
     return base
-
-
-def get_test_db_handler():
-    #
-    # For these tests to work, please create a config file
-    # which has details to a local TEST database.
-    #
-    # FOR THE LOVE OF GOD DO NOT USE A PROD DATABASE!
-    #
-    config = ConfigParser()
-    config.read_file(open("tests/tests_common.cfg", "r", encoding="utf-8"))
-
-    host = config.get("test database", "host")
-    port = config.getint("test database", "port")
-    db_name = config.get("test database", "db")
-    user = config.get("test database", "user")
-    password = config.get("test database", "pass")
-
-    return MWAXDBHandler(host, port, db_name, user, password)
-
-
-def run_create_test_db_object_script(creation_sql_filename):
-    # Connect to test db, drop and then recreate the database objects
-    # expects:
-    # * db mwax_mover_test must already exist
-    # * Database name should NOT be "mwa" - just in case we accidently run this in prod!
-    # * Ditto for hostname- should be localhost - just in case!
-
-    test_db_handler = get_test_db_handler()
-    test_db_handler.start_database_pool()
-
-    assert test_db_handler.db_name == "mwax_mover_test"
-    assert test_db_handler.host == "localhost"
-
-    # Read script
-    with open(creation_sql_filename, "r") as file:
-        creation_sql_script = file.read()
-
-    with test_db_handler.pool.getconn() as conn:
-        conn.execute(creation_sql_script)
 
 
 def create_observation_subfiles(

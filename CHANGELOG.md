@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.9.11 25-Aug-2026
+
+* Removed developer specific paths and dependencies from unit tests.
+
 # 1.9.10 25-Aug-2026
 
 * update_calvin_plots_and_index: upgrade existing v1 to v2 to fix height and width swap of pngs

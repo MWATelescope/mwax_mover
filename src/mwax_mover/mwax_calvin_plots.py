@@ -57,8 +57,56 @@ from mwax_mover.mwax_hyperdrive_solutions import (
     HyperfitsSolutionGroup,
     TileFlagReason,
 )
+from mwax_mover.utils import running_under_pytest
 
 logger = logging.getLogger(__name__)
+
+
+# DPI used for every saved figure when running under pytest. Some of these
+# figures are physically large -- plot_phase_fits sizes itself from the tile
+# count and can reach 20x30 inches, which at the production 300 dpi is a
+# 6000x9000 (54 megapixel) PNG. Encoding those dominates the runtime of the
+# plotting tests (minutes per test) without testing anything the smaller
+# image doesn't: the tests assert on the presence, naming and content of the
+# output, never on its resolution. Production runs are unaffected.
+_PYTEST_PLOT_DPI = 40
+
+# Linear scale applied to figure dimensions (inches) when running under pytest.
+# Combined with _PYTEST_PLOT_DPI this shrinks the rendered raster substantially,
+# which matters most for the paged amplitude-outlier figures: those are sized
+# from the tile count and can reach 24x16 inches per page, and every page is
+# also re-rendered a second time by bbox_inches="tight".
+_PYTEST_PLOT_FIGSIZE_SCALE = 0.35
+
+
+def plot_dpi(production_dpi: int) -> int:
+    """Return the DPI to save a figure at, reduced when running under pytest.
+
+    Args:
+        production_dpi: The DPI to use in normal (non-test) operation.
+
+    Returns:
+        ``_PYTEST_PLOT_DPI`` when running under pytest, otherwise
+        ``production_dpi`` unchanged.
+    """
+    return _PYTEST_PLOT_DPI if running_under_pytest() else production_dpi
+
+
+def plot_figsize(width_inches: float, height_inches: float) -> tuple[float, float]:
+    """Scale a figure size down when running under pytest.
+
+    Args:
+        width_inches: Figure width in inches for normal (non-test) operation.
+        height_inches: Figure height in inches for normal (non-test) operation.
+
+    Returns:
+        The (width, height) tuple, scaled by ``_PYTEST_PLOT_FIGSIZE_SCALE``
+        when running under pytest, otherwise unchanged.
+    """
+    if not running_under_pytest():
+        return (width_inches, height_inches)
+    scale = _PYTEST_PLOT_FIGSIZE_SCALE
+    return (width_inches * scale, height_inches * scale)
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +289,7 @@ def plot_rx_lengths(flavor_fits, prefix, show, title):
         plt.show()
     if prefix:
         plt.tight_layout()
-        fig.savefig(f"{prefix}rx_lengths.png", dpi=300, bbox_inches="tight")
+        fig.savefig(f"{prefix}rx_lengths.png", dpi=plot_dpi(300), bbox_inches="tight")
 
     return means
 
@@ -262,7 +310,7 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fi
     """
     rxs = np.sort(np.unique(phase_fits_pivot["rx"]))
     slots = np.sort(np.unique(phase_fits_pivot["slot"]))
-    figsize = (np.clip(len(slots) * 2.5, 5, 20), np.clip(len(rxs) * 3, 5, 30))
+    figsize = plot_figsize(float(np.clip(len(slots) * 2.5, 5, 20)), float(np.clip(len(rxs) * 3, 5, 30)))
 
     for pol, soln in zip(["xx", "yy"], [soln_xx, soln_yy]):
         plt.clf()
@@ -333,7 +381,7 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fi
             plt.show()
         if prefix:
             plt.tight_layout()
-            fig.savefig(f"{prefix}phase_fits_{pol}.png", dpi=300, bbox_inches="tight")
+            fig.savefig(f"{prefix}phase_fits_{pol}.png", dpi=plot_dpi(300), bbox_inches="tight")
 
 
 def plot_phase_intercepts(prefix, show, title, flavor_fits):
@@ -376,7 +424,7 @@ def plot_phase_intercepts(prefix, show, title, flavor_fits):
         plt.show()
     if prefix:
         plt.tight_layout()
-        fig.savefig(f"{prefix}intercepts.png", dpi=300, bbox_inches="tight")
+        fig.savefig(f"{prefix}intercepts.png", dpi=plot_dpi(300), bbox_inches="tight")
 
 
 def plot_phase_residual(
@@ -571,7 +619,7 @@ def plot_phase_residual(
     if title:
         fig.suptitle(title)
         fig.subplots_adjust(top=0.95)
-    fig.savefig(f"{prefix}residual.png", dpi=200, bbox_inches="tight")
+    fig.savefig(f"{prefix}residual.png", dpi=plot_dpi(200), bbox_inches="tight")
     df.to_csv(f"{prefix}residual.tsv", sep="\t", index=False)
 
 
@@ -1052,7 +1100,9 @@ def _render_combined_gains_figure(
     n_plotted = len(tile_range)
     n_rows, n_tile_cols = _grid_shape(n_tiles)
     n_cols = n_tile_cols * 2
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 4 * n_rows), dpi=150, squeeze=False)
+    fig, axes = plt.subplots(
+        n_rows, n_cols, figsize=plot_figsize(6 * n_cols, 4 * n_rows), dpi=plot_dpi(150), squeeze=False
+    )
 
     for i, tile in enumerate(tile_range):
         row = i // n_tile_cols
@@ -1326,7 +1376,7 @@ def _render_and_save_combined_gains_page(
         fig = _render_combined_gains_figure(
             bundle, first_tile_index, n_tiles, pristine_jones, solution_file_will_be_modified
         )
-        fig.savefig(page_path, dpi=150, bbox_inches="tight")
+        fig.savefig(page_path, dpi=plot_dpi(150), bbox_inches="tight")
         plt.close(fig)
         return True, ""
     except Exception as exc:  # noqa: BLE001 -- reported to the caller, not raised in the worker

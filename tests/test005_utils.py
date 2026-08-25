@@ -15,6 +15,7 @@ from configparser import ConfigParser
 from pathlib import Path
 
 import pytest
+from tests_common import render_test_config
 
 from mwax_mover import utils, version
 from mwax_mover.utils import (
@@ -521,7 +522,7 @@ def test_config_get_list_valid():
     An empty string would result in and empty list []
     """
 
-    config_filename = os.path.join(os.getcwd(), "tests/data/test005/test005.cfg")
+    config_filename = render_test_config("test005")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
@@ -534,7 +535,7 @@ def test_config_get_list_valid():
 
 def test_config_get_bool_true():
 
-    config_filename = os.path.join(os.getcwd(), "tests/data/test005/test005.cfg")
+    config_filename = render_test_config("test005")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
@@ -545,7 +546,7 @@ def test_config_get_bool_true():
 
 def test_config_get_bool_false():
 
-    config_filename = os.path.join(os.getcwd(), "tests/data/test005/test005.cfg")
+    config_filename = render_test_config("test005")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
@@ -563,7 +564,7 @@ def test_config_get_list_empty():
     An empty string would result in and empty list []
     """
 
-    config_filename = os.path.join(os.getcwd(), "tests/data/test005/test005.cfg")
+    config_filename = render_test_config("test005")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
@@ -578,7 +579,7 @@ def test_config_get_optional_value():
     """Read an empty string from a config file and ensure it gets
     treated as None. Also test an non empty gets read right too"""
 
-    config_filename = os.path.join(os.getcwd(), "tests/data/test005/test005.cfg")
+    config_filename = render_test_config("test005")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
@@ -609,7 +610,7 @@ def test_config_get_optional_value_spaces_not_empty_string():
     """Read an empty string which has spaces in it from a config file and ensure it gets
     treated as None."""
 
-    config_filename = os.path.join(os.getcwd(), "tests/data/test005/test005.cfg")
+    config_filename = render_test_config("test005")
     config = ConfigParser()
     config.read_file(open(config_filename, "r", encoding="utf-8"))
 
@@ -620,6 +621,7 @@ def test_config_get_optional_value_spaces_not_empty_string():
     assert empty_return_val is None
 
 
+@pytest.mark.integration
 def test_download_metafits_file():
     """Test that we can download a metafits file by obsid
     from the web service"""
@@ -856,6 +858,7 @@ def test_should_project_be_archived():
     assert utils.should_project_be_archived("c123") is False
 
 
+@pytest.mark.integration
 def test_get_data_files_for_obsid_from_webservice_404():
 
     # Uknown obsid- raises exception
@@ -863,6 +866,7 @@ def test_get_data_files_for_obsid_from_webservice_404():
         utils.get_data_files_for_obsid_from_webservice(1234567890)
 
 
+@pytest.mark.integration
 def test_get_data_files_for_obsid_from_webservice_200():
 
     # Good obsid with 24 gpubox files and 1 flags and 1 metafits. Only return the 24 gpubox files
@@ -960,6 +964,7 @@ def test_delete_files_older_than():
     shutil.rmtree(test_path)
 
 
+@pytest.mark.integration
 def test_run_giant_squid():
     timeout_secs = 4
     path_to_binary = "../giant-squid/target/release/giant-squid"

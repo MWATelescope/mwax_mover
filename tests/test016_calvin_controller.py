@@ -21,7 +21,7 @@ def test_mwax_calvin_controller():
     mcal.hostname = "calvin99"
 
     # Determine config file location
-    config_filename = "tests/data/test016/test016.cfg"
+    config_filename = tests_common.render_test_config("test016")
 
     # Override db_handler with a fake one
     fake_db_handler = FakeMWAXDBHandler()
@@ -51,6 +51,6 @@ def test_mwax_calvin_controller():
     assert mcal.s3_profile == "mwa-calvin-s3"
     assert mcal.s3_bucket == "mwa_calvin_solutions"
     assert mcal.plot_upload_paths == [
-        "/home/gsleap/mwax_mover_testing/test016/shared/data/calvin11/plots",
-        "/home/gsleap/mwax_mover_testing/test016/shared/data/calvin12/plots",
+        os.path.join(base_dir, "shared/data/calvin11/plots"),
+        os.path.join(base_dir, "shared/data/calvin12/plots"),
     ]
