@@ -1,5 +1,112 @@
 # Changelog
 
+# 1.9.12 25-Aug-2026
+
+* calvin_controller: Fixed race condition bugs which can lead to some files not being uploaded or errors when dirs get removed before we're done. Implemented an atomic operaiton instead.
+
+# 1.9.11 25-Aug-2026
+
+* Removed developer specific paths and dependencies from unit tests.
+
+# 1.9.10 25-Aug-2026
+
+* update_calvin_plots_and_index: upgrade existing v1 to v2 to fix height and width swap of pngs
+
+# 1.9.9 24-Aug-2026
+
+* mwacache_archive: Reworked the ingest code to optimise the calls and speed it up, combined with haproxy.cfg changes to eliminate the wait we had before when dealing with different VSS servers not being in sync with each other.
+
+# 1.9.8 21-Aug-2026
+
+* update_calvin_plots_and_index: Fixed bug where a null fitid would cause the process to fail. When no max_gain specified for a fit, pass max-amp of 100 to Hyperdrive solutions-plot. Otherwise let Hyperdrive figure it out.
+
+# 1.9.7 21-Aug-2026
+
+* update_calvin_plots_and_index: Fixed bug where existing file entries were not updated in index.json.
+
+# 1.9.6 21-Aug-2026
+
+* update_calvin_plots_and_index: Fixed so solutions are copied to the upload dir, never moved. (We always keep them)
+
+# 1.9.5 21-Aug-2026
+
+* calvin_processor: correctly describe the original phase and amp plots from hyperdrive in index.json.
+
+# 1.9.4 21-Aug-2026
+
+* update_calvin_plots_and_index: fixed fit_id db column name being wrong when looking up fit_id.
+* calvin_processor: correcly indexes the solution FITS files now for index.json on the cal.mwatelescope.org index.json.
+
+# 1.9.3 20-Aug-2026
+
+* update_calvin_plots_and_index.py: Refactor to recursively find solutions from a root dir so the db connection can be shared when dealing with many solutions to process.
+* calvin_processor: Correclty insert `phase_outlier_nstd` into the calibration_fits table (instead of NULL)
+* calvin_processor: fixed `ensure_system_byte_order()` silently returning wrong values on genuinely byte-swapped input (e.g. real FITS data) -- it relabelled the dtype without actually swapping the bytes. Fixed via `.astype()`. The existing test didn't catch this since its fixture used `.view()`, which doesn't produce a real byte-swap; rewritten accordingly.
+* calvin_processor: removed a duplicate, independently broken copy of `ensure_system_byte_order()` in `plot_debug_phase_fits()` that used `ndarray.newbyteorder()` (removed in numpy 2.0, would crash on real byte-swapped input on the pinned numpy version). Not caught by tests since they mock this function out. Now uses the shared (fixed) implementation; added a regression test.
+* calvin_processor: fixed several stale docstrings found during review -- `nstd`/`phase_outlier_nstd` wrongly described as "beyond the population mean" (it's the robust median) in five places; `GainFitInfo`/`PhaseFitInfo` had no field docs, and `pol0`/`pol1` are polynomial coefficients, not polarisations, despite the name; a couple of functions listed a stale flagging-pipeline order; one docstring pointed to a since-renamed CALVIN.md section. No behaviour changes.
+* CALVIN.md: clarified Step 4's documented default MAD threshold (10.0) is the shipped config value, not the underlying function's own default (5.0).
+
+# 1.9.2 19-Aug-2026
+
+* calvin_processor: `{obs_id}_*_gain_outliers_tiles.png` -- the "{pct}% Good (n_good/n_total)" + per-channel-reason-breakdown summary introduced for Calvin-fully-flagged tiles now shows on every tile except one flagged structurally (metafits/TILES-HDU/BASELINES-HDU, which still has no per-channel data to break down). A clean tile shows "100% Good" with no second line, in black with no border colour change; a partially-flagged tile shows its actual good fraction and reason breakdown in orange, matching its border; a fully flagged tile (structural or Calvin-caused) still shows it in red. `_fully_flagged_channel_summary_text` renamed to `_channel_summary_text` to reflect this broader use.
+* calvin_processor: `{obs_id}_*_gain_outliers_tiles.png` -- a Calvin-fully-flagged tile's title now says "FULLY FLAGGED" too (it previously only said "gx/gy amplitude", without indicating fully-flagged status in the title itself; the structural-flag case already had this). Its top-centre message is also richer now: instead of the single-line reason text, it shows a "{pct}% Good (n_good/n_total)" line (the fraction of channels that were never individually flagged before whatever whole-tile promotion swept the rest into NaN too) followed by a breakdown of every distinct per-channel reason actually present, e.g. "100 NaN, 200 above gain cutoff, 22 outside 10 MAD" (using the actual mad_residual_threshold, not a hardcoded value). Structurally-flagged tiles (metafits/TILES-HDU/BASELINES-HDU) are unaffected -- there's no per-channel data to break down for those, so they keep their existing single-line message. `HyperfitsSolutionGroup` gained a `mad_residual_threshold` attribute (set by `flag_amplitude_outliers`), so this label reflects whatever threshold was actually used without needing it threaded through as a new parameter.
+
+* calvin_processor: reinstated `gain_max_cutoff` (config: `gains_cut_off_max`, default 100) as a real, absolute gain-amplitude sanity check -- previously accepted only for calibration_fits table provenance and never actually applied. Runs early in the flagging pipeline (right after enforce_whole_jones_nan, before amplitude-outlier flagging): any (tile, chanblock) entry whose gx or gy amplitude exceeds the cutoff is flagged (whole Jones NaN'd) with the new `ChannelFlagReason.GAIN_MAX_CUTOFF` bit. Catches a failure mode neither `hyperdrive`'s own per-chanblock convergence flag nor `flag_amplitude_outliers`'s per-tile fit can: a tile's solve diverging to a spurious-but-numerically-stable value (e.g. gain amplitudes of 1e10+) that hyperdrive still marks "converged," and that an amplitude fit adapts to (and hides within) rather than flagging. `HyperfitsSolutionGroup.run_flagging_pipeline()` gained a `gain_max_cutoff: float | None = 100.0` parameter; `cli/cal_utils.py` gained `--gain-max-cutoff`/`--no-gain-max-cutoff`.
+* calvin_processor: `{obs_id}_intercepts.png` and `{obs_id}_residual.png` now have a fixed, deterministic facet ordering -- rows alphabetical by receiver flavour, columns XX then YY -- instead of whatever order pandas/seaborn happened to produce.
+* calvin_processor: `detect_phase_outliers()` now runs *last* in `run_flagging_pipeline()` (after `flag_amplitude_outliers`/`flag_mostly_bad_tiles`, not third), so its result is the truly final, fully-cleaned state. `write_stats_and_debug_plots()` now reuses that result directly instead of recomputing an equally expensive second phase fit purely for reporting -- phase fitting isn't cheap (~2 minutes for a 256-tile observation in testing), so this was a real, not just theoretical, cost. `write_stats_and_debug_plots()`'s `phase_outlier_nstd` parameter now only affects the BEFORE table's annotation; pass the same value to both calls, or the BEFORE/AFTER sections will silently reflect two different thresholds.
+* CALVIN.md: Step 3 (gain-magnitude sanity cutoff) through Step 6 (phase-outlier detection, moved from Step 4) renumbered and reordered to match the corrected execution order; updated the DB parameters list and output-files table accordingly.
+* calvin_processor: `{obs_id}_residual.png`'s XX and YY columns now share the same y-axis scale (and therefore the same tick decimal formatting) within each receiver-flavour row, so the two polarisations are directly comparable at a glance. Different flavour rows are still independently scaled, since their typical residual magnitudes can genuinely differ. Previously every facet was independently auto-scaled (`sharey=False`), which could show visually different vertical scales for XX vs YY even for the same flavour.
+* calvin_processor: `{obs_id}_*_gain_outliers_tiles.png` now visually distinguishes gain-max-cutoff-flagged channels from ordinary amplitude outliers, and colour now tracks severity rather than which check caught a channel: orange for a partial (some-channels) flag, red reserved for a fully flagged tile/border. Amplitude outliers get a black 'x' marker; gain-cutoff divergences get a black '+' -- the two reasons are told apart by marker shape, not colour, since both now share the same orange shading/border when only some channels are affected. Previously amplitude outliers had no shading or marker distinction at all (just a generic black 'x'), and an earlier version of this same change (before release) used red/orange to distinguish the two reasons directly rather than severity -- changed again after review, since red-for-severity/orange-for-warning is a more intuitive convention than red-for-one-specific-check. Also fixed a pre-existing bug found while making this change: the page legend only ever sampled the first tile's two subplots for its entries, so labels like "flagged" (and now "gain cutoff") could silently be missing from the legend whenever that particular tile happened to be clean, regardless of other flagged tiles on the same page -- it now gathers from every subplot on the page, de-duplicated by label.
+* calvin_processor: `{obs_id}_*_gain_outliers_tiles.png` no longer hides a Calvin-fully-flagged tile's real data behind a placeholder panel. A tile fully flagged by Calvin itself (e.g. promoted via Step 5's mostly-bad-tile check) still has real pristine data, so it's now plotted normally (same styling as any other tile) with the flag reason overlaid as red text, top-centre, plus a red border -- rather than being hidden. Tiles flagged structurally before Calvin's own analysis ever ran (metafits/TILES-HDU/BASELINES-HDU -- these genuinely have no data, since apply_tile_flags() NaNs them immediately) still get a text-only placeholder, but that text is now also red and top-centre (previously black and vertically centred), and the panel now gets a red border too.
+* calvin_processor: three follow-up fixes to `{obs_id}_*_gain_outliers_tiles.png`: (1) the structurally-flagged placeholder's title now says "gx amplitude"/"gy amplitude" (it previously didn't distinguish the two subplots at all -- the Calvin-fully-flagged case already did, unaffected); (2) the black 'x' marker no longer marks every channel of a promoted tile -- only channels with their own genuine per-channel reason, since flag_mostly_bad_tiles NaNs every channel of a promoted tile regardless of whether that specific channel ever individually triggered anything, and marking innocent swept-in channels the same way as genuinely-caught ones was misleading; (3) removed the forced plain-notation y-axis formatting, so a subplot with very large values (e.g. a gain-cutoff divergence) now switches to scientific notation automatically instead of spelling out the full number, while normal-range subplots are unaffected. Checked empirically (not just by inspection) that the acceptance band already renders correctly with real, valid data whenever a promoted tile has at least one surviving channel for flag_amplitude_outliers to fit against -- it's only genuinely blank when the tile has zero valid channels left by that point, which is an inherent data limitation rather than something to paper over with a fabricated fallback.
+* calvin_processor: phase-outlier detection (renamed from `flag_phase_outliers` to `detect_phase_outliers`) no longer flags or modifies a tile's calibration solution -- permanent policy change, not a config toggle. Researchers wanted phase-outlier status visible for review without Calvin silently removing the affected tile's solution from the committed FITS file / database. The result is now report-only: shown in `{obs_id}_stats.txt`'s new `Flavor` and `PhOutlier` columns, and in the phase-fit debug plots. `TileFlagReason.PHASE_OUTLIER` is kept defined but is never set by the automatic pipeline anymore.
+* calvin_processor: added a shared `annotate_phase_outliers()` helper (mwax_calvin_utils.py) so `detect_phase_outliers`, the stats table, and the debug plots all use the exact same (pol, flavor)-scoped outlier definition and `phase_outlier_nstd` threshold. Previously the plotting path independently recomputed this with a hardcoded `nstd=3.0`, which could silently disagree with the actual configured threshold.
+* calvin_processor: `{obs_id}_stats.txt`'s per-tile table now includes the tile's receiver flavour (`Flavor` column, both BEFORE/AFTER sections).
+* calvin_processor: `{obs_id}_residual.png` now shades each receiver-flavour/polarisation facet with a band showing that group's phase-outlier reporting range, mirroring the existing amplitude/gain-outlier acceptance bands. `{obs_id}_intercepts.png` and `{obs_id}_rx_lengths.png` are unchanged.
+* calvin_processor: removed dead code from mwax_calvin_utils.py left over from the mwax_calvin_plots.py migration -- `debug_phase_fits`, `plot_rx_lengths`, `plot_phase_fits`, `plot_phase_intercepts`, `plot_phase_residual` were unused duplicates of functions already live in mwax_calvin_plots.py. Also removes the now-unused matplotlib/seaborn imports (and the `mpl.use("Agg")` backend-forcing call) that existed only to support them -- every other module importing mwax_calvin_utils.py no longer pays that import cost for nothing.
+* calvin_processor: phase-outlier flagging (`flag_phase_outliers`) now scopes its population-outlier threshold per receiver flavour (rx_type) as well as per polarisation, instead of pooling every flavour together. Different flavours (e.g. RRI/SHAO/NI) have measurably different natural chi2dof/sigma_resid distributions, so pooling let a numerically-dominant flavour's spread set a threshold too strict for a naturally-noisier minority flavour and too lenient for a naturally-tighter one. See CALVIN.md's "Phase-outlier flagging" section for a worked example. `reject_outliers()` gained a `group_cols` parameter (default `("pol",)`, preserving prior behaviour for any other callers) to support this.
+* calvin_processor: rename of db column name 'phase_outlier_tile_bad_channel_fraction' to 'tile_bad_channel_fraction' (same for config file).
+* calvin_processor: Fix to ensure unintended files don't get indexed as "miscellaneous files".
+
+# 1.9.1 18-Aug-2026
+
+* calvin_processor: fixed wrong db column name 'phase_outlier_tile_bad_channel_fraction'.
+
+# 1.9.0 18-Aug-2026
+
+* calvin_processor: huge refactor to consolidate all flagging, outlier detections, fitting and plotting
+* cal_utils: added missing "before" hyperdrive plots (was only ever generating "after" plots).
+* calvin_processor: Fixed bug where generate_hyperdrive_plots() always returned success even when hyperdrive failed.
+* calvin_processor: Renamed process_gain_fits to process_gain_fits_for_db.
+* calvin_processor: Suppressed extraneous warnings/log noise (redundant INFO logs, expected RuntimeWarning, scipy LineSearchWarning).
+* calvin_processor: Forced headless Agg matplotlib backend (was silently using an interactive backend).
+* cal_utils: Added --profile flag to cal_utils for performance profiling.
+* calvin_processor: Fixed major bug where fit_phase_line()'s optimizer was silently failing to refine phase fits on every input (finite-difference gradient issue); fixed by supplying an exact analytic gradient. ~3.8x faster phase fitting.
+* calvin_processor: Fixed sigma-clip threshold in fit_phase_line() (was comparing mismatched units by coincidence); replaced with robust median+MAD threshold.
+* calvin_processor: Vectorized amplitude-outlier flagging (iterative_poly_clip_batch) instead of per-tile fitting. ~1.5-2.6x faster.
+* calvin_processor: Parallelized per-page plot rendering across processes instead of one at a time.
+* calvin_processor: Overall pipeline wall time reduced from 549s to 197s (2.8x) on real data.
+* calvin_processor: Added phase_outlier_nstd in calvin_processor config file and db.
+
+# 1.8.1 12-Aug-2026
+
+* calvin_processor: Fixed bug where solutions files were not being added to the index.json.
+
+# 1.8.0 12-Aug-2026
+
+* calvin_processor: generate gain outlier fit & residual MAD outlier plots.
+* calvin_processor: read gain outlier config params from config file.
+* calvin_processor: save gain outlier config params from config file to database calibration_fits table.
+* calvin_processor: add digital gains to each tile in the TILE HDU of the hyperdrive solutions file(s) (for the beamformer).
+* calvin_processor: upload new gain outlier plots and the actual solutions (and the unmodified original if applicable) to s3.
+* calvin_processor: Added more info to solution quality txt file report.
+* calvin_processor: don't hardcode the gain plots from hyperdrive to a max of 5.
+* calvin_processor: don't delete ASVO download from Acacia (no longer needed- only was needed when I was processing a huge backlog).
+* Fixed formatting in many files (ruff).
+* Fixed broken tests.
+* mwax_subfile_distributor/subfile_processor: removed cli argument --mode which told mwax if it was intended to be runnning as bf or corr.
+* cal_utils: New cli tool. Now runs the same code as the real calvin_processor (post hyperdrive). NaN's outliers and generates outlier plots and hyperdrive stats and plots.
+
 # 1.7.30 5-Aug-2026
 
 * calvin_controller: handle "no obs locations" errors and don't fail the calibration_request.

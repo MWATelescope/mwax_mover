@@ -6,7 +6,6 @@ filterbank files produced by the MWAX beamformer into a single complete
 observation output file.
 """
 
-from typing import List
 import logging
 import os
 import re
@@ -104,13 +103,15 @@ def set_filterbank_key_value_int(header: bytearray, key: str, value: int) -> byt
         # The value we want to replace will be the next 4 bytes
         if key_bytes in cuml_bytes:
             start_idx = len(cuml_bytes)
-            header[start_idx : start_idx + 4] = value.to_bytes(4, "little", signed=False)
+            header[start_idx : start_idx + 4] = value.to_bytes(
+                4, "little", signed=False
+            )
             return header
 
     raise ValueError(f"Key {key} not found in filterbank file")
 
 
-def stitch_filterbank_files(files: List[str], output_dir: str) -> str:
+def stitch_filterbank_files(files: list[str], output_dir: str) -> str:
     """Concatenate multiple filterbank files into a single observation output file.
 
     Combines per-subobservation filterbank files produced by the MWAX beamformer
@@ -135,7 +136,9 @@ def stitch_filterbank_files(files: List[str], output_dir: str) -> str:
 
     if len(files) == 1:
         # Nothing to stitch but we still need the output_filename to be created, so copy the file
-        logger.debug(f"Only one filterbank file, no stiching needed: copying {files[0]} to {output_filename}")
+        logger.debug(
+            f"Only one filterbank file, no stiching needed: copying {files[0]} to {output_filename}"
+        )
         shutil.copyfile(files[0], output_filename)
         return output_filename
 
@@ -145,7 +148,7 @@ def stitch_filterbank_files(files: List[str], output_dir: str) -> str:
 
     # The first file header will be the one we will use
     first_header = bytearray()
-    all_data_start_indices: List[int] = []
+    all_data_start_indices: list[int] = []
 
     for filename in sorted_files:
         # Read each header and get the start index of data

@@ -8,12 +8,11 @@ import signal
 import threading
 import time
 
-from mwax_mover.utils import MWAXSubfileDistirbutorMode
-from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
-from tests_common import setup_test_directories
+from tests_common import render_test_config, setup_test_directories
 from tests_fakedb import FakeMWAXDBHandler
 
-TEST_CONFIG_FILE = "tests/data/test003/test003.cfg"
+from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
+
 TEST_METAFITS = "tests/data/1451758560/1451758560_metafits.fits"
 
 # Filterbank
@@ -40,7 +39,7 @@ def test_beamformer_archiver_fil():
     # Add any select results (in order in the code below-or keep commented if none)
     # e.g. fake_db_handler.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
 
-    sd.initialise(TEST_CONFIG_FILE, MWAXSubfileDistirbutorMode.BEAMFORMER, fake_db_handler)
+    sd.initialise(render_test_config("test003"), fake_db_handler)
     # Add any select results (in order in the code below-or keep commented if none)
     # e.g. sd.db_handler.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
 
@@ -56,7 +55,10 @@ def test_beamformer_archiver_fil():
     print("Beamformer files incoming!")
     for v in TEST_FIL:
         # Create the fil file
-        shutil.copyfile(v + ".fil", os.path.join(sd.cfg_bf_incoming_path, os.path.basename(v) + ".fil"))
+        shutil.copyfile(
+            v + ".fil",
+            os.path.join(sd.cfg_bf_incoming_path, os.path.basename(v) + ".fil"),
+        )
 
     #
     # NOTE! wsl does not support iNotify, so the only way to test is to put the test files in the incoming dirs

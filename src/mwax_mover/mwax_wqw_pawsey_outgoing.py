@@ -6,14 +6,13 @@ it to Acacia or Banksia via rclone, updates the MRO metadata database to record
 the archive location and bucket, then deletes the local copy.
 """
 
+import logging
 import os
 
-from mwax_mover import mwax_db
+from mwax_mover import mwa_archiver, mwax_db, mwax_mover, utils
 from mwax_mover.mwax_db import DataFileRow, MWAXDBHandler, get_data_file_row
-from mwax_mover import mwa_archiver, mwax_mover, utils
-from mwax_mover.utils import ArchiveLocation
 from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
-import logging
+from mwax_mover.utils import ArchiveLocation
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +89,9 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             logger.debug(f"{item}: file size on disk is {actual_file_size} bytes")
 
             # Lookup file from db
-            data_files_row: DataFileRow = get_data_file_row(self.remote_db_handler_object, item, val.obs_id)
+            data_files_row: DataFileRow = get_data_file_row(
+                self.remote_db_handler_object, item, val.obs_id
+            )
             database_file_size = data_files_row.size
 
             # Check for 0 size
@@ -113,14 +114,18 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
                 # with the item and it should not be requeued
                 return True
 
-            logger.debug(f"{item}: File size matches metadata. Checking md5sum... database")
+            logger.debug(
+                f"{item}: File size matches metadata. Checking md5sum... database"
+            )
 
             # Check md5sum
             actual_checksum = utils.do_checksum_md5(item, None, 600)
 
             # Compare
             if actual_checksum != data_files_row.checksum:
-                logger.warning(f"{item}: checksum {actual_checksum} does not match {data_files_row.checksum}.")
+                logger.warning(
+                    f"{item}: checksum {actual_checksum} does not match {data_files_row.checksum}."
+                )
                 return False
 
             logger.debug(f"{item}: md5 checksum matches")
@@ -146,7 +151,9 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
                     rclone_check_wait_secs=self.rclone_check_wait_secs,
                 )
             else:
-                raise NotImplementedError(f"Location {self.archive_to_location.value} not implemented")
+                raise NotImplementedError(
+                    f"Location {self.archive_to_location.value} not implemented"
+                )
 
             if archive_success:
                 # Update record in metadata database

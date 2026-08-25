@@ -9,22 +9,20 @@ also exposes a Flask web service for health reporting, archiving pause/resume, a
 calibration observation release.
 """
 
-from mwax_mover.mwax_db import MWAXDBHandler
-
 import argparse
-from configparser import ConfigParser
-import queue
+import glob
 import json
 import logging
-import glob
 import os
+import queue
 import random
+import shutil
 import signal
 import socket
 import sys
-import shutil
-import time
 import threading
+import time
+from configparser import ConfigParser
 
 from flask import Flask, request
 from werkzeug.serving import make_server
@@ -32,10 +30,13 @@ from werkzeug.serving import make_server
 from mwax_mover import (
     mwax_db,
     utils,
+    version,
 )
-from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker, MWAXWatchQueueWorker
-from typing import Optional
-from mwax_mover import version
+from mwax_mover.mwax_db import MWAXDBHandler
+from mwax_mover.mwax_watch_queue_worker import (
+    MWAXPriorityWatchQueueWorker,
+    MWAXWatchQueueWorker,
+)
 from mwax_mover.mwax_wqw_bf_stitching_processor import BfStitchingProcessor
 from mwax_mover.mwax_wqw_checksum_and_db import ChecksumAndDBProcessor
 from mwax_mover.mwax_wqw_outgoing import OutgoingProcessor
@@ -61,7 +62,6 @@ class MWAXSubfileDistributor:
         Sets up instance variables for configuration, workers, Flask web server,
         archiving, and database connections.
         """
-        self.subfile_dist_mode: utils.MWAXSubfileDistirbutorMode = utils.MWAXSubfileDistirbutorMode.UNKNOWN
 
         # Config parser
         self.config: ConfigParser
@@ -76,7 +76,7 @@ class MWAXSubfileDistributor:
 
         # Web server
         self.flask_app = Flask(__name__)
-        self.flask_thread: Optional[threading.Thread] = None
+        self.flask_thread: threading.Thread | None = None
         self.flask_server = None
 
         # This list helps us keep track of all the workers
@@ -171,41 +171,22 @@ class MWAXSubfileDistributor:
 
         parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
 
-        parser.add_argument(
-            "--mode",
-            choices=["c", "b", "C", "B"],
-            required=True,
-            help="Mode of operation: C (correlator) or B (beamformer)",
-        )
-
         args = vars(parser.parse_args())
 
         # Check that config file exists
         config_filename = args["cfg"]
 
-        # mode
-        config_mode: utils.MWAXSubfileDistirbutorMode = utils.MWAXSubfileDistirbutorMode.UNKNOWN
-        mode_str = ""
-        try:
-            mode_str = str(args["mode"])
-            config_mode: utils.MWAXSubfileDistirbutorMode = utils.MWAXSubfileDistirbutorMode(mode_str.upper())
-        except Exception:
-            print(f"--mode {mode_str} is not supported")
-            exit(-1)
-
-        self.initialise(config_filename, config_mode)
+        self.initialise(config_filename)
 
     def initialise(
         self,
         config_filename: str,
-        config_mode: utils.MWAXSubfileDistirbutorMode,
-        override_db_handler: Optional[MWAXDBHandler] = None,
+        override_db_handler: MWAXDBHandler | None = None,
     ):
         """Initialize the distributor from configuration file and mode.
 
         Args:
             config_filename: Path to the configuration file.
-            config_mode: Mode of operation (CORRELATOR or BEAMFORMER).
             override_db_handler: If present, this will override the default MWAXDBHandler (this is used for testing via tests/tests_fakedb.py FakeMWAXDBHandler). Defaults to None.
         """
         if not os.path.exists(config_filename):
@@ -217,23 +198,12 @@ class MWAXSubfileDistributor:
         self.config.read_file(open(config_filename, "r", encoding="utf-8"))
 
         # Read log level
-        config_file_log_level: Optional[str] = utils.read_optional_config(self.config, "mwax mover", "log_level")
+        config_file_log_level: str | None = utils.read_optional_config(self.config, "mwax mover", "log_level")
 
         if config_file_log_level:
             logger.setLevel(config_file_log_level)
 
         logger.info(f"Starting mwax_subfile_distributor processor...v{version.get_mwax_mover_version_string()}")
-
-        logger.info("==========================================================================================")
-
-        self.subfile_dist_mode = config_mode
-        if self.subfile_dist_mode == utils.MWAXSubfileDistirbutorMode.CORRELATOR:
-            logger.info("running in CORRELATOR mode: ignoring Beamforming observations")
-        elif self.subfile_dist_mode == utils.MWAXSubfileDistirbutorMode.BEAMFORMER:
-            logger.info("running in BEAMFORMER mode: ignoring VCS and Correlator observations")
-        else:
-            logger.warning(f"Incorrect mode: {self.subfile_dist_mode.value} exiting")
-            exit(2)
 
         logger.info("==========================================================================================")
 
@@ -606,13 +576,14 @@ class MWAXSubfileDistributor:
             self.cfg_always_keep_subfiles,
             self.cfg_corr_archive_destination_enabled,
             self.cfg_corr_metafits_path,
-            self.subfile_dist_mode,
         )
         self.workers.append(self.subfile_incoming_processor)
 
         if self.cfg_packet_stats_destination_dir != "" and self.cfg_packet_stats_dump_dir != "":
             packet_stats_worker = PacketStatsProcessor(
-                self.cfg_packet_stats_dump_dir, ".dat", self.cfg_packet_stats_destination_dir
+                self.cfg_packet_stats_dump_dir,
+                ".dat",
+                self.cfg_packet_stats_destination_dir,
             )
             self.workers.append(packet_stats_worker)
 
@@ -694,7 +665,9 @@ class MWAXSubfileDistributor:
             #   Add to the outgoing cal list so that when release_cal_obs is called by calvin, we can remove the file from the list and archive the file
             #
             self.vis_cal_outgoing_processor = VisCalOutgoingProcessor(
-                self.cfg_corr_calibrator_outgoing_path, self.outgoing_cal_list, self.outgoing_cal_list_lock
+                self.cfg_corr_calibrator_outgoing_path,
+                self.outgoing_cal_list,
+                self.outgoing_cal_list_lock,
             )
             self.workers.append(self.vis_cal_outgoing_processor)
 
@@ -755,21 +728,24 @@ class MWAXSubfileDistributor:
                             # Send to vis_outgoing
                             # Take the input filename - strip the path, then append the output path
                             outgoing_filename = os.path.join(
-                                self.cfg_corr_visdata_outgoing_path, os.path.basename(item)
+                                self.cfg_corr_visdata_outgoing_path,
+                                os.path.basename(item),
                             )
                             logger.debug(f"{obs_id}- moving {item} to outgoing vis dir")
                             os.rename(item, outgoing_filename)
                         else:
                             # No this project doesn't get archived
                             outgoing_filename = os.path.join(
-                                self.cfg_corr_visdata_dont_archive_path, os.path.basename(item)
+                                self.cfg_corr_visdata_dont_archive_path,
+                                os.path.basename(item),
                             )
                             logger.debug(f"{item}- moving file to {self.cfg_corr_visdata_dont_archive_path}")
                             os.rename(item, outgoing_filename)
                     else:
                         # This host is not doing any archiving
                         outgoing_filename = os.path.join(
-                            self.cfg_corr_visdata_dont_archive_path, os.path.basename(item)
+                            self.cfg_corr_visdata_dont_archive_path,
+                            os.path.basename(item),
                         )
                         logger.debug(f"{item}- moving file to {self.cfg_corr_visdata_dont_archive_path}")
                         os.rename(item, outgoing_filename)
@@ -855,7 +831,7 @@ class MWAXSubfileDistributor:
                     raise ValueError(f"obs_id {obs_id} passed to release_cal_obs() is not an int")
 
         except Exception as ws_exception:
-            return f"ERROR: {ws_exception}".encode("utf-8"), 500
+            return f"ERROR: {ws_exception}".encode(), 500
 
     def endpoint_dump_voltages(self):
         """Web service endpoint to request voltage buffer dump.
@@ -913,13 +889,16 @@ class MWAXSubfileDistributor:
                         return b"Failed to start Voltage Buffer Dump", 400
                 else:
                     # Reject this request
-                    return b"Voltage Buffer Dump already in progress. Request canceled.", 400
+                    return (
+                        b"Voltage Buffer Dump already in progress. Request canceled.",
+                        400,
+                    )
 
         except ValueError as parameters_exception:  # pylint: disable=broad-except
-            return f"Value Error: {parameters_exception}".encode("utf-8"), 400
+            return f"Value Error: {parameters_exception}".encode(), 400
 
         except Exception as dump_voltages_exception:  # pylint: disable=broad-except
-            return f"ERROR: {dump_voltages_exception}".encode("utf-8"), 500
+            return f"ERROR: {dump_voltages_exception}".encode(), 500
 
     def dump_voltages(self, start_gps_time: int, end_gps_time: int, trigger_id: int) -> bool:
         """Dump voltage buffer subfiles from shared memory to disk.
@@ -940,7 +919,7 @@ class MWAXSubfileDistributor:
         self.dump_end_gps = end_gps_time
         self.dump_trigger_id = trigger_id
 
-        logger.info(f"dump_voltages: from {str(start_gps_time)} to {str(end_gps_time)} for trigger {trigger_id}...")
+        logger.info(f"dump_voltages: from {start_gps_time!s} to {end_gps_time!s} for trigger {trigger_id}...")
 
         # Look for any .free files which have the first 10 characters of
         # filename from starttime to endtime
@@ -1043,7 +1022,7 @@ class MWAXSubfileDistributor:
             "version": version.get_mwax_mover_version_string(),
             "host": self.hostname,
             "running": self.running,
-            "mode": self.subfile_dist_mode.value,
+            "mode": self.subfile_incoming_processor.current_subfile_mode,
             "archiving": self.cfg_corr_archive_destination_enabled,
             "cmdline": " ".join(sys.argv[1:]),
         }
@@ -1080,7 +1059,7 @@ class MWAXSubfileDistributor:
             self.start_flask_web_server()
         except Exception:
             logger.exception("Unable to start web server. Exiting")
-            exit(1)
+            sys.exit(1)
 
         # creating database connection pool(s)
         logger.info("Starting database connection pool...")
@@ -1157,16 +1136,28 @@ class MWAXSubfileDistributor:
         self.flask_app.add_url_rule("/shutdown", "shutdown", self.endpoint_shutdown, methods=["POST", "GET"])
         self.flask_app.add_url_rule("/status", "status", self.endpoint_status, methods=["GET"])
         self.flask_app.add_url_rule(
-            "/pause_archiving", "pause_archiving", self.endpoint_pause_archiving, methods=["POST", "GET"]
+            "/pause_archiving",
+            "pause_archiving",
+            self.endpoint_pause_archiving,
+            methods=["POST", "GET"],
         )
         self.flask_app.add_url_rule(
-            "/resume_archiving", "resume_archiving", self.endpoint_resume_archiving, methods=["POST", "GET"]
+            "/resume_archiving",
+            "resume_archiving",
+            self.endpoint_resume_archiving,
+            methods=["POST", "GET"],
         )
         self.flask_app.add_url_rule(
-            "/release_cal_obs", "release_cal_obs", self.endpoint_release_cal_obs, methods=["POST", "GET"]
+            "/release_cal_obs",
+            "release_cal_obs",
+            self.endpoint_release_cal_obs,
+            methods=["POST", "GET"],
         )
         self.flask_app.add_url_rule(
-            "/dump_voltages", "dump_voltages", self.endpoint_dump_voltages, methods=["POST", "GET"]
+            "/dump_voltages",
+            "dump_voltages",
+            self.endpoint_dump_voltages,
+            methods=["POST", "GET"],
         )
 
         host = "0.0.0.0"

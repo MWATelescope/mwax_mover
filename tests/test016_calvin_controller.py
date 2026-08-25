@@ -1,8 +1,10 @@
 import logging
 import os
-from mwax_mover.cli.mwax_calvin_controller import MWAXCalvinController
+
 import tests_common
 from tests_fakedb import FakeMWAXDBHandler
+
+from mwax_mover.cli.mwax_calvin_controller import MWAXCalvinController
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +21,7 @@ def test_mwax_calvin_controller():
     mcal.hostname = "calvin99"
 
     # Determine config file location
-    config_filename = "tests/data/test016/test016.cfg"
+    config_filename = tests_common.render_test_config("test016")
 
     # Override db_handler with a fake one
     fake_db_handler = FakeMWAXDBHandler()
@@ -41,7 +43,7 @@ def test_mwax_calvin_controller():
         f"log path mismatch: {mcal.log_path} {os.path.join(base_dir, 'logs')}"
     )
 
-    assert mcal.health_multicast_interface_name == "eth2"
+    assert mcal.health_multicast_interface_name == "lo"
     assert mcal.health_multicast_ip == "127.0.0.1"
     assert mcal.health_multicast_port == 8012
     assert mcal.health_multicast_hops == 1
@@ -49,6 +51,6 @@ def test_mwax_calvin_controller():
     assert mcal.s3_profile == "mwa-calvin-s3"
     assert mcal.s3_bucket == "mwa_calvin_solutions"
     assert mcal.plot_upload_paths == [
-        "/home/gsleap/mwax_mover_testing/test016/shared/data/calvin11/plots",
-        "/home/gsleap/mwax_mover_testing/test016/shared/data/calvin12/plots",
+        os.path.join(base_dir, "shared/data/calvin11/plots"),
+        os.path.join(base_dir, "shared/data/calvin12/plots"),
     ]

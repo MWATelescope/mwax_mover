@@ -8,20 +8,21 @@ record insertion, calibration request management, and archive status updates.
 
 import datetime
 import logging
-import os
 import math
+import os
 import time
-from typing import Optional, Tuple
+
 import psycopg
 import psycopg.errors
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 from tenacity import (
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_fixed,
-    retry_if_exception_type,
 )
+
 from mwax_mover.utils import ArchiveLocation
 
 logger = logging.getLogger(__name__)
@@ -30,14 +31,7 @@ logger = logging.getLogger(__name__)
 class MWAXDBHandler:
     """Class which takes care of the primitive database functions"""
 
-    def __init__(
-        self,
-        host: str,
-        port: int,
-        db_name,
-        user: str,
-        password: str,
-    ):
+    def __init__(self, host: str, port: int, db_name, user: str, password: str, ssl_mode: str | None = None):
         """Initialize the MWAXDBHandler with database connection parameters.
 
         Args:
@@ -46,6 +40,7 @@ class MWAXDBHandler:
             db_name: The database name.
             user: The database user.
             password: The database password.
+            ssl_mode: The suffix for ssl e.g. '?sslmode=require' or None to not specify
         """
         self.host = host
         self.port = port
@@ -59,7 +54,7 @@ class MWAXDBHandler:
                 max_size=3,
                 open=False,
                 check=ConnectionPool.check_connection,
-                conninfo=f"postgresql://{user}:{password}@{host}:{port}/{db_name}",
+                conninfo=f"postgresql://{user}:{password}@{host}:{port}/{db_name}{'' if ssl_mode is None else ssl_mode}",
             )
 
     def close(self):
@@ -152,28 +147,30 @@ class MWAXDBHandler:
         """
         # Assuming we have a connection, try to do the database operation
         try:
-            with self.pool.connection() as conn:
-                with conn.cursor(row_factory=dict_row) as cursor:
-                    # Run the sql
-                    cursor.execute(sql, parm_list)
+            with (
+                self.pool.connection() as conn,
+                conn.cursor(row_factory=dict_row) as cursor,
+            ):
+                # Run the sql
+                cursor.execute(sql, parm_list)
 
-                    # Fetch results as a list of tuples
-                    rows = cursor.fetchall()
+                # Fetch results as a list of tuples
+                rows = cursor.fetchall()
 
-                    # Check how many rows we affected
-                    rows_affected = len(rows)
+                # Check how many rows we affected
+                rows_affected = len(rows)
 
-                    if expected_rows:
-                        # if we passed in how many rows we were expecting, check it!
-                        if expected_rows == rows_affected:
-                            return rows
-                        else:
-                            # Something went wrong
-                            logger.error(f"Error- queried {rows_affected} rows, expected 1. SQL={sql}")
-                            raise Exception(f"Error- queried {rows_affected} rows, expected 1. SQL={sql}")
-                    else:
-                        # We don't know how many rows, so cool, return them
+                if expected_rows:
+                    # if we passed in how many rows we were expecting, check it!
+                    if expected_rows == rows_affected:
                         return rows
+                    else:
+                        # Something went wrong
+                        logger.error(f"Error- queried {rows_affected} rows, expected 1. SQL={sql}")
+                        raise Exception(f"Error- queried {rows_affected} rows, expected 1. SQL={sql}")
+                else:
+                    # We don't know how many rows, so cool, return them
+                    return rows
 
         except Exception:
             logger.exception("postgres exception")
@@ -239,25 +236,22 @@ class MWAXDBHandler:
 
         # Assuming we have a connection, try to do the database operation
         try:
-            with self.pool.connection() as conn:
-                with conn.cursor() as cursor:
-                    # Run the sql
-                    cursor.execute(sql, parm_list)
-                    conn.commit()
+            with self.pool.connection() as conn, conn.cursor() as cursor:
+                # Run the sql
+                cursor.execute(sql, parm_list)
+                conn.commit()
 
-                    # Check how many rows we affected
-                    rows_affected = cursor.rowcount
+                # Check how many rows we affected
+                rows_affected = cursor.rowcount
 
-                    if expected_rows:
-                        if rows_affected != expected_rows:
-                            # An exception in here will trigger a rollback
-                            # which is good
-                            logger.error(
-                                f"Error- query affected {rows_affected} rows, expected {expected_rows}. SQL={sql}"
-                            )
-                            raise Exception(
-                                f"Error- query affected {rows_affected} rows, expected {expected_rows}. SQL={sql}"
-                            )
+                if expected_rows:
+                    if rows_affected != expected_rows:
+                        # An exception in here will trigger a rollback
+                        # which is good
+                        logger.error(f"Error- query affected {rows_affected} rows, expected {expected_rows}. SQL={sql}")
+                        raise Exception(
+                            f"Error- query affected {rows_affected} rows, expected {expected_rows}. SQL={sql}"
+                        )
 
         except psycopg.errors.ForeignKeyViolation:
             # Trying to insert or update but a value of a field violates the FK constraint-
@@ -454,7 +448,7 @@ def update_data_file_row_as_archived(
     archive_filename: str,
     location: ArchiveLocation,
     bucket: str,
-    folder: Optional[str],
+    folder: str | None,
 ) -> bool:
     """Updates a data_files row as archived (at Pawsey)"""
     # Prepare the fields
@@ -527,28 +521,32 @@ def insert_calibration_request_row(
 
 def insert_calibration_fits_row(
     db_handler_object,
-    transaction_cursor: Optional[psycopg.Cursor],
+    transaction_cursor: psycopg.Cursor | None,
     obs_id: int,
     code_version: str,
     creator: str,
     fit_niter: int,
-    fit_limit: Optional[int],
+    fit_limit: int | None,
     source_list: str,
     num_sources: int,
     calibration_command: str,
-    gain_max_cutoff: Optional[float],
-) -> Tuple[bool, int | None]:
+    gain_max_cutoff: float | None,
+    gain_outlier_poly_degree: int | None,
+    gain_outlier_mad_residual_threshold: float | None,
+    gain_outlier_modify_gains: bool | None,
+    tile_bad_channel_fraction: float | None = None,
+    phase_outlier_nstd_threshold: float | None = None,
+) -> tuple[bool, int | None]:
     """Inserts a new calibration_fits row and return the fit_id if successful
     This row represents the calibration 'header' for an obsid.
 
         Returns:
             Success (bool), fit_id (int or None)
     """
-
     sql = (
         "INSERT INTO calibration_fits"
-        " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit,source_list,num_sources,calibration_command,gain_max_cutoff)"
-        " VALUES (%s,%s,%s,now(),%s,%s,%s,%s,%s,%s,%s);"
+        " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit,source_list,num_sources,calibration_command,gain_max_cutoff,gain_outlier_poly_degree,gain_outlier_mad_residual_threshold,gain_outlier_modify_gains,tile_bad_channel_fraction,phase_outlier_nstd_threshold)"
+        " VALUES (%s,%s,%s,now(),%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
     )
 
     # Fit ID is the Unix timestamp multiplied by 10**6 so it's an int
@@ -565,6 +563,11 @@ def insert_calibration_fits_row(
         num_sources,
         calibration_command,
         gain_max_cutoff,
+        gain_outlier_poly_degree,
+        gain_outlier_mad_residual_threshold,
+        gain_outlier_modify_gains,
+        tile_bad_channel_fraction,
+        phase_outlier_nstd_threshold,
     )
 
     try:
@@ -674,7 +677,7 @@ def insert_calibration_solutions_row(
         return False
 
 
-def get_unattempted_unrequested_cal_obsids(db_handler_object: MWAXDBHandler, oldest_obs_id: int) -> Optional[list[int]]:
+def get_unattempted_unrequested_cal_obsids(db_handler_object: MWAXDBHandler, oldest_obs_id: int) -> list[int] | None:
     # This SQL gets all calibrator obs which have not yet been calibrated and
     # have not had a cal request added yet
     sql = """SELECT m.starttime as obs_id
@@ -716,7 +719,9 @@ def get_unattempted_unrequested_cal_obsids(db_handler_object: MWAXDBHandler, old
 #
 # Calvin controller
 #
-def get_unattempted_calibration_requests(db_handler_object: MWAXDBHandler) -> list[Tuple[int, int, bool, bool]] | None:
+def get_unattempted_calibration_requests(
+    db_handler_object: MWAXDBHandler,
+) -> list[tuple[int, int, bool, bool]] | None:
     """Returns the deatils of the next oldest unattempted calibration_requests.
 
     Parameters:
@@ -779,7 +784,7 @@ def get_unattempted_calibration_requests(db_handler_object: MWAXDBHandler) -> li
     -- Always ensure bulk requests are sorted last for non-realtime
     ORDER BY c.bulk_request, c.request_added_datetime"""
 
-    return_list: list[Tuple[int, int, bool, bool]] = []
+    return_list: list[tuple[int, int, bool, bool]] = []
 
     try:
         # Get the next request, if any
@@ -811,10 +816,10 @@ def get_unattempted_calibration_requests(db_handler_object: MWAXDBHandler) -> li
 def update_calsolution_request_submit_mwa_asvo_job_status(
     db_handler_object: MWAXDBHandler,
     request_ids: list[int],
-    mwa_asvo_job_id: Optional[int],
-    mwa_asvo_job_submitted_datetime: Optional[datetime.datetime],
-    mwa_asvo_job_submitted_error_datetime: Optional[datetime.datetime],
-    mwa_asvo_job_submitted_error_message: Optional[str],
+    mwa_asvo_job_id: int | None,
+    mwa_asvo_job_submitted_datetime: datetime.datetime | None,
+    mwa_asvo_job_submitted_error_datetime: datetime.datetime | None,
+    mwa_asvo_job_submitted_error_message: str | None,
 ):
     """Update a calibration_request request with status info regarding the MWA ASVO job submitted.
 
@@ -860,10 +865,10 @@ def update_calsolution_request_submit_mwa_asvo_job_status(
 def update_calibration_request_slurm_status(
     db_handler_object: MWAXDBHandler,
     request_ids: list[int],
-    slurm_job_id: Optional[int],
-    slurm_job_submitted_datetime: Optional[datetime.datetime],
-    slurm_job_submitted_error_datetime: Optional[datetime.datetime],
-    slurm_job_submitted_error_message: Optional[str],
+    slurm_job_id: int | None,
+    slurm_job_submitted_datetime: datetime.datetime | None,
+    slurm_job_submitted_error_datetime: datetime.datetime | None,
+    slurm_job_submitted_error_message: str | None,
 ):
     sql = """
     UPDATE public.calibration_request
@@ -900,7 +905,7 @@ def update_calibration_request_slurm_status(
 #
 def update_calsolution_request_download_complete_status(
     db_handler_object: MWAXDBHandler,
-    slurm_job_id: Optional[int],
+    slurm_job_id: int | None,
     request_ids: list[int],
     download_completed_datetime: datetime.datetime | None,
     download_error_datetime: datetime.datetime | None,
@@ -929,10 +934,20 @@ def update_calsolution_request_download_complete_status(
 
     if slurm_job_id:
         sql = f"{sql} slurm_job_id = %s"
-        params = [download_completed_datetime, download_error_datetime, download_error_message, slurm_job_id]
+        params = [
+            download_completed_datetime,
+            download_error_datetime,
+            download_error_message,
+            slurm_job_id,
+        ]
     else:
         sql = f"{sql} id = ANY(%s)"
-        params = [download_completed_datetime, download_error_datetime, download_error_message, request_ids]
+        params = [
+            download_completed_datetime,
+            download_error_datetime,
+            download_error_message,
+            request_ids,
+        ]
 
     # check for validity, raise exception if not valid
     if (
@@ -975,7 +990,12 @@ def update_calibration_request_assign_hostname_start_download(
     WHERE
     slurm_job_id = %s"""
 
-    params = [slurm_hostname, download_started_datetime, download_started_datetime, slurm_job_id]
+    params = [
+        slurm_hostname,
+        download_started_datetime,
+        download_started_datetime,
+        slurm_job_id,
+    ]
 
     try:
         # Update the row
@@ -1024,7 +1044,11 @@ def update_calsolution_request_calibration_started_status(
     params = []
 
     try:
-        params = [calibration_started_datetime, calibration_started_datetime, slurm_job_id]
+        params = [
+            calibration_started_datetime,
+            calibration_started_datetime,
+            slurm_job_id,
+        ]
 
         db_handler_object.execute_dml(sql, params, None)
         logger.debug("Successfully updated calibration_request table.")
@@ -1039,10 +1063,10 @@ def update_calsolution_request_calibration_started_status(
 def update_calsolution_request_calibration_complete_status(
     db_handler_object: MWAXDBHandler,
     slurm_job_id: int,
-    calibration_completed_datetime: Optional[datetime.datetime],
-    calibration_fit_id: Optional[int],
-    calibration_error_datetime: Optional[datetime.datetime],
-    calibration_error_message: Optional[str],
+    calibration_completed_datetime: datetime.datetime | None,
+    calibration_fit_id: int | None,
+    calibration_error_datetime: datetime.datetime | None,
+    calibration_error_message: str | None,
 ):
     """Update a calsolution request with updated calibration completed status info.
 
@@ -1105,3 +1129,37 @@ def update_calsolution_request_calibration_complete_status(
 
         # Re-raise error
         raise
+
+
+def get_fit_info_from_slurm_job_and_obsid(
+    db_handler_object: MWAXDBHandler, obs_id: int, slurm_job_id: int
+) -> tuple[int, int | None] | None:
+    # This SQL looks up a fitid and determines if a max amp is needed to be passed to hyperdrive amp plots
+    # from the calibration_request and fits table based on an obsid and a slurm jobid.
+    # This will be unique for calvin fits.
+    # Won't work for any fits prior to the introduction of the calibration_request table
+    sql = """SELECT r.calibration_fit_id, f.creator, f.code_version, 
+                CASE WHEN f.gain_max_cutoff IS NULL AND r.calibration_fit_id IS NOT NULL AND f.gain_outlier_modify_gains IS NULL THEN 100 		 
+                ELSE NULL END as amp_plot_max
+            FROM calibration_request r
+            LEFT OUTER JOIN calibration_fits f ON f.fitid=r.calibration_fit_id AND f.obsid=r.cal_id
+            WHERE cal_id = %s AND slurm_job_id=%s"""
+
+    # Run SQL
+    rows = db_handler_object.select_one_row_postgres(
+        sql,
+        [obs_id, slurm_job_id],
+    )
+
+    # Return a list or None if no rows
+    if len(rows) > 0:
+        fit_id = rows["calibration_fit_id"]
+        if fit_id is None:
+            return None
+        else:
+            amp_plot_max = rows["amp_plot_max"]
+            if amp_plot_max is not None:
+                amp_plot_max = int(amp_plot_max)
+            return (int(fit_id), amp_plot_max)
+    else:
+        return None

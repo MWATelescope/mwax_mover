@@ -8,12 +8,11 @@ import signal
 import threading
 import time
 
-from mwax_mover.utils import MWAXSubfileDistirbutorMode
-from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
-from tests_common import setup_test_directories
+from tests_common import render_test_config, setup_test_directories
 from tests_fakedb import FakeMWAXDBHandler
 
-TEST_CONFIG_FILE = "tests/data/test002/test002.cfg"
+from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
+
 TEST_METAFITS = "tests/data/1454343736/1454343736_metafits.fits"
 
 # VDIF
@@ -40,7 +39,7 @@ def test_beamformer_archiver_vdif():
     # Add any select results (in order in the code below-or keep commented if none)
     # e.g. fake_db_handler.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
 
-    sd.initialise(TEST_CONFIG_FILE, MWAXSubfileDistirbutorMode.BEAMFORMER, fake_db_handler)
+    sd.initialise(render_test_config("test002"), fake_db_handler)
 
     # setup test data (metafits file and cal files)
     metafits = os.path.join(sd.cfg_corr_metafits_path, os.path.basename(TEST_METAFITS))
@@ -53,7 +52,10 @@ def test_beamformer_archiver_vdif():
     # Copy VDIF data in (we are simulating the beamformer dumping in files as tmp then renaming)
     for v in TEST_VDIF:
         # Create the temp vdif file
-        shutil.copyfile(v + ".vdif", os.path.join(sd.cfg_bf_incoming_path, os.path.basename(v) + ".vdif"))
+        shutil.copyfile(
+            v + ".vdif",
+            os.path.join(sd.cfg_bf_incoming_path, os.path.basename(v) + ".vdif"),
+        )
 
     #
     # NOTE! wsl does not support iNotify, so the only way to test is to put the test files in the incoming dirs

@@ -1,8 +1,9 @@
-from pathlib import Path
 import argparse
 import json
 import os
 import sys
+from pathlib import Path
+
 from mwax_mover.mwax_calvin_utils import generate_plot_index_file
 
 
@@ -64,7 +65,9 @@ def main() -> None:
         try:
             fit_id = int(p.name)
         except Exception:
-            print(f"Could not infer FitID from {args.directory}- please specify fit-id instead.")
+            print(
+                f"Could not infer FitID from {args.directory}- please specify fit-id instead."
+            )
             sys.exit(-3)
     else:
         fit_id = int(args.fit_id)

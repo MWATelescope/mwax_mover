@@ -6,10 +6,11 @@ which calibrator observations are ready for submission to the Calvin calibration
 pipeline.
 """
 
-from mwax_mover.mwax_watch_queue_worker import MWAXWatchQueueWorker
-from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
 import logging
 import threading
+
+from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
+from mwax_mover.mwax_watch_queue_worker import MWAXWatchQueueWorker
 
 logger = logging.getLogger(__name__)
 

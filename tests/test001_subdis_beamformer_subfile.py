@@ -8,12 +8,11 @@ import signal
 import threading
 import time
 
-from mwax_mover.utils import MWAXSubfileDistirbutorMode
-from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
+from tests_common import create_observation_subfiles, render_test_config, setup_test_directories
 from tests_fakedb import FakeMWAXDBHandler
-from tests_common import setup_test_directories, create_observation_subfiles
 
-TEST_CONFIG_FILE = "tests/data/test001/test001.cfg"
+from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
+
 TEST_METAFITS = "tests/data/1454743816/1454743816_metafits.fits"
 TEST_AOCAL_FILES = [f"tests/data/1454343616/1454343616_256_0032_{c}_calfile.bin" for c in range(109, 109 + 24)]
 
@@ -34,14 +33,20 @@ def test_beamformer_subfile():
     # Add any select results (in order in the code below-or keep commented if none)
     # e.g. fake_db_handler.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
 
-    sd.initialise(TEST_CONFIG_FILE, MWAXSubfileDistirbutorMode.BEAMFORMER, fake_db_handler)
+    sd.initialise(render_test_config("test001"), fake_db_handler)
 
     # setup data
     metafits = os.path.join(sd.cfg_corr_metafits_path, os.path.basename(TEST_METAFITS))
     shutil.copyfile(TEST_METAFITS, metafits)
 
     create_observation_subfiles(
-        1454743816, 2, "MWAX_BEAMFORMER", 109, 0, os.path.join(base_dir, "tmp"), sd.cfg_subfile_incoming_path
+        1454743816,
+        2,
+        "MWAX_BEAMFORMER",
+        109,
+        0,
+        os.path.join(base_dir, "tmp"),
+        sd.cfg_subfile_incoming_path,
     )
 
     for c in TEST_AOCAL_FILES:

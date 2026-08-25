@@ -9,15 +9,15 @@ item, or drop the item entirely. Implements configurable exponential backoff.
 import logging
 import os
 import queue
-import time
 import threading
-from typing import Optional
-from mwax_mover import mwax_mover, mwax_command
+import time
+
+from mwax_mover import mwax_command, mwax_mover
 
 logger = logging.getLogger(__name__)
 
 
-class QueueWorker(object):
+class QueueWorker:
     """This class represents a worker process, processing items off a queue"""
 
     # Either pass an event handler or pass an executable path to run
@@ -72,7 +72,9 @@ class QueueWorker(object):
         if (event_handler is None and executable_path is None) or (
             event_handler is not None and executable_path is not None
         ):
-            raise Exception("QueueWorker requires event_handler OR executable_path not both and not neither!")
+            raise Exception(
+                "QueueWorker requires event_handler OR executable_path not both and not neither!"
+            )
 
         self._executable_path = executable_path
         self._event_handler = event_handler
@@ -80,7 +82,7 @@ class QueueWorker(object):
         self._paused = False
         self.exit_once_queue_empty = exit_once_queue_empty
         self.requeue_to_eoq_on_failure = requeue_to_eoq_on_failure
-        self.current_item: Optional[str] = None
+        self.current_item: str | None = None
         self.consecutive_error_count = 0
         self.backoff_initial_seconds = backoff_initial_seconds
         self.backoff_factor = backoff_factor
@@ -111,7 +113,9 @@ class QueueWorker(object):
                     success = False
 
                     if self.current_item is None:
-                        self.current_item = self.source_queue.get(block=True, timeout=0.5)
+                        self.current_item = self.source_queue.get(
+                            block=True, timeout=0.5
+                        )
 
                     # Because we block in the above get, we should always have a value for current_item
                     # but this gate ensure the type checker is satisfied that current_item is not None.
@@ -146,7 +150,9 @@ class QueueWorker(object):
                         continue
 
                     elapsed = time.time() - start_time
-                    logger.info(f"Complete. Queue size: {self.source_queue.qsize()} Elapsed: {elapsed:.2f} sec")
+                    logger.info(
+                        f"Complete. Queue size: {self.source_queue.qsize()} Elapsed: {elapsed:.2f} sec"
+                    )
 
                     if success:
                         # reset our error count and backoffs
@@ -154,9 +160,12 @@ class QueueWorker(object):
                     else:
                         if self.requeue_on_error:
                             self.consecutive_error_count += 1
-                            backoff = self.backoff_initial_seconds * self.backoff_factor * self.consecutive_error_count
-                            if backoff > self.backoff_limit_seconds:
-                                backoff = self.backoff_limit_seconds
+                            backoff = (
+                                self.backoff_initial_seconds
+                                * self.backoff_factor
+                                * self.consecutive_error_count
+                            )
+                            backoff = min(backoff, self.backoff_limit_seconds)
 
                             logger.info(
                                 f"{self.consecutive_error_count} consecutive"
@@ -217,7 +226,9 @@ class QueueWorker(object):
         command = command.replace(mwax_mover.FILE_REPLACEMENT_TOKEN, filename)
 
         filename_no_ext = os.path.splitext(filename)[0]
-        command = command.replace(mwax_mover.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext)
+        command = command.replace(
+            mwax_mover.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext
+        )
 
         return_value, _ = mwax_command.run_command_ext(command, -1, 60, True)
 

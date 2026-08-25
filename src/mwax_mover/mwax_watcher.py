@@ -9,14 +9,16 @@ before entering the live event loop.
 import logging
 import os
 import queue
-import inotify.constants
+
 import inotify.adapters
+import inotify.constants
+
 from mwax_mover import mwax_mover, utils
 
 logger = logging.getLogger(__name__)
 
 
-class Watcher(object):
+class Watcher:
     """Class that watches a directory and adds files to a queue"""
 
     def __init__(
@@ -75,7 +77,9 @@ class Watcher(object):
         logging.getLogger("inotify.adapters").setLevel(logging.CRITICAL)
 
         if self.recursive:
-            logger.info(f"Watcher starting on {self.path}/*{self.pattern} and all subdirectories...")
+            logger.info(
+                f"Watcher starting on {self.path}/*{self.pattern} and all subdirectories..."
+            )
             self.inotify_tree = inotify.adapters.InotifyTree(self.path, mask=self.mask)
         else:
             logger.info(f"Watcher starting on {self.path}/*{self.pattern}...")
@@ -83,7 +87,9 @@ class Watcher(object):
             self.inotify_tree.add_watch(self.path, mask=self.mask)
 
         if self.exclude_pattern:
-            logger.info(f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}")
+            logger.info(
+                f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}"
+            )
 
         self.watching = True
         self.do_watch_loop()
@@ -137,12 +143,15 @@ class Watcher(object):
                     # check event is one we care about
                     if header.mask & self.mask:
                         # Check file extension is one we care about
-                        if (os.path.splitext(filename)[1] == self.pattern or self.pattern == ".*") and os.path.splitext(
-                            filename
-                        )[1] != self.exclude_pattern:
+                        if (
+                            os.path.splitext(filename)[1] == self.pattern
+                            or self.pattern == ".*"
+                        ) and os.path.splitext(filename)[1] != self.exclude_pattern:
                             dest_filename = os.path.join(path, filename)
                             self.dest_queue.put(dest_filename)
-                            logger.info(f"{dest_filename} added to queue ({self.dest_queue.qsize()})")
+                            logger.info(
+                                f"{dest_filename} added to queue ({self.dest_queue.qsize()})"
+                            )
 
     def get_status(self) -> dict:
         """Get the current status of the watcher.

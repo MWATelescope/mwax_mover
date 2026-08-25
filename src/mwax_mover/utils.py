@@ -84,14 +84,6 @@ class GiantSquidJobAlreadyExistsException(Exception):
         self.job_id: int = job_id
 
 
-class MWAXSubfileDistirbutorMode(Enum):
-    """Class representing the mode running"""
-
-    UNKNOWN = ""
-    BEAMFORMER = "B"
-    CORRELATOR = "C"
-
-
 class CorrelatorMode(Enum):
     """Class representing correlator mode"""
 
@@ -113,7 +105,10 @@ class CorrelatorMode(Enum):
         Returns:
             True if the mode is NO_CAPTURE or CORR_MODE_CHANGE, False otherwise.
         """
-        return mode_string in [CorrelatorMode.NO_CAPTURE.value, CorrelatorMode.CORR_MODE_CHANGE.value]
+        return mode_string in [
+            CorrelatorMode.NO_CAPTURE.value,
+            CorrelatorMode.CORR_MODE_CHANGE.value,
+        ]
 
     @staticmethod
     def is_correlator(mode_string: str) -> bool:
@@ -166,7 +161,10 @@ class CorrelatorMode(Enum):
         Returns:
             True if the mode is MWAX_BEAMFORMER or MWAX_CORR_BF, False otherwise.
         """
-        return mode_string in [CorrelatorMode.MWAX_BEAMFORMER.value, CorrelatorMode.MWAX_CORR_BF.value]
+        return mode_string in [
+            CorrelatorMode.MWAX_BEAMFORMER.value,
+            CorrelatorMode.MWAX_CORR_BF.value,
+        ]
 
 
 class MWADataFileType(Enum):
@@ -232,7 +230,7 @@ class ArchiveLocation(Enum):
     AcaciaMWA = 4
 
 
-def download_metafits_file(obs_id: int, metafits_path: str):
+def download_metafits_file(obs_id: int, metafits_path: str) -> str:
     """
     Download a metafits FITS file for the given observation ID from MWA web services
     and write it to disk.
@@ -244,6 +242,9 @@ def download_metafits_file(obs_id: int, metafits_path: str):
         obs_id: The 10-digit MWA observation ID.
         metafits_path: Directory path where the downloaded metafits file will be written.
             The file will be named ``<obs_id>_metafits.fits``.
+
+    Returns:
+        new metafits full filename
 
     Raises:
         Exception: If the file could not be downloaded from any URL after all retries.
@@ -262,6 +263,8 @@ def download_metafits_file(obs_id: int, metafits_path: str):
     metafits = response.content
     with open(metafits_file_path, "wb") as handler:
         handler.write(metafits)
+
+    return metafits_file_path
 
 
 def validate_filename(
@@ -1705,7 +1708,10 @@ def get_data_files_for_obsid_from_webservice(
     Raises:
         Exception: If the web service cannot be reached after all retries.
     """
-    urls = ["http://mro.mwa128t.org/metadata/data_files", "http://ws.mwatelescope.org/metadata/data_files"]
+    urls = [
+        "http://mro.mwa128t.org/metadata/data_files",
+        "http://ws.mwatelescope.org/metadata/data_files",
+    ]
     data = {"obs_id": obs_id, "terse": False, "all_files": True}
 
     # On failure of all urls and retries it will raise an exception
@@ -1743,7 +1749,10 @@ def get_data_files_with_hostname_for_obsid_from_webservice(
     Raises:
         Exception: If the web service cannot be reached after all retries.
     """
-    urls = ["http://mro.mwa128t.org/metadata/data_files", "http://ws.mwatelescope.org/metadata/data_files"]
+    urls = [
+        "http://mro.mwa128t.org/metadata/data_files",
+        "http://ws.mwatelescope.org/metadata/data_files",
+    ]
     data = {"obs_id": obs_id, "terse": False, "all_files": True}
 
     # On failure of all urls and retries it will raise an exception
@@ -2321,18 +2330,35 @@ def parse_rclone_stats(stderr: str) -> dict:
     return last_stats
 
 
-def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 120) -> tuple[int, int]:
+def rclone_move(
+    path: str,
+    profile: str,
+    bucket: str,
+    dest_subpath: str | None = None,
+    min_file_age_secs: int = 0,
+) -> tuple[int, int]:
     """Run rclone move for files in a directory to the S3 destination.
 
-    Uses --min-age to skip files that are too new, and --no-traverse for
-    efficiency on large buckets.
+    Uses --no-traverse for efficiency on large buckets.
 
     Args:
         path: Local directory path to move files from.
         profile: The rclone profile to use (see rclone.conf).
         bucket: Destination bucket name.
-        min_file_age_secs: Do not attempt to move any file which is newer than this many seconds.
-            This prevents moving files before they are finished being written.
+        dest_subpath: Optional path within the bucket to move into. Use this to
+            preserve a directory name that would otherwise be lost by moving the
+            directory's *contents* rather than the directory itself -- e.g. pass
+            the fit_id when moving ``<base>/<fit_id>`` so the objects land under
+            ``<bucket>/<fit_id>/`` and match the URLs written into index.json.
+        min_file_age_secs: Do not attempt to move any file which is newer than
+            this many seconds. Defaults to 0 (no age filter).
+
+            NOTE: this is not a safe way to detect "the writer has finished".
+            A file moved into ``path`` with os.rename keeps its original mtime,
+            so it can arrive already older than any threshold set here. Callers
+            that need completion detection should have the writer publish a
+            fully-populated directory atomically instead -- see
+            mwax_calvin_utils.upload_plot_files.
 
     Returns:
         tuple of transfers and bytes_transferred
@@ -2342,6 +2368,9 @@ def rclone_move(path: str, profile: str, bucket: str, min_file_age_secs: int = 1
     """
 
     dest = f"{profile}:{bucket}"
+    if dest_subpath:
+        dest = f"{dest}/{dest_subpath}"
+
     cmd = [
         "rclone",
         "move",
@@ -2515,7 +2544,12 @@ def rclone_delete_file(rclone_profile: str, bucket: str, filename: str) -> None:
         FileNotFoundError: If the rclone binary is not found on PATH.
     """
     remote_path = f"{rclone_profile}:{bucket}/{filename}"
-    result = subprocess.run(["rclone", "deletefile", remote_path], capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        ["rclone", "deletefile", remote_path],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     if result.returncode != 0:
         raise subprocess.CalledProcessError(
             result.returncode,

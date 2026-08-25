@@ -8,22 +8,20 @@ and retrieve its exit code and output.
 
 import logging
 import os
-import subprocess
 import shlex
-import typing
-from typing import Optional
+import subprocess
 
 logger = logging.getLogger(__name__)
 
 
 def run_command_ext(
     command: str,
-    numa_node: typing.Optional[int],
+    numa_node: int | None,
     timeout: int = 60,
     use_shell: bool = False,
     copy_user_env: bool = False,
-    extra_env_vars: Optional[dict[str, str]] = None,
-) -> typing.Tuple[bool, str]:
+    extra_env_vars: dict[str, str] | None = None,
+) -> tuple[bool, str]:
     """Execute a command synchronously with optional NUMA pinning.
 
     Runs a command via subprocess with optional NUMA node binding,
@@ -44,7 +42,7 @@ def run_command_ext(
         A tuple of (success: bool, output: str). Success is True if return code
         is 0, False otherwise. Output is combined stdout and stderr.
     """
-    myenv: Optional[dict[str, str]] = None
+    myenv: dict[str, str] | None = None
 
     if copy_user_env:
         # Should we copy the user's environment for the subprocess? Default is no
@@ -60,7 +58,9 @@ def run_command_ext(
         cmdline = f"{command}"
     else:
         if int(numa_node) >= 0:
-            cmdline = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} {command}"
+            cmdline = (
+                f"numactl --cpunodebind={numa_node!s} --membind={numa_node!s} {command}"
+            )
         else:
             cmdline = f"{command}"
 
@@ -79,7 +79,13 @@ def run_command_ext(
 
         # Execute the command
         completed_process = subprocess.run(
-            args, shell=use_shell, check=False, timeout=timeout, capture_output=True, text=True, env=myenv
+            args,
+            shell=use_shell,
+            check=False,
+            timeout=timeout,
+            capture_output=True,
+            text=True,
+            env=myenv,
         )
 
         return_code = completed_process.returncode
@@ -110,7 +116,7 @@ def run_command_ext(
             return True, f"{stdout} {stderror}"
 
     except Exception as command_exception:
-        error = f"Exception executing {cmdline}: {str(command_exception)}"
+        error = f"Exception executing {cmdline}: {command_exception!s}"
         logger.exception(f"Exception executing {cmdline}:")
         return False, error
 
@@ -138,7 +144,7 @@ def run_command_popen(
     Returns:
         A subprocess.Popen object that can be polled or waited on.
     """
-    myenv: Optional[dict[str, str]] = None
+    myenv: dict[str, str] | None = None
 
     if copy_user_env:
         # Should we copy the user's environment for the subprocess? Default is no
@@ -149,7 +155,9 @@ def run_command_popen(
         cmdline = f"{command}"
     else:
         if int(numa_node) > 0:
-            cmdline = f"numactl --cpunodebind={str(numa_node)} --membind={str(numa_node)} {command}"
+            cmdline = (
+                f"numactl --cpunodebind={numa_node!s} --membind={numa_node!s} {command}"
+            )
         else:
             cmdline = f"{command}"
 
@@ -168,12 +176,17 @@ def run_command_popen(
 
     # Execute the command
     popen_process = subprocess.Popen(
-        args, shell=use_shell, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=myenv
+        args,
+        shell=use_shell,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=myenv,
     )
     return popen_process
 
 
-def check_popen_finished(popen_process, timeout: int = 60) -> typing.Tuple[int, str, str]:
+def check_popen_finished(popen_process, timeout: int = 60) -> tuple[int, str, str]:
     """Wait for a Popen process to finish and return its exit code and output.
 
     Blocks until the process terminates or the timeout is exceeded. On timeout,
@@ -209,6 +222,6 @@ def check_popen_finished(popen_process, timeout: int = 60) -> typing.Tuple[int, 
         )
 
     except Exception as command_exception:
-        logger.error(f"Exception executing {popen_process.args}: {str(command_exception)}")
+        logger.error(f"Exception executing {popen_process.args}: {command_exception!s}")
 
     return (exit_code, stdout, stderr)

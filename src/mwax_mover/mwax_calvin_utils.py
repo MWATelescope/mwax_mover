@@ -7,50 +7,46 @@ binary format constants and read/write helpers, SBATCH script generation
 functions, and estimate_birli_output_bytes() for storage pre-checks.
 """
 
-from pathlib import Path
-
-import mwalib
-
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import timezone
 import datetime
-from enum import Enum
 import glob
-import re
 import json
 import logging
 import mimetypes
 import os
+import re
 import shutil
+import sys
 import time
+import warnings
+from enum import Enum
+from pathlib import Path
+from typing import NamedTuple
+
 import numpy as np
-from astropy.io import fits
+import pandas as pd
 from astropy import units as u
 from astropy.constants import c  # ty: ignore[unresolved-import]
-from scipy.optimize import minimize
-import pandas as pd
-from pandas import DataFrame
-import seaborn as sns
-import matplotlib as mpl
-from matplotlib import pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
 from mwalib import MetafitsContext
-import numpy.typing as npt  # noqa: F401
-from numpy.typing import ArrayLike, NDArray
-from typing import NamedTuple, List, Tuple, Optional, Union, Any  # noqa: F401
-import sys
+from numpy.typing import NDArray
+from scipy.optimize import minimize
+
 from mwax_mover.mwax_command import (
+    check_popen_finished,
     run_command_ext,
     run_command_popen,
-    check_popen_finished,
 )
-from mwax_mover.utils import is_int, extract_channels_from_filename, get_png_dimensions
+from mwax_mover.utils import (
+    delete_files_older_than,
+    extract_channels_from_filename,
+    get_png_dimensions,
+    is_int,
+)
 
 logger = logging.getLogger(__name__)
 
 V_LIGHT_M_S = 299792458.0
 
-AOCAL_INTRO = "MWAOCAL\0".encode("utf8")
+AOCAL_INTRO = b"MWAOCAL\0"
 AOCAL_FILE_TYPE = 0
 AOCAL_STRUCTURE_TYPE = 0
 AOCAL_INTERVAL_COUNT = 1
@@ -61,6 +57,106 @@ AOCAL_HEADER_FORMAT = "<8s6I2d"
 
 # Standard number of MWA coarse channels.
 MWA_NUM_COARSE_CHANS = 24
+
+
+def read_solutions_hdu_complex(solutions_data: NDArray[np.float64]) -> NDArray[np.complex128]:
+    """Convert a raw hyperdrive SOLUTIONS HDU array into complex Jones terms.
+
+    The SOLUTIONS HDU stores each of the four polarisation terms (XX, XY, YX,
+    YY -- equivalently gx, Dx, Dy, gy in hyperdrive's own Jones-matrix
+    notation) as a consecutive (real, imag) float64 pair, giving 8 floats per
+    (timeblock, tile, chanblock) entry. This collapses those 8 floats into 4
+    complex values without altering any leading axes, so it works whether
+    the caller wants a single timeblock or all of them.
+
+    Args:
+        solutions_data: Raw SOLUTIONS HDU data, shape (..., 8) -- typically
+            (timeblock, tile, chanblock, 8).
+
+    Returns:
+        Complex128 array, shape (..., 4), trailing axis ordered
+        [XX, XY, YX, YY].
+    """
+    data = np.asarray(solutions_data, dtype=np.float64)
+    return data[..., 0::2] + 1j * data[..., 1::2]
+
+
+def read_results_hdu(results_data: NDArray[np.float64], timeblock: int = 0) -> NDArray[np.float64]:
+    """Get one timeblock's convergence precision values from a RESULTS HDU.
+
+    RESULTS is a plain FITS ImageHDU (not a binary table), shape
+    (n_timeblocks, n_chanblocks). This selects a single timeblock's row.
+    Solution files with more than one timeblock are not currently supported
+    by this pipeline (see the single-timeblock assumption enforced
+    elsewhere, e.g. HyperfitsSolutionGroup.get_solns); this helper always
+    returns exactly one timeblock's row rather than merging several.
+
+    Args:
+        results_data: Raw RESULTS HDU data, shape (n_timeblocks, n_chanblocks).
+        timeblock: Which timeblock's row to return. Defaults to 0.
+
+    Returns:
+        1-D float64 array of convergence precision per chanblock, for the
+        requested timeblock. NaN entries mean that chanblock failed to
+        converge or was pre-flagged.
+    """
+    return np.asarray(results_data, dtype=np.float64)[timeblock]
+
+
+def read_tiles_hdu(tiles_data) -> tuple[NDArray[np.int_], list[str], NDArray[np.bool_]]:
+    """Read tile antenna indices, names, and flags from a TILES HDU.
+
+    Antenna indices should already be ascending in practice, but this sorts
+    explicitly to guarantee alignment with the SOLUTIONS HDU's tile axis
+    regardless, in case a file ever has them out of order.
+
+    Args:
+        tiles_data: Raw TILES HDU data (a FITS binary table with Antenna,
+            TileName, and Flag columns).
+
+    Returns:
+        A tuple (antennas, tile_names, flags), each ordered by ascending
+        antenna index:
+        - antennas: int array of antenna indices.
+        - tile_names: list of tile name strings.
+        - flags: bool array of tile flags (True = flagged).
+    """
+    antennas = np.asarray(tiles_data["Antenna"])
+    order = np.argsort(antennas)
+    tile_names = [str(tiles_data["TileName"][i]) for i in order]
+    flags = np.asarray(tiles_data["Flag"])[order].astype(bool)
+    return antennas[order], tile_names, flags
+
+
+def read_baseline_tile_flags(baseline_weights: NDArray[np.float64], n_tiles: int) -> NDArray[np.bool_]:
+    """Infer per-tile flagging from a BASELINES HDU's NaN pattern.
+
+    Baselines are ordered ascending: (0,1), (0,2), ..., (0,N-1), (1,2), ...
+    (autocorrelations are not included in this HDU). A NaN weight on any
+    baseline involving a tile means that tile was flagged for the solve.
+
+    This is a third, independent source of tile flagging alongside the
+    TILES HDU's own Flag column and the metafits flag column: all three
+    come from the same hyperdrive run, but this one is derived rather than
+    stored directly, so it's worth keeping as a separate check in case it
+    and the TILES HDU flag column ever disagree within one file.
+
+    Args:
+        baseline_weights: 1D array of baseline weights (NaN = flagged).
+        n_tiles: Number of tiles/antennas in the observation.
+
+    Returns:
+        Boolean array of shape (n_tiles,), True where the tile is flagged.
+    """
+    tile_flagged = np.zeros(n_tiles, dtype=bool)
+    idx = 0
+    for i in range(n_tiles):
+        for j in range(i + 1, n_tiles):
+            if np.isnan(baseline_weights[idx]):
+                tile_flagged[i] = True
+                tile_flagged[j] = True
+            idx += 1
+    return tile_flagged
 
 
 class CalvinJobType(Enum):
@@ -83,7 +179,7 @@ class Tile(NamedTuple):
 
 
 class Input(NamedTuple):
-    """Info about an MWA tile"""
+    """Info about a single MWA rf_input (one polarisation's signal chain for a tile)."""
 
     name: str
     id: int
@@ -99,7 +195,9 @@ class Input(NamedTuple):
 class ChanInfo(NamedTuple):
     """channel selection info"""
 
-    coarse_chan_ranges: List[NDArray[np.int_]]  # List[Tuple(int, int)]
+    coarse_chan_ranges: list[
+        NDArray[np.int_]
+    ]  # each element is a contiguous run of coarse channel numbers (from np.split)
     fine_chans_per_coarse: int
     fine_chan_width_hz: float
 
@@ -120,7 +218,7 @@ class Metafits:
     checks that mwalib already validates internally.
     """
 
-    def __init__(self, metafits: Union[str, MetafitsContext]):
+    def __init__(self, metafits: str | MetafitsContext):
         """Initialise a Metafits reader backed by mwalib.
 
         Args:
@@ -136,7 +234,17 @@ class Metafits:
             self._mc = metafits
 
     @property
-    def tiles(self) -> List[Tile]:
+    def mwalib_context(self) -> MetafitsContext:
+        """Get the underlying mwalib MetafitsContext.
+
+        For callers that need the raw context directly -- e.g.
+        add_digital_gains_column, which reads rf_inputs digital gains --
+        rather than one of this class's own derived properties.
+        """
+        return self._mc
+
+    @property
+    def tiles(self) -> list[Tile]:
         """Get tile information from metafits, sorted by tile ID.
 
         mwalib exposes one Antenna per tile (not duplicated per pol), so
@@ -159,7 +267,7 @@ class Metafits:
         )
 
     @property
-    def inputs(self) -> List[Input]:
+    def inputs(self) -> list[Input]:
         """Get input (rf_input) information from metafits, sorted by input index.
 
         mwalib exposes one Rfinput per polarisation per tile, so no
@@ -223,7 +331,7 @@ class Metafits:
         )
 
     @property
-    def calibrator(self) -> Optional[str]:
+    def calibrator(self) -> str | None:
         """Get calibrator source name from metafits.
 
         Returns None when the metafits carries an empty CALIBSRC string.
@@ -236,627 +344,30 @@ class Metafits:
         return self._mc.obs_id
 
 
-class HyperfitsSolution:
-    """A single calibration solution in hyperdrive FITS format"""
-
-    def __init__(self, filename) -> None:
-        """Initialize a HyperfitsSolution file reader.
-
-        Args:
-            filename: Path to the hyperdrive FITS solution file.
-        """
-        self.filename = filename
-
-    @property
-    def chanblocks_hz(self) -> NDArray[np.int_]:
-        """Get channel block frequencies from the solution file."""
-        with fits.open(self.filename) as hdus:
-            freq_data = hdus["CHANBLOCKS"].data["Freq"].astype(np.int_)
-            result = np.array(ensure_system_byte_order(freq_data))
-            assert len(result), f"no chanblocks found in {self.filename}"
-
-            # if multiple chanblocks, validate they are in order
-            if len(result) > 1:
-                diff = np.diff(result)
-                if not np.all(diff >= 0):
-                    raise RuntimeError(f"chanblocks are not in ascending order. {result=}")
-                if not np.all(diff[1:] == diff[0]):
-                    raise RuntimeError(f"chanblocks are not contiguous. {result=}")
-
-            return result
-
-    # @property
-    # def tile_names_flags(self) -> List[Tuple[str, bool]]:
-    #     """Get the tile names and flags ordered by index"""
-    #     with fits.open(self.filename) as hdus:
-    #         tile_data = hdus['TILES'].data
-    #         return [
-    #             (tile["TileName"], tile["Flag"])
-    #             for tile in tile_data
-    #         ]
-
-    @property
-    def tile_flags(self) -> List[bool]:
-        """Get tile flags ordered by antenna index."""
-        with fits.open(self.filename) as hdus:
-            tile_data = hdus["TILES"].data
-            return tile_data["Flag"]
-
-    def get_average_times(self) -> List[float]:
-        """Get the average time for each timeblock.
-
-        Raises:
-            KeyError: If TIMEBLOCKS HDU is not present.
-        """
-        with fits.open(self.filename) as hdus:
-            time_data = hdus["TIMEBLOCKS"].data
-            return [time["Average"] for time in time_data]
-
-    def get_solutions(self) -> List[NDArray[np.complex128]]:
-        """Get solutions as complex arrays.
-
-        Returns:
-            A list of four complex arrays (XX, XY, YX, YY) each with shape [time, tile, chan].
-        """
-        with fits.open(self.filename) as hdus:
-            solutions = hdus["SOLUTIONS"].data
-            return [
-                solutions[:, :, :, 0] + 1j * solutions[:, :, :, 1],
-                solutions[:, :, :, 2] + 1j * solutions[:, :, :, 3],
-                solutions[:, :, :, 4] + 1j * solutions[:, :, :, 5],
-                solutions[:, :, :, 6] + 1j * solutions[:, :, :, 7],
-            ]
-
-    def get_ref_solutions(self, ref_tile_idx=None) -> List[NDArray[np.complex128]]:
-        """Get solutions divided by reference tile.
-
-        Args:
-            ref_tile_idx: Index of the reference tile. If None, returns raw solutions.
-
-        Returns:
-            A list of four complex arrays (XX, XY, YX, YY) each with shape [time, tile, chan],
-            or raw solutions if ref_tile_idx is None.
-        """
-        solutions = self.get_solutions()
-
-        if ref_tile_idx is None:
-            return solutions
-
-        # divide solutions by reference
-        ref_solutions = [solution[:, ref_tile_idx, :] for solution in solutions]
-
-        # divide solutions jones matrix by reference jones matrix, via inverse determinant
-        ref_inv_det = np.divide(
-            1 + 0j,
-            ref_solutions[0] * ref_solutions[3] - ref_solutions[1] * ref_solutions[2],
-        )
-
-        return [
-            (solutions[0] * ref_solutions[3] - solutions[1] * ref_solutions[2]) * ref_inv_det,
-            (solutions[1] * ref_solutions[0] - solutions[0] * ref_solutions[1]) * ref_inv_det,
-            (solutions[2] * ref_solutions[3] - solutions[3] * ref_solutions[2]) * ref_inv_det,
-            (solutions[3] * ref_solutions[0] - solutions[2] * ref_solutions[1]) * ref_inv_det,
-        ]
-
-    @property
-    def results(self) -> NDArray[np.float64]:
-        """Get convergence results from the solution file.
-
-        Returns:
-            1-D float64 array of per-channel convergence values.
-
-        Raises:
-            KeyError: If the RESULTS HDU is not present. This is expected for
-                older hyperdrive solution files. Callers that can tolerate missing
-                results should catch KeyError and fall back to uniform weights.
-        """
-        with fits.open(self.filename) as hdus:
-            # flatten() is required because astropy returns a structured array
-            # from FITS binary table columns, not a plain ndarray.
-            return hdus["RESULTS"].data.flatten()
-
-
-class HyperfitsSolutionGroup:
-    """A group of Hyperdrive FITS calibration solutions and corresponding metafits files."""
-
-    def __init__(self, metafits: Metafits, solns: List[HyperfitsSolution]):
-        """Initialize a solution group with metafits and solution files.
-
-        Args:
-            metafits: List of Metafits file readers.
-            solns: List of HyperfitsSolution file readers.
-
-        Raises:
-            RuntimeError: If no metafits or solution files are provided.
-        """
-        self.metafits = metafits
-
-        if not len(solns):
-            raise RuntimeError("no solutions files provided")
-        self.solns = solns
-
-        self.metafits_tiles_df = self.metafits.tiles_df
-        self.metafits_chan_info = HyperfitsSolutionGroup.get_metafits_chan_info(self.metafits)
-        (
-            self.chanblocks_per_coarse,
-            self.all_chanblocks_hz,
-            self.all_solution_coarse_chan_indices,
-        ) = HyperfitsSolutionGroup.get_soln_chan_info(self.metafits_chan_info, self.solns)
-
-    @classmethod
-    def get_metafits_chan_info(cls, metafits: Metafits) -> ChanInfo:
-        """Get combined channel information from all metafits files.
-
-        Validates that channel ranges do not overlap and that channel info is consistent.
-
-        Args:
-            metafits: Metafits file object.
-
-        Returns:
-            Combined ChanInfo object.
-
-        Raises:
-            RuntimeError: If channel info is inconsistent or ranges overlap.
-        """
-        first_chan_info = metafits.chan_info
-        all_ranges = sorted([*first_chan_info.coarse_chan_ranges], key=lambda x: x[0])
-
-        # assert coarse channel ranges do not overlap
-        for left, right in zip(all_ranges[:-1], all_ranges[1:]):
-            if left[0] == right[0] or left[-1] >= right[0]:
-                raise RuntimeError(f"coarse channel ranges from metafits overlap. {[left, right]}, {metafits=}")
-
-        return ChanInfo(
-            coarse_chan_ranges=all_ranges,
-            fine_chan_width_hz=first_chan_info.fine_chan_width_hz,
-            fine_chans_per_coarse=first_chan_info.fine_chans_per_coarse,
-        )
-
-    @classmethod
-    def get_soln_chan_info(
-        cls, metafits_chan_info: ChanInfo, solns: List[HyperfitsSolution]
-    ) -> Tuple[int, List[NDArray[np.int_]], List[int]]:
-        """Get channel block information for provided solutions.
-
-        Validates that channel info from metafits is consistent with solutions.
-
-        Args:
-            metafits_chan_info: Channel information from metafits files.
-            solns: List of solution files.
-
-        Returns:
-            A tuple of (chanblocks_per_coarse, list of chanblocks_hz arrays,
-            sorted list of coarse channel indices present across all solutions).
-
-        Raises:
-            RuntimeError: If channel info is inconsistent between solution and metafits.
-        """
-        chanblocks_per_coarse = None
-        all_chanblocks_hz = []
-        all_solution_coarse_chans: list[int] = []
-
-        metafits_coarse_chans = np.concatenate(metafits_chan_info.coarse_chan_ranges)
-        metafits_fine_chan_width_hz = metafits_chan_info.fine_chan_width_hz
-        metafits_fine_chans_per_coarse = metafits_chan_info.fine_chans_per_coarse
-        metafits_coarse_bandwidth_hz = metafits_fine_chan_width_hz * metafits_fine_chans_per_coarse
-
-        for soln in solns:
-            # coarse_chans = chaninfo.coarse_chan_ranges[coarse_chan_range_idx]
-            chanblocks_hz = soln.chanblocks_hz
-
-            if len(chanblocks_hz) < 2:
-                raise RuntimeError(f"{soln.filename} - not enough chanblocks found ({chanblocks_hz=})")
-
-            chanblock_width_hz = chanblocks_hz[1] - chanblocks_hz[0]
-
-            if chanblock_width_hz % metafits_fine_chan_width_hz != 0:
-                raise RuntimeError(
-                    f"{soln.filename} - chanblock width in solution file ({chanblock_width_hz})"
-                    f" is not a multiple of fine channel width in metafits ({metafits_fine_chan_width_hz})"
-                )
-
-            chans_per_block = int(chanblock_width_hz // metafits_fine_chan_width_hz)
-            chanblocks_per_coarse_ = int(metafits_fine_chans_per_coarse // chans_per_block)
-
-            if chanblocks_per_coarse is None:
-                chanblocks_per_coarse = chanblocks_per_coarse_
-            else:
-                if chanblocks_per_coarse != chanblocks_per_coarse_:
-                    raise RuntimeError(
-                        f"{soln.filename} - chanblocks_per_coarse {chanblocks_per_coarse_}"
-                        f" does not match previous value {chanblocks_per_coarse}"
-                    )
-
-            # break chanblocks into coarse channels
-            soln_coarse_chans = []
-            for coarse_chanblocks in np.split(chanblocks_hz, len(chanblocks_hz) // chanblocks_per_coarse):
-                if len(coarse_chanblocks) == 1:
-                    coarse_centroid_hz = coarse_chanblocks[0]
-                else:
-                    coarse_bandwidth_hz = coarse_chanblocks[-1] - coarse_chanblocks[0]
-                    if coarse_bandwidth_hz > metafits_coarse_bandwidth_hz:
-                        raise RuntimeError(
-                            f"{soln.filename} - solution {coarse_bandwidth_hz=} > {metafits_coarse_bandwidth_hz=}"
-                        )
-                    coarse_centroid_hz = np.mean(coarse_chanblocks + chanblock_width_hz / 2)
-
-                coarse_chan_idx = np.round(coarse_centroid_hz // metafits_coarse_bandwidth_hz)
-
-                if coarse_chan_idx not in metafits_coarse_chans:
-                    raise RuntimeError(
-                        f"{soln.filename} - solution coarse centroid {coarse_centroid_hz}Hz ({coarse_chan_idx=}) "
-                        "not found in metafits coarse channels"
-                    )
-
-                if coarse_chan_idx in soln_coarse_chans:
-                    raise RuntimeError(
-                        f"{soln.filename} - solution coarse centroid {coarse_centroid_hz}Hz ({coarse_chan_idx=}) "
-                        "already found in solution coarse channels"
-                    )
-
-                soln_coarse_chans.append(coarse_chan_idx)
-
-            range_ncoarse = len(soln_coarse_chans)
-            soln_ncoarse = len(chanblocks_hz) // chanblocks_per_coarse
-
-            if range_ncoarse != soln_ncoarse:
-                logger.warning(
-                    f"{soln.filename} - warning: number of coarse channels in solution file ({soln_ncoarse=})"
-                    f" does not match number of coarse channels in metafits for this range ({range_ncoarse=})"
-                    f" given {chanblocks_per_coarse=}, {chans_per_block=}"
-                )
-
-            # Accumulate coarse channel indices found in this solution file so
-            # we can later detect which metafits channels are missing solutions.
-            all_solution_coarse_chans.extend(int(c) for c in soln_coarse_chans)
-
-            all_chanblocks_hz.append(chanblocks_hz)
-
-        if all_chanblocks_hz is None:
-            raise RuntimeError("No valid channels found")
-
-        if chanblocks_per_coarse is None:
-            raise RuntimeError("chanblocks_per_coarse is none")
-
-        return (chanblocks_per_coarse, all_chanblocks_hz, sorted(all_solution_coarse_chans))
-
-    @property
-    def refant(self) -> pd.Series:
-        """Get reference antenna (unflagged tile with lowest ID).
-
-        Returns the first unflagged tile in the solutions and metafits.
-
-        Returns:
-            A pandas Series representing the reference antenna row.
-
-        Raises:
-            ValueError: If no unflagged tiles are found.
-        """
-        # Start from metafits flags then OR-in the solution flags for each file,
-        # without copying the full DataFrame.
-        combined_flag = self.metafits_tiles_df["flag"].to_numpy(dtype=bool)
-        for soln in self.solns:
-            combined_flag = np.logical_or(combined_flag, soln.tile_flags)
-
-        unflagged_mask = ~combined_flag
-        if not unflagged_mask.any():
-            raise ValueError("No unflagged tiles found")
-
-        # Return the row with the lowest tile ID among unflagged tiles.
-        candidate_ids = self.metafits_tiles_df["id"].to_numpy()
-        best_idx = np.where(unflagged_mask)[0][np.argmin(candidate_ids[unflagged_mask])]
-        return self.metafits_tiles_df.iloc[best_idx]
-
-    @property
-    def calibrator(self):
-        """Get calibrator source name(s) from metafits file."""
-        return self.metafits.calibrator
-
-    @property
-    def results(self) -> NDArray[np.float64]:
-        """Get the combined results array from all solutions."""
-        for soln, chanblocks_hz in zip(self.solns, self.all_chanblocks_hz):
-            if len(chanblocks_hz) != len(soln.results):
-                raise RuntimeError(
-                    f"{soln.filename} - number of chanblocks ({len(chanblocks_hz)})"
-                    f" does not match number of results ({len(soln.results)})"
-                )
-
-        results = np.concatenate([soln.results for soln in self.solns])
-
-        if results.size == 0:
-            raise RuntimeError("No valid results found")
-
-        return results
-
-    @property
-    def weights(self) -> NDArray[np.float64]:
-        """Generate per-channel weights from hyperdrive convergence results.
-
-        Convergence values < 0 or > 1e-4 are treated as invalid (set to NaN)
-        and excluded from normalisation. The remaining values are transformed
-        via exp(-result) and normalised to [0, 1].
-
-        Returns:
-            Float64 array of weights in [0, 1], one per chanblock. Invalid
-            or NaN entries become 0.0 via np.nan_to_num.
-
-        Note:
-            Falls back to uniform weights of 1.0 if the solution file does
-            not contain a RESULTS HDU (older hyperdrive versions).
-        """
-        try:
-            results = self.results.copy()  # copy so we can mutate safely
-            results[results < 0] = np.nan
-            results[results > 1e-4] = np.nan
-            exp_results = np.exp(-results)
-            return np.nan_to_num(
-                (exp_results - np.nanmin(exp_results)) / (np.nanmax(exp_results) - np.nanmin(exp_results))
-            )
-        except KeyError:
-            return np.full(len(self.all_chanblocks_hz[0]), 1.0)
-
-    def get_solns(self, refant_name=None) -> Tuple[NDArray[np.int_], NDArray[np.complex128], NDArray[np.complex128]]:
-        """Get tile IDs and XX/YY solutions for the reference antenna.
-
-        Args:
-            refant_name: Name of the reference antenna. If None, no reference normalization is applied.
-
-        Returns:
-            A tuple of (tile_ids, xx_solutions, yy_solutions).
-
-        Raises:
-            RuntimeError: If reference antenna is not found or flagged in solutions.
-        """
-        # Pre-extract metafits arrays once to avoid per-iteration DataFrame copies.
-        tile_names = self.metafits_tiles_df["name"].to_numpy()
-        tile_ids = self.metafits_tiles_df["id"].to_numpy()
-        metafits_flags = self.metafits_tiles_df["flag"].to_numpy(dtype=bool)
-
-        soln_tile_ids = None
-        ref_tile_idx = None
-        all_xx_solns = None
-        all_yy_solns = None
-
-        for chanblocks_hz, soln in zip(self.all_chanblocks_hz, self.solns):
-            # TODO: ch_flags = hdus['CHANBLOCKS'].data['Flag']
-            # TODO: results = hdus['RESULTS'].data.flatten()
-
-            # Merge metafits and solution flags without copying the full DataFrame.
-            combined_flag = np.logical_or(metafits_flags, soln.tile_flags)
-
-            if refant_name is not None:
-                ref_mask = tile_names == refant_name
-
-                if not ref_mask.any():
-                    raise RuntimeError(f"{soln.filename} - reference tile {refant_name} not found in solution file")
-
-                if ref_mask.sum() > 1:
-                    raise RuntimeError(
-                        f"{soln.filename} - more than one tile with name {refant_name} found in solution file"
-                    )
-
-                _ref_tile_idx = int(np.where(ref_mask)[0][0])
-
-                if combined_flag[_ref_tile_idx]:
-                    raise RuntimeError(
-                        f"{soln.filename} - reference tile {refant_name}"
-                        f" is flagged in solutions file (index {_ref_tile_idx})"
-                    )
-
-                # FIX 2: use `is None` instead of falsy check so that index 0 is handled correctly
-                if ref_tile_idx is None:
-                    ref_tile_idx = _ref_tile_idx
-                elif ref_tile_idx != _ref_tile_idx:
-                    raise RuntimeError(
-                        f"{soln.filename} - reference tile in solution file does not match previous solution files"
-                    )
-
-            _tile_ids = tile_ids
-
-            # _tile_ids, _ref_tile_idx = soln.validate_tiles(tiles_by_name, refant)
-            if soln_tile_ids is None or not len(soln_tile_ids):
-                soln_tile_ids = tile_ids
-            elif not np.array_equal(soln_tile_ids, _tile_ids):
-                raise RuntimeError(
-                    f"{soln.filename} - tile selection in solution file"
-                    f" does not match previous solution files.\n"
-                    f" previous:\n{_tile_ids}\n"
-                    f" this:\n{soln_tile_ids}"
-                )
-
-            # validate timeblocks
-            try:
-                avg_times = soln.get_average_times()
-            except KeyError:
-                # actual time values are not actually used anyway, just length.
-                solutions = soln.get_solutions()
-                n_times = solutions[0].shape[0]
-                avg_times = [float("nan")] * n_times
-
-            # TODO: support multiple timeblocks
-            if len(avg_times) != 1:
-                raise RuntimeError(f"{soln.filename} - exactly 1 timeblock must be provided: ({len(avg_times)})")
-
-            # TODO: compare with metafits times
-
-            # validate solutions
-            solutions = soln.get_ref_solutions(ref_tile_idx)
-
-            for solution in solutions:
-                if (ntimes := solution.shape[0]) != 1:
-                    raise RuntimeError(
-                        f"{soln.filename} - number of timeblocks in SOLUTIONS HDU ({ntimes})"
-                        f" does not match number of timeblocks in TIMEBLOCKS HDU ({len(avg_times)})"
-                    )
-
-                if (ntiles := solution.shape[1]) != len(soln_tile_ids):
-                    raise RuntimeError(
-                        f"{soln.filename} - number of tiles in SOLUTIONS HDU ({ntiles})"
-                        f" does not match number of tiles in TILES HDU ({len(soln_tile_ids)})"
-                    )
-
-                if (nchans := solution.shape[2]) != len(chanblocks_hz):
-                    raise RuntimeError(
-                        f"{soln.filename} - number of channels in SOLUTIONS HDU ({nchans})"
-                        f" does not match number of channels in CHANBLOCKS HDU ({len(chanblocks_hz)})"
-                    )
-
-            # TODO: sanity check, ref_solutions should be identity matrix or NaN
-
-            if all_xx_solns is None:
-                all_xx_solns = solutions[0]
-            else:
-                all_xx_solns = np.concatenate((all_xx_solns, solutions[0]), axis=2)
-
-            if all_yy_solns is None:
-                all_yy_solns = solutions[3]
-            else:
-                all_yy_solns = np.concatenate((all_yy_solns, solutions[3]), axis=2)
-
-        if soln_tile_ids is None or all_xx_solns is None or all_yy_solns is None:
-            raise RuntimeError("No valid solutions found")
-
-        return soln_tile_ids, all_xx_solns, all_yy_solns
-
-    def get_solns_both(
-        self, refant_name: str
-    ) -> Tuple[
-        NDArray[np.int_],
-        NDArray[np.complex128],
-        NDArray[np.complex128],
-        NDArray[np.complex128],
-        NDArray[np.complex128],
-    ]:
-        """Return tile IDs, raw and reference-normalised XX/YY solutions in one FITS read pass.
-
-        Equivalent to calling ``get_solns()`` and ``get_solns(refant_name)``
-        back-to-back, but reads each solution FITS file only once instead of
-        twice.  The raw (un-normalised) solutions are needed for gain fitting;
-        the reference-normalised solutions are needed for phase fitting.
-
-        The reference normalisation replicates
-        ``HyperfitsSolution.get_ref_solutions()`` on the already-read raw data,
-        avoiding a second FITS open.  The Jones matrix inverse of the reference
-        tile is applied channel-wise via the standard 2×2 determinant formula.
-
-        Args:
-            refant_name: Name of the reference antenna (must not be flagged in
-                either the metafits or the solution file).
-
-        Returns:
-            A 5-tuple of ``(tile_ids, noref_xx, noref_yy, ref_xx, ref_yy)``.
-
-        Raises:
-            RuntimeError: If the reference antenna is not found, is flagged, or
-                if solution data is inconsistent across files.
-        """
-        # Pre-extract metafits arrays once so the per-file loop needs no
-        # DataFrame copies and no repeated column access.
-        tile_names = self.metafits_tiles_df["name"].to_numpy()
-        tile_ids = self.metafits_tiles_df["id"].to_numpy()
-        metafits_flags = self.metafits_tiles_df["flag"].to_numpy(dtype=bool)
-
-        soln_tile_ids = None
-        ref_tile_idx: Optional[int] = None
-        all_noref_xx: Optional[NDArray[np.complex128]] = None
-        all_noref_yy: Optional[NDArray[np.complex128]] = None
-        all_ref_xx: Optional[NDArray[np.complex128]] = None
-        all_ref_yy: Optional[NDArray[np.complex128]] = None
-
-        for chanblocks_hz, soln in zip(self.all_chanblocks_hz, self.solns):
-            # Merge flags without a DataFrame copy.
-            combined_flag = np.logical_or(metafits_flags, soln.tile_flags)
-
-            # Find and validate the reference antenna.
-            ref_mask = tile_names == refant_name
-            if not ref_mask.any():
-                raise RuntimeError(f"{soln.filename} - reference tile {refant_name} not found in solution file")
-            if ref_mask.sum() > 1:
-                raise RuntimeError(
-                    f"{soln.filename} - more than one tile with name {refant_name} found in solution file"
-                )
-            _ref_tile_idx = int(np.where(ref_mask)[0][0])
-            if combined_flag[_ref_tile_idx]:
-                raise RuntimeError(
-                    f"{soln.filename} - reference tile {refant_name}"
-                    f" is flagged in solutions file (index {_ref_tile_idx})"
-                )
-            if ref_tile_idx is None:
-                ref_tile_idx = _ref_tile_idx
-            elif ref_tile_idx != _ref_tile_idx:
-                raise RuntimeError(
-                    f"{soln.filename} - reference tile in solution file does not match previous solution files"
-                )
-
-            # Tile ID consistency check.
-            if soln_tile_ids is None:
-                soln_tile_ids = tile_ids
-            elif not np.array_equal(soln_tile_ids, tile_ids):
-                raise RuntimeError(f"{soln.filename} - tile IDs do not match previous solution files")
-
-            # Single FITS read for all solution data — this is the key difference
-            # from two separate get_solns() calls.
-            raw_solutions = soln.get_solutions()
-
-            # Validate timeblock count directly from the solutions array,
-            # avoiding a separate FITS open for the TIMEBLOCKS HDU.
-            n_times = raw_solutions[0].shape[0]
-            if n_times != 1:
-                raise RuntimeError(f"{soln.filename} - exactly 1 timeblock must be provided: ({n_times})")
-
-            # Shape validation.
-            for solution in raw_solutions:
-                if (ntimes := solution.shape[0]) != 1:
-                    raise RuntimeError(f"{soln.filename} - SOLUTIONS HDU timeblock count ({ntimes}) != 1")
-                if (ntiles := solution.shape[1]) != len(soln_tile_ids):
-                    raise RuntimeError(
-                        f"{soln.filename} - number of tiles in SOLUTIONS HDU ({ntiles})"
-                        f" does not match TILES HDU ({len(soln_tile_ids)})"
-                    )
-                if (nchans := solution.shape[2]) != len(chanblocks_hz):
-                    raise RuntimeError(
-                        f"{soln.filename} - number of channels in SOLUTIONS HDU ({nchans})"
-                        f" does not match CHANBLOCKS HDU ({len(chanblocks_hz)})"
-                    )
-
-            # Raw (un-normalised) XX and YY for gain fitting.
-            noref_xx = raw_solutions[0]
-            noref_yy = raw_solutions[3]
-
-            # Reference-normalised XX and YY for phase fitting.
-            # Replicates HyperfitsSolution.get_ref_solutions() on already-read data.
-            # ref[i] has shape (1, n_chans); broadcasting over the tiles axis is implicit.
-            ref = [s[:, ref_tile_idx, :] for s in raw_solutions]
-            ref_inv_det = np.divide(1 + 0j, ref[0] * ref[3] - ref[1] * ref[2])
-            ref_xx = (raw_solutions[0] * ref[3] - raw_solutions[1] * ref[2]) * ref_inv_det
-            ref_yy = (raw_solutions[3] * ref[0] - raw_solutions[2] * ref[1]) * ref_inv_det
-
-            # Accumulate across solution files.
-            if all_noref_xx is None or all_noref_yy is None or all_ref_xx is None or all_ref_yy is None:
-                all_noref_xx, all_noref_yy = noref_xx, noref_yy
-                all_ref_xx, all_ref_yy = ref_xx, ref_yy
-            else:
-                all_noref_xx = np.concatenate((all_noref_xx, noref_xx), axis=2)
-                all_noref_yy = np.concatenate((all_noref_yy, noref_yy), axis=2)
-                all_ref_xx = np.concatenate((all_ref_xx, ref_xx), axis=2)
-                all_ref_yy = np.concatenate((all_ref_yy, ref_yy), axis=2)
-
-        if (
-            soln_tile_ids is None
-            or all_noref_xx is None
-            or all_noref_yy is None
-            or all_ref_xx is None
-            or all_ref_yy is None
-        ):
-            raise RuntimeError("No valid solutions found")
-
-        return soln_tile_ids, all_noref_xx, all_noref_yy, all_ref_xx, all_ref_yy
-
-
 class PhaseFitInfo(NamedTuple):
+    """Result of fitting a linear phase ramp to one tile/polarisation's calibration solution.
+
+    See fit_phase_line for how these are computed.
+
+    Fields:
+        length: Fitted equivalent cable length, in metres (derived from the
+            fitted phase slope via delay = length / c).
+        intercept: Fitted phase intercept, in radians, wrapped to [-pi, pi].
+        sigma_resid: Standard deviation of phase residuals (radians) after
+            subtracting the best-fit model. Lower is better.
+        chi2dof: Chi-squared per degree of freedom = sum(residuals**2) /
+            (N - 2). Values near 1.0 indicate a good fit; much larger
+            suggests a poor fit or RFI; much smaller suggests over-fitting
+            or too few points.
+        quality: Fraction of original frequency channels surviving the
+            sigma-clip, in [0, 1]. 1.0 means every channel was used.
+        stderr: Standard error of the fitted slope (rad/Hz), from the exact
+            analytic Hessian (see _phase_fit_hess_inv) scaled by residual
+            variance. Not used elsewhere in the pipeline -- purely
+            informational.
+    """
+
     length: float
-    # Intercept is in radians
     intercept: float
     sigma_resid: float
     chi2dof: float
@@ -883,11 +394,38 @@ class PhaseFitInfo(NamedTuple):
 
 
 class GainFitInfo(NamedTuple):
+    """Result of fitting gain amplitude vs. frequency for one tile/polarisation.
+
+    One instance covers all coarse channels: every field except `quality`
+    is a per-coarse-channel list. See fit_gain for how these are computed.
+
+    Note on naming: despite the names, `pol0`/`pol1` are NOT related to
+    polarisation (XX/YY) -- a separate GainFitInfo is already computed per
+    polarisation (see e.g. x_gains/y_gains in mwax_calvin_solutions.py).
+    Within a single GainFitInfo, `pol0`/`pol1` are the order-0 (intercept)
+    and order-1 (slope) coefficients of a small linear polynomial fit to
+    gain amplitude vs. chanblock index, done *within* each coarse channel
+    solely to compute `sigma_resid`.
+
+    Fields:
+        quality: Fraction of all chanblocks (including flagged ones)
+            within 2*sigma_resid of their coarse channel's linear fit,
+            across all coarse channels. Range [0, 1]; higher is better.
+        gains: Per-coarse-channel weighted-mean inverse amplitude
+            (1/amp), i.e. the actual gain value used downstream.
+        pol0: Per-coarse-channel intercept of the within-coarse-channel
+            linear amplitude fit (see note above). Diagnostic only.
+        pol1: Per-coarse-channel slope of the within-coarse-channel
+            linear amplitude fit (see note above). Diagnostic only.
+        sigma_resid: Per-coarse-channel residual standard deviation of
+            that linear fit.
+    """
+
     quality: float
-    gains: List[float]
-    pol0: List[float]
-    pol1: List[float]
-    sigma_resid: List[float]
+    gains: list[float]
+    pol0: list[float]
+    pol1: list[float]
+    sigma_resid: list[float]
 
     @staticmethod
     def default(n_coarse: int = MWA_NUM_COARSE_CHANS) -> "GainFitInfo":
@@ -921,10 +459,10 @@ class GainFitInfo(NamedTuple):
 
 
 def pad_gains_to_full_coarse(
-    values: List[float],
-    actual_chans: List[int],
+    values: list[float],
+    actual_chans: list[int],
     expected_chans: NDArray[np.int_],
-) -> List[float]:
+) -> list[float]:
     """Pad a per-coarse-channel list to match all expected metafits channels.
 
     Creates a list of length ``len(expected_chans)`` initialised to NaN, then
@@ -946,7 +484,7 @@ def pad_gains_to_full_coarse(
         missing channels.
     """
     n_expected = len(expected_chans)
-    padded: List[float] = [np.nan] * n_expected
+    padded: list[float] = [np.nan] * n_expected
     for i, chan_idx in enumerate(actual_chans):
         positions = np.where(expected_chans == chan_idx)[0]
         if len(positions) == 1:
@@ -956,7 +494,7 @@ def pad_gains_to_full_coarse(
 
 def pad_gain_fit_info(
     gain_fit: GainFitInfo,
-    actual_coarse_chans: List[int],
+    actual_coarse_chans: list[int],
     expected_coarse_chans: NDArray[np.int_],
 ) -> GainFitInfo:
     """Return a new GainFitInfo with all per-channel arrays padded to the full metafits channel set.
@@ -999,7 +537,7 @@ def ensure_system_byte_order(arr):
     """
     system_byte_order = ">" if sys.byteorder == "big" else "<"
     if arr.dtype.byteorder not in f"{system_byte_order}|=":
-        return np.frombuffer(arr.tobytes(), dtype=arr.dtype.newbyteorder("="))
+        return arr.astype(arr.dtype.newbyteorder("="))
     return arr
 
 
@@ -1028,6 +566,41 @@ def wrap_angle(angle):
     return np.mod(angle + np.pi, 2 * np.pi) - np.pi
 
 
+# Floor for fit_phase_line's sigma-clip threshold (2 * max(resid_std, this)),
+# in radians. See its use in fit_phase_line for why it's needed.
+_MIN_CLIP_THRESHOLD_RAD = 1e-6
+
+
+def _phase_fit_hess_inv(ν: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Exact inverse Hessian of the phase-ramp fit objective w.r.t. (m, c).
+
+    residual_i(m, c) = wrap(θ_i - m·ν_i - c) is piecewise-linear in (m, c)
+    almost everywhere (wrap's derivative is exactly 1 a.e.; see
+    wrap_angle), so for cost = Σ residual_i², the Gauss-Newton Hessian
+    approximation (2·JᵗJ, where J is the residual Jacobian) is not an
+    approximation here -- it's the exact Hessian, independent of (m, c)
+    and of how many optimizer iterations were taken to get there.
+
+    This replaces relying on scipy.optimize.minimize's own internal BFGS
+    hess_inv, which is only a running approximation built up from
+    gradient differences across iterations -- accurate after enough
+    iterations, but meaningless if the optimizer (now given an exact
+    analytic gradient, so converging in far fewer steps) terminates
+    before that approximation has accumulated real curvature information.
+
+    Args:
+        ν: Frequencies (Hz) of the currently-valid points.
+
+    Returns:
+        The 2x2 inverse Hessian, ordered (m, c) to match `params`.
+    """
+    n = len(ν)
+    sum_ν = np.sum(ν)
+    sum_ν2 = np.sum(ν**2)
+    hessian = 2.0 * np.array([[sum_ν2, sum_ν], [sum_ν, n]])
+    return np.linalg.inv(hessian)
+
+
 def fit_phase_line(
     freqs_hz: NDArray[np.float64],
     solution: NDArray[np.complex128],
@@ -1047,7 +620,7 @@ def fit_phase_line(
         solution: Complex array of calibration solutions.
         weights: Array of weights for each solution.
         niter: Number of fitting iterations. Each iteration refits after
-            rejecting outliers beyond 2*stderr. Must be >= 1.
+            rejecting outliers beyond 2*resid_std. Must be >= 1.
         fit_iono: Whether to fit ionospheric dispersion (currently unused).
 
     Returns:
@@ -1065,12 +638,14 @@ def fit_phase_line(
     #              Values near 1.0 indicate a good fit; much larger suggests poor fit
     #              or RFI; much smaller suggests over-fitting or too few points.
     #
-    # stderr:      Standard error on the fitted slope (rad/Hz), estimated from the
-    #              optimiser's inverse Hessian scaled by residual variance. Used above
-    #              to sigma-clip outlier channels (|residual| < 2 * stderr[0]).
+    # stderr:      Standard error of the fitted slope m (rad/Hz), from the
+    #              objective's exact analytic Hessian (see
+    #              _phase_fit_hess_inv) scaled by residual variance. Not
+    #              used elsewhere in the pipeline -- purely informational.
     #
-    # quality:     Fraction of original frequency channels surviving the sigma-clip
-    #              (len(mask) / nfreqs). Ranges 0–1; 1.0 means all channels were used.
+    # quality:     Fraction of original frequency channels surviving the
+    #              sigma-clip (|residual| < 2*resid_std) (len(mask) /
+    #              nfreqs). Ranges 0-1; 1.0 means all channels were used.
 
     # original number of frequencies
     nfreqs = len(freqs_hz)
@@ -1164,11 +739,25 @@ def fit_phase_line(
     y_int = np.angle(np.mean(solution / model(ν.to(u.Hz).value, slope.value, 0)))
     params = (slope.value, y_int)
 
-    def objective(params, ν, data):
+    def objective_and_grad(params, ν, data):
+        # Combines cost and its exact gradient into one call (jac=True
+        # below) so minimize() never falls back to finite-difference
+        # gradient estimation -- which was re-evaluating this same
+        # objective ~500+ times per fit (once per finite-difference step,
+        # repeated by BFGS's line search) and dominating overall runtime.
+        #
+        # wrap_angle(x) = mod(x + pi, 2*pi) - pi has derivative exactly 1
+        # almost everywhere (it's flat with slope 1 between discontinuous
+        # -2*pi jumps at the wrap points, a measure-zero set the
+        # optimizer won't land on), so d(residual_i)/dm = -ν_i and
+        # d(residual_i)/dc = -1, giving:
+        #   d(cost)/dm = -2 * sum(residual_i * ν_i)
+        #   d(cost)/dc = -2 * sum(residual_i)
         constructed = model(ν, *params)
         residuals = wrap_angle(np.angle(data) - np.angle(constructed))
         cost = np.sum(np.abs(residuals) ** 2)
-        return cost
+        grad = np.array([-2.0 * np.sum(residuals * ν), -2.0 * np.sum(residuals)])
+        return cost, grad
 
     if niter < 1:
         raise ValueError(f"niter must be >= 1, got {niter}")
@@ -1182,7 +771,16 @@ def fit_phase_line(
 
     while niter > 0:
         niter -= 1
-        res = minimize(objective, params, args=(ν.to(u.Hz).value, solution))
+        # A line-search failure inside minimize() doesn't stop it from
+        # returning a result -- just possibly a worse one, which the
+        # chi2dof/sigma_resid quality metrics below already reflect. The
+        # resulting LineSearchWarning is expected noise for a difficult
+        # fit, not a sign minimize() failed outright.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message="The line search algorithm did not converge", category=RuntimeWarning
+            )
+            res = minimize(objective_and_grad, params, args=(ν.to(u.Hz).value, solution), jac=True)
         params = res.x
 
         constructed = model(ν.to(u.Hz).value, *params)
@@ -1190,9 +788,62 @@ def fit_phase_line(
         chi2dof = np.sum(np.abs(residuals) ** 2) / (len(residuals) - len(params))
         resid_std = residuals.std()
         resid_var = residuals.var(ddof=len(params))
-        stderr = np.sqrt(np.diag(res.hess_inv * resid_var))
+        stderr = np.sqrt(np.diag(_phase_fit_hess_inv(ν.to(u.Hz).value)) * resid_var)
 
-        mask = np.where(np.abs(residuals) < 2 * stderr[0])[0]
+        # Sigma-clip using a robust median+MAD scale of residuals
+        # (radians), not stderr[0] (rad/Hz). stderr[0] is the standard
+        # error of the fitted SLOPE m, not a residual-scale quantity --
+        # comparing it against |residuals| (also radians) is a units
+        # mismatch (rad/Hz vs rad). It used to "work" only by a numerical
+        # coincidence specific to scipy.optimize.minimize's default
+        # (numerical-gradient) BFGS: on this badly-conditioned problem
+        # (m ~1e-9, c ~O(1)), BFGS's own hess_inv approximation never
+        # moves far from its near-identity starting point, which happens
+        # to make stderr[0] land close to resid_std anyway -- not because
+        # it reflects m's true uncertainty, but because BFGS's
+        # bookkeeping stays close to its own initial scale. That
+        # coincidence breaks once an exact analytic gradient lets the
+        # optimizer converge in far fewer iterations: stderr[0] (now
+        # computed exactly via _phase_fit_hess_inv, decoupled from BFGS's
+        # convergence path) correctly reflects m's real, tiny rad/Hz-
+        # scale uncertainty, which is meaningless as a radians threshold.
+        #
+        # resid_std itself can collapse towards machine noise for a
+        # (near-)exact fit -- e.g. clean synthetic data, or any tile
+        # whose residuals converge extremely tightly -- which would
+        # otherwise make the clipping threshold degenerate (almost no
+        # residual satisfies it, tripping the "too few points" early
+        # exit and reporting near-zero quality for an excellent fit).
+        # _MIN_CLIP_THRESHOLD_RAD guards against that; it's far below any
+        # physically meaningful phase noise, so it has no effect on
+        # realistic (noisy) data where resid_std is orders of magnitude
+        # larger than this.
+        #
+        # The clip itself uses a robust median + MAD scale, not resid_std
+        # and not zero as the comparison centre. Two related reasons:
+        #
+        # 1. std is not robust to the very outliers it's meant to catch
+        #    (the same masking/swamping issue fixed in reject_outliers):
+        #    a large contaminated fraction inflates std in proportion to
+        #    its own presence, so the "2*std" threshold grows permissive
+        #    exactly when it should tighten. E.g. with 25% of channels
+        #    flipped by pi, the outlier residuals (~2.1-2.6 rad) and the
+        #    clean residuals (~-0.55 to -1.0 rad) separate cleanly, but
+        #    2*resid_std (~2.7 rad) ends up just barely above the
+        #    outliers' own max -- letting them all survive by
+        #    coincidence, not because they're not outliers.
+        # 2. A single non-robust least-squares fit over contaminated data
+        #    is itself biased towards the outliers, so even the CLEAN
+        #    residuals end up centred away from zero (e.g. ~-0.7 rad
+        #    above, not 0). Comparing |residuals| against a threshold
+        #    (implicitly centred at zero) would then wrongly reject the
+        #    clean majority too; centring on the residuals' own median
+        #    instead correctly separates the two groups regardless of
+        #    where the (biased) fit put them.
+        resid_median = np.median(residuals)
+        resid_mad = np.median(np.abs(residuals - resid_median))
+        clip_scale = max(1.4826 * resid_mad, _MIN_CLIP_THRESHOLD_RAD)
+        mask = np.where(np.abs(residuals - resid_median) < 2 * clip_scale)[0]
         if len(mask) < 2:
             break
         solution = solution[mask]
@@ -1223,6 +874,8 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse: int) -> GainF
 
     Returns:
         GainFitInfo object containing fitted gains and quality metrics.
+        See GainFitInfo's docstring -- in particular, its pol0/pol1
+        fields are polynomial-fit coefficients, not polarisation labels.
     """
     # length check- should be the number of fine channels
     n_freqs = len(chanblocks_hz)
@@ -1301,6 +954,250 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse: int) -> GainF
     )
 
 
+def iterative_poly_clip(
+    x: np.ndarray,
+    y: np.ndarray,
+    degree: int,
+    residual_threshold: float,
+    initial_valid: np.ndarray,
+    max_iter: int = 10,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float, float]:
+    """Fit a robust, sigma-clipped polynomial to y(x) and flag outliers.
+
+    Iteratively fits a degree-N polynomial on the currently-valid points,
+    computes residuals against that fit, rejects points whose residual
+    exceeds residual_threshold MADs (median absolute deviations) from the
+    median residual, and refits -- repeating until the valid set stops
+    changing (or max_iter is reached). This guards against a single
+    extreme outlier dragging a one-shot least-squares fit far enough off
+    course that it masks the very outlier it should catch.
+
+    Ported from the now-deleted mwax_calvin_quality._iterative_poly_clip as
+    a standalone pure function, for reuse by
+    HyperfitsSolutionGroup.flag_amplitude_outliers.
+
+    Args:
+        x: 1D array of independent variable values (e.g. chanblock index).
+        y: 1D array of dependent variable values (e.g. gain amplitude).
+        degree: Polynomial degree to fit.
+        residual_threshold: Number of residual-MADs beyond which a point
+            is considered an outlier. Dimensionless -- e.g. 5.0 means "5x
+            the typical residual scatter for this tile/pol", not an
+            absolute gain value.
+        initial_valid: Boolean mask of points eligible to be fit at all
+            (e.g. already excludes points flagged for unrelated reasons
+            like non-convergence). Outliers found here are only ever a
+            subset of this mask.
+        max_iter: Maximum number of fit/clip iterations.
+
+    Returns:
+        A tuple (valid, residual, fit, mad, med):
+        - valid: Boolean array, True for points considered good (within
+          initial_valid and not rejected as an outlier).
+        - residual: Float array, |y - fit - median_residual| / mad at
+          every point (including points outside initial_valid, computed
+          against the final fit). NaN everywhere if no fit could ever be
+          computed (too few valid points).
+        - fit: Float array, the final polynomial fit evaluated at every x.
+          NaN everywhere if no fit could be computed at all.
+        - mad: The median absolute deviation of residuals from the final
+          fit iteration (scalar, same units as y). NaN if no fit could be
+          computed.
+        - med: The median residual from the final fit iteration (scalar,
+          same units as y). NaN if no fit could be computed.
+    """
+    n = len(y)
+    valid = initial_valid.copy()
+    residual = np.full(n, np.nan, dtype=np.float64)
+    fit = np.full(n, np.nan, dtype=np.float64)
+    mad = np.nan
+    med = np.nan
+
+    if valid.sum() < degree + 2:
+        return valid, residual, fit, mad, med
+
+    for _ in range(max_iter):
+        coeffs = np.polyfit(x[valid], y[valid], degree)
+        fit = np.polyval(coeffs, x)
+        resid_all = y - fit
+
+        med = np.median(resid_all[valid])
+        mad = np.median(np.abs(resid_all[valid] - med))
+        if mad == 0:
+            residual[:] = 0.0
+            break
+
+        residual = np.abs(resid_all - med) / mad
+        new_valid = initial_valid & (residual <= residual_threshold)
+
+        if new_valid.sum() < degree + 2:
+            break
+        if np.array_equal(new_valid, valid):
+            valid = new_valid
+            break
+        valid = new_valid
+
+    return valid, residual, fit, mad, med
+
+
+def iterative_poly_clip_batch(
+    x: np.ndarray,
+    Y: np.ndarray,
+    degree: int,
+    residual_threshold: float,
+    initial_valid: np.ndarray,
+    max_iter: int = 10,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Vectorized, batched equivalent of iterative_poly_clip, fitting every
+    row (tile) at once instead of looping and calling np.polyfit per tile.
+
+    Mathematically identical to calling iterative_poly_clip(x, Y[t], ...)
+    for each tile t independently -- same per-tile stopping conditions,
+    same MAD-based clipping -- but replaces what was previously up to
+    (n_tiles * max_iter) separate np.polyfit/np.polyval calls with a
+    handful of batched numpy operations per outer iteration. Since every
+    tile shares the same x-grid (chanblock index), a per-tile weighted
+    least-squares fit is just a per-tile (degree+1)x(degree+1) normal-
+    equations solve against a shared design matrix, which batches
+    trivially across tiles via einsum + batched np.linalg.solve, instead
+    of paying np.polyfit's (comparatively large) fixed per-call overhead
+    thousands of times over.
+
+    Args:
+        x: 1D array of independent variable values (e.g. chanblock
+            index), shape (n_chan,), shared across all tiles.
+        Y: 2D array of dependent variable values, shape (n_tiles, n_chan).
+        degree: Polynomial degree to fit.
+        residual_threshold: Number of residual-MADs beyond which a point
+            is considered an outlier.
+        initial_valid: Boolean array, shape (n_tiles, n_chan), of points
+            eligible to be fit at all per tile.
+        max_iter: Maximum number of fit/clip iterations.
+
+    Returns:
+        A tuple (valid, residual, fit, mad, med), each matching
+        iterative_poly_clip's per-tile return but with an added leading
+        tile axis: valid/residual/fit shape (n_tiles, n_chan), mad/med
+        shape (n_tiles,).
+    """
+    n_tiles, n = Y.shape
+    valid = initial_valid.copy()
+    residual = np.full((n_tiles, n), np.nan, dtype=np.float64)
+    fit = np.full((n_tiles, n), np.nan, dtype=np.float64)
+    mad = np.full(n_tiles, np.nan, dtype=np.float64)
+    med = np.full(n_tiles, np.nan, dtype=np.float64)
+
+    min_points = degree + 2
+    # Mirrors the per-tile early return: a tile with too few initially-
+    # valid points is never fit at all, and keeps its original valid mask.
+    done = valid.sum(axis=1) < min_points
+
+    # Shared design matrix (every tile has the same x-grid).
+    design = np.vander(x, degree + 1, increasing=True)  # (n, degree+1)
+
+    for _ in range(max_iter):
+        active = np.where(~done)[0]
+        if len(active) == 0:
+            break
+
+        weights = valid[active].astype(np.float64)  # (n_active, n)
+        # Y can contain NaN at invalid positions (e.g. a pre-existing-NaN
+        # Jones entry) -- weight=0 there doesn't zero out a NaN
+        # (0 * nan == nan), so replace those entries before weighting.
+        # The per-tile version never has this problem since it indexes
+        # y[valid] directly, never touching the invalid entries at all.
+        y_true = Y[active]
+        y_for_fit = np.where(weights > 0, y_true, 0.0)
+
+        # Batched normal equations: A[t] = designᵗ diag(weights[t]) design;
+        # b[t] = designᵗ diag(weights[t]) y_for_fit[t]. Exact for a
+        # weighted least-squares fit against the shared design matrix --
+        # same answer np.polyfit(x[valid], y[valid], degree) would give.
+        gram = np.einsum("tk,ki,kj->tij", weights, design, design)
+        rhs = (weights * y_for_fit) @ design  # (n_active, degree+1)
+
+        try:
+            coeffs = np.linalg.solve(gram, rhs[..., np.newaxis])[..., 0]
+        except np.linalg.LinAlgError:
+            # Extremely unlikely given the min_points guard above (would
+            # need a degenerate x-distribution among the valid points),
+            # but fall back tile-by-tile rather than losing the whole
+            # batch if it ever happens.
+            coeffs = np.full((len(active), degree + 1), np.nan)
+            for i in range(len(active)):
+                try:
+                    coeffs[i] = np.linalg.solve(gram[i], rhs[i])
+                except np.linalg.LinAlgError:
+                    pass
+
+        fit_active = coeffs @ design.T  # (n_active, n)
+        # Residuals use the TRUE y, not y_for_fit -- a point temporarily
+        # excluded this round (weight=0, but still within initial_valid,
+        # i.e. not NaN) must be re-evaluated against its real value each
+        # iteration so it can rejoin if the updated fit now passes it.
+        # Using the zeroed y_for_fit here instead would compare a fake
+        # zero against the fit for every currently-excluded point,
+        # corrupting exactly the re-inclusion check the iteration depends
+        # on. Genuinely-NaN positions still propagate NaN here, same as
+        # the per-tile version's resid_all = y - fit.
+        resid_all = y_true - fit_active
+
+        # Per-tile median/MAD over that tile's currently-valid points only.
+        masked_resid = np.where(weights > 0, resid_all, np.nan)
+        med_active = np.nanmedian(masked_resid, axis=1)
+        mad_active = np.nanmedian(np.abs(masked_resid - med_active[:, None]), axis=1)
+
+        fit[active] = fit_active
+        med[active] = med_active
+        mad[active] = mad_active
+
+        # A tolerance, not exact equality: a genuinely (near-)perfect fit
+        # can land at a different tiny floating-point residue (~1e-15 to
+        # 1e-16) depending on the numerical method used -- np.polyfit's
+        # SVD-based approach per-tile vs. this function's batched normal-
+        # equations solve are mathematically equivalent but not
+        # bit-identical. Dividing by an almost-but-not-exactly-zero MAD
+        # would otherwise amplify that noise unpredictably in `residual`
+        # below. 1e-9 is far below any real measurement noise in gain
+        # amplitude data (realistically ~1e-2 to 1e0 in these units).
+        zero_mad = mad_active < 1e-9
+        if zero_mad.any():
+            zero_idx = active[zero_mad]
+            residual[zero_idx] = 0.0
+            done[zero_idx] = True
+
+        nonzero = ~zero_mad
+        if nonzero.any():
+            nz_idx = active[nonzero]
+            residual_nz = np.abs(resid_all[nonzero] - med_active[nonzero, None]) / mad_active[nonzero, None]
+            residual[nz_idx] = residual_nz
+
+            new_valid_nz = initial_valid[nz_idx] & (residual_nz <= residual_threshold)
+            too_few = new_valid_nz.sum(axis=1) < min_points
+            done[nz_idx[too_few]] = True
+
+            keep_going = ~too_few
+            kg_idx = nz_idx[keep_going]
+            new_valid_kg = new_valid_nz[keep_going]
+            unchanged = np.all(new_valid_kg == valid[kg_idx], axis=1)
+
+            # Apply new_valid regardless of whether it changed (matches
+            # iterative_poly_clip's `valid = new_valid` in both the
+            # "unchanged" and "keep going" branches); only the stopping
+            # decision differs between them.
+            valid[kg_idx] = new_valid_kg
+            done[kg_idx[unchanged]] = True
+
+    # Y positions that were never valid may have been zeroed internally
+    # above to avoid 0*NaN propagation; the per-tile version's residual
+    # is NaN wherever the original Y is NaN (resid_all = y - fit, and y
+    # itself is NaN there), so match that here even though nothing
+    # currently consumes this field.
+    residual = np.where(np.isnan(Y), np.nan, residual)
+
+    return valid, residual, fit, mad, med
+
+
 def poly_str(coeffs, independent_var="x"):
     """Format polynomial coefficients as a string expression.
 
@@ -1354,102 +1251,61 @@ def textwrap(s, width=70):
     return "\n".join(lines)
 
 
-def debug_phase_fits(
-    phase_fits: pd.DataFrame,
-    tiles: pd.DataFrame,
-    freqs: NDArray[np.float64],
-    soln_xx: NDArray[np.complex128],
-    soln_yy: NDArray[np.complex128],
-    weights: NDArray[np.float64],
-    prefix: str = "./",
-    show: bool = False,
-    title: str = "",
-    plot_residual: bool = False,
-    residual_vmax=None,
-) -> Optional[pd.DataFrame]:
-    """Generate debug plots and analysis for phase fits.
-
-    Produces plots and TSV files for phase fit intercepts, residuals, and RX lengths,
-    and returns a pivoted dataframe with per-antenna fit information.
-
-    Args:
-        phase_fits: DataFrame with phase fit results per tile and polarization.
-        tiles: DataFrame with tile metadata.
-        freqs: Array of frequency values in Hz.
-        soln_xx: XX polarization solutions.
-        soln_yy: YY polarization solutions.
-        weights: Weight values for each frequency channel.
-        prefix: Output directory prefix for saving plots (default: './').
-        show: Whether to display plots (default: False).
-        title: Title for plots (default: '').
-        plot_residual: Whether to plot residuals (default: False).
-        residual_vmax: Maximum value for residual plot y-axis (default: None).
-
-    Returns:
-        Pivoted DataFrame with combined fit data, or None if no valid fits.
-    """
-    n_total = len(phase_fits)
-    if n_total == 0:
-        return
-
-    phase_fits = reject_outliers(phase_fits, "chi2dof")
-    phase_fits = reject_outliers(phase_fits, "sigma_resid")
-
-    n_good = len(phase_fits[~phase_fits["outlier"]])
-    if n_good == 0:
-        return
-
-    flavor_fits = pd.merge(phase_fits, tiles, left_on="tile_id", right_on="id")
-    bad_fits = flavor_fits[flavor_fits["outlier"]]
-    if len(bad_fits) > 0:
-        logger.debug(f"flagged {len(bad_fits)} of {n_total} fits as outliers:")
-        logger.debug(bad_fits[["name", "pol"]].to_string(index=False))
-
-    # make a new colormap for weighted data
-    half_blues = LinearSegmentedColormap.from_list(
-        colors=mpl.colormaps["Blues"](np.linspace(0.5, 1, 256)),
-        name="HalfBlues",
-    )
-
-    if len(flavor_fits):
-        _rx_means = plot_rx_lengths(flavor_fits, prefix, show, title)
-        # print(f"{rx_means=}")
-
-    def ensure_system_byte_order(arr):
-        system_byte_order = ">" if sys.byteorder == "big" else "<"
-        if arr.dtype.byteorder != system_byte_order and arr.dtype.byteorder not in "|=":
-            return arr.newbyteorder(system_byte_order)
-        return arr
-
-    freqs = ensure_system_byte_order(freqs)
-    weights = ensure_system_byte_order(weights)
-    soln_xx = ensure_system_byte_order(soln_xx)
-    soln_yy = ensure_system_byte_order(soln_yy)
-
-    if plot_residual:
-        plot_phase_residual(freqs, soln_xx, soln_yy, weights, prefix, title, plot_residual, residual_vmax, flavor_fits)
-    if len(flavor_fits):
-        plot_phase_intercepts(prefix, show, title, flavor_fits)
-
-    phase_fits_pivot = pivot_phase_fits(phase_fits, tiles)
-    weights2 = weights**2
-
-    if prefix:
-        phase_fits_pivot.to_csv(f"{prefix}phase_fits.tsv", sep="\t", index=False)
-
-    if len(phase_fits_pivot):
-        plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, half_blues, phase_fits_pivot, weights2)
-
-    return phase_fits_pivot
-
-
-def reject_outliers(data, quality_key, nstd=3.0):
+def reject_outliers(data, quality_key, group_cols=("pol",), nstd=3.0, max_iter=10):
     """Mark outliers in a DataFrame based on a quality metric.
 
+    Uses a robust, iteratively-refined threshold per group (see
+    group_cols): threshold = median + nstd * 1.4826 * MAD, computed from
+    that group's not-yet-flagged rows, with newly-flagged rows removed
+    from the population before recomputing the threshold and repeating
+    (until nothing new is flagged, or max_iter is reached).
+
+    This replaces a single-pass mean + nstd*std threshold, which is
+    vulnerable to masking (aka swamping): if several rows are comparably
+    bad, they inflate the population mean/std together, raising the
+    threshold enough that only the single most extreme one crosses it
+    while the rest hide beneath it. A robust median/MAD centre and scale
+    resists being dragged by the very outliers it's meant to catch, and
+    iterating lets the threshold tighten again each time an outlier is
+    set aside, so a cluster of comparably-bad rows gets caught round by
+    round instead of masking each other. Mirrors the median/MAD +
+    iterative-clip approach already used by iterative_poly_clip for
+    amplitude-outlier detection.
+
+    Also fixes a pre-existing bug: the previous implementation computed
+    quality_thresh from a `pol`-specific population but then applied it
+    via a mask with no `pol` filter, so a threshold derived from one
+    polarisation's population could incorrectly flag rows of the other.
+    Flagging is now scoped to the current group throughout.
+
+    Grouping only by `pol` (the default, and the only behaviour before
+    group_cols was added) pools every tile of every receiver flavour into
+    one population per polarisation before thresholding. On real MWA
+    observations, different receiver flavours (e.g. RRI/SHAO/NI) have
+    measurably different natural chi2dof/sigma_resid distributions even
+    after each tile's own cable delay is fit out -- so pooling them
+    together lets whichever flavour has the most tiles set a threshold
+    that's too strict for a naturally-noisier minority flavour
+    (over-flagging it) and too lenient for a naturally-tighter one
+    (under-flagging it). Passing group_cols=("pol", "flavor") scopes the
+    threshold to each flavour's own population instead. See CALVIN.md's
+    "Phase-outlier detection" section for a worked example on a real
+    observation.
+
     Args:
-        data: Input DataFrame with a 'pol' column and quality column.
+        data: Input DataFrame with the columns named in group_cols, plus
+            the quality column.
         quality_key: Name of the column to use for outlier detection.
-        nstd: Number of standard deviations for outlier threshold (default: 3.0).
+        group_cols: Column name(s) defining the population each row is
+            compared against -- a separate threshold is computed and
+            applied independently per unique combination of these
+            columns' values (default: ("pol",), i.e. one threshold per
+            polarisation, matching this function's original behaviour).
+        nstd: Number of (MAD-derived, approximately Gaussian-equivalent)
+            standard deviations beyond the population median before a
+            row is an outlier (default: 3.0). Negative flags low
+            outliers instead of high ones.
+        max_iter: Maximum number of threshold/clip iterations per group.
 
     Returns:
         DataFrame with an 'outlier' column added/updated marking outliers.
@@ -1458,284 +1314,114 @@ def reject_outliers(data, quality_key, nstd=3.0):
         return data
     if "outlier" not in data.columns:
         data["outlier"] = False
-    for pol in data["pol"].unique():
-        idx_pol_good = np.where(np.logical_and(data["pol"] == pol, ~data["outlier"]))[0]
-        quality_thresh = data.loc[idx_pol_good, quality_key].mean() + nstd * data.loc[idx_pol_good, quality_key].std()
-        if nstd >= 0:
-            data.loc[data[quality_key] >= quality_thresh, "outlier"] = True
-        else:
-            data.loc[data[quality_key] <= quality_thresh, "outlier"] = True
 
+    # Scales a normal-distribution MAD to be comparable to a standard
+    # deviation, so nstd keeps roughly the same meaning as the previous
+    # mean+nstd*std threshold for a population with few/no outliers.
+    mad_to_std = 1.4826
+
+    quality_values = data[quality_key].to_numpy()
+    outlier_values = data["outlier"].to_numpy().copy()
+
+    # A single string key per row, combining every group_cols value --
+    # lets the loop below treat any number of grouping columns the same
+    # way it previously treated just "pol", with one iteration per unique
+    # combination rather than one nested loop per column.
+    group_cols = list(group_cols)
+    group_key = data[group_cols].astype(str).agg("|".join, axis=1).to_numpy()
+
+    for grp in np.unique(group_key):
+        grp_mask = group_key == grp
+
+        for _ in range(max_iter):
+            idx_grp_good = np.where(grp_mask & ~outlier_values)[0]
+            if len(idx_grp_good) == 0:
+                break
+
+            grp_values = quality_values[idx_grp_good]
+            grp_median = np.median(grp_values)
+            grp_mad = np.median(np.abs(grp_values - grp_median))
+
+            if grp_mad == 0 or np.isnan(grp_mad):
+                if np.ptp(grp_values) == 0:
+                    # Truly zero spread across this group's currently-good
+                    # population (or too few points to compute a
+                    # meaningful spread, e.g. a single row) -- nothing
+                    # stands out, so stop iterating for this group.
+                    # Without this guard, zero spread gives threshold ==
+                    # median, and ">=" trivially flags every remaining
+                    # row via equality -- the opposite of correct
+                    # behaviour.
+                    break
+                # MAD's ~50% breakdown point means a minority of extreme
+                # values can collapse it to zero even though real spread
+                # exists (e.g. 9 identical values + 1 extreme one: the
+                # median residual is 0 for the majority, so is the MAD).
+                # Fall back to a mean+std threshold for this round only,
+                # as a safety net -- std isn't fooled by a minority
+                # outlier the way MAD's breakdown point is here.
+                grp_mean = np.mean(grp_values)
+                grp_std = np.std(grp_values, ddof=1)
+                if grp_std == 0:
+                    break
+                quality_thresh = grp_mean + nstd * grp_std
+            else:
+                quality_thresh = grp_median + nstd * mad_to_std * grp_mad
+
+            if nstd >= 0:
+                newly_bad = grp_mask & ~outlier_values & (quality_values >= quality_thresh)
+            else:
+                newly_bad = grp_mask & ~outlier_values & (quality_values <= quality_thresh)
+
+            if not newly_bad.any():
+                break
+            outlier_values[newly_bad] = True
+
+    data["outlier"] = outlier_values
     return data
 
 
-def plot_rx_lengths(flavor_fits, prefix, show, title):
-    """Plot and save cable length distribution by receiver.
+def annotate_phase_outliers(
+    phase_fits: pd.DataFrame,
+    tiles: pd.DataFrame,
+    nstd: float = 3.0,
+) -> pd.DataFrame:
+    """Merge tile metadata into a phase-fits DataFrame and mark population outliers.
+
+    Merges tiles (e.g. HyperfitsSolutionGroup.metafits_tiles_df or
+    Metafits.tiles_df -- anything with 'id' and 'flavor' columns) into
+    phase_fits on tile_id/id, then scopes reject_outliers's
+    population-outlier test to (pol, flavor) groups, on chi2dof then
+    sigma_resid, sequentially.
+
+    This is the single, shared definition of "phase outlier" used
+    everywhere in the Calvin pipeline: HyperfitsSolutionGroup.
+    detect_phase_outliers (which only reports the result -- see its
+    docstring for why phase outliers are no longer flagged or modified),
+    and mwax_calvin_plots.write_stats_and_debug_plots (which feeds the
+    same annotated DataFrame to both the stats.txt Flavor/PhOutlier
+    columns and the phase-fit debug plots). Routing every caller through
+    one function keeps that definition consistent -- previously the
+    plotting path independently recomputed this with a hardcoded nstd,
+    which could silently disagree with the actual detection threshold.
 
     Args:
-        flavor_fits: DataFrame with fit results per receiver.
-        prefix: Output directory prefix for saving plot.
-        show: Whether to display the plot.
-        title: Title for the plot.
+        phase_fits: DataFrame from process_phase_fits (or a snapshot of
+            it), with columns tile_id/soln_idx/pol/chi2dof/sigma_resid/etc.
+        tiles: DataFrame with tile metadata, including 'id' and 'flavor'.
+        nstd: Number of (MAD-derived) standard deviations beyond each
+            (pol, flavor) population's robust centre before a tile's fit
+            is an outlier on that metric (default: 3.0). See
+            reject_outliers.
 
     Returns:
-        Series with mean cable lengths per receiver.
+        phase_fits merged with tiles (on tile_id/id) and with an
+        'outlier' column marking population-outlier rows.
     """
-    good_fits = flavor_fits[~flavor_fits["outlier"]]
-    rxs = sorted(good_fits["rx"].unique())
-    means = good_fits.groupby(["rx"])["length"].mean()
-
-    plt.clf()
-    box_plot = sns.boxplot(data=good_fits, y="rx", x="length", hue="pol", orient="h", fliersize=0.5)
-    # offset = good_fits['length'].median() * 0.05 # offset from median for display
-    box_plot.grid(axis="x")
-    x_text = np.max(box_plot.get_xlim())
-
-    for ytick in box_plot.get_yticks():
-        rx = rxs[ytick]
-        mean = means[rx]
-        box_plot.text(
-            x_text,
-            ytick,
-            f"rx{rx:02} = {mean:+6.2f}m",
-            horizontalalignment="left",
-            weight="semibold",
-            fontfamily="monospace",
-        )
-        box_plot.add_line(plt.Line2D([mean, mean], [ytick - 0.5, ytick + 0.5], color="red", linewidth=1))
-
-    fig = plt.gcf()
-    if title:
-        fig.suptitle(title)
-        # fig.subplots_adjust(top=0.88)
-    if show:
-        plt.show()
-    if prefix:
-        plt.tight_layout()
-        fig.savefig(f"{prefix}rx_lengths.png", dpi=300, bbox_inches="tight")
-
-    return means
-
-
-def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fits_pivot, weights2):
-    """Plot phase fits for XX and YY polarizations.
-
-    Args:
-        freqs: Array of frequency values.
-        soln_xx: XX polarization solutions.
-        soln_yy: YY polarization solutions.
-        prefix: Output directory prefix for saving plots.
-        show: Whether to display plots.
-        title: Title for plots.
-        cmap: Colormap for weighted data.
-        phase_fits_pivot: DataFrame with pivoted phase fit results.
-        weights2: Squared weight values.
-    """
-    rxs = np.sort(np.unique(phase_fits_pivot["rx"]))
-    slots = np.sort(np.unique(phase_fits_pivot["slot"]))
-    figsize = (np.clip(len(slots) * 2.5, 5, 20), np.clip(len(rxs) * 3, 5, 30))
-
-    for pol, soln in zip(["xx", "yy"], [soln_xx, soln_yy]):
-        plt.clf()
-        fig, axs = plt.subplots(len(rxs), len(slots), sharex=True, sharey="row", squeeze=True)
-        # rest of the code assumes axs is 2D array
-        if len(rxs) == 1 and len(slots) == 1:
-            axs = np.array([[axs]])
-        elif len(rxs) == 1:
-            axs = axs[np.newaxis, :]
-        elif len(slots) == 1:
-            axs = axs[:, np.newaxis]
-
-        for ax in axs.flatten():
-            ax.axis("off")
-        for _, fit in phase_fits_pivot.iterrows():
-            signal = soln[fit["soln_idx"]]
-            if fit["flag"] or np.isnan(signal).all():
-                continue
-            mask = np.where(np.logical_and(np.isfinite(signal), weights2 > 0))[0]
-            angle = np.angle(signal)
-            mask_freq: np.ndarray = freqs[mask]
-            model_freqs = np.linspace(mask_freq.min(), mask_freq.max(), len(freqs))
-            rx_idx = np.where(rxs == fit["rx"])[0][0]
-            slot_idx = np.where(slots == fit["slot"])[0][0]
-            ax = axs[rx_idx][slot_idx]
-            ax.axis("on")
-            gradient = (2 * np.pi * u.rad * (fit[f"length_{pol}"] * u.m) / c).to(u.rad / u.Hz).value
-            intercept = fit[f"intercept_{pol}"]
-            model = gradient * model_freqs + intercept
-            ax.scatter(model_freqs, wrap_angle(model), c="red", s=0.5)
-            mask_weights: ArrayLike = weights2[mask]
-            ax.scatter(mask_freq, wrap_angle(angle[mask]), c=mask_weights, cmap=cmap, s=2)
-            outlier = fit[f"outlier_{pol}"]
-            color = "red" if outlier else "black"
-            ax.set_title(
-                f"{fit['name']}|{fit['soln_idx']}", color=color, weight="semibold", fontfamily="monospace"
-            )  # |{fit['id']}
-            x_text = np.mean(ax.get_xlim())
-            y_text = np.mean(ax.get_ylim())
-            text = "\n".join(
-                [
-                    f"L{fit[f'length_{pol}']:+6.2f}m",
-                    f"X{fit[f'chi2dof_{pol}']:.4f}",
-                    # f"S{fit[f'sigma_resid_{pol}']:.4f}",
-                    # f"Q{fit[f'quality_{pol}']:.2f}",
-                ]
-            )
-            ax.text(
-                x_text,
-                y_text,
-                text,
-                ha="center",
-                va="center",
-                zorder=10,
-                horizontalalignment="left",
-                weight="semibold",
-                fontfamily="monospace",
-                color=color,
-                backgroundcolor=("white", 0.5),
-            )
-
-        fig.set_size_inches(*figsize)
-        if title:
-            fig.suptitle(title)
-            fig.subplots_adjust(top=0.88)
-        if show:
-            plt.show()
-        if prefix:
-            plt.tight_layout()
-            fig.savefig(f"{prefix}phase_fits_{pol}.png", dpi=300, bbox_inches="tight")
-
-
-def plot_phase_intercepts(prefix, show, title, flavor_fits):
-    """Plot phase intercepts in polar coordinates.
-
-    Args:
-        prefix: Output directory prefix for saving plot.
-        show: Whether to display the plot.
-        title: Title for the plot.
-        flavor_fits: DataFrame with phase fit results.
-    """
-    plt.clf()
-    g = sns.FacetGrid(
-        flavor_fits,
-        row="flavor",
-        col="pol",
-        hue="flavor",
-        subplot_kws=dict(projection="polar"),
-        sharex=False,
-        sharey=False,
-        despine=False,
-    )
-    g.map(
-        (lambda theta, r, size, **kwargs: plt.scatter(x=theta, y=r, s=10 / (0.1 + size), **kwargs)),
-        "intercept",
-        "length",
-        "sigma_resid",
-    )
-    fig = plt.gcf()
-    if title:
-        fig.suptitle(title)
-        fig.subplots_adjust(top=0.95)
-    if show:
-        plt.show()
-    if prefix:
-        plt.tight_layout()
-        fig.savefig(f"{prefix}intercepts.png", dpi=300, bbox_inches="tight")
-
-
-def plot_phase_residual(freqs, soln_xx, soln_yy, weights, prefix, title, plot_res, residual_vmax, flavor_fits):
-    """Plot and analyze phase residuals across frequencies.
-
-    Args:
-        freqs: Array of frequency values in Hz.
-        soln_xx: XX polarization solutions.
-        soln_yy: YY polarization solutions.
-        weights: Weight values for each frequency.
-        prefix: Output directory prefix for saving plots and data.
-        title: Title for plots.
-        plot_res: Whether to plot residuals.
-        residual_vmax: Maximum value for residual plot y-axis.
-        flavor_fits: DataFrame with phase fit results per receiver flavor.
-    """
-    plt.clf()
-    g = sns.FacetGrid(flavor_fits, row="flavor", col="pol", hue="flavor", sharex=True, sharey=False)
-
-    if len(freqs) != len(weights):
-        raise RuntimeError(f"({len(freqs)=}) and ({len(weights)=}) must be the same length")
-
-    df = pd.DataFrame(
-        {
-            "freq": freqs,
-            "weights": weights,
-        }
-    )
-
-    def plot_residual(
-        soln_idxs: pd.Series, pols: pd.Series, flavs: pd.Series, lengths: pd.Series, intercepts: pd.Series, **kwargs
-    ):
-        gradients = (2 * np.pi * u.rad * (lengths.to_numpy() * u.m) / c).to(u.rad / u.Hz).value
-        intercepts_arr = intercepts.to_numpy()
-        pol = pols.iloc[0]
-        flav = flavs.iloc[0]
-        if pol == "XX":
-            solns = soln_xx[soln_idxs.values]
-        elif pol == "YY":
-            solns = soln_yy[soln_idxs.values]
-        else:
-            raise RuntimeError(f"wut pol? {pol}")
-        models = gradients[:, np.newaxis] * freqs[np.newaxis, :] + intercepts_arr[:, np.newaxis]
-        resids = wrap_angle(np.angle(solns) - models)
-        medians = np.nanmedian(resids, axis=0)
-        min_mse = np.inf
-        best_coeffs = None
-        best_indep = None
-        mask = np.where(np.logical_and(np.isfinite(medians), np.logical_not(np.isnan(medians)), weights > 0))[0]
-        df[f"{flav}_{pol}"] = medians
-        for indep_var in ["ν", "λ"]:
-            if indep_var == "ν":
-                xs = freqs[mask]
-            elif indep_var == "λ":
-                xs = 1.0 / freqs[mask]
-
-            for order in range(1, 9):
-                try:
-                    coeffs = np.polyfit(xs, medians[mask], order)
-                except ValueError:
-                    logger.exception(
-                        f"plot_residual(): Error in np.polyfit. Skipping polyfit({order=}, {indep_var=}) due to "
-                        f"ValueError for {flav=} {pol=}.\n{xs=}\n{medians[mask]=}"
-                    )
-                    continue
-
-                mse = order * np.nanmean((medians - np.poly1d(coeffs)(freqs)) ** 2)
-                if mse < min_mse:
-                    min_mse = mse
-                    best_coeffs = coeffs
-                    best_indep = indep_var
-
-        _ = kwargs.pop("label")
-        sns.scatterplot(x=freqs, y=medians, hue=weights, **dict(**kwargs, marker="+"))
-        if best_coeffs is not None and best_indep is not None:
-            sns.lineplot(x=freqs, y=np.poly1d(best_coeffs)(freqs), **kwargs)
-            eqn = poly_str(best_coeffs, independent_var=best_indep)
-            poly_wrap = textwrap(f"[{len(best_coeffs)}] {eqn}", width=40)
-            plt.text(0.05, 0.1, poly_wrap, transform=plt.gca().transAxes, fontsize=7)
-        if residual_vmax is not None:
-            ylim = float(residual_vmax)
-            plt.ylim(-ylim, ylim)
-
-        # logger.debug(f"{flav=} {pol=} {eqn=}")
-
-    g.map(plot_residual, "soln_idx", "pol", "flavor", "length", "intercept")
-    g.set_axis_labels("freq", "phase")
-
-    fig = plt.gcf()
-    if title:
-        fig.suptitle(title)
-        fig.subplots_adjust(top=0.95)
-    fig.savefig(f"{prefix}residual.png", dpi=200, bbox_inches="tight")
-    # save df to csv
-    df.to_csv(f"{prefix}residual.tsv", sep="\t", index=False)
+    merged = phase_fits.merge(tiles, left_on="tile_id", right_on="id", how="left")
+    merged = reject_outliers(merged, "chi2dof", group_cols=("pol", "flavor"), nstd=nstd)
+    merged = reject_outliers(merged, "sigma_resid", group_cols=("pol", "flavor"), nstd=nstd)
+    return merged
 
 
 def pivot_phase_fits(
@@ -1760,7 +1446,7 @@ def pivot_phase_fits(
     phase_fits = pd.merge(phase_fits, tiles, left_on="tile_id", right_on="id")
     phase_fits.drop("id", axis=1, inplace=True)
     tile_columns = ["soln_idx", "name", "tile_id", "rx", "slot", "flavor"]
-    tile_columns += [*(set(tiles.columns) - set(tile_columns) - set(["id"]))]
+    tile_columns += [*(set(tiles.columns) - set(tile_columns) - {"id"})]
     fit_columns = [column for column in phase_fits.columns if column not in tile_columns]
     fit_columns.sort()
     phase_fits = pd.concat([phase_fits[tile_columns], phase_fits[fit_columns]], axis=1)
@@ -1776,11 +1462,17 @@ def get_convergence_summary(solutions_fits_file: str):
     Returns:
         List of tuples with convergence statistics.
     """
+    # Local import to avoid a module-level circular dependency: HyperfitsSolution
+    # now lives in mwax_hyperdrive_solutions.py, which itself imports several
+    # symbols from this module (ChanInfo, Metafits, ensure_system_byte_order,
+    # etc.). This is the only remaining usage of HyperfitsSolution here.
+    from mwax_mover.mwax_hyperdrive_solutions import HyperfitsSolution
+
     soln = HyperfitsSolution(solutions_fits_file)
     results = soln.results
     converged_channel_indices = np.where(~np.isnan(results))
     summary = []
-    summary.append(results)
+    summary.append(("Converged channel indices", converged_channel_indices))
     summary.append(("Total number of channels", len(results)))
     summary.append(
         (
@@ -1808,7 +1500,9 @@ def generate_hyperdrive_plots(
     hyperdrive_solution_filename: str,
     hyperdrive_binary_path: str,
     metafits_filename: str,
-) -> Tuple[bool, str]:
+    output_dir: str,
+    max_amp: int | None = None,
+) -> tuple[bool, str]:
     """Generate solution plots.
 
     Args:
@@ -1816,6 +1510,8 @@ def generate_hyperdrive_plots(
         hyperdrive_solution_filename: Path to the hyperdrive solution FITS file.
         hyperdrive_binary_path: Path to the hyperdrive executable.
         metafits_filename: Path to the metafits file.
+        output_dir: path to where we write the plots
+        max_amp: Optionally pass a max value for Hyperdrive to clip to when plotting amps. None means let Hyperdrive figure it out.
 
     Returns:
         A tuple of (success: bool, error_message: str).
@@ -1824,7 +1520,11 @@ def generate_hyperdrive_plots(
 
     try:
         # Now run hyperdrive again to do some plots
-        hyp_soln_plot_args = f"--max-amp 5 --output-directory {os.path.dirname(hyperdrive_solution_filename)}"
+        hyp_soln_plot_args = f" --output-directory {output_dir}"
+
+        if not max_amp is None:
+            hyp_soln_plot_args += f" --max-amp {max_amp}"
+
         cmd = (
             f"{hyperdrive_binary_path} solutions-plot {hyp_soln_plot_args} "
             f"-m"
@@ -1844,29 +1544,27 @@ def generate_hyperdrive_plots(
 
 def write_hyperdrive_stats(
     obs_id: int,
-    stats_filename: str,
+    stats_fd,
     hyperdrive_solution_filename: str,
-) -> Tuple[bool, str]:
-    """Write convergence statistics.
+) -> tuple[bool, str]:
+    """Write convergence statistics. (Append to existiing stats file if it exists.)
 
     Args:
         obs_id: Observation ID.
-        stats_filename: Path to write statistics to.
+        stats_fd: File descriptor for the statistics file.
         hyperdrive_solution_filename: Path to the hyperdrive solution FITS file.
 
     Returns:
         A tuple of (success: bool, error_message: str).
     """
-    logger.info(f"{obs_id} Writing stats for {hyperdrive_solution_filename} to {stats_filename}...")
-
+    logger.info(f"{obs_id} Writing convergence stats for {hyperdrive_solution_filename}.")
     try:
         conv_summary_list = get_convergence_summary(hyperdrive_solution_filename)
 
-        with open(stats_filename, "w", encoding="UTF-8") as stats:
-            for row in conv_summary_list:
-                stats.write(f"{row[0]}: {row[1]}\n")
+        stats_fd.writelines(f"{row[0]}: {row[1]}\n" for row in conv_summary_list)
+        stats_fd.write("\n")
 
-        logger.info(f"{obs_id} Finished running hyperdrive stats on {hyperdrive_solution_filename}.")
+        logger.info(f"{obs_id} Finished running convergence stats for {hyperdrive_solution_filename}.")
     except Exception as catch_all_exception:
         return False, str(catch_all_exception)
 
@@ -2048,7 +1746,7 @@ def run_birli(
 
 
 def run_hyperdrive(
-    input_uvfits_files: List[str],
+    input_uvfits_files: list[str],
     metafits_filename: str,
     job_output_path: str,
     obs_id: int,
@@ -2186,272 +1884,6 @@ def run_hyperdrive(
     return True, calibration_command
 
 
-def run_hyperdrive_stats(
-    input_solution_files: list[str],
-    metafits_filename: str,
-    obs_id: int,
-    hyperdrive_binary_path: str,
-    hyperdrive_output_path: str,
-) -> bool:
-    """Generate statistics and plots from hyperdrive solution files.
-
-    Args:
-        input_solution_files: List of input hyperdrive solution files (full filename).
-        metafits_filename: Path to the metafits file.
-        obs_id: Observation ID.
-        hyperdrive_binary_path: Path to the hyperdrive executable.
-        hyperdrive_output_path: Directory containing hyperdrive outputs.
-
-    Returns:
-        True if all stats generation succeeded, False otherwise.
-    """
-    # produce stats/plots
-    plots_successful: int = 0
-    stats_successful: int = 0
-
-    logger.info(
-        f"{obs_id}: {len(input_solution_files)} contiguous bands detected."
-        f" Running hyperdrive stats {len(input_solution_files)} times...."
-    )
-
-    for hyperdrive_run, solution_filename in enumerate(input_solution_files):
-        # Take the filename which for picket fence will also have
-        # the band info and in all cases the obsid. We will use
-        # this as a base for other files we work with
-        obsid_and_band = os.path.basename(solution_filename).replace("_solutions.fits", "")
-
-        (
-            plots_success,
-            plots_error,
-        ) = generate_hyperdrive_plots(
-            obs_id,
-            solution_filename,
-            hyperdrive_binary_path,
-            metafits_filename,
-        )
-
-        # Write the stats to the output dir
-        stats_filename = os.path.join(hyperdrive_output_path, f"{obsid_and_band}_stats.txt")
-
-        (
-            stats_success,
-            stats_error,
-        ) = write_hyperdrive_stats(
-            obs_id,
-            stats_filename,
-            solution_filename,
-        )
-
-        if plots_success:
-            plots_successful += 1
-        else:
-            logger.warning(
-                f"{obs_id}: hyperdrive plots run"
-                f" {hyperdrive_run + 1}/{len(input_solution_files)} FAILED:"
-                f" {plots_error}."
-            )
-
-        if stats_success:
-            stats_successful += 1
-        else:
-            logger.warning(
-                f"{obs_id}: hyperdrive stats run"
-                f" {hyperdrive_run + 1}/{len(input_solution_files)} FAILED:"
-                f" {stats_error}."
-            )
-
-    if plots_successful == len(input_solution_files):
-        logger.info(f"{obs_id}: All {plots_successful} hyperdrive plots runs successful")
-    else:
-        logger.warning(f"{obs_id}: Not all hyperdrive plots runs were successful.")
-
-    if stats_successful == len(input_solution_files):
-        logger.info(f"{obs_id}: All {stats_successful} hyperdrive stats runs successful")
-    else:
-        logger.warning(f"{obs_id}: Not all hyperdrive stats runs were successful.")
-
-    return plots_successful == stats_successful == len(input_solution_files)
-
-
-def process_phase_fits(tiles, chanblocks_hz, all_xx_solns, all_yy_solns, weights, soln_tile_ids, phase_fit_niter):
-    """Fit linear phase ramps to each tile and polarization.
-
-    Args:
-        tiles: DataFrame with tile information.
-        chanblocks_hz: Array of channel block frequencies in Hz.
-        all_xx_solns: XX polarization solutions for all tiles.
-        all_yy_solns: YY polarization solutions for all tiles.
-        weights: Weight values for each solution.
-        soln_tile_ids: Tile IDs in the solutions.
-        phase_fit_niter: Number of iterations for fitting.
-
-    Returns:
-        DataFrame with phase fit parameters for each tile and polarization.
-    """
-    futures = {}
-
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
-            for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
-                future = executor.submit(
-                    _phase_fit_one,
-                    soln_idx,
-                    tile_id,
-                    pol,
-                    solns,
-                    chanblocks_hz,
-                    weights,
-                    phase_fit_niter,
-                    tiles,
-                )
-                futures[future] = (soln_idx, tile_id, pol)
-
-    fits = [result for future in as_completed(futures) if (result := future.result()) is not None]
-
-    return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])
-
-
-def _phase_fit_one(
-    soln_idx: int,
-    tile_id: int,
-    pol: str,
-    solns: NDArray[np.complex128],
-    chanblocks_hz: NDArray[np.float64],
-    weights: NDArray[np.float64],
-    phase_fit_niter: int,
-    tiles: DataFrame,
-) -> list | None:
-    """Fit a phase ramp for a single tile and polarization.
-
-    Looks up the tile in the tiles DataFrame, skips flagged or missing tiles,
-    and calls fit_phase_line to perform the fit. Intended to be called
-    concurrently via ThreadPoolExecutor.
-
-    Args:
-        soln_idx: Index of this tile in the solutions array.
-        tile_id: The tile ID to look up in the tiles DataFrame.
-        pol: Polarization label, either "XX" or "YY".
-        solns: Complex calibration solutions for this tile and polarization.
-        chanblocks_hz: Array of channel block frequencies in Hz.
-        weights: Weight values for each solution.
-        phase_fit_niter: Number of iterations for phase fitting.
-        tiles: DataFrame containing tile metadata including flags and names.
-
-    Returns:
-        A list of [tile_id, soln_idx, pol, *PhaseFitInfo fields] if the fit
-        succeeded, or None if the tile was skipped or the fit failed.
-    """
-    id_matches = tiles[tiles.id == tile_id]
-    if len(id_matches) != 1:
-        return None
-    tile = id_matches.iloc[0]
-    if tile.flag:
-        return None
-    name = tile.name
-    try:
-        fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)
-    except Exception:
-        logger.exception(f"Error: {tile_id=:4} {pol} ({name})")
-        return None
-    # uncomment me for verbose debug
-    # logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
-    return [tile_id, soln_idx, pol, *fit]
-
-
-def _gain_fit_one(
-    soln_idx: int,
-    tile_id: int,
-    pol: str,
-    solns: NDArray[np.complex128],
-    chanblocks_hz: NDArray[np.float64],
-    weights: NDArray[np.float64],
-    chanblocks_per_coarse: int,
-    tiles: DataFrame,
-) -> list | None:
-    """Fit gain solutions for a single tile and polarization.
-
-    Looks up the tile in the tiles DataFrame, skips flagged or missing tiles,
-    and calls fit_gain to perform the fit. Intended to be called
-    concurrently via ThreadPoolExecutor.
-
-    Args:
-        soln_idx: Index of this tile in the solutions array.
-        tile_id: The tile ID to look up in the tiles DataFrame.
-        pol: Polarization label, either "XX" or "YY".
-        solns: Complex calibration solutions for this tile and polarization.
-        chanblocks_hz: Array of channel block frequencies in Hz.
-        weights: Weight values for each solution.
-        chanblocks_per_coarse: Number of channel blocks per coarse channel.
-        tiles: DataFrame containing tile metadata including flags and names.
-
-    Returns:
-        A list of [tile_id, soln_idx, pol, *GainFitInfo fields] if the fit
-        succeeded, or None if the tile was skipped or the fit failed.
-    """
-    id_matches = tiles[tiles.id == tile_id]
-    if len(id_matches) != 1:
-        return None
-    tile = id_matches.iloc[0]
-    if tile.flag:
-        return None
-    name = tile.name
-    try:
-        fit = fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse)
-        # uncomment me for verbose debug
-        # logger.debug(f"{tile_id=:4} {pol} ({name}) {fit=}")
-        # logger.debug(f"gains: {fit.gains}")
-    except Exception:
-        logger.exception(f"Error: {tile_id=:4} {pol} ({name})")
-        return None
-    return [tile_id, soln_idx, pol, *fit]
-
-
-def process_gain_fits(
-    tiles: DataFrame,
-    chanblocks_hz: NDArray[np.float64],
-    all_xx_solns: NDArray[np.complex128],
-    all_yy_solns: NDArray[np.complex128],
-    weights: NDArray[np.float64],
-    soln_tile_ids: NDArray[np.signedinteger[Any]],
-    chanblocks_per_coarse: int,
-) -> DataFrame:
-    """Fit gain solutions to each tile and polarization.
-
-    Args:
-        tiles: DataFrame with tile information.
-        chanblocks_hz: Array of channel block frequencies in Hz.
-        all_xx_solns: XX polarization solutions for all tiles.
-        all_yy_solns: YY polarization solutions for all tiles.
-        weights: Weight values for each solution.
-        soln_tile_ids: Tile IDs in the solutions.
-        chanblocks_per_coarse: Number of channel blocks per coarse channel.
-
-    Returns:
-        DataFrame with gain fit parameters for each tile and polarization.
-    """
-    futures = {}
-
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, all_xx_solns[0], all_yy_solns[0])):
-            for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
-                future = executor.submit(
-                    _gain_fit_one,
-                    soln_idx,
-                    tile_id,
-                    pol,
-                    solns,
-                    chanblocks_hz,
-                    weights,
-                    chanblocks_per_coarse,
-                    tiles,
-                )
-                futures[future] = (soln_idx, tile_id, pol)
-
-    fits = [result for future in as_completed(futures) if (result := future.result()) is not None]
-
-    return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *GainFitInfo._fields])
-
-
 def create_sbatch_script(
     config_file_path: str,
     obs_id: int,
@@ -2536,7 +1968,7 @@ exit $?
     return job_script
 
 
-def submit_sbatch(script_path: str, script: str, obs_id: int, request_ids: list[int]) -> Tuple[bool, Optional[int]]:
+def submit_sbatch(script_path: str, script: str, obs_id: int, request_ids: list[int]) -> tuple[bool, int | None]:
     """Submit an sbatch script to Slurm.
 
     Args:
@@ -2559,7 +1991,7 @@ def submit_sbatch(script_path: str, script: str, obs_id: int, request_ids: list[
         with open(script_filename, "w") as job_script:
             job_script.write(script)
     except Exception:
-        logger.exception(f"{str(obs_id)} failure creating temp sbatch script.")
+        logger.exception(f"{obs_id!s} failure creating temp sbatch script.")
         return (False, None)
 
     # Submit the job
@@ -2583,7 +2015,7 @@ def submit_sbatch(script_path: str, script: str, obs_id: int, request_ids: list[
                 # This deserves to be a massive failure, as if SBATCH returned true it should always give
                 # us the SLURM job id!
                 logger.error(f"Slurm job submitted OK, but could not get slurm_job_id from: {stdout}. Aborting")
-                exit(-10)
+                sys.exit(-10)
         else:
             logger.error(f"{script_filename} failed to be submitted to SLURM. Error {stdout}")
 
@@ -2663,199 +2095,7 @@ def estimate_birli_output_bytes(
     return timesteps * coarse_channels * fine_channels * baselines * pols * bytes_per_r_and_i
 
 
-# def split_aocal_file_into_coarse_channels(
-#     obs_id: int, input_aocal_filename: str, input_rec_chans: list[int], output_dir: str
-# ) -> list[str]:
-#     """Split an AOCAL file into one file per coarse channel.
-
-#     Args:
-#         obs_id: Observation ID.
-#         input_aocal_filename: Path to the input AOCAL binary file.
-#         input_rec_chans: List of receiver channel numbers in the file.
-#         output_dir: Directory to write the split AOCAL files to.
-
-#     Returns:
-#         List of output AOCAL filenames written.
-
-#     Raises:
-#         ValueError: If the AOCAL file format is invalid.
-#     """
-#     # Given any aocal file which may have 1 - 24 coarse channels of data within, split it into 1 file per coarse channel
-#     # Since aocal files have minimal metadata in the file, give the function input_rec_chans which is a hint as to how many
-#     # and what the coarse chans are in the aocal file and what their receiver chan numbers are.
-#     #
-#     # Returns a list of new aocal filenames written
-#     #
-#     # Assuming a normal contiguous aocal file of 24 coarse chans, you would get 24 aocal files, all with the same header
-#     # called: obsid_chXXX_aocal.bin where XXX is the rec chan number
-
-#     # If it is picket fence and there are, say, 3 8 channel aocal files, you would run this function 3 times and each time
-#     # you would get 8 files, 1 per coarse chan
-
-#     # See: https://mwatelescope.atlassian.net/wiki/spaces/MP/pages/1190658052/aocal+File+Format for description of file format
-
-#     # get count of coarse channels worth of cal data provided
-#     input_aocal_coarse_chans = len(input_rec_chans)
-
-#     # Do some validity checks
-#     file_size_bytes: int = os.stat(input_aocal_filename).st_size
-
-#     # header size
-#     header_size_bytes = struct.calcsize(AOCAL_HEADER_FORMAT)
-
-#     # Data size
-#     data_size_bytes = file_size_bytes - header_size_bytes
-
-#     # Read the header of the file
-#     with open(input_aocal_filename, "rb") as in_file:
-#         header_bytes = in_file.read(header_size_bytes)
-#         (
-#             intro,
-#             file_type,
-#             structure_type,
-#             interval_count,
-#             antenna_count,
-#             input_aocal_fine_channel_count,
-#             polarisation_count,
-#             start_gpstime,
-#             end_gpstime,
-#         ) = struct.unpack(AOCAL_HEADER_FORMAT, header_bytes)
-
-#         if intro != AOCAL_INTRO:
-#             raise ValueError(f"aocal file {input_aocal_filename} does not start with expected string {AOCAL_INTRO}")
-
-#         if file_type != AOCAL_FILE_TYPE:
-#             raise ValueError(
-#                 f"aocal file {input_aocal_filename} has invalid file_type {file_type} expected {AOCAL_FILE_TYPE}"
-#             )
-
-#         if structure_type != AOCAL_STRUCTURE_TYPE:
-#             raise ValueError(
-#                 f"aocal file {input_aocal_filename} has invalid structure_type {structure_type} expected {AOCAL_STRUCTURE_TYPE}"
-#             )
-
-#         if interval_count != AOCAL_INTERVAL_COUNT:
-#             raise ValueError(
-#                 f"aocal file {input_aocal_filename} has invalid interval_count {interval_count} expected {AOCAL_INTERVAL_COUNT}"
-#             )
-
-#         if polarisation_count != AOCAL_POLS:
-#             raise ValueError(
-#                 f"aocal file {input_aocal_filename} has invalid polarisation_count {polarisation_count} expected {AOCAL_POLS}"
-#             )
-
-#         input_data = in_file.read()
-
-#     # Expected data size
-#     expected_input_data_size_bytes = (
-#         AOCAL_INTERVAL_COUNT
-#         * antenna_count
-#         * input_aocal_fine_channel_count
-#         * polarisation_count
-#         * AOCAL_VALUES
-#         * DOUBLE_SIZE
-#     )
-
-#     if expected_input_data_size_bytes != data_size_bytes:
-#         raise ValueError(
-#             f"aocal file {input_aocal_filename} data size of {data_size_bytes} doesn't match expected size of {expected_input_data_size_bytes}"
-#         )
-
-#     if expected_input_data_size_bytes != len(input_data):
-#         raise ValueError(
-#             f"aocal file {input_aocal_filename} read data size of {len(input_data)} which doesn't match expected size of {expected_input_data_size_bytes}"
-#         )
-
-#     fine_chans_per_coarse = int(input_aocal_fine_channel_count / input_aocal_coarse_chans)
-
-#     np_data = np.frombuffer(input_data, dtype=np.float64)
-#     np_data = np.reshape(
-#         np_data,
-#         (
-#             AOCAL_INTERVAL_COUNT,
-#             antenna_count,
-#             input_aocal_coarse_chans,
-#             fine_chans_per_coarse,
-#             polarisation_count,
-#             AOCAL_VALUES,
-#         ),
-#     )
-
-#     # This is the number of doubles
-#     values_per_coarse_chan = (
-#         AOCAL_INTERVAL_COUNT * antenna_count * fine_chans_per_coarse * polarisation_count * AOCAL_VALUES
-#     )
-#     bytes_per_coarse_chan = values_per_coarse_chan * 8
-
-#     out_filenames = []
-
-#     for c_idx, rec_chan_no in enumerate(input_rec_chans):
-#         out_filename = os.path.join(
-#             output_dir,
-#             get_aocal_filename(obs_id, antenna_count, fine_chans_per_coarse, rec_chan_no),
-#         )
-
-#         # create new file
-#         with open(out_filename, "wb") as out_file:
-#             out_file.write(
-#                 struct.pack(
-#                     AOCAL_HEADER_FORMAT,
-#                     AOCAL_INTRO,
-#                     AOCAL_FILE_TYPE,
-#                     AOCAL_STRUCTURE_TYPE,
-#                     interval_count,
-#                     antenna_count,
-#                     fine_chans_per_coarse,
-#                     polarisation_count,
-#                     start_gpstime,
-#                     end_gpstime,
-#                 )
-#             )
-
-#             # Write out just this coarse channel
-#             subarray_le = np.asarray(np_data[:, :, c_idx, :, :, :], dtype="<f8")
-
-#             bytes_written = out_file.write(subarray_le.tobytes(order="C"))
-
-#             if bytes_written != bytes_per_coarse_chan:
-#                 raise ValueError(
-#                     f"aocal file {input_aocal_filename}: wrote wrong number of bytes {bytes_written} (should have been {bytes_per_coarse_chan}) to new aocal file {out_filename}"
-#                 )
-
-#             out_filenames.append(out_filename)
-
-#     return out_filenames
-
-
-# def get_aocal_filename(obsid: int, num_tiles: int, num_fine_chans: int, rec_chan_no: int) -> str:
-#     """Generate the standard AOCAL filename.
-
-#     Args:
-#         obsid: Observation ID.
-#         num_tiles: Number of tiles in the array.
-#         num_fine_chans: Total number of fine channels.
-#         rec_chan_no: Receiver channel number.
-
-#     Returns:
-#         The AOCAL filename string.
-#     """
-#     return f"{obsid}_{num_tiles:03}_{num_fine_chans:04}_{rec_chan_no:03}_calfile.bin"
-
-
-# def get_partial_aocal_filename(obsid: int, rec_chan_no: int) -> str:
-#     """Generate a partial AOCAL filename pattern for globbing.
-
-#     Args:
-#         obsid: Observation ID.
-#         rec_chan_no: Receiver channel number.
-
-#     Returns:
-#         The AOCAL filename pattern string with wildcards.
-#     """
-#     return f"{obsid}_*_{rec_chan_no:03}_calfile.bin"
-
-
-def get_solution_fits_filename(solutions_dir: str, obs_id: int, rec_chan: int) -> Optional[str]:
+def get_solution_fits_filename(solutions_dir: str, obs_id: int, rec_chan: int) -> str | None:
     """Find a hyperdrive solution FITS file for a specific channel.
 
     Searches for solution files in multiple formats:
@@ -2886,7 +2126,7 @@ def get_solution_fits_filename(solutions_dir: str, obs_id: int, rec_chan: int) -
     return None
 
 
-def parse_solution_channels(filename: str) -> Optional[tuple[int, int]]:
+def parse_solution_channels(filename: str) -> tuple[int, int] | None:
     """Parse channel range from a hyperdrive solution filename.
 
     Recognises these filename flavours (with .fits or .bin extension):
@@ -3006,12 +2246,22 @@ def get_file_description(filename: str) -> str:
         desc = "Calibration solution amplitudes vs fine channel per tile"
     elif "solutions_phases.png" in filename:
         desc = "Calibration solution phase vs fine channel per tile"
+    elif "solutions_amps_original.png" in filename:
+        desc = "Original unmodified Hyperdrive calibration solution amplitudes vs fine channel per tile"
+    elif "solutions_phases_original.png" in filename:
+        desc = "Original unmodified Hyperdrive calibration solution phase vs fine channel per tile"
     elif "stats.txt" in filename:
-        desc = "Hyperdrive fine channel convergence statistics"
+        desc = "Before/after per-tile flagging stats, followed by Hyperdrive fine channel convergence statistics"
     elif "residual.tsv" in filename:
         desc = "Tab separated value (TSV) file of phase residuals vs frequency by receiver type and polarisation"
     elif "residual.png" in filename:
         desc = "Plot of phase residuals vs frequency by receiver type and polarisation"
+    elif "gain_outliers_tiles" in filename:
+        desc = "Plot of outlier gains that were removed from the calibration solutions"
+    elif "_solutions.fits" in filename:
+        desc = "Hyperdrive calibration solutions in FITS format."
+    elif "_solutions.original.fits" in filename:
+        desc = "Original unmodified Hyperdrive calibration solutions out of Hyperdrive in FITS format"
 
     if desc == "":
         return "Miscellaneous file"
@@ -3055,7 +2305,7 @@ def generate_plot_index_file(
 
         index = {
             "version": 2,
-            "generated_at": datetime.datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "generated_at": datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "base_url": plot_front_end_url,
             "path": str(fit_id),
             "files": files,
@@ -3071,7 +2321,7 @@ def generate_plot_index_file(
         return False, {}
 
 
-def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_url: str) -> Optional[dict]:
+def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_url: str) -> dict | None:
     """Builds an index.json file entry dict for a given directory entry.
 
     Inspects the file at ``filename``, extracts metadata (size, modification
@@ -3104,11 +2354,16 @@ def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_
     path = Path(filename)
     _, ext = os.path.splitext(path.name)
 
-    if ext not in (".png", ".tsv", ".txt"):
+    if ext not in (".png", ".tsv", ".txt", ".fits"):
+        return None
+
+    # Now check for other files which slip through
+    if ext == ".fits" and not (str(path).endswith("solutions.fits") or str(path).endswith("solutions.original.fits")):
+        # Ignore the visibility FITS files and metafits files
         return None
 
     stat = path.stat()
-    last_modified = datetime.datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+    last_modified = datetime.datetime.fromtimestamp(stat.st_mtime, tz=datetime.UTC)
     mime_type, _ = mimetypes.guess_type(path.name)
 
     is_png = ext == ".png"
@@ -3128,132 +2383,215 @@ def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_
     }
 
 
-def clip_hyperdrive_solution_gains(hyperdrive_fits_file: str, cut_off: float, mc: mwalib.MetafitsContext):
-    """Clip hyperdrive calibration solution gains exceeding a threshold.
-
-    Opens a hyperdrive FITS solution file, finds any Jones matrices where at
-    least one complex gain amplitude exceeds the cut_off threshold, sets all
-    four polarisations of those Jones matrices to NaN, and writes the result
-    back to disk.
+def export_calibration_solutions(solution_files: list[str], cal_export_path: str, cal_export_max_age_hours: int):
+    """Export calibration solution FITS files to the configured export directory and delete stale files.
 
     Args:
-        hyperdrive_fits_file: Path to the hyperdrive FITS solution file.
-        cut_off: Threshold above which an entire Jones matrix is set to NaN.
-        mc: MetafitsContext used to determine the tileid and name from the
-            antenna indices in the solutions file.
+        solution_files: List of hyperdrive solution filenames
+        cal_export_path: Path to copy solution files to
+        cal_export_max_age_hours: Files older than this many hours will be deleted from the cal_export_path
+
+    Returns:
+        Nothing
     """
+    # if cal_export_path is set then:
+    # 1. copy the solution FITS files to the export dir
+    # 2. try to clean up old files
 
-    HDU = "SOLUTIONS"
-    # Polarisation names indexed by their position in the last axis of the
-    # solutions array: 0=XX, 1=XY, 2=YX, 3=YY
-    POL_NAMES = ["XX", "XY", "YX", "YY"]
+    #
+    # copy the solution.fits file(s) to the export directory
+    logger.info(f"Found {len(solution_files)} solution FITS files to upload.")
 
-    with fits.open(hyperdrive_fits_file, mode="update") as hdul:
-        if HDU not in hdul:
-            raise Exception(f"Warning: No SOLUTIONS HDU found in {hyperdrive_fits_file}")
+    for f in solution_files:
+        # Copy solution fits files to the cal_export directory
+        cal_dest = os.path.join(cal_export_path, os.path.basename(f))
+        logger.info(f"Copying solution FITS file {f} to {cal_dest}")
+        shutil.copy(f, cal_dest)
 
-        logger.info(f"checking solutions file {hyperdrive_fits_file} for gains > {cut_off}")
-
-        # The SOLUTIONS HDU stores each complex gain as two consecutive float64
-        # values (real, imag), so the raw FITS column layout is:
-        #   shape: (time, antenna, chan, 8)  -- 8 floats = 4 pols × (re + im)
-        #
-        # Force native byte order (little-endian on x86): FITS files are
-        # big-endian, and np.view() below requires a native-endian array to
-        # safely reinterpret the memory as complex128.
-        data = np.array(hdul[HDU].data, dtype=np.float64)
-        # shape: (time, antenna, chan, 8)
-
-        # Reinterpret each consecutive pair of float64 (re, im) as one
-        # complex128 value. np.view() does not copy data; it aliases the same
-        # memory with a different dtype, halving the size of the last axis.
-        data_complex = data.view(np.complex128)
-        # shape: (time, antenna, chan, 4)  -- last axis: [XX, XY, YX, YY]
-        #
-        # data_complex and data share the same underlying buffer, so writes to
-        # data_complex are visible through data (and vice versa). This is what
-        # allows us to flag via data_complex and then assign data back to the HDU.
-
-        # Compute the amplitude (absolute value) of every complex gain sample.
-        amp = np.abs(data_complex)
-        # shape: (time, antenna, chan, 4)  -- last axis: [XX, XY, YX, YY]
-
-        # Total counts used in logging below.
-        total_samples = amp.size  # total (time, ant, chan, pol) samples
-        total_jones = amp.shape[0] * amp.shape[1] * amp.shape[2]  # total (time, ant, chan) Jones matrices
-
-        # Boolean mask: True wherever an individual gain amplitude exceeds the
-        # threshold. Kept separate from the Jones-matrix flag below so we can
-        # report how many individual pol samples actually triggered the cutoff.
-        mask = amp > cut_off
-        # shape: (time, antenna, chan, 4)  -- same layout as amp
-
-        # Reduce across the polarisation axis: True for any (time, ant, chan)
-        # where at least one of XX, XY, YX, YY exceeded the threshold.
-        # If any one pol is bad the whole Jones matrix is considered unreliable,
-        # so we flag all four pols together.
-        any_flagged = mask.any(axis=-1)
-        # shape: (time, antenna, chan)  -- pol axis removed; True = entire Jones matrix flagged
-
-        # Set all four polarisations of every flagged Jones matrix to NaN + NaN*j.
-        # Indexing data_complex with a (time, ant, chan) boolean array selects
-        # rows of shape (4,) — one row per flagged Jones matrix — so the single
-        # assignment sets all four pols at once.
-        # Because data_complex is a view of data, this also updates data in-place;
-        # no separate copy-back is needed for the flags.
-        data_complex[any_flagged] = np.nan + 1j * np.nan
-
-        # Count the pol samples that actually exceeded the cutoff (what triggered flagging).
-        exceeded_count = int(mask.sum())
-        # Count how many Jones matrices were flagged, and the resulting NaN pol samples
-        # (always 4× the Jones matrix count since all four pols are set to NaN together).
-        jones_flagged_count = int(any_flagged.sum())
-        nan_pol_count = jones_flagged_count * 4
-
+    # Clean up old files
+    ext_list = ["fits", "bin"]
+    files_removed = delete_files_older_than(cal_export_path, cal_export_max_age_hours * 3600, ext_list)
+    if len(files_removed) > 0:
         logger.debug(
-            f"Gains > {cut_off}:"
-            f" {exceeded_count} / {total_samples} pol samples exceeded cutoff"
-            f" ({100 * exceeded_count / total_samples:.2f}%);"
-            f" {jones_flagged_count} / {total_jones} Jones matrices"
-            f" ({nan_pol_count} / {total_samples} pol samples) set to NaN"
-            f" ({100 * jones_flagged_count / total_jones:.2f}% of Jones matrices)"
+            f"Removed the following files from {cal_export_path} as they were older than {cal_export_max_age_hours} hours: {files_removed}"
         )
+    else:
+        logger.debug(f"No files older than {cal_export_max_age_hours} hours found in {cal_export_path} to remove.")
 
-        if jones_flagged_count > 0:
-            # np.argwhere(any_flagged) returns the indices of every True element.
-            # Each row is one flagged Jones matrix: [time_idx, ant_idx, chan_idx]
-            flagged_indices = np.argwhere(any_flagged)
-            # shape: (jones_flagged_count, 3)  -- columns: [time, antenna, chan]
 
-            # Collapse to unique (antenna, chan) pairs so we log one line per
-            # affected tile+channel rather than one line per time step.
-            # Slice columns 1:3 to get just [ant_idx, chan_idx].
-            unique_ant_chan = np.unique(flagged_indices[:, 1:3], axis=0)
-            # shape: (n_unique_ant_chan, 2)  -- columns: [antenna, chan]
+STAGING_DIR_PREFIX = ".staging-"
 
-            for ant_idx, chan_idx in unique_ant_chan:
-                # Report the worst (max) amplitude seen across all time steps for
-                # each of the four polarisations at this (antenna, chan) pair.
-                # amp[:, ant_idx, chan_idx, p] selects all time steps for a fixed
-                # (antenna, chan, pol) triple; shape: (n_timesteps,).
-                # All four pols are shown regardless of which one(s) triggered the
-                # cutoff, since the entire Jones matrix has been set to NaN.
-                pol_details = ", ".join(
-                    f"{POL_NAMES[p]}(Gain={amp[:, ant_idx, chan_idx, p].max():.4f})" for p in range(4)
+
+def get_staging_path(upload_path: str) -> str:
+    """Build the staging directory path used to assemble an upload directory.
+
+    Args:
+        upload_path: The final, published directory, e.g.
+            ``/data/calvin/plots/1768401673707300``.
+
+    Returns:
+        A sibling directory of *upload_path* prefixed with
+        ``STAGING_DIR_PREFIX``, e.g.
+        ``/data/calvin/plots/.staging-1768401673707300``. The dot prefix is what
+        the controller's upload thread uses to tell an in-progress directory
+        from a published one.
+    """
+    base_path = os.path.dirname(upload_path)
+    fit_dir_name = os.path.basename(upload_path)
+    return os.path.join(base_path, f"{STAGING_DIR_PREFIX}{fit_dir_name}")
+
+
+def reap_orphaned_staging_dirs(base_path: str, max_age_hours: int = 24) -> list[str]:
+    """Delete staging directories left behind by a previous, crashed run.
+
+    ``upload_plot_files`` assembles each fit's files in a ``.staging-*``
+    directory and then publishes it with a single atomic rename. If the process
+    dies partway through, the staging directory is orphaned: nothing will ever
+    publish or consume it, so it must be cleaned up here.
+
+    Intended to be called once at processor startup. Only directories older
+    than *max_age_hours* are removed, so a staging directory belonging to a
+    concurrently-running job is never touched. The Slurm walltime for a Calvin
+    job is at most 10 hours (see create_sbatch_script), so the 24 hour default
+    is comfortably beyond the lifetime of any legitimate in-flight job.
+
+    Args:
+        base_path: The plot upload base directory to scan, e.g.
+            ``/data/calvin/plots``. Missing or non-directory paths are ignored.
+        max_age_hours: Only remove staging directories whose modification time
+            is at least this many hours in the past. Defaults to 24.
+
+    Returns:
+        A list of the staging directory paths that were successfully removed.
+    """
+    removed: list[str] = []
+
+    base = Path(base_path)
+    if not base.is_dir():
+        logger.debug(f"reap_orphaned_staging_dirs: {base_path} is not a directory. Nothing to do.")
+        return removed
+
+    cutoff_seconds = max_age_hours * 3600
+    now = time.time()
+
+    for entry in base.iterdir():
+        if not entry.name.startswith(STAGING_DIR_PREFIX):
+            continue
+
+        try:
+            if not entry.is_dir():
+                continue
+
+            age_seconds = now - entry.stat().st_mtime
+            if age_seconds < cutoff_seconds:
+                logger.info(
+                    f"reap_orphaned_staging_dirs: leaving {entry} alone"
+                    f" ({age_seconds / 3600:.1f}h old, threshold is {max_age_hours}h)"
                 )
+                continue
 
-                logger.debug(
-                    f"  antenna_idx={ant_idx}"
-                    f" [TileId: {mc.antennas[ant_idx].tile_id}"
-                    f" Name: {mc.antennas[ant_idx].tile_name}],"
-                    f" chan_idx={chan_idx}: all pols set to NaN: {pol_details}"
-                )
+            shutil.rmtree(entry)
+            removed.append(str(entry))
+            logger.warning(
+                f"reap_orphaned_staging_dirs: removed orphaned staging dir {entry}"
+                f" ({age_seconds / 3600:.1f}h old). Its plots were never published."
+            )
+        except Exception:
+            # One bad entry must not stop us reaping the rest
+            logger.exception(f"reap_orphaned_staging_dirs: could not remove {entry}. Ignoring.")
 
-        # Write the modified float64 array (which contains the NaN-flagged
-        # complex pairs) back to the HDU and flush to disk.
-        # Note: we assign `data` (the float64 view) rather than `data_complex`
-        # because that is the shape the HDU originally held.
-        hdul[HDU].data = data
-        hdul.flush()
+    return removed
 
-        logger.info(f"finished rewriting solutions file {hyperdrive_fits_file}")
+
+def upload_plot_files(job_output_path: str, upload_path: str) -> bool:
+    """Assemble this fit's plots and stats in a staging dir, then publish atomically.
+
+    Files are gathered into a sibling ``.staging-<fit_id>`` directory and only
+    then renamed into place as *upload_path*. Directory rename is atomic within
+    a filesystem, so the controller's upload thread never observes a partially
+    populated fit directory -- it either does not exist yet, or it is complete.
+
+    This matters because the controller uploads and then deletes these
+    directories from a different host over a network filesystem. Any scheme
+    based on inferring completion (checking whether a directory is empty, or
+    comparing file/directory mtimes against a wall clock that belongs to
+    another machine) can delete a directory that is still being written to,
+    losing every plot for that fit. Publishing atomically removes the
+    possibility rather than narrowing the window.
+
+    Failures are logged and reported via the return value rather than raised:
+    the plots are a diagnostic aid, and losing them must not fail an otherwise
+    successful calibration.
+
+    Args:
+        job_output_path: The location of all the plots, txt, tsv files for this fit.
+        upload_path: Final destination directory for this fit's plots and stats,
+            conventionally ``<plot_upload_path>/<fit_id>``.
+
+    Returns:
+        True if the directory was published successfully, False otherwise.
+    """
+    staging_path = get_staging_path(upload_path)
+
+    try:
+        # Refuse to overwrite an already-published fit. Checked before anything
+        # is moved, so a collision costs nothing: the files stay in
+        # job_output_path where they can be inspected or retried by hand.
+        if os.path.exists(upload_path):
+            logger.error(
+                f"upload_plot_files: {upload_path} already exists. Aborting without"
+                " uploading anything. The files remain in"
+                f" {job_output_path}. This needs manual investigation."
+            )
+            return False
+
+        # A staging dir surviving from a previous crashed attempt for this same
+        # fit contains nothing of value (it was never published), so start clean
+        # rather than merging stale files into this attempt.
+        if os.path.exists(staging_path):
+            logger.warning(f"upload_plot_files: removing stale staging dir {staging_path} before starting.")
+            shutil.rmtree(staging_path)
+
+        os.makedirs(staging_path)
+
+        exts = [
+            "*.png",
+            "*.txt",
+            "*.tsv",
+            "*.json",
+            "*_solutions.fits",
+            "*_solutions.original.fits",
+        ]
+        for ext in exts:
+            plot_files = glob.glob(os.path.join(job_output_path, ext))
+            for file_no, pfile in enumerate(plot_files, start=1):
+                try:
+                    dest_filename = os.path.join(staging_path, os.path.basename(pfile))
+
+                    # We want to keep the solutions on calvin servers so copy them, don't move them!
+                    if ext in ["*_solutions.fits", "*_solutions.original.fits"]:
+                        logger.debug(f"Copying {pfile} to {dest_filename} [{file_no}/{len(plot_files)}]")
+                        shutil.copy(pfile, dest_filename)
+                    else:
+                        logger.debug(f"Moving {pfile} to {dest_filename} [{file_no}/{len(plot_files)}]")
+                        shutil.move(pfile, dest_filename)
+
+                except Exception as e:
+                    logger.warning(f"Failed to move {pfile} to the {staging_path}. Error: {e!s}. Ignoring")
+                    # keep going and try the next file
+
+        # Publish. os.replace() on a directory requires the target not to exist
+        # (or to be an empty directory), which the check above ensures. This is
+        # the point at which the controller becomes able to see the files.
+        os.replace(staging_path, upload_path)
+        logger.info(f"upload_plot_files: published {upload_path} for upload.")
+        return True
+
+    except Exception as ee:
+        # Something went wrong- log it and keep going. Deliberately leave the
+        # staging dir in place for inspection; reap_orphaned_staging_dirs will
+        # remove it on a later processor startup if it is genuinely abandoned.
+        logger.warning(
+            f"Failed to publish {upload_path} (staging dir {staging_path} left in place). Error: {ee!s}. Ignoring"
+        )
+        return False

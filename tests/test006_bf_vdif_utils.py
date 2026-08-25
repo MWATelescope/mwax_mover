@@ -1,8 +1,10 @@
-import shutil
-from mwax_mover.mwax_bf_vdif_utils import stitch_vdif_files_and_write_hdr
-from tests_common import setup_test_directories
-import pytest
 import os
+import shutil
+
+import pytest
+from tests_common import setup_test_directories
+
+from mwax_mover.mwax_bf_vdif_utils import stitch_vdif_files_and_write_hdr
 
 
 def test_stitch_zero_files():
@@ -32,8 +34,12 @@ def test_stitch_one_file():
         metafits_filename, filenames, output_dir
     )
 
-    assert output_vdif_filename == os.path.join(output_dir, "1454343736_ch109_beam00.vdif")
-    assert output_hdr_filename == os.path.join(output_dir, "1454343736_ch109_beam00.hdr")
+    assert output_vdif_filename == os.path.join(
+        output_dir, "1454343736_ch109_beam00.vdif"
+    )
+    assert output_hdr_filename == os.path.join(
+        output_dir, "1454343736_ch109_beam00.hdr"
+    )
 
     assert os.path.exists(output_vdif_filename)
     assert os.path.exists(output_hdr_filename)
@@ -57,7 +63,9 @@ def test_stitch_many_files2():
         metafits_filename, filenames, output_dir
     )
 
-    assert output_vdif_filename == os.path.join(output_dir, f"{obs_id}_ch109_beam01.vdif")
+    assert output_vdif_filename == os.path.join(
+        output_dir, f"{obs_id}_ch109_beam01.vdif"
+    )
     assert output_hdr_filename == os.path.join(output_dir, f"{obs_id}_ch109_beam01.hdr")
 
     assert os.path.exists(output_vdif_filename)
@@ -75,11 +83,19 @@ def test_stitch_with_target_name_sra_sdec():
     # Note to save space in github we will use an existing vdif file in the repo (not the real one)
     #
     metafits_filename = "tests/data/1457904016/1457904016_metafits.fits"
-    original_vdif_filename1 = "tests/data/1454343736/1454343736_1454343736_ch109_beam01.vdif"
-    original_vdif_filename2 = "tests/data/1454343736/1454343736_1454343744_ch109_beam01.vdif"
+    original_vdif_filename1 = (
+        "tests/data/1454343736/1454343736_1454343736_ch109_beam01.vdif"
+    )
+    original_vdif_filename2 = (
+        "tests/data/1454343736/1454343736_1454343744_ch109_beam01.vdif"
+    )
 
-    new_vdif_filename1 = os.path.join(output_dir, "1457904016_1457904016_ch120_beam01.vdif")
-    new_vdif_filename2 = os.path.join(output_dir, "1457904016_1457904024_ch120_beam01.vdif")
+    new_vdif_filename1 = os.path.join(
+        output_dir, "1457904016_1457904016_ch120_beam01.vdif"
+    )
+    new_vdif_filename2 = os.path.join(
+        output_dir, "1457904016_1457904024_ch120_beam01.vdif"
+    )
 
     # copy the data files into test dir and rename so the code sees the correct filename
     shutil.copyfile(original_vdif_filename1, new_vdif_filename1)
@@ -115,6 +131,12 @@ def test_stitch_with_target_name_sra_sdec():
     assert dec_line != ""
 
     # Now we check the contents
-    assert source_line == "SOURCE       PSR J1453-6413 # name of the astronomical source\n", f"{source_line}"
-    assert ra_line == "RA           223.38606     # Right Ascension of the source\n", f"{ra_line}"
-    assert dec_line == "DEC          -64.22112    # Declination of the source\n", f"{dec_line}"
+    assert (
+        source_line == "SOURCE       PSR J1453-6413 # name of the astronomical source\n"
+    ), f"{source_line}"
+    assert ra_line == "RA           223.38606     # Right Ascension of the source\n", (
+        f"{ra_line}"
+    )
+    assert dec_line == "DEC          -64.22112    # Declination of the source\n", (
+        f"{dec_line}"
+    )

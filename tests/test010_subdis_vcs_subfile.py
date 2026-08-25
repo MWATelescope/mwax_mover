@@ -9,12 +9,16 @@ import signal
 import threading
 import time
 
-from mwax_mover.utils import MWAXSubfileDistirbutorMode
-from tests_common import create_observation_subfiles, setup_test_directories
-from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
+from tests_common import (
+    create_observation_subfiles,
+    get_test_bin_dir,
+    render_test_config,
+    setup_test_directories,
+)
 from tests_fakedb import FakeMWAXDBHandler
 
-TEST_CONFIG_FILE = "tests/data/test010/test010.cfg"
+from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
+
 TEST_METAFITS = "tests/data/1369821496/1369821496_metafits.fits"
 
 
@@ -32,7 +36,7 @@ def test_correlator_config_file():
     # e.g. fake_db_handler.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
 
     # Call to read config <-- this is what we're testing!
-    sd.initialise(TEST_CONFIG_FILE, MWAXSubfileDistirbutorMode.CORRELATOR, fake_db_handler)
+    sd.initialise(render_test_config("test010"), fake_db_handler)
 
     #
     # Now confirm the params all match the config file
@@ -40,7 +44,7 @@ def test_correlator_config_file():
 
     # mwax_mover section
     assert sd.cfg_webserver_port == 9999
-    assert sd.cfg_health_multicast_interface_name == "eth2"
+    assert sd.cfg_health_multicast_interface_name == "lo"
     assert sd.cfg_health_multicast_ip == "224.234.0.0"
     assert sd.cfg_health_multicast_port == 8005
     assert sd.cfg_health_multicast_hops == 1
@@ -60,7 +64,7 @@ def test_correlator_config_file():
     assert sd.cfg_corr_visdata_dont_archive_path == os.path.join(base_dir, "visdata/dont_archive")
     assert sd.cfg_corr_visdata_processing_stats_path == os.path.join(base_dir, "visdata/processing_stats")
     assert sd.cfg_corr_visdata_outgoing_path == os.path.join(base_dir, "visdata/outgoing")
-    assert sd.cfg_corr_mwax_stats_binary_dir == "../mwax_stats/target/release"
+    assert sd.cfg_corr_mwax_stats_binary_dir == get_test_bin_dir("test010")
 
     assert sd.cfg_corr_mwax_stats_dump_dir == os.path.join(base_dir, "vulcan/mwax_stats_dump")
     assert sd.cfg_corr_mwax_stats_timeout_sec == 600
@@ -92,7 +96,7 @@ def test_process_vcs_subfile():
     sd = MWAXSubfileDistributor()
 
     # Call to read config <-- this is what we're testing!
-    sd.initialise(TEST_CONFIG_FILE, MWAXSubfileDistirbutorMode.CORRELATOR)
+    sd.initialise(render_test_config("test010"))
     # Override db_handler with a fake one
     sd.db_handler = FakeMWAXDBHandler()
     # Add any select results (in order in the code below-or keep commented if none)
@@ -114,7 +118,13 @@ def test_process_vcs_subfile():
 
     # throw some subfiles in!
     create_observation_subfiles(
-        1369821496, 3, "MWAX_VCS", 109, 0, os.path.join(base_dir, "tmp"), sd.cfg_subfile_incoming_path
+        1369821496,
+        3,
+        "MWAX_VCS",
+        109,
+        0,
+        os.path.join(base_dir, "tmp"),
+        sd.cfg_subfile_incoming_path,
     )
 
     # allow things to process

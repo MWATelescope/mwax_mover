@@ -2,7 +2,6 @@
 Version handling for mwax_mover
 """
 
-import typing
 from importlib.metadata import version as _get_version
 
 
@@ -15,7 +14,7 @@ def get_mwax_mover_version_string() -> str:
     return _get_version("mwax_mover")
 
 
-def get_pmwax_mover_version_number() -> typing.Tuple[int, int, int]:
+def get_pmwax_mover_version_number() -> tuple[int, int, int]:
     """Get the version number of mwax_mover as a tuple.
 
     Returns:

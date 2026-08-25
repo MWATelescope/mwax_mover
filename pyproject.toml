@@ -1,6 +1,6 @@
 [project]
 name = "mwax_mover"
-version = "1.7.30"
+version = "1.9.12"
 description = "A module to manage input, archiving and calibration for the MWAX correlator"
 readme = "README.md"
 requires-python = ">=3.12, <3.15"
@@ -38,7 +38,12 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest", "pytest-cov"]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff>=0.16.1",
+    "ty>=0.0.69",
+]
 
 [project.urls]
 homepage = "https://github.com/MWATelescope/mwax_mover"
@@ -52,16 +57,21 @@ mwax_calvin_controller = "mwax_mover.cli.mwax_calvin_controller:main"
 mwax_subfile_distributor = "mwax_mover.cli.mwax_subfile_distributor:main"
 mwacache_archiver = "mwax_mover.cli.mwacache_archive_processor:main"
 fits_inspect = "mwax_mover.cli.fits_inspect:main"
-aocal_split = "mwax_mover.cli.aocal_split:main"
 cal_utils = "mwax_mover.cli.cal_utils:main"
 vdif_cat = "mwax_mover.cli.vdif_cat:main"
 generate_index_json = "mwax_mover.cli.generate_index_json:main"
 update_calvin_plots_and_index = "mwax_mover.cli.update_calvin_plots_and_index:main"
 print_metafits_info = "mwax_mover.cli.print_metafits_info:main"
 
-[tool.black]
+[tool.ruff]
 line-length = 120
-target-version = ['py312']
+target-version = "py312"
+
+[tool.ruff.lint]
+# Starting set. E/F are pycodestyle+pyflakes (the ruff default) and B is
+# flake8-bugbear. ARG, RET and SIM are worth adding once the existing
+# findings in those categories have been worked through.
+select = ["E", "F", "B"]
 
 [tool.uv]
 package = true
@@ -71,5 +81,15 @@ log_cli = true
 log_cli_level = "DEBUG"
 log_format = "%(asctime)s %(levelname)s %(name)s.%(funcName)s %(message)s"
 log_date_format = "%Y-%m-%d %H:%M:%S"
-addopts = "-vv -x" # --assert=plain"                                                         # Be more verbose and fail on first error and never truncate asserts
+# Our test modules are named testNNN_*.py, which does NOT match pytest's
+# default python_files patterns (test_*.py / *_test.py). Without this,
+# `pytest` collects zero tests and exits successfully.
+python_files = ["test*.py"]
+# Be more verbose and never truncate asserts. Deliberately no -x: a full run
+# should report every failure, not stop at the first. Pass -x on the command
+# line when iterating on a single failure.
+addopts = "-vv -m 'not integration'"
 testpaths = ["tests"]
+markers = [
+    "integration: requires network access or real external binaries (giant-squid, etc). Deselected by default; run with `pytest -m integration`.",
+]

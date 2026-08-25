@@ -22,12 +22,12 @@ import subprocess
 import tempfile
 import threading
 import time
-import unittest.mock as mock
+from unittest import mock
 
 import inotify.constants
 import pytest
 
-import mwax_mover.mwax_mover as mwax_mover
+from mwax_mover import mwax_mover
 from mwax_mover.mwax_watcher import Watcher
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -73,7 +73,9 @@ def shm_watch_dir():
     if not os.path.exists(shm_base):
         pytest.skip("/dev/shm not available on this system")
     if not _inotify_reliable(shm_base):
-        pytest.skip(f"/dev/shm filesystem ({_fs_type(shm_base)}) is not inotify-reliable")
+        pytest.skip(
+            f"/dev/shm filesystem ({_fs_type(shm_base)}) is not inotify-reliable"
+        )
     with tempfile.TemporaryDirectory(dir=shm_base) as tmpdir:
         yield tmpdir
 
@@ -260,7 +262,9 @@ def _run_watcher_with_events(watcher: Watcher, fake_events: list):
     watcher.inotify_tree = mock_inotify
     watcher.watching = True
 
-    with mock.patch("mwax_mover.mwax_watcher.utils.scan_for_existing_files_and_add_to_queue"):
+    with mock.patch(
+        "mwax_mover.mwax_watcher.utils.scan_for_existing_files_and_add_to_queue"
+    ):
         watcher.do_watch_loop()
 
 
@@ -279,21 +283,33 @@ class TestDoWatchLoopFiltering:
         )
 
     def test_matching_extension_enqueued(self, dest_queue, tmp_path):
-        w = self._make_watcher(dest_queue, tmp_path, ".fits", mwax_mover.MODE_WATCH_DIR_FOR_RENAME)
-        event = _make_fake_event(inotify.constants.IN_MOVED_TO, str(tmp_path), "obs123.fits")
+        w = self._make_watcher(
+            dest_queue, tmp_path, ".fits", mwax_mover.MODE_WATCH_DIR_FOR_RENAME
+        )
+        event = _make_fake_event(
+            inotify.constants.IN_MOVED_TO, str(tmp_path), "obs123.fits"
+        )
         _run_watcher_with_events(w, [event])
         assert dest_queue.qsize() == 1
         assert dest_queue.get() == str(tmp_path) + "/obs123.fits"
 
     def test_non_matching_extension_not_enqueued(self, dest_queue, tmp_path):
-        w = self._make_watcher(dest_queue, tmp_path, ".fits", mwax_mover.MODE_WATCH_DIR_FOR_RENAME)
-        event = _make_fake_event(inotify.constants.IN_MOVED_TO, str(tmp_path), "obs123.metafits")
+        w = self._make_watcher(
+            dest_queue, tmp_path, ".fits", mwax_mover.MODE_WATCH_DIR_FOR_RENAME
+        )
+        event = _make_fake_event(
+            inotify.constants.IN_MOVED_TO, str(tmp_path), "obs123.metafits"
+        )
         _run_watcher_with_events(w, [event])
         assert dest_queue.empty()
 
     def test_wildcard_pattern_enqueues_any_extension(self, dest_queue, tmp_path):
-        w = self._make_watcher(dest_queue, tmp_path, ".*", mwax_mover.MODE_WATCH_DIR_FOR_RENAME)
-        event = _make_fake_event(inotify.constants.IN_MOVED_TO, str(tmp_path), "obs123.metafits")
+        w = self._make_watcher(
+            dest_queue, tmp_path, ".*", mwax_mover.MODE_WATCH_DIR_FOR_RENAME
+        )
+        event = _make_fake_event(
+            inotify.constants.IN_MOVED_TO, str(tmp_path), "obs123.metafits"
+        )
         _run_watcher_with_events(w, [event])
         assert dest_queue.qsize() == 1
 
@@ -305,11 +321,15 @@ class TestDoWatchLoopFiltering:
             mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
             exclude_pattern=".metafits",
         )
-        event = _make_fake_event(inotify.constants.IN_MOVED_TO, str(tmp_path), "obs123.metafits")
+        event = _make_fake_event(
+            inotify.constants.IN_MOVED_TO, str(tmp_path), "obs123.metafits"
+        )
         _run_watcher_with_events(w, [event])
         assert dest_queue.empty()
 
-    def test_excluded_extension_does_not_block_other_extensions(self, dest_queue, tmp_path):
+    def test_excluded_extension_does_not_block_other_extensions(
+        self, dest_queue, tmp_path
+    ):
         w = self._make_watcher(
             dest_queue,
             tmp_path,
@@ -318,8 +338,12 @@ class TestDoWatchLoopFiltering:
             exclude_pattern=".metafits",
         )
         events = [
-            _make_fake_event(inotify.constants.IN_MOVED_TO, str(tmp_path), "obs123.metafits"),
-            _make_fake_event(inotify.constants.IN_MOVED_TO, str(tmp_path), "obs123.fits"),
+            _make_fake_event(
+                inotify.constants.IN_MOVED_TO, str(tmp_path), "obs123.metafits"
+            ),
+            _make_fake_event(
+                inotify.constants.IN_MOVED_TO, str(tmp_path), "obs123.fits"
+            ),
         ]
         _run_watcher_with_events(w, events)
         assert dest_queue.qsize() == 1
@@ -327,14 +351,25 @@ class TestDoWatchLoopFiltering:
 
     def test_wrong_event_type_not_enqueued(self, dest_queue, tmp_path):
         """IN_OPEN arriving on a IN_MOVED_TO watcher should be ignored."""
-        w = self._make_watcher(dest_queue, tmp_path, ".fits", mwax_mover.MODE_WATCH_DIR_FOR_RENAME)
-        event = _make_fake_event(inotify.constants.IN_OPEN, str(tmp_path), "obs123.fits")
+        w = self._make_watcher(
+            dest_queue, tmp_path, ".fits", mwax_mover.MODE_WATCH_DIR_FOR_RENAME
+        )
+        event = _make_fake_event(
+            inotify.constants.IN_OPEN, str(tmp_path), "obs123.fits"
+        )
         _run_watcher_with_events(w, [event])
         assert dest_queue.empty()
 
     def test_multiple_matching_events_all_enqueued(self, dest_queue, tmp_path):
-        w = self._make_watcher(dest_queue, tmp_path, ".fits", mwax_mover.MODE_WATCH_DIR_FOR_RENAME)
-        events = [_make_fake_event(inotify.constants.IN_MOVED_TO, str(tmp_path), f"obs{i}.fits") for i in range(5)]
+        w = self._make_watcher(
+            dest_queue, tmp_path, ".fits", mwax_mover.MODE_WATCH_DIR_FOR_RENAME
+        )
+        events = [
+            _make_fake_event(
+                inotify.constants.IN_MOVED_TO, str(tmp_path), f"obs{i}.fits"
+            )
+            for i in range(5)
+        ]
         _run_watcher_with_events(w, events)
         assert dest_queue.qsize() == 5
 
@@ -400,7 +435,9 @@ class TestLiveInotify:
                 except FileNotFoundError:
                     pass
 
-    def test_rename_non_matching_extension_not_detected(self, dest_queue, shm_watch_dir):
+    def test_rename_non_matching_extension_not_detected(
+        self, dest_queue, shm_watch_dir
+    ):
         """A renamed file with a non-matching extension is not enqueued."""
         watcher = Watcher(
             name="test_rename_no_match",
