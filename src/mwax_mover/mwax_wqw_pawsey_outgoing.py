@@ -44,7 +44,8 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             remote_db_handler_object: Database handler for the remote metadata database.
             s3_profile: rclone profile name to upload with (see rclone.conf).
             archive_to_location: Target archive location (Acacia, Banksia, or AcaciaMWA).
-            rclone_check_wait_secs: Number of seconds to wait between rclone copy and rclone check (to allow banksia VSS's to sync)
+            rclone_check_wait_secs: Number of seconds to wait between rclone copy and
+                rclone check (to allow banksia VSS's to sync)
             recursive: Whether to watch each incoming path's subdirectories as
                 well. Comes from the per-host `recursive` config option.
         """

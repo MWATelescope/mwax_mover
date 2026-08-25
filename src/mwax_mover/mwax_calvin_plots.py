@@ -664,7 +664,8 @@ def generate_hyperdrive_plots(
         A tuple of (success: bool, error_message: str).
     """
     logger.info(
-        f"{obs_id} generating {'original unmodified' if before else 'after flagging'} hyperdrive plots for {hyperdrive_solution_filename}..."
+        f"{obs_id} generating {'original unmodified' if before else 'after flagging'}"
+        f" hyperdrive plots for {hyperdrive_solution_filename}..."
     )
 
     try:

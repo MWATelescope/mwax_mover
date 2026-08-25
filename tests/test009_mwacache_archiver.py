@@ -35,7 +35,8 @@ def test_mwacache_archiver_config_file():
     # e.g. mcap.mro_db_handler_object.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
     mcap.remote_db_handler = FakeMWAXDBHandler()
     # Add any select results (in order in the code below-or keep commented if none)
-    # e.g. mcap.remote_db_handler_object.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
+    # e.g. mcap.remote_db_handler_object.select_results =
+    #          [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
 
     #
     # Now confirm the params all match the config file

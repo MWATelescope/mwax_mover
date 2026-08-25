@@ -180,7 +180,8 @@ class PriorityWatcher:
 
                                 self.dest_queue.put(new_queue_item)
                                 logger.info(
-                                    f"{dest_filename} added to queue with priority {priority} ({self.dest_queue.qsize()})"
+                                    f"{dest_filename} added to queue with priority"
+                                    f" {priority} ({self.dest_queue.qsize()})"
                                 )
 
     def get_status(self) -> dict:

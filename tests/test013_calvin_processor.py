@@ -68,8 +68,8 @@ def test_mwax_calvin_processor():
     assert mcal.keep_completed_visibility_files == 0
     assert mcal.cal_export_max_age_hours == 24
     assert (
-        mcal.hyperdrive_extra_args
-        == "--uvw-min 50m --uvw-max 1667l --max-iterations 500 --stop-thresh 1e-20 --veto-threshold 0.0 --source-dist-cutoff 50"
+        mcal.hyperdrive_extra_args == "--uvw-min 50m --uvw-max 1667l --max-iterations 500 --stop-thresh 1e-20"
+        " --veto-threshold 0.0 --source-dist-cutoff 50"
     )
     assert mcal.phase_fit_niter == 3
     assert mcal.gains_cut_off_max == 100.0
@@ -134,8 +134,8 @@ def test_mwax_calvin_processor_no_gains_cutoff():
     assert mcal.keep_completed_visibility_files == 0
     assert mcal.cal_export_max_age_hours == 24
     assert (
-        mcal.hyperdrive_extra_args
-        == "--uvw-min 50m --uvw-max 1667l --max-iterations 500 --stop-thresh 1e-20 --veto-threshold 0.0 --source-dist-cutoff 50"
+        mcal.hyperdrive_extra_args == "--uvw-min 50m --uvw-max 1667l --max-iterations 500 --stop-thresh 1e-20"
+        " --veto-threshold 0.0 --source-dist-cutoff 50"
     )
     assert mcal.phase_fit_niter == 3
     assert mcal.gains_cut_off_max is None

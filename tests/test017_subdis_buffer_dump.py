@@ -69,7 +69,8 @@ def do_buffer_dump(
 
     Args:
         obs_id (int): An obsid to use, which we have the metafits for in test_data/OBSID/OBSID_metafits.fits.
-        obs_exp_time (int): How long is the observation? The length determines how many subfiles we create for the test (and how long the test goes for).
+        obs_exp_time (int): How long is the observation? The length determines how
+            many subfiles we create for the test (and how long the test goes for).
         dump_start (int): The gps time we pass to dump_voltages that specifies the first subobs to dump.
         dump_end (int): The gps time we pass to dump_voltages that specifies the last subobs to dump.
         dump_trigger_id (int): The id of the trigger so we can inject it into the subfile headers of the dumped files

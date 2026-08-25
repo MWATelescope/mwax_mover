@@ -141,21 +141,35 @@ def main() -> None:
     """Entry point for the update_hyperdrive_plots_and_index command line tool.
 
     Parses arguments and calls generate_hyperdrive_plots(), downloads the old index.json,
-    updates index.json then copies the files to the local upload directory for calvin controller to upload, printing a summary on success or an error message on failure.
+    updates index.json then copies the files to the local upload directory for
+    calvin controller to upload, printing a summary on success or an error
+    message on failure.
     """
     parser = argparse.ArgumentParser(
-        description="Scans recursively for solution directories. For each solution directory, calls generate_hyperdrive_plots(), downloads the old index.json, updates index.json then re-uploads it",
+        description=(
+            "Scans recursively for solution directories. For each solution directory,"
+            " calls generate_hyperdrive_plots(), downloads the old index.json, updates"
+            " index.json then re-uploads it"
+        ),
     )
     parser.add_argument(
         "--solution-dir",
         required=True,
-        help="Path to the directory to start recursively looking for solution files. Solution dirs should end in SLURMJOBID_OBSID - e.g. /data/calvin/jobs/9176_1234567890",
+        help=(
+            "Path to the directory to start recursively looking for solution files."
+            " Solution dirs should end in SLURMJOBID_OBSID - e.g."
+            " /data/calvin/jobs/9176_1234567890"
+        ),
     )
 
     parser.add_argument(
         "--base-upload-dir",
         required=False,
-        help="Path to the directory that calvin controller uploads to S3- usually /data/calvin/plots. This util will create a dir for the fit inside the base dir.",
+        help=(
+            "Path to the directory that calvin controller uploads to S3- usually"
+            " /data/calvin/plots. This util will create a dir for the fit inside the"
+            " base dir."
+        ),
     )
 
     parser.add_argument(

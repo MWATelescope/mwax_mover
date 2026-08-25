@@ -2037,7 +2037,8 @@ def estimate_birli_output_bytes(
     pols: int = metafits_context.num_visibility_pols  # (XX,XY,YX,YY) # 4
 
     # Uncomment for debug
-    # print(f"{timesteps}ts * {coarse_channels * fine_channels}ch * {baselines}bl * {pols}pol * {bytes_per_visibility} bytes")
+    # print(f"{timesteps}ts * {coarse_channels * fine_channels}ch"
+    #       f" * {baselines}bl * {pols}pol * {bytes_per_r_and_i} bytes")
 
     return timesteps * coarse_channels * fine_channels * baselines * pols * bytes_per_r_and_i
 
@@ -2180,7 +2181,10 @@ def get_file_description(filename: str) -> str:
     elif "hyperdrive_readme.txt" in filename:
         desc = "Full log output of the Hyperdrive run"
     elif "intercepts.png" in filename:
-        desc = "Plots showing, for each reciever type and polarisation, a plot of the phase intercepts in polar coordinates vs cable length"
+        desc = (
+            "Plots showing, for each reciever type and polarisation, a plot of the"
+            " phase intercepts in polar coordinates vs cable length"
+        )
     elif "phase_fits_xx.png" in filename:
         desc = "Plot of the phase fit for each tile (phase vs frequency) for XX"
     elif "phase_fits_yy.png" in filename:
@@ -2360,7 +2364,8 @@ def export_calibration_solutions(solution_files: list[str], cal_export_path: str
     files_removed = delete_files_older_than(cal_export_path, cal_export_max_age_hours * 3600, ext_list)
     if len(files_removed) > 0:
         logger.debug(
-            f"Removed the following files from {cal_export_path} as they were older than {cal_export_max_age_hours} hours: {files_removed}"
+            f"Removed the following files from {cal_export_path} as they were older"
+            f" than {cal_export_max_age_hours} hours: {files_removed}"
         )
     else:
         logger.debug(f"No files older than {cal_export_max_age_hours} hours found in {cal_export_path} to remove.")

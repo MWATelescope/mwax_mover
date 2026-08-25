@@ -66,7 +66,8 @@ def copy_file_rsync(
         gbps_per_sec = (size_gigabytes * 8) / elapsed
 
         logger.info(
-            f"{source_filename}: copy_file_rsync success ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at {gbps_per_sec:.3f} Gbps)"
+            f"{source_filename}: copy_file_rsync success ({size_gigabytes:.3f}GB in"
+            f" {elapsed:.3f} seconds at {gbps_per_sec:.3f} Gbps)"
         )
         return True
     else:

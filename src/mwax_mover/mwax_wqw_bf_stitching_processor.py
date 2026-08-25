@@ -96,7 +96,10 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
                     raise ValueError(f"{item}: Error getting subobs_id from filename {filename}")
             except Exception:
                 logger.warning(
-                    f"{item}: filename not in correct format. Should be obsid_subobsid_chXXX_beamXX.vdif or .fil. It's probably a failed file from a previous run and can probably be safely deleted (by you). Skipping file."
+                    f"{item}: filename not in correct format. Should be"
+                    " obsid_subobsid_chXXX_beamXX.vdif or .fil. It's probably a failed"
+                    " file from a previous run and can probably be safely deleted (by"
+                    " you). Skipping file."
                 )
                 return True
 
@@ -138,13 +141,16 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
                     )
 
                     logger.debug(
-                        f"{item}: Found {len(files)} vdif files to stitch for rec_chan {rec_chan:03d}, beam {beam:02d}: {files}"
+                        f"{item}: Found {len(files)} vdif files to stitch for"
+                        f" rec_chan {rec_chan:03d}, beam {beam:02d}: {files}"
                     )
 
                     # Now keep the original files if the config file tells us we should
                     if self.keep_original_files_after_stitching:
                         logger.info(
-                            f"{item}: Copying unstitched vdif files to bf_dont_archive_path since keep_original_files_after_stitching=True..."
+                            f"{item}: Copying unstitched vdif files to"
+                            " bf_dont_archive_path since"
+                            " keep_original_files_after_stitching=True..."
                         )
                         for f in files:
                             shutil.copy(
@@ -168,13 +174,16 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
                     files = glob.glob(os.path.join(file_path, f"{obs_id}_*_ch{rec_chan:03d}_beam{beam:02d}.fil"))
 
                     logger.debug(
-                        f"{item}: Found {len(files)} filterbank files to stitch for rec_chan {rec_chan:03d}, beam {beam:02d}"
+                        f"{item}: Found {len(files)} filterbank files to stitch for"
+                        f" rec_chan {rec_chan:03d}, beam {beam:02d}"
                     )
 
                     # Now keep the original files if the config file tells us we should
                     if self.keep_original_files_after_stitching:
                         logger.info(
-                            f"{item}: Copying unstitched filterbank files to bf_dont_archive_path since keep_original_files_after_stitching=True..."
+                            f"{item}: Copying unstitched filterbank files to"
+                            " bf_dont_archive_path since"
+                            " keep_original_files_after_stitching=True..."
                         )
                         for f in files:
                             shutil.copy(

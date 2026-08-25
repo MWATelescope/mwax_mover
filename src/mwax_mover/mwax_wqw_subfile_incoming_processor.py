@@ -294,7 +294,8 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                         )
                     except Exception:
                         logger.warning(
-                            f"{item}: key {METAFITS_CALOBSID} not found in metafits file {metafits_filename} hdu {METAFITS_CALIBDATA_HDU}"
+                            f"{item}: key {METAFITS_CALOBSID} not found in metafits"
+                            f" file {metafits_filename} hdu {METAFITS_CALIBDATA_HDU}"
                         )
                         cal_obs_id_str = "0"
 
@@ -302,7 +303,9 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                         cal_obs_id: int = int(cal_obs_id_str)
                     except Exception:
                         logger.warning(
-                            f"{item}: value {cal_obs_id_str} for key {METAFITS_CALOBSID} in {metafits_filename} hdu {METAFITS_CALIBDATA_HDU} is not a number"
+                            f"{item}: value {cal_obs_id_str} for key"
+                            f" {METAFITS_CALOBSID} in {metafits_filename} hdu"
+                            f" {METAFITS_CALIBDATA_HDU} is not a number"
                         )
                         cal_obs_id = 0
 

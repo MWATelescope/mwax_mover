@@ -53,7 +53,8 @@ class MWAASVOJob:
             request_id: The calibration solution request ID.
             obs_id: The observation ID.
             job_id: The MWA ASVO job ID.
-            bulk_request: Is this request an ASVO cal request (bulk_request=False) or an MWA Ops Team bulk calibration (bulk_request=True)
+            bulk_request: Is this request an ASVO cal request (bulk_request=False)
+                or an MWA Ops Team bulk calibration (bulk_request=True)
         """
         self.request_ids: list[int] = []
         self.request_ids.append(request_id)
@@ -70,7 +71,9 @@ class MWAASVOJob:
         self.download_slurm_job_submitted: bool = False
         self.download_slurm_job_id: int | None = None
         self.download_slurm_job_submitted_datetime: datetime | None = None
-        # A flag used to build a new list without the ones needing to be removed. Bypasses the classic mutating a list while iterating issue! https://rednafi.com/python/modify-iterables-while-iterating/
+        # A flag used to build a new list without the ones needing to be removed.
+        # Bypasses the classic mutating-a-list-while-iterating issue! See
+        # https://rednafi.com/python/modify-iterables-while-iterating/
         self.remove_from_list: bool = False
 
     def __str__(self):
@@ -316,7 +319,8 @@ class MWAASVOHelper:
 
                         if changed:
                             logger.info(
-                                f"{job}: updated - {job.job_state.value}{'' if job.download_url is None else ' ' + job.download_url}"
+                                f"{job}: updated - {job.job_state.value}"
+                                f"{'' if job.download_url is None else ' ' + job.download_url}"
                             )
                         # break
                         # Do not break here because in theory there could be >1 request for this asvo job.

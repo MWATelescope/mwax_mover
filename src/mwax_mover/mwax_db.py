@@ -54,7 +54,9 @@ class MWAXDBHandler:
                 max_size=3,
                 open=False,
                 check=ConnectionPool.check_connection,
-                conninfo=f"postgresql://{user}:{password}@{host}:{port}/{db_name}{'' if ssl_mode is None else ssl_mode}",
+                conninfo=(
+                    f"postgresql://{user}:{password}@{host}:{port}/{db_name}{'' if ssl_mode is None else ssl_mode}"
+                ),
             )
 
     def close(self):
@@ -532,7 +534,10 @@ def insert_calibration_fits_row(
     """
     sql = (
         "INSERT INTO calibration_fits"
-        " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit,source_list,num_sources,calibration_command,gain_max_cutoff,gain_outlier_poly_degree,gain_outlier_mad_residual_threshold,gain_outlier_modify_gains,tile_bad_channel_fraction,phase_outlier_nstd_threshold)"
+        " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit,source_list"
+        ",num_sources,calibration_command,gain_max_cutoff,gain_outlier_poly_degree"
+        ",gain_outlier_mad_residual_threshold,gain_outlier_modify_gains"
+        ",tile_bad_channel_fraction,phase_outlier_nstd_threshold)"
         " VALUES (%s,%s,%s,now(),%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
     )
 
@@ -1129,7 +1134,10 @@ def get_fit_info_from_slurm_job_and_obsid(
     # This will be unique for calvin fits.
     # Won't work for any fits prior to the introduction of the calibration_request table
     sql = """SELECT r.calibration_fit_id, f.creator, f.code_version, 
-                CASE WHEN f.gain_max_cutoff IS NULL AND r.calibration_fit_id IS NOT NULL AND f.gain_outlier_modify_gains IS NULL THEN 100 		 
+                CASE
+                    WHEN f.gain_max_cutoff IS NULL
+                     AND r.calibration_fit_id IS NOT NULL
+                     AND f.gain_outlier_modify_gains IS NULL THEN 100
                 ELSE NULL END as amp_plot_max
             FROM calibration_request r
             LEFT OUTER JOIN calibration_fits f ON f.fitid=r.calibration_fit_id AND f.obsid=r.cal_id

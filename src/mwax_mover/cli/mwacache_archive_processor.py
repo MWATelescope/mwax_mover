@@ -305,8 +305,12 @@ class MWACacheArchiveProcessor:
 
         Args:
             config_filename: Path to the configuration file.
-            override_mro_db_handler: If present, this will override the default MWAXDBHandler (this is used for testing via tests/tests_fakedb.py FakeMWAXDBHandler). Defaults to None.
-            override_remote_db_handler: If present, this will override the default MWAXDBHandler (this is used for testing via tests/tests_fakedb.py FakeMWAXDBHandler). Defaults to None.
+            override_mro_db_handler: If present, this will override the default
+                MWAXDBHandler (this is used for testing via tests/tests_fakedb.py
+                FakeMWAXDBHandler). Defaults to None.
+            override_remote_db_handler: If present, this will override the default
+                MWAXDBHandler (this is used for testing via tests/tests_fakedb.py
+                FakeMWAXDBHandler). Defaults to None.
         """
         if not os.path.exists(config_filename):
             print(f"Configuration file location {config_filename} does not exist. Quitting.")

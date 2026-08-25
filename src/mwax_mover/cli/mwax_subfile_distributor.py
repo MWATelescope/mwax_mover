@@ -197,7 +197,9 @@ class MWAXSubfileDistributor:
 
         Args:
             config_filename: Path to the configuration file.
-            override_db_handler: If present, this will override the default MWAXDBHandler (this is used for testing via tests/tests_fakedb.py FakeMWAXDBHandler). Defaults to None.
+            override_db_handler: If present, this will override the default
+                MWAXDBHandler (this is used for testing via tests/tests_fakedb.py
+                FakeMWAXDBHandler). Defaults to None.
         """
         if not os.path.exists(config_filename):
             logger.error(f"Configuration file location {config_filename} does not exist. Quitting.")
@@ -633,7 +635,8 @@ class MWAXSubfileDistributor:
         # Do:
         #   Run mwax_stats
         # Then:
-        #   Move file to outgoing cal dir (if archiving & calibrator), outgoing dir (if archiving and not calibrator) or dont_archive dir (if not archiving)
+        #   Move file to outgoing cal dir (if archiving & calibrator), outgoing dir
+        #   (if archiving and not calibrator) or dont_archive dir (if not archiving)
         self.vis_stats_processor = VisStatsProcessor(
             self.cfg_corr_metafits_path,
             self.cfg_corr_visdata_processing_stats_path,
@@ -651,7 +654,8 @@ class MWAXSubfileDistributor:
         #   watch_dir_incoming_bf
         # Do:
         #   Stitch the files and save them into watch_dir_stitching_bf
-        #   (Optionally copy the pre-stitched files to dont_archive_path_bf if bf_keep_original_files_after_stitching is True)
+        #   (Optionally copy the pre-stitched files to dont_archive_path_bf if
+        #   bf_keep_original_files_after_stitching is True)
         # Then:
         #   ChecksumAndDB processor will pick up the new files in watch_dir_stitching_bf
         self.bf_stitching_processor = BfStitchingProcessor(
@@ -672,7 +676,8 @@ class MWAXSubfileDistributor:
             # Watch:
             #   watch_dir_outgoing_cal
             # Do:
-            #   Add to the outgoing cal list so that when release_cal_obs is called by calvin, we can remove the file from the list and archive the file
+            #   Add to the outgoing cal list so that when release_cal_obs is called
+            #   by calvin, we can remove the file from the list and archive the file
             #
             self.vis_cal_outgoing_processor = VisCalOutgoingProcessor(
                 self.cfg_corr_calibrator_outgoing_path,

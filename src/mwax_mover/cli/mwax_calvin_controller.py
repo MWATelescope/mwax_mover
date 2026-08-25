@@ -375,7 +375,9 @@ class MWAXCalvinController:
             self.database_errors += 1
 
         logger.info(
-            f"Found {len(realtime_requests_list)} realtime, {sum(1 for r in asvo_requests_list if not r.bulk_request)} MWA ASVO and {sum(1 for r in asvo_requests_list if r.bulk_request)} bulk requests to add."
+            f"Found {len(realtime_requests_list)} realtime,"
+            f" {sum(1 for r in asvo_requests_list if not r.bulk_request)} MWA ASVO and"
+            f" {sum(1 for r in asvo_requests_list if r.bulk_request)} bulk requests to add."
         )
 
         # Handle realtime requests first!
@@ -441,7 +443,8 @@ class MWAXCalvinController:
             # Now update the value in self- the health loop will report this number
             self.mwa_asvo_calibration_requests_queued = requests_queued
 
-            # Put in a sleep to allow newly created jobs to be show in giant squid when we run mwa_asvo_update_tracked_jobs()
+            # Put in a sleep to allow newly created jobs to be shown in giant squid
+            # when we run mwa_asvo_update_tracked_jobs()
             self.sleep(5)
 
             # For mwa_asvo requests, if we're not in an MWA ASVO outage, update jobs check for ready ones
@@ -875,7 +878,9 @@ class MWAXCalvinController:
 
         Args:
             config_filename: Path to the configuration file.
-            override_db_handler: If present, this will override the default MWAXDBHandler (this is used for testing via tests/tests_fakedb.py FakeMWAXDBHandler). Defaults to None.
+            override_db_handler: If present, this will override the default
+                MWAXDBHandler (this is used for testing via tests/tests_fakedb.py
+                FakeMWAXDBHandler). Defaults to None.
         """
         self.config_filename = config_filename
         self.worker_config_filename = config_filename.replace("calvin_controller", "calvin_processor")

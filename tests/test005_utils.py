@@ -982,7 +982,11 @@ def test_extract_tar():
 
 
 def test_get_filename_from_url():
-    filename_in_url = "https://projects.pawsey org au/mwa-asvo/1444927824_1021186_vis.tar?AWSAccessKeyId=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX&Signature=YYYYYYYYYYYYYYYYY%3D&Expires=1777533409"
+    filename_in_url = (
+        "https://projects.pawsey org au/mwa-asvo/1444927824_1021186_vis.tar"
+        "?AWSAccessKeyId=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+        "&Signature=YYYYYYYYYYYYYYYYY%3D&Expires=1777533409"
+    )
 
     assert extract_filename_from_mwa_asvo_signed_url(filename_in_url) == "1444927824_1021186_vis.tar"
 

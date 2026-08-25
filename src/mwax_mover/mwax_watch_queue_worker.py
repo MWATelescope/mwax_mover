@@ -87,7 +87,8 @@ def get_watcher_thread_name(watch_path: str, pattern: str) -> str:
 
 class MWAXWatchQueueWorker(ABC):
     """
-    This class is responsible for watching a set of paths and putting any files that are found into an ordinary Python queue for processing.
+    This class is responsible for watching a set of paths and putting any files
+    that are found into an ordinary Python queue for processing.
 
     watch_path_exts: a list of tuples, where each tuple contains a path to watch and a pattern to match files against.
                      For example: [("/data/level7", ".fits"), ("/data/level8", ".txt")]
@@ -277,7 +278,8 @@ class MWAXWatchQueueWorker(ABC):
 
 class MWAXPriorityWatchQueueWorker(ABC):
     """
-    This class is responsible for watching a set of paths and putting any files that are found into a Python priority queue for processing.
+    This class is responsible for watching a set of paths and putting any files
+    that are found into a Python priority queue for processing.
 
     watch_path_exts: a list of tuples, where each tuple contains a path to watch and a pattern to match files against.
                      For example: [("/data/level7", ".fits"), ("/data/level8", ".txt")]

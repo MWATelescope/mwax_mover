@@ -2039,7 +2039,10 @@ def copy_subfile_to_disk_dd(
     """
     logger.debug(f"{filename}- Copying first {bytes_to_write} bytes of file into {destination_path}")
 
-    command = f"dd if={filename} of={destination_path}/{destination_filename} bs=4M oflag=direct iflag=count_bytes count={bytes_to_write}"
+    command = (
+        f"dd if={filename} of={destination_path}/{destination_filename}"
+        f" bs=4M oflag=direct iflag=count_bytes count={bytes_to_write}"
+    )
 
     start_time = time.time()
     retval, stdout = mwax_command.run_command_ext(command, numa_node, timeout, False)

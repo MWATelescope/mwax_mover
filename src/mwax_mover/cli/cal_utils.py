@@ -237,14 +237,22 @@ def main() -> None:
         "--tile-bad-channel-fraction",
         type=float,
         default=0.5,
-        help="Fraction (0-1) of a tile's chanblocks that must already be flagged bad before the whole tile is promoted to fully flagged. [DEFAULT=0.5]",
+        help=(
+            "Fraction (0-1) of a tile's chanblocks that must already be flagged bad"
+            " before the whole tile is promoted to fully flagged. [DEFAULT=0.5]"
+        ),
     )
 
     parser.add_argument(
         "--gain-max-cutoff",
         type=float,
         default=100.0,
-        help="Absolute gain-amplitude ceiling: any (tile, chanblock) entry whose gx or gy amplitude exceeds this is flagged, run before phase-outlier detection and amplitude-outlier flagging. Use --no-gain-max-cutoff to disable. [DEFAULT=100.0]",
+        help=(
+            "Absolute gain-amplitude ceiling: any (tile, chanblock) entry whose gx or"
+            " gy amplitude exceeds this is flagged, run before phase-outlier detection"
+            " and amplitude-outlier flagging. Use --no-gain-max-cutoff to disable."
+            " [DEFAULT=100.0]"
+        ),
     )
 
     parser.add_argument(
@@ -281,7 +289,11 @@ def main() -> None:
         type=Path,
         default=None,
         metavar="FILE",
-        help="Path to the metafits FITS file. If not provided, the dir where the solutions files reside will be searched and if not found a new metafits will be downloaded there and used.",
+        help=(
+            "Path to the metafits FITS file. If not provided, the dir where the"
+            " solutions files reside will be searched and if not found a new metafits"
+            " will be downloaded there and used."
+        ),
     )
 
     parser.add_argument(
