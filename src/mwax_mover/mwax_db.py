@@ -167,23 +167,19 @@ class MWAXDBHandler:
             logger.exception("postgres exception")
             raise
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_fixed(30),
-        retry=retry_if_exception_type(
-            (
-                psycopg.errors.ConnectionFailure,
-                psycopg.errors.ConnectionException,
-                psycopg.errors.ConnectionTimeout,
-                psycopg.errors.OperationalError,
-            )
-        ),
-    )
     def execute_single_dml_row(self, sql: str, parm_list):
         """Execute an INSERT, UPDATE, or DELETE statement affecting exactly one row.
 
         Automatically commits on success and rolls back on failure within
-        a transaction context.
+        a transaction context. Connection-failure retries are handled by
+        execute_dml, which this delegates to.
+
+        NOTE: this method used to carry its own @retry decorator identical to
+        execute_dml's. Since it does nothing but call execute_dml, the two
+        nested retries multiplied: up to 9 attempts rather than 3, and a
+        worst case of roughly 5 minutes (3 x 30s inner waits, repeated 3 times)
+        instead of 1. The outer decorator has been removed so the retry policy
+        is defined in exactly one place.
 
         Args:
             sql: SQL DML statement.

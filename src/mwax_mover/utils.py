@@ -1649,19 +1649,24 @@ def call_webservice(
 
     if max_retries <= 0:
         raise ValueError("max_retries must be >=1")
-    attempt = 0
+
     err: Exception = Exception()
 
-    while attempt <= max_retries:
-        attempt += 1
+    # NOTE: this loop used to be `attempt = 0; while attempt <= max_retries`,
+    # which ran max_retries + 1 times -- one more than the parameter name and
+    # docstring imply. Each iteration already tries every URL in url_list, so
+    # max_retries now means exactly that many attempts at the whole list.
+    for attempt in range(1, max_retries + 1):
         try:
-            return_value = call_webservice_inner(obs_id, url_list, data)
-            return return_value
+            return call_webservice_inner(obs_id, url_list, data)
         except Exception as e:
             # Store the exception in case this is the last attempt
             err = e
+            if attempt < max_retries:
+                logger.warning(f"{obs_id}: attempt {attempt}/{max_retries} failed ({e}). Retrying.")
 
     # If we got here we ran out of attempts
+    logger.error(f"{obs_id}: all {max_retries} attempt(s) failed.")
     raise err
 
 
@@ -2124,6 +2129,13 @@ def run_giant_squid(
     for attempt in range(max_retries + 1):
         if attempt > 0:
             delay = retry_delay_seconds * (2 ** (attempt - 1)) + random.uniform(0, 1)
+            # Under pytest, collapse the wait. With the defaults this loop
+            # otherwise sleeps 10+20+40+80+160 = 310 real seconds before giving
+            # up, which made a single unit test take over five minutes whenever
+            # the giant-squid binary was absent. The retry *logic* is still
+            # exercised; only the wall-clock wait is skipped.
+            if running_under_pytest():
+                delay = 0.01
             logger.warning(
                 f"run_giant_squid: retry {attempt}/{max_retries} after {delay:.1f}s (last error: {last_exception})"
             )

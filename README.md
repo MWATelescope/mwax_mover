@@ -659,7 +659,7 @@ Same as `Watcher` but deposits into a `queue.PriorityQueue`. Reads the associate
 A wrapper for file paths used as `PriorityQueue` payloads. Overrides comparison operators so that equal-priority items are sorted by filename only (ignoring directory path), giving consistent ordering.
 
 **`mwax_queue_worker.py`** — `QueueWorker`
-Processes items from a `queue.Queue`, calling either a provided `event_handler` callable or running a shell command with token substitution. Implements exponential backoff on failure with three configurable strategies: requeue to end of queue, keep retrying the same item, or drop failed items entirely.
+Processes items from a `queue.Queue`, calling either a provided `event_handler` callable or running a shell command with token substitution. Implements exponential backoff on failure (`calculate_backoff_seconds()`: `initial * factor**(n-1)`, capped at `backoff_limit_seconds`) with three configurable strategies: requeue to end of queue, keep retrying the same item, or drop failed items entirely.
 
 **`mwax_priority_queue_worker.py`** — `PriorityQueueWorker`
 Identical logic to `QueueWorker` but operates on a `PriorityQueue`. When requeueing a failed item to the end of the queue, increments its priority number so it sinks toward the back.

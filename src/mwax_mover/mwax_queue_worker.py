@@ -3,7 +3,8 @@
 QueueWorker dequeues file paths and calls either a provided event_handler callable
 or runs a shell command with __FILE__ / __FILENOEXT__ token substitution. Supports
 three failure strategies: requeue to the end of the queue, keep retrying the same
-item, or drop the item entirely. Implements configurable exponential backoff.
+item, or drop the item entirely. Implements configurable exponential backoff
+(see calculate_backoff_seconds).
 """
 
 import logging
@@ -15,6 +16,38 @@ import time
 from mwax_mover import mwax_command, mwax_mover
 
 logger = logging.getLogger(__name__)
+
+
+def calculate_backoff_seconds(
+    consecutive_error_count: int,
+    backoff_initial_seconds: int,
+    backoff_factor: int,
+    backoff_limit_seconds: int,
+) -> float:
+    """Calculate the exponential backoff delay after a run of failures.
+
+    NOTE: this used to be computed inline (identically, in both QueueWorker and
+    PriorityQueueWorker) as
+    ``backoff_initial_seconds * backoff_factor * consecutive_error_count``,
+    which grows *linearly* -- 2, 4, 6, 8, ... -- despite everything describing
+    it as exponential. It is now genuinely exponential: 1, 2, 4, 8, 16, ...
+
+    Args:
+        consecutive_error_count: Number of consecutive failures so far. The
+            first failure is 1.
+        backoff_initial_seconds: Delay after the first failure.
+        backoff_factor: Multiplier applied per additional consecutive failure.
+        backoff_limit_seconds: Upper bound on the returned delay.
+
+    Returns:
+        The number of seconds to wait, capped at *backoff_limit_seconds*. Zero
+        or negative *consecutive_error_count* returns 0.
+    """
+    if consecutive_error_count < 1:
+        return 0
+
+    delay = backoff_initial_seconds * (backoff_factor ** (consecutive_error_count - 1))
+    return min(delay, backoff_limit_seconds)
 
 
 class QueueWorker:
@@ -59,7 +92,8 @@ class QueueWorker:
             requeue_to_eoq_on_failure: If True, requeue failed items to the end of
                 the queue. Defaults to True.
             backoff_initial_seconds: Initial backoff time in seconds. Defaults to 1.
-            backoff_factor: Multiplier for exponential backoff. Defaults to 2.
+            backoff_factor: Multiplier applied per additional consecutive failure,
+                giving initial * factor**(n-1). Defaults to 2.
             backoff_limit_seconds: Maximum backoff time in seconds. Defaults to 60.
             requeue_on_error: Whether to requeue or retry failed items. Defaults to True.
 
@@ -100,6 +134,12 @@ class QueueWorker:
         self._running = True
         self.current_item = None
         self.consecutive_error_count = 0
+        # stop() sets this event to interrupt an in-flight backoff wait. Nothing
+        # ever cleared it, so once stop() had been called every subsequent
+        # event.wait(backoff) returned instantly and backoff was silently
+        # disabled for the rest of the process's life. Clear it on start so a
+        # restarted worker backs off properly again.
+        self.event.clear()
         backoff = 0
 
         while self._running:
@@ -154,8 +194,12 @@ class QueueWorker:
                     else:
                         if self.requeue_on_error:
                             self.consecutive_error_count += 1
-                            backoff = self.backoff_initial_seconds * self.backoff_factor * self.consecutive_error_count
-                            backoff = min(backoff, self.backoff_limit_seconds)
+                            backoff = calculate_backoff_seconds(
+                                self.consecutive_error_count,
+                                self.backoff_initial_seconds,
+                                self.backoff_factor,
+                                self.backoff_limit_seconds,
+                            )
 
                             logger.info(
                                 f"{self.consecutive_error_count} consecutive"
