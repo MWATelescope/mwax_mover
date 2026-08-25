@@ -181,5 +181,8 @@ def call_dump_voltages(web_port: int, start: int, end: int, trigger_id: int) -> 
         "end": end,
         "trigger_id": trigger_id,
     }
-    response = requests.get(url, params=params)
+    # /dump_voltages changes state, so it is POST-only. NOTE: the real caller
+    # of this endpoint is FREDDA (external to this repo) -- it must also use
+    # POST, see the deployment note in the CHANGELOG.
+    response = requests.post(url, params=params)
     return response.status_code == 200

@@ -8,6 +8,7 @@ filterbank) and whether the observation's project should be archived.
 
 import logging
 import os
+import shutil
 
 from mwax_mover import utils
 from mwax_mover.mwax_db import MWAXDBHandler, insert_data_file_row
@@ -68,7 +69,15 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
             mode=MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
             corr_hi_priority_projects=list_of_corr_hi_priority_projects,
             vcs_hi_priority_projects=list_of_vcs_hi_priority_projects,
-            requeue_to_eoq_on_failure=False,
+            # Order does not matter here, so a failed item is requeued to the
+            # back of the queue rather than retried in place. Retrying in place
+            # meant one permanently-bad file (e.g. an unrecognised filetype,
+            # which always returns False) blocked the head of the queue
+            # indefinitely at one attempt per backoff interval, stalling every
+            # other file behind it. The priority worker also bumps a requeued
+            # item's priority number so it sinks rather than cycling straight
+            # back to the front.
+            requeue_to_eoq_on_failure=True,
         )
         self.visdata_incoming_path = visdata_incoming_path
         self.voltdata_incoming_path = voltdata_incoming_path
@@ -208,7 +217,7 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
             return False
 
         logger.debug(f"{item}: moving file to {os.path.dirname(dest)}")
-        os.rename(item, dest)
+        shutil.move(item, dest)
         logger.info(f"{item}: moved file to {os.path.dirname(dest)}. Queue size: {self.pqueue.qsize()}")
 
         logger.info(f"{item}: Finished")

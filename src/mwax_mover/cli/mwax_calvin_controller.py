@@ -484,7 +484,7 @@ class MWAXCalvinController:
             realtime_request.obs_id,
             CalvinJobType.realtime,
             self.log_path,
-            [str(realtime_request.request_id)],
+            [realtime_request.request_id],
             False,
             "",
         )
@@ -586,7 +586,7 @@ class MWAXCalvinController:
                                 job.obs_id,
                                 CalvinJobType.mwa_asvo,
                                 self.log_path,
-                                [str(r) for r in job.request_ids],
+                                job.request_ids,
                                 job.bulk_request,
                                 f'--mwa-asvo-download-url="{job.download_url}" --asvo-job-id={job.job_id}',
                             )

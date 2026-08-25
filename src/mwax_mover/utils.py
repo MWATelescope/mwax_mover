@@ -1575,35 +1575,35 @@ def should_project_be_archived(project_id: str) -> bool:
 
 
 def call_webservice(
-    obs_id: int, url_list: list[str], data, max_retries: int = 3, timeout: int = 30
+    obs_id: int,
+    url_list: list[str],
+    data,
+    max_retries: int = 3,
+    timeout: int = 30,
+    method: str = "GET",
 ) -> requests.Response:
     """
     Call a list of MWA web service URLs in order, retrying on transient failures.
 
     Iterates through ``url_list`` on each attempt, returning immediately on an
-    HTTP 200 response. HTTP 4xx responses are treated as permanent failures and
-    are not retried.
-    All other failures (non-200 status codes, network exceptions) cause the next
-    URL to be tried; if all URLs are exhausted the attempt fails and tenacity
-    will retry the entire sequence up to ``max_retries`` times.
-
-    Note: With the default arguments (``max_retries=10``, ``wait=30``) this
-    function may block for up to ~5 minutes before raising.
+    HTTP 200 response. Any other outcome (non-200 status code, network
+    exception) causes the next URL to be tried; if all URLs are exhausted the
+    attempt fails and the whole sequence is retried up to ``max_retries`` times.
 
     Args:
         obs_id: The MWA observation ID, used only for log messages.
-        url_list: Ordered list of URLs to try. Each must accept a GET request
-            with optional ``data`` parameters.
-        data: Query parameters to pass to ``requests.get()``, or None.
-        max_retries: Maximum number of retry attempts via tenacity. Defaults to 10.
+        url_list: Ordered list of URLs to try.
+        data: Parameters to pass to the request, or None.
+        max_retries: Maximum number of retry attempts. Defaults to 3.
         timeout: Timeout to get a response from the server. Defaults to 30.
+        method: HTTP method to use, "GET" or "POST". Defaults to "GET".
+            Endpoints which change state (rather than just reading it) are
+            POST-only, so callers of those must pass "POST".
 
     Returns:
         The first successful ``requests.Response`` object (HTTP status 200).
 
     Raises:
-        Exception: If any URL returns an HTTP 4xx response (permanent error,
-            not retried).
         requests.RequestException: If all URLs fail on every attempt across
             all retries.
     """
@@ -1624,7 +1624,7 @@ def call_webservice(
             logger.debug(f"{obs_id}: trying with {url} with data ({'' if data is None else data})")
 
             try:
-                response = requests.get(url, data, timeout=timeout)
+                response = requests.request(method, url, data=data, timeout=timeout)
 
                 if response.status_code == 200:
                     logger.debug(f"{obs_id}: returned 200 (success)")

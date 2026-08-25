@@ -638,8 +638,14 @@ def generate_hyperdrive_plots(
     metafits_filename: str,
     output_dir: str,
     before: bool,
+    max_amp: int | None = None,
 ) -> tuple[bool, str]:
     """Generate solution plots via the hyperdrive binary itself.
+
+    This is the single implementation. A second, near-identical copy used to
+    live in mwax_calvin_utils.py -- it accepted max_amp but not before, and it
+    discarded run_command_ext's return code, so a failed hyperdrive run was
+    reported as a success. Callers of that copy now come here instead.
 
     Args:
         obs_id: Observation ID.
@@ -647,7 +653,12 @@ def generate_hyperdrive_plots(
         hyperdrive_binary_path: Path to the hyperdrive executable.
         metafits_filename: Path to the metafits file.
         output_dir: path to where we write the plots
-        before: bool specifying if this run is the BEFORE or AFTER calvin flags outliers- only used to generate correct filenames
+        before: True if this run is BEFORE Calvin flags outliers, False if
+            after. Only used to generate the correct filenames: a BEFORE run's
+            amp/phase plots are renamed with an "_original" suffix so the AFTER
+            run (which hyperdrive names identically) does not overwrite them.
+        max_amp: Optionally pass a max value for Hyperdrive to clip to when
+            plotting amps. None means let Hyperdrive figure it out.
 
     Returns:
         A tuple of (success: bool, error_message: str).
@@ -658,6 +669,10 @@ def generate_hyperdrive_plots(
 
     try:
         hyp_soln_plot_args = f" --output-directory {output_dir}"
+
+        if max_amp is not None:
+            hyp_soln_plot_args += f" --max-amp {max_amp}"
+
         cmd = (
             f"{hyperdrive_binary_path} solutions-plot {hyp_soln_plot_args} "
             f"-m"

@@ -11,10 +11,8 @@ from pathlib import Path
 
 import requests
 
-from mwax_mover.mwax_calvin_utils import (
-    generate_hyperdrive_plots,
-    populate_index_json_entry,
-)
+from mwax_mover.mwax_calvin_plots import generate_hyperdrive_plots
+from mwax_mover.mwax_calvin_utils import populate_index_json_entry
 from mwax_mover.mwax_db import MWAXDBHandler, get_fit_info_from_slurm_job_and_obsid
 from mwax_mover.utils import download_metafits_file, read_config
 
@@ -347,6 +345,7 @@ def main() -> None:
                 hyperdrive_binary_path,
                 metafits_filename,
                 sol.dir_path,
+                before=False,
                 max_amp=fit_hyperdrive_plot_max,
             )
 

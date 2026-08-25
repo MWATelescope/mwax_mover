@@ -1,9 +1,15 @@
 """Generate the illustrative plots used in CALVIN.md.
 
 Uses synthetic, clearly-not-real data, but runs it through the actual
-pipeline functions (fit_phase_line, iterative_poly_clip, reject_outliers)
+pipeline functions (fit_phase_line, iterative_poly_clip_batch, reject_outliers)
 from mwax_calvin_utils so the plots reflect real algorithm behaviour, not
 just a hand-drawn approximation of it.
+
+NOTE: uses iterative_poly_clip_batch, not the per-tile iterative_poly_clip,
+because the batch version is the one the production pipeline actually calls
+(see HyperfitsSolutionGroup.flag_amplitude_outliers). The two differ slightly
+in their zero-MAD handling, so illustrating with the per-tile version could
+show behaviour the pipeline does not have.
 
 Run from the repo root: python3 docs/img/make_illustrations.py
 """
@@ -21,7 +27,7 @@ sys.path.insert(0, "src")
 
 from mwax_mover.mwax_calvin_utils import (
     fit_phase_line,
-    iterative_poly_clip,
+    iterative_poly_clip_batch,
     reject_outliers,
 )
 
@@ -164,10 +170,13 @@ def step4_amplitude_outliers():
     spike_channels = [40, 41, 140, 141, 142, 250]
     gx_amp[spike_channels] += rng.uniform(0.35, 0.55, len(spike_channels))
 
-    initial_valid = np.ones(n_chan, dtype=bool)
-    valid, _residual, fit, mad, med = iterative_poly_clip(
-        chan_idx, gx_amp, degree=2, residual_threshold=10.0, initial_valid=initial_valid
+    # iterative_poly_clip_batch works on a batch of tiles, so present this
+    # single illustrative trace as a batch of one and unwrap the results.
+    initial_valid = np.ones((1, n_chan), dtype=bool)
+    valid_b, _residual_b, fit_b, mad_b, med_b = iterative_poly_clip_batch(
+        chan_idx, gx_amp[np.newaxis, :], degree=2, residual_threshold=10.0, initial_valid=initial_valid
     )
+    valid, fit, mad, med = valid_b[0], fit_b[0], mad_b[0], med_b[0]
 
     band_lower = fit + med - 10.0 * mad
     band_upper = fit + med + 10.0 * mad

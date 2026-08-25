@@ -708,7 +708,9 @@ class HyperfitsSolutionGroup:
                         )
                     coarse_centroid_hz = np.mean(coarse_chanblocks + chanblock_width_hz / 2)
 
-                coarse_chan_idx = np.round(coarse_centroid_hz // metafits_coarse_bandwidth_hz)
+                # NOTE: // already floors, so the np.round() that used to wrap this
+                # was a no-op for the non-negative frequencies we deal with here.
+                coarse_chan_idx = coarse_centroid_hz // metafits_coarse_bandwidth_hz
 
                 if coarse_chan_idx not in metafits_coarse_chans:
                     raise RuntimeError(
@@ -1163,7 +1165,7 @@ class HyperfitsSolutionGroup:
                 file_jones[exceeds_cutoff, :, :] = np.nan + 1j * np.nan
                 file_reasons[exceeds_cutoff] |= ChannelFlagReason.GAIN_MAX_CUTOFF
 
-    def flag_amplitude_outliers(self, poly_degree: int = 2, mad_residual_threshold: float = 5.0) -> None:
+    def flag_amplitude_outliers(self, poly_degree: int = 2, mad_residual_threshold: float = 10.0) -> None:
         """Flag per-channel gain-amplitude outliers, one contiguous file at a time.
 
         For each tile in each file, gx and gy amplitude are each fit
@@ -1348,7 +1350,7 @@ class HyperfitsSolutionGroup:
         refant_name: str,
         phase_fit_niter: int,
         poly_degree: int = 2,
-        mad_residual_threshold: float = 5.0,
+        mad_residual_threshold: float = 10.0,
         phase_outlier_nstd: float = 3.0,
         tile_bad_channel_fraction: float = 0.5,
         gain_max_cutoff: float | None = 100.0,

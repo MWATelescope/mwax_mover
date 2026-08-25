@@ -30,6 +30,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
         s3_profile: str,
         archive_to_location: ArchiveLocation,
         rclone_check_wait_secs: int,
+        recursive: bool = False,
     ):
         """Initialize the PawseyOutgoingProcessor.
 
@@ -41,9 +42,11 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             list_of_vcs_hi_priority_projects: List of high-priority VCS project IDs.
             mro_db_handler_object: Database handler for the MRO metadata database.
             remote_db_handler_object: Database handler for the remote metadata database.
-            s3_profile: AWS/S3 profile name for Ceph access.
+            s3_profile: rclone profile name to upload with (see rclone.conf).
             archive_to_location: Target archive location (Acacia, Banksia, or AcaciaMWA).
             rclone_check_wait_secs: Number of seconds to wait between rclone copy and rclone check (to allow banksia VSS's to sync)
+            recursive: Whether to watch each incoming path's subdirectories as
+                well. Comes from the per-host `recursive` config option.
         """
         super().__init__(
             name,
@@ -53,6 +56,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             exclude_pattern=".part*",
             corr_hi_priority_projects=list_of_corr_hi_priority_projects,
             vcs_hi_priority_projects=list_of_vcs_hi_priority_projects,
+            recursive=recursive,
             requeue_to_eoq_on_failure=True,
         )
         self.mro_db_handler_object = mro_db_handler_object

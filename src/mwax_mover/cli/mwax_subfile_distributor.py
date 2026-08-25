@@ -1132,32 +1132,36 @@ class MWAXSubfileDistributor:
 
         logger.info(f"Starting http server on port {self.cfg_webserver_port}...")
 
-        # threaded=True lets Flask handle multiple requests concurrently
-        self.flask_app.add_url_rule("/shutdown", "shutdown", self.endpoint_shutdown, methods=["POST", "GET"])
+        # Endpoints which change state are POST-only. They used to accept GET
+        # as well, which meant anything that speculatively fetches a URL - a
+        # crawler, a link checker, an over-eager monitoring probe - could stop
+        # the correlator by hitting /shutdown. Only /status, which just reads,
+        # answers GET.
         self.flask_app.add_url_rule("/status", "status", self.endpoint_status, methods=["GET"])
+        self.flask_app.add_url_rule("/shutdown", "shutdown", self.endpoint_shutdown, methods=["POST"])
         self.flask_app.add_url_rule(
             "/pause_archiving",
             "pause_archiving",
             self.endpoint_pause_archiving,
-            methods=["POST", "GET"],
+            methods=["POST"],
         )
         self.flask_app.add_url_rule(
             "/resume_archiving",
             "resume_archiving",
             self.endpoint_resume_archiving,
-            methods=["POST", "GET"],
+            methods=["POST"],
         )
         self.flask_app.add_url_rule(
             "/release_cal_obs",
             "release_cal_obs",
             self.endpoint_release_cal_obs,
-            methods=["POST", "GET"],
+            methods=["POST"],
         )
         self.flask_app.add_url_rule(
             "/dump_voltages",
             "dump_voltages",
             self.endpoint_dump_voltages,
-            methods=["POST", "GET"],
+            methods=["POST"],
         )
 
         host = "0.0.0.0"

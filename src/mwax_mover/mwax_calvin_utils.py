@@ -1486,53 +1486,6 @@ def get_convergence_summary(solutions_fits_file: str):
     return summary
 
 
-def generate_hyperdrive_plots(
-    obs_id: int,
-    hyperdrive_solution_filename: str,
-    hyperdrive_binary_path: str,
-    metafits_filename: str,
-    output_dir: str,
-    max_amp: int | None = None,
-) -> tuple[bool, str]:
-    """Generate solution plots.
-
-    Args:
-        obs_id: Observation ID.
-        hyperdrive_solution_filename: Path to the hyperdrive solution FITS file.
-        hyperdrive_binary_path: Path to the hyperdrive executable.
-        metafits_filename: Path to the metafits file.
-        output_dir: path to where we write the plots
-        max_amp: Optionally pass a max value for Hyperdrive to clip to when plotting amps. None means let Hyperdrive figure it out.
-
-    Returns:
-        A tuple of (success: bool, error_message: str).
-    """
-    logger.info(f"{obs_id} generating plots for {hyperdrive_solution_filename}...")
-
-    try:
-        # Now run hyperdrive again to do some plots
-        hyp_soln_plot_args = f" --output-directory {output_dir}"
-
-        if not max_amp is None:
-            hyp_soln_plot_args += f" --max-amp {max_amp}"
-
-        cmd = (
-            f"{hyperdrive_binary_path} solutions-plot {hyp_soln_plot_args} "
-            f"-m"
-            f" {metafits_filename} {hyperdrive_solution_filename}"
-        )
-
-        return_value, _ = run_command_ext(cmd, -1, timeout=60, use_shell=False)
-
-        logger.info(
-            f"{obs_id} Finished running hyperdrive plots on {hyperdrive_solution_filename}. Return={return_value}"
-        )
-    except Exception as catch_all_exception:
-        return False, str(catch_all_exception)
-
-    return True, ""
-
-
 def write_hyperdrive_stats(
     obs_id: int,
     stats_fd,
@@ -1880,7 +1833,7 @@ def create_sbatch_script(
     obs_id: int,
     jobtype: CalvinJobType,
     log_path: str,
-    request_ids: list[str],
+    request_ids: list[int],
     bulk_request: bool,
     processor_args: str,
 ) -> str:
@@ -1891,7 +1844,8 @@ def create_sbatch_script(
         obs_id: Observation ID.
         jobtype: Type of Calvin job (realtime or mwa_asvo).
         log_path: Global log directory path.
-        request_ids: List of request IDs.
+        request_ids: List of calibration request IDs (integers, matching the
+            calibration_request.id database column).
         bulk_request: Is this a bulk request? If so lower priority.
         processor_args: Extra command-line arguments for the processor.
 
@@ -1950,7 +1904,7 @@ mwax_calvin_processor \\
 --cfg={config_file_path} \\
 --job-type={jobtype.value} \\
 --obs-id={obs_id} \\
---request-ids={",".join(request_ids)} \\
+--request-ids={",".join(str(r) for r in request_ids)} \\
 --slurm-job-id=$SLURM_JOBID {processor_args}
 
 exit $?
@@ -1966,7 +1920,9 @@ def submit_sbatch(script_path: str, script: str, obs_id: int, request_ids: list[
         script_path: Directory to write the script to.
         script: The batch script content.
         obs_id: Observation ID (for naming).
-        request_id: Request ID (for naming-prevents duplicates- yes it can happen. In fact it just did. Hence this change!)
+        request_ids: Calibration request IDs, included in the script filename
+            to keep it unique (two requests for the same obs_id at the same
+            second would otherwise collide - this has happened).
 
     Returns:
         A tuple of (success: bool, slurm_job_id: int or None).

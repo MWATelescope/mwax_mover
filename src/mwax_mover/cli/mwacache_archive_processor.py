@@ -95,6 +95,7 @@ class MWACacheArchiveProcessor:
         self.remote_db_handler: mwax_db.MWAXDBHandler
 
         self.watch_dirs: list[str] = []
+        self.recursive: bool = False
 
         # This list helps us keep track of all the workers
         self.workers: list[MWAXPriorityWatchQueueWorker] = list()
@@ -467,6 +468,7 @@ class MWACacheArchiveProcessor:
                 self.s3_profile,
                 self.archive_to_location,
                 self.rclone_check_wait_secs,
+                self.recursive,
             )
             self.workers.append(worker)
 

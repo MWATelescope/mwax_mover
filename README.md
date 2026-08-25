@@ -169,25 +169,34 @@ start()
 ### Interacting with mwax_subfile_distributor via Web Services
 
 ```bash
-# Example call:
-http://host:port/command[?param1&param2]
+# Read-only endpoints answer GET:
+curl http://host:port/status
+
+# Everything else changes state and is POST-only:
+curl -X POST "http://host:port/command[?param1&param2]"
 ```
 
-Web service commands:
+Web service commands. **`/status` is the only endpoint that accepts GET**; every
+other endpoint below changes state and answers `POST` only, so that an
+accidental GET (a crawler, a link checker, an over-eager monitoring probe)
+cannot stop the correlator or dump the voltage buffer. A GET to any of them
+returns `405 Method Not Allowed`.
 
-* /status
+* /status `[GET]`
   * Reports status of all processes in JSON format
-* /pause_archiving
+* /shutdown `[POST]`
+  * Shuts the processor down.
+* /pause_archiving `[POST]`
   * Pauses all archiving processes in order to reduce disk contention. (This is called automatically whenever a
   MWAX_VCS observation is running, if in CORRELATOR mode)
-* /resume_archiving
+* /resume_archiving `[POST]`
   * Resuming archiving processes. (This is called automatically once the correlator is no longer running in
   MWAX_VCS mode)
-* /dump_voltages?start=X&end=X&trigger_id=X
+* /dump_voltages?start=X&end=X&trigger_id=X `[POST]`
   * This will pause archiving and rename all *.free subfiles to *.keep, add the trigger_id to the subfile header,
   then write the .keep files to disk. Once written successfully, all *.keep files are renamed back to *.free so
   mwax_u2s can continue to use them. This webservice call is generally triggered by the M&C system.
-* /release_cal_obs?obs_id=X
+* /release_cal_obs?obs_id=X `[POST]`
   * This will be called by a calvin server when it has finished calibration of an obs_id. It triggers the MWAX
     server to release the visibility file(s) for that obs_id so they can be archived.
 

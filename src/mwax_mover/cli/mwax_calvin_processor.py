@@ -550,6 +550,8 @@ class MWAXCalvinProcessor:
                         None,
                         max_retries=1,
                         timeout=60,
+                        # /release_cal_obs changes state, so it is POST-only.
+                        method="POST",
                     )
                     # success
                     successful_hosts.add(hostname)

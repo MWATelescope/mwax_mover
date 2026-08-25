@@ -9,6 +9,7 @@ outgoing for archiving.
 
 import logging
 import os
+import shutil
 
 from mwax_mover import utils
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
@@ -113,24 +114,24 @@ class VisStatsProcessor(MWAXWatchQueueWorker):
                     # Take the input filename - strip the path, then append the output path
                     outgoing_filename = os.path.join(self.visdata_outgoing_cal_path, os.path.basename(item))
                     logger.debug(f"{item}: moving file to outgoing cal dir")
-                    os.rename(item, outgoing_filename)
+                    shutil.move(item, outgoing_filename)
                 else:
                     # Not a calibrator just archive it
                     # Send to vis_outgoing
                     # Take the input filename - strip the path, then append the output path
                     outgoing_filename = os.path.join(self.visdata_outgoing_path, os.path.basename(item))
                     logger.debug(f"{item}: moving file to outgoing vis dir")
-                    os.rename(item, outgoing_filename)
+                    shutil.move(item, outgoing_filename)
             else:
                 # This project doesn't get archived or calibrated, move to dont_archive
                 outgoing_filename = os.path.join(self.visdata_dont_archive_path, os.path.basename(item))
                 logger.debug(f"{item}: moving file to {self.visdata_dont_archive_path}")
-                os.rename(item, outgoing_filename)
+                shutil.move(item, outgoing_filename)
         else:
             # This host is not doing any archiving, move to dont_archive
             outgoing_filename = os.path.join(self.visdata_dont_archive_path, os.path.basename(item))
             logger.debug(f"{item}: moving file to {self.visdata_dont_archive_path}")
-            os.rename(item, outgoing_filename)
+            shutil.move(item, outgoing_filename)
 
         logger.info(f"{item}: Finished")
         return True

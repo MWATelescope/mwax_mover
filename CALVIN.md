@@ -116,7 +116,7 @@ This deliberately:
 - **Does not** compare one tile against another. Real per-tile bandpasses differ for physical reasons (cable length, dipole position, position in the beam), so cross-tile comparison would produce a lot of false positives.
 - **Does not** fit across multiple frequency bands at once for a picket-fence observation. A single polynomial fit spanning a large gap between two widely-separated bands would not be physically meaningful.
 
-**Default sensitivity (as shipped in `cfg/calvin_processor.cfg`):** a channel must deviate by more than **10 residual-MADs** from the fitted curve to be flagged (`gain_outlier_mad_residual_threshold = 10.0`; a MAD is the median absolute deviation — a robust stand-in for a standard deviation, explained below). Note this is the deployed config value, not the underlying Python function's own signature default (`flag_amplitude_outliers`'s `mad_residual_threshold` defaults to `5.0` if called directly without a config-supplied value).
+**Default sensitivity:** a channel must deviate by more than **10 residual-MADs** from the fitted curve to be flagged (`gain_outlier_mad_residual_threshold = 10.0` in `cfg/calvin_processor.cfg`; a MAD is the median absolute deviation — a robust stand-in for a standard deviation, explained below). `flag_amplitude_outliers`, `run_flagging_pipeline` and `cal_utils --mad-threshold` all use the same 10.0 default, so calling any of them without a config-supplied value behaves identically to the deployed pipeline.
 
 **Example** — one tile's gain amplitude vs. channel, with the fitted parabola, its ±10-MAD acceptance band, and a handful of narrowband RFI-like spikes sitting outside the band and getting flagged (illustrative data):
 

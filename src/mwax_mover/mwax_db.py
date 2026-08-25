@@ -571,8 +571,11 @@ def insert_calibration_fits_row(
         logger.exception(
             f"{obs_id}: error inserting calibration_fits record in table. SQL was {sql} Values: {sql_values}"
         )
-        if transaction_cursor:
-            transaction_cursor.connection.rollback()
+        # NOTE: deliberately does NOT roll back here. The caller owns the
+        # transaction (mwax_calvin_solutions.process_solutions runs this inside
+        # a `with conn.transaction():` block and raises on a False return),
+        # so rolling back from in here meant two things were trying to unwind
+        # the same transaction. Rollback is the caller's job; we just report.
         return (False, None)
 
 
