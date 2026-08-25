@@ -31,6 +31,29 @@ $ source .venv/bin/activate
 $ mwax_subfile_distributor --help
 ```
 
+## Developing
+
+```bash
+# Enable the ruff format pre-commit hook (once per clone)
+$ uv run pre-commit install
+
+# The checks CI runs, which you can run locally before pushing:
+$ uv run ruff format --check src/ tests/   # blocking in CI
+$ uv run ty check src/                     # blocking in CI
+$ uv run pytest                            # blocking in CI
+$ uv run ruff check .                      # informational in CI (for now)
+```
+
+CI (`.github/workflows/ci.yml`) runs the above on every pull request and on
+pushes to `main`, against Python 3.12 and 3.13.
+
+Tests that need network access or real external binaries are marked
+`integration` and are deselected by default. Run them explicitly with
+`uv run pytest -m integration`.
+
+The test suite creates its scratch directories under the system temp directory.
+Set `MWAX_MOVER_TEST_DIR` to put them somewhere else.
+
 ---
 
 ## Architecture Overview
