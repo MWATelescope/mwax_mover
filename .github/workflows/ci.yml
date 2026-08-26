@@ -37,37 +37,32 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      # Blocking: the repo is kept formatted and this passes today.
+      # Blocking: the repo is kept formatted and this passes today. Scope is the
+      # whole repo, matching `ruff check` below -- docs/img/make_illustrations.py
+      # is the only Python file outside src/ and tests/, and it is already
+      # formatted, so there is no reason for the two to disagree on scope.
       - name: ruff format --check
-        run: uv run ruff format --check src/ tests/
+        run: uv run ruff format --check .
 
-      # Blocking: passes today.
+      # Blocking: passes today. Includes tests/ deliberately. tests/ is a package
+      # (see tests/__init__.py) whose shared helpers resolve via
+      # [tool.ty.environment] extra-paths in pyproject.toml, and a src/-only
+      # check cannot see a break in that wiring -- exactly the regression that
+      # made this widening worth doing.
       - name: ty check
-        run: uv run ty check src/
+        run: uv run ty check src/ tests/
 
-      # NON-blocking for now. `ruff check` currently reports ~86 findings
-      # (mostly E501 on long string literals, which the formatter cannot split),
-      # so making this a gate would turn CI red immediately and train everyone
-      # to ignore it.
+      # Blocking as of the lint cleanup that cleared the last 25 findings.
+      # `--output-format=github` emits a `::error` annotation per finding, which
+      # is what puts a new one directly on the offending line of the diff. That
+      # was previously avoided only because ~86 pre-existing findings would have
+      # decorated every PR with red marks for issues nobody introduced; with a
+      # clean baseline, every annotation is now genuinely actionable.
       #
-      # Deliberately NOT --output-format=github: that emits a `::error`
-      # annotation per finding, which would decorate every PR with 86 red marks
-      # for pre-existing issues. Plain output in the log plus a counts table in
-      # the job summary is visible without being noise.
-      #
-      # Once `uv run ruff check .` is clean: drop continue-on-error, switch to
-      # --output-format=github so new findings annotate the diff, AND add
-      # `- id: ruff-check` to .pre-commit-config.yaml so the two agree.
-      - name: ruff check (informational)
-        continue-on-error: true
-        run: |
-          uv run ruff check . --output-format=concise || true
-          {
-            echo "### ruff check findings (not yet enforced)"
-            echo '```'
-            uv run ruff check . --statistics || true
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+      # This is kept in step with the `ruff-check` hook in
+      # .pre-commit-config.yaml so a commit that passes locally also passes here.
+      - name: ruff check
+        run: uv run ruff check . --output-format=github
 
   test:
     name: Tests (Python ${{ matrix.python-version }})

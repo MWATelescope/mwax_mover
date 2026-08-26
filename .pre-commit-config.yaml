@@ -5,9 +5,10 @@
 #     uv sync                 # installs pre-commit into the dev group
 #     uv run pre-commit install
 #
-# After that, `ruff format` runs automatically on every staged Python file.
-# If it reformats anything the commit is aborted so you can review the change
-# and `git add` it before committing again.
+# After that, `ruff check` and `ruff format` run automatically on every staged
+# Python file. If the lint finds anything, or the formatter reformats anything,
+# the commit is aborted so you can fix or review the change and `git add` it
+# before committing again.
 #
 # To run against the whole repo without committing (e.g. the first time, or in
 # CI):
@@ -18,8 +19,9 @@
 #
 #     git commit --no-verify
 #
-# NOTE: `rev` is pinned deliberately. `ruff format` output can change between
-# releases, so an unpinned hook would silently reformat the codebase whenever a
+# NOTE: `rev` is pinned deliberately. Both `ruff format` output and the set of
+# lint rules can change between releases, so an unpinned hook would silently
+# reformat the codebase, or start failing commits on new findings, whenever a
 # contributor happened to have a newer ruff. Bump this and the `ruff` dev
 # dependency in pyproject.toml together, and run
 # `uv run pre-commit run --all-files` in the same commit as the bump.
@@ -27,16 +29,25 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.4
     hooks:
-      # Formatting only, for now. Line length and style come from the
-      # [tool.ruff] / [tool.ruff.format] sections of pyproject.toml, so this
-      # hook and a manual `ruff format src/ tests/` always agree.
-      - id: ruff-format
+      # Lint before formatting, matching ruff's own documented ordering.
+      #
+      # Deliberately no `--fix`: the outstanding findings in this repo have
+      # needed real decisions rather than mechanical rewrites (`zip(strict=)` is
+      # a semantic choice about whether a length mismatch is a bug;
+      # `pytest.raises(Exception)` needs a narrower type or a `match=`), and
+      # several of ruff's fixes for them are classed unsafe. A hook that
+      # silently rewrote code mid-commit would hide exactly the decision worth
+      # making. Run `ruff check --fix` by hand when a fix genuinely is
+      # mechanical.
+      #
+      # Enabled once `ruff check .` reached zero findings; it reports the same
+      # thing as the blocking `ruff check` step in .github/workflows/ci.yml, so
+      # a commit that passes locally also passes CI. If lint is ever knowingly
+      # allowed to regress, disable both together rather than letting them
+      # disagree.
+      - id: ruff-check
 
-      # `ruff check` is deliberately NOT enabled yet: the codebase currently
-      # has ~90 outstanding lint findings (mostly E501 on long string
-      # literals, which the formatter cannot split). Enabling it now would
-      # block commits to any file that still contains one. Add:
-      #
-      #   - id: ruff-check
-      #
-      # once `ruff check .` is clean.
+      # Formatting. Line length and style come from the [tool.ruff] /
+      # [tool.ruff.format] sections of pyproject.toml, so this hook and a manual
+      # `ruff format .` always agree.
+      - id: ruff-format
