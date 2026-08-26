@@ -57,7 +57,7 @@ import sys
 from pathlib import Path
 
 from mwax_mover.mwax_calvin_plots import (
-    generate_hyperdrive_plots,
+    generate_hyperdrive_plots_for_files,
     plot_outlier_gains,
     write_hyperdrive_stats,
     write_stats_and_debug_plots,
@@ -117,12 +117,10 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
     # a read-only hyperdrive invocation; it's independent of the
     # in-memory run_flagging_pipeline() below regardless of ordering,
     # since nothing gets written to disk until commit().)
-    for f in args.solution_filenames:
-        plots_success, plots_error = generate_hyperdrive_plots(
-            obs_id, f, args.hyperdrive_binary_path, metafits_filename, args.output_path, before=True
-        )
-        if not plots_success:
-            print(f"Warning: 'before' hyperdrive plots failed for {f}: {plots_error}")
+    for failed_file, plots_error in generate_hyperdrive_plots_for_files(
+        obs_id, args.solution_filenames, args.hyperdrive_binary_path, metafits_filename, args.output_path, before=True
+    ):
+        print(f"Warning: 'before' hyperdrive plots failed for {failed_file}: {plots_error}")
 
     # Full flagging pipeline, matching mwax_calvin_processor's
     # process_solutions() -- both now share the same
@@ -138,16 +136,16 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
         gain_max_cutoff=args.gain_max_cutoff,
     )
 
-    for file_idx, f in enumerate(args.solution_filenames):
-        obsid_and_band = os.path.basename(f).replace("_solutions.fits", "")
-        plot_outlier_gains(
-            soln_group,
-            file_idx,
-            n_tiles=args.plot_n_tiles,
-            output_path=os.path.join(args.output_path, f"{obsid_and_band}_gain_outliers_tiles.png"),
-            pristine_jones=pristine_jones[file_idx],
-            solution_file_will_be_modified=args.modify_solutions,
-        )
+    # One stitched, paginated set for the whole observation (every coarse
+    # channel on one compressed x-axis), not one set per solution file --
+    # see plot_outlier_gains.
+    plot_outlier_gains(
+        soln_group,
+        n_tiles=args.plot_n_tiles,
+        output_path=os.path.join(args.output_path, f"{obs_id}_gain_outliers_tiles.png"),
+        pristine_jones=pristine_jones,
+        solution_file_will_be_modified=args.modify_solutions,
+    )
 
     if args.modify_solutions:
         soln_group.commit(metafits.mwalib_context)
@@ -155,12 +153,10 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
     # hyperdrive's own plots/stats run regardless of --modify-solutions,
     # matching this tool's historical behaviour (that flag only ever
     # controlled whether outlier-flagged gains were written to disk).
-    for f in args.solution_filenames:
-        plots_success, plots_error = generate_hyperdrive_plots(
-            obs_id, f, args.hyperdrive_binary_path, metafits_filename, args.output_path, before=False
-        )
-        if not plots_success:
-            print(f"Warning: hyperdrive plots failed for {f}: {plots_error}")
+    for failed_file, plots_error in generate_hyperdrive_plots_for_files(
+        obs_id, args.solution_filenames, args.hyperdrive_binary_path, metafits_filename, args.output_path, before=False
+    ):
+        print(f"Warning: hyperdrive plots failed for {failed_file}: {plots_error}")
 
     # Single combined stats file: before/after per-tile stats first, then
     # hyperdrive convergence stats below -- write_stats_and_debug_plots()

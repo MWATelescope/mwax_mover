@@ -290,6 +290,13 @@ class HyperfitsSolution:
         """
         self.filename = filename
 
+        # Cache for the RESULTS HDU (see the `results` property). Two-state so a
+        # missing HDU is remembered too: _results_cached distinguishes "not read
+        # yet" from "read, and there is no RESULTS HDU", which must keep raising
+        # KeyError for callers that fall back to uniform weights.
+        self._results_cached: bool = False
+        self._results: NDArray[np.float64] | None = None
+
     @property
     def chanblocks_hz(self) -> NDArray[np.int_]:
         """Get channel block frequencies from the solution file."""
@@ -370,6 +377,15 @@ class HyperfitsSolution:
     def results(self) -> NDArray[np.float64]:
         """Get convergence results from the solution file.
 
+        Read from disk once and cached thereafter. The RESULTS HDU is immutable
+        for the life of this object (nothing here writes it -- write_jones only
+        touches SOLUTIONS), and it is read repeatedly: every access to
+        HyperfitsSolutionGroup.results touches it twice per file (once in the
+        length-validation loop, once in the concatenate), and .weights goes
+        through that on each of its several accesses per pipeline run. Uncached,
+        a 24-file picket-fence observation opened solution files 192 times per
+        run, against 8 for a contiguous one, all over a shared filesystem.
+
         Returns:
             1-D float64 array of per-channel convergence values, for
             timeblock 0.
@@ -378,9 +394,23 @@ class HyperfitsSolution:
             KeyError: If the RESULTS HDU is not present. This is expected for
                 older hyperdrive solution files. Callers that can tolerate missing
                 results should catch KeyError and fall back to uniform weights.
+                A missing HDU is cached as such, so this keeps raising without
+                re-reading the file.
         """
-        with fits.open(self.filename) as hdus:
-            return read_results_hdu(hdus["RESULTS"].data)
+        if not self._results_cached:
+            try:
+                with fits.open(self.filename) as hdus:
+                    self._results = read_results_hdu(hdus["RESULTS"].data)
+            except KeyError:
+                self._results = None
+                self._results_cached = True
+                raise
+            self._results_cached = True
+
+        if self._results is None:
+            raise KeyError(f"no RESULTS HDU in {self.filename}")
+
+        return self._results
 
     @property
     def chanblock_converged(self) -> NDArray[np.bool_]:
@@ -878,14 +908,20 @@ class HyperfitsSolutionGroup:
     @property
     def results(self) -> NDArray[np.float64]:
         """Get the combined results array from all solutions."""
-        for soln, chanblocks_hz in zip(self.solns, self.all_chanblocks_hz):
-            if len(chanblocks_hz) != len(soln.results):
+        # Each file's results are fetched once and reused for both the length
+        # check and the concatenate. Previously .results was touched twice per
+        # file here, which (before HyperfitsSolution cached it) meant two FITS
+        # opens per file per access to this property.
+        per_file_results = [soln.results for soln in self.solns]
+
+        for soln, chanblocks_hz, soln_results in zip(self.solns, self.all_chanblocks_hz, per_file_results):
+            if len(chanblocks_hz) != len(soln_results):
                 raise RuntimeError(
                     f"{soln.filename} - number of chanblocks ({len(chanblocks_hz)})"
-                    f" does not match number of results ({len(soln.results)})"
+                    f" does not match number of results ({len(soln_results)})"
                 )
 
-        results = np.concatenate([soln.results for soln in self.solns])
+        results = np.concatenate(per_file_results)
 
         if results.size == 0:
             raise RuntimeError("No valid results found")

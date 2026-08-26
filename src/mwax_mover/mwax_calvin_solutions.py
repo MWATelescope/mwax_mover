@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 
 from mwax_mover.mwax_calvin_plots import (
-    generate_hyperdrive_plots,
+    generate_hyperdrive_plots_for_files,
     plot_outlier_gains,
     write_hyperdrive_stats,
     write_stats_and_debug_plots,
@@ -186,12 +186,13 @@ def process_solutions(
         # the on-disk files via a read-only hyperdrive invocation; it's
         # independent of the in-memory apply_tile_flags() below regardless
         # of ordering, since nothing gets written to disk until commit().)
-        for f in fits_solution_files:
-            plots_success, plots_error = generate_hyperdrive_plots(
-                obs_id, f, hyperdrive_binary_path, metafits_file, output_data_path, before=True
-            )
-            if not plots_success:
-                logger.warning(f"{obs_id}: 'before' hyperdrive plots failed for {f}: {plots_error}")
+        # Run concurrently: each is an external hyperdrive process, and a
+        # picket fence has one solution file per coarse channel (24 serial
+        # launches here and another 24 below, versus 2 for a contiguous obs).
+        for failed_file, plots_error in generate_hyperdrive_plots_for_files(
+            obs_id, fits_solution_files, hyperdrive_binary_path, metafits_file, output_data_path, before=True
+        ):
+            logger.warning(f"{obs_id}: 'before' hyperdrive plots failed for {failed_file}: {plots_error}")
 
         # apply_tile_flags() runs first (cheap, structural) so the "before"
         # snapshot captured right after it reflects the pre-existing
@@ -222,29 +223,33 @@ def process_solutions(
 
         # "After" plots: calvin's own outlier plots, from soln_group's
         # final in-memory state -- no staleness, since nothing downstream
-        # changes the data further. One paginated set per solution file,
-        # matching the historical *_gain_outliers_tiles naming convention.
-        for file_idx, f in enumerate(fits_solution_files):
-            obsid_and_band = os.path.basename(f).replace("_solutions.fits", "")
-            plot_outlier_gains(
-                soln_group,
-                file_idx,
-                n_tiles=gain_outlier_plot_n_tiles_per_page,
-                output_path=os.path.join(output_data_path, f"{obsid_and_band}_gain_outliers_tiles.png"),
-                pristine_jones=soln_group.before_jones[file_idx],
-                solution_file_will_be_modified=True,
-            )
+        # changes the data further.
+        #
+        # ONE paginated set for the whole observation, with every coarse
+        # channel stitched onto a single compressed x-axis, rather than a
+        # set per solution file. For a picket fence that is 5 pages instead
+        # of 120 and one process pool instead of 24 -- measured as the bulk
+        # of the runtime gap against a contiguous observation. Detection is
+        # still per file; only the plot is stitched. Filenames therefore no
+        # longer carry a _ch<N> component (generate_plot_index_file matches
+        # on the "gain_outliers_tiles" substring, so the index still
+        # categorises these correctly).
+        plot_outlier_gains(
+            soln_group,
+            n_tiles=gain_outlier_plot_n_tiles_per_page,
+            output_path=os.path.join(output_data_path, f"{obs_id}_gain_outliers_tiles.png"),
+            pristine_jones=soln_group.before_jones,
+            solution_file_will_be_modified=True,
+        )
 
         soln_group.commit(metafits.mwalib_context)
 
         # "After" plots: hyperdrive's own binary-generated amp/phase plots,
         # against the now-committed files.
-        for f in fits_solution_files:
-            plots_success, plots_error = generate_hyperdrive_plots(
-                obs_id, f, hyperdrive_binary_path, metafits_file, output_data_path, before=False
-            )
-            if not plots_success:
-                logger.warning(f"{obs_id}: hyperdrive plots failed for {f}: {plots_error}")
+        for failed_file, plots_error in generate_hyperdrive_plots_for_files(
+            obs_id, fits_solution_files, hyperdrive_binary_path, metafits_file, output_data_path, before=False
+        ):
+            logger.warning(f"{obs_id}: hyperdrive plots failed for {failed_file}: {plots_error}")
 
         # Single combined stats file: before/after per-tile stats first,
         # hyperdrive convergence stats below -- written by

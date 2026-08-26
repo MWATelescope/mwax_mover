@@ -22,15 +22,26 @@ in a since-removed local duplicate of ensure_system_byte_order.
 """
 
 import io
+import pickle
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from mwax_mover.mwax_calvin_utils import Metafits
 from mwax_mover.mwax_calvin_plots import (
+    STITCH_GAP_CHANBLOCKS,
+    _build_stitched_axis,
+    _extract_combined_gains_bundle,
     _channel_reason_counts_text,
     _channel_summary_text,
+    _stitch_files,
+    _stitch_reasons,
     build_tile_stats_rows,
+    generate_hyperdrive_plots,
+    generate_hyperdrive_plots_for_files,
     plot_debug_phase_fits,
     write_tile_stats_table,
 )
@@ -518,3 +529,495 @@ def test_plot_debug_phase_fits_handles_byteswapped_input():
 
     assert result is not None
     assert len(result) > 0
+
+
+# ===========================================================================
+# Stitched (compressed / broken) x-axis for multi-file gain outlier plots
+# ===========================================================================
+
+
+class TestBuildStitchedAxis:
+    """Tests for _build_stitched_axis's compressed multi-picket x-axis."""
+
+    def test_single_file_has_no_gaps(self):
+        """A contiguous observation gets a plain 0..n-1 axis and no breaks."""
+        axis = _build_stitched_axis([32], [69])
+
+        assert np.array_equal(axis["x_real"], np.arange(32))
+        # No separator inserted, so padded and real are identical
+        assert np.array_equal(axis["x_padded"], axis["x_real"])
+        assert len(axis["gap_centres"]) == 0
+        assert axis["tick_labels"] == ["69"]
+        assert axis["n_real"] == 32
+
+    def test_real_spacing_preserved_within_each_picket(self):
+        """Inside a picket, channels stay exactly 1 unit apart."""
+        axis = _build_stitched_axis([4, 4, 4], [62, 67, 73])
+
+        x = axis["x_real"]
+        assert len(x) == 12
+        for start in (0, 4, 8):
+            segment = x[start : start + 4]
+            assert np.allclose(np.diff(segment), 1.0)
+
+    def test_gap_inserted_between_pickets(self):
+        """Adjacent pickets are separated by exactly STITCH_GAP_CHANBLOCKS."""
+        axis = _build_stitched_axis([4, 4], [62, 67])
+
+        x = axis["x_real"]
+        # Last channel of picket 0 to first channel of picket 1
+        assert x[4] - x[3] == 1 + STITCH_GAP_CHANBLOCKS
+
+    def test_padded_axis_carries_one_nan_per_boundary(self):
+        """x_padded has a NaN between pickets, which is what breaks the lines."""
+        axis = _build_stitched_axis([4, 4, 4], [62, 67, 73])
+
+        padded = axis["x_padded"]
+        assert len(padded) == 12 + 2  # 2 boundaries
+        assert int(np.isnan(padded).sum()) == 2
+        # Real channel positions survive, in order, ignoring the separators
+        assert np.array_equal(padded[~np.isnan(padded)], axis["x_real"])
+
+    def test_gap_centres_fall_strictly_inside_the_gaps(self):
+        """Break markers sit between pickets, never on top of real data."""
+        axis = _build_stitched_axis([4, 4, 4], [62, 67, 73])
+
+        x = axis["x_real"]
+        assert len(axis["gap_centres"]) == 2
+        for i, centre in enumerate(axis["gap_centres"]):
+            last_of_prev = x[(i + 1) * 4 - 1]
+            first_of_next = x[(i + 1) * 4]
+            assert last_of_prev < centre < first_of_next
+
+    def test_ticks_are_one_per_picket_at_segment_centre(self):
+        """Each picket gets exactly one tick, labelled with its coarse chan."""
+        axis = _build_stitched_axis([4, 4, 4], [62, 67, 73])
+
+        x = axis["x_real"]
+        assert axis["tick_labels"] == ["62", "67", "73"]
+        assert len(axis["tick_pos"]) == 3
+        for i, pos in enumerate(axis["tick_pos"]):
+            segment = x[i * 4 : (i + 1) * 4]
+            assert segment.min() <= pos <= segment.max()
+
+    def test_handles_differing_chanblock_counts_per_file(self):
+        """Files need not all have the same number of chanblocks."""
+        axis = _build_stitched_axis([2, 5, 3], [62, 67, 73])
+
+        assert axis["n_real"] == 10
+        assert len(axis["x_real"]) == 10
+        assert len(axis["x_padded"]) == 12
+        assert len(axis["gap_centres"]) == 2
+
+    def test_twenty_four_pickets_matches_real_picket_fence(self):
+        """The real 24x32 picket-fence case: 768 real, 791 padded, 23 breaks."""
+        axis = _build_stitched_axis([32] * 24, list(range(62, 62 + 24)))
+
+        assert axis["n_real"] == 768
+        assert len(axis["x_real"]) == 768
+        assert len(axis["x_padded"]) == 791
+        assert len(axis["gap_centres"]) == 23
+        assert len(axis["tick_pos"]) == 24
+
+
+class TestStitchFiles:
+    """Tests for _stitch_files / _stitch_reasons channel-axis concatenation."""
+
+    @staticmethod
+    def _per_file(values):
+        """One (2, n) array per file, filled with the given constant."""
+        return [np.full((2, 3), v, dtype=float) for v in values]
+
+    def test_unpadded_concatenates_directly(self):
+        """pad=False yields one column per real channel, aligned with x_real."""
+        out = _stitch_files(self._per_file([1, 2, 3]), False, [3, 3, 3])
+
+        assert out.shape == (2, 9)
+        assert not np.isnan(out).any()
+        assert np.array_equal(out[0], [1, 1, 1, 2, 2, 2, 3, 3, 3])
+
+    def test_padded_inserts_nan_between_files(self):
+        """pad=True inserts exactly one NaN column per boundary."""
+        out = _stitch_files(self._per_file([1, 2, 3]), True, [3, 3, 3])
+
+        assert out.shape == (2, 11)
+        assert int(np.isnan(out[0]).sum()) == 2
+        # The NaN sits between files, not at either end
+        assert np.isnan(out[0, 3]) and np.isnan(out[0, 7])
+        assert not np.isnan(out[0, 0]) and not np.isnan(out[0, -1])
+
+    def test_rejects_wrong_number_of_files(self):
+        """A per_file/chanblocks_per_file mismatch is a programming error."""
+        with pytest.raises(ValueError, match="expected 3 arrays, got 2"):
+            _stitch_files(self._per_file([1, 2]), True, [3, 3, 3])
+
+    def test_reasons_are_never_padded(self):
+        """Flag reasons must stay one column per real channel.
+
+        A separator column has no channel behind it, so padding these would
+        corrupt every "N of M channels flagged" count and could make a
+        fully-flagged tile look partially clean.
+        """
+        per_file = [
+            np.full((2, 3), ChannelFlagReason.NONE, dtype=object),
+            np.full((2, 3), ChannelFlagReason.AMPLITUDE_OUTLIER, dtype=object),
+        ]
+
+        out = _stitch_reasons(per_file)
+
+        assert out.shape == (2, 6)
+        assert list(out[0]) == [ChannelFlagReason.NONE] * 3 + [ChannelFlagReason.AMPLITUDE_OUTLIER] * 3
+
+    def test_reasons_width_matches_unpadded_data_width(self):
+        """Reasons and x_real must agree, or masks would be misaligned."""
+        axis = _build_stitched_axis([3, 3], [62, 67])
+        reasons = _stitch_reasons([np.full((2, 3), ChannelFlagReason.NONE, dtype=object) for _ in range(2)])
+        data_real = _stitch_files(self._per_file([1, 2]), False, [3, 3])
+        data_padded = _stitch_files(self._per_file([1, 2]), True, [3, 3])
+
+        assert reasons.shape[1] == len(axis["x_real"]) == data_real.shape[1]
+        assert data_padded.shape[1] == len(axis["x_padded"])
+
+
+class TestExtractCombinedGainsBundle:
+    """Tests for the stitched bundle handed to the page-rendering workers."""
+
+    @staticmethod
+    def _make_group(n_files=3, n_tiles=2, n_cb=4):
+        """Build a minimal group with everything the bundle reads.
+
+        Bypasses __init__ (no real FITS files) and populates only the
+        attributes _extract_combined_gains_bundle touches.
+        """
+        group = HyperfitsSolutionGroup.__new__(HyperfitsSolutionGroup)
+        tile_ids = np.arange(1, n_tiles + 1)
+        group.metafits_tiles_df = pd.DataFrame(
+            {
+                "name": [f"Tile{i:03d}" for i in tile_ids],
+                "id": tile_ids,
+                "flag": [False] * n_tiles,
+                "rx": [1] * n_tiles,
+                "slot": [1] * n_tiles,
+                "flavor": "RRI",
+            }
+        )
+        # Only .obsid is read by the bundle. Spec'd to Metafits rather than a
+        # bare stub so the type matches and a future attribute access on this
+        # fake fails loudly instead of silently returning a Mock.
+        metafits = MagicMock(spec=Metafits)
+        metafits.obsid = 1234567890
+        group.metafits = metafits
+        group.all_solution_coarse_chan_indices = [62 + 5 * i for i in range(n_files)]
+
+        # Distinct amplitude per file so stitch ordering is observable
+        group.jones = []
+        for f in range(n_files):
+            j = np.zeros((n_tiles, n_cb, 2, 2), dtype=np.complex128)
+            j[:, :, 0, 0] = f + 1
+            j[:, :, 1, 1] = (f + 1) * 10
+            group.jones.append(j)
+
+        group.channel_flag_reasons = [
+            np.full((n_tiles, n_cb), ChannelFlagReason.NONE, dtype=object) for _ in range(n_files)
+        ]
+        group.tile_flag_reasons = np.full(n_tiles, TileFlagReason.NONE, dtype=object)
+        group.amplitude_fit = [
+            {"gx": np.full((n_tiles, n_cb), 1.0), "gy": np.full((n_tiles, n_cb), 1.0)} for _ in range(n_files)
+        ]
+        group.amplitude_band = [
+            {
+                "gx": (np.full((n_tiles, n_cb), 0.5), np.full((n_tiles, n_cb), 1.5)),
+                "gy": (np.full((n_tiles, n_cb), 0.5), np.full((n_tiles, n_cb), 1.5)),
+            }
+            for _ in range(n_files)
+        ]
+        group.mad_residual_threshold = 10.0
+        return group
+
+    def test_bundle_spans_every_file(self):
+        """One bundle covers the whole observation, not one file."""
+        bundle = _extract_combined_gains_bundle(self._make_group(n_files=3, n_tiles=2, n_cb=4))
+
+        assert bundle["n_files"] == 3
+        # 3 files x 4 chanblocks real, plus 2 NaN separators when padded
+        assert bundle["gx_amp_real"].shape == (2, 12)
+        assert bundle["gx_amp"].shape == (2, 14)
+        assert bundle["chan_reasons"].shape == (2, 12)
+
+    def test_padded_and_real_arrays_stay_aligned_with_their_axes(self):
+        """Every padded array matches x_padded; every real one matches x_real."""
+        bundle = _extract_combined_gains_bundle(self._make_group())
+        n_padded = len(bundle["axis"]["x_padded"])
+        n_real = len(bundle["axis"]["x_real"])
+
+        for key in ("gx_amp", "gy_amp", "fit_gx", "fit_gy", "band_lower_gx", "band_upper_gx"):
+            assert bundle[key].shape[1] == n_padded, f"{key} is not padded-aligned"
+
+        for key in ("gx_amp_real", "gy_amp_real", "chan_reasons"):
+            assert bundle[key].shape[1] == n_real, f"{key} is not real-aligned"
+
+    def test_files_are_stitched_in_order(self):
+        """File 0's channels come first, so the axis is monotonic in frequency."""
+        bundle = _extract_combined_gains_bundle(self._make_group(n_files=3, n_tiles=2, n_cb=4))
+
+        # gx amplitude was set to file_idx + 1
+        assert np.array_equal(bundle["gx_amp_real"][0], [1] * 4 + [2] * 4 + [3] * 4)
+        # gy to (file_idx + 1) * 10 -- confirms gx/gy aren't crossed
+        assert np.array_equal(bundle["gy_amp_real"][0], [10] * 4 + [20] * 4 + [30] * 4)
+
+    def test_pristine_jones_overrides_current_state(self):
+        """Plots show pre-flagging values when a pristine snapshot is given."""
+        group = self._make_group(n_files=2, n_tiles=2, n_cb=4)
+        pristine = [j.copy() for j in group.jones]
+        for j in pristine:
+            j[:, :, 0, 0] = 99.0
+        # Simulate flagging having NaN'd the live data
+        for j in group.jones:
+            j[:, :, 0, 0] = np.nan
+
+        bundle = _extract_combined_gains_bundle(group, pristine)
+
+        assert np.all(bundle["gx_amp_real"] == 99.0)
+        assert not np.isnan(bundle["gx_amp_real"]).any()
+
+    def test_pristine_jones_file_count_must_match(self):
+        """A per-file list of the wrong length is caught, not silently zipped."""
+        group = self._make_group(n_files=3)
+        with pytest.raises(ValueError, match="pristine_jones has 2 files, expected 3"):
+            _extract_combined_gains_bundle(group, [group.jones[0], group.jones[1]])
+
+    def test_bundle_is_picklable(self):
+        """The bundle crosses a ProcessPoolExecutor boundary, so it must pickle.
+
+        This is the whole reason the bundle exists: a HyperfitsSolutionGroup
+        holds mwalib's Rust-backed MetafitsContext and cannot be sent to a
+        worker process.
+        """
+        bundle = _extract_combined_gains_bundle(self._make_group())
+
+        restored = pickle.loads(pickle.dumps(bundle))
+
+        assert restored["n_files"] == bundle["n_files"]
+        assert np.array_equal(restored["gx_amp_real"], bundle["gx_amp_real"])
+
+    def test_single_file_bundle_has_no_separators(self):
+        """A contiguous observation is stitched trivially, with no NaN columns."""
+        bundle = _extract_combined_gains_bundle(self._make_group(n_files=1, n_tiles=2, n_cb=4))
+
+        assert bundle["n_files"] == 1
+        assert bundle["gx_amp"].shape == bundle["gx_amp_real"].shape
+        assert not np.isnan(bundle["gx_amp"]).any()
+        assert len(bundle["axis"]["gap_centres"]) == 0
+
+
+# ===========================================================================
+# generate_hyperdrive_plots rename scoping / generate_hyperdrive_plots_for_files
+# ===========================================================================
+
+
+class TestGenerateHyperdrivePlotsRename:
+    """Tests that the "before" rename only touches its own input's plots.
+
+    The rename used to glob the whole output directory, which was only safe
+    because it ran serially (an already-renamed file stops matching). That made
+    the function impossible to parallelise and cost a full directory scan per
+    file. These tests pin the scoped behaviour, since the real hyperdrive binary
+    isn't available in the test environment.
+    """
+
+    @staticmethod
+    def _fake_hyperdrive(output_dir, stem, suffixes=("amps", "phases")):
+        """Return a run_command_ext stand-in that creates hyperdrive's plots."""
+
+        def _run(cmd, *args, **kwargs):
+            for suffix in suffixes:
+                Path(output_dir, f"{stem}_{suffix}.png").write_text("fake plot")
+            return True, ""
+
+        return _run
+
+    def test_renames_only_its_own_files(self, tmp_path):
+        """Another picket's plots in the same directory are left alone."""
+        stem = "1391522232_ch62_solutions"
+        # A sibling picket's plots, already sitting in the shared output dir
+        other_amps = tmp_path / "1391522232_ch67_solutions_amps.png"
+        other_amps.write_text("other picket")
+
+        with patch(
+            "mwax_mover.mwax_calvin_plots.run_command_ext",
+            side_effect=self._fake_hyperdrive(tmp_path, stem),
+        ):
+            success, error = generate_hyperdrive_plots(
+                1391522232,
+                str(tmp_path / f"{stem}.fits"),
+                "/fake/hyperdrive",
+                "/fake/metafits.fits",
+                str(tmp_path),
+                before=True,
+            )
+
+        assert success, error
+        # Its own plots were renamed
+        assert (tmp_path / f"{stem}_amps_original.png").exists()
+        assert (tmp_path / f"{stem}_phases_original.png").exists()
+        assert not (tmp_path / f"{stem}_amps.png").exists()
+        # The other picket's plot was NOT touched
+        assert other_amps.exists()
+        assert not (tmp_path / "1391522232_ch67_solutions_amps_original.png").exists()
+
+    def test_after_run_does_not_rename(self, tmp_path):
+        """before=False leaves hyperdrive's filenames as produced."""
+        stem = "1391522232_ch62_solutions"
+
+        with patch(
+            "mwax_mover.mwax_calvin_plots.run_command_ext",
+            side_effect=self._fake_hyperdrive(tmp_path, stem),
+        ):
+            success, _ = generate_hyperdrive_plots(
+                1391522232,
+                str(tmp_path / f"{stem}.fits"),
+                "/fake/hyperdrive",
+                "/fake/metafits.fits",
+                str(tmp_path),
+                before=False,
+            )
+
+        assert success
+        assert (tmp_path / f"{stem}_amps.png").exists()
+        assert not (tmp_path / f"{stem}_amps_original.png").exists()
+
+    def test_renames_unexpected_suffixes_too(self, tmp_path):
+        """A suffix we didn't anticipate is still protected from being overwritten.
+
+        The rename globs on the solution stem rather than hardcoding
+        "_amps"/"_phases", so a hyperdrive version emitting a third plot type
+        doesn't silently lose its "before" copy.
+        """
+        stem = "1391522232_ch62_solutions"
+
+        with patch(
+            "mwax_mover.mwax_calvin_plots.run_command_ext",
+            side_effect=self._fake_hyperdrive(tmp_path, stem, suffixes=("amps", "phases", "delays")),
+        ):
+            generate_hyperdrive_plots(
+                1391522232,
+                str(tmp_path / f"{stem}.fits"),
+                "/fake/hyperdrive",
+                "/fake/metafits.fits",
+                str(tmp_path),
+                before=True,
+            )
+
+        assert (tmp_path / f"{stem}_delays_original.png").exists()
+
+    def test_already_renamed_files_are_not_double_renamed(self, tmp_path):
+        """A second pass must not produce *_original_original.png."""
+        stem = "1391522232_ch62_solutions"
+        (tmp_path / f"{stem}_amps_original.png").write_text("from an earlier run")
+
+        with patch(
+            "mwax_mover.mwax_calvin_plots.run_command_ext",
+            side_effect=self._fake_hyperdrive(tmp_path, stem, suffixes=("phases",)),
+        ):
+            generate_hyperdrive_plots(
+                1391522232,
+                str(tmp_path / f"{stem}.fits"),
+                "/fake/hyperdrive",
+                "/fake/metafits.fits",
+                str(tmp_path),
+                before=True,
+            )
+
+        assert not (tmp_path / f"{stem}_amps_original_original.png").exists()
+        assert (tmp_path / f"{stem}_amps_original.png").exists()
+
+    def test_warns_when_hyperdrive_produced_nothing(self, tmp_path, caplog):
+        """A success with no matching plots is surfaced, not silently ignored."""
+        stem = "1391522232_ch62_solutions"
+
+        with patch("mwax_mover.mwax_calvin_plots.run_command_ext", return_value=(True, "")):
+            success, _ = generate_hyperdrive_plots(
+                1391522232,
+                str(tmp_path / f"{stem}.fits"),
+                "/fake/hyperdrive",
+                "/fake/metafits.fits",
+                str(tmp_path),
+                before=True,
+            )
+
+        assert success
+        assert "produced no plots matching" in caplog.text
+
+
+class TestGenerateHyperdrivePlotsForFiles:
+    """Tests for the concurrent per-file hyperdrive plot wrapper."""
+
+    def test_every_file_is_attempted(self):
+        """All solution files get a hyperdrive invocation."""
+        files = [f"/data/obs_ch{c}_solutions.fits" for c in (62, 67, 73)]
+
+        with patch("mwax_mover.mwax_calvin_plots.generate_hyperdrive_plots", return_value=(True, "")) as mock_gen:
+            failures = generate_hyperdrive_plots_for_files(
+                123, files, "/fake/hyperdrive", "/fake/metafits.fits", "/out", before=True
+            )
+
+        assert failures == []
+        assert mock_gen.call_count == 3
+        assert {call.args[1] for call in mock_gen.call_args_list} == set(files)
+
+    def test_one_failure_does_not_stop_the_others(self):
+        """A failing file is reported but the rest still run."""
+        files = [f"/data/obs_ch{c}_solutions.fits" for c in (62, 67, 73)]
+
+        def _gen(obs_id, filename, *args, **kwargs):
+            if "ch67" in filename:
+                return False, "hyperdrive exploded"
+            return True, ""
+
+        with patch("mwax_mover.mwax_calvin_plots.generate_hyperdrive_plots", side_effect=_gen) as mock_gen:
+            failures = generate_hyperdrive_plots_for_files(
+                123, files, "/fake/hyperdrive", "/fake/metafits.fits", "/out", before=True
+            )
+
+        assert mock_gen.call_count == 3
+        assert len(failures) == 1
+        assert "ch67" in failures[0][0]
+        assert failures[0][1] == "hyperdrive exploded"
+
+    def test_raised_exception_is_captured_not_propagated(self):
+        """Plots are diagnostic: a crash must not fail the calibration."""
+        files = ["/data/obs_ch62_solutions.fits", "/data/obs_ch67_solutions.fits"]
+
+        def _gen(obs_id, filename, *args, **kwargs):
+            if "ch62" in filename:
+                raise RuntimeError("boom")
+            return True, ""
+
+        with patch("mwax_mover.mwax_calvin_plots.generate_hyperdrive_plots", side_effect=_gen):
+            failures = generate_hyperdrive_plots_for_files(
+                123, files, "/fake/hyperdrive", "/fake/metafits.fits", "/out", before=True
+            )
+
+        assert len(failures) == 1
+        assert failures[0][1] == "boom"
+
+    def test_empty_file_list_is_a_no_op(self):
+        """No files means no pool and no work."""
+        with patch("mwax_mover.mwax_calvin_plots.generate_hyperdrive_plots") as mock_gen:
+            assert (
+                generate_hyperdrive_plots_for_files(
+                    123, [], "/fake/hyperdrive", "/fake/metafits.fits", "/out", before=True
+                )
+                == []
+            )
+        mock_gen.assert_not_called()
+
+    def test_before_flag_is_passed_through(self):
+        """The before/after distinction must survive the pool dispatch."""
+        with patch("mwax_mover.mwax_calvin_plots.generate_hyperdrive_plots", return_value=(True, "")) as mock_gen:
+            generate_hyperdrive_plots_for_files(
+                123, ["/data/a_solutions.fits"], "/fake/hyperdrive", "/fake/metafits.fits", "/out", before=False
+            )
+
+        # (obs_id, filename, binary, metafits, output_dir, before, max_amp)
+        assert mock_gen.call_args_list[0].args[5] is False

@@ -23,12 +23,14 @@ against.
 
 import io
 import os
+import shutil
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import numpy as np
 import pandas as pd
 import pytest
 from astropy import units as u
+from astropy.io import fits
 from astropy.constants import c as speed_of_light  # ty: ignore[unresolved-import]
 
 from mwax_mover.mwax_calvin_utils import Metafits, reject_outliers
@@ -1229,3 +1231,131 @@ def test_commit_backup_preserves_pristine_original(tmp_path):
 
     backup_jones = HyperfitsSolution(backup_paths[0]).get_jones()
     assert np.allclose(backup_jones, pristine, equal_nan=True)
+
+
+# ===========================================================================
+# HyperfitsSolution.results caching
+# ===========================================================================
+
+
+class TestResultsCaching:
+    """Tests that the RESULTS HDU is read from disk once per solution file.
+
+    The RESULTS HDU is immutable for the life of a HyperfitsSolution (nothing
+    writes it -- write_jones only touches SOLUTIONS), but it was re-read on
+    every access: HyperfitsSolutionGroup.results touched it twice per file, and
+    .weights goes through that on each of its several accesses per pipeline run.
+    On a 24-file picket fence that was 192 fits.open calls per run against 8 for
+    a contiguous observation, over a shared filesystem.
+    """
+
+    @staticmethod
+    def _counting_fits_open(counter):
+        """Wrap astropy's fits.open so opens of the solution file are counted."""
+        real_open = fits.open
+
+        def _open(name, *args, **kwargs):
+            counter.append(str(name))
+            return real_open(name, *args, **kwargs)
+
+        return _open
+
+    def test_repeated_access_reads_the_file_once(self):
+        """Every access after the first is served from the cache."""
+        hs = HyperfitsSolution(SOLUTIONS_PATH)
+        opens: list[str] = []
+
+        with patch("mwax_mover.mwax_hyperdrive_solutions.fits.open", side_effect=self._counting_fits_open(opens)):
+            first = hs.results
+            for _ in range(5):
+                _ = hs.results
+
+        assert len(opens) == 1
+        assert len(first) > 0
+
+    def test_cached_value_matches_an_uncached_read(self):
+        """Caching must not change the values returned."""
+        expected = HyperfitsSolution(SOLUTIONS_PATH).results
+
+        hs = HyperfitsSolution(SOLUTIONS_PATH)
+        _ = hs.results  # populate the cache
+        assert np.array_equal(hs.results, expected, equal_nan=True)
+
+    def test_group_results_reads_each_file_once(self):
+        """The group property no longer reads each file twice per access."""
+        metafits = Metafits(METAFITS_PATH)
+        group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+        opens: list[str] = []
+
+        with patch("mwax_mover.mwax_hyperdrive_solutions.fits.open", side_effect=self._counting_fits_open(opens)):
+            _ = group.results
+
+        # Previously two: one for the length-validation loop, one for the concat
+        assert sum(1 for name in opens if name == SOLUTIONS_PATH) == 1
+
+    def test_weights_accessed_repeatedly_does_not_reread(self):
+        """weights() is accessed several times per pipeline run."""
+        metafits = Metafits(METAFITS_PATH)
+        group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+        opens: list[str] = []
+
+        with patch("mwax_mover.mwax_hyperdrive_solutions.fits.open", side_effect=self._counting_fits_open(opens)):
+            for _ in range(4):
+                _ = group.weights
+
+        assert sum(1 for name in opens if name == SOLUTIONS_PATH) == 1
+
+    def test_missing_results_hdu_keeps_raising_without_rereading(self):
+        """A file with no RESULTS HDU must keep raising KeyError, from cache.
+
+        Callers (notably weights) rely on KeyError to fall back to uniform
+        weights, so a cached miss must not silently become a success -- and must
+        not re-open the file on every subsequent attempt either.
+        """
+        hs = HyperfitsSolution(SOLUTIONS_PATH)
+        opens: list[str] = []
+
+        def _open_without_results(name, *args, **kwargs):
+            opens.append(str(name))
+            raise KeyError("RESULTS")
+
+        with patch("mwax_mover.mwax_hyperdrive_solutions.fits.open", side_effect=_open_without_results):
+            for _ in range(3):
+                with pytest.raises(KeyError):
+                    _ = hs.results
+
+        assert len(opens) == 1
+
+    def test_weights_falls_back_to_uniform_when_results_missing(self):
+        """The cached-miss path still produces the uniform-weight fallback."""
+        metafits = Metafits(METAFITS_PATH)
+        group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+        n_chanblocks = len(group.all_chanblocks_hz_concat)
+
+        with patch.object(type(group.solns[0]), "results", new_callable=PropertyMock, side_effect=KeyError("RESULTS")):
+            weights = group.weights
+
+        assert weights.shape == (n_chanblocks,)
+        assert np.all(weights == 1.0)
+
+    def test_cache_is_still_valid_after_write_jones(self, tmp_path):
+        """commit() rewrites SOLUTIONS only, so a cached RESULTS stays correct.
+
+        This is what makes caching safe at all: if write_jones ever started
+        touching the RESULTS HDU, the cache would silently go stale for the rest
+        of the run and weights would be computed from pre-commit convergence
+        values.
+        """
+        soln_path = tmp_path / "solutions.fits"
+        shutil.copy(SOLUTIONS_PATH, soln_path)
+
+        hs = HyperfitsSolution(str(soln_path))
+        cached_before = hs.results.copy()
+
+        jones = hs.get_jones()
+        hs.write_jones(jones * 2.0, backup=False)
+
+        # The cached value must still match what a fresh reader sees on disk
+        fresh = HyperfitsSolution(str(soln_path)).results
+        assert np.array_equal(hs.results, cached_before, equal_nan=True)
+        assert np.array_equal(hs.results, fresh, equal_nan=True)

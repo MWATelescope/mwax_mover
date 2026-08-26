@@ -19,7 +19,7 @@ Two families of functions live here:
 import logging
 import os
 import warnings
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import matplotlib as mpl
@@ -34,6 +34,7 @@ mpl.use("Agg")
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
+import matplotlib.transforms as mtransforms
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -687,28 +688,123 @@ def generate_hyperdrive_plots(
             return False, output
 
         if before:
-            # Rename files so the AFTER run does not overwrite them.
-            # Glob results are materialized into a list first -- renaming
-            # a file while a generator is still scanning the same
-            # directory for the same pattern is mutating the directory
-            # mid-iteration, which isn't guaranteed to behave consistently.
-            directory = Path(output_dir)  # change to your target directory
+            # Rename this call's own output so the AFTER run (which hyperdrive
+            # names identically) does not overwrite it.
+            #
+            # Derived from the input filename rather than globbed from the
+            # directory. A directory-wide glob picked up every other solution
+            # file's plots too, which was only safe because it ran serially and
+            # an already-renamed file stops matching -- it made this function
+            # unsafe to call concurrently, and cost a full directory scan per
+            # file (O(N^2) for a picket fence). hyperdrive derives its plot
+            # names from the solution file's stem, so the two files this call
+            # produced can be named exactly.
+            # Scoped by glob on the stem rather than by assuming hyperdrive's
+            # exact plot suffixes ("_amps"/"_phases"): if a hyperdrive version
+            # emits a different or additional suffix, this still renames it,
+            # whereas hardcoding the two names would silently leave the new one
+            # to be overwritten by the AFTER run.
+            directory = Path(output_dir)
+            soln_stem = Path(hyperdrive_solution_filename).stem
 
-            # rename "*_solutions_amps.png" to "_solutions_amps_original.png"
-            for file in list(directory.glob("*_solutions_amps.png")):
-                new_name = file.with_name(file.stem + "_original" + file.suffix)
-                file.rename(new_name)
+            renamed = 0
+            for produced in list(directory.glob(f"{soln_stem}_*.png")):
+                if produced.stem.endswith("_original"):
+                    continue
+                produced.rename(produced.with_name(f"{produced.stem}_original{produced.suffix}"))
+                renamed += 1
 
-            # rename "*_solutions_phases.png" to "_solutions_phases_original.png"
-            for file in list(directory.glob("*_solutions_phases.png")):
-                new_name = file.with_name(file.stem + "_original" + file.suffix)
-                file.rename(new_name)
+            if renamed == 0:
+                logger.warning(
+                    f"{obs_id} hyperdrive reported success but produced no plots matching"
+                    f" {soln_stem}_*.png in {output_dir}. The 'after' run may overwrite"
+                    " whatever it did produce."
+                )
 
         logger.info(f"{obs_id} Finished running hyperdrive plots on {hyperdrive_solution_filename}.")
     except Exception as catch_all_exception:
         return False, str(catch_all_exception)
 
     return True, ""
+
+
+def generate_hyperdrive_plots_for_files(
+    obs_id: int,
+    solution_filenames: list[str],
+    hyperdrive_binary_path: str,
+    metafits_filename: str,
+    output_dir: str,
+    before: bool,
+    max_amp: int | None = None,
+    max_workers: int | None = None,
+) -> list[tuple[str, str]]:
+    """Run generate_hyperdrive_plots for every solution file, concurrently.
+
+    Each call is an external ``hyperdrive solutions-plot`` process, so these are
+    IO/subprocess bound and a thread pool parallelises them fine -- the GIL is
+    released while waiting on the child. This matters for a picket-fence
+    observation: the pipeline invokes this once per solution file for the
+    "before" pass and again for the "after" pass, so 24 files meant 48 serial
+    process launches versus 2 for a contiguous observation.
+
+    Safe to run concurrently only because generate_hyperdrive_plots's "before"
+    rename is scoped to its own input file's stem. It previously globbed the
+    whole output directory, which would have had concurrent calls renaming each
+    other's files.
+
+    Failures are collected and returned rather than raised: these plots are a
+    diagnostic aid, and one file failing should not abort the rest or fail an
+    otherwise good calibration.
+
+    Args:
+        obs_id: Observation ID.
+        solution_filenames: Every hyperdrive solution FITS file to plot.
+        hyperdrive_binary_path: Path to the hyperdrive executable.
+        metafits_filename: Path to the metafits file.
+        output_dir: Where to write the plots.
+        before: See generate_hyperdrive_plots.
+        max_amp: See generate_hyperdrive_plots.
+        max_workers: Concurrent hyperdrive processes. Defaults to
+            min(len(solution_filenames), os.cpu_count()), so a contiguous
+            observation still runs exactly one process.
+
+    Returns:
+        A list of (solution_filename, error_message) for the files that failed,
+        empty if every file succeeded.
+    """
+    if not solution_filenames:
+        return []
+
+    workers = max_workers if max_workers is not None else min(len(solution_filenames), os.cpu_count() or 1)
+
+    failures: list[tuple[str, str]] = []
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(
+                generate_hyperdrive_plots,
+                obs_id,
+                f,
+                hyperdrive_binary_path,
+                metafits_filename,
+                output_dir,
+                before,
+                max_amp,
+            ): f
+            for f in solution_filenames
+        }
+
+        for future in as_completed(futures):
+            filename = futures[future]
+            try:
+                success, error = future.result()
+            except Exception as exc:  # noqa: BLE001 -- reported, not raised
+                failures.append((filename, str(exc)))
+                continue
+            if not success:
+                failures.append((filename, error))
+
+    return failures
 
 
 def write_hyperdrive_stats(
@@ -907,16 +1003,181 @@ def _channel_summary_text(tile_idx: int, file_reasons: NDArray[np.object_], mad_
     return line1 + "\n" + ", ".join(parts)
 
 
-def _extract_combined_gains_bundle(group: HyperfitsSolutionGroup, file_idx: int) -> dict:
+# Blank x-axis width, in chanblock units, inserted between adjacent pickets in
+# a stitched plot. Deliberately narrow: a picket-fence observation's real
+# frequency gaps are enormous (1391522232 spans 78.7-241.2 MHz with only 18.9%
+# of that span covered by actual data), so plotting against true frequency would
+# spend over 80% of the axis on emptiness and squeeze each picket's chanblocks
+# into an unreadable sliver. The gap is therefore compressed to a fixed token
+# width and marked, rather than drawn to scale -- the axis is explicitly not
+# linear in frequency, which is why every picket boundary gets a visible break
+# line and the x label says so.
+STITCH_GAP_CHANBLOCKS = 6
+
+# Per-subplot width in inches for a stitched (multi-file) plot, and the number
+# of tile-pairs per row that goes with it. A stitched subplot carries every
+# file's chanblocks instead of one file's, so at the single-file width of 6in
+# each picket would get only ~38px -- too narrow to see individual flagged
+# channels. 12in gives ~75px per picket. The narrower 3-tile-col grid trades
+# width for height so the page stays 10800px wide, matching what the
+# single-file layout already produces, rather than becoming twice as wide as
+# anything else in the fit directory.
+#
+# Note total figure area is n_tiles * 2 * subplot_area regardless of grid shape,
+# so the grid controls aspect ratio only -- widening subplots always costs
+# proportionally more pixels (and file size). Hence 12in rather than more.
+STITCHED_SUBPLOT_WIDTH_IN = 12
+STITCHED_TILE_COLS = 3
+
+# Per-subplot width in inches for a single-file plot (the historical value).
+SINGLE_FILE_SUBPLOT_WIDTH_IN = 6
+
+# X tick label size for a stitched plot, where there is one label per picket.
+# Measured against the rendered label extents for the 24-picket worst case at
+# STITCHED_SUBPLOT_WIDTH_IN: at 6pt the 24 labels clear each other by ~5px, at
+# 7pt they collide. Raise the subplot width before raising this.
+_STITCHED_TICK_FONTSIZE = 6
+
+
+def _build_stitched_axis(
+    chanblocks_per_file: list[int],
+    coarse_chans: list[int] | NDArray[np.int_],
+    gap: int = STITCH_GAP_CHANBLOCKS,
+) -> dict:
+    """Build a compressed ("broken") x-axis spanning every solution file.
+
+    Each file's chanblocks keep their true uniform spacing of 1 unit, and a
+    fixed *gap* of blank units is inserted between adjacent files. This is the
+    single-axes equivalent of a broken-axis plot: the alternative, one real
+    subplot per segment, would mean 24 axes per tile-pol (~1500 per page for a
+    picket fence) and would cost more than plotting per file did in the first
+    place.
+
+    Two x arrays come back because they serve different purposes. Continuous
+    series (the data trace, the polynomial fit, the acceptance band) are plotted
+    against ``x_padded``, which carries a NaN between segments so matplotlib
+    breaks the line and the fill instead of drawing a straight run across a gap
+    that contains no data. Everything indexed per real channel (scatter markers,
+    flag masks, channel counts) uses ``x_real``, which has exactly one entry per
+    real chanblock and no separators, so channel indices line up with the
+    flag-reason arrays.
+
+    Args:
+        chanblocks_per_file: Number of chanblocks in each solution file, in the
+            same order as the group's files.
+        coarse_chans: The coarse channel number for each file, used for tick
+            labels. Must be the same length as *chanblocks_per_file*.
+        gap: Blank width, in chanblock units, between adjacent files.
+
+    Returns:
+        A dict with ``x_real`` (one position per real chanblock), ``x_padded``
+        (with a NaN between segments), ``gap_centres`` (x position of each
+        boundary, for break markers), ``tick_pos``/``tick_labels`` (one per
+        file, at the segment centre), and ``n_real`` / ``chanblocks_per_file``
+        for the padding helper.
+    """
+    x_real_parts: list[NDArray[np.float64]] = []
+    x_padded_parts: list[NDArray[np.float64]] = []
+    gap_centres: list[float] = []
+    tick_pos: list[float] = []
+
+    cursor = 0.0
+    n_files = len(chanblocks_per_file)
+
+    for i, n_cb in enumerate(chanblocks_per_file):
+        segment = np.arange(n_cb, dtype=np.float64) + cursor
+        x_real_parts.append(segment)
+        x_padded_parts.append(segment)
+        tick_pos.append(float(segment.mean()) if n_cb else cursor)
+        cursor += n_cb
+
+        if i < n_files - 1:
+            gap_centres.append(cursor + gap / 2.0 - 0.5)
+            # One NaN column per boundary -- this is what breaks plot() and
+            # fill_between() across the gap.
+            x_padded_parts.append(np.array([np.nan]))
+            cursor += gap
+
+    return {
+        "x_real": np.concatenate(x_real_parts) if x_real_parts else np.zeros(0),
+        "x_padded": np.concatenate(x_padded_parts) if x_padded_parts else np.zeros(0),
+        "gap_centres": np.array(gap_centres, dtype=np.float64),
+        "tick_pos": np.array(tick_pos, dtype=np.float64),
+        "tick_labels": [str(int(c)) for c in coarse_chans],
+        "n_real": int(sum(chanblocks_per_file)),
+        "chanblocks_per_file": list(chanblocks_per_file),
+    }
+
+
+def _stitch_files(per_file: list[NDArray], pad: bool, chanblocks_per_file: list[int]) -> NDArray[np.float64]:
+    """Concatenate per-file (n_tiles, n_chanblocks) arrays along the channel axis.
+
+    Args:
+        per_file: One array per solution file, all with the same leading
+            (tile) dimension.
+        pad: If True, insert a single NaN column between adjacent files, giving
+            an array aligned with ``x_padded`` from _build_stitched_axis. If
+            False, the arrays are concatenated directly, aligned with
+            ``x_real``.
+        chanblocks_per_file: Unused except as a length check against *per_file*.
+
+    Returns:
+        The concatenated float64 array.
+
+    Raises:
+        ValueError: If per_file and chanblocks_per_file disagree in length.
+    """
+    if len(per_file) != len(chanblocks_per_file):
+        raise ValueError(f"expected {len(chanblocks_per_file)} arrays, got {len(per_file)}")
+
+    parts: list[NDArray] = []
+    for i, arr in enumerate(per_file):
+        parts.append(np.asarray(arr, dtype=np.float64))
+        if pad and i < len(per_file) - 1:
+            parts.append(np.full((arr.shape[0], 1), np.nan, dtype=np.float64))
+    return np.concatenate(parts, axis=1)
+
+
+def _stitch_reasons(per_file: list[NDArray[np.object_]]) -> NDArray[np.object_]:
+    """Concatenate per-file channel flag-reason arrays, with no separators.
+
+    Kept separate from _stitch_files because these are object-dtype IntFlag
+    arrays, and because they must NOT be padded: a separator column has no
+    channel behind it, so giving it a reason would corrupt every "N of M
+    channels flagged" count and could make an all-flagged tile look partially
+    clean.
+
+    Args:
+        per_file: One (n_tiles, n_chanblocks) object array per solution file.
+
+    Returns:
+        The concatenated (n_tiles, n_real_chanblocks) object array.
+    """
+    return np.concatenate(per_file, axis=1)
+
+
+def _extract_combined_gains_bundle(
+    group: HyperfitsSolutionGroup,
+    pristine_jones: list[NDArray[np.complex128]] | None = None,
+) -> dict:
     """Extract the plain, picklable data _render_combined_gains_figure
-    needs from a HyperfitsSolutionGroup.
+    needs from a HyperfitsSolutionGroup, stitched across every file.
 
     Exists so plot_outlier_gains can dispatch page rendering to worker
     processes: a HyperfitsSolutionGroup itself isn't picklable (it holds
     mwalib's Rust-backed MetafitsContext), but everything actually needed
     to render a page is plain numpy arrays/dicts/primitives, which are.
-    Called once per file (not per page) since the same bundle is reused
-    for every page of that file.
+    Called once per observation (not per page, and no longer per file)
+    since the same bundle is reused for every page.
+
+    Every file's chanblocks are concatenated onto one compressed x-axis
+    (see _build_stitched_axis), so a picket-fence observation produces one
+    set of pages covering all 24 coarse channels rather than one set per
+    picket. Outlier *detection* remains strictly per file -- this only
+    changes presentation. That is why the fit and band arrays are stitched
+    from group.amplitude_fit/amplitude_band as-is: each file's polynomial
+    was fit against its own chanblocks only, and stitching never refits
+    anything across a gap.
 
     Args:
         group: The solution group, after apply_tile_flags,
@@ -924,7 +1185,9 @@ def _extract_combined_gains_bundle(group: HyperfitsSolutionGroup, file_idx: int)
             flag_amplitude_outliers, and flag_mostly_bad_tiles have run
             (detect_phase_outliers is not required -- this bundle doesn't
             use group.phase_fits).
-        file_idx: Which solution file (index into group.jones/solns).
+        pristine_jones: One Jones array per file (e.g. group.before_jones),
+            to plot amplitudes from so flagged-but-not-yet-NaN'd values are
+            still visible. Defaults to the group's current state.
 
     Returns:
         A dict of everything _render_combined_gains_figure needs.
@@ -936,13 +1199,35 @@ def _extract_combined_gains_bundle(group: HyperfitsSolutionGroup, file_idx: int)
     assert group.amplitude_band is not None
     assert group.mad_residual_threshold is not None
 
+    n_files = len(group.jones)
+    chanblocks_per_file = [int(file_jones.shape[1]) for file_jones in group.jones]
+
+    if pristine_jones is None:
+        gains_for_plot = group.jones
+    else:
+        if len(pristine_jones) != n_files:
+            raise ValueError(f"pristine_jones has {len(pristine_jones)} files, expected {n_files}")
+        gains_for_plot = pristine_jones
+
+    axis = _build_stitched_axis(chanblocks_per_file, group.all_solution_coarse_chan_indices)
+
     return {
-        "file_idx": file_idx,
-        "file_jones": group.jones[file_idx],
+        "n_files": n_files,
+        "axis": axis,
+        # Padded (NaN between files) -- for continuous series only.
+        "gx_amp": _stitch_files([np.abs(j[:, :, 0, 0]) for j in gains_for_plot], True, chanblocks_per_file),
+        "gy_amp": _stitch_files([np.abs(j[:, :, 1, 1]) for j in gains_for_plot], True, chanblocks_per_file),
+        "fit_gx": _stitch_files([f["gx"] for f in group.amplitude_fit], True, chanblocks_per_file),
+        "fit_gy": _stitch_files([f["gy"] for f in group.amplitude_fit], True, chanblocks_per_file),
+        "band_lower_gx": _stitch_files([b["gx"][0] for b in group.amplitude_band], True, chanblocks_per_file),
+        "band_upper_gx": _stitch_files([b["gx"][1] for b in group.amplitude_band], True, chanblocks_per_file),
+        "band_lower_gy": _stitch_files([b["gy"][0] for b in group.amplitude_band], True, chanblocks_per_file),
+        "band_upper_gy": _stitch_files([b["gy"][1] for b in group.amplitude_band], True, chanblocks_per_file),
+        # Unpadded -- one column per real chanblock, aligned with axis["x_real"].
+        "gx_amp_real": _stitch_files([np.abs(j[:, :, 0, 0]) for j in gains_for_plot], False, chanblocks_per_file),
+        "gy_amp_real": _stitch_files([np.abs(j[:, :, 1, 1]) for j in gains_for_plot], False, chanblocks_per_file),
+        "chan_reasons": _stitch_reasons(group.channel_flag_reasons),
         "tile_names": group.metafits_tiles_df["name"].to_numpy(),
-        "fit": group.amplitude_fit[file_idx],
-        "band": group.amplitude_band[file_idx],
-        "file_reasons": group.channel_flag_reasons[file_idx],
         "tile_reasons": group.tile_flag_reasons,
         "obsid": group.metafits.obsid,
         "mad_residual_threshold": group.mad_residual_threshold,
@@ -951,14 +1236,13 @@ def _extract_combined_gains_bundle(group: HyperfitsSolutionGroup, file_idx: int)
 
 def plot_combined_gains(
     group: HyperfitsSolutionGroup,
-    file_idx: int,
     first_tile_index: int = 0,
     n_tiles: int = 16,
-    pristine_jones: NDArray[np.complex128] | None = None,
+    pristine_jones: list[NDArray[np.complex128]] | None = None,
     solution_file_will_be_modified: bool = True,
 ) -> plt.Figure:
-    """Plot gx and gy gain amplitude in separate subplots per tile, for one
-    file in a solution group.
+    """Plot gx and gy gain amplitude in separate subplots per tile, stitched
+    across every file in a solution group.
 
     Equivalent to the retired mwax_calvin_quality.plot_combined, adapted to
     work from HyperfitsSolutionGroup's flag-reason state (after all
@@ -967,10 +1251,10 @@ def plot_combined_gains(
 
     Thin wrapper around _render_combined_gains_figure: extracts the plain
     data that function needs from group, then delegates to it. Kept
-    separate so plot_outlier_gains can extract the bundle once per file
-    and reuse it across every page (and across worker processes, when
-    saving to disk), rather than needing group itself in each page's
-    rendering call.
+    separate so plot_outlier_gains can extract the bundle once per
+    observation and reuse it across every page (and across worker
+    processes, when saving to disk), rather than needing group itself in
+    each page's rendering call.
 
     Args:
         group: The solution group, after apply_tile_flags,
@@ -978,38 +1262,38 @@ def plot_combined_gains(
             flag_amplitude_outliers, and flag_mostly_bad_tiles have run
             (detect_phase_outliers is not required -- this plot doesn't
             use group.phase_fits).
-        file_idx: Which solution file (index into group.jones/solns) to plot.
         first_tile_index: Index of the first tile to include in this page.
         n_tiles: Number of tiles to plot starting from first_tile_index.
             Also determines the subplot grid shape (see _grid_shape).
-        pristine_jones: Jones matrices to plot amplitudes from, shape
-            (n_tiles, n_chanblocks, 2, 2) -- e.g. a copy of
-            group.jones[file_idx] taken before any flagging ran, so
-            flagged-but-not-yet-NaN'd values are still visible on the
-            plot. Defaults to group.jones[file_idx] (its current state)
-            if not given -- if flagging has already run, flagged entries
-            will show as gaps rather than visible outlier points.
+        pristine_jones: One Jones array per file (e.g. group.before_jones),
+            each shape (n_tiles, n_chanblocks, 2, 2), taken before any
+            flagging ran so flagged-but-not-yet-NaN'd values are still
+            visible on the plot. Defaults to group.jones (its current
+            state) if not given -- if flagging has already run, flagged
+            entries will show as gaps rather than visible outlier points.
         solution_file_will_be_modified: If True, a note is added to the
             figure title.
 
     Returns:
         The matplotlib Figure containing the grid of per-tile subplot pairs.
     """
-    bundle = _extract_combined_gains_bundle(group, file_idx)
-    return _render_combined_gains_figure(
-        bundle, first_tile_index, n_tiles, pristine_jones, solution_file_will_be_modified
-    )
+    bundle = _extract_combined_gains_bundle(group, pristine_jones)
+    return _render_combined_gains_figure(bundle, first_tile_index, n_tiles, solution_file_will_be_modified)
 
 
 def _render_combined_gains_figure(
     bundle: dict,
     first_tile_index: int,
     n_tiles: int,
-    pristine_jones: NDArray[np.complex128] | None,
     solution_file_will_be_modified: bool,
 ) -> plt.Figure:
     """Render one page of the combined gx/gy amplitude plot from an
     extracted data bundle (see _extract_combined_gains_bundle).
+
+    Every solution file appears on one compressed x-axis, with a marked
+    break at each picket boundary (see _build_stitched_axis). The axis is
+    therefore not linear in frequency; ticks are labelled with the real
+    coarse channel number of each segment.
 
     This is the actual rendering logic behind plot_combined_gains, kept
     as a standalone function (touching only plain data, never a
@@ -1070,42 +1354,46 @@ def _render_combined_gains_figure(
         bundle: Extracted data from _extract_combined_gains_bundle.
         first_tile_index: Index of the first tile to include in this page.
         n_tiles: Number of tiles to plot starting from first_tile_index.
-            Also determines the subplot grid shape (see _grid_shape).
-        pristine_jones: Jones matrices to plot amplitudes from, shape
-            (n_tiles, n_chanblocks, 2, 2) -- e.g. a copy of the file's
-            jones taken before any flagging ran, so flagged-but-not-yet-
-            NaN'd values are still visible on the plot. Defaults to
-            bundle["file_jones"] (its current state) if not given -- if
-            flagging has already run, flagged entries will show as gaps
-            rather than visible outlier points.
+            Also determines the subplot grid shape (see _grid_shape),
+            except for a stitched multi-file plot, which uses the fixed
+            STITCHED_TILE_COLS instead.
         solution_file_will_be_modified: If True, a note is added to the
             figure title.
 
     Returns:
         The matplotlib Figure containing the grid of per-tile subplot pairs.
     """
-    file_idx = bundle["file_idx"]
-    file_jones = bundle["file_jones"]
-    n_tiles_total, n_chanblocks = file_jones.shape[:2]
+    n_files = bundle["n_files"]
+    axis = bundle["axis"]
+    x_padded = axis["x_padded"]
+    x_real = axis["x_real"]
+    gap_centres = axis["gap_centres"]
+    stitched = n_files > 1
+
     tile_names = bundle["tile_names"]
 
-    gains_for_plot = pristine_jones if pristine_jones is not None else file_jones
-    before_gx = np.abs(gains_for_plot[:, :, 0, 0])
-    before_gy = np.abs(gains_for_plot[:, :, 1, 1])
+    # Padded (NaN between pickets) -- continuous series only, so nothing is
+    # drawn across a frequency gap that contains no data.
+    before_gx = bundle["gx_amp"]
+    before_gy = bundle["gy_amp"]
+    fit = {"gx": bundle["fit_gx"], "gy": bundle["fit_gy"]}
+    band_lower_gx, band_upper_gx = bundle["band_lower_gx"], bundle["band_upper_gx"]
+    band_lower_gy, band_upper_gy = bundle["band_lower_gy"], bundle["band_upper_gy"]
 
-    fit = bundle["fit"]
-    band_lower_gx, band_upper_gx = bundle["band"]["gx"]
-    band_lower_gy, band_upper_gy = bundle["band"]["gy"]
+    # Unpadded -- indexed per real chanblock, aligned with x_real and with the
+    # flag-reason arrays.
+    before_gx_real = bundle["gx_amp_real"]
+    before_gy_real = bundle["gy_amp_real"]
 
-    file_reasons = bundle["file_reasons"]
+    file_reasons = bundle["chan_reasons"]
     tile_reasons = bundle["tile_reasons"]
     mad_residual_threshold = bundle["mad_residual_threshold"]
 
+    n_tiles_total = file_reasons.shape[0]
     last_tile_index = min(first_tile_index + n_tiles, n_tiles_total)
     tile_range = range(first_tile_index, last_tile_index)
-    chan_idx = np.arange(n_chanblocks)
 
-    # Per-channel "bad" mask, combining this file's own channel reasons with
+    # Per-channel "bad" mask, combining every file's channel reasons with
     # any whole-tile flag (broadcast across every chanblock).
     bad_mask = (file_reasons != ChannelFlagReason.NONE) | (tile_reasons[:, np.newaxis] != TileFlagReason.NONE)
     # Channels caught specifically by amplitude-outlier detection.
@@ -1122,10 +1410,27 @@ def _render_combined_gains_figure(
     )
 
     n_plotted = len(tile_range)
-    n_rows, n_tile_cols = _grid_shape(n_tiles)
+
+    # A stitched subplot has to fit every file's chanblocks, so it gets a wider
+    # subplot and a narrower grid. The narrower grid is what keeps the page from
+    # becoming wider than the single-file layout already produces -- note total
+    # figure area is n_tiles * 2 * subplot_area regardless of grid shape, so the
+    # grid trades width for height and nothing else.
+    if stitched:
+        n_tile_cols = STITCHED_TILE_COLS
+        n_rows = int(np.ceil(n_tiles / n_tile_cols))
+        subplot_width_in = STITCHED_SUBPLOT_WIDTH_IN
+    else:
+        n_rows, n_tile_cols = _grid_shape(n_tiles)
+        subplot_width_in = SINGLE_FILE_SUBPLOT_WIDTH_IN
+
     n_cols = n_tile_cols * 2
     fig, axes = plt.subplots(
-        n_rows, n_cols, figsize=plot_figsize(6 * n_cols, 4 * n_rows), dpi=plot_dpi(150), squeeze=False
+        n_rows,
+        n_cols,
+        figsize=plot_figsize(subplot_width_in * n_cols, 4 * n_rows),
+        dpi=plot_dpi(150),
+        squeeze=False,
     )
 
     for i, tile in enumerate(tile_range):
@@ -1188,29 +1493,38 @@ def _render_combined_gains_figure(
         # own reason and shouldn't look like it did.
         channel_level_flagged = file_reasons[tile, :] != ChannelFlagReason.NONE
 
-        # -- shade amplitude-outlier-flagged channels with a translucent
-        # orange band -- orange indicates partial (some-channels)
-        # flagging regardless of reason; red is reserved for a fully
-        # flagged tile (see the border-colour logic below), not for
-        # which specific check caught the channel.
-        new_flagged_chans = np.where(new_amplitude_bad_mask[tile, :])[0]
-        for cb in new_flagged_chans:
-            ax_gx.axvspan(cb - 0.5, cb + 0.5, color="orange", alpha=0.15, zorder=0)
-            ax_gy.axvspan(cb - 0.5, cb + 0.5, color="orange", alpha=0.15, zorder=0)
-
-        # -- shade gain-max-cutoff-flagged channels the same translucent
-        # orange -- the two reasons are still told apart by marker shape
-        # ('x' vs '+' below), not colour, since colour here tracks
-        # severity (partial vs fully flagged) rather than which specific
-        # check caught the channel --
-        new_gain_cutoff_chans = np.where(new_gain_cutoff_bad_mask[tile, :])[0]
-        for cb in new_gain_cutoff_chans:
-            ax_gx.axvspan(cb - 0.5, cb + 0.5, color="orange", alpha=0.15, zorder=0)
-            ax_gy.axvspan(cb - 0.5, cb + 0.5, color="orange", alpha=0.15, zorder=0)
+        # -- shade flagged channels with a translucent orange band --
+        # orange indicates partial (some-channels) flagging regardless of
+        # reason; red is reserved for a fully flagged tile (see the
+        # border-colour logic below), not for which specific check caught
+        # the channel. Amplitude-outlier and gain-max-cutoff channels get
+        # the same shading; the two are told apart by marker shape ('x' vs
+        # '+' below).
+        #
+        # Drawn as one masked fill per axis rather than an axvspan per
+        # channel. A stitched picket-fence plot has every file's chanblocks
+        # on one axis (768 for a 24x32 observation), so a per-channel
+        # axvspan loop could add tens of thousands of Rectangle patches to
+        # a single page. step="mid" reproduces the old +/-0.5 span
+        # boundaries and merges runs of adjacent flagged channels.
+        shade_mask = new_amplitude_bad_mask[tile, :] | new_gain_cutoff_bad_mask[tile, :]
+        if shade_mask.any():
+            for ax in (ax_gx, ax_gy):
+                ax.fill_between(
+                    x_real,
+                    0,
+                    1,
+                    where=shade_mask,
+                    step="mid",
+                    color="orange",
+                    alpha=0.15,
+                    zorder=0,
+                    transform=mtransforms.blended_transform_factory(ax.transData, ax.transAxes),
+                )
 
         # -- gx subplot: data, fit line, shaded acceptance band --
         ax_gx.fill_between(
-            chan_idx,
+            x_padded,
             band_lower_gx[tile],
             band_upper_gx[tile],
             color="tab:blue",
@@ -1218,13 +1532,13 @@ def _render_combined_gains_figure(
             zorder=0,
             label="gx band",
         )
-        ax_gx.plot(chan_idx, before_gx[tile], color="tab:blue", alpha=0.7, linewidth=0.8, label="gx")
-        ax_gx.plot(chan_idx, fit["gx"][tile], color="black", linestyle="--", alpha=0.8, linewidth=0.8, label="gx fit")
+        ax_gx.plot(x_padded, before_gx[tile], color="tab:blue", alpha=0.7, linewidth=0.8, label="gx")
+        ax_gx.plot(x_padded, fit["gx"][tile], color="black", linestyle="--", alpha=0.8, linewidth=0.8, label="gx fit")
         flagged_other_gx = channel_level_flagged & ~new_gain_cutoff_bad_mask[tile, :]
         if flagged_other_gx.any():
             ax_gx.scatter(
-                chan_idx[flagged_other_gx],
-                before_gx[tile][flagged_other_gx],
+                x_real[flagged_other_gx],
+                before_gx_real[tile][flagged_other_gx],
                 color="black",
                 marker="x",
                 s=15,
@@ -1233,8 +1547,8 @@ def _render_combined_gains_figure(
             )
         if new_gain_cutoff_bad_mask[tile, :].any():
             ax_gx.scatter(
-                chan_idx[new_gain_cutoff_bad_mask[tile, :]],
-                before_gx[tile][new_gain_cutoff_bad_mask[tile, :]],
+                x_real[new_gain_cutoff_bad_mask[tile, :]],
+                before_gx_real[tile][new_gain_cutoff_bad_mask[tile, :]],
                 color="black",
                 marker="+",
                 s=30,
@@ -1251,7 +1565,7 @@ def _render_combined_gains_figure(
 
         # -- gy subplot: data, fit line, shaded acceptance band --
         ax_gy.fill_between(
-            chan_idx,
+            x_padded,
             band_lower_gy[tile],
             band_upper_gy[tile],
             color="tab:green",
@@ -1259,13 +1573,13 @@ def _render_combined_gains_figure(
             zorder=0,
             label="gy band",
         )
-        ax_gy.plot(chan_idx, before_gy[tile], color="tab:green", alpha=0.7, linewidth=0.8, label="gy")
-        ax_gy.plot(chan_idx, fit["gy"][tile], color="gray", linestyle="--", alpha=0.8, linewidth=0.8, label="gy fit")
+        ax_gy.plot(x_padded, before_gy[tile], color="tab:green", alpha=0.7, linewidth=0.8, label="gy")
+        ax_gy.plot(x_padded, fit["gy"][tile], color="gray", linestyle="--", alpha=0.8, linewidth=0.8, label="gy fit")
         flagged_other_gy = channel_level_flagged & ~new_gain_cutoff_bad_mask[tile, :]
         if flagged_other_gy.any():
             ax_gy.scatter(
-                chan_idx[flagged_other_gy],
-                before_gy[tile][flagged_other_gy],
+                x_real[flagged_other_gy],
+                before_gy_real[tile][flagged_other_gy],
                 color="black",
                 marker="x",
                 s=15,
@@ -1274,8 +1588,8 @@ def _render_combined_gains_figure(
             )
         if new_gain_cutoff_bad_mask[tile, :].any():
             ax_gy.scatter(
-                chan_idx[new_gain_cutoff_bad_mask[tile, :]],
-                before_gy[tile][new_gain_cutoff_bad_mask[tile, :]],
+                x_real[new_gain_cutoff_bad_mask[tile, :]],
+                before_gy_real[tile][new_gain_cutoff_bad_mask[tile, :]],
                 color="black",
                 marker="+",
                 s=30,
@@ -1289,6 +1603,24 @@ def _render_combined_gains_figure(
         ax_gy.set_title(gy_title, fontsize=9)
         ax_gy.yaxis.set_major_formatter(mticker.ScalarFormatter(useOffset=False, useMathText=True))
         ax_gy.tick_params(labelsize=7)
+
+        if stitched:
+            # Mark every picket boundary, and label each segment with its real
+            # coarse channel number so the compressed gaps are unambiguous.
+            # vlines takes the whole array, so all boundaries cost one
+            # LineCollection per axis rather than one artist each.
+            for ax in (ax_gx, ax_gy):
+                ax.vlines(
+                    gap_centres,
+                    *ax.get_ylim(),
+                    color="0.55",
+                    linestyles=(0, (2, 2)),
+                    linewidth=0.9,
+                    zorder=1,
+                )
+                ax.set_xticks(axis["tick_pos"])
+                ax.set_xticklabels(axis["tick_labels"], fontsize=_STITCHED_TICK_FONTSIZE)
+                ax.set_xlabel("coarse channel (gaps compressed, not to scale)", fontsize=7)
 
         # Every tile reaching this point has already had its structural
         # case (metafits/TILES-HDU/BASELINES-HDU) handled above via
@@ -1358,9 +1690,13 @@ def _render_combined_gains_figure(
         if solution_file_will_be_modified
         else "Outlier gains are reported only, solutions file was not modified"
     )
+    if stitched:
+        scope_str = f"all {n_files} coarse channels stitched, gaps compressed"
+    else:
+        scope_str = "single contiguous band"
     fig.suptitle(
         f"Gain amplitude with fit & MAD band for {obsid_str} "
-        f"(file {file_idx}; tiles {first_tile_index}-{last_tile_index - 1}; NO REF TILE). {modification_str}",
+        f"({scope_str}; tiles {first_tile_index}-{last_tile_index - 1}; NO REF TILE). {modification_str}",
         y=0.995,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.90))
@@ -1372,7 +1708,6 @@ def _render_and_save_combined_gains_page(
     bundle: dict,
     first_tile_index: int,
     n_tiles: int,
-    pristine_jones: NDArray[np.complex128] | None,
     solution_file_will_be_modified: bool,
     page_path: str,
 ) -> tuple[bool, str]:
@@ -1387,7 +1722,6 @@ def _render_and_save_combined_gains_page(
         bundle: Extracted data from _extract_combined_gains_bundle.
         first_tile_index: See _render_combined_gains_figure.
         n_tiles: See _render_combined_gains_figure.
-        pristine_jones: See _render_combined_gains_figure.
         solution_file_will_be_modified: See _render_combined_gains_figure.
         page_path: Where to save this page.
 
@@ -1397,9 +1731,7 @@ def _render_and_save_combined_gains_page(
         one bad page doesn't take down the rest of the batch.
     """
     try:
-        fig = _render_combined_gains_figure(
-            bundle, first_tile_index, n_tiles, pristine_jones, solution_file_will_be_modified
-        )
+        fig = _render_combined_gains_figure(bundle, first_tile_index, n_tiles, solution_file_will_be_modified)
         fig.savefig(page_path, dpi=plot_dpi(150), bbox_inches="tight")
         plt.close(fig)
         return True, ""
@@ -1409,21 +1741,39 @@ def _render_and_save_combined_gains_page(
 
 def plot_outlier_gains(
     group: HyperfitsSolutionGroup,
-    file_idx: int,
     n_tiles: int = 16,
     output_path: str | None = None,
-    pristine_jones: NDArray[np.complex128] | None = None,
+    pristine_jones: list[NDArray[np.complex128]] | None = None,
     solution_file_will_be_modified: bool = True,
 ) -> list[plt.Figure]:
-    """Plot flagged hyperdrive calibration gains, paged by tile, for one file.
+    """Plot flagged hyperdrive calibration gains, paged by tile, for the whole
+    observation.
+
+    Every solution file is stitched onto one compressed x-axis, so a
+    picket-fence observation produces one paginated set covering all its coarse
+    channels instead of a separate set per picket. This is both what a human
+    reviewer asked for (24 separate plots per obs was unmanageable) and the
+    single largest cost in post-hyperdrive processing for a picket fence: this
+    function used to be called once per solution file, so a 24-file observation
+    created 24 process pools and rendered 24x as many figures as a contiguous
+    one, for the same number of data points. Measured on a real 24-picket
+    observation, that was the bulk of the 3-5x runtime difference against a
+    contiguous observation.
+
+    Outlier detection itself is untouched and remains strictly per file (see
+    HyperfitsSolutionGroup.flag_amplitude_outliers -- a single polynomial across
+    a picket-fence frequency gap would be meaningless). Only presentation is
+    stitched, and each file's own fit and acceptance band are drawn over that
+    file's own segment only.
 
     Args:
         group: The solution group (see plot_combined_gains).
-        file_idx: Which solution file (index into group.jones/solns) to plot.
         n_tiles: Number of tiles per page/figure.
         output_path: If given, each page is saved using this as the base
             filename, with "_{first}-{last}" inserted before the extension.
-        pristine_jones: See plot_combined_gains.
+            Because pages now span every file, the caller should no longer
+            include a per-channel component in this name.
+        pristine_jones: See plot_combined_gains -- one array per file.
         solution_file_will_be_modified: See plot_combined_gains.
 
     Returns:
@@ -1436,7 +1786,7 @@ def plot_outlier_gains(
         nothing currently uses the return value in that case anyway.
     """
     assert group.jones is not None
-    n_tiles_total = group.jones[file_idx].shape[0]
+    n_tiles_total = group.jones[0].shape[0]
     n_pages = int(np.ceil(n_tiles_total / n_tiles))
 
     if output_path is None:
@@ -1450,7 +1800,6 @@ def plot_outlier_gains(
             figures.append(
                 plot_combined_gains(
                     group,
-                    file_idx,
                     first_tile_index=first_tile_index,
                     n_tiles=n_tiles,
                     pristine_jones=pristine_jones,
@@ -1459,7 +1808,8 @@ def plot_outlier_gains(
             )
         return figures
 
-    bundle = _extract_combined_gains_bundle(group, file_idx)
+    # One bundle and one pool for the whole observation, not one per file.
+    bundle = _extract_combined_gains_bundle(group, pristine_jones)
 
     with ProcessPoolExecutor() as executor:
         futures = {}
@@ -1472,7 +1822,6 @@ def plot_outlier_gains(
                 bundle,
                 first_tile_index,
                 n_tiles,
-                pristine_jones,
                 solution_file_will_be_modified,
                 page_path,
             )
