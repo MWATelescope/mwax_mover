@@ -138,7 +138,7 @@ def step6b_population():
     ax.scatter(tile_ids[bad], chi2dof[bad], s=45, color="tab:red", zorder=3, label="Flagged (phase outlier)")
     ax.axhline(threshold, color="black", ls="--", lw=1.2, label=f"median + 3×MAD threshold ({threshold:.2f})")
     ax.axhline(median, color="grey", ls=":", lw=1, label=f"population median ({median:.2f})")
-    for idx, label in zip(outlier_idx, outlier_labels):
+    for idx, label in zip(outlier_idx, outlier_labels, strict=True):
         ax.annotate(
             label,
             (tile_ids[idx], chi2dof[idx]),
