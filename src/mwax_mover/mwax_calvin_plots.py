@@ -1234,6 +1234,163 @@ def _extract_combined_gains_bundle(
     }
 
 
+# Peak resident memory per page render, as a multiple of the figure's raw RGBA
+# buffer (width_px * height_px * 4). Measured at ~2.1x on a 10800x3600 page:
+# 156MB of raw buffer against a 322MB peak RSS delta, because savefig with
+# bbox_inches="tight" renders to measure the tight bounding box and then again
+# to write the file. Rounded up slightly for the PNG compression buffer.
+_PAGE_RENDER_MEMORY_FACTOR = 2.5
+
+# Fraction of the memory we believe is available that we are willing to commit
+# to concurrent page renders. Leaves room for the parent process (which is
+# holding the whole solution group's Jones arrays) and for anything else sharing
+# the allocation.
+_PAGE_RENDER_MEMORY_BUDGET_FRACTION = 0.6
+
+# Fallback when no memory limit can be determined at all. Deliberately modest:
+# an unbounded pool is what caused ENOMEM in the first place, so guessing low
+# and rendering a few pages serially is much better than guessing high.
+_PAGE_RENDER_FALLBACK_WORKERS = 4
+
+
+def _page_grid(n_tiles: int, stitched: bool) -> tuple[int, int, int]:
+    """Compute the subplot grid and per-subplot width for one page.
+
+    Shared by _render_combined_gains_figure (which builds the figure) and
+    _max_render_workers (which has to predict how much memory that figure will
+    take). Keeping it in one place means the memory estimate cannot silently
+    drift away from the figure actually created.
+
+    Args:
+        n_tiles: Number of tile-pairs on the page.
+        stitched: True for a multi-file stitched page, which needs a wider
+            subplot to fit every file's chanblocks (see
+            STITCHED_SUBPLOT_WIDTH_IN) on a narrower grid.
+
+    Returns:
+        A (n_rows, n_tile_cols, subplot_width_inches) tuple. Each tile-pair
+        occupies two subplot columns, so the actual column count is
+        n_tile_cols * 2.
+    """
+    if stitched:
+        n_tile_cols = STITCHED_TILE_COLS
+        n_rows = int(np.ceil(n_tiles / n_tile_cols))
+        return n_rows, n_tile_cols, STITCHED_SUBPLOT_WIDTH_IN
+
+    n_rows, n_tile_cols = _grid_shape(n_tiles)
+    return n_rows, n_tile_cols, SINGLE_FILE_SUBPLOT_WIDTH_IN
+
+
+def _available_memory_bytes() -> int | None:
+    """Best effort estimate of memory this process may actually use.
+
+    Checks the cgroup limit before the node's free memory, because Calvin runs
+    these as Slurm jobs: the node can have hundreds of GB free while this job is
+    confined to a small fraction of it, and sizing a process pool against the
+    node would then be wildly over-optimistic.
+
+    Returns:
+        Bytes believed available, or None if nothing could be determined (in
+        which case callers should fall back to a conservative fixed value
+        rather than assuming plenty).
+    """
+    candidates: list[int] = []
+
+    # cgroup v2, then v1. "max" (v2) or a sentinel near 2**63 (v1) means
+    # unlimited, so it tells us nothing and is skipped.
+    for limit_path, usage_path in (
+        ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory.current"),
+        ("/sys/fs/cgroup/memory/memory.limit_in_bytes", "/sys/fs/cgroup/memory/memory.usage_in_bytes"),
+    ):
+        try:
+            with open(limit_path, encoding="utf-8") as fd:
+                raw = fd.read().strip()
+            if raw == "max":
+                continue
+            limit = int(raw)
+            if limit > 2**62:
+                continue
+
+            used = 0
+            try:
+                with open(usage_path, encoding="utf-8") as fd:
+                    used = int(fd.read().strip())
+            except (OSError, ValueError):
+                pass
+
+            candidates.append(max(limit - used, 0))
+            break
+        except (OSError, ValueError):
+            continue
+
+    # MemAvailable already accounts for what is currently in use, so it needs no
+    # usage subtraction.
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as fd:
+            for line in fd:
+                if line.startswith("MemAvailable:"):
+                    candidates.append(int(line.split()[1]) * 1024)
+                    break
+    except (OSError, ValueError, IndexError):
+        pass
+
+    if not candidates:
+        return None
+
+    # The tightest constraint wins: being inside a small cgroup on a big node is
+    # exactly the case that has to be respected.
+    return min(candidates)
+
+
+def _max_render_workers(n_tiles: int, stitched: bool, n_pages: int) -> int:
+    """Decide how many page renders may run concurrently.
+
+    A stitched page is large -- 10800x3600px for the cal_utils default of 16
+    tiles per page -- and peaks at a few hundred MB while matplotlib renders and
+    saves it. An unbounded ProcessPoolExecutor defaults to os.cpu_count()
+    workers, which on a many-core calvin node meant tens of GB of render buffers
+    live at once and pages failing with "[Errno 12] Cannot allocate memory".
+
+    The cap is the smallest of: the number of pages there actually are (no point
+    starting idle workers), the CPU count, and how many page-sized allocations
+    fit in the memory budget.
+
+    Args:
+        n_tiles: Tiles per page, which together with *stitched* fixes the figure
+            size (see _page_grid).
+        stitched: Whether these are stitched multi-file pages.
+        n_pages: Total pages to render.
+
+    Returns:
+        Worker count, always at least 1.
+    """
+    n_rows, n_tile_cols, subplot_width_in = _page_grid(n_tiles, stitched)
+    width_px = subplot_width_in * n_tile_cols * 2 * 150
+    height_px = 4 * n_rows * 150
+    bytes_per_page = int(width_px * height_px * 4 * _PAGE_RENDER_MEMORY_FACTOR)
+
+    cpu_cap = os.cpu_count() or 1
+    available = _available_memory_bytes()
+
+    if available is None:
+        memory_cap = _PAGE_RENDER_FALLBACK_WORKERS
+        logger.debug(
+            f"Could not determine available memory; capping page renders at {_PAGE_RENDER_FALLBACK_WORKERS} workers."
+        )
+    else:
+        budget = int(available * _PAGE_RENDER_MEMORY_BUDGET_FRACTION)
+        memory_cap = max(1, budget // bytes_per_page)
+
+    workers = max(1, min(n_pages, cpu_cap, memory_cap))
+
+    logger.info(
+        f"Rendering {n_pages} page(s) of {width_px}x{height_px}px"
+        f" (~{bytes_per_page / 1e6:.0f} MB each) with {workers} worker(s)"
+        f" [cpu={cpu_cap}, memory allows {memory_cap}]"
+    )
+    return workers
+
+
 def plot_combined_gains(
     group: HyperfitsSolutionGroup,
     first_tile_index: int = 0,
@@ -1416,13 +1573,7 @@ def _render_combined_gains_figure(
     # becoming wider than the single-file layout already produces -- note total
     # figure area is n_tiles * 2 * subplot_area regardless of grid shape, so the
     # grid trades width for height and nothing else.
-    if stitched:
-        n_tile_cols = STITCHED_TILE_COLS
-        n_rows = int(np.ceil(n_tiles / n_tile_cols))
-        subplot_width_in = STITCHED_SUBPLOT_WIDTH_IN
-    else:
-        n_rows, n_tile_cols = _grid_shape(n_tiles)
-        subplot_width_in = SINGLE_FILE_SUBPLOT_WIDTH_IN
+    n_rows, n_tile_cols, subplot_width_in = _page_grid(n_tiles, stitched)
 
     n_cols = n_tile_cols * 2
     fig, axes = plt.subplots(
@@ -1745,6 +1896,7 @@ def plot_outlier_gains(
     output_path: str | None = None,
     pristine_jones: list[NDArray[np.complex128]] | None = None,
     solution_file_will_be_modified: bool = True,
+    max_workers: int | None = None,
 ) -> list[plt.Figure]:
     """Plot flagged hyperdrive calibration gains, paged by tile, for the whole
     observation.
@@ -1775,6 +1927,11 @@ def plot_outlier_gains(
             include a per-channel component in this name.
         pristine_jones: See plot_combined_gains -- one array per file.
         solution_file_will_be_modified: See plot_combined_gains.
+        max_workers: Concurrent page renders. Defaults to an automatic,
+            memory-aware cap (see _max_render_workers); pass an explicit value
+            to override it. A stitched page peaks at a few hundred MB, so this
+            is not merely a throughput knob -- an unbounded pool is what caused
+            pages to fail with "[Errno 12] Cannot allocate memory".
 
     Returns:
         When output_path is None: a list of matplotlib Figures, one per
@@ -1811,7 +1968,13 @@ def plot_outlier_gains(
     # One bundle and one pool for the whole observation, not one per file.
     bundle = _extract_combined_gains_bundle(group, pristine_jones)
 
-    with ProcessPoolExecutor() as executor:
+    workers = (
+        max_workers
+        if max_workers is not None
+        else _max_render_workers(n_tiles, stitched=bundle["n_files"] > 1, n_pages=n_pages)
+    )
+
+    with ProcessPoolExecutor(max_workers=workers) as executor:
         futures = {}
         for page in range(n_pages):
             first_tile_index = page * n_tiles

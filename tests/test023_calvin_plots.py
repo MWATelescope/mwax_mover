@@ -32,9 +32,17 @@ import pytest
 
 from mwax_mover.mwax_calvin_utils import Metafits
 from mwax_mover.mwax_calvin_plots import (
+    SINGLE_FILE_SUBPLOT_WIDTH_IN,
     STITCH_GAP_CHANBLOCKS,
+    STITCHED_SUBPLOT_WIDTH_IN,
+    STITCHED_TILE_COLS,
+    _PAGE_RENDER_FALLBACK_WORKERS,
+    _available_memory_bytes,
     _build_stitched_axis,
     _extract_combined_gains_bundle,
+    _grid_shape,
+    _max_render_workers,
+    _page_grid,
     _channel_reason_counts_text,
     _channel_summary_text,
     _stitch_files,
@@ -1021,3 +1029,193 @@ class TestGenerateHyperdrivePlotsForFiles:
 
         # (obs_id, filename, binary, metafits, output_dir, before, max_amp)
         assert mock_gen.call_args_list[0].args[5] is False
+
+
+# ===========================================================================
+# Page render memory budgeting (_page_grid / _available_memory_bytes /
+# _max_render_workers)
+# ===========================================================================
+
+
+class TestPageGrid:
+    """Tests for the shared page-geometry helper.
+
+    Shared deliberately: _render_combined_gains_figure builds the figure from
+    this and _max_render_workers predicts its memory from it, so if they ever
+    disagreed the cap would be sized against a figure that isn't what gets
+    made.
+    """
+
+    def test_stitched_uses_the_wide_narrow_layout(self):
+        """Stitched pages get wider subplots on fewer tile columns."""
+        n_rows, n_tile_cols, width_in = _page_grid(16, stitched=True)
+
+        assert n_tile_cols == STITCHED_TILE_COLS
+        assert width_in == STITCHED_SUBPLOT_WIDTH_IN
+        assert n_rows == 6  # ceil(16 / 3)
+
+    def test_single_file_keeps_the_historical_layout(self):
+        """A contiguous observation's layout is unchanged by the stitching work."""
+        n_rows, n_tile_cols, width_in = _page_grid(16, stitched=False)
+
+        assert width_in == SINGLE_FILE_SUBPLOT_WIDTH_IN
+        assert (n_rows, n_tile_cols) == _grid_shape(16)
+
+    def test_every_tile_on_the_page_has_a_cell(self):
+        """The grid must never be too small for the tiles it has to hold."""
+        for n_tiles in (1, 3, 7, 16, 32, 64):
+            for stitched in (True, False):
+                n_rows, n_tile_cols, _ = _page_grid(n_tiles, stitched)
+                assert n_rows * n_tile_cols >= n_tiles, f"{n_tiles=} {stitched=}"
+
+
+class TestAvailableMemoryBytes:
+    """Tests for memory detection, which must respect a Slurm/cgroup limit."""
+
+    def test_prefers_the_tightest_constraint(self, tmp_path, monkeypatch):
+        """A small cgroup on a big node must win over the node's free memory.
+
+        This is the case that matters on calvin: the node can have hundreds of
+        GB free while the Slurm job is confined to a fraction of it.
+        """
+        cgroup_max = tmp_path / "memory.max"
+        cgroup_max.write_text("4000000000")  # 4 GB limit
+        cgroup_cur = tmp_path / "memory.current"
+        cgroup_cur.write_text("1000000000")  # 1 GB already used
+        meminfo = tmp_path / "meminfo"
+        meminfo.write_text("MemTotal:  500000000 kB\nMemAvailable: 400000000 kB\n")  # ~400 GB free
+
+        real_open = open
+
+        def _open(path, *args, **kwargs):
+            mapping = {
+                "/sys/fs/cgroup/memory.max": cgroup_max,
+                "/sys/fs/cgroup/memory.current": cgroup_cur,
+                "/proc/meminfo": meminfo,
+            }
+            return real_open(mapping.get(str(path), path), *args, **kwargs)
+
+        monkeypatch.setattr("builtins.open", _open)
+
+        # 4 GB limit minus 1 GB in use, not the node's 400 GB
+        assert _available_memory_bytes() == 3_000_000_000
+
+    def test_unlimited_cgroup_falls_through_to_meminfo(self, tmp_path, monkeypatch):
+        """cgroup v2 "max" means no limit, so it must not be treated as a number."""
+        cgroup_max = tmp_path / "memory.max"
+        cgroup_max.write_text("max")
+        meminfo = tmp_path / "meminfo"
+        meminfo.write_text("MemAvailable: 8000000 kB\n")
+
+        real_open = open
+
+        def _open(path, *args, **kwargs):
+            if str(path) == "/sys/fs/cgroup/memory.max":
+                return real_open(cgroup_max, *args, **kwargs)
+            if str(path) == "/proc/meminfo":
+                return real_open(meminfo, *args, **kwargs)
+            raise FileNotFoundError(path)
+
+        monkeypatch.setattr("builtins.open", _open)
+
+        assert _available_memory_bytes() == 8_000_000 * 1024
+
+    def test_returns_none_when_nothing_is_readable(self, monkeypatch):
+        """Undetectable memory must be reported as such, not guessed as plenty."""
+
+        def _open(path, *args, **kwargs):
+            raise FileNotFoundError(path)
+
+        monkeypatch.setattr("builtins.open", _open)
+
+        assert _available_memory_bytes() is None
+
+
+class TestMaxRenderWorkers:
+    """Tests for the concurrency cap that fixes the ENOMEM page failures.
+
+    A stitched page peaks at a few hundred MB while matplotlib renders and saves
+    it, and the pool used to default to os.cpu_count() workers -- tens of GB of
+    live render buffers on a many-core node.
+    """
+
+    def test_scales_down_when_memory_is_tight(self):
+        """Little memory means few concurrent renders, regardless of core count."""
+        with (
+            patch("mwax_mover.mwax_calvin_plots._available_memory_bytes", return_value=int(2e9)),
+            patch("os.cpu_count", return_value=64),
+        ):
+            workers = _max_render_workers(16, stitched=True, n_pages=16)
+
+        assert 1 <= workers <= 4
+
+    def test_memory_cap_beats_cpu_count(self):
+        """The bug was sizing the pool by cores alone; memory must dominate."""
+        with (
+            patch("mwax_mover.mwax_calvin_plots._available_memory_bytes", return_value=int(8e9)),
+            patch("os.cpu_count", return_value=64),
+        ):
+            workers = _max_render_workers(16, stitched=True, n_pages=64)
+
+        assert workers < 64
+
+    def test_never_exceeds_the_page_count(self):
+        """No point starting workers with no page to render."""
+        with (
+            patch("mwax_mover.mwax_calvin_plots._available_memory_bytes", return_value=int(512e9)),
+            patch("os.cpu_count", return_value=64),
+        ):
+            assert _max_render_workers(16, stitched=True, n_pages=3) == 3
+
+    def test_never_exceeds_cpu_count(self):
+        """Plenty of memory still shouldn't oversubscribe the CPUs."""
+        with (
+            patch("mwax_mover.mwax_calvin_plots._available_memory_bytes", return_value=int(512e9)),
+            patch("os.cpu_count", return_value=2),
+        ):
+            assert _max_render_workers(16, stitched=True, n_pages=16) == 2
+
+    def test_falls_back_conservatively_when_memory_is_unknown(self):
+        """Guessing low and rendering serially beats another ENOMEM."""
+        with (
+            patch("mwax_mover.mwax_calvin_plots._available_memory_bytes", return_value=None),
+            patch("os.cpu_count", return_value=64),
+        ):
+            assert _max_render_workers(16, stitched=True, n_pages=16) == _PAGE_RENDER_FALLBACK_WORKERS
+
+    def test_always_at_least_one(self):
+        """Even an absurdly small budget must still make progress."""
+        with (
+            patch("mwax_mover.mwax_calvin_plots._available_memory_bytes", return_value=1024),
+            patch("os.cpu_count", return_value=64),
+        ):
+            assert _max_render_workers(16, stitched=True, n_pages=16) == 1
+
+    def test_budget_covers_the_measured_peak_per_page(self):
+        """The cap must leave room for what a page render actually costs.
+
+        Measured at ~322MB peak RSS for a 10800x3600 page. The chosen worker
+        count multiplied by that must fit inside the available memory, or the
+        cap isn't doing its job.
+        """
+        measured_peak_bytes = 322 * 1024 * 1024
+        available = int(8e9)
+
+        with (
+            patch("mwax_mover.mwax_calvin_plots._available_memory_bytes", return_value=available),
+            patch("os.cpu_count", return_value=64),
+        ):
+            workers = _max_render_workers(16, stitched=True, n_pages=64)
+
+        assert workers * measured_peak_bytes < available
+
+    def test_stitched_pages_get_fewer_workers_than_single_file_pages(self):
+        """A stitched page is bigger, so fewer of them fit at once."""
+        with (
+            patch("mwax_mover.mwax_calvin_plots._available_memory_bytes", return_value=int(8e9)),
+            patch("os.cpu_count", return_value=64),
+        ):
+            stitched = _max_render_workers(16, stitched=True, n_pages=64)
+            single = _max_render_workers(16, stitched=False, n_pages=64)
+
+        assert stitched < single
