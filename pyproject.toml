@@ -112,6 +112,27 @@ python_files = ["test*.py"]
 # line when iterating on a single failure.
 addopts = "-vv -m 'not integration'"
 testpaths = ["tests"]
+# Put tests/ on sys.path explicitly. Two reasons:
+#
+# 1. The test tree is a package (see tests/__init__.py), which is what allows
+#    two test modules in different subdirectories to share a basename -- e.g. a
+#    future tests/calibration/test_plots.py alongside tests/calvin/test_plots.py.
+#    Without the package, pytest's prepend import mode rejects the second one
+#    with "import file mismatch". But making it a package also stops the shared
+#    helpers being importable as top-level modules, because the repository root
+#    goes on sys.path instead of tests/. This restores that.
+# 2. It was previously implicit: tests/ landed on sys.path only as a side effect
+#    of pytest collecting tests/conftest.py. Stating it here means the helper
+#    imports do not silently depend on that file continuing to exist.
+pythonpath = ["tests"]
 markers = [
     "integration: requires network access or real external binaries (giant-squid, etc). Deselected by default; run with `pytest -m integration`.",
 ]
+
+[tool.ty.environment]
+# ty does not read pytest's `pythonpath`, so tests/ has to be declared here too
+# for the shared test helpers (tests_common, tests_fakedb) to resolve. Both
+# settings exist for the same reason: the test tree is a package, which puts the
+# repository root on the module search path instead of tests/. Keep the two in
+# step -- if one is changed, change the other.
+extra-paths = ["tests"]
