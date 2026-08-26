@@ -1,5 +1,10 @@
 # Changelog
 
+# Unreleased (1.11.0)
+
+* Restructure of source code.
+  * Added architecture tests to ensure compliance with top down structure (i.e. high level modules only call lower level modules).
+
 # 1.10.2 26-Aug-2026
 
 * Clean up of ruff errors.
