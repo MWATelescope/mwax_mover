@@ -64,6 +64,15 @@ logger.addHandler(handler)
 # looked at the directory again.
 DEFAULT_PLOT_UPLOAD_MAX_FITS_PER_PASS = 100
 
+# Delay between passes when the previous pass left a backlog behind, instead of
+# the full plot_upload_interval_secs. A truncated batch means there is known work
+# waiting, so sleeping the normal interval (600s in production) would leave the
+# thread idle while thousands of fit dirs drain at 100 per 10 minutes. This is
+# deliberately not zero: a fit dir that uploads but cannot be removed (rclone
+# skipped a file, so rmdir fails) stays in the backlog, and with no floor delay
+# a path in that state would be retried in a tight loop.
+PLOT_UPLOAD_BACKLOG_DELAY_SECS = 5
+
 
 def fit_dir_sort_key(fit_dir: Path) -> tuple[int, int, str]:
     """Build a sort key ordering fit directories newest (largest fitid) first.
@@ -257,6 +266,15 @@ class MWAXCalvinController:
         removes each directory once it is empty. Per-path exponential backoff is
         applied when a pass uploads nothing at all.
 
+        The interval is a sleep between passes, not a fixed-rate timer: this is
+        the only thread doing this work, so passes can never overlap. When a pass
+        leaves a backlog behind, the sleep is shortened to
+        ``PLOT_UPLOAD_BACKLOG_DELAY_SECS`` so a large backlog does not drain at
+        one batch per full interval.
+
+        *stop_event* is passed down into each batch and checked between paths, so
+        shutdown does not have to wait out a whole pass of rclone transfers.
+
         A directory is "published" if its name does not start with a dot.
         ``mwax_calvin_utils.upload_plot_files`` assembles each fit in a
         ``.staging-<fit_id>`` directory and publishes it with a single atomic
@@ -297,7 +315,15 @@ class MWAXCalvinController:
         ]
 
         while not stop_event.is_set():
+            # True if any path still had fit dirs waiting after its batch
+            backlog_pending = False
+
             for tracker in upload_trackers:
+                # Don't start another path's batch if we're shutting down
+                if stop_event.is_set():
+                    logger.debug("Shutdown requested, abandoning the rest of this pass.")
+                    break
+
                 now: float = time.monotonic()
 
                 if now < tracker.next_attempt_time:
@@ -306,7 +332,8 @@ class MWAXCalvinController:
                     continue
 
                 try:
-                    self.upload_published_fit_dirs(tracker.plot_upload_path)
+                    if self.upload_published_fit_dirs(tracker.plot_upload_path, stop_event):
+                        backlog_pending = True
 
                     if tracker.consecutive_failures > 0:
                         logger.info(
@@ -335,11 +362,26 @@ class MWAXCalvinController:
                         f"(failure #{tracker.consecutive_failures}, retrying in {delay:.0f}s): {e}",
                     )
 
-            stop_event.wait(timeout=self.plot_upload_interval_secs)
+            # A truncated batch means there is known work waiting, so come back
+            # almost immediately rather than idling for the full interval. The
+            # directory is still re-scanned at the top of each pass, so a fit
+            # published in the meantime is still uploaded ahead of the backlog.
+            if backlog_pending:
+                logger.debug(
+                    f"Backlog remains, next pass in {PLOT_UPLOAD_BACKLOG_DELAY_SECS}s"
+                    f" instead of {self.plot_upload_interval_secs}s."
+                )
+                stop_event.wait(timeout=PLOT_UPLOAD_BACKLOG_DELAY_SECS)
+            else:
+                stop_event.wait(timeout=self.plot_upload_interval_secs)
 
         logger.debug("Plot upload thread completed successfully.")
 
-    def upload_published_fit_dirs(self, plot_upload_path: str) -> None:
+    def upload_published_fit_dirs(
+        self,
+        plot_upload_path: str,
+        stop_event: threading.Event | None = None,
+    ) -> bool:
         """Upload a batch of the newest published fit directories, then remove them.
 
         Each fit directory's contents are moved into ``<bucket>/<fit_dir_name>``
@@ -368,6 +410,17 @@ class MWAXCalvinController:
         Args:
             plot_upload_path: Base directory containing published fit
                 directories, e.g. ``/shared/data/calvin11/calvin/plots``.
+            stop_event: Optional shutdown event. Checked before each fit
+                directory so a shutdown does not have to wait out an entire
+                batch of rclone transfers. Any directory not reached is simply
+                left in place for the next run.
+
+        Returns:
+            True if this path still has fit directories waiting after this call,
+            i.e. the batch was truncated. The caller uses this to shorten its
+            sleep so a backlog is not drained one batch per full interval. False
+            if the path was fully drained, does not exist, or the call stopped
+            early on *stop_event*.
 
         Raises:
             subprocess.CalledProcessError: If rclone exits non-zero and no fit
@@ -377,7 +430,7 @@ class MWAXCalvinController:
         base = Path(plot_upload_path)
         if not base.is_dir():
             logger.warning(f"Plot upload path {plot_upload_path} does not exist or is not a directory. Skipping.")
-            return
+            return False
 
         candidates: list[Path] = []
 
@@ -400,9 +453,11 @@ class MWAXCalvinController:
 
         if not batch:
             logger.debug(f"No published fit dirs to upload in {plot_upload_path}")
-            return
+            return False
 
-        if len(candidates) > len(batch):
+        more_pending = len(candidates) > len(batch)
+
+        if more_pending:
             logger.info(
                 f"{len(candidates)} fit dir(s) pending in {plot_upload_path}."
                 f" Uploading the {len(batch)} newest this pass; the remainder"
@@ -411,8 +466,20 @@ class MWAXCalvinController:
 
         first_error: Exception | None = None
         uploaded_count = 0
+        stopped_early = False
 
         for fit_dir in batch:
+            # Bail out promptly on shutdown rather than working through the rest
+            # of the batch. Whatever is left stays published and is picked up on
+            # the next run, so nothing is lost by stopping here.
+            if stop_event is not None and stop_event.is_set():
+                logger.info(
+                    f"Shutdown requested, stopping after {uploaded_count} of {len(batch)} fit dir(s)"
+                    f" from {plot_upload_path}. The rest remain for the next run."
+                )
+                stopped_early = True
+                break
+
             try:
                 transfers, bytes_moved = utils.rclone_move(
                     str(fit_dir),
@@ -457,6 +524,10 @@ class MWAXCalvinController:
                 f" {plot_upload_path}, but {uploaded_count} succeeded, so this path is not being"
                 " backed off. Failed dirs will be retried on the next pass."
             )
+
+        # On shutdown, report no backlog: the caller is exiting, so there is no
+        # point asking it to come back sooner.
+        return more_pending and not stopped_early
 
     def main_loop_handler(self):
         """Handle a single iteration of the main control loop.

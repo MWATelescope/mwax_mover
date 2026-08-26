@@ -1,6 +1,7 @@
 import logging
 import os
 import subprocess
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,6 +11,7 @@ from tests_fakedb import FakeMWAXDBHandler
 
 from mwax_mover.cli.mwax_calvin_controller import (
     DEFAULT_PLOT_UPLOAD_MAX_FITS_PER_PASS,
+    PLOT_UPLOAD_BACKLOG_DELAY_SECS,
     MWAXCalvinController,
     fit_dir_sort_key,
 )
@@ -245,3 +247,175 @@ class TestUploadPublishedFitDirs:
             mcal.upload_published_fit_dirs(str(tmp_path / "does_not_exist"))
 
         mock_move.assert_not_called()
+
+    def test_returns_true_when_backlog_remains(self, tmp_path):
+        """A truncated batch reports a backlog so the caller shortens its sleep."""
+        base = tmp_path / "plots"
+        self.make_fit_dirs(base, [1768401673707000 + i for i in range(5)])
+
+        mcal = self.make_controller(max_fits_per_pass=2)
+
+        with patch(
+            "mwax_mover.cli.mwax_calvin_controller.utils.rclone_move",
+            side_effect=self.fake_rclone_move,
+        ):
+            assert mcal.upload_published_fit_dirs(str(base)) is True
+
+    def test_returns_false_when_path_fully_drained(self, tmp_path):
+        """No backlog means the caller sleeps for the full interval."""
+        base = tmp_path / "plots"
+        self.make_fit_dirs(base, [1768401673707300, 1768401673707301])
+
+        mcal = self.make_controller(max_fits_per_pass=10)
+
+        with patch(
+            "mwax_mover.cli.mwax_calvin_controller.utils.rclone_move",
+            side_effect=self.fake_rclone_move,
+        ):
+            assert mcal.upload_published_fit_dirs(str(base)) is False
+
+    def test_returns_false_when_batch_exactly_empties_path(self, tmp_path):
+        """A full batch that leaves nothing behind is not a backlog."""
+        base = tmp_path / "plots"
+        self.make_fit_dirs(base, [1768401673707300, 1768401673707301])
+
+        mcal = self.make_controller(max_fits_per_pass=2)
+
+        with patch(
+            "mwax_mover.cli.mwax_calvin_controller.utils.rclone_move",
+            side_effect=self.fake_rclone_move,
+        ):
+            assert mcal.upload_published_fit_dirs(str(base)) is False
+
+    def test_stop_event_aborts_batch_between_fit_dirs(self, tmp_path):
+        """Shutdown stops the batch instead of working through every dir."""
+        base = tmp_path / "plots"
+        self.make_fit_dirs(base, [1768401673707000 + i for i in range(5)])
+
+        mcal = self.make_controller()
+        stop_event = threading.Event()
+
+        def stop_after_first(path, profile, bucket, dest_subpath=None, min_file_age_secs=0):
+            # Simulate shutdown arriving while the first transfer is running
+            stop_event.set()
+            return self.fake_rclone_move(path, profile, bucket, dest_subpath, min_file_age_secs)
+
+        with patch(
+            "mwax_mover.cli.mwax_calvin_controller.utils.rclone_move",
+            side_effect=stop_after_first,
+        ) as mock_move:
+            result = mcal.upload_published_fit_dirs(str(base), stop_event)
+
+        # Only the newest dir was uploaded; the rest were left alone
+        assert mock_move.call_count == 1
+        assert mock_move.call_args_list[0].kwargs["dest_subpath"] == "1768401673707004"
+        assert sorted(int(d.name) for d in base.iterdir()) == [1768401673707000 + i for i in range(4)]
+
+        # Stopping early must not ask the caller to come back sooner
+        assert result is False
+
+    def test_stop_event_already_set_uploads_nothing(self, tmp_path):
+        """An already-set stop event means no transfers are started at all."""
+        base = tmp_path / "plots"
+        self.make_fit_dirs(base, [1768401673707300])
+
+        mcal = self.make_controller()
+        stop_event = threading.Event()
+        stop_event.set()
+
+        with patch("mwax_mover.cli.mwax_calvin_controller.utils.rclone_move") as mock_move:
+            assert mcal.upload_published_fit_dirs(str(base), stop_event) is False
+
+        mock_move.assert_not_called()
+        assert [d.name for d in base.iterdir()] == ["1768401673707300"]
+
+
+class RecordingStopEvent(threading.Event):
+    """A stop event that records wait() timeouts and ends the loop after N passes.
+
+    Subclasses threading.Event rather than duck-typing it so the handler still
+    receives the type it declares.
+    """
+
+    def __init__(self, passes: int = 1):
+        super().__init__()
+        self.waits: list[float | None] = []
+        self.passes_remaining = passes
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """Record the timeout, then stop the loop once the pass budget is spent."""
+        self.waits.append(timeout)
+        self.passes_remaining -= 1
+        if self.passes_remaining <= 0:
+            self.set()
+        return self.is_set()
+
+
+class TestPlotUploadHandler:
+    """Tests for how plot_upload_handler paces its passes."""
+
+    @staticmethod
+    def make_controller(tmp_path) -> MWAXCalvinController:
+        """Build a controller with one upload path and a production-like interval."""
+        mcal = MWAXCalvinController()
+        mcal.s3_profile = "test-profile"
+        mcal.s3_bucket = "test-bucket"
+        mcal.plot_upload_paths = [str(tmp_path)]
+        mcal.plot_upload_interval_secs = 600
+        mcal.plot_upload_max_fits_per_pass = 100
+        return mcal
+
+    def test_uses_short_delay_when_backlog_pending(self, tmp_path):
+        """A backlog must not drain at one batch per full interval."""
+        mcal = self.make_controller(tmp_path)
+        stop_event = RecordingStopEvent()
+
+        with patch.object(mcal, "upload_published_fit_dirs", return_value=True):
+            mcal.plot_upload_handler(stop_event)
+
+        assert stop_event.waits == [PLOT_UPLOAD_BACKLOG_DELAY_SECS]
+
+    def test_uses_full_interval_when_no_backlog(self, tmp_path):
+        """With nothing pending, the normal interval applies."""
+        mcal = self.make_controller(tmp_path)
+        stop_event = RecordingStopEvent()
+
+        with patch.object(mcal, "upload_published_fit_dirs", return_value=False):
+            mcal.plot_upload_handler(stop_event)
+
+        assert stop_event.waits == [600]
+
+    def test_backoff_still_applies_on_failure(self, tmp_path):
+        """A total failure backs the path off and does not report a backlog."""
+        mcal = self.make_controller(tmp_path)
+        stop_event = RecordingStopEvent()
+
+        with patch.object(
+            mcal,
+            "upload_published_fit_dirs",
+            side_effect=subprocess.CalledProcessError(1, "rclone", stderr="s3 down"),
+        ):
+            mcal.plot_upload_handler(stop_event)
+
+        # Falls back to the full interval rather than hot-looping on the failure
+        assert stop_event.waits == [600]
+
+    def test_stop_event_prevents_further_paths(self, tmp_path):
+        """Once shutdown is requested, remaining paths in the pass are skipped."""
+        mcal = self.make_controller(tmp_path)
+        mcal.plot_upload_paths = [str(tmp_path / "a"), str(tmp_path / "b"), str(tmp_path / "c")]
+        stop_event = RecordingStopEvent()
+
+        def stop_during_first_path(plot_upload_path, event=None):
+            stop_event.set()
+            return False
+
+        with patch.object(
+            mcal,
+            "upload_published_fit_dirs",
+            side_effect=stop_during_first_path,
+        ) as mock_upload:
+            mcal.plot_upload_handler(stop_event)
+
+        # Only the first path was attempted, not all three
+        assert mock_upload.call_count == 1
