@@ -10,7 +10,7 @@ import threading
 import time
 
 import requests
-from tests_common import create_observation_subfiles, render_test_config, setup_test_directories
+from tests_common import create_observation_subfiles, obs_metafits_path, render_test_config, setup_test_directories
 from tests_fakedb import FakeMWAXDBHandler
 
 from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
@@ -104,7 +104,7 @@ def do_buffer_dump(
     # e.g. sd.db_handler.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
 
     # setup data
-    src_metafits = f"tests/data/{obs_id}/{obs_id}_metafits.fits"
+    src_metafits = obs_metafits_path(obs_id)
     metafits = os.path.join(sd.cfg_corr_metafits_path, os.path.basename(src_metafits))
     shutil.copyfile(src_metafits, metafits)
 

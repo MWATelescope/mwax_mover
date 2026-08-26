@@ -1,7 +1,7 @@
 import os
 
 import pytest
-from tests_common import setup_test_directories
+from tests_common import data_path, setup_test_directories
 
 from mwax_mover.mwax_bf_filterbank_utils import (
     get_filterbank_components,
@@ -35,7 +35,7 @@ def test_stitch_one_file():
     output_dir = setup_test_directories("test007")
 
     filenames = [
-        "tests/data/1451758560/1451758560_1451758560_ch109_beam00.fil",
+        data_path("1451758560", "1451758560_1451758560_ch109_beam00.fil"),
     ]
 
     output_filterbank_filename = stitch_filterbank_files(filenames, output_dir)
@@ -49,8 +49,8 @@ def test_stitch_many_files():
     output_dir = setup_test_directories("test007")
 
     filenames = [
-        "tests/data/1451758560/1451758560_1451758560_ch109_beam00.fil",
-        "tests/data/1451758560/1451758560_1451758568_ch109_beam00.fil",
+        data_path("1451758560", "1451758560_1451758560_ch109_beam00.fil"),
+        data_path("1451758560", "1451758560_1451758568_ch109_beam00.fil"),
     ]
 
     _, data1_start_index = get_filterbank_components(filenames[0])

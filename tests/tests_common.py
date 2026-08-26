@@ -22,6 +22,61 @@ DEFAULT_TEST_BASE_DIR = str(Path(tempfile.gettempdir()) / "mwax_mover_testing")
 CONFIG_TOKEN_BASE_DIR = "@TEST_BASE_DIR@"
 CONFIG_TOKEN_BIN_DIR = "@TEST_BIN_DIR@"
 
+# The tests/ directory itself, and the read-only fixture tree inside it.
+#
+# Anchored on this file's own location rather than the process working
+# directory. Fixture paths used to be written as relative literals
+# (data_path("...")), which meant the whole suite only worked when pytest was
+# invoked from the repository root -- running it from anywhere else failed at
+# collection. Anchoring here also decouples the fixture location from where a
+# test module happens to live, which is what allows test modules to be moved
+# into subdirectories mirroring the package layout without rewriting a single
+# fixture path.
+TESTS_DIR = Path(__file__).resolve().parent
+DATA_DIR = TESTS_DIR / "data"
+
+
+def data_path(*parts: str) -> str:
+    """Build an absolute path into the shared tests/data fixture tree.
+
+    Args:
+        *parts: Path components below tests/data, e.g.
+            ``data_path("1391522232", "1391522232_metafits.fits")``.
+
+    Returns:
+        The absolute path as a string. A string rather than a Path because
+        almost every caller passes it straight into production code that takes
+        str paths (os.path.join, open, astropy, mwalib).
+    """
+    return str(DATA_DIR.joinpath(*parts))
+
+
+def obs_data_dir(obs_id: int | str) -> str:
+    """Return the fixture directory for one observation.
+
+    Args:
+        obs_id: The observation ID, which is also the directory name.
+
+    Returns:
+        Absolute path to ``tests/data/<obs_id>``.
+    """
+    return data_path(str(obs_id))
+
+
+def obs_metafits_path(obs_id: int | str) -> str:
+    """Return the metafits fixture for one observation.
+
+    The single most repeated fixture path in the suite, hence its own helper.
+
+    Args:
+        obs_id: The observation ID.
+
+    Returns:
+        Absolute path to ``tests/data/<obs_id>/<obs_id>_metafits.fits``.
+    """
+    return data_path(str(obs_id), f"{obs_id}_metafits.fits")
+
+
 # Stub files created inside the per-test bin directory. The processors under
 # test only check that these paths exist (via os.path.exists) during
 # initialise(); nothing is ever executed or read, so empty files suffice.
@@ -85,7 +140,7 @@ def render_test_config(test_code: str, cfg_filename: str | None = None) -> str:
     if cfg_filename is None:
         cfg_filename = f"{test_code}.cfg"
 
-    template_path = Path("tests") / "data" / test_code / cfg_filename
+    template_path = Path(data_path(test_code, cfg_filename))
     if not template_path.is_file():
         raise FileNotFoundError(f"Test config template not found: {template_path}")
 

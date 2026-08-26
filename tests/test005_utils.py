@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 import requests
-from tests_common import render_test_config
+from tests_common import data_path, obs_data_dir, obs_metafits_path, render_test_config
 
 from mwax_mover import utils, version
 from mwax_mover.utils import (
@@ -68,7 +68,7 @@ def test_version():
 
 def test_validate_filename_valid1():
     """Test that validate_filename() correctly identifies attributes based on filename"""
-    metafits_path = "tests/data/1244973688"
+    metafits_path = obs_data_dir(1244973688)
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -91,7 +91,7 @@ def test_validate_filename_valid1():
 
 def test_validate_filename_valid2():
     """Test that validate_filename() correctly identifies attributes based on filename"""
-    metafits_path = os.path.join(os.getcwd(), "tests/data/1347318488")
+    metafits_path = obs_data_dir(1347318488)
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -114,7 +114,7 @@ def test_validate_filename_valid2():
 
 def test_validate_filename_valid3():
     """Test that validate_filename() correctly identifies attributes based on filename"""
-    metafits_path = os.path.join(os.getcwd(), "tests/data/1220738720")
+    metafits_path = obs_data_dir(1220738720)
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -137,7 +137,7 @@ def test_validate_filename_valid3():
 
 def test_validate_filename_valid4():
     """Test that validate_filename() correctly identifies attributes based on filename"""
-    metafits_path = os.path.join(os.getcwd(), "tests/data/1220738720")
+    metafits_path = obs_data_dir(1220738720)
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -160,7 +160,7 @@ def test_validate_filename_valid4():
 
 def test_validate_filename_valid5():
     """Test that validate_filename() correctly identifies attributes based on filename"""
-    metafits_path = os.path.join(os.getcwd(), "tests/data/1220738720")
+    metafits_path = obs_data_dir(1220738720)
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -183,7 +183,7 @@ def test_validate_filename_valid5():
 
 def test_validate_filename_valid6():
     """Test that validate_filename() correctly identifies attributes based on filename"""
-    metafits_path = os.path.join(os.getcwd(), "tests/data/1328239120")
+    metafits_path = obs_data_dir(1328239120)
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -206,7 +206,7 @@ def test_validate_filename_valid6():
 
 def test_validate_filename_valid7():
     """Test that validate_filename() correctly identifies attributes based on filename"""
-    metafits_path = os.path.join(os.getcwd(), "tests/data/1328239120")
+    metafits_path = obs_data_dir(1328239120)
 
     # Test for a normal MWAX correlator file
     filename = os.path.join(
@@ -235,7 +235,7 @@ def test_get_metafits_values_correlator():
     #
     # Run test
     #
-    is_calibrator, project_id, calib_src = utils.get_metafits_values("tests/data/1347318488/1347318488_metafits.fits")
+    is_calibrator, project_id, calib_src = utils.get_metafits_values(obs_metafits_path(1347318488))
     assert is_calibrator is True
     assert project_id == "G0080"
     assert calib_src == "J063633-204225"
@@ -247,7 +247,7 @@ def test_get_metafits_values_non_cal():
     metafits which is not a calibrator- i.e. it has
     CALIBRAT=False and no CALIBSRC key
     """
-    is_calibrator, project_id, calib_src = utils.get_metafits_values("tests/data/1244973688/1244973688_metafits.fits")
+    is_calibrator, project_id, calib_src = utils.get_metafits_values(obs_metafits_path(1244973688))
     assert is_calibrator is False
     assert project_id == "C001"
     assert calib_src == ""
@@ -256,7 +256,7 @@ def test_get_metafits_values_non_cal():
 def test_scan_for_existing_files_and_add_to_queue():
     """Test we can find files and add to a queue"""
     queue_target = queue.Queue()
-    watch_dir = "tests/data/1244973688"
+    watch_dir = obs_data_dir(1244973688)
     pattern = ".fits"
     recursive = False
 
@@ -276,7 +276,7 @@ def test_scan_for_existing_files_and_add_to_queue():
 def test_scan_for_existing_files_and_add_to_priority_queue():
     """Test we can find files and add to a priority queue"""
     queue_target = queue.PriorityQueue()
-    watch_dir = "tests/data/1244973688"
+    watch_dir = obs_data_dir(1244973688)
     pattern = ".fits"
     recursive = False
     metafits_path = watch_dir
@@ -314,7 +314,7 @@ def test_scan_for_existing_files_and_add_to_priority_queue():
 
 def test_scan_directory():
     """Tests we can get a list of files in a dir"""
-    watch_dir = "tests/data/1244973688"
+    watch_dir = obs_data_dir(1244973688)
     pattern = ".fits"
     recursive = False
 
@@ -341,8 +341,8 @@ def test_get_priority_correlator_calibrator():
     #
 
     priority = utils.get_priority(
-        "tests/data/1347318488/1347318488_20190619100110_ch101_000.fits",
-        "tests/data/1347318488/",
+        data_path("1347318488", "1347318488_20190619100110_ch101_000.fits"),
+        obs_data_dir(1347318488),
         ["D0006"],
         ["C001"],
     )
@@ -359,8 +359,8 @@ def test_get_priority_correlator_high_priority_list():
     #
 
     priority = utils.get_priority(
-        "tests/data/1122979144/1122979144_20190619100110_ch101_000.fits",
-        "tests/data/1122979144/",
+        data_path("1122979144", "1122979144_20190619100110_ch101_000.fits"),
+        obs_data_dir(1122979144),
         ["D0006"],
         ["C001"],
     )
@@ -374,8 +374,8 @@ def test_get_priority_vcs_c001():
     #
 
     priority = utils.get_priority(
-        "tests/data/1347063304/1347063304_1347063304_114.sub",
-        "tests/data/1347063304/",
+        data_path("1347063304", "1347063304_1347063304_114.sub"),
+        obs_data_dir(1347063304),
         ["D0006"],
         ["C001"],
     )
@@ -389,8 +389,8 @@ def test_get_priority_correlator_c001():
     #
 
     priority = utils.get_priority(
-        "tests/data/1244973688/1244973688_20190619100110_ch114_000.fits",
-        "tests/data/1244973688/",
+        data_path("1244973688", "1244973688_20190619100110_ch114_000.fits"),
+        obs_data_dir(1244973688),
         ["D0006"],
         ["C001"],
     )
@@ -404,8 +404,8 @@ def test_get_priority_vcs_g0024():
     #
 
     priority = utils.get_priority(
-        "tests/data/1220738720/1220738720_1220738720_123.sub",
-        "tests/data/1220738720/",
+        data_path("1220738720", "1220738720_1220738720_123.sub"),
+        obs_data_dir(1220738720),
         ["D0006"],
         ["C001"],
     )
@@ -419,8 +419,8 @@ def test_get_priority_metafits_ppd():
     #
 
     priority = utils.get_priority(
-        "tests/data/1328239120/1328239120_metafits_ppds.fits",
-        "tests/data/1328239120/",
+        data_path("1328239120", "1328239120_metafits_ppds.fits"),
+        obs_data_dir(1328239120),
         ["D0006"],
         ["C001"],
     )
@@ -432,7 +432,7 @@ def test_do_checksum_md5():
 
     filename = os.path.join(
         os.getcwd(),
-        "tests/data/1244973688/1244973688_20190619100110_ch114_000.fits",
+        data_path("1244973688", "1244973688_20190619100110_ch114_000.fits"),
     )
 
     numa_node = None
@@ -450,7 +450,7 @@ def test_determine_bucket_acacia():
     """Tests we get the correct bucket and folder given a filename and location"""
     full_filename = os.path.join(
         os.getcwd(),
-        "tests/data/1244973688/1244973688_20190619100110_ch114_000.fits",
+        data_path("1244973688", "1244973688_20190619100110_ch114_000.fits"),
     )
     location = utils.ArchiveLocation.AcaciaIngest
     #
@@ -464,7 +464,7 @@ def test_determine_bucket_banksia():
     """Tests we get the correct bucket and folder given a filename and location"""
     full_filename = os.path.join(
         os.getcwd(),
-        "tests/data/1244973688/1244973688_20190619100110_ch114_000.fits",
+        data_path("1244973688", "1244973688_20190619100110_ch114_000.fits"),
     )
     location = utils.ArchiveLocation.Banksia
     #
@@ -478,7 +478,7 @@ def test_get_bucket_name_from_filename():
     """Test getting a bucket name for a filename"""
     filename = os.path.join(
         os.getcwd(),
-        "tests/data/1244973688/1244973688_20190619100110_ch114_000.fits",
+        data_path("1244973688", "1244973688_20190619100110_ch114_000.fits"),
     )
 
     #

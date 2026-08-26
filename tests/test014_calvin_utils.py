@@ -34,6 +34,7 @@ import pytest
 from astropy import units as u
 from astropy.constants import c as speed_of_light  # ty: ignore[unresolved-import]
 
+from tests_common import obs_metafits_path
 import mwax_mover
 import mwax_mover.mwax_calvin_utils
 from mwax_mover.mwax_calvin_utils import (
@@ -114,7 +115,7 @@ def _make_phase_fits_df(lengths: list[float], pol: str = "XX", flavor: str = "RR
 
 
 def test_estimate_birli_output_bytes():
-    test_metafits = "tests/data/1244973688/1244973688_metafits.fits"
+    test_metafits = obs_metafits_path(1244973688)
     metafits_context = mwalib.MetafitsContext(test_metafits, None)
     calc_bytes: float = mwax_mover.mwax_calvin_utils.estimate_birli_output_bytes(metafits_context, 40, 2.0)
     # Manually calculate the gigabytes
@@ -188,8 +189,8 @@ class TestParseSolutionChannels:
 
 # def test_split_aocal_file_into_coarse_channels_8_and_16_per_file():
 #     in_filenames = [
-#         "tests/data/1186438304/1186438304_ch142-149_solutions.bin",
-#         "tests/data/1186438304/1186438304_ch158-173_solutions.bin",
+#         data_path("1186438304", "1186438304_ch142-149_solutions.bin"),
+#         data_path("1186438304", "1186438304_ch158-173_solutions.bin"),
 #     ]
 #     obsid = 1186438304
 #     base_dir = setup_test_directories("test0014")
@@ -249,7 +250,7 @@ class TestParseSolutionChannels:
 
 
 # def test_split_aocal_file_into_coarse_channels_24_per_file():
-#     in_filename = "tests/data/1451758560/1451758560_solutions.bin"
+#     in_filename = data_path("1451758560", "1451758560_solutions.bin")
 #     base_dir = setup_test_directories("test0014")
 #     out_dir = os.path.join(base_dir, "data/calvin/out_jobs")
 #     chans = [
@@ -291,30 +292,30 @@ class TestParseSolutionChannels:
 #     base_dir = setup_test_directories("test0014")
 #     out_dir = os.path.join(base_dir, "data/calvin/out_jobs")
 #     in_filenames = [
-#         "tests/data/1450212840/1450212840_ch101_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch107_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch113_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch120_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch127_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch134_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch142_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch150_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch158_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch167_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch177_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch187_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch210_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch226_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch58_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch61_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch65_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch69_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch73_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch77_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch81_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch86_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch91_solutions.bin",
-#         "tests/data/1450212840/1450212840_ch96_solutions.bin",
+#         data_path("1450212840", "1450212840_ch101_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch107_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch113_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch120_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch127_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch134_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch142_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch150_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch158_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch167_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch177_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch187_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch210_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch226_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch58_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch61_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch65_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch69_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch73_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch77_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch81_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch86_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch91_solutions.bin"),
+#         data_path("1450212840", "1450212840_ch96_solutions.bin"),
 #     ]
 #     chans = [
 #         58,

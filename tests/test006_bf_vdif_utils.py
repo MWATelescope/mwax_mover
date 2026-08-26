@@ -2,7 +2,7 @@ import os
 import shutil
 
 import pytest
-from tests_common import setup_test_directories
+from tests_common import data_path, obs_metafits_path, setup_test_directories
 
 from mwax_mover.mwax_bf_vdif_utils import stitch_vdif_files_and_write_hdr
 
@@ -24,12 +24,12 @@ def test_stitch_one_file():
     output_dir = setup_test_directories("test006")
 
     filenames = [
-        "tests/data/1454343736/1454343736_1454343736_ch109_beam00.vdif",
+        data_path("1454343736", "1454343736_1454343736_ch109_beam00.vdif"),
     ]
 
     obs_id = os.path.basename(filenames[0])[0:10]
 
-    metafits_filename = f"tests/data/{obs_id}/{obs_id}_metafits.fits"
+    metafits_filename = obs_metafits_path(obs_id)
     output_vdif_filename = ""
     output_hdr_filename = ""
 
@@ -48,13 +48,13 @@ def test_stitch_many_files2():
     output_dir = setup_test_directories("test006")
 
     filenames = [
-        "tests/data/1454343736/1454343736_1454343736_ch109_beam01.vdif",
-        "tests/data/1454343736/1454343736_1454343744_ch109_beam01.vdif",
+        data_path("1454343736", "1454343736_1454343736_ch109_beam01.vdif"),
+        data_path("1454343736", "1454343736_1454343744_ch109_beam01.vdif"),
     ]
 
     obs_id = os.path.basename(filenames[0])[0:10]
 
-    metafits_filename = f"tests/data/{obs_id}/{obs_id}_metafits.fits"
+    metafits_filename = obs_metafits_path(obs_id)
     output_vdif_filename = ""
     output_hdr_filename = ""
 
@@ -79,9 +79,9 @@ def test_stitch_with_target_name_sra_sdec():
     #
     # Note to save space in github we will use an existing vdif file in the repo (not the real one)
     #
-    metafits_filename = "tests/data/1457904016/1457904016_metafits.fits"
-    original_vdif_filename1 = "tests/data/1454343736/1454343736_1454343736_ch109_beam01.vdif"
-    original_vdif_filename2 = "tests/data/1454343736/1454343736_1454343744_ch109_beam01.vdif"
+    metafits_filename = obs_metafits_path(1457904016)
+    original_vdif_filename1 = data_path("1454343736", "1454343736_1454343736_ch109_beam01.vdif")
+    original_vdif_filename2 = data_path("1454343736", "1454343736_1454343744_ch109_beam01.vdif")
 
     new_vdif_filename1 = os.path.join(output_dir, "1457904016_1457904016_ch120_beam01.vdif")
     new_vdif_filename2 = os.path.join(output_dir, "1457904016_1457904024_ch120_beam01.vdif")

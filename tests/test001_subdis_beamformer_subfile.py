@@ -8,13 +8,19 @@ import signal
 import threading
 import time
 
-from tests_common import create_observation_subfiles, render_test_config, setup_test_directories
+from tests_common import (
+    create_observation_subfiles,
+    data_path,
+    obs_metafits_path,
+    render_test_config,
+    setup_test_directories,
+)
 from tests_fakedb import FakeMWAXDBHandler
 
 from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
 
-TEST_METAFITS = "tests/data/1454743816/1454743816_metafits.fits"
-TEST_AOCAL_FILES = [f"tests/data/1454343616/1454343616_256_0032_{c}_calfile.bin" for c in range(109, 109 + 24)]
+TEST_METAFITS = obs_metafits_path(1454743816)
+TEST_AOCAL_FILES = [data_path("1454343616", f"1454343616_256_0032_{c}_calfile.bin") for c in range(109, 109 + 24)]
 
 
 def test_beamformer_subfile():

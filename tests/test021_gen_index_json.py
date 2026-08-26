@@ -1,6 +1,8 @@
 import logging
 import os
 
+from tests_common import data_path
+
 from mwax_mover.mwax_calvin_utils import generate_plot_index_file
 
 logger = logging.getLogger(__name__)
@@ -8,7 +10,7 @@ logger.level = logging.DEBUG
 
 
 def test_generate_plot_file():
-    fit_path = "tests/data/test021/1768401673707300"
+    fit_path = data_path("test021", "1768401673707300")
     out_filename = os.path.join(fit_path, "index.json")
 
     # ensure out_filename is removed before we test

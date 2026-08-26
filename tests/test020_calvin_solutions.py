@@ -21,7 +21,7 @@ import shutil
 from unittest.mock import MagicMock, patch
 
 import pytest
-from tests_common import setup_test_directories
+from tests_common import obs_data_dir, setup_test_directories
 
 from mwax_mover.mwax_calvin_solutions import process_solutions
 
@@ -567,7 +567,7 @@ def test_process_solutions_success_2():
     base_dir = setup_test_directories("test020")
 
     obsid = 1391522232
-    input_path = f"tests/data/{obsid}"
+    input_path = obs_data_dir(obsid)
     output_path = os.path.join(base_dir, "data/calvin/out_jobs")
 
     # Copy the solutions file to output_path so process_solutions can glob it

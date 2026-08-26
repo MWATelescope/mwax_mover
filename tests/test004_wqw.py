@@ -8,7 +8,7 @@ import queue
 import shutil
 import time
 
-from tests_common import setup_test_directories
+from tests_common import obs_metafits_path, setup_test_directories
 
 from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
 from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
@@ -35,7 +35,7 @@ class MyWatchQueueWorker(MWAXWatchQueueWorker):
 def test_wqw():
     base_dir = setup_test_directories("test004")
 
-    metafits_path = "tests/data/1369821496/1369821496_metafits.fits"
+    metafits_path = obs_metafits_path(1369821496)
     assert os.path.exists(metafits_path)
 
     incoming_dir = os.path.join(base_dir, "visdata/incoming")
@@ -68,7 +68,7 @@ class MyPriorityWatchQueueWorker(MWAXPriorityWatchQueueWorker):
 def test_priority_wqw():
     base_dir = setup_test_directories("test004")
 
-    metafits_path = "tests/data/1451758560/1451758560_metafits.fits"
+    metafits_path = obs_metafits_path(1451758560)
     assert os.path.exists(metafits_path)
 
     incoming_dir = os.path.join(base_dir, "visdata/incoming")

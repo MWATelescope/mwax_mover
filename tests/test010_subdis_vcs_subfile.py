@@ -12,6 +12,7 @@ import time
 from tests_common import (
     create_observation_subfiles,
     get_test_bin_dir,
+    obs_metafits_path,
     render_test_config,
     setup_test_directories,
 )
@@ -19,7 +20,7 @@ from tests_fakedb import FakeMWAXDBHandler
 
 from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
 
-TEST_METAFITS = "tests/data/1369821496/1369821496_metafits.fits"
+TEST_METAFITS = obs_metafits_path(1369821496)
 
 
 def test_correlator_config_file():

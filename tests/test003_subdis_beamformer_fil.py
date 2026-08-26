@@ -8,19 +8,19 @@ import signal
 import threading
 import time
 
-from tests_common import render_test_config, setup_test_directories
+from tests_common import data_path, obs_metafits_path, render_test_config, setup_test_directories
 from tests_fakedb import FakeMWAXDBHandler
 
 from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
 
-TEST_METAFITS = "tests/data/1451758560/1451758560_metafits.fits"
+TEST_METAFITS = obs_metafits_path(1451758560)
 
 # Filterbank
 TEST_FIL = [
-    "tests/data/1451758560/1451758560_1451758560_ch109_beam00",
-    "tests/data/1451758560/1451758560_1451758568_ch109_beam00",
-    "tests/data/1451758560/1451758560_1451758560_ch109_beam01",
-    "tests/data/1451758560/1451758560_1451758568_ch109_beam01",
+    data_path("1451758560", "1451758560_1451758560_ch109_beam00"),
+    data_path("1451758560", "1451758560_1451758568_ch109_beam00"),
+    data_path("1451758560", "1451758560_1451758560_ch109_beam01"),
+    data_path("1451758560", "1451758560_1451758568_ch109_beam01"),
 ]
 
 

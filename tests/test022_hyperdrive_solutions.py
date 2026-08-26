@@ -33,6 +33,8 @@ from astropy import units as u
 from astropy.io import fits
 from astropy.constants import c as speed_of_light  # ty: ignore[unresolved-import]
 
+from tests_common import data_path, obs_metafits_path
+
 from mwax_mover.mwax_calvin_utils import Metafits, reject_outliers
 from mwax_mover.mwax_hyperdrive_solutions import (
     ChannelFlagReason,
@@ -43,8 +45,8 @@ from mwax_mover.mwax_hyperdrive_solutions import (
 
 # A real fixture whose filename parse_solution_channels() can parse -- same
 # file used by TestSharedHduHelpersAgreeAcrossCallers in test014.
-SOLUTIONS_PATH = "tests/data/1391522232/1391522232_ch89_solutions.fits"
-METAFITS_PATH = "tests/data/1391522232/1391522232_metafits.fits"
+SOLUTIONS_PATH = data_path("1391522232", "1391522232_ch89_solutions.fits")
+METAFITS_PATH = obs_metafits_path(1391522232)
 
 
 # ===========================================================================

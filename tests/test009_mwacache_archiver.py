@@ -9,7 +9,7 @@ import signal
 import threading
 import time
 
-from tests_common import render_test_config, setup_test_directories
+from tests_common import obs_metafits_path, render_test_config, setup_test_directories
 from tests_fakedb import FakeMWAXDBHandler
 
 from mwax_mover.cli.mwacache_archive_processor import MWACacheArchiveProcessor
@@ -79,7 +79,7 @@ def test_mwacache_archiver_config_file():
 
 def test_mwacache_archiver_metafits_file():
     """Tests that MWACacheArchiver processes a file ok"""
-    TEST_METAFITS = "tests/data/1122979144/1122979144_metafits.fits"
+    TEST_METAFITS = obs_metafits_path(1122979144)
 
     # Setup all the paths
     base_dir = setup_test_directories("test009")
