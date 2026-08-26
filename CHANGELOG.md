@@ -69,6 +69,7 @@
   * `MWAXDBHandler.execute_single_dml_row()` carried its own `@retry` decorator identical to the one on `execute_dml`, which it does nothing but call. The two nested retries multiplied: up to 9 attempts instead of 3, and a worst case of roughly 5 minutes instead of 1. The redundant outer decorator has been removed so the retry policy is defined in one place.
   * `utils.call_webservice()`: `max_retries` ran one more attempt than its name and docstring implied (`while attempt <= max_retries` starting from 0). It now means exactly that many attempts at the whole URL list. **Note this is a small behaviour change:** the default `max_retries=3` now makes 3 attempts rather than 4, and `release_cal_obs` (which passes 1) makes 1 rather than 2 -- that call already sits inside a 60-minute outer retry loop, so it is not weakened in practice. Failed attempts are now also logged individually.
   * `utils.run_giant_squid()`: retry backoff is collapsed to ~0 under pytest. With the defaults the loop slept 10+20+40+80+160 = 310 real seconds before giving up, so a single unit test took over five minutes whenever the giant-squid binary was absent. The retry logic is still exercised; only the wall-clock wait is skipped.
+  * Added fitsid ordering (descending) to the calvin plot upload code and batches so that new fits get uploaded quickly if there is a big backlog.
 
 # 1.9.12 25-Aug-2026
 

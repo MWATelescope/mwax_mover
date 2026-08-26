@@ -56,6 +56,41 @@ logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
 
+# Default number of published fit directories uploaded per pass over a single
+# plot upload path. Uploads run newest-first, and the directory is re-scanned at
+# the start of every pass, so a bounded batch is what allows a fit published
+# moments ago to overtake a backlog rather than queue behind it. With thousands
+# of old fits pending, an unbounded pass would upload all of them before it ever
+# looked at the directory again.
+DEFAULT_PLOT_UPLOAD_MAX_FITS_PER_PASS = 100
+
+
+def fit_dir_sort_key(fit_dir: Path) -> tuple[int, int, str]:
+    """Build a sort key ordering fit directories newest (largest fitid) first.
+
+    Fit directories are named for their fitid, which is a microsecond epoch
+    value (see ``mwax_db.insert_calibration_fits_row``), so a larger fitid is
+    always a more recent fit. Sorting numerically rather than lexicographically
+    means the ordering does not silently depend on every fitid happening to have
+    the same number of digits.
+
+    Any directory whose name is not an integer is not a fit directory. Those
+    sort last, alphabetically, so an unexpected entry can never displace real
+    fits from the head of the batch.
+
+    Args:
+        fit_dir: The fit directory to derive a sort key for. Only its name is
+            used.
+
+    Returns:
+        A tuple suitable for ``list.sort(key=...)``: ``(0, -fitid, "")`` for
+        numerically named directories and ``(1, 0, name)`` for anything else.
+    """
+    try:
+        return (0, -int(fit_dir.name), "")
+    except ValueError:
+        return (1, 0, fit_dir.name)
+
 
 class CalibrationRequest:
     """One row of work read from the calibration_request table."""
@@ -135,6 +170,7 @@ class MWAXCalvinController:
         self.s3_profile: str = ""
         self.s3_bucket: str = ""
         self.plot_upload_interval_secs = 120
+        self.plot_upload_max_fits_per_pass: int = DEFAULT_PLOT_UPLOAD_MAX_FITS_PER_PASS
 
         # Create a stop event handler for the plot uploader thread
         self.plot_uploader_stop_event = threading.Event()
@@ -217,8 +253,9 @@ class MWAXCalvinController:
 
         Every ``self.plot_upload_interval_secs`` seconds, walks each path in
         ``self.plot_upload_paths`` looking for published fit directories, uploads
-        each one's contents to S3, and removes the directory once it is empty.
-        Per-path exponential backoff is applied on failure.
+        the newest ``self.plot_upload_max_fits_per_pass`` of them to S3, and
+        removes each directory once it is empty. Per-path exponential backoff is
+        applied when a pass uploads nothing at all.
 
         A directory is "published" if its name does not start with a dot.
         ``mwax_calvin_utils.upload_plot_files`` assembles each fit in a
@@ -303,11 +340,26 @@ class MWAXCalvinController:
         logger.debug("Plot upload thread completed successfully.")
 
     def upload_published_fit_dirs(self, plot_upload_path: str) -> None:
-        """Upload every published fit directory under a base path, then remove it.
+        """Upload a batch of the newest published fit directories, then remove them.
 
         Each fit directory's contents are moved into ``<bucket>/<fit_dir_name>``
         so the resulting object keys match the URLs written into that fit's
         index.json by ``populate_index_json_entry``.
+
+        Directories are uploaded newest fitid first, and at most
+        ``self.plot_upload_max_fits_per_pass`` of them per call. Both matter when
+        a backlog builds up: fitids are monotonically increasing, so newest-first
+        gets the freshest solutions into S3 without waiting on older ones, and
+        the batch limit bounds how long a pass takes so that a fit published
+        during it is picked up by the next re-scan rather than after the entire
+        backlog has drained.
+
+        A failing fit directory does not abandon the rest of the batch -- with
+        newest-first ordering, one permanently broken directory would otherwise
+        starve every older one indefinitely. The first error is re-raised at the
+        end only if *nothing* in the batch uploaded, which keeps the caller's
+        backoff for a genuine S3 or network outage while stopping a single bad
+        directory from throttling a path that is otherwise working.
 
         A directory is only removed after rclone reports success for it *and*
         the directory is confirmed empty, so a partial upload leaves the
@@ -318,16 +370,18 @@ class MWAXCalvinController:
                 directories, e.g. ``/shared/data/calvin11/calvin/plots``.
 
         Raises:
-            subprocess.CalledProcessError: If rclone exits non-zero for any fit
-                directory. Propagated so the caller can apply backoff to this
-                whole path.
+            subprocess.CalledProcessError: If rclone exits non-zero and no fit
+                directory in the batch uploaded successfully. Propagated so the
+                caller can apply backoff to this whole path.
         """
         base = Path(plot_upload_path)
         if not base.is_dir():
             logger.warning(f"Plot upload path {plot_upload_path} does not exist or is not a directory. Skipping.")
             return
 
-        for fit_dir in sorted(base.iterdir()):
+        candidates: list[Path] = []
+
+        for fit_dir in base.iterdir():
             # Skip staging dirs (and anything else hidden): these are still
             # being written to by a calvin_processor. See upload_plot_files.
             if fit_dir.name.startswith("."):
@@ -338,12 +392,48 @@ class MWAXCalvinController:
                 logger.warning(f"Unexpected file (not a directory) in {plot_upload_path}: {fit_dir}. Skipping.")
                 continue
 
-            transfers, bytes_moved = utils.rclone_move(
-                str(fit_dir),
-                self.s3_profile,
-                self.s3_bucket,
-                dest_subpath=fit_dir.name,
+            candidates.append(fit_dir)
+
+        # Newest fitid first, then take only this pass's batch.
+        candidates.sort(key=fit_dir_sort_key)
+        batch = candidates[: self.plot_upload_max_fits_per_pass]
+
+        if not batch:
+            logger.debug(f"No published fit dirs to upload in {plot_upload_path}")
+            return
+
+        if len(candidates) > len(batch):
+            logger.info(
+                f"{len(candidates)} fit dir(s) pending in {plot_upload_path}."
+                f" Uploading the {len(batch)} newest this pass; the remainder"
+                " follow on subsequent passes."
             )
+
+        first_error: Exception | None = None
+        uploaded_count = 0
+
+        for fit_dir in batch:
+            try:
+                transfers, bytes_moved = utils.rclone_move(
+                    str(fit_dir),
+                    self.s3_profile,
+                    self.s3_bucket,
+                    dest_subpath=fit_dir.name,
+                )
+            except Exception as e:
+                # Keep the first error so the caller can still see a real
+                # failure, but carry on: the next dir may well succeed.
+                if first_error is None:
+                    first_error = e
+
+                logger.warning(
+                    f"Upload failed for {fit_dir}: "
+                    f"{e.stderr.strip() if isinstance(e, subprocess.CalledProcessError) and e.stderr else e}."
+                    " Continuing with the remaining fit dirs in this batch."
+                )
+                continue
+
+            uploaded_count += 1
             logger.info(f"Uploaded {transfers} file(s) ({bytes_moved / 1000.0:.1f} KB) from {fit_dir}")
 
             # rclone move leaves the (now empty) source dir behind. Only remove
@@ -354,6 +444,19 @@ class MWAXCalvinController:
                 logger.debug(f"Removed uploaded fit dir {fit_dir}")
             except OSError as e:
                 logger.warning(f"Not removing {fit_dir}: {e}. Will retry on the next pass.")
+
+        if first_error is not None:
+            if uploaded_count == 0:
+                # Nothing worked, so this looks like a problem with the path or
+                # the S3 endpoint rather than one bad fit dir. Let the caller
+                # back this path off.
+                raise first_error
+
+            logger.warning(
+                f"{len(batch) - uploaded_count} of {len(batch)} fit dir(s) failed to upload from"
+                f" {plot_upload_path}, but {uploaded_count} succeeded, so this path is not being"
+                " backed off. Failed dirs will be retried on the next pass."
+            )
 
     def main_loop_handler(self):
         """Handle a single iteration of the main control loop.
@@ -1023,6 +1126,24 @@ class MWAXCalvinController:
         self.plot_upload_interval_secs: int = int(
             utils.read_config(config, "plots upload", "plot_upload_interval_secs")
         )
+
+        # Optional: how many fit dirs to upload per pass over each plot upload
+        # path. Left optional so existing config files keep working unchanged.
+        if config.has_option("plots upload", "plot_upload_max_fits_per_pass"):
+            self.plot_upload_max_fits_per_pass = int(
+                utils.read_config(config, "plots upload", "plot_upload_max_fits_per_pass")
+            )
+
+            if self.plot_upload_max_fits_per_pass < 1:
+                logger.error(
+                    "plot_upload_max_fits_per_pass must be at least 1, got"
+                    f" {self.plot_upload_max_fits_per_pass}. Quitting."
+                )
+                sys.exit(1)
+        else:
+            self.plot_upload_max_fits_per_pass = DEFAULT_PLOT_UPLOAD_MAX_FITS_PER_PASS
+
+        logger.info(f"Uploading up to {self.plot_upload_max_fits_per_pass} fit dir(s) per pass, newest fitid first.")
 
         # Setup the MWA ASVO Helper
         self.mwax_asvo_helper.initialise(
