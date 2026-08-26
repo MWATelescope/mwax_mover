@@ -12,26 +12,3 @@ def get_mwax_mover_version_string() -> str:
         The package version as a string (e.g., "1.2.3").
     """
     return _get_version("mwax_mover")
-
-
-def get_pmwax_mover_version_number() -> tuple[int, int, int]:
-    """Get the version number of mwax_mover as a tuple.
-
-    Returns:
-        A tuple of (major, minor, patch) version numbers.
-
-    Raises:
-        Exception: If the version string cannot be parsed.
-    """
-    version = get_mwax_mover_version_string()
-    try:
-        return (
-            int(version.split(".")[0]),
-            int(version.split(".")[1]),
-            int(version.split(".")[2]),
-        )
-    except Exception as catch_all_exception:
-        raise Exception(
-            f"Unabled to determine mwax_mover version: Got {version} which"
-            f" could not be parsed. Error: {catch_all_exception}"
-        ) from catch_all_exception

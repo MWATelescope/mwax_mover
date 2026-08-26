@@ -1,9 +1,15 @@
 """Generate the illustrative plots used in CALVIN.md.
 
 Uses synthetic, clearly-not-real data, but runs it through the actual
-pipeline functions (fit_phase_line, iterative_poly_clip, reject_outliers)
+pipeline functions (fit_phase_line, iterative_poly_clip_batch, reject_outliers)
 from mwax_calvin_utils so the plots reflect real algorithm behaviour, not
 just a hand-drawn approximation of it.
+
+NOTE: uses iterative_poly_clip_batch, not the per-tile iterative_poly_clip,
+because the batch version is the one the production pipeline actually calls
+(see HyperfitsSolutionGroup.flag_amplitude_outliers). The two differ slightly
+in their zero-MAD handling, so illustrating with the per-tile version could
+show behaviour the pipeline does not have.
 
 Run from the repo root: python3 docs/img/make_illustrations.py
 """
@@ -21,7 +27,7 @@ sys.path.insert(0, "src")
 
 from mwax_mover.mwax_calvin_utils import (
     fit_phase_line,
-    iterative_poly_clip,
+    iterative_poly_clip_batch,
     reject_outliers,
 )
 
@@ -32,9 +38,9 @@ plt.rcParams.update({"font.size": 11, "figure.dpi": 130})
 
 
 # ---------------------------------------------------------------------------
-# Step 3a: phase-vs-frequency, good tile vs. outlier (wrong-delay) tile
+# Step 6a: phase-vs-frequency, good tile vs. outlier (wrong-delay) tile
 # ---------------------------------------------------------------------------
-def step3a_phase_fits():
+def step6a_phase_fits():
     n_chan = 200
     freqs_hz = np.linspace(150e6, 180e6, n_chan)
     weights = np.ones(n_chan)
@@ -94,15 +100,15 @@ def step3a_phase_fits():
 
     fig.suptitle("Step 3 — phase-vs-frequency delay fit: good tile vs. outlier tile (illustrative data)")
     fig.tight_layout()
-    fig.savefig(f"{OUT}/step3a_phase_fit_example.png", bbox_inches="tight")
+    fig.savefig(f"{OUT}/step6a_phase_fit_example.png", bbox_inches="tight")
     plt.close(fig)
     return fit_good, fit_bad
 
 
 # ---------------------------------------------------------------------------
-# Step 3b: population scatter of chi2dof with median/MAD threshold, outlier tile marked
+# Step 6b: population scatter of chi2dof with median/MAD threshold, outlier tile marked
 # ---------------------------------------------------------------------------
-def step3b_population():
+def step6b_population():
     n_tiles = 128
     # Most tiles cluster near chi2dof ~ 1 with normal-ish scatter.
     chi2dof = np.abs(rng.normal(1.0, 0.25, n_tiles))
@@ -110,7 +116,7 @@ def step3b_population():
 
     # Two illustrative bad tiles, well above the robust threshold. These
     # are independent, hand-picked illustrative values -- not required to
-    # numerically match step3a_phase_fits's "Tile 057" example, which is
+    # numerically match step6a_phase_fits's "Tile 057" example, which is
     # deliberately a lower-noise case chosen so its fitted delay line
     # stays visually clean (no within-band wrap).
     outlier_idx = [56, 91]
@@ -132,7 +138,7 @@ def step3b_population():
     ax.scatter(tile_ids[bad], chi2dof[bad], s=45, color="tab:red", zorder=3, label="Flagged (phase outlier)")
     ax.axhline(threshold, color="black", ls="--", lw=1.2, label=f"median + 3×MAD threshold ({threshold:.2f})")
     ax.axhline(median, color="grey", ls=":", lw=1, label=f"population median ({median:.2f})")
-    for idx, label in zip(outlier_idx, outlier_labels):
+    for idx, label in zip(outlier_idx, outlier_labels, strict=True):
         ax.annotate(
             label,
             (tile_ids[idx], chi2dof[idx]),
@@ -144,7 +150,7 @@ def step3b_population():
     ax.set_title("Step 3 — population outlier test across all tiles (illustrative data)")
     ax.legend(loc="upper left", fontsize=8)
     fig.tight_layout()
-    fig.savefig(f"{OUT}/step3b_population_outlier_test.png", bbox_inches="tight")
+    fig.savefig(f"{OUT}/step6b_population_outlier_test.png", bbox_inches="tight")
     plt.close(fig)
 
 
@@ -164,10 +170,13 @@ def step4_amplitude_outliers():
     spike_channels = [40, 41, 140, 141, 142, 250]
     gx_amp[spike_channels] += rng.uniform(0.35, 0.55, len(spike_channels))
 
-    initial_valid = np.ones(n_chan, dtype=bool)
-    valid, _residual, fit, mad, med = iterative_poly_clip(
-        chan_idx, gx_amp, degree=2, residual_threshold=10.0, initial_valid=initial_valid
+    # iterative_poly_clip_batch works on a batch of tiles, so present this
+    # single illustrative trace as a batch of one and unwrap the results.
+    initial_valid = np.ones((1, n_chan), dtype=bool)
+    valid_b, _residual_b, fit_b, mad_b, med_b = iterative_poly_clip_batch(
+        chan_idx, gx_amp[np.newaxis, :], degree=2, residual_threshold=10.0, initial_valid=initial_valid
     )
+    valid, fit, mad, med = valid_b[0], fit_b[0], mad_b[0], med_b[0]
 
     band_lower = fit + med - 10.0 * mad
     band_upper = fit + med + 10.0 * mad
@@ -198,7 +207,7 @@ def step4_amplitude_outliers():
 
 
 if __name__ == "__main__":
-    step3a_phase_fits()
-    step3b_population()
+    step6a_phase_fits()
+    step6b_population()
     step4_amplitude_outliers()
     print("Wrote illustrations to", OUT)

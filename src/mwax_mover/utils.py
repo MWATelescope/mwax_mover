@@ -1,7 +1,7 @@
 """Shared utility functions, enumerations, and helper classes for mwax_mover.
 
-Key enumerations: MWAXSubfileDistirbutorMode, CorrelatorMode, MWADataFileType,
-ArchiveLocation. Key classes: ValidationData (filename validation result).
+Key enumerations: CorrelatorMode, MWADataFileType, ArchiveLocation.
+Key classes: ValidationData (filename validation result).
 Key functions: validate_filename(), metafits creation/reading, MD5 checksumming,
 PSRDADA header parsing, Redis-based beamformer signalling, UDP multicast sending,
 and config file helpers (read_config, read_optional_config, read_config_list).
@@ -17,7 +17,6 @@ import os
 import queue
 import random
 import re
-import shutil
 import socket
 import struct
 import subprocess
@@ -223,6 +222,14 @@ class ValidationData:
 
 
 class ArchiveLocation(Enum):
+    """Where a data file is (or should be) archived at Pawsey.
+
+    The integer values are the ones stored in the MWA metadata database's
+    data_files.remote_archived location column, so they must not be renumbered.
+    DMF and Versity are defined for historical/database completeness but are not
+    implemented by determine_bucket().
+    """
+
     Unknown = 0
     DMF = 1
     AcaciaIngest = 2
@@ -304,12 +311,13 @@ def validate_filename(
     file_ext_part: str = ""
 
     # 1. Is there an extension?
-    split_filename = os.path.splitext(filename)
-    if len(split_filename) == 2:
-        file_name_part = os.path.basename(split_filename[0])
-        file_ext_part = split_filename[1]
-    else:
-        # Error no extension
+    # NOTE: this used to test `len(os.path.splitext(filename)) == 2`, which is
+    # always true (splitext always returns a 2-tuple), so the "no extension"
+    # branch was unreachable and such filenames fell through to be reported as
+    # "Unknown file extension " by step 3 instead. Test the extension itself.
+    file_name_part, file_ext_part = os.path.splitext(filename)
+    file_name_part = os.path.basename(file_name_part)
+    if not file_ext_part:
         valid = False
         validation_error = "Filename has no extension- ignoring"
 
@@ -329,7 +337,7 @@ def validate_filename(
             filetype_id = MWADataFileType.MWAX_VOLTAGES.value
         elif file_ext_part.lower() == ".fits":
             # Could be metafits (e.g. 1316906688_metafits_ppds.fits) or
-            # visibilitlies
+            # visibilities
             if file_name_part[10:] == "_metafits_ppds" or file_name_part[10:] == "_metafits":
                 filetype_id = MWADataFileType.MWA_PPD_FILE.value
             else:
@@ -441,7 +449,7 @@ def validate_filename(
         # Obtain a lock so we can only do this inside one thread
         with metafits_file_lock:
             if not os.path.exists(metafits_filename):
-                logger.info(f"Metafits file {metafits_filename} not found. Atempting to download it")
+                logger.info(f"Metafits file {metafits_filename} not found. Attempting to download it")
                 try:
                     download_metafits_file(obs_id, metafits_path)
                 except requests.RequestException as download_exception:
@@ -1139,34 +1147,6 @@ def get_ip_address(ifname: str) -> str:
     )
 
 
-def get_primary_ip_address() -> str:
-    """
-    Return the primary IPv4 address of this host.
-
-    Resolves the fully-qualified domain name of the host and returns the
-    corresponding IP address.
-
-    Returns:
-        The primary IPv4 address as a dotted-decimal string.
-    """
-    return socket.gethostbyname(socket.getfqdn())
-
-
-def get_disk_space_bytes(path: str) -> tuple[int, int, int]:
-    """
-    Return disk usage statistics for the filesystem containing ``path``.
-
-    Args:
-        path: Any path on the filesystem to query (file or directory).
-
-    Returns:
-        A named tuple ``(total, used, free)`` with values in bytes, as
-        returned by ``shutil.disk_usage``.
-    """
-    # Get disk space: total, used and free
-    return shutil.disk_usage(path)
-
-
 def do_checksum_md5(full_filename: str, numa_node: int | None, timeout: int) -> str:
     """
     Compute the MD5 checksum of a file by running the system ``md5sum`` command.
@@ -1359,9 +1339,11 @@ def inject_subfile_header(subfile_filename: str, key_value_pairs: str):
 
 def inject_beamformer_headers(subfile_filename: str, beamformer_settings: str):
     """
-    Append beamformer settings to the existing PSRDADA subfile header.
+    Write beamformer settings into a PSRDADA subfile header.
 
     A thin wrapper around ``inject_subfile_header`` for the beamformer use case.
+    NOTE: despite the name, this OVERWRITES the last line of the existing header
+    rather than appending to it -- see inject_subfile_header.
 
     Args:
         subfile_filename: Path to the ``.sub`` subfile to modify in place.
@@ -1425,11 +1407,16 @@ def read_subfile_values(filename: str, keys: list[str]) -> dict:
         any keyword not found in the header.
     """
     subfile_values = {}
-    found = 0
 
     # Create the dict with None values for all keys
     for key in keys:
         subfile_values[key] = None
+
+    # Track which keys we have actually resolved. NOTE: this used to be a plain
+    # counter incremented on every matching line, so a keyword appearing twice
+    # in the header counted twice and could satisfy the early exit below before
+    # every requested key had been seen.
+    remaining = set(keys)
 
     with open(filename, "rb") as subfile:
         subfile_text = subfile.read(PSRDADA_HEADER_BYTES).decode()
@@ -1443,11 +1430,11 @@ def read_subfile_values(filename: str, keys: list[str]) -> dict:
                 keyword = split_line[0].strip()
                 value = split_line[1].strip()
 
-                if keyword in keys:
+                if keyword in remaining:
                     subfile_values[keyword] = value
-                    found += 1
+                    remaining.discard(keyword)
 
-                    if found == len(keys):
+                    if not remaining:
                         # Exit loop early if we have all the values
                         break
 
@@ -1493,7 +1480,7 @@ def write_mock_subfile_from_header(output_filename, header):
     remainder_len = 4096 - len(header)
     padding = [0x0 for _ in range(remainder_len)]
     assert len(padding) == remainder_len
-    # add 255 bytes of data to this subfile
+    # add 256 bytes of data to this subfile
     data_padding = [x for x in range(256)]
     assert len(data_padding) == 256
 
@@ -1598,35 +1585,35 @@ def should_project_be_archived(project_id: str) -> bool:
 
 
 def call_webservice(
-    obs_id: int, url_list: list[str], data, max_retries: int = 3, timeout: int = 30
+    obs_id: int,
+    url_list: list[str],
+    data,
+    max_retries: int = 3,
+    timeout: int = 30,
+    method: str = "GET",
 ) -> requests.Response:
     """
     Call a list of MWA web service URLs in order, retrying on transient failures.
 
     Iterates through ``url_list`` on each attempt, returning immediately on an
-    HTTP 200 response. HTTP 4xx responses are treated as permanent failures and
-    are not retried.
-    All other failures (non-200 status codes, network exceptions) cause the next
-    URL to be tried; if all URLs are exhausted the attempt fails and tenacity
-    will retry the entire sequence up to ``max_retries`` times.
-
-    Note: With the default arguments (``max_retries=10``, ``wait=30``) this
-    function may block for up to ~5 minutes before raising.
+    HTTP 200 response. Any other outcome (non-200 status code, network
+    exception) causes the next URL to be tried; if all URLs are exhausted the
+    attempt fails and the whole sequence is retried up to ``max_retries`` times.
 
     Args:
         obs_id: The MWA observation ID, used only for log messages.
-        url_list: Ordered list of URLs to try. Each must accept a GET request
-            with optional ``data`` parameters.
-        data: Query parameters to pass to ``requests.get()``, or None.
-        max_retries: Maximum number of retry attempts via tenacity. Defaults to 10.
+        url_list: Ordered list of URLs to try.
+        data: Parameters to pass to the request, or None.
+        max_retries: Maximum number of retry attempts. Defaults to 3.
         timeout: Timeout to get a response from the server. Defaults to 30.
+        method: HTTP method to use, "GET" or "POST". Defaults to "GET".
+            Endpoints which change state (rather than just reading it) are
+            POST-only, so callers of those must pass "POST".
 
     Returns:
         The first successful ``requests.Response`` object (HTTP status 200).
 
     Raises:
-        Exception: If any URL returns an HTTP 4xx response (permanent error,
-            not retried).
         requests.RequestException: If all URLs fail on every attempt across
             all retries.
     """
@@ -1647,7 +1634,7 @@ def call_webservice(
             logger.debug(f"{obs_id}: trying with {url} with data ({'' if data is None else data})")
 
             try:
-                response = requests.get(url, data, timeout=timeout)
+                response = requests.request(method, url, data=data, timeout=timeout)
 
                 if response.status_code == 200:
                     logger.debug(f"{obs_id}: returned 200 (success)")
@@ -1672,19 +1659,24 @@ def call_webservice(
 
     if max_retries <= 0:
         raise ValueError("max_retries must be >=1")
-    attempt = 0
+
     err: Exception = Exception()
 
-    while attempt <= max_retries:
-        attempt += 1
+    # NOTE: this loop used to be `attempt = 0; while attempt <= max_retries`,
+    # which ran max_retries + 1 times -- one more than the parameter name and
+    # docstring imply. Each iteration already tries every URL in url_list, so
+    # max_retries now means exactly that many attempts at the whole list.
+    for attempt in range(1, max_retries + 1):
         try:
-            return_value = call_webservice_inner(obs_id, url_list, data)
-            return return_value
+            return call_webservice_inner(obs_id, url_list, data)
         except Exception as e:
             # Store the exception in case this is the last attempt
             err = e
+            if attempt < max_retries:
+                logger.warning(f"{obs_id}: attempt {attempt}/{max_retries} failed ({e}). Retrying.")
 
     # If we got here we ran out of attempts
+    logger.error(f"{obs_id}: all {max_retries} attempt(s) failed.")
     raise err
 
 
@@ -1772,7 +1764,7 @@ def get_data_files_with_hostname_for_obsid_from_webservice(
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
 def remove_file(filename: str, raise_error: bool) -> bool:
     """
-    Delete a file from the filesystem, with up to 5 automatic retries.
+    Delete a file from the filesystem, with up to 3 automatic attempts.
 
     Retries are handled by tenacity with a 10-second fixed wait between
     attempts. Retries only occur when ``raise_error`` is True and the deletion
@@ -2021,52 +2013,6 @@ def push_message_to_redis(redis_host: str, redis_queue_key: str, message_data):
         attempt += 1
 
 
-def copy_subfile_to_disk_cp(
-    filename: str,
-    numa_node: int,
-    destination_path: str,
-    timeout: int,
-    destination_filename: str = ".",
-) -> bool:
-    """
-    Copy a subfile to a destination directory using the system ``cp`` command.
-
-    .. deprecated::
-        Replaced by ``copy_subfile_to_disk_dd()``. Retained for reference.
-
-    Args:
-        filename: Full path to the source subfile.
-        numa_node: NUMA node to pin the subprocess to, or None for no pinning.
-        destination_path: Destination directory path.
-        timeout: Maximum number of seconds to wait for the command to complete.
-        destination_filename: Destination filename within ``destination_path``.
-            Defaults to ``'.'`` (i.e. preserve the source filename).
-
-    Returns:
-        True if ``cp`` exited successfully, False otherwise.
-    """
-    logger.info(f"{filename}- Copying file into {destination_path}")
-
-    command = f"cp {filename} {destination_path}/{destination_filename}"
-
-    start_time = time.time()
-    retval, stdout = mwax_command.run_command_ext(command, numa_node, timeout, False)
-    elapsed = time.time() - start_time
-
-    if retval:
-        logger.info(
-            f"{filename}- Copying file into"
-            f" {destination_path}/{destination_filename} was successful"
-            f" (took {elapsed:.3f} secs)."
-        )
-    else:
-        logger.error(
-            f"{filename}- Copying file into {destination_path}/{destination_filename} failed with error {stdout}"
-        )
-
-    return retval
-
-
 def copy_subfile_to_disk_dd(
     filename: str,
     numa_node: int,
@@ -2086,8 +2032,8 @@ def copy_subfile_to_disk_dd(
     Uses ``oflag=direct`` and ``iflag=count_bytes`` for efficient I/O, and logs
     the transfer rate in GB/sec on success.
 
-    Note: Unlike ``copy_subfile_to_disk_cp``, ``destination_filename`` must be
-    an actual filename — ``dd`` does not accept ``'.'`` as a destination.
+    Note: ``destination_filename`` must be an actual filename — ``dd`` does not
+    accept ``'.'`` as a destination.
 
     Args:
         filename: Full (or relative) path to the source subfile.
@@ -2103,7 +2049,10 @@ def copy_subfile_to_disk_dd(
     """
     logger.debug(f"{filename}- Copying first {bytes_to_write} bytes of file into {destination_path}")
 
-    command = f"dd if={filename} of={destination_path}/{destination_filename} bs=4M oflag=direct iflag=count_bytes count={bytes_to_write}"
+    command = (
+        f"dd if={filename} of={destination_path}/{destination_filename}"
+        f" bs=4M oflag=direct iflag=count_bytes count={bytes_to_write}"
+    )
 
     start_time = time.time()
     retval, stdout = mwax_command.run_command_ext(command, numa_node, timeout, False)
@@ -2139,19 +2088,6 @@ def running_under_pytest() -> bool:
     """
     # Returns True if we are running as part of pytest
     return ("PYTEST_CURRENT_TEST" in os.environ) or ("pytest" in sys.modules)
-
-
-def get_gbps_from_elapsed(size_gigabytes: float, elapsed_seconds: float) -> float:
-    """Calculate throughput in Gbps.
-
-    Args:
-        size_gigabytes: Transfer size in gigabytes.
-        elapsed_seconds: Elapsed time in seconds.
-
-    Returns:
-        Throughput in Gbps, or 0.0 if elapsed time is zero.
-    """
-    return (size_gigabytes * 8) / elapsed_seconds if elapsed_seconds > 0 else 0.0
 
 
 def get_gbps(size_gigabytes: float, start_time: float) -> float:
@@ -2206,6 +2142,13 @@ def run_giant_squid(
     for attempt in range(max_retries + 1):
         if attempt > 0:
             delay = retry_delay_seconds * (2 ** (attempt - 1)) + random.uniform(0, 1)
+            # Under pytest, collapse the wait. With the defaults this loop
+            # otherwise sleeps 10+20+40+80+160 = 310 real seconds before giving
+            # up, which made a single unit test take over five minutes whenever
+            # the giant-squid binary was absent. The retry *logic* is still
+            # exercised; only the wall-clock wait is skipped.
+            if running_under_pytest():
+                delay = 0.01
             logger.warning(
                 f"run_giant_squid: retry {attempt}/{max_retries} after {delay:.1f}s (last error: {last_exception})"
             )
@@ -2271,7 +2214,7 @@ def extract_tar(tar_filename: str, dest_path: str) -> None:
     using the 'data' filter to reject unsafe paths (absolute paths,
     '../' traversal, symlinks pointing outside the destination).
 
-    NOTE: tar.extractall() sliently overwrites existing files.
+    NOTE: tar.extractall() silently overwrites existing files.
 
     For our purposes this is fine so I don't care, but be warned!
 
@@ -2414,75 +2357,6 @@ def rclone_move(
 
     # pass back transfers, transferred_bytes
     return transfers, bytes_moved
-
-
-# def rclone_copy(
-#     path: str,
-#     filenames_no_path: list[str],
-#     profile: str,
-#     bucket: str,
-# ) -> tuple[int, int]:
-#     """Run rclone copy files to an S3 bucket destination.
-
-#     Args:
-#         path: local directory that `filenames` lives in
-#         filenames: List of local files to copy (no directories/paths).
-#         profile: The rclone profile to use (see rclone.conf).
-#         bucket: Destination bucket name.
-
-#     Returns:
-#         tuple of transfers and bytes_transferred
-
-#     Raises:
-#         subprocess.CalledProcessError: If rclone exits with a non-zero return code.
-#     """
-#     dest = f"{profile}:{bucket}"
-#     cmd = [
-#         "rclone",
-#         "copy",
-#         path,
-#         "-v",  # This is needed to get any json output
-#         "--use-json-log",  # structured JSON lines on stderr
-#         "--stats",
-#         "1h",  # suppress periodic stats, only emit at end
-#     ]
-#     # append each filename
-#     for f in filenames_no_path:
-#         cmd.append("--include")
-#         cmd.append(os.path.basename(f))
-
-#     # now append the destination
-#     cmd.append(dest)
-#     logger.debug(f"Running rclone: {' '.join(cmd)}")
-
-#     result = subprocess.run(cmd, capture_output=True, text=True)
-
-#     #  get rclone stats - skip if we hit an error
-#     try:
-#         stats = parse_rclone_stats(result.stderr)
-#         transfers = stats.get("transfers", 0)
-#         bytes_copied = 0
-#         if transfers > 0:
-#             bytes_copied = stats.get("bytes", 0)
-#             elapsed = stats.get("elapsedTime", 0.0)
-#             logger.info(
-#                 f"rclone moved {transfers} file(s) ({bytes_copied / 1000.0:.1f} KB) in {elapsed:.1f}s",
-#             )
-#         else:
-#             logger.debug("rclone: nothing to copy")
-#     except Exception:
-#         bytes_copied = 0
-#         transfers = 0
-#         logger.exception("Error getting stats from rclone. Skipping.")
-
-#     if result.returncode != 0:
-#         raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
-
-#     if result.stdout:
-#         logger.debug(f"rclone stdout: {result.stdout.strip()}")
-
-#     # pass back transfers, transferred_bytes
-#     return transfers, bytes_copied
 
 
 def extract_channels_from_filename(filename: str) -> dict | None:

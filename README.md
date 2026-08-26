@@ -4,13 +4,22 @@ A suite of command line tools which are part of the MWAX correlator for the MWA.
 
 The `mwax_mover` suite manages data ingestion, distribution, archiving, and near-realtime calibration for the **MWAX correlator** — part of the **Murchison Widefield Array (MWA)** radio telescope at the Murchison Radio-observatory (MRO) in Western Australia.
 
-Five executable command line tools:
+Five long-running services:
 
 * **mwax_mover** - a simple command line tool to watch a directory and execute an arbitrary command on each new file.
 * **mwax_subfile_distributor** - the main real-time data handling engine of the MWAX correlator and beamformer. Responsible for sending new subobservations to the correlator, beamformer or to disk; and archiving subfiles or correlated visibilities to the mwacache servers. Output from the beamformer gets sent to another host running FREDDA (FRB detection pipeline). FREDDA can then signal this process to dump subfiles to disk if a detection is made.
 * **mwacache_archiver** - runs on the mwacache servers at Curtin. Monitors for new files sent from MWAX servers and then sends them to Pawsey's Long Term Storage and updates the MWA metadata db to confirm they were archived.
 * **mwax_calvin_controller** - runs on the Calvin SLURM cluster at the MRO. MWAX servers keep any FITS files from calibrator observations in a `cal_outgoing` directory. The mwax_calvin_controller detects a new calibration is required and then submits a SLURM job to the cluster which runs the mwax_calvin_processor.
 * **mwax_calvin_processor** - runs on a Calvin HPC node when SLURM commands it, copies the calibrator visibility files from all of the MWAX hosts, then performs calibration, uploading the solution to the MWA database. Once completed, the calvin host calls `release_cal_obs` on each of the MWAX host's web service endpoints which then tells calvin to either move the files to the vis_outgoing dir for archiving or to the dont_archive directory.
+
+Plus these command line utilities, for diagnostics and one-off maintenance:
+
+* **cal_utils** - runs the same flagging/plotting pipeline as mwax_calvin_processor against solution file(s) you already have, without touching the database. Useful for investigating a fit or trying different thresholds. See CALVIN.md.
+* **update_calvin_plots_and_index** - regenerates the plots and `index.json` for fits which have already been processed, and stages them for upload.
+* **generate_index_json** - builds the `index.json` manifest for a single fit directory.
+* **fits_inspect** - prints the header keys and data of a given HDU in any FITS file.
+* **print_metafits_info** - prints the fine and coarse channel layout of a metafits file.
+* **vdif_cat** - stitches beamformer VDIF subobservation files into complete observation files.
 
 ## Installing
 
@@ -30,6 +39,29 @@ $ source .venv/bin/activate
 # Now run a command line tool e.g.
 $ mwax_subfile_distributor --help
 ```
+
+## Developing
+
+```bash
+# Enable the ruff format pre-commit hook (once per clone)
+$ uv run pre-commit install
+
+# The checks CI runs, which you can run locally before pushing:
+$ uv run ruff format --check src/ tests/   # blocking in CI
+$ uv run ty check src/                     # blocking in CI
+$ uv run pytest                            # blocking in CI
+$ uv run ruff check .                      # informational in CI (for now)
+```
+
+CI (`.github/workflows/ci.yml`) runs the above on every pull request and on
+pushes to `main`, against Python 3.12 and 3.13.
+
+Tests that need network access or real external binaries are marked
+`integration` and are deselected by default. Run them explicitly with
+`uv run pytest -m integration`.
+
+The test suite creates its scratch directories under the system temp directory.
+Set `MWAX_MOVER_TEST_DIR` to put them somewhere else.
 
 ---
 
@@ -169,25 +201,34 @@ start()
 ### Interacting with mwax_subfile_distributor via Web Services
 
 ```bash
-# Example call:
-http://host:port/command[?param1&param2]
+# Read-only endpoints answer GET:
+curl http://host:port/status
+
+# Everything else changes state and is POST-only:
+curl -X POST "http://host:port/command[?param1&param2]"
 ```
 
-Web service commands:
+Web service commands. **`/status` is the only endpoint that accepts GET**; every
+other endpoint below changes state and answers `POST` only, so that an
+accidental GET (a crawler, a link checker, an over-eager monitoring probe)
+cannot stop the correlator or dump the voltage buffer. A GET to any of them
+returns `405 Method Not Allowed`.
 
-* /status
+* /status `[GET]`
   * Reports status of all processes in JSON format
-* /pause_archiving
+* /shutdown `[POST]`
+  * Shuts the processor down.
+* /pause_archiving `[POST]`
   * Pauses all archiving processes in order to reduce disk contention. (This is called automatically whenever a
   MWAX_VCS observation is running, if in CORRELATOR mode)
-* /resume_archiving
+* /resume_archiving `[POST]`
   * Resuming archiving processes. (This is called automatically once the correlator is no longer running in
   MWAX_VCS mode)
-* /dump_voltages?start=X&end=X&trigger_id=X
+* /dump_voltages?start=X&end=X&trigger_id=X `[POST]`
   * This will pause archiving and rename all *.free subfiles to *.keep, add the trigger_id to the subfile header,
   then write the .keep files to disk. Once written successfully, all *.keep files are renamed back to *.free so
   mwax_u2s can continue to use them. This webservice call is generally triggered by the M&C system.
-* /release_cal_obs?obs_id=X
+* /release_cal_obs?obs_id=X `[POST]`
   * This will be called by a calvin server when it has finished calibration of an obs_id. It triggers the MWAX
     server to release the visibility file(s) for that obs_id so they can be archived.
 
@@ -602,12 +643,12 @@ A reference for all Python modules in `src/mwax_mover/`.
 Module-level constants only. Defines the `__FILE__` and `__FILENOEXT__` token strings used for command substitution, and the three watch-mode string constants (`WATCH_DIR_FOR_NEW`, `WATCH_DIR_FOR_RENAME`, `WATCH_DIR_FOR_RENAME_OR_NEW`).
 
 **`version.py`**
-Provides `get_mwax_mover_version_string()` and `get_pmwax_mover_version_number()`. Reads the installed package version via `importlib_metadata`.
+Provides `get_mwax_mover_version_string()`, which reads the installed package version via the stdlib `importlib.metadata`.
 
 ### Database
 
 **`mwax_db.py`** — `MWAXDBHandler`
-Wraps a `psycopg` + `psycopg_pool` connection pool to a PostgreSQL database. Provides `select_one_row_postgres`, `select_many_rows_postgres`, `execute_single_dml_row`, and `execute_dml`, all decorated with `tenacity` retry logic for transient connection failures. Also contains all domain-specific query functions used by the rest of the codebase (e.g. `insert_data_file_row`, `get_unattempted_calsolution_requests`, `update_calibration_request_slurm_status`, etc.).
+Wraps a `psycopg` + `psycopg_pool` connection pool to a PostgreSQL database. Provides `select_one_row_postgres`, `select_many_rows_postgres`, `execute_single_dml_row`, and `execute_dml`, all decorated with `tenacity` retry logic for transient connection failures. Also contains all domain-specific query functions used by the rest of the codebase (e.g. `insert_data_file_row`, `get_unattempted_calibration_requests`, `update_calibration_request_slurm_status`, etc.).
 
 ### Command Execution
 
@@ -621,10 +662,9 @@ Thin wrappers around `subprocess`:
 
 **`utils.py`**
 Broad utility module. Key enums and classes:
-- `MWAXSubfileDistirbutorMode` — `UNKNOWN`, `BEAMFORMER`, `CORRELATOR`.
 - `CorrelatorMode` — all MWAX operating modes (`MWAX_CORRELATOR`, `MWAX_VCS`, `MWAX_BEAMFORMER`, `MWAX_BUFFER`, etc.) with static helpers `is_correlator()`, `is_vcs()`, `is_beamformer()`, etc.
 - `MWADataFileType` — maps file types to their MWA metadata database IDs (voltages, visibilities, VDIF, filterbank, PPD, etc.).
-- `ArchiveLocation` — Pawsey LTS destinations (`AcaciaIngest`, `Banksia`, `AcaciaMWA`).
+- `ArchiveLocation` — Pawsey LTS destinations (`AcaciaIngest`, `Banksia`, `AcaciaMWA`), plus `Unknown` and the unimplemented `DMF`.
 - `ValidationData` — result struct from `validate_filename()`, containing `obs_id`, `project_id`, `filetype_id`, `calibrator` flag, and `valid`.
 
 Key functions include filename validation, metafits creation/reading, MD5 checksumming, PSRDADA header parsing, Redis-based beamformer signalling, multicast sending, and config file helpers.
@@ -633,10 +673,9 @@ Key functions include filename validation, metafits creation/reading, MD5 checks
 
 **`mwa_archiver.py`**
 Stateless file transfer functions:
-- `copy_file_rsync()` — copies a file to a remote host via rsync over SSH with AES128-CTR cipher.
+- `copy_file_rsync()` — copies a file between hosts via rsync over SSH with AES128-CTR cipher. Used to pull calibrator visibilities from the MWAX boxes onto a calvin node.
 - `archive_file_xrootd()` — uploads a file to a remote xrootd server using a `.part` temporary filename, then atomically renames it via SSH `mv` on success.
-- `archive_file_rclone()` — uploads a file to Pawsey S3 (Acacia/Banksia) via `rclone copyto`, with checksum verification via `rclone check`. Iterates over multiple configured endpoints on failure.
-- `ceph_get_s3_md5_etag()` — computes the Ceph-style multipart ETag (MD5 of MD5s) for S3 integrity verification.
+- `archive_file_rclone_haproxy()` — uploads a file to Pawsey S3 (Acacia/Banksia) via `rclone copyto`, through a local HAProxy instance which handles endpoint selection, health checking and failover. Verified afterwards with `rclone check`.
 
 ### Watch / Queue Pipeline
 
@@ -650,7 +689,7 @@ Same as `Watcher` but deposits into a `queue.PriorityQueue`. Reads the associate
 A wrapper for file paths used as `PriorityQueue` payloads. Overrides comparison operators so that equal-priority items are sorted by filename only (ignoring directory path), giving consistent ordering.
 
 **`mwax_queue_worker.py`** — `QueueWorker`
-Processes items from a `queue.Queue`, calling either a provided `event_handler` callable or running a shell command with token substitution. Implements exponential backoff on failure with three configurable strategies: requeue to end of queue, keep retrying the same item, or drop failed items entirely.
+Processes items from a `queue.Queue`, calling either a provided `event_handler` callable or running a shell command with token substitution. Implements exponential backoff on failure (`calculate_backoff_seconds()`: `initial * factor**(n-1)`, capped at `backoff_limit_seconds`) with three configurable strategies: requeue to end of queue, keep retrying the same item, or drop failed items entirely.
 
 **`mwax_priority_queue_worker.py`** — `PriorityQueueWorker`
 Identical logic to `QueueWorker` but operates on a `PriorityQueue`. When requeueing a failed item to the end of the queue, increments its priority number so it sinks toward the back.
@@ -681,7 +720,7 @@ Simple pass-through: appends calibrator FITS file paths to a shared thread-safe 
 Archives visibility, voltage, and beamformer files from MWAX boxes to the mwacache servers via `archive_file_xrootd()`, then deletes the local copy.
 
 **`mwax_wqw_pawsey_outgoing.py`** — `PawseyOutgoingProcessor`
-Runs on mwacache servers. Validates files, checks size and MD5 checksum against the remote metadata database, archives to Pawsey LTS (Acacia/Banksia) via `archive_file_rclone()`, updates the MRO metadata database to mark the file as archived, then deletes the local copy.
+Runs on mwacache servers. Validates files, checks size and MD5 checksum against the remote metadata database, archives to Pawsey LTS (Acacia/Banksia) via `archive_file_rclone_haproxy()`, updates the MRO metadata database to mark the file as archived, then deletes the local copy.
 
 **`mwax_wqw_packet_stats_processor.py`** — `PacketStatsProcessor`
 Copies packet statistics dump files to a remote destination host (e.g. `vulcan`) using `shutil.copy2`, then deletes the local file.
@@ -692,10 +731,16 @@ Copies packet statistics dump files to a remote destination host (e.g. `vulcan`)
 Manages interaction with the MWA ASVO data download service via the `giant-squid` CLI. `MWAASVOJob` tracks a single download job including its state, request IDs, submission timestamp, and download URL. `MWAASVOHelper` maintains the list of in-flight jobs, calls `giant-squid submitvis` to submit new jobs, and calls `giant-squid list` to poll job states. Raises typed exceptions for outages (`GiantSquidMWAASVOOutageException`) and duplicate submissions (`GiantSquidJobAlreadyExistsException`).
 
 **`mwax_calvin_utils.py`**
-Calibration support utilities. Contains `CalvinJobType` enum (`realtime` / `mwa_asvo`); data structures `Tile`, `Metafits`, `HyperfitsSolution`, `HyperfitsSolutionGroup`, `GainFitInfo`, `PhaseFitInfo`; AOCAL binary format constants; `create_sbatch_script()` and `submit_sbatch()` for SLURM job management; phase and gain fit processing functions; and `estimate_birli_output_bytes()` for storage estimation.
+Calibration support utilities. Contains the `CalvinJobType` enum (`realtime` / `mwa_asvo`); data structures `Tile`, `Input`, `Metafits`, `ChanInfo`, `TimeInfo`, `GainFitInfo`, `PhaseFitInfo`; `create_sbatch_script()` and `submit_sbatch()` for SLURM job management; the pure numeric fitting functions (`fit_phase_line()`, `fit_gain()`, `iterative_poly_clip_batch()`, `reject_outliers()`); and `estimate_birli_output_bytes()` for storage estimation.
+
+**`mwax_hyperdrive_solutions.py`** — `HyperfitsSolution`, `HyperfitsSolutionGroup`
+Reads, flags and writes hyperdrive FITS solution files. `HyperfitsSolutionGroup` holds one solution file per contiguous coarse-channel band plus the observation's metafits, and owns the whole flagging pipeline via `run_flagging_pipeline()`: `apply_tile_flags()`, `enforce_whole_jones_nan()`, `flag_gain_max_cutoff()`, `flag_amplitude_outliers()`, `flag_mostly_bad_tiles()`, then report-only `detect_phase_outliers()`. `commit()` writes the result back to disk. See CALVIN.md for the full description.
+
+**`mwax_calvin_plots.py`**
+Everything that touches matplotlib/seaborn, plus hyperdrive's own binary-generated plots and convergence stats. Phase-fit diagnostics (`plot_debug_phase_fits()` and helpers), the paged amplitude-outlier plots (`plot_outlier_gains()`), the before/after per-tile stats table (`write_stats_and_debug_plots()`), and `generate_hyperdrive_plots()` / `write_hyperdrive_stats()` which shell out to the hyperdrive binary.
 
 **`mwax_calvin_solutions.py`** — `process_solutions()`
-Post-processes calibration solutions produced by `hyperdrive`. Loads hyperfits solution files and metafits, determines a reference antenna, fits phases and gains per coarse channel, and inserts the results into the calibration database via `insert_calibration_fits_row` and `insert_calibration_solutions_row`.
+Post-processes calibration solutions produced by `hyperdrive`. Loads the hyperfits solution files and metafits, determines a reference antenna, runs the full flagging pipeline, generates before/after plots and the per-tile stats file, commits the flagged solutions to disk, fits final phases and gains, and inserts the results into the calibration database via `insert_calibration_fits_row` and `insert_calibration_solutions_row`.
 
 ### Beamformer Format Utilities
 

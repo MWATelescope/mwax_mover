@@ -21,9 +21,7 @@ from mwax_mover.utils import MWADataFileType, ValidationData
 
 # Setup root logger so processor log output is visible when running with -s
 handler = logging.StreamHandler()
-handler.setFormatter(
-    logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s")
-)
+handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(threadName)s, %(message)s"))
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
@@ -167,43 +165,41 @@ class TestArchivingDisabled:
                 "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(filetype_id, project_id),
             ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.rename") as mock_rename,
+            patch("mwax_mover.mwax_wqw_checksum_and_db.shutil.move") as mock_move,
         ):
             result = processor.handler(item)
 
-        return result, mock_rename, item
+        return result, mock_move, item
 
     def test_voltages_go_to_volt_dont_archive(self, dirs):
-        result, mock_rename, item = self._run(dirs, MWADataFileType.MWAX_VOLTAGES.value)
+        result, mock_move, item = self._run(dirs, MWADataFileType.MWAX_VOLTAGES.value)
         assert result is True
         expected = os.path.join(dirs["volt_dont_archive"], DUMMY_FILENAME)
-        mock_rename.assert_called_once_with(item, expected)
+        mock_move.assert_called_once_with(item, expected)
 
     def test_visibilities_go_to_processing_stats(self, dirs):
-        result, mock_rename, item = self._run(
-            dirs, MWADataFileType.MWAX_VISIBILITIES.value
-        )
+        result, mock_move, item = self._run(dirs, MWADataFileType.MWAX_VISIBILITIES.value)
         assert result is True
         expected = os.path.join(dirs["vis_proc_stats"], DUMMY_FILENAME)
-        mock_rename.assert_called_once_with(item, expected)
+        mock_move.assert_called_once_with(item, expected)
 
     def test_ppd_goes_to_vis_dont_archive(self, dirs):
-        result, mock_rename, item = self._run(dirs, MWADataFileType.MWA_PPD_FILE.value)
+        result, mock_move, item = self._run(dirs, MWADataFileType.MWA_PPD_FILE.value)
         assert result is True
         expected = os.path.join(dirs["vis_dont_archive"], DUMMY_FILENAME)
-        mock_rename.assert_called_once_with(item, expected)
+        mock_move.assert_called_once_with(item, expected)
 
     def test_vdif_goes_to_bf_dont_archive(self, dirs):
-        result, mock_rename, item = self._run(dirs, MWADataFileType.VDIF.value)
+        result, mock_move, item = self._run(dirs, MWADataFileType.VDIF.value)
         assert result is True
         expected = os.path.join(dirs["bf_dont_archive"], DUMMY_FILENAME)
-        mock_rename.assert_called_once_with(item, expected)
+        mock_move.assert_called_once_with(item, expected)
 
     def test_filterbank_goes_to_bf_dont_archive(self, dirs):
-        result, mock_rename, item = self._run(dirs, MWADataFileType.FILTERBANK.value)
+        result, mock_move, item = self._run(dirs, MWADataFileType.FILTERBANK.value)
         assert result is True
         expected = os.path.join(dirs["bf_dont_archive"], DUMMY_FILENAME)
-        mock_rename.assert_called_once_with(item, expected)
+        mock_move.assert_called_once_with(item, expected)
 
     def test_unknown_filetype_returns_false(self, dirs):
         """An unrecognised filetype with archiving disabled should return False."""
@@ -215,7 +211,7 @@ class TestArchivingDisabled:
                 "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(filetype_id=99),
             ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.rename"),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.shutil.move"),
         ):
             result = processor.handler(item)
 
@@ -239,9 +235,7 @@ class TestArchivingEnabledArchiveProject:
                 "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(filetype_id, project_id="G0001"),
             ),
-            patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()
-            ),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()),
             patch(
                 "mwax_mover.mwax_wqw_checksum_and_db.utils.do_checksum_md5",
                 return_value=DUMMY_CHECKSUM,
@@ -254,46 +248,42 @@ class TestArchivingEnabledArchiveProject:
                 "mwax_mover.mwax_wqw_checksum_and_db.insert_data_file_row",
                 return_value=True,
             ),
-            patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True
-            ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.rename") as mock_rename,
+            patch("mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.shutil.move") as mock_move,
         ):
             result = processor.handler(item)
 
-        return result, mock_rename, item
+        return result, mock_move, item
 
     def test_voltages_go_to_volt_outgoing(self, dirs):
-        result, mock_rename, item = self._run(dirs, MWADataFileType.MWAX_VOLTAGES.value)
+        result, mock_move, item = self._run(dirs, MWADataFileType.MWAX_VOLTAGES.value)
         assert result is True
         expected = os.path.join(dirs["volt_outgoing"], DUMMY_FILENAME)
-        mock_rename.assert_called_once_with(item, expected)
+        mock_move.assert_called_once_with(item, expected)
 
     def test_visibilities_go_to_processing_stats(self, dirs):
-        result, mock_rename, item = self._run(
-            dirs, MWADataFileType.MWAX_VISIBILITIES.value
-        )
+        result, mock_move, item = self._run(dirs, MWADataFileType.MWAX_VISIBILITIES.value)
         assert result is True
         expected = os.path.join(dirs["vis_proc_stats"], DUMMY_FILENAME)
-        mock_rename.assert_called_once_with(item, expected)
+        mock_move.assert_called_once_with(item, expected)
 
     def test_ppd_goes_to_vis_outgoing(self, dirs):
-        result, mock_rename, item = self._run(dirs, MWADataFileType.MWA_PPD_FILE.value)
+        result, mock_move, item = self._run(dirs, MWADataFileType.MWA_PPD_FILE.value)
         assert result is True
         expected = os.path.join(dirs["vis_outgoing"], DUMMY_FILENAME)
-        mock_rename.assert_called_once_with(item, expected)
+        mock_move.assert_called_once_with(item, expected)
 
     def test_vdif_goes_to_bf_outgoing(self, dirs):
-        result, mock_rename, item = self._run(dirs, MWADataFileType.VDIF.value)
+        result, mock_move, item = self._run(dirs, MWADataFileType.VDIF.value)
         assert result is True
         expected = os.path.join(dirs["bf_outgoing"], DUMMY_FILENAME)
-        mock_rename.assert_called_once_with(item, expected)
+        mock_move.assert_called_once_with(item, expected)
 
     def test_filterbank_goes_to_bf_outgoing(self, dirs):
-        result, mock_rename, item = self._run(dirs, MWADataFileType.FILTERBANK.value)
+        result, mock_move, item = self._run(dirs, MWADataFileType.FILTERBANK.value)
         assert result is True
         expected = os.path.join(dirs["bf_outgoing"], DUMMY_FILENAME)
-        mock_rename.assert_called_once_with(item, expected)
+        mock_move.assert_called_once_with(item, expected)
 
     def test_unknown_filetype_returns_false(self, dirs):
         """An unrecognised filetype when archiving is enabled should return False."""
@@ -305,9 +295,7 @@ class TestArchivingEnabledArchiveProject:
                 "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(filetype_id=99, project_id="G0001"),
             ),
-            patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()
-            ),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()),
             patch(
                 "mwax_mover.mwax_wqw_checksum_and_db.utils.do_checksum_md5",
                 return_value=DUMMY_CHECKSUM,
@@ -320,9 +308,7 @@ class TestArchivingEnabledArchiveProject:
                 "mwax_mover.mwax_wqw_checksum_and_db.insert_data_file_row",
                 return_value=True,
             ),
-            patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True
-            ),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True),
         ):
             result = processor.handler(item)
 
@@ -337,13 +323,9 @@ class TestArchivingEnabledArchiveProject:
         with (
             patch(
                 "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
-                return_value=make_valid_val(
-                    MWADataFileType.MWAX_VOLTAGES.value, project_id="G0001"
-                ),
+                return_value=make_valid_val(MWADataFileType.MWAX_VOLTAGES.value, project_id="G0001"),
             ),
-            patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()
-            ),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()),
             patch(
                 "mwax_mover.mwax_wqw_checksum_and_db.utils.do_checksum_md5",
                 return_value=DUMMY_CHECKSUM,
@@ -356,10 +338,8 @@ class TestArchivingEnabledArchiveProject:
                 "mwax_mover.mwax_wqw_checksum_and_db.insert_data_file_row",
                 return_value=True,
             ) as mock_insert,
-            patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True
-            ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.rename"),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.shutil.move"),
         ):
             result = processor.handler(item)
 
@@ -376,13 +356,9 @@ class TestArchivingEnabledArchiveProject:
         with (
             patch(
                 "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
-                return_value=make_valid_val(
-                    MWADataFileType.MWAX_VISIBILITIES.value, project_id="G0001"
-                ),
+                return_value=make_valid_val(MWADataFileType.MWAX_VISIBILITIES.value, project_id="G0001"),
             ),
-            patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()
-            ),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()),
             patch(
                 "mwax_mover.mwax_wqw_checksum_and_db.utils.do_checksum_md5",
                 return_value=DUMMY_CHECKSUM,
@@ -395,10 +371,8 @@ class TestArchivingEnabledArchiveProject:
                 "mwax_mover.mwax_wqw_checksum_and_db.insert_data_file_row",
                 return_value=True,
             ),
-            patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True
-            ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.rename"),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.shutil.move"),
         ):
             result = processor.handler(item)
 
@@ -424,9 +398,7 @@ class TestArchivingEnabledNoArchiveProject:
                 "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(filetype_id, project_id="C123"),
             ),
-            patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()
-            ),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()),
             patch(
                 "mwax_mover.mwax_wqw_checksum_and_db.utils.do_checksum_md5",
                 return_value=DUMMY_CHECKSUM,
@@ -439,47 +411,43 @@ class TestArchivingEnabledNoArchiveProject:
                 "mwax_mover.mwax_wqw_checksum_and_db.insert_data_file_row",
                 return_value=True,
             ),
-            patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True
-            ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.rename") as mock_rename,
+            patch("mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.shutil.move") as mock_move,
         ):
             result = processor.handler(item)
 
-        return result, mock_rename, item
+        return result, mock_move, item
 
     def test_voltages_go_to_volt_dont_archive(self, dirs):
-        result, mock_rename, item = self._run(dirs, MWADataFileType.MWAX_VOLTAGES.value)
+        result, mock_move, item = self._run(dirs, MWADataFileType.MWAX_VOLTAGES.value)
         assert result is True
         expected = os.path.join(dirs["volt_dont_archive"], DUMMY_FILENAME)
-        mock_rename.assert_called_once_with(item, expected)
+        mock_move.assert_called_once_with(item, expected)
 
     def test_visibilities_go_to_processing_stats(self, dirs):
         """Even for C123, visibilities still go to processing_stats for stats generation."""
-        result, mock_rename, item = self._run(
-            dirs, MWADataFileType.MWAX_VISIBILITIES.value
-        )
+        result, mock_move, item = self._run(dirs, MWADataFileType.MWAX_VISIBILITIES.value)
         assert result is True
         expected = os.path.join(dirs["vis_proc_stats"], DUMMY_FILENAME)
-        mock_rename.assert_called_once_with(item, expected)
+        mock_move.assert_called_once_with(item, expected)
 
     def test_ppd_goes_to_vis_dont_archive(self, dirs):
-        result, mock_rename, item = self._run(dirs, MWADataFileType.MWA_PPD_FILE.value)
+        result, mock_move, item = self._run(dirs, MWADataFileType.MWA_PPD_FILE.value)
         assert result is True
         expected = os.path.join(dirs["vis_dont_archive"], DUMMY_FILENAME)
-        mock_rename.assert_called_once_with(item, expected)
+        mock_move.assert_called_once_with(item, expected)
 
     def test_vdif_goes_to_bf_dont_archive(self, dirs):
-        result, mock_rename, item = self._run(dirs, MWADataFileType.VDIF.value)
+        result, mock_move, item = self._run(dirs, MWADataFileType.VDIF.value)
         assert result is True
         expected = os.path.join(dirs["bf_dont_archive"], DUMMY_FILENAME)
-        mock_rename.assert_called_once_with(item, expected)
+        mock_move.assert_called_once_with(item, expected)
 
     def test_filterbank_goes_to_bf_dont_archive(self, dirs):
-        result, mock_rename, item = self._run(dirs, MWADataFileType.FILTERBANK.value)
+        result, mock_move, item = self._run(dirs, MWADataFileType.FILTERBANK.value)
         assert result is True
         expected = os.path.join(dirs["bf_dont_archive"], DUMMY_FILENAME)
-        mock_rename.assert_called_once_with(item, expected)
+        mock_move.assert_called_once_with(item, expected)
 
 
 # ---------------------------------------------------------------------------
@@ -517,9 +485,7 @@ class TestErrorConditions:
                 "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(MWADataFileType.MWAX_VOLTAGES.value),
             ),
-            patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()
-            ),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()),
             patch(
                 "mwax_mover.mwax_wqw_checksum_and_db.utils.do_checksum_md5",
                 return_value=DUMMY_CHECKSUM,
@@ -548,9 +514,7 @@ class TestErrorConditions:
                 "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(MWADataFileType.MWAX_VOLTAGES.value),
             ),
-            patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()
-            ),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()),
             patch(
                 "mwax_mover.mwax_wqw_checksum_and_db.utils.do_checksum_md5",
                 return_value=DUMMY_CHECKSUM,
@@ -563,9 +527,7 @@ class TestErrorConditions:
                 "mwax_mover.mwax_wqw_checksum_and_db.insert_data_file_row",
                 return_value=True,
             ),
-            patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=False
-            ),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=False),
         ):
             result = processor.handler(item)
 
@@ -581,9 +543,7 @@ class TestErrorConditions:
                 "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(MWADataFileType.MWAX_VISIBILITIES.value),
             ),
-            patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()
-            ),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()),
             patch(
                 "mwax_mover.mwax_wqw_checksum_and_db.utils.do_checksum_md5",
                 return_value=DUMMY_CHECKSUM,
@@ -596,10 +556,8 @@ class TestErrorConditions:
                 "mwax_mover.mwax_wqw_checksum_and_db.insert_data_file_row",
                 return_value=True,
             ) as mock_insert,
-            patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True
-            ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.rename"),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.shutil.move"),
         ):
             result = processor.handler(item)
 
@@ -632,10 +590,8 @@ class TestErrorConditions:
                 "mwax_mover.mwax_wqw_checksum_and_db.insert_data_file_row",
                 return_value=True,
             ) as mock_insert,
-            patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True
-            ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.rename"),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True),
+            patch("mwax_mover.mwax_wqw_checksum_and_db.shutil.move"),
         ):
             result = processor.handler(item)
 

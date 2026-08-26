@@ -2,7 +2,8 @@
 
 PriorityQueueWorker dequeues (priority, MWAXPriorityQueueData) tuples and calls
 either a provided event_handler callable or runs a shell command with token
-substitution. Implements exponential backoff on failure; when requeueing a failed
+substitution. Implements exponential backoff on failure (see
+calculate_backoff_seconds); when requeueing a failed
 item to the end of the queue, increments its priority number so it sinks toward
 the back.
 """
@@ -15,6 +16,7 @@ import time
 
 from mwax_mover import mwax_command, mwax_mover
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
+from mwax_mover.mwax_queue_worker import calculate_backoff_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +66,8 @@ class PriorityQueueWorker:
             requeue_to_eoq_on_failure: If True, requeue failed items to the end of
                 the queue with incremented priority. Defaults to True.
             backoff_initial_seconds: Initial backoff time in seconds. Defaults to 1.
-            backoff_factor: Multiplier for exponential backoff. Defaults to 2.
+            backoff_factor: Multiplier applied per additional consecutive failure,
+                giving initial * factor**(n-1). Defaults to 2.
             backoff_limit_seconds: Maximum backoff time in seconds. Defaults to 60.
 
         Raises:
@@ -76,9 +79,7 @@ class PriorityQueueWorker:
         if (event_handler is None and executable_path is None) or (
             event_handler is not None and executable_path is not None
         ):
-            raise Exception(
-                "QueueWorker requires event_handler OR executable_path not both and not neither!"
-            )
+            raise Exception("QueueWorker requires event_handler OR executable_path not both and not neither!")
 
         self._executable_path = executable_path
         self._event_handler = event_handler
@@ -106,6 +107,12 @@ class PriorityQueueWorker:
         self._running = True
         self.current_item = None
         self.consecutive_error_count = 0
+        # stop() sets this event to interrupt an in-flight backoff wait. Nothing
+        # ever cleared it, so once stop() had been called every subsequent
+        # event.wait(backoff) returned instantly and backoff was silently
+        # disabled for the rest of the process's life. Clear it on start so a
+        # restarted worker backs off properly again.
+        self.event.clear()
         backoff = 0
 
         while self._running:
@@ -117,9 +124,7 @@ class PriorityQueueWorker:
                     success = False
 
                     if self.current_item is None:
-                        self.current_item = self.source_queue.get(
-                            block=True, timeout=0.5
-                        )
+                        self.current_item = self.source_queue.get(block=True, timeout=0.5)
 
                     # Because we block in the above get, we should always have a value for current_item
                     # but this gate ensure the type checker is satisfied that current_item is not None.
@@ -160,21 +165,19 @@ class PriorityQueueWorker:
                         continue
 
                     elapsed = time.time() - start_time
-                    logger.info(
-                        f"Complete. Queue size: {self.source_queue.qsize()} Elapsed: {elapsed:.2f} sec"
-                    )
+                    logger.info(f"Complete. Queue size: {self.source_queue.qsize()} Elapsed: {elapsed:.2f} sec")
 
                     if success:
                         # reset our error count and backoffs
                         self.consecutive_error_count = 0
                     else:
                         self.consecutive_error_count += 1
-                        backoff = (
-                            self.backoff_initial_seconds
-                            * self.backoff_factor
-                            * self.consecutive_error_count
+                        backoff = calculate_backoff_seconds(
+                            self.consecutive_error_count,
+                            self.backoff_initial_seconds,
+                            self.backoff_factor,
+                            self.backoff_limit_seconds,
                         )
-                        backoff = min(backoff, self.backoff_limit_seconds)
 
                         logger.info(
                             f"{self.consecutive_error_count} consecutive failures. Backing off for {backoff} seconds."
@@ -238,9 +241,7 @@ class PriorityQueueWorker:
         command = command.replace(mwax_mover.FILE_REPLACEMENT_TOKEN, filename)
 
         filename_no_ext = os.path.splitext(filename)[0]
-        command = command.replace(
-            mwax_mover.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext
-        )
+        command = command.replace(mwax_mover.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext)
 
         return_value, _ = mwax_command.run_command_ext(command, -1, 60, True)
 

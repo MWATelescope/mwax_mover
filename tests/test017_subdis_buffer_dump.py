@@ -17,7 +17,6 @@ from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
 from mwax_mover.utils import running_under_pytest
 
 
-
 def test_running_under_pytest():
     assert running_under_pytest()
 
@@ -70,7 +69,8 @@ def do_buffer_dump(
 
     Args:
         obs_id (int): An obsid to use, which we have the metafits for in test_data/OBSID/OBSID_metafits.fits.
-        obs_exp_time (int): How long is the observation? The length determines how many subfiles we create for the test (and how long the test goes for).
+        obs_exp_time (int): How long is the observation? The length determines how
+            many subfiles we create for the test (and how long the test goes for).
         dump_start (int): The gps time we pass to dump_voltages that specifies the first subobs to dump.
         dump_end (int): The gps time we pass to dump_voltages that specifies the last subobs to dump.
         dump_trigger_id (int): The id of the trigger so we can inject it into the subfile headers of the dumped files
@@ -182,5 +182,8 @@ def call_dump_voltages(web_port: int, start: int, end: int, trigger_id: int) -> 
         "end": end,
         "trigger_id": trigger_id,
     }
-    response = requests.get(url, params=params)
+    # /dump_voltages changes state, so it is POST-only. NOTE: the real caller
+    # of this endpoint is FREDDA (external to this repo) -- it must also use
+    # POST, see the deployment note in the CHANGELOG.
+    response = requests.post(url, params=params)
     return response.status_code == 200

@@ -116,7 +116,7 @@ This deliberately:
 - **Does not** compare one tile against another. Real per-tile bandpasses differ for physical reasons (cable length, dipole position, position in the beam), so cross-tile comparison would produce a lot of false positives.
 - **Does not** fit across multiple frequency bands at once for a picket-fence observation. A single polynomial fit spanning a large gap between two widely-separated bands would not be physically meaningful.
 
-**Default sensitivity (as shipped in `cfg/calvin_processor.cfg`):** a channel must deviate by more than **10 residual-MADs** from the fitted curve to be flagged (`gain_outlier_mad_residual_threshold = 10.0`; a MAD is the median absolute deviation — a robust stand-in for a standard deviation, explained below). Note this is the deployed config value, not the underlying Python function's own signature default (`flag_amplitude_outliers`'s `mad_residual_threshold` defaults to `5.0` if called directly without a config-supplied value).
+**Default sensitivity:** a channel must deviate by more than **10 residual-MADs** from the fitted curve to be flagged (`gain_outlier_mad_residual_threshold = 10.0` in `cfg/calvin_processor.cfg`; a MAD is the median absolute deviation — a robust stand-in for a standard deviation, explained below). `flag_amplitude_outliers`, `run_flagging_pipeline` and `cal_utils --mad-threshold` all use the same 10.0 default, so calling any of them without a config-supplied value behaves identically to the deployed pipeline.
 
 **Example** — one tile's gain amplitude vs. channel, with the fitted parabola, its ±10-MAD acceptance band, and a handful of narrowband RFI-like spikes sitting outside the band and getting flagged (illustrative data):
 
@@ -155,11 +155,11 @@ The underlying line-fit method was originally written to find each tile's cable 
 
 **Example** — a well-behaved tile's phase tightly hugs its fitted delay line (low χ²/dof, low σ residual). A tile with a faulty connector or receiver scatters widely around its own fitted line instead (illustrative data, not a real observation):
 
-![Phase fit: good tile vs. outlier tile](docs/img/step3a_phase_fit_example.png)
+![Phase fit: good tile vs. outlier tile](docs/img/step6a_phase_fit_example.png)
 
 That fit-quality metric is then compared across every tile in the observation. Here, "Tile 057" (from the plot above) sits well above the robust median+MAD threshold on χ²/dof, so it's reported as an outlier — but not flagged or modified (illustrative data):
 
-![Population outlier test across all tiles](docs/img/step3b_population_outlier_test.png)
+![Population outlier test across all tiles](docs/img/step6b_population_outlier_test.png)
 
 The `{obs_id}_residual.png` debug plot (see [Output files](#output-files) below) also shades a band on each receiver-flavour/polarisation facet showing that group's outlier range (±`phase_outlier_nstd`×MAD around the median σ residual), so an individual tile's scatter can be visually compared against the actual reporting threshold.
 

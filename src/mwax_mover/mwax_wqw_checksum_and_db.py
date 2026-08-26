@@ -8,6 +8,7 @@ filterbank) and whether the observation's project should be archived.
 
 import logging
 import os
+import shutil
 
 from mwax_mover import utils
 from mwax_mover.mwax_db import MWAXDBHandler, insert_data_file_row
@@ -19,6 +20,11 @@ logger = logging.getLogger(__name__)
 
 
 class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
+    """Checksums an incoming file, records it in the metadata DB, and routes it onward.
+
+    Instantiated by MWAXSubfileDistributor. See the module docstring for detail.
+    """
+
     def __init__(
         self,
         metafits_path: str,
@@ -68,7 +74,15 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
             mode=MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
             corr_hi_priority_projects=list_of_corr_hi_priority_projects,
             vcs_hi_priority_projects=list_of_vcs_hi_priority_projects,
-            requeue_to_eoq_on_failure=False,
+            # Order does not matter here, so a failed item is requeued to the
+            # back of the queue rather than retried in place. Retrying in place
+            # meant one permanently-bad file (e.g. an unrecognised filetype,
+            # which always returns False) blocked the head of the queue
+            # indefinitely at one attempt per backoff interval, stalling every
+            # other file behind it. The priority worker also bumps a requeued
+            # item's priority number so it sinks rather than cycling straight
+            # back to the front.
+            requeue_to_eoq_on_failure=True,
         )
         self.visdata_incoming_path = visdata_incoming_path
         self.voltdata_incoming_path = voltdata_incoming_path
@@ -97,12 +111,15 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
             val: Validated filename metadata including filetype_id and obs_id.
 
         Returns:
-            True if the file disappeared before or after DB insert.
-            False if the DB insert failed.
-            None if checksum and DB insert both succeeded and file still exists.
+            None if the checksum and DB insert both succeeded and the file still
+            exists -- i.e. None means SUCCESS and the caller should carry on.
+            True if the file disappeared before or after the DB insert; the
+            caller should stop and report success, as there is nothing left to
+            do with it.
+            False if the DB insert failed; the caller should report failure.
 
-        Raises:
-            FileNotFoundError: Caught and logged; returns True to continue processing.
+            (A FileNotFoundError while checksumming is caught here and reported
+            as True, not propagated.)
         """
         try:
             file_size = os.stat(item).st_size
@@ -140,9 +157,7 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
 
         return None
 
-    def _get_destination(
-        self, item: str, val: ValidationData, archive: bool
-    ) -> str | None:
+    def _get_destination(self, item: str, val: ValidationData, archive: bool) -> str | None:
         """Determine the destination directory for the file.
 
         Routes files based on type and archive flag. Visibilities always go to
@@ -159,20 +174,12 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
         basename = os.path.basename(item)
 
         if val.filetype_id == MWADataFileType.MWAX_VOLTAGES.value:
-            dest_dir = (
-                self.voltdata_outgoing_path
-                if archive
-                else self.voltdata_dont_archive_path
-            )
+            dest_dir = self.voltdata_outgoing_path if archive else self.voltdata_dont_archive_path
         elif val.filetype_id == MWADataFileType.MWAX_VISIBILITIES.value:
             # Stats are always produced, even for no-archive projects.
             dest_dir = self.visdata_processing_stats_path
         elif val.filetype_id == MWADataFileType.MWA_PPD_FILE.value:
-            dest_dir = (
-                self.visdata_outgoing_path
-                if archive
-                else self.visdata_dont_archive_path
-            )
+            dest_dir = self.visdata_outgoing_path if archive else self.visdata_dont_archive_path
         elif val.filetype_id in (
             MWADataFileType.VDIF.value,
             MWADataFileType.FILTERBANK.value,
@@ -210,22 +217,16 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
             if result is not None:
                 return result
 
-        should_archive = (
-            utils.should_project_be_archived(val.project_id) and self.archiving_enabled
-        )
+        should_archive = utils.should_project_be_archived(val.project_id) and self.archiving_enabled
         dest = self._get_destination(item, val, archive=should_archive)
 
         if dest is None:
-            logger.error(
-                f"{item}: not a valid file extension {val.filetype_id} / {val.file_ext}"
-            )
+            logger.error(f"{item}: not a valid file extension {val.filetype_id} / {val.file_ext}")
             return False
 
         logger.debug(f"{item}: moving file to {os.path.dirname(dest)}")
-        os.rename(item, dest)
-        logger.info(
-            f"{item}: moved file to {os.path.dirname(dest)}. Queue size: {self.pqueue.qsize()}"
-        )
+        shutil.move(item, dest)
+        logger.info(f"{item}: moved file to {os.path.dirname(dest)}. Queue size: {self.pqueue.qsize()}")
 
         logger.info(f"{item}: Finished")
         return True

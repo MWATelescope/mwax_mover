@@ -87,10 +87,11 @@ def get_watcher_thread_name(watch_path: str, pattern: str) -> str:
 
 class MWAXWatchQueueWorker(ABC):
     """
-    This class is responsible for watching a set of paths and putting any files that are found into an ordinary Python queue for processing.
+    This class is responsible for watching a set of paths and putting any files
+    that are found into an ordinary Python queue for processing.
 
-    watch_path_exts: a list of tuples, where each tuple contains a path to watch and a pattern to match files against.
-                     For example: [("/data/level7", ".fits"), ("/data/level8", ".txt")]
+    watch_paths_exts: a list of tuples, where each tuple contains a path to watch and a pattern to match files against.
+                      For example: [("/data/level7", ".fits"), ("/data/level8", ".txt")]
     """
 
     def __init__(
@@ -134,9 +135,7 @@ class MWAXWatchQueueWorker(ABC):
             requeue_to_eoq_on_failure,
         )
 
-        self.queue_worker_thread = Thread(
-            name="worker_thread", target=self.queue_worker.start, daemon=True
-        )
+        self.queue_worker_thread = Thread(name="worker_thread", target=self.queue_worker.start, daemon=True)
         self.threads.append(self.queue_worker_thread)
 
         # Create a watcher and watcher thread for each path we're watching
@@ -279,7 +278,8 @@ class MWAXWatchQueueWorker(ABC):
 
 class MWAXPriorityWatchQueueWorker(ABC):
     """
-    This class is responsible for watching a set of paths and putting any files that are found into a Python priority queue for processing.
+    This class is responsible for watching a set of paths and putting any files
+    that are found into a Python priority queue for processing.
 
     watch_path_exts: a list of tuples, where each tuple contains a path to watch and a pattern to match files against.
                      For example: [("/data/level7", ".fits"), ("/data/level8", ".txt")]
@@ -334,9 +334,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
             requeue_to_eoq_on_failure,
         )
 
-        self.pqueue_worker_thread = Thread(
-            name="worker_thread", target=self.pqueue_worker.start, daemon=True
-        )
+        self.pqueue_worker_thread = Thread(name="worker_thread", target=self.pqueue_worker.start, daemon=True)
         self.threads.append(self.pqueue_worker_thread)
 
         # Create a watcher and watcher thread for each path we're watching

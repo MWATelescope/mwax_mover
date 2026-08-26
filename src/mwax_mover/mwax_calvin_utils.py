@@ -1,10 +1,12 @@
 """Calibration support utilities for the Calvin pipeline.
 
-Provides data structures (Tile, Metafits, HyperfitsSolution, HyperfitsSolutionGroup,
-GainFitInfo, PhaseFitInfo), the CalvinJobType enum (realtime / mwa_asvo), AOCAL
-binary format constants and read/write helpers, SBATCH script generation
-(create_sbatch_script) and submission (submit_sbatch), phase and gain fitting
-functions, and estimate_birli_output_bytes() for storage pre-checks.
+Provides data structures (Tile, Input, Metafits, ChanInfo, TimeInfo, GainFitInfo,
+PhaseFitInfo), the CalvinJobType enum (realtime / mwa_asvo), SBATCH script
+generation (create_sbatch_script) and submission (submit_sbatch), phase and gain
+fitting functions, and estimate_birli_output_bytes() for storage pre-checks.
+
+HyperfitsSolution and HyperfitsSolutionGroup live in mwax_hyperdrive_solutions.py;
+all plotting lives in mwax_calvin_plots.py.
 """
 
 import datetime
@@ -43,17 +45,6 @@ from mwax_mover.utils import (
 )
 
 logger = logging.getLogger(__name__)
-
-V_LIGHT_M_S = 299792458.0
-
-AOCAL_INTRO = b"MWAOCAL\0"
-AOCAL_FILE_TYPE = 0
-AOCAL_STRUCTURE_TYPE = 0
-AOCAL_INTERVAL_COUNT = 1
-AOCAL_POLS = 4  # XX,XY,YX,YY
-AOCAL_VALUES = 2  # real and imaginary
-DOUBLE_SIZE = 8  # 8 bytes for a float64
-AOCAL_HEADER_FORMAT = "<8s6I2d"
 
 # Standard number of MWA coarse channels.
 MWA_NUM_COARSE_CHANS = 24
@@ -566,8 +557,9 @@ def wrap_angle(angle):
     return np.mod(angle + np.pi, 2 * np.pi) - np.pi
 
 
-# Floor for fit_phase_line's sigma-clip threshold (2 * max(resid_std, this)),
-# in radians. See its use in fit_phase_line for why it's needed.
+# Floor for fit_phase_line's sigma-clip scale: the threshold is
+# 2 * max(1.4826 * MAD, this), in radians. See its use in fit_phase_line for
+# why the floor is needed.
 _MIN_CLIP_THRESHOLD_RAD = 1e-6
 
 
@@ -620,14 +612,18 @@ def fit_phase_line(
         solution: Complex array of calibration solutions.
         weights: Array of weights for each solution.
         niter: Number of fitting iterations. Each iteration refits after
-            rejecting outliers beyond 2*resid_std. Must be >= 1.
-        fit_iono: Whether to fit ionospheric dispersion (currently unused).
+            rejecting outliers more than 2 robust scale units (median + MAD, see
+            the sigma-clip comment in the loop below) from the median residual.
+            Must be >= 1.
+        fit_iono: Accepted but currently unused; ionospheric dispersion is not
+            fitted.
 
     Returns:
         PhaseFitInfo object containing fitted parameters and quality metrics.
 
     Raises:
         RuntimeError: If not enough valid phases are available to fit.
+        ValueError: If niter is less than 1.
     """
     # Quality metrics for the phase fit:
     #
@@ -644,8 +640,9 @@ def fit_phase_line(
     #              used elsewhere in the pipeline -- purely informational.
     #
     # quality:     Fraction of original frequency channels surviving the
-    #              sigma-clip (|residual| < 2*resid_std) (len(mask) /
-    #              nfreqs). Ranges 0-1; 1.0 means all channels were used.
+    #              sigma-clip (|residual - median| < 2 * 1.4826 * MAD; see the
+    #              detailed comment at the clip itself) (len(mask) / nfreqs).
+    #              Ranges 0-1; 1.0 means all channels were used.
 
     # original number of frequencies
     nfreqs = len(freqs_hz)
@@ -906,6 +903,7 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse: int) -> GainF
             np.split(chanblocks_hz, n_coarse),
             np.split(amps, n_coarse),
             np.split(weights, n_coarse),
+            strict=True,
         )
     ):
         # remove nans and zero weights
@@ -1051,9 +1049,17 @@ def iterative_poly_clip_batch(
     """Vectorized, batched equivalent of iterative_poly_clip, fitting every
     row (tile) at once instead of looping and calling np.polyfit per tile.
 
-    Mathematically identical to calling iterative_poly_clip(x, Y[t], ...)
-    for each tile t independently -- same per-tile stopping conditions,
-    same MAD-based clipping -- but replaces what was previously up to
+    Equivalent to calling iterative_poly_clip(x, Y[t], ...) for each tile t
+    independently -- same per-tile stopping conditions, same MAD-based
+    clipping -- with one deliberate difference: the per-tile version treats a
+    residual MAD of exactly 0 as "perfect fit", whereas this one uses a 1e-9
+    tolerance (see the zero_mad comment below), because the batched
+    normal-equations solve and np.polyfit's SVD land on different tiny
+    floating-point residues for the same data. This is also why
+    docs/img/make_illustrations.py uses this function rather than the per-tile
+    one -- so the illustrations show what the pipeline actually does.
+
+    Replaces what was previously up to
     (n_tiles * max_iter) separate np.polyfit/np.polyval calls with a
     handful of batched numpy operations per outer iteration. Since every
     tile shares the same x-grid (chanblock index), a per-tile weighted
@@ -1495,59 +1501,12 @@ def get_convergence_summary(solutions_fits_file: str):
     return summary
 
 
-def generate_hyperdrive_plots(
-    obs_id: int,
-    hyperdrive_solution_filename: str,
-    hyperdrive_binary_path: str,
-    metafits_filename: str,
-    output_dir: str,
-    max_amp: int | None = None,
-) -> tuple[bool, str]:
-    """Generate solution plots.
-
-    Args:
-        obs_id: Observation ID.
-        hyperdrive_solution_filename: Path to the hyperdrive solution FITS file.
-        hyperdrive_binary_path: Path to the hyperdrive executable.
-        metafits_filename: Path to the metafits file.
-        output_dir: path to where we write the plots
-        max_amp: Optionally pass a max value for Hyperdrive to clip to when plotting amps. None means let Hyperdrive figure it out.
-
-    Returns:
-        A tuple of (success: bool, error_message: str).
-    """
-    logger.info(f"{obs_id} generating plots for {hyperdrive_solution_filename}...")
-
-    try:
-        # Now run hyperdrive again to do some plots
-        hyp_soln_plot_args = f" --output-directory {output_dir}"
-
-        if not max_amp is None:
-            hyp_soln_plot_args += f" --max-amp {max_amp}"
-
-        cmd = (
-            f"{hyperdrive_binary_path} solutions-plot {hyp_soln_plot_args} "
-            f"-m"
-            f" {metafits_filename} {hyperdrive_solution_filename}"
-        )
-
-        return_value, _ = run_command_ext(cmd, -1, timeout=60, use_shell=False)
-
-        logger.info(
-            f"{obs_id} Finished running hyperdrive plots on {hyperdrive_solution_filename}. Return={return_value}"
-        )
-    except Exception as catch_all_exception:
-        return False, str(catch_all_exception)
-
-    return True, ""
-
-
 def write_hyperdrive_stats(
     obs_id: int,
     stats_fd,
     hyperdrive_solution_filename: str,
 ) -> tuple[bool, str]:
-    """Write convergence statistics. (Append to existiing stats file if it exists.)
+    """Write convergence statistics. (Append to existing stats file if it exists.)
 
     Args:
         obs_id: Observation ID.
@@ -1760,7 +1719,9 @@ def run_hyperdrive(
     """Run hyperdrive calibration on UV FITS files.
 
     Args:
-        input_uvfits_files: List of input UV FITS files (one per coarse channel).
+        input_uvfits_files: List of input UV FITS files, one per contiguous
+            coarse-channel band (so 1 for a normal observation, up to 24 for a
+            picket fence).
         metafits_filename: Path to the metafits file.
         job_output_path: Output directory for hyperdrive.
         obs_id: Observation ID.
@@ -1785,15 +1746,15 @@ def run_hyperdrive(
     elapsed = -1
     cmdline = ""
     exit_code = 0
-    # FIX 1: initialise calibration_command so it is always bound, even if
-    # input_uvfits_files is empty, preventing UnboundLocalError at the return sites.
+    # Initialised here so it is always bound, even if input_uvfits_files is
+    # empty, which would otherwise be an UnboundLocalError at the return sites.
     calibration_command = ""
 
     for hyperdrive_run, uvfits_file in enumerate(input_uvfits_files):
         obsid_and_band = os.path.basename(uvfits_file.replace(".uvfits", ""))
 
-        # FIX 2: move start_time above the try block so it is always bound
-        # before the exception handler references elapsed.
+        # Outside the try block so it is always bound before the exception
+        # handler below computes `elapsed` from it.
         start_time = time.time()
 
         try:
@@ -1831,8 +1792,8 @@ def run_hyperdrive(
                     f" in {elapsed:.3f} seconds"
                 )
 
-                # FIX 3: include job_output_path so the readme is written to
-                # the correct output directory, not the current working directory.
+                # Joined with job_output_path so the readme lands in the job's
+                # output directory rather than the current working directory.
                 readme_filename = os.path.join(job_output_path, f"{obsid_and_band}_hyperdrive_readme.txt")
                 write_readme_file(
                     readme_filename,
@@ -1889,7 +1850,7 @@ def create_sbatch_script(
     obs_id: int,
     jobtype: CalvinJobType,
     log_path: str,
-    request_ids: list[str],
+    request_ids: list[int],
     bulk_request: bool,
     processor_args: str,
 ) -> str:
@@ -1900,7 +1861,8 @@ def create_sbatch_script(
         obs_id: Observation ID.
         jobtype: Type of Calvin job (realtime or mwa_asvo).
         log_path: Global log directory path.
-        request_ids: List of request IDs.
+        request_ids: List of calibration request IDs (integers, matching the
+            calibration_request.id database column).
         bulk_request: Is this a bulk request? If so lower priority.
         processor_args: Extra command-line arguments for the processor.
 
@@ -1959,7 +1921,7 @@ mwax_calvin_processor \\
 --cfg={config_file_path} \\
 --job-type={jobtype.value} \\
 --obs-id={obs_id} \\
---request-ids={",".join(request_ids)} \\
+--request-ids={",".join(str(r) for r in request_ids)} \\
 --slurm-job-id=$SLURM_JOBID {processor_args}
 
 exit $?
@@ -1975,7 +1937,9 @@ def submit_sbatch(script_path: str, script: str, obs_id: int, request_ids: list[
         script_path: Directory to write the script to.
         script: The batch script content.
         obs_id: Observation ID (for naming).
-        request_id: Request ID (for naming-prevents duplicates- yes it can happen. In fact it just did. Hence this change!)
+        request_ids: Calibration request IDs, included in the script filename
+            to keep it unique (two requests for the same obs_id at the same
+            second would otherwise collide - this has happened).
 
     Returns:
         A tuple of (success: bool, slurm_job_id: int or None).
@@ -2044,7 +2008,7 @@ def count_slurm_asvo_jobs() -> int:
         return -1
 
     if not success:
-        logger.error("count_slurm_asvo_jobs() retured -1")
+        logger.error("count_slurm_asvo_jobs() returned -1")
         return -1
 
     return sum(1 for line in output.splitlines() if line.startswith("asvo"))
@@ -2070,7 +2034,7 @@ def estimate_birli_output_bytes(
     #
     # bytes_per_visibility comes from Birli
     #
-    # baselines = (tiles * tiles + 1)
+    # baselines = tiles * (tiles + 1) / 2  (autocorrelations included)
     # timesteps = duration / birli_int_time_res_sec
     # coarse_chans = 24
     # fine_channels = 30.72 MHz / birli_freq_res_khz
@@ -2090,7 +2054,8 @@ def estimate_birli_output_bytes(
     pols: int = metafits_context.num_visibility_pols  # (XX,XY,YX,YY) # 4
 
     # Uncomment for debug
-    # print(f"{timesteps}ts * {coarse_channels * fine_channels}ch * {baselines}bl * {pols}pol * {bytes_per_visibility} bytes")
+    # print(f"{timesteps}ts * {coarse_channels * fine_channels}ch"
+    #       f" * {baselines}bl * {pols}pol * {bytes_per_r_and_i} bytes")
 
     return timesteps * coarse_channels * fine_channels * baselines * pols * bytes_per_r_and_i
 
@@ -2233,7 +2198,10 @@ def get_file_description(filename: str) -> str:
     elif "hyperdrive_readme.txt" in filename:
         desc = "Full log output of the Hyperdrive run"
     elif "intercepts.png" in filename:
-        desc = "Plots showing, for each reciever type and polarisation, a plot of the phase intercepts in polar coordinates vs cable length"
+        desc = (
+            "Plots showing, for each receiver type and polarisation, a plot of the"
+            " phase intercepts in polar coordinates vs cable length"
+        )
     elif "phase_fits_xx.png" in filename:
         desc = "Plot of the phase fit for each tile (phase vs frequency) for XX"
     elif "phase_fits_yy.png" in filename:
@@ -2328,8 +2296,10 @@ def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_
     time, MIME type, and PNG dimensions where applicable), and returns a dict
     suitable for inclusion in the ``files`` list of an index.json file.
 
-    Only ``.png``, ``.tsv``, and ``.txt`` files are supported; all other
-    extensions return ``None``.
+    Only ``.png``, ``.tsv``, ``.txt`` and ``.fits`` files are supported; all
+    other extensions return ``None``. Of the ``.fits`` files, only those ending
+    ``solutions.fits`` or ``solutions.original.fits`` are accepted -- this
+    deliberately excludes the visibility and metafits FITS files.
 
     Args:
         filename: A str or Path representing the file to describe.
@@ -2413,7 +2383,8 @@ def export_calibration_solutions(solution_files: list[str], cal_export_path: str
     files_removed = delete_files_older_than(cal_export_path, cal_export_max_age_hours * 3600, ext_list)
     if len(files_removed) > 0:
         logger.debug(
-            f"Removed the following files from {cal_export_path} as they were older than {cal_export_max_age_hours} hours: {files_removed}"
+            f"Removed the following files from {cal_export_path} as they were older"
+            f" than {cal_export_max_age_hours} hours: {files_removed}"
         )
     else:
         logger.debug(f"No files older than {cal_export_max_age_hours} hours found in {cal_export_path} to remove.")

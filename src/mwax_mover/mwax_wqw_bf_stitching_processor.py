@@ -22,6 +22,11 @@ logger = logging.getLogger(__name__)
 
 
 class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
+    """Stitches beamformer subobservation files into a complete observation file.
+
+    Instantiated by MWAXSubfileDistributor. See the module docstring for detail.
+    """
+
     def __init__(
         self,
         metafits_path: str,
@@ -60,9 +65,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
         self.bf_incoming_path = bf_incoming_path
         self.bf_stitching_path = bf_stitching_path
         self.bf_dont_archive_path = bf_dont_archive_path
-        self.list_of_correlator_high_priority_projects = (
-            list_of_corr_hi_priority_projects
-        )
+        self.list_of_correlator_high_priority_projects = list_of_corr_hi_priority_projects
         self.list_of_vcs_high_priority_projects = list_of_vcs_hi_priority_projects
         self.archiving_enabled = archiving_enabled
         self.keep_original_files_after_stitching = keep_original_files_after_stitching
@@ -90,39 +93,35 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
             try:
                 try:
                     obs_id = int(filename[0:10])
-                except Exception:
-                    raise ValueError(
-                        f"{item}: Error getting obs_id from filename {filename}"
-                    )
+                except Exception as exc:
+                    raise ValueError(f"{item}: Error getting obs_id from filename {filename}") from exc
                 try:
                     subobs_id = int(filename[11:21])
-                except Exception:
-                    raise ValueError(
-                        f"{item}: Error getting subobs_id from filename {filename}"
-                    )
+                except Exception as exc:
+                    raise ValueError(f"{item}: Error getting subobs_id from filename {filename}") from exc
             except Exception:
                 logger.warning(
-                    f"{item}: filename not in correct format. Should be obsid_subobsid_chXXX_beamXX.vdif or .fil. It's probably a failed file from a previous run and can probably be safely deleted (by you). Skipping file."
+                    f"{item}: filename not in correct format. Should be"
+                    " obsid_subobsid_chXXX_beamXX.vdif or .fil. It's probably a failed"
+                    " file from a previous run and can probably be safely deleted (by"
+                    " you). Skipping file."
                 )
                 return True
 
             # Determine metafits filename
-            metafits_filename = os.path.join(
-                self.metafits_path, f"{obs_id}_metafits.fits"
-            )
+            metafits_filename = os.path.join(self.metafits_path, f"{obs_id}_metafits.fits")
 
             try:
-                duration_sec = int(
-                    utils.get_metafits_value(metafits_filename, METAFITS_EXPOSURE)
-                )
-            except Exception:
+                duration_sec = int(utils.get_metafits_value(metafits_filename, METAFITS_EXPOSURE))
+            except Exception as exc:
+                # Chained deliberately: this one propagates out of the method, and
+                # the cause (missing metafits file vs missing key vs unparseable
+                # value) is what makes it actionable.
                 raise ValueError(
                     f"{item}: Error reading {METAFITS_EXPOSURE} from metafits filename {metafits_filename}"
-                )
+                ) from exc
 
-            logger.debug(
-                f"{item}: Read {METAFITS_EXPOSURE} of {duration_sec}s from {metafits_filename}"
-            )
+            logger.debug(f"{item}: Read {METAFITS_EXPOSURE} of {duration_sec}s from {metafits_filename}")
 
             # Now determine the last subobs we should see
             # we subtract 8 seconds because the subobsid is the START of the subobs. Examples:
@@ -136,14 +135,10 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
             )
             if subobs_id >= expected_last_subobs_id:
                 # Time to stitch up the files
-                logger.debug(
-                    f"{item}: Observation complete. Stitching up beamformer {ext} files..."
-                )
+                logger.debug(f"{item}: Observation complete. Stitching up beamformer {ext} files...")
                 if ext == ".vdif":
                     # determine the file_path, rec_chan and beam number
-                    file_path, _, _, rec_chan, beam = (
-                        mwax_bf_vdif_utils.get_vdif_filename_components(item)
-                    )
+                    file_path, _, _, rec_chan, beam = mwax_bf_vdif_utils.get_vdif_filename_components(item)
 
                     # find all the vdif files for this beam, channel and obs
                     files = glob.glob(
@@ -154,25 +149,24 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
                     )
 
                     logger.debug(
-                        f"{item}: Found {len(files)} vdif files to stitch for rec_chan {rec_chan:03d}, beam {beam:02d}: {files}"
+                        f"{item}: Found {len(files)} vdif files to stitch for"
+                        f" rec_chan {rec_chan:03d}, beam {beam:02d}: {files}"
                     )
 
                     # Now keep the original files if the config file tells us we should
                     if self.keep_original_files_after_stitching:
                         logger.info(
-                            f"{item}: Copying unstitched vdif files to bf_dont_archive_path since keep_original_files_after_stitching=True..."
+                            f"{item}: Copying unstitched vdif files to"
+                            " bf_dont_archive_path since"
+                            " keep_original_files_after_stitching=True..."
                         )
                         for f in files:
                             shutil.copy(
                                 f,
-                                os.path.join(
-                                    self.bf_dont_archive_path, os.path.basename(f)
-                                ),
+                                os.path.join(self.bf_dont_archive_path, os.path.basename(f)),
                             )
 
-                    mwax_bf_vdif_utils.stitch_vdif_files_and_write_hdr(
-                        metafits_filename, files, self.bf_stitching_path
-                    )
+                    mwax_bf_vdif_utils.stitch_vdif_files_and_write_hdr(metafits_filename, files, self.bf_stitching_path)
 
                     # If it worked, remove the files
                     for f in files:
@@ -182,40 +176,31 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
 
                 elif ext == ".fil":
                     # determine file_path, rec_chan and beam number
-                    file_path, _, _, rec_chan, beam = (
-                        mwax_bf_filterbank_utils.get_filterbank_filename_components(
-                            item
-                        )
-                    )
+                    file_path, _, _, rec_chan, beam = mwax_bf_filterbank_utils.get_filterbank_filename_components(item)
 
                     # find all the fil files for this beam, channel and obs
-                    files = glob.glob(
-                        os.path.join(
-                            file_path, f"{obs_id}_*_ch{rec_chan:03d}_beam{beam:02d}.fil"
-                        )
-                    )
+                    files = glob.glob(os.path.join(file_path, f"{obs_id}_*_ch{rec_chan:03d}_beam{beam:02d}.fil"))
 
                     logger.debug(
-                        f"{item}: Found {len(files)} filterbank files to stitch for rec_chan {rec_chan:03d}, beam {beam:02d}"
+                        f"{item}: Found {len(files)} filterbank files to stitch for"
+                        f" rec_chan {rec_chan:03d}, beam {beam:02d}"
                     )
 
                     # Now keep the original files if the config file tells us we should
                     if self.keep_original_files_after_stitching:
                         logger.info(
-                            f"{item}: Copying unstitched filterbank files to bf_dont_archive_path since keep_original_files_after_stitching=True..."
+                            f"{item}: Copying unstitched filterbank files to"
+                            " bf_dont_archive_path since"
+                            " keep_original_files_after_stitching=True..."
                         )
                         for f in files:
                             shutil.copy(
                                 f,
-                                os.path.join(
-                                    self.bf_dont_archive_path, os.path.basename(f)
-                                ),
+                                os.path.join(self.bf_dont_archive_path, os.path.basename(f)),
                             )
 
                     # Now stitch the files together and write to the stitching path
-                    mwax_bf_filterbank_utils.stitch_filterbank_files(
-                        files, self.bf_stitching_path
-                    )
+                    mwax_bf_filterbank_utils.stitch_filterbank_files(files, self.bf_stitching_path)
 
                     # If it worked, remove the files
                     for f in files:

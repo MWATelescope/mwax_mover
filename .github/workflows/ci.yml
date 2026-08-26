@@ -1,0 +1,109 @@
+name: CI
+
+# Runs the same checks a developer runs locally, so a PR cannot merge with a
+# broken build even if the contributor has not installed the pre-commit hook
+# (see .pre-commit-config.yaml).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Allows a run to be kicked off by hand from the Actions tab, which is handy
+  # for confirming a fix without pushing an empty commit.
+  workflow_dispatch:
+
+# A new push to the same branch cancels an in-progress run for it. The test job
+# takes ~15 minutes, so without this a branch with several quick pushes queues
+# up runs that are already obsolete.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast feedback: formatting and type checking finish in well under a minute,
+  # so they run as their own job rather than making you wait for the test suite
+  # to find out you forgot to run `ruff format`.
+  lint:
+    name: Lint and type check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # Blocking: the repo is kept formatted and this passes today.
+      - name: ruff format --check
+        run: uv run ruff format --check src/ tests/
+
+      # Blocking: passes today.
+      - name: ty check
+        run: uv run ty check src/
+
+      # NON-blocking for now. `ruff check` currently reports ~86 findings
+      # (mostly E501 on long string literals, which the formatter cannot split),
+      # so making this a gate would turn CI red immediately and train everyone
+      # to ignore it.
+      #
+      # Deliberately NOT --output-format=github: that emits a `::error`
+      # annotation per finding, which would decorate every PR with 86 red marks
+      # for pre-existing issues. Plain output in the log plus a counts table in
+      # the job summary is visible without being noise.
+      #
+      # Once `uv run ruff check .` is clean: drop continue-on-error, switch to
+      # --output-format=github so new findings annotate the diff, AND add
+      # `- id: ruff-check` to .pre-commit-config.yaml so the two agree.
+      - name: ruff check (informational)
+        continue-on-error: true
+        run: |
+          uv run ruff check . --output-format=concise || true
+          {
+            echo "### ruff check findings (not yet enforced)"
+            echo '```'
+            uv run ruff check . --statistics || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    # The suite takes ~11 minutes, dominated by test020_calvin_solutions.py
+    # (~160s per test x 11 tests: roughly half in fit_phase_line and half in
+    # matplotlib rendering). 30 gives headroom on a slow runner without letting
+    # a genuinely hung test burn Actions minutes for hours.
+    timeout-minutes: 30
+    strategy:
+      # Report every version's result rather than cancelling the rest on the
+      # first failure - a version-specific break is exactly what the matrix is
+      # for, and we want to see which ones.
+      fail-fast: false
+      matrix:
+        # pyproject requires >=3.12,<3.15. 3.12 is what runs in production at
+        # the MRO; 3.13 is here to catch breakage before we upgrade. Add "3.14"
+        # once mwalib and the scientific stack publish wheels for it.
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --python ${{ matrix.python-version }}
+
+      # The `integration` marked tests need network access and real external
+      # binaries (giant-squid), so they are deselected by the `addopts` in
+      # pyproject.toml and are NOT run here. Everything else is self-contained:
+      # test configs are rendered per-test with stub binaries, and the scratch
+      # tree location comes from MWAX_MOVER_TEST_DIR (defaulting to a temp dir).
+      - name: pytest
+        env:
+          MWAX_MOVER_TEST_DIR: ${{ runner.temp }}/mwax_mover_testing
+        run: uv run pytest

@@ -2,7 +2,7 @@
 """Inspect a FITS file: print header key values, and table or image data.
 
 Usage:
-    python fits_inspect.py <filename> <hdu>
+    fits_inspect <filename> <hdu>
 
 Where <hdu> is either an integer HDU index (e.g. 1) or an HDU
 EXTNAME/name string (e.g. SOLUTIONS).
@@ -22,13 +22,9 @@ def parse_args() -> argparse.Namespace:
     Returns:
         argparse.Namespace: Parsed arguments with `filename` and `hdu`.
     """
-    parser = argparse.ArgumentParser(
-        description="Print header info and data summary for a FITS HDU."
-    )
+    parser = argparse.ArgumentParser(description="Print header info and data summary for a FITS HDU.")
     parser.add_argument("filename", help="Path to the FITS file")
-    parser.add_argument(
-        "hdu", help="HDU index (integer) or HDU name (string), e.g. 1 or SOLUTIONS"
-    )
+    parser.add_argument("hdu", help="HDU index (integer) or HDU name (string), e.g. 1 or SOLUTIONS")
     return parser.parse_args()
 
 
@@ -123,9 +119,7 @@ def main() -> None:
                 sys.exit(1)
 
             print(f"File: {args.filename}")
-            print(
-                f"HDU: {hdu.name!r} (index {hdul.index_of(hdu.name) if hdu.name else '?'})"
-            )
+            print(f"HDU: {hdu.name!r} (index {hdul.index_of(hdu.name) if hdu.name else '?'})")
             print(f"Type: {type(hdu).__name__}")
 
             print_header_table(hdu.header)
@@ -135,9 +129,7 @@ def main() -> None:
             elif isinstance(hdu, (fits.ImageHDU, fits.PrimaryHDU)):
                 print_image_data(hdu)
             else:
-                print(
-                    f"\n(No data preview available for HDU type {type(hdu).__name__})"
-                )
+                print(f"\n(No data preview available for HDU type {type(hdu).__name__})")
 
     except FileNotFoundError:
         print(f"Error: file not found: {args.filename}", file=sys.stderr)

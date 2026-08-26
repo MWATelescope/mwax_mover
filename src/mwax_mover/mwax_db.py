@@ -54,7 +54,9 @@ class MWAXDBHandler:
                 max_size=3,
                 open=False,
                 check=ConnectionPool.check_connection,
-                conninfo=f"postgresql://{user}:{password}@{host}:{port}/{db_name}{'' if ssl_mode is None else ssl_mode}",
+                conninfo=(
+                    f"postgresql://{user}:{password}@{host}:{port}/{db_name}{'' if ssl_mode is None else ssl_mode}"
+                ),
             )
 
     def close(self):
@@ -76,15 +78,6 @@ class MWAXDBHandler:
         # Check we are not already started
         if self.pool.closed:
             self.pool.open(wait=True)
-
-    def stop_database_pool(self):
-        """Gracefully close the database connection pool."""
-        # Gracefully close the connections in the pool
-        if self.pool:
-            try:
-                self.pool.close()
-            except Exception:
-                pass
 
     def select_one_row_postgres(self, sql: str, parm_list):
         """Retrieve a single row from the database.
@@ -176,23 +169,19 @@ class MWAXDBHandler:
             logger.exception("postgres exception")
             raise
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_fixed(30),
-        retry=retry_if_exception_type(
-            (
-                psycopg.errors.ConnectionFailure,
-                psycopg.errors.ConnectionException,
-                psycopg.errors.ConnectionTimeout,
-                psycopg.errors.OperationalError,
-            )
-        ),
-    )
     def execute_single_dml_row(self, sql: str, parm_list):
         """Execute an INSERT, UPDATE, or DELETE statement affecting exactly one row.
 
         Automatically commits on success and rolls back on failure within
-        a transaction context.
+        a transaction context. Connection-failure retries are handled by
+        execute_dml, which this delegates to.
+
+        NOTE: this method used to carry its own @retry decorator identical to
+        execute_dml's. Since it does nothing but call execute_dml, the two
+        nested retries multiplied: up to 9 attempts rather than 3, and a
+        worst case of roughly 5 minutes (3 x 30s inner waits, repeated 3 times)
+        instead of 1. The outer decorator has been removed so the retry policy
+        is defined in exactly one place.
 
         Args:
             sql: SQL DML statement.
@@ -545,7 +534,10 @@ def insert_calibration_fits_row(
     """
     sql = (
         "INSERT INTO calibration_fits"
-        " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit,source_list,num_sources,calibration_command,gain_max_cutoff,gain_outlier_poly_degree,gain_outlier_mad_residual_threshold,gain_outlier_modify_gains,tile_bad_channel_fraction,phase_outlier_nstd_threshold)"
+        " (fitid,obsid,code_version,fit_time,creator,fit_niter,fit_limit,source_list"
+        ",num_sources,calibration_command,gain_max_cutoff,gain_outlier_poly_degree"
+        ",gain_outlier_mad_residual_threshold,gain_outlier_modify_gains"
+        ",tile_bad_channel_fraction,phase_outlier_nstd_threshold)"
         " VALUES (%s,%s,%s,now(),%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
     )
 
@@ -580,8 +572,11 @@ def insert_calibration_fits_row(
         logger.exception(
             f"{obs_id}: error inserting calibration_fits record in table. SQL was {sql} Values: {sql_values}"
         )
-        if transaction_cursor:
-            transaction_cursor.connection.rollback()
+        # NOTE: deliberately does NOT roll back here. The caller owns the
+        # transaction (mwax_calvin_solutions.process_solutions runs this inside
+        # a `with conn.transaction():` block and raises on a False return),
+        # so rolling back from in here meant two things were trying to unwind
+        # the same transaction. Rollback is the caller's job; we just report.
         return (False, None)
 
 
@@ -678,6 +673,19 @@ def insert_calibration_solutions_row(
 
 
 def get_unattempted_unrequested_cal_obsids(db_handler_object: MWAXDBHandler, oldest_obs_id: int) -> list[int] | None:
+    """Find calibrator observations with no calibration_request row yet.
+
+    Args:
+        db_handler_object: A populated database handler (dummy or real).
+        oldest_obs_id: Ignore any observation older than this obs_id, so we do
+            not keep reconsidering the entire archive.
+
+    Returns:
+        A list of obs_ids needing a calibration request, or None if none found.
+
+    Raises:
+        Exception: If the database query fails.
+    """
     # This SQL gets all calibrator obs which have not yet been calibrated and
     # have not had a cal request added yet
     sql = """SELECT m.starttime as obs_id
@@ -722,14 +730,17 @@ def get_unattempted_unrequested_cal_obsids(db_handler_object: MWAXDBHandler, old
 def get_unattempted_calibration_requests(
     db_handler_object: MWAXDBHandler,
 ) -> list[tuple[int, int, bool, bool]] | None:
-    """Returns the deatils of the next oldest unattempted calibration_requests.
+    """Return the details of the next oldest unattempted calibration_requests.
 
-    Parameters:
-            db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
-            hostname (str): The name of the current host so we can specify who is working on this request
+    Args:
+        db_handler_object: A populated database handler (dummy or real).
 
     Returns:
-            list of Tuple(request_id, cal_id, realtime,bulk_request) OR None if none found. Raises exceptions on error
+        A list of (request_id, cal_id, realtime, bulk_request) tuples, or None if
+        none were found.
+
+    Raises:
+        Exception: If the database query fails.
     """
 
     # How this works!
@@ -870,6 +881,19 @@ def update_calibration_request_slurm_status(
     slurm_job_submitted_error_datetime: datetime.datetime | None,
     slurm_job_submitted_error_message: str | None,
 ):
+    """Record the outcome of submitting a Slurm job for one or more requests.
+
+    Args:
+        db_handler_object: A populated database handler (dummy or real).
+        request_ids: The calibration request IDs to update.
+        slurm_job_id: The submitted Slurm job ID, or None on failure.
+        slurm_job_submitted_datetime: When the job was submitted, or None on failure.
+        slurm_job_submitted_error_datetime: When submission failed, or None on success.
+        slurm_job_submitted_error_message: Why submission failed, or None on success.
+
+    Raises:
+        Exception: If the database update fails.
+    """
     sql = """
     UPDATE public.calibration_request
     SET
@@ -981,6 +1005,17 @@ def update_calibration_request_assign_hostname_start_download(
     slurm_hostname: str,
     download_started_datetime: datetime.datetime,
 ):
+    """Record which host a Slurm job landed on, and that its download has begun.
+
+    Args:
+        db_handler_object: A populated database handler (dummy or real).
+        slurm_job_id: The Slurm job ID whose request row should be updated.
+        slurm_hostname: The calvin host now working on this request.
+        download_started_datetime: When the download started.
+
+    Raises:
+        Exception: If the database update fails.
+    """
     sql = """
     UPDATE public.calibration_request
     SET
@@ -1134,12 +1169,31 @@ def update_calsolution_request_calibration_complete_status(
 def get_fit_info_from_slurm_job_and_obsid(
     db_handler_object: MWAXDBHandler, obs_id: int, slurm_job_id: int
 ) -> tuple[int, int | None] | None:
+    """Look up a fit_id, and whether hyperdrive's amp plots need a max-amp clip.
+
+    Args:
+        db_handler_object: A populated database handler (dummy or real).
+        obs_id: The observation ID of the fit.
+        slurm_job_id: The Slurm job ID that produced the fit. Together with
+            obs_id this is unique for calvin fits.
+
+    Returns:
+        A (fit_id, amp_plot_max) tuple, where amp_plot_max is 100 or None, or
+        None if no matching fit was found. Will not find fits from before the
+        calibration_request table was introduced.
+
+    Raises:
+        Exception: If the database query fails.
+    """
     # This SQL looks up a fitid and determines if a max amp is needed to be passed to hyperdrive amp plots
     # from the calibration_request and fits table based on an obsid and a slurm jobid.
     # This will be unique for calvin fits.
     # Won't work for any fits prior to the introduction of the calibration_request table
     sql = """SELECT r.calibration_fit_id, f.creator, f.code_version, 
-                CASE WHEN f.gain_max_cutoff IS NULL AND r.calibration_fit_id IS NOT NULL AND f.gain_outlier_modify_gains IS NULL THEN 100 		 
+                CASE
+                    WHEN f.gain_max_cutoff IS NULL
+                     AND r.calibration_fit_id IS NOT NULL
+                     AND f.gain_outlier_modify_gains IS NULL THEN 100
                 ELSE NULL END as amp_plot_max
             FROM calibration_request r
             LEFT OUTER JOIN calibration_fits f ON f.fitid=r.calibration_fit_id AND f.obsid=r.cal_id

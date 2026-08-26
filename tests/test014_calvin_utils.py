@@ -25,6 +25,7 @@ section if that happens.
 
 import logging
 import os
+from pathlib import Path
 
 import mwalib
 import numpy as np
@@ -1237,7 +1238,7 @@ def test_write_readme_success_exit_code_zero(tmp_path):
     fname = str(tmp_path / "readme_ok.txt")
     write_readme_file(fname, cmd="my_command arg1", exit_code=0, output="some output", error="")
     assert os.path.exists(fname)
-    content = open(fname).read()
+    content = Path(fname).read_text()
     assert "succeeded" in content  # typo fixed in source: was "succeded"
     assert "my_command arg1" in content
     assert "some output" in content
@@ -1246,7 +1247,7 @@ def test_write_readme_success_exit_code_zero(tmp_path):
 def test_write_readme_failure_exit_code_nonzero(tmp_path):
     fname = str(tmp_path / "readme_fail.txt")
     write_readme_file(fname, cmd="bad_command", exit_code=1, output="", error="something went wrong")
-    content = open(fname).read()
+    content = Path(fname).read_text()
     assert "failed" in content
     assert "something went wrong" in content
 
@@ -1254,7 +1255,7 @@ def test_write_readme_failure_exit_code_nonzero(tmp_path):
 def test_write_readme_includes_exit_code(tmp_path):
     fname = str(tmp_path / "readme_code.txt")
     write_readme_file(fname, cmd="cmd", exit_code=42, output="out", error="err")
-    content = open(fname).read()
+    content = Path(fname).read_text()
     assert "42" in content
 
 
@@ -1892,9 +1893,7 @@ class TestReadTilesHdu:
 
     def test_already_ascending_antennas_unchanged(self):
         """When Antenna is already ascending, order is preserved."""
-        tiles_data = self._tiles_recarray(
-            antennas=[0, 1, 2], tile_names=["Tile0", "Tile1", "Tile2"], flags=[0, 1, 0]
-        )
+        tiles_data = self._tiles_recarray(antennas=[0, 1, 2], tile_names=["Tile0", "Tile1", "Tile2"], flags=[0, 1, 0])
 
         antennas, names, flags = read_tiles_hdu(tiles_data)
 
@@ -1904,9 +1903,7 @@ class TestReadTilesHdu:
 
     def test_out_of_order_antennas_are_sorted(self):
         """When Antenna is out of order, names/flags are reordered to match."""
-        tiles_data = self._tiles_recarray(
-            antennas=[2, 0, 1], tile_names=["TileC", "TileA", "TileB"], flags=[1, 0, 1]
-        )
+        tiles_data = self._tiles_recarray(antennas=[2, 0, 1], tile_names=["TileC", "TileA", "TileB"], flags=[1, 0, 1])
 
         antennas, names, flags = read_tiles_hdu(tiles_data)
 

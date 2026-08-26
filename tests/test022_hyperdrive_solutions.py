@@ -23,12 +23,14 @@ against.
 
 import io
 import os
+import shutil
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import numpy as np
 import pandas as pd
 import pytest
 from astropy import units as u
+from astropy.io import fits
 from astropy.constants import c as speed_of_light  # ty: ignore[unresolved-import]
 
 from mwax_mover.mwax_calvin_utils import Metafits, reject_outliers
@@ -304,6 +306,28 @@ def test_weights_uniform_fallback():
     assert np.all(weights == pytest.approx(1.0))
 
 
+def test_weights_uniform_fallback_spans_all_solution_files():
+    """Missing RESULTS HDU across a multi-file (picket fence) group.
+
+    Regression test: the fallback used to return an array sized from the FIRST
+    solution file's chanblocks only, so for a group of several files it was
+    silently shorter than the concatenated chanblock axis that callers index it
+    against.
+    """
+    mock_group = MagicMock(spec=HyperfitsSolutionGroup)
+    type(mock_group).results = PropertyMock(side_effect=KeyError("RESULTS"))
+    mock_group.all_chanblocks_hz = [
+        np.linspace(138e6, 140e6, 32),
+        np.linspace(150e6, 152e6, 32),
+        np.linspace(168e6, 170e6, 32),
+    ]
+
+    weights = HyperfitsSolutionGroup.weights.fget(mock_group)
+
+    assert len(weights) == 96, "weights must cover every file's chanblocks, not just the first"
+    assert np.all(weights == pytest.approx(1.0))
+
+
 # ===========================================================================
 # HyperfitsSolutionGroup.load
 # ===========================================================================
@@ -400,7 +424,8 @@ def test_enforce_whole_jones_nan_promotes_partial_entry():
 
     # Pick an entry that starts fully finite, then corrupt just one term.
     finite_mask = ~np.any(np.isnan(group.jones[0]), axis=(-2, -1))
-    tile_idx, chan_idx = next(zip(*np.where(finite_mask)))
+    finite_tiles, finite_chans = np.where(finite_mask)
+    tile_idx, chan_idx = int(finite_tiles[0]), int(finite_chans[0])
     group.jones[0][tile_idx, chan_idx, 0, 1] = np.nan + 1j * np.nan  # Dx only
 
     group.enforce_whole_jones_nan()
@@ -417,7 +442,8 @@ def test_enforce_whole_jones_nan_leaves_fully_finite_entry_untouched():
     assert group.jones is not None
     assert group.channel_flag_reasons is not None
     finite_mask = ~np.any(np.isnan(group.jones[0]), axis=(-2, -1))
-    tile_idx, chan_idx = next(zip(*np.where(finite_mask)))
+    finite_tiles, finite_chans = np.where(finite_mask)
+    tile_idx, chan_idx = int(finite_tiles[0]), int(finite_chans[0])
     original = group.jones[0][tile_idx, chan_idx].copy()
 
     group.enforce_whole_jones_nan()
@@ -875,9 +901,7 @@ def test_detect_phase_outliers_flavor_scoping_avoids_cross_flavor_false_positive
     pooled_phase_fits = reject_outliers(pooled_phase_fits, "sigma_resid", nstd=3.0)
     rri_tile_ids = {i + 1 for i in range(15, n_tiles)}
     pooled_rri_outliers = set(
-        pooled_phase_fits.loc[
-            pooled_phase_fits["outlier"] & pooled_phase_fits["tile_id"].isin(rri_tile_ids), "tile_id"
-        ]
+        pooled_phase_fits.loc[pooled_phase_fits["outlier"] & pooled_phase_fits["tile_id"].isin(rri_tile_ids), "tile_id"]
     )
     assert pooled_rri_outliers, (
         "expected the pol-only pooled threshold to flag at least one RRI tile "
@@ -927,7 +951,7 @@ def test_detect_phase_outliers_never_flags_or_modifies_jones():
         group.detect_phase_outliers(refant_name="Tile001", phase_fit_niter=1, nstd=2.0)
 
     np.testing.assert_array_equal(before_tile_flag_reasons, group.tile_flag_reasons)
-    for before_file_jones, after_file_jones in zip(before_all_jones, group.jones):
+    for before_file_jones, after_file_jones in zip(before_all_jones, group.jones, strict=True):
         assert np.array_equal(before_file_jones, after_file_jones, equal_nan=True)
 
 
@@ -1058,9 +1082,7 @@ def test_run_flagging_pipeline_gain_max_cutoff_none_preserves_prior_behaviour():
         )
 
     assert not (group.tile_flag_reasons[1] & TileFlagReason.MOSTLY_BAD_CHANNELS)
-    assert not np.any(
-        [reasons[1, 5] & ChannelFlagReason.GAIN_MAX_CUTOFF for reasons in group.channel_flag_reasons]
-    )
+    assert not np.any([reasons[1, 5] & ChannelFlagReason.GAIN_MAX_CUTOFF for reasons in group.channel_flag_reasons])
 
 
 def test_run_flagging_pipeline_detect_phase_outliers_runs_last():
@@ -1211,3 +1233,131 @@ def test_commit_backup_preserves_pristine_original(tmp_path):
 
     backup_jones = HyperfitsSolution(backup_paths[0]).get_jones()
     assert np.allclose(backup_jones, pristine, equal_nan=True)
+
+
+# ===========================================================================
+# HyperfitsSolution.results caching
+# ===========================================================================
+
+
+class TestResultsCaching:
+    """Tests that the RESULTS HDU is read from disk once per solution file.
+
+    The RESULTS HDU is immutable for the life of a HyperfitsSolution (nothing
+    writes it -- write_jones only touches SOLUTIONS), but it was re-read on
+    every access: HyperfitsSolutionGroup.results touched it twice per file, and
+    .weights goes through that on each of its several accesses per pipeline run.
+    On a 24-file picket fence that was 192 fits.open calls per run against 8 for
+    a contiguous observation, over a shared filesystem.
+    """
+
+    @staticmethod
+    def _counting_fits_open(counter):
+        """Wrap astropy's fits.open so opens of the solution file are counted."""
+        real_open = fits.open
+
+        def _open(name, *args, **kwargs):
+            counter.append(str(name))
+            return real_open(name, *args, **kwargs)
+
+        return _open
+
+    def test_repeated_access_reads_the_file_once(self):
+        """Every access after the first is served from the cache."""
+        hs = HyperfitsSolution(SOLUTIONS_PATH)
+        opens: list[str] = []
+
+        with patch("mwax_mover.mwax_hyperdrive_solutions.fits.open", side_effect=self._counting_fits_open(opens)):
+            first = hs.results
+            for _ in range(5):
+                _ = hs.results
+
+        assert len(opens) == 1
+        assert len(first) > 0
+
+    def test_cached_value_matches_an_uncached_read(self):
+        """Caching must not change the values returned."""
+        expected = HyperfitsSolution(SOLUTIONS_PATH).results
+
+        hs = HyperfitsSolution(SOLUTIONS_PATH)
+        _ = hs.results  # populate the cache
+        assert np.array_equal(hs.results, expected, equal_nan=True)
+
+    def test_group_results_reads_each_file_once(self):
+        """The group property no longer reads each file twice per access."""
+        metafits = Metafits(METAFITS_PATH)
+        group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+        opens: list[str] = []
+
+        with patch("mwax_mover.mwax_hyperdrive_solutions.fits.open", side_effect=self._counting_fits_open(opens)):
+            _ = group.results
+
+        # Previously two: one for the length-validation loop, one for the concat
+        assert sum(1 for name in opens if name == SOLUTIONS_PATH) == 1
+
+    def test_weights_accessed_repeatedly_does_not_reread(self):
+        """weights() is accessed several times per pipeline run."""
+        metafits = Metafits(METAFITS_PATH)
+        group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+        opens: list[str] = []
+
+        with patch("mwax_mover.mwax_hyperdrive_solutions.fits.open", side_effect=self._counting_fits_open(opens)):
+            for _ in range(4):
+                _ = group.weights
+
+        assert sum(1 for name in opens if name == SOLUTIONS_PATH) == 1
+
+    def test_missing_results_hdu_keeps_raising_without_rereading(self):
+        """A file with no RESULTS HDU must keep raising KeyError, from cache.
+
+        Callers (notably weights) rely on KeyError to fall back to uniform
+        weights, so a cached miss must not silently become a success -- and must
+        not re-open the file on every subsequent attempt either.
+        """
+        hs = HyperfitsSolution(SOLUTIONS_PATH)
+        opens: list[str] = []
+
+        def _open_without_results(name, *args, **kwargs):
+            opens.append(str(name))
+            raise KeyError("RESULTS")
+
+        with patch("mwax_mover.mwax_hyperdrive_solutions.fits.open", side_effect=_open_without_results):
+            for _ in range(3):
+                with pytest.raises(KeyError):
+                    _ = hs.results
+
+        assert len(opens) == 1
+
+    def test_weights_falls_back_to_uniform_when_results_missing(self):
+        """The cached-miss path still produces the uniform-weight fallback."""
+        metafits = Metafits(METAFITS_PATH)
+        group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+        n_chanblocks = len(group.all_chanblocks_hz_concat)
+
+        with patch.object(type(group.solns[0]), "results", new_callable=PropertyMock, side_effect=KeyError("RESULTS")):
+            weights = group.weights
+
+        assert weights.shape == (n_chanblocks,)
+        assert np.all(weights == 1.0)
+
+    def test_cache_is_still_valid_after_write_jones(self, tmp_path):
+        """commit() rewrites SOLUTIONS only, so a cached RESULTS stays correct.
+
+        This is what makes caching safe at all: if write_jones ever started
+        touching the RESULTS HDU, the cache would silently go stale for the rest
+        of the run and weights would be computed from pre-commit convergence
+        values.
+        """
+        soln_path = tmp_path / "solutions.fits"
+        shutil.copy(SOLUTIONS_PATH, soln_path)
+
+        hs = HyperfitsSolution(str(soln_path))
+        cached_before = hs.results.copy()
+
+        jones = hs.get_jones()
+        hs.write_jones(jones * 2.0, backup=False)
+
+        # The cached value must still match what a fresh reader sees on disk
+        fresh = HyperfitsSolution(str(soln_path)).results
+        assert np.array_equal(hs.results, cached_before, equal_nan=True)
+        assert np.array_equal(hs.results, fresh, equal_nan=True)

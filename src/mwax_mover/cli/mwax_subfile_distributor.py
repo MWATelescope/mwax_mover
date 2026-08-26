@@ -74,6 +74,16 @@ class MWAXSubfileDistributor:
             self.hostname: str = utils.get_hostname()
         self.running: bool = False
 
+        # Set by request_fatal_shutdown() when a worker thread hits an
+        # unrecoverable error. Worker threads cannot terminate the process
+        # themselves (sys.exit() on a non-main thread only ends that thread and
+        # its exit code is discarded), so they record the intended exit code
+        # here and the main thread acts on it. Non-zero means "we did NOT
+        # complete successfully" and is what main() exits with, so that systemd
+        # / the alerting on top of it sees a failure rather than a clean stop.
+        self.fatal_exit_code: int = 0
+        self.fatal_reason: str = ""
+
         # Web server
         self.flask_app = Flask(__name__)
         self.flask_thread: threading.Thread | None = None
@@ -187,7 +197,9 @@ class MWAXSubfileDistributor:
 
         Args:
             config_filename: Path to the configuration file.
-            override_db_handler: If present, this will override the default MWAXDBHandler (this is used for testing via tests/tests_fakedb.py FakeMWAXDBHandler). Defaults to None.
+            override_db_handler: If present, this will override the default
+                MWAXDBHandler (this is used for testing via tests/tests_fakedb.py
+                FakeMWAXDBHandler). Defaults to None.
         """
         if not os.path.exists(config_filename):
             logger.error(f"Configuration file location {config_filename} does not exist. Quitting.")
@@ -623,7 +635,8 @@ class MWAXSubfileDistributor:
         # Do:
         #   Run mwax_stats
         # Then:
-        #   Move file to outgoing cal dir (if archiving & calibrator), outgoing dir (if archiving and not calibrator) or dont_archive dir (if not archiving)
+        #   Move file to outgoing cal dir (if archiving & calibrator), outgoing dir
+        #   (if archiving and not calibrator) or dont_archive dir (if not archiving)
         self.vis_stats_processor = VisStatsProcessor(
             self.cfg_corr_metafits_path,
             self.cfg_corr_visdata_processing_stats_path,
@@ -641,7 +654,8 @@ class MWAXSubfileDistributor:
         #   watch_dir_incoming_bf
         # Do:
         #   Stitch the files and save them into watch_dir_stitching_bf
-        #   (Optionally copy the pre-stitched files to dont_archive_path_bf if bf_keep_original_files_after_stitching is True)
+        #   (Optionally copy the pre-stitched files to dont_archive_path_bf if
+        #   bf_keep_original_files_after_stitching is True)
         # Then:
         #   ChecksumAndDB processor will pick up the new files in watch_dir_stitching_bf
         self.bf_stitching_processor = BfStitchingProcessor(
@@ -662,7 +676,8 @@ class MWAXSubfileDistributor:
             # Watch:
             #   watch_dir_outgoing_cal
             # Do:
-            #   Add to the outgoing cal list so that when release_cal_obs is called by calvin, we can remove the file from the list and archive the file
+            #   Add to the outgoing cal list so that when release_cal_obs is called
+            #   by calvin, we can remove the file from the list and archive the file
             #
             self.vis_cal_outgoing_processor = VisCalOutgoingProcessor(
                 self.cfg_corr_calibrator_outgoing_path,
@@ -1088,14 +1103,47 @@ class MWAXSubfileDistributor:
             for w in self.workers:
                 if self.running:
                     if not w.is_running():
-                        logger.error(f"Worker {w.name} has stopped unexpectedly.")
-                        self.running = False
+                        self.request_fatal_shutdown(4, f"Worker {w.name} has stopped unexpectedly.")
                         break
 
             time.sleep(0.1)
 
-        # Final log message
-        logger.info("Completed Successfully")
+        # Final log message. NOTE: this used to unconditionally log "Completed
+        # Successfully", even when we got here because a worker died. Combined
+        # with main()'s sys.exit(0), a fatal error looked like a clean shutdown
+        # to systemd and to whatever alerts on it.
+        if self.fatal_exit_code:
+            logger.error(f"Shutting down with exit code {self.fatal_exit_code}: {self.fatal_reason}")
+        else:
+            logger.info("Completed Successfully")
+
+    def request_fatal_shutdown(self, exit_code: int, reason: str) -> None:
+        """Ask the main thread to shut the whole processor down and exit non-zero.
+
+        Worker threads cannot terminate the process themselves: sys.exit() on a
+        non-main thread raises SystemExit in that thread only, which kills the
+        thread and discards the exit code, leaving the daemon running with one
+        fewer worker. Worker code that hits an unrecoverable error should call
+        this instead, then stop what it is doing.
+
+        The first caller wins, so the exit code reflects the original cause
+        rather than any knock-on failure. Safe to call more than once and from
+        any thread.
+
+        Args:
+            exit_code: Non-zero process exit code for main() to exit with.
+            reason: Human-readable description, logged and included in the
+                final shutdown message.
+        """
+        if self.fatal_exit_code:
+            # Already shutting down for an earlier (root cause) reason.
+            logger.warning(f"Additional fatal error while shutting down: {reason}")
+            return
+
+        logger.error(f"FATAL: {reason} Requesting shutdown with exit code {exit_code}.")
+        self.fatal_exit_code = exit_code
+        self.fatal_reason = reason
+        self.running = False
 
     def stop(self):
         """Stop the distributor and shutdown all workers and servers.
@@ -1132,32 +1180,36 @@ class MWAXSubfileDistributor:
 
         logger.info(f"Starting http server on port {self.cfg_webserver_port}...")
 
-        # threaded=True lets Flask handle multiple requests concurrently
-        self.flask_app.add_url_rule("/shutdown", "shutdown", self.endpoint_shutdown, methods=["POST", "GET"])
+        # Endpoints which change state are POST-only. They used to accept GET
+        # as well, which meant anything that speculatively fetches a URL - a
+        # crawler, a link checker, an over-eager monitoring probe - could stop
+        # the correlator by hitting /shutdown. Only /status, which just reads,
+        # answers GET.
         self.flask_app.add_url_rule("/status", "status", self.endpoint_status, methods=["GET"])
+        self.flask_app.add_url_rule("/shutdown", "shutdown", self.endpoint_shutdown, methods=["POST"])
         self.flask_app.add_url_rule(
             "/pause_archiving",
             "pause_archiving",
             self.endpoint_pause_archiving,
-            methods=["POST", "GET"],
+            methods=["POST"],
         )
         self.flask_app.add_url_rule(
             "/resume_archiving",
             "resume_archiving",
             self.endpoint_resume_archiving,
-            methods=["POST", "GET"],
+            methods=["POST"],
         )
         self.flask_app.add_url_rule(
             "/release_cal_obs",
             "release_cal_obs",
             self.endpoint_release_cal_obs,
-            methods=["POST", "GET"],
+            methods=["POST"],
         )
         self.flask_app.add_url_rule(
             "/dump_voltages",
             "dump_voltages",
             self.endpoint_dump_voltages,
-            methods=["POST", "GET"],
+            methods=["POST"],
         )
 
         host = "0.0.0.0"
@@ -1191,9 +1243,15 @@ def main():
         processor.initialise_from_command_line()
 
         processor.start()
-        sys.exit(0)
     except Exception:
         logger.exception("Exited with error")
+        sys.exit(1)
+
+    # start() returns once the main loop has ended. If a worker thread hit an
+    # unrecoverable error it recorded an exit code via request_fatal_shutdown();
+    # surface it here so systemd (and the alerting on top of it) sees a failure.
+    # This used to be an unconditional sys.exit(0).
+    sys.exit(processor.fatal_exit_code)
 
 
 if __name__ == "__main__":

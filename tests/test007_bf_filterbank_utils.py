@@ -26,7 +26,8 @@ def test_stitch_zero_files():
 
     filenames = []
 
-    with pytest.raises(Exception):
+    # See test006: production raises a bare Exception, so match on the message.
+    with pytest.raises(Exception, match="No filterbank files to stitch"):
         stitch_filterbank_files(filenames, output_dir)
 
 
@@ -39,9 +40,7 @@ def test_stitch_one_file():
 
     output_filterbank_filename = stitch_filterbank_files(filenames, output_dir)
 
-    assert output_filterbank_filename == os.path.join(
-        output_dir, "1451758560_ch109_beam00.fil"
-    )
+    assert output_filterbank_filename == os.path.join(output_dir, "1451758560_ch109_beam00.fil")
 
     assert os.path.exists(output_filterbank_filename)
 
@@ -62,9 +61,7 @@ def test_stitch_many_files():
 
     output_filterbank_filename = stitch_filterbank_files(filenames, output_dir)
 
-    assert output_filterbank_filename == os.path.join(
-        output_dir, "1451758560_ch109_beam00.fil"
-    )
+    assert output_filterbank_filename == os.path.join(output_dir, "1451758560_ch109_beam00.fil")
     assert os.path.exists(output_filterbank_filename)
 
     # Get new data len- check it is the same as 1+2

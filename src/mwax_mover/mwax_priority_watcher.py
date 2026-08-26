@@ -50,9 +50,7 @@ class PriorityWatcher:
             FileNotFoundError: If the specified path does not exist.
         """
         self.name = name
-        self.inotify_tree: (
-            inotify.adapters.InotifyTree | inotify.adapters.Inotify | None
-        ) = None
+        self.inotify_tree: inotify.adapters.InotifyTree | inotify.adapters.Inotify | None = None
         self.recursive = recursive
         self.mode = mode
         self.path = path
@@ -61,12 +59,8 @@ class PriorityWatcher:
         self.pattern = pattern  # must be ".ext" or ".*"
         self.exclude_pattern = exclude_pattern  # Can be None or ".ext"
         self.metafits_path = metafits_path
-        self.list_of_correlator_high_priority_projects: list = (
-            list_of_correlator_high_priority_projects
-        )
-        self.list_of_vcs_high_priority_projects: list = (
-            list_of_vcs_high_priority_projects
-        )
+        self.list_of_correlator_high_priority_projects: list = list_of_correlator_high_priority_projects
+        self.list_of_vcs_high_priority_projects: list = list_of_vcs_high_priority_projects
         # This is a flag used so callers can know when,
         # on startup that the scan for existing files
         # has completed. This is useful for the workers
@@ -96,9 +90,7 @@ class PriorityWatcher:
         logging.getLogger("inotify.adapters").setLevel(logging.CRITICAL)
 
         if self.recursive:
-            logger.info(
-                f"PriorityWatcher starting on {self.path}/*{self.pattern} and all subdirectories..."
-            )
+            logger.info(f"PriorityWatcher starting on {self.path}/*{self.pattern} and all subdirectories...")
             self.inotify_tree = inotify.adapters.InotifyTree(self.path, mask=self.mask)
         else:
             logger.info(f"PriorityWatcher starting on {self.path}/*{self.pattern}...")
@@ -106,9 +98,7 @@ class PriorityWatcher:
             self.inotify_tree.add_watch(self.path, mask=self.mask)
 
         if self.exclude_pattern:
-            logger.info(
-                f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}"
-            )
+            logger.info(f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}")
 
         self.watching = True
         self.do_watch_loop()
@@ -159,9 +149,7 @@ class PriorityWatcher:
 
         while self.watching:
             if self.inotify_tree:
-                for event in self.inotify_tree.event_gen(
-                    timeout_s=0.1, yield_nones=False
-                ):
+                for event in self.inotify_tree.event_gen(timeout_s=0.1, yield_nones=False):
                     # This if is a bit redundant as above we specify we don't yield nones.
                     if event:
                         (header, _, path, filename) = event
@@ -173,8 +161,7 @@ class PriorityWatcher:
                         if header.mask & self.mask:
                             # Check file extension is one we care about
                             if (
-                                os.path.splitext(filename)[1] == self.pattern
-                                or self.pattern == ".*"
+                                os.path.splitext(filename)[1] == self.pattern or self.pattern == ".*"
                             ) and os.path.splitext(filename)[1] != self.exclude_pattern:
                                 dest_filename = os.path.join(path, filename)
 
@@ -193,7 +180,8 @@ class PriorityWatcher:
 
                                 self.dest_queue.put(new_queue_item)
                                 logger.info(
-                                    f"{dest_filename} added to queue with priority {priority} ({self.dest_queue.qsize()})"
+                                    f"{dest_filename} added to queue with priority"
+                                    f" {priority} ({self.dest_queue.qsize()})"
                                 )
 
     def get_status(self) -> dict:

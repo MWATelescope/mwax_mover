@@ -11,6 +11,7 @@ the pure numeric fitting functions (fit_phase_line, fit_gain, etc.) and
 mwax_calvin_plots.py for plotting.
 """
 
+import itertools
 import logging
 import os
 import shutil
@@ -210,7 +211,7 @@ def _gain_fit_one(
 def add_digital_gains_column(
     hyperdrive_solution_filename: str,
     metafits_context: mwalib.MetafitsContext,
-):
+) -> bool:
     """Add a float32[24] digital-gains column to a FITS binary table HDU.
 
     Builds the 24-element (one per coarse channel) digital gain array for
@@ -229,7 +230,14 @@ def add_digital_gains_column(
             the caller is responsible for constructing/populating it.
 
     Returns:
-        The new fits.BinTableHDU with the digital gains column added.
+        True if the column was added, False if it was already present and
+        nothing was changed.
+
+        NOTE: this previously returned the fits.BinTableHDU itself, which
+        escaped the `with fits.open(...)` block. astropy loads HDU data
+        lazily, so touching .data on the returned object after the file had
+        been closed was unsafe. No caller used the return value, so it now
+        reports only whether a change was made.
 
     Raises:
         KeyError: If a tile ID present in the HDU cannot be found among
@@ -249,7 +257,7 @@ def add_digital_gains_column(
         # Does this column already exist? If so don't do anything but log a warning.
         if col_name in hdul[hdu_name].columns.names:
             logger.warning(f"Column '{col_name}' already exists in HDU '{hdu_name}'; skipping addition.")
-            return tile_hdu
+            return False
 
         try:
             gains_array = np.array([gains_by_tile[int(tid)] for tid in tile_ids], dtype=np.float32)
@@ -269,7 +277,7 @@ def add_digital_gains_column(
         hdul[hdul.index_of(hdu_name)] = new_hdu
         hdul.flush()
 
-    return new_hdu
+    return True
 
 
 class HyperfitsSolution:
@@ -282,6 +290,13 @@ class HyperfitsSolution:
             filename: Path to the hyperdrive FITS solution file.
         """
         self.filename = filename
+
+        # Cache for the RESULTS HDU (see the `results` property). Two-state so a
+        # missing HDU is remembered too: _results_cached distinguishes "not read
+        # yet" from "read, and there is no RESULTS HDU", which must keep raising
+        # KeyError for callers that fall back to uniform weights.
+        self._results_cached: bool = False
+        self._results: NDArray[np.float64] | None = None
 
     @property
     def chanblocks_hz(self) -> NDArray[np.int_]:
@@ -363,6 +378,15 @@ class HyperfitsSolution:
     def results(self) -> NDArray[np.float64]:
         """Get convergence results from the solution file.
 
+        Read from disk once and cached thereafter. The RESULTS HDU is immutable
+        for the life of this object (nothing here writes it -- write_jones only
+        touches SOLUTIONS), and it is read repeatedly: every access to
+        HyperfitsSolutionGroup.results touches it twice per file (once in the
+        length-validation loop, once in the concatenate), and .weights goes
+        through that on each of its several accesses per pipeline run. Uncached,
+        a 24-file picket-fence observation opened solution files 192 times per
+        run, against 8 for a contiguous one, all over a shared filesystem.
+
         Returns:
             1-D float64 array of per-channel convergence values, for
             timeblock 0.
@@ -371,9 +395,23 @@ class HyperfitsSolution:
             KeyError: If the RESULTS HDU is not present. This is expected for
                 older hyperdrive solution files. Callers that can tolerate missing
                 results should catch KeyError and fall back to uniform weights.
+                A missing HDU is cached as such, so this keeps raising without
+                re-reading the file.
         """
-        with fits.open(self.filename) as hdus:
-            return read_results_hdu(hdus["RESULTS"].data)
+        if not self._results_cached:
+            try:
+                with fits.open(self.filename) as hdus:
+                    self._results = read_results_hdu(hdus["RESULTS"].data)
+            except KeyError:
+                self._results = None
+                self._results_cached = True
+                raise
+            self._results_cached = True
+
+        if self._results is None:
+            raise KeyError(f"no RESULTS HDU in {self.filename}")
+
+        return self._results
 
     @property
     def chanblock_converged(self) -> NDArray[np.bool_]:
@@ -509,11 +547,13 @@ class HyperfitsSolutionGroup:
         """Initialize a solution group with metafits and solution files.
 
         Args:
-            metafits: List of Metafits file readers.
-            solns: List of HyperfitsSolution file readers.
+            metafits: The observation's Metafits reader (a single instance, not
+                a list).
+            solns: List of HyperfitsSolution file readers, one per contiguous
+                coarse-channel band.
 
         Raises:
-            RuntimeError: If no metafits or solution files are provided.
+            RuntimeError: If no solution files are provided.
         """
         self.metafits = metafits
 
@@ -592,7 +632,7 @@ class HyperfitsSolutionGroup:
             np.full(file_jones.shape[:2], ChannelFlagReason.NONE, dtype=object) for file_jones in self.jones
         ]
 
-        for file_jones, file_reasons, soln in zip(self.jones, self.channel_flag_reasons, self.solns):
+        for file_jones, file_reasons, soln in zip(self.jones, self.channel_flag_reasons, self.solns, strict=True):
             pre_existing_nan = np.any(np.isnan(file_jones), axis=(-2, -1))  # shape (n_tiles, n_chanblocks)
             file_reasons[pre_existing_nan] |= ChannelFlagReason.PRE_EXISTING_NAN
 
@@ -606,12 +646,12 @@ class HyperfitsSolutionGroup:
 
     @classmethod
     def get_metafits_chan_info(cls, metafits: Metafits) -> ChanInfo:
-        """Get combined channel information from all metafits files.
+        """Get coarse channel information from the observation's metafits.
 
-        Validates that channel ranges do not overlap and that channel info is consistent.
+        Validates that the coarse channel ranges do not overlap.
 
         Args:
-            metafits: Metafits file object.
+            metafits: The observation's Metafits reader.
 
         Returns:
             Combined ChanInfo object.
@@ -623,7 +663,7 @@ class HyperfitsSolutionGroup:
         all_ranges = sorted([*first_chan_info.coarse_chan_ranges], key=lambda x: x[0])
 
         # assert coarse channel ranges do not overlap
-        for left, right in zip(all_ranges[:-1], all_ranges[1:]):
+        for left, right in itertools.pairwise(all_ranges):
             if left[0] == right[0] or left[-1] >= right[0]:
                 raise RuntimeError(f"coarse channel ranges from metafits overlap. {[left, right]}, {metafits=}")
 
@@ -701,7 +741,9 @@ class HyperfitsSolutionGroup:
                         )
                     coarse_centroid_hz = np.mean(coarse_chanblocks + chanblock_width_hz / 2)
 
-                coarse_chan_idx = np.round(coarse_centroid_hz // metafits_coarse_bandwidth_hz)
+                # NOTE: // already floors, so the np.round() that used to wrap this
+                # was a no-op for the non-negative frequencies we deal with here.
+                coarse_chan_idx = coarse_centroid_hz // metafits_coarse_bandwidth_hz
 
                 if coarse_chan_idx not in metafits_coarse_chans:
                     raise RuntimeError(
@@ -757,12 +799,10 @@ class HyperfitsSolutionGroup:
         - each file's BASELINES-HDU-inferred flagging (see
           read_baseline_tile_flags).
 
-        Note: this is a new, more complete check than the metafits-OR-TILES
-        combination `refant` computes locally today. `refant` is left as-is
-        for now rather than refactored to use this, to avoid changing its
-        behaviour in the same step that introduces this property; revisit
-        once the flagging pipeline (apply_tile_flags etc.) is built and
-        actually consumes this.
+        Note: `refant` and `apply_tile_flags` both use this, so all three
+        sources are honoured consistently. (An earlier version of this
+        docstring said `refant` still computed its own weaker metafits-OR-TILES
+        check; that stopped being true once `refant` was switched over.)
 
         Returns:
             Boolean array, shape (n_tiles,). True where the tile is flagged
@@ -815,7 +855,7 @@ class HyperfitsSolutionGroup:
         assert self.jones is not None
         assert self.channel_flag_reasons is not None
 
-        for file_jones, file_reasons in zip(self.jones, self.channel_flag_reasons):
+        for file_jones, file_reasons in zip(self.jones, self.channel_flag_reasons, strict=True):
             any_nan = np.any(np.isnan(file_jones), axis=(-2, -1))
             all_nan = np.all(np.isnan(file_jones), axis=(-2, -1))
             partial = any_nan & ~all_nan
@@ -869,14 +909,20 @@ class HyperfitsSolutionGroup:
     @property
     def results(self) -> NDArray[np.float64]:
         """Get the combined results array from all solutions."""
-        for soln, chanblocks_hz in zip(self.solns, self.all_chanblocks_hz):
-            if len(chanblocks_hz) != len(soln.results):
+        # Each file's results are fetched once and reused for both the length
+        # check and the concatenate. Previously .results was touched twice per
+        # file here, which (before HyperfitsSolution cached it) meant two FITS
+        # opens per file per access to this property.
+        per_file_results = [soln.results for soln in self.solns]
+
+        for soln, chanblocks_hz, soln_results in zip(self.solns, self.all_chanblocks_hz, per_file_results, strict=True):
+            if len(chanblocks_hz) != len(soln_results):
                 raise RuntimeError(
                     f"{soln.filename} - number of chanblocks ({len(chanblocks_hz)})"
-                    f" does not match number of results ({len(soln.results)})"
+                    f" does not match number of results ({len(soln_results)})"
                 )
 
-        results = np.concatenate([soln.results for soln in self.solns])
+        results = np.concatenate(per_file_results)
 
         if results.size == 0:
             raise RuntimeError("No valid results found")
@@ -908,7 +954,13 @@ class HyperfitsSolutionGroup:
                 (exp_results - np.nanmin(exp_results)) / (np.nanmax(exp_results) - np.nanmin(exp_results))
             )
         except KeyError:
-            return np.full(len(self.all_chanblocks_hz[0]), 1.0)
+            # No RESULTS HDU (older hyperdrive files): fall back to uniform
+            # weights. Must cover EVERY file's chanblocks, not just the first
+            # one's -- callers index this alongside all_chanblocks_hz_concat,
+            # so for a picket-fence observation with several solution files a
+            # first-file-only length gave a silently mismatched array.
+            n_chanblocks_total = sum(len(chanblocks_hz) for chanblocks_hz in self.all_chanblocks_hz)
+            return np.full(n_chanblocks_total, 1.0)
 
     def _find_ref_tile_idx(self, refant_name: str) -> int:
         """Find and validate the reference antenna's tile index.
@@ -1037,7 +1089,7 @@ class HyperfitsSolutionGroup:
 
         futures = {}
         with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-            for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, ref_xx, ref_yy)):
+            for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, ref_xx, ref_yy, strict=True)):
                 for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
                     future = executor.submit(
                         _phase_fit_one,
@@ -1072,7 +1124,9 @@ class HyperfitsSolutionGroup:
 
         futures = {}
         with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-            for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, noref_xx, noref_yy)):
+            for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(
+                zip(soln_tile_ids, noref_xx, noref_yy, strict=True)
+            ):
                 for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
                     future = executor.submit(
                         _gain_fit_one,
@@ -1140,7 +1194,7 @@ class HyperfitsSolutionGroup:
         if gain_max_cutoff is None:
             return
 
-        for file_jones, file_reasons in zip(self.jones, self.channel_flag_reasons):
+        for file_jones, file_reasons in zip(self.jones, self.channel_flag_reasons, strict=True):
             gx_amp = np.abs(file_jones[..., 0, 0])
             gy_amp = np.abs(file_jones[..., 1, 1])
             # NaN comparisons are always False, so already-NaN (already
@@ -1150,7 +1204,7 @@ class HyperfitsSolutionGroup:
                 file_jones[exceeds_cutoff, :, :] = np.nan + 1j * np.nan
                 file_reasons[exceeds_cutoff] |= ChannelFlagReason.GAIN_MAX_CUTOFF
 
-    def flag_amplitude_outliers(self, poly_degree: int = 2, mad_residual_threshold: float = 5.0) -> None:
+    def flag_amplitude_outliers(self, poly_degree: int = 2, mad_residual_threshold: float = 10.0) -> None:
         """Flag per-channel gain-amplitude outliers, one contiguous file at a time.
 
         For each tile in each file, gx and gy amplitude are each fit
@@ -1196,7 +1250,7 @@ class HyperfitsSolutionGroup:
         self.amplitude_band = []
         self.mad_residual_threshold = mad_residual_threshold
 
-        for file_jones, file_reasons in zip(self.jones, self.channel_flag_reasons):
+        for file_jones, file_reasons in zip(self.jones, self.channel_flag_reasons, strict=True):
             n_chanblocks = file_jones.shape[1]
             gx_amp = np.abs(file_jones[..., 0, 0])
             gy_amp = np.abs(file_jones[..., 1, 1])
@@ -1297,8 +1351,9 @@ class HyperfitsSolutionGroup:
 
         For each tile not already tile-flagged, computes the fraction of
         its chanblocks (summed across all files) carrying any per-channel
-        flag reason (pre-existing NaN, non-converged, partial-Jones, or
-        amplitude-outlier -- combined total, regardless of which reason),
+        flag reason (pre-existing NaN, non-converged, partial-Jones, above the
+        gain-max cutoff, or amplitude-outlier -- combined total, regardless of
+        which reason),
         and promotes it to fully flagged (MOSTLY_BAD_CHANNELS) if that
         fraction is >= threshold.
 
@@ -1335,7 +1390,7 @@ class HyperfitsSolutionGroup:
         refant_name: str,
         phase_fit_niter: int,
         poly_degree: int = 2,
-        mad_residual_threshold: float = 5.0,
+        mad_residual_threshold: float = 10.0,
         phase_outlier_nstd: float = 3.0,
         tile_bad_channel_fraction: float = 0.5,
         gain_max_cutoff: float | None = 100.0,
@@ -1454,7 +1509,7 @@ class HyperfitsSolutionGroup:
         self._ensure_loaded()
         assert self.jones is not None
 
-        backup_paths = [soln.write_jones(file_jones) for soln, file_jones in zip(self.solns, self.jones)]
+        backup_paths = [soln.write_jones(file_jones) for soln, file_jones in zip(self.solns, self.jones, strict=True)]
 
         for soln in self.solns:
             add_digital_gains_column(soln.filename, metafits_context)

@@ -152,7 +152,9 @@ class MWAXCalvinProcessor:
         self.gains_cut_off_max: float | None = None
         self.acacia_projects_profile: str = ""
         self.acacia_projects_bucket: str = ""
-        self.delete_acacia_file: bool = False  # Hardcoded to false for now, but could be set to true if we want to delete the file from acacia after processing
+        # Hardcoded to false for now, but could be set to true if we want to
+        # delete the file from acacia after processing
+        self.delete_acacia_file: bool = False
 
         self.gain_outlier_poly_degree: int
         self.gain_outlier_mad_residual_threshold: float
@@ -241,9 +243,16 @@ class MWAXCalvinProcessor:
             try:
                 utils.download_metafits_file(self.obs_id, self.job_input_path)
             except Exception as catch_all_exception:  # pylint: disable=broad-except
-                error_message = f"Metafits file {self.metafits_filename} did not exist and"
-                " could not download one from web service. Exiting."
-                f" {catch_all_exception}"
+                # NOTE: the continuation lines here were previously separate
+                # statements rather than an implicit concatenation, so
+                # error_message contained only the first fragment and the
+                # exception detail never reached the log or the DB failure
+                # record. Parenthesised so they actually join.
+                error_message = (
+                    f"Metafits file {self.metafits_filename} did not exist and"
+                    " could not download one from web service. Exiting."
+                    f" {catch_all_exception}"
+                )
                 logger.exception(error_message)
                 self.fail_job_downloading(error_message)
                 self.stop(exit_code=-1)
@@ -463,25 +472,31 @@ class MWAXCalvinProcessor:
                             filename=acacia_filename,
                         )
                         logger.info(
-                            f"Successfully deleted {acacia_filename} from {self.acacia_projects_profile}:{self.acacia_projects_bucket}."
+                            f"Successfully deleted {acacia_filename} from"
+                            f" {self.acacia_projects_profile}:{self.acacia_projects_bucket}."
                         )
                     except CalledProcessError as cp:
                         if cp.returncode == 4:
                             # File didn't exist — this is ok- it might have been automatically cleaned up
                             logger.warning(
-                                f"Tried to delete {acacia_filename} from {self.acacia_projects_profile}:{self.acacia_projects_bucket} but rclone reports FileNotFound. Ignoring."
+                                f"Tried to delete {acacia_filename} from"
+                                f" {self.acacia_projects_profile}:{self.acacia_projects_bucket}"
+                                " but rclone reports FileNotFound. Ignoring."
                             )
                         else:
                             logger.warning(
-                                f"CalledProcessError deleting {acacia_filename} from {self.acacia_projects_profile}:{self.acacia_projects_bucket}. Ignoring."
+                                f"CalledProcessError deleting {acacia_filename} from"
+                                f" {self.acacia_projects_profile}:{self.acacia_projects_bucket}. Ignoring."
                             )
                     except Exception:
                         logger.warning(
-                            f"Error deleting {acacia_filename} from {self.acacia_projects_profile}:{self.acacia_projects_bucket}. Ignoring."
+                            f"Error deleting {acacia_filename} from"
+                            f" {self.acacia_projects_profile}:{self.acacia_projects_bucket}. Ignoring."
                         )
                 except Exception:
                     logger.warning(
-                        f"Could not parse MWA ASVO presigned url {self.mwa_asvo_download_url} to get the filename to delete from {self.acacia_projects_profile}. Ignoring."
+                        f"Could not parse MWA ASVO presigned url {self.mwa_asvo_download_url}"
+                        f" to get the filename to delete from {self.acacia_projects_profile}. Ignoring."
                     )
 
             # if we get here, the whole calibration solution was inserted ok.
@@ -543,6 +558,8 @@ class MWAXCalvinProcessor:
                         None,
                         max_retries=1,
                         timeout=60,
+                        # /release_cal_obs changes state, so it is POST-only.
+                        method="POST",
                     )
                     # success
                     successful_hosts.add(hostname)
@@ -716,7 +733,10 @@ class MWAXCalvinProcessor:
             if not utils.check_remote_file_exists(
                 self.acacia_projects_profile, self.acacia_projects_bucket, tar_filename
             ):
-                message = "MWA ASVO data no longer exists. It might have expired or been deleted by a recent request for this obsid. Erroring job."
+                message = (
+                    "MWA ASVO data no longer exists. It might have expired or been"
+                    " deleted by a recent request for this obsid. Erroring job."
+                )
                 logger.warning(f"{self.obs_id}: {message}")
 
                 return False, message, False
@@ -736,7 +756,8 @@ class MWAXCalvinProcessor:
             args = f"--keep-tar {self.asvo_job_id} -d {self.job_input_path}"
             # On success we just return some stdout, otherwise an exception is raised
             #
-            # "HTTPS_PROXY": "http://localhost:3128" => ensures downloads from pawsey go via haproxy->mwacache->squid->Pawsey so we can download via 100G link
+            # "HTTPS_PROXY": "http://localhost:3128" => ensures downloads from pawsey
+            #     go via haproxy->mwacache->squid->Pawsey so we can download via 100G link
             # "NO_PROXY": "asvo.mwatelescope.org"    => ensures authentication and other ASVO calls don't go via haproxy
             #
             stdout = run_giant_squid(
@@ -751,27 +772,35 @@ class MWAXCalvinProcessor:
             )
             elapsed_seconds = time.monotonic() - start_time
 
-            # It's possible to have a successful run, but the obsid or jobid doesn't exist or some other problem. Let's check stdout
-            # success message is like: "08:19:20 [INFO] Job ID 1028014 (obsid: 1422444512) [1/1]: Completed download of 1.4 MiB in 0.002 s (717.8 MiB/s)"
+            # It's possible to have a successful run, but the obsid or jobid doesn't
+            # exist or some other problem. Let's check stdout. A success message looks
+            # like:
+            #   "08:19:20 [INFO] Job ID 1028014 (obsid: 1422444512) [1/1]:
+            #    Completed download of 1.4 MiB in 0.002 s (717.8 MiB/s)"
             if "Completed download" in stdout:
                 file_size_bytes = os.stat(full_tar_filename).st_size
                 gbps = (file_size_bytes * 8) / (elapsed_seconds * 1_000_000_000)
                 logger.info(
-                    f"{self.obs_id!s} Download of {full_tar_filename} complete. Size: {file_size_bytes / 1_000_000_000:.1f} GB"
+                    f"{self.obs_id!s} Download of {full_tar_filename} complete."
+                    f" Size: {file_size_bytes / 1_000_000_000:.1f} GB"
                     f" Time: {elapsed_seconds:.1f}s"
                     f" Rate: {gbps:.1f} Gbps"
                 )
             elif f"Obsid {self.obs_id} wasn't found in your list of jobs" in stdout:
                 retry_this_download = False
                 raise Exception(
-                    "The MWA ASVO job download has expired. This calibration request will be readded to the table and retried"
+                    "The MWA ASVO job download has expired. This calibration request"
+                    " will be readded to the table and retried"
                 )
             else:
                 # We didn't get that message, so something went wrong
                 raise Exception("giant-squid returned success but file was not downloaded")
 
         except Exception:
-            error_message = f"Failed to download observation {self.obs_id} from {self.mwa_asvo_download_url}. Stdout from giant-squid: {stdout}"
+            error_message = (
+                f"Failed to download observation {self.obs_id} from {self.mwa_asvo_download_url}."
+                f" Stdout from giant-squid: {stdout}"
+            )
             logger.exception(error_message)
             return False, error_message, retry_this_download
 
@@ -859,7 +888,10 @@ class MWAXCalvinProcessor:
             # How does what we need compare to what we have?
             return_value = len(data_dir_filenames) == len(self.ws_filenames)
 
-            message = f"{self.obs_id} check_obs_is_ready_to_process() == {return_value} (WS: {len(self.ws_filenames)}, data_dir: {len(data_dir_filenames)})"
+            message = (
+                f"{self.obs_id} check_obs_is_ready_to_process() == {return_value}"
+                f" (WS: {len(self.ws_filenames)}, data_dir: {len(data_dir_filenames)})"
+            )
 
             logger.info(message)
 
@@ -1076,11 +1108,14 @@ class MWAXCalvinProcessor:
             config_filename: Path to the configuration file.
             obs_id: The observation ID to process.
             slurm_job_id: The SLURM job ID of this job.
-            asvo_job_id: For MWA ASVO jobs, we pass in the MWA ASVO job id which we use in giant-squid to do the download.
+            asvo_job_id: For MWA ASVO jobs, we pass in the MWA ASVO job id which we
+                use in giant-squid to do the download.
             job_type: Type of job (realtime or mwa_asvo).
             mwa_asvo_download_url: Download URL for MWA ASVO jobs (empty for realtime).
             request_ids: List of request IDs associated with this job.
-            override_db_handler: If present, this will override the default MWAXDBHandler (this is used for testing via tests/tests_fakedb.py FakeMWAXDBHandler). Defaults to None.
+            override_db_handler: If present, this will override the default
+                MWAXDBHandler (this is used for testing via tests/tests_fakedb.py
+                FakeMWAXDBHandler). Defaults to None.
         """
         # Get this hosts hostname
         self.hostname = utils.get_hostname()

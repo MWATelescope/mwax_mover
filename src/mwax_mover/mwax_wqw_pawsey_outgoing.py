@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 
 
 class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
+    """Validates and archives mwacache files to Pawsey Long-Term Storage.
+
+    Instantiated by MWACacheArchiveProcessor. See the module docstring for detail.
+    """
+
     def __init__(
         self,
         name: str,
@@ -30,6 +35,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
         s3_profile: str,
         archive_to_location: ArchiveLocation,
         rclone_check_wait_secs: int,
+        recursive: bool = False,
     ):
         """Initialize the PawseyOutgoingProcessor.
 
@@ -41,9 +47,12 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             list_of_vcs_hi_priority_projects: List of high-priority VCS project IDs.
             mro_db_handler_object: Database handler for the MRO metadata database.
             remote_db_handler_object: Database handler for the remote metadata database.
-            s3_profile: AWS/S3 profile name for Ceph access.
+            s3_profile: rclone profile name to upload with (see rclone.conf).
             archive_to_location: Target archive location (Acacia, Banksia, or AcaciaMWA).
-            rclone_check_wait_secs: Number of seconds to wait between rclone copy and rclone check (to allow banksia VSS's to sync)
+            rclone_check_wait_secs: Number of seconds to wait between rclone copy and
+                rclone check (to allow banksia VSS's to sync)
+            recursive: Whether to watch each incoming path's subdirectories as
+                well. Comes from the per-host `recursive` config option.
         """
         super().__init__(
             name,
@@ -53,6 +62,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             exclude_pattern=".part*",
             corr_hi_priority_projects=list_of_corr_hi_priority_projects,
             vcs_hi_priority_projects=list_of_vcs_hi_priority_projects,
+            recursive=recursive,
             requeue_to_eoq_on_failure=True,
         )
         self.mro_db_handler_object = mro_db_handler_object
@@ -89,9 +99,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             logger.debug(f"{item}: file size on disk is {actual_file_size} bytes")
 
             # Lookup file from db
-            data_files_row: DataFileRow = get_data_file_row(
-                self.remote_db_handler_object, item, val.obs_id
-            )
+            data_files_row: DataFileRow = get_data_file_row(self.remote_db_handler_object, item, val.obs_id)
             database_file_size = data_files_row.size
 
             # Check for 0 size
@@ -114,18 +122,14 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
                 # with the item and it should not be requeued
                 return True
 
-            logger.debug(
-                f"{item}: File size matches metadata. Checking md5sum... database"
-            )
+            logger.debug(f"{item}: File size matches metadata. Checking md5sum...")
 
             # Check md5sum
             actual_checksum = utils.do_checksum_md5(item, None, 600)
 
             # Compare
             if actual_checksum != data_files_row.checksum:
-                logger.warning(
-                    f"{item}: checksum {actual_checksum} does not match {data_files_row.checksum}."
-                )
+                logger.warning(f"{item}: checksum {actual_checksum} does not match {data_files_row.checksum}.")
                 return False
 
             logger.debug(f"{item}: md5 checksum matches")
@@ -151,9 +155,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
                     rclone_check_wait_secs=self.rclone_check_wait_secs,
                 )
             else:
-                raise NotImplementedError(
-                    f"Location {self.archive_to_location.value} not implemented"
-                )
+                raise NotImplementedError(f"Location {self.archive_to_location.value} not implemented")
 
             if archive_success:
                 # Update record in metadata database

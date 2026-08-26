@@ -32,9 +32,7 @@ from mwax_mover.utils import ArchiveLocation
 
 # Setup root logger
 handler = logging.StreamHandler()
-handler.setFormatter(
-    logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(message)s")
-)
+handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(message)s"))
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
@@ -91,13 +89,19 @@ class MWACacheArchiveProcessor:
         self.high_priority_vcs_projectids: list[str] = []
 
         # MWAX servers will copy in a temp file, then rename once it is good
-        self.archiving_paused: bool = False
         self.running: bool = False
+
+        # See request_fatal_shutdown(). Non-zero means we did NOT complete
+        # successfully, and is what main() exits with so systemd (and the
+        # alerting on top of it) sees a failure rather than a clean stop.
+        self.fatal_exit_code: int = 0
+        self.fatal_reason: str = ""
 
         self.mro_db_handler: mwax_db.MWAXDBHandler
         self.remote_db_handler: mwax_db.MWAXDBHandler
 
         self.watch_dirs: list[str] = []
+        self.recursive: bool = False
 
         # This list helps us keep track of all the workers
         self.workers: list[MWAXPriorityWatchQueueWorker] = list()
@@ -121,9 +125,7 @@ class MWACacheArchiveProcessor:
 
         # create a health thread
         logger.info("Starting health_thread...")
-        health_thread = threading.Thread(
-            name="health_thread", target=self.health_handler, daemon=True
-        )
+        health_thread = threading.Thread(name="health_thread", target=self.health_handler, daemon=True)
         health_thread.start()
 
         logger.info("Cleaning up old temp files...")
@@ -140,10 +142,7 @@ class MWACacheArchiveProcessor:
                 # in progress file.
                 min_partial_purge_age_secs = 3600
 
-                if (
-                    time.time() - os.path.getmtime(partial_file)
-                    > min_partial_purge_age_secs
-                ):
+                if time.time() - os.path.getmtime(partial_file) > min_partial_purge_age_secs:
                     logger.warning(
                         f"Partial file {partial_file} is older than"
                         f" {min_partial_purge_age_secs} seconds and will be"
@@ -173,32 +172,45 @@ class MWACacheArchiveProcessor:
             for w in self.workers:
                 if self.running:
                     if not w.is_running():
-                        logger.error(f"Worker {w.name} has stopped unexpectedly.")
-                        self.running = False
+                        self.request_fatal_shutdown(4, f"Worker {w.name} has stopped unexpectedly.")
                         break
 
             time.sleep(0.1)
 
-        # Final log message
-        logger.info("Completed Successfully")
+        # Final log message. NOTE: this used to unconditionally log "Completed
+        # Successfully" even when we got here because a worker died, which
+        # combined with main()'s sys.exit(0) made a fatal error look like a
+        # clean shutdown.
+        if self.fatal_exit_code:
+            logger.error(f"Shutting down with exit code {self.fatal_exit_code}: {self.fatal_reason}")
+        else:
+            logger.info("Completed Successfully")
 
-    def pause_archiving(self, paused: bool):
-        """Pause or resume archiving operations across all workers.
+    def request_fatal_shutdown(self, exit_code: int, reason: str) -> None:
+        """Ask the main thread to shut the whole processor down and exit non-zero.
+
+        Worker threads cannot terminate the process themselves: sys.exit() on a
+        non-main thread raises SystemExit in that thread only, killing the thread
+        and discarding the exit code. Worker code that hits an unrecoverable
+        error should call this instead, then stop what it is doing.
+
+        The first caller wins, so the exit code reflects the original cause
+        rather than any knock-on failure. Safe to call more than once and from
+        any thread.
 
         Args:
-            paused: True to pause archiving, False to resume.
+            exit_code: Non-zero process exit code for main() to exit with.
+            reason: Human-readable description, logged and included in the
+                final shutdown message.
         """
-        if self.archiving_paused != paused:
-            if paused:
-                logger.info("Pausing archiving")
-            else:
-                logger.info("Resuming archiving")
+        if self.fatal_exit_code:
+            logger.warning(f"Additional fatal error while shutting down: {reason}")
+            return
 
-            for worker in self.workers:
-                if worker:
-                    worker.pause(paused)
-
-            self.archiving_paused = paused
+        logger.error(f"FATAL: {reason} Requesting shutdown with exit code {exit_code}.")
+        self.fatal_exit_code = exit_code
+        self.fatal_reason = reason
+        self.running = False
 
     def stop(self):
         """Stop the processor and shutdown all workers and connections.
@@ -242,9 +254,7 @@ class MWACacheArchiveProcessor:
                     self.health_multicast_hops,
                 )
             except Exception as catch_all_exception:  # pylint: disable=broad-except
-                logger.warning(
-                    f"health_handler: Failed to send health information. {catch_all_exception}"
-                )
+                logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
 
             # Sleep for a second
             time.sleep(1)
@@ -295,13 +305,15 @@ class MWACacheArchiveProcessor:
 
         Args:
             config_filename: Path to the configuration file.
-            override_mro_db_handler: If present, this will override the default MWAXDBHandler (this is used for testing via tests/tests_fakedb.py FakeMWAXDBHandler). Defaults to None.
-            override_remote_db_handler: If present, this will override the default MWAXDBHandler (this is used for testing via tests/tests_fakedb.py FakeMWAXDBHandler). Defaults to None.
+            override_mro_db_handler: If present, this will override the default
+                MWAXDBHandler (this is used for testing via tests/tests_fakedb.py
+                FakeMWAXDBHandler). Defaults to None.
+            override_remote_db_handler: If present, this will override the default
+                MWAXDBHandler (this is used for testing via tests/tests_fakedb.py
+                FakeMWAXDBHandler). Defaults to None.
         """
         if not os.path.exists(config_filename):
-            print(
-                f"Configuration file location {config_filename} does not exist. Quitting."
-            )
+            print(f"Configuration file location {config_filename} does not exist. Quitting.")
             sys.exit(1)
 
         # Parse config file
@@ -309,17 +321,13 @@ class MWACacheArchiveProcessor:
         config.read_file(open(config_filename, "r", encoding="utf-8"))
 
         # Read log level
-        config_file_log_level: str | None = utils.read_optional_config(
-            config, "mwax mover", "log_level"
-        )
+        config_file_log_level: str | None = utils.read_optional_config(config, "mwax mover", "log_level")
         if config_file_log_level:
             # It's now safe to start logging
             # start logging
             logger.setLevel(config_file_log_level)
 
-        logger.info(
-            f"Starting mwacache_archive_processor processor...v{version.get_mwax_mover_version_string()}"
-        )
+        logger.info(f"Starting mwacache_archive_processor processor...v{version.get_mwax_mover_version_string()}")
 
         logger.info(f"hostname: {self.hostname}")
 
@@ -338,17 +346,11 @@ class MWACacheArchiveProcessor:
         self.metafits_path = utils.read_config(config, "mwax mover", "metafits_path")
 
         if not os.path.exists(self.metafits_path):
-            logger.error(
-                f"Metafits file location  {self.metafits_path} does not exist. Quitting."
-            )
+            logger.error(f"Metafits file location  {self.metafits_path} does not exist. Quitting.")
             sys.exit(1)
 
-        self.archive_to_location = ArchiveLocation(
-            int(utils.read_config(config, "mwax mover", "archive_to_location"))
-        )
-        self.concurrent_archive_workers = int(
-            utils.read_config(config, "mwax mover", "concurrent_archive_workers")
-        )
+        self.archive_to_location = ArchiveLocation(int(utils.read_config(config, "mwax mover", "archive_to_location")))
+        self.concurrent_archive_workers = int(utils.read_config(config, "mwax mover", "concurrent_archive_workers"))
         self.archive_command_timeout_sec = int(
             utils.read_config(
                 config,
@@ -380,24 +382,16 @@ class MWACacheArchiveProcessor:
         )
 
         # health
-        self.health_multicast_ip = utils.read_config(
-            config, "mwax mover", "health_multicast_ip"
-        )
-        self.health_multicast_port = int(
-            utils.read_config(config, "mwax mover", "health_multicast_port")
-        )
-        self.health_multicast_hops = int(
-            utils.read_config(config, "mwax mover", "health_multicast_hops")
-        )
+        self.health_multicast_ip = utils.read_config(config, "mwax mover", "health_multicast_ip")
+        self.health_multicast_port = int(utils.read_config(config, "mwax mover", "health_multicast_port"))
+        self.health_multicast_hops = int(utils.read_config(config, "mwax mover", "health_multicast_hops"))
         self.health_multicast_interface_name = utils.read_config(
             config,
             "mwax mover",
             "health_multicast_interface_name",
         )
         # get this hosts primary network interface ip
-        self.health_multicast_interface_ip = utils.get_ip_address(
-            self.health_multicast_interface_name
-        )
+        self.health_multicast_interface_ip = utils.get_ip_address(self.health_multicast_interface_name)
         logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
 
         # We set different s3 options based on the location
@@ -424,9 +418,7 @@ class MWACacheArchiveProcessor:
 
         # Look for data_path1.. data_pathN
         while config.has_option(self.hostname, f"incoming_path{i}"):
-            new_incoming_path = utils.read_config(
-                config, self.hostname, f"incoming_path{i}"
-            )
+            new_incoming_path = utils.read_config(config, self.hostname, f"incoming_path{i}")
             if not os.path.exists(new_incoming_path):
                 logger.error(
                     f"incoming file location in incoming_path{i} - {new_incoming_path} does not exist. Quitting."
@@ -450,24 +442,16 @@ class MWACacheArchiveProcessor:
         #
         # MRO database - this is one we will update
         #
-        self.mro_metadatadb_host = utils.read_config(
-            config, "mro metadata database", "host"
-        )
+        self.mro_metadatadb_host = utils.read_config(config, "mro metadata database", "host")
 
-        self.mro_metadatadb_db = utils.read_config(
-            config, "mro metadata database", "db"
-        )
-        self.mro_metadatadb_user = utils.read_config(
-            config, "mro metadata database", "user"
-        )
+        self.mro_metadatadb_db = utils.read_config(config, "mro metadata database", "db")
+        self.mro_metadatadb_user = utils.read_config(config, "mro metadata database", "user")
 
         self.mro_metadatadb_pass = utils.read_config(
             config, "mro metadata database", "pass", self.mro_metadatadb_host != "dummy"
         )
 
-        self.mro_metadatadb_port = int(
-            utils.read_config(config, "mro metadata database", "port")
-        )
+        self.mro_metadatadb_port = int(utils.read_config(config, "mro metadata database", "port"))
 
         # Initiate database connection for mro metadata db
         if override_mro_db_handler:
@@ -485,25 +469,17 @@ class MWACacheArchiveProcessor:
         # Remote metadata db is ready only- just used to query file size and
         # date info
         #
-        self.remote_metadatadb_host = utils.read_config(
-            config, "remote metadata database", "host"
-        )
+        self.remote_metadatadb_host = utils.read_config(config, "remote metadata database", "host")
 
-        self.remote_metadatadb_db = utils.read_config(
-            config, "remote metadata database", "db"
-        )
-        self.remote_metadatadb_user = utils.read_config(
-            config, "remote metadata database", "user"
-        )
+        self.remote_metadatadb_db = utils.read_config(config, "remote metadata database", "db")
+        self.remote_metadatadb_user = utils.read_config(config, "remote metadata database", "user")
         self.remote_metadatadb_pass = utils.read_config(
             config,
             "remote metadata database",
             "pass",
             self.remote_metadatadb_db != "dummy",
         )
-        self.remote_metadatadb_port = int(
-            utils.read_config(config, "remote metadata database", "port")
-        )
+        self.remote_metadatadb_port = int(utils.read_config(config, "remote metadata database", "port"))
 
         # Initiate database connection for remote metadata db
         if override_remote_db_handler:
@@ -533,6 +509,7 @@ class MWACacheArchiveProcessor:
                 self.s3_profile,
                 self.archive_to_location,
                 self.rclone_check_wait_secs,
+                self.recursive,
             )
             self.workers.append(worker)
 
@@ -559,9 +536,7 @@ class MWACacheArchiveProcessor:
             " local disk."
         )
 
-        parser.add_argument(
-            "-c", "--cfg", required=True, help="Configuration file location.\n"
-        )
+        parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
 
         args = vars(parser.parse_args())
 
@@ -578,9 +553,13 @@ def main():
     try:
         processor.initialise_from_command_line()
         processor.start()
-        sys.exit(0)
     except Exception:
         logger.exception("Exited with error")
+        sys.exit(1)
+
+    # Surface a worker thread's fatal exit code (see request_fatal_shutdown).
+    # This used to be an unconditional sys.exit(0).
+    sys.exit(processor.fatal_exit_code)
 
 
 if __name__ == "__main__":

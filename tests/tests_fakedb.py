@@ -133,9 +133,7 @@ class FakeMWAXDBHandler(MWAXDBHandler):
         """
         self.dml_calls.append({"sql": sql, "params": parm_list})
 
-    def execute_dml_row_within_transaction(
-        self, sql: str, parm_list, transaction_cursor
-    ):
+    def execute_dml_row_within_transaction(self, sql: str, parm_list, transaction_cursor):
         """Record a transactional DML call without executing it against the database.
 
         Like ``execute_single_dml_row``, this appends to ``dml_calls`` and
