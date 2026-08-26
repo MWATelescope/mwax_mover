@@ -424,7 +424,8 @@ def test_enforce_whole_jones_nan_promotes_partial_entry():
 
     # Pick an entry that starts fully finite, then corrupt just one term.
     finite_mask = ~np.any(np.isnan(group.jones[0]), axis=(-2, -1))
-    tile_idx, chan_idx = next(zip(*np.where(finite_mask)))
+    finite_tiles, finite_chans = np.where(finite_mask)
+    tile_idx, chan_idx = int(finite_tiles[0]), int(finite_chans[0])
     group.jones[0][tile_idx, chan_idx, 0, 1] = np.nan + 1j * np.nan  # Dx only
 
     group.enforce_whole_jones_nan()
@@ -441,7 +442,8 @@ def test_enforce_whole_jones_nan_leaves_fully_finite_entry_untouched():
     assert group.jones is not None
     assert group.channel_flag_reasons is not None
     finite_mask = ~np.any(np.isnan(group.jones[0]), axis=(-2, -1))
-    tile_idx, chan_idx = next(zip(*np.where(finite_mask)))
+    finite_tiles, finite_chans = np.where(finite_mask)
+    tile_idx, chan_idx = int(finite_tiles[0]), int(finite_chans[0])
     original = group.jones[0][tile_idx, chan_idx].copy()
 
     group.enforce_whole_jones_nan()
@@ -949,7 +951,7 @@ def test_detect_phase_outliers_never_flags_or_modifies_jones():
         group.detect_phase_outliers(refant_name="Tile001", phase_fit_niter=1, nstd=2.0)
 
     np.testing.assert_array_equal(before_tile_flag_reasons, group.tile_flag_reasons)
-    for before_file_jones, after_file_jones in zip(before_all_jones, group.jones):
+    for before_file_jones, after_file_jones in zip(before_all_jones, group.jones, strict=True):
         assert np.array_equal(before_file_jones, after_file_jones, equal_nan=True)
 
 

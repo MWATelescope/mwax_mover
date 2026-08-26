@@ -268,7 +268,7 @@ def main() -> None:
     #
     solutions: list[SolutionDir] = []
     if recursive:
-        for root, dirs, files in os.walk(solution_root):
+        for root, _dirs, _files in os.walk(solution_root):
             # root is the directory of this iteration
             try:
                 new_slurm_job_id, new_obs_id = parse_job_dir(root)

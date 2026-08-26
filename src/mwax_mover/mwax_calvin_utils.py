@@ -903,6 +903,7 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse: int) -> GainF
             np.split(chanblocks_hz, n_coarse),
             np.split(amps, n_coarse),
             np.split(weights, n_coarse),
+            strict=True,
         )
     ):
         # remove nans and zero weights

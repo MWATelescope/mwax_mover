@@ -15,6 +15,7 @@ from configparser import ConfigParser
 from pathlib import Path
 
 import pytest
+import requests
 from tests_common import render_test_config
 
 from mwax_mover import utils, version
@@ -828,8 +829,8 @@ def test_should_project_be_archived():
 @pytest.mark.integration
 def test_get_data_files_for_obsid_from_webservice_404():
 
-    # Uknown obsid- raises exception
-    with pytest.raises(Exception):
+    # Unknown obsid- call_webservice raises once every url/retry is exhausted
+    with pytest.raises(requests.RequestException):
         utils.get_data_files_for_obsid_from_webservice(1234567890)
 
 

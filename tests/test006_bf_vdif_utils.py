@@ -13,7 +13,10 @@ def test_stitch_zero_files():
     filenames = []
     metafits_filename = ""
 
-    with pytest.raises(Exception):
+    # Matched on the message rather than a narrower type: the production code
+    # raises a bare Exception here, so the message is the only thing that
+    # distinguishes this failure from an unrelated one.
+    with pytest.raises(Exception, match="No VDIF files to stitch"):
         _, _ = stitch_vdif_files_and_write_hdr(metafits_filename, filenames, output_dir)
 
 

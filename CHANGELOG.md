@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.10.2 26-Aug-2026
+
+* Clean up of ruff errors.
+
 # 1.10.1 26-Aug-2026
 
 * Fixed gain-outlier pages failing with `[Errno 12] Cannot allocate memory` on a 256-tile picket fence (seen via `cal_utils`). `plot_outlier_gains()` created its `ProcessPoolExecutor` with no `max_workers`, so it spawned `os.cpu_count()` workers, and a stitched page peaks at ~322MB measured (10800x3600px for the `cal_utils` default of 16 tiles per page: a 156MB raw RGBA buffer, roughly doubled because `savefig(bbox_inches="tight")` renders once to measure the bounding box and again to write the file). On a many-core calvin node that was tens of GB of live render buffers. The pool is now bounded by `_max_render_workers()`, which takes the smallest of the page count, the CPU count, and how many page-sized allocations fit in a fraction of the memory actually available. Memory detection checks the cgroup limit before the node's `MemAvailable`, since these run as Slurm jobs and the node can have hundreds of GB free while the job is confined to a fraction of it; if neither can be read it falls back to 4 workers rather than assuming plenty. Page geometry now comes from a shared `_page_grid()` helper used by both the renderer and the estimator, so the memory estimate cannot drift from the figure actually created. `plot_outlier_gains()` also takes an optional `max_workers` override. Note the per-worker bundle copy was measured at only ~5% of the per-page peak (16.5MB against 322MB), so slicing the bundle per page was deliberately not done -- it would have meant threading a tile offset through the renderer for a negligible saving.

@@ -11,6 +11,7 @@ the pure numeric fitting functions (fit_phase_line, fit_gain, etc.) and
 mwax_calvin_plots.py for plotting.
 """
 
+import itertools
 import logging
 import os
 import shutil
@@ -631,7 +632,7 @@ class HyperfitsSolutionGroup:
             np.full(file_jones.shape[:2], ChannelFlagReason.NONE, dtype=object) for file_jones in self.jones
         ]
 
-        for file_jones, file_reasons, soln in zip(self.jones, self.channel_flag_reasons, self.solns):
+        for file_jones, file_reasons, soln in zip(self.jones, self.channel_flag_reasons, self.solns, strict=True):
             pre_existing_nan = np.any(np.isnan(file_jones), axis=(-2, -1))  # shape (n_tiles, n_chanblocks)
             file_reasons[pre_existing_nan] |= ChannelFlagReason.PRE_EXISTING_NAN
 
@@ -662,7 +663,7 @@ class HyperfitsSolutionGroup:
         all_ranges = sorted([*first_chan_info.coarse_chan_ranges], key=lambda x: x[0])
 
         # assert coarse channel ranges do not overlap
-        for left, right in zip(all_ranges[:-1], all_ranges[1:]):
+        for left, right in itertools.pairwise(all_ranges):
             if left[0] == right[0] or left[-1] >= right[0]:
                 raise RuntimeError(f"coarse channel ranges from metafits overlap. {[left, right]}, {metafits=}")
 
@@ -854,7 +855,7 @@ class HyperfitsSolutionGroup:
         assert self.jones is not None
         assert self.channel_flag_reasons is not None
 
-        for file_jones, file_reasons in zip(self.jones, self.channel_flag_reasons):
+        for file_jones, file_reasons in zip(self.jones, self.channel_flag_reasons, strict=True):
             any_nan = np.any(np.isnan(file_jones), axis=(-2, -1))
             all_nan = np.all(np.isnan(file_jones), axis=(-2, -1))
             partial = any_nan & ~all_nan
@@ -914,7 +915,7 @@ class HyperfitsSolutionGroup:
         # opens per file per access to this property.
         per_file_results = [soln.results for soln in self.solns]
 
-        for soln, chanblocks_hz, soln_results in zip(self.solns, self.all_chanblocks_hz, per_file_results):
+        for soln, chanblocks_hz, soln_results in zip(self.solns, self.all_chanblocks_hz, per_file_results, strict=True):
             if len(chanblocks_hz) != len(soln_results):
                 raise RuntimeError(
                     f"{soln.filename} - number of chanblocks ({len(chanblocks_hz)})"
@@ -1088,7 +1089,7 @@ class HyperfitsSolutionGroup:
 
         futures = {}
         with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-            for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, ref_xx, ref_yy)):
+            for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, ref_xx, ref_yy, strict=True)):
                 for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
                     future = executor.submit(
                         _phase_fit_one,
@@ -1123,7 +1124,9 @@ class HyperfitsSolutionGroup:
 
         futures = {}
         with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-            for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, noref_xx, noref_yy)):
+            for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(
+                zip(soln_tile_ids, noref_xx, noref_yy, strict=True)
+            ):
                 for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
                     future = executor.submit(
                         _gain_fit_one,
@@ -1191,7 +1194,7 @@ class HyperfitsSolutionGroup:
         if gain_max_cutoff is None:
             return
 
-        for file_jones, file_reasons in zip(self.jones, self.channel_flag_reasons):
+        for file_jones, file_reasons in zip(self.jones, self.channel_flag_reasons, strict=True):
             gx_amp = np.abs(file_jones[..., 0, 0])
             gy_amp = np.abs(file_jones[..., 1, 1])
             # NaN comparisons are always False, so already-NaN (already
@@ -1247,7 +1250,7 @@ class HyperfitsSolutionGroup:
         self.amplitude_band = []
         self.mad_residual_threshold = mad_residual_threshold
 
-        for file_jones, file_reasons in zip(self.jones, self.channel_flag_reasons):
+        for file_jones, file_reasons in zip(self.jones, self.channel_flag_reasons, strict=True):
             n_chanblocks = file_jones.shape[1]
             gx_amp = np.abs(file_jones[..., 0, 0])
             gy_amp = np.abs(file_jones[..., 1, 1])
@@ -1506,7 +1509,7 @@ class HyperfitsSolutionGroup:
         self._ensure_loaded()
         assert self.jones is not None
 
-        backup_paths = [soln.write_jones(file_jones) for soln, file_jones in zip(self.solns, self.jones)]
+        backup_paths = [soln.write_jones(file_jones) for soln, file_jones in zip(self.solns, self.jones, strict=True)]
 
         for soln in self.solns:
             add_digital_gains_column(soln.filename, metafits_context)

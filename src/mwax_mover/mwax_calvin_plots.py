@@ -313,7 +313,7 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fi
     slots = np.sort(np.unique(phase_fits_pivot["slot"]))
     figsize = plot_figsize(float(np.clip(len(slots) * 2.5, 5, 20)), float(np.clip(len(rxs) * 3, 5, 30)))
 
-    for pol, soln in zip(["xx", "yy"], [soln_xx, soln_yy]):
+    for pol, soln in zip(["xx", "yy"], [soln_xx, soln_yy], strict=True):
         plt.clf()
         fig, axs = plt.subplots(len(rxs), len(slots), sharex=True, sharey="row", squeeze=True)
         # rest of the code assumes axs is 2D array
@@ -1828,7 +1828,7 @@ def _render_combined_gains_figure(
 
     handles, labels = [], []
     for ax in axes.flat:
-        for handle, label in zip(*ax.get_legend_handles_labels()):
+        for handle, label in zip(*ax.get_legend_handles_labels(), strict=True):
             if label not in labels:
                 handles.append(handle)
                 labels.append(label)
@@ -2158,7 +2158,7 @@ def build_tile_stats_rows(
             # value isn't necessarily NaN yet at the "before" snapshot
             # (load() only records the reason, it doesn't NaN the data).
             good_gx, good_gy = [], []
-            for file_jones, file_reasons in zip(jones_snapshot, channel_reasons):
+            for file_jones, file_reasons in zip(jones_snapshot, channel_reasons, strict=True):
                 good = file_reasons[tile] == ChannelFlagReason.NONE
                 good_gx.append(np.abs(file_jones[tile, good, 0, 0]))
                 good_gy.append(np.abs(file_jones[tile, good, 1, 1]))

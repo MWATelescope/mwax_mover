@@ -93,12 +93,12 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
             try:
                 try:
                     obs_id = int(filename[0:10])
-                except Exception:
-                    raise ValueError(f"{item}: Error getting obs_id from filename {filename}")
+                except Exception as exc:
+                    raise ValueError(f"{item}: Error getting obs_id from filename {filename}") from exc
                 try:
                     subobs_id = int(filename[11:21])
-                except Exception:
-                    raise ValueError(f"{item}: Error getting subobs_id from filename {filename}")
+                except Exception as exc:
+                    raise ValueError(f"{item}: Error getting subobs_id from filename {filename}") from exc
             except Exception:
                 logger.warning(
                     f"{item}: filename not in correct format. Should be"
@@ -113,10 +113,13 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
 
             try:
                 duration_sec = int(utils.get_metafits_value(metafits_filename, METAFITS_EXPOSURE))
-            except Exception:
+            except Exception as exc:
+                # Chained deliberately: this one propagates out of the method, and
+                # the cause (missing metafits file vs missing key vs unparseable
+                # value) is what makes it actionable.
                 raise ValueError(
                     f"{item}: Error reading {METAFITS_EXPOSURE} from metafits filename {metafits_filename}"
-                )
+                ) from exc
 
             logger.debug(f"{item}: Read {METAFITS_EXPOSURE} of {duration_sec}s from {metafits_filename}")
 

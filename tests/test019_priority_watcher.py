@@ -214,7 +214,9 @@ class TestMWAXPriorityQueueDataUnhashable:
     def test_cannot_be_added_to_set(self):
         item = MWAXPriorityQueueData("/path/1234567890_file.fits")
         with pytest.raises(TypeError):
-            {item}
+            # Constructing the set is the operation under test -- assigned only
+            # so it isn't a bare expression statement.
+            _ = {item}
 
 
 class TestMWAXPriorityQueueDataQueueOrdering:
