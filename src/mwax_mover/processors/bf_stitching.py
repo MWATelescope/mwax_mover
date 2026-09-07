@@ -3,7 +3,7 @@
 Monitors the beamformer incoming directory for .vdif and .fil subobservation files.
 Once the final expected subobs for an observation arrives, globs all matching files
 and stitches them into a complete observation file using the appropriate format
-utility (mwax_bf_vdif_utils or mwax_bf_filterbank_utils). Optionally retains
+utility (beamformer.vdif or beamformer.filterbank). Optionally retains
 original subobs files before stitching.
 """
 
@@ -12,9 +12,10 @@ import logging
 import os
 import shutil
 
-from mwax_mover import mwax_bf_filterbank_utils, mwax_bf_vdif_utils, utils
+from mwax_mover import utils
+from mwax_mover.beamformer import filterbank, vdif
 from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME
-from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
+from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
 
 METAFITS_EXPOSURE = "EXPOSURE"
 
@@ -138,7 +139,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
                 logger.debug(f"{item}: Observation complete. Stitching up beamformer {ext} files...")
                 if ext == ".vdif":
                     # determine the file_path, rec_chan and beam number
-                    file_path, _, _, rec_chan, beam = mwax_bf_vdif_utils.get_vdif_filename_components(item)
+                    file_path, _, _, rec_chan, beam = vdif.get_vdif_filename_components(item)
 
                     # find all the vdif files for this beam, channel and obs
                     files = glob.glob(
@@ -166,7 +167,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
                                 os.path.join(self.bf_dont_archive_path, os.path.basename(f)),
                             )
 
-                    mwax_bf_vdif_utils.stitch_vdif_files_and_write_hdr(metafits_filename, files, self.bf_stitching_path)
+                    vdif.stitch_vdif_files_and_write_hdr(metafits_filename, files, self.bf_stitching_path)
 
                     # If it worked, remove the files
                     for f in files:
@@ -176,7 +177,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
 
                 elif ext == ".fil":
                     # determine file_path, rec_chan and beam number
-                    file_path, _, _, rec_chan, beam = mwax_bf_filterbank_utils.get_filterbank_filename_components(item)
+                    file_path, _, _, rec_chan, beam = filterbank.get_filterbank_filename_components(item)
 
                     # find all the fil files for this beam, channel and obs
                     files = glob.glob(os.path.join(file_path, f"{obs_id}_*_ch{rec_chan:03d}_beam{beam:02d}.fil"))
@@ -200,7 +201,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
                             )
 
                     # Now stitch the files together and write to the stitching path
-                    mwax_bf_filterbank_utils.stitch_filterbank_files(files, self.bf_stitching_path)
+                    filterbank.stitch_filterbank_files(files, self.bf_stitching_path)
 
                     # If it worked, remove the files
                     for f in files:

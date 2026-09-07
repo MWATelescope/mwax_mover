@@ -1,4 +1,4 @@
-"""Tests for mwax_mover.mwax_watcher.Watcher.
+"""Tests for mwax_mover.queues.watcher.Watcher.
 
 Coverage:
   - Constructor validation (path existence, mask assignment per mode)
@@ -28,7 +28,7 @@ import inotify.constants
 import pytest
 
 from mwax_mover import constants
-from mwax_mover.mwax_watcher import Watcher
+from mwax_mover.queues.watcher import Watcher
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -260,7 +260,7 @@ def _run_watcher_with_events(watcher: Watcher, fake_events: list):
     watcher.inotify_tree = mock_inotify
     watcher.watching = True
 
-    with mock.patch("mwax_mover.mwax_watcher.utils.scan_for_existing_files_and_add_to_queue"):
+    with mock.patch("mwax_mover.queues.watcher.utils.scan_for_existing_files_and_add_to_queue"):
         watcher.do_watch_loop()
 
 

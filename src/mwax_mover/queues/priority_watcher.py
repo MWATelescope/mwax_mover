@@ -11,7 +11,10 @@ import inotify.adapters
 import inotify.constants
 
 from mwax_mover import constants, utils
-from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
+from mwax_mover.queues.priority_queue_data import (
+    MWAXPriorityQueueData,
+    scan_for_existing_files_and_add_to_priority_queue,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +138,7 @@ class PriorityWatcher:
             or self.mode == constants.MODE_WATCH_DIR_FOR_RENAME
             or self.mode == constants.MODE_WATCH_DIR_FOR_RENAME_OR_NEW
         ):
-            utils.scan_for_existing_files_and_add_to_priority_queue(
+            scan_for_existing_files_and_add_to_priority_queue(
                 self.metafits_path,
                 self.path,
                 self.pattern,

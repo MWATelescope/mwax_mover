@@ -32,7 +32,7 @@ from mwax_mover import (
     utils,
     version,
 )
-from mwax_mover.mwa_archiver import copy_file_rsync
+from mwax_mover.archive.archiver import copy_file_rsync
 from mwax_mover.mwax_calvin_solutions import process_solutions
 from mwax_mover.mwax_calvin_utils import (
     CalvinJobType,

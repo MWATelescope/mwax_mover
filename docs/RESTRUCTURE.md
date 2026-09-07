@@ -81,7 +81,7 @@ docstrings cross-reference module filenames heavily (16 point at
 
 ## Phase 0 (complete)
 
-Guard rails and prerequisites. No source files moved.
+Guard rails and prerequisites, plus the one L0 rename.
 
 | commit | what |
 |---|---|
@@ -89,6 +89,8 @@ Guard rails and prerequisites. No source files moved.
 | `1b28c86` | `tests/__init__.py` + `pythonpath` / ty `extra-paths` |
 | `25e0577` | `ruff check` made a blocking gate (CI + pre-commit) |
 | `617393e` | fixture paths made CWD-independent |
+| `fea718b` | `mwax_mover.py` renamed to `constants.py` |
+| `c26c537` | the 15 dependent files (12 expected from the doc's own fan-in count, plus 3 more caught by `ty check`) |
 
 ### Architecture test
 
@@ -170,15 +172,78 @@ referenced after but not before. Twelve new paths do not exist on disk; all
 twelve were already non-existent (mock subfiles the tests create, and filename
 prefixes).
 
+## Phase 1 (complete)
+
+Leaf packages: `queues/`, `archive/`, `beamformer/`, `processors/`. Done as a
+single commit rather than one per package, since all four are pure moves with
+no cross-dependencies between them.
+
+| old | new |
+|---|---|
+| `mwax_watcher.py` | `queues/watcher.py` |
+| `mwax_priority_watcher.py` | `queues/priority_watcher.py` |
+| `mwax_queue_worker.py` | `queues/queue_worker.py` |
+| `mwax_priority_queue_worker.py` | `queues/priority_queue_worker.py` |
+| `mwax_priority_queue_data.py` | `queues/priority_queue_data.py` |
+| `mwax_watch_queue_worker.py` | `queues/watch_queue_worker.py` |
+| `mwa_archiver.py` | `archive/archiver.py` |
+| `mwax_bf_vdif_utils.py` | `beamformer/vdif.py` |
+| `mwax_bf_filterbank_utils.py` | `beamformer/filterbank.py` |
+| `mwax_wqw_subfile_incoming_processor.py` | `processors/subfile_incoming.py` |
+| `mwax_wqw_checksum_and_db.py` | `processors/checksum_and_db.py` |
+| `mwax_wqw_outgoing.py` | `processors/outgoing.py` |
+| `mwax_wqw_pawsey_outgoing.py` | `processors/pawsey_outgoing.py` |
+| `mwax_wqw_vis_cal_outgoing.py` | `processors/vis_cal_outgoing.py` |
+| `mwax_wqw_vis_stats.py` | `processors/vis_stats.py` |
+| `mwax_wqw_packet_stats_processor.py` | `processors/packet_stats.py` |
+| `mwax_wqw_bf_stitching_processor.py` | `processors/bf_stitching.py` |
+
+No `__init__.py` in any of the four: `cli/` was already an implicit namespace
+package, so the new leaf packages follow the same convention rather than
+introducing a second one.
+
+### The upward import is gone
+
+`scan_for_existing_files_and_add_to_priority_queue()` moved from `utils.py`
+into `queues/priority_queue_data.py`, alongside the `MWAXPriorityQueueData` it
+constructs. It now calls back into `utils.scan_directory()` and
+`utils.get_priority()` (a downward import, L3 -> L2, which is fine) instead of
+the reverse. `KNOWN_UPWARD_IMPORTS` in the architecture test is now empty --
+the ratchet's first entry is fully paid off.
+
+Its one caller (`queues/priority_watcher.py`) imports it directly rather than
+via a `utils.`-qualified call, matching how it already imported
+`MWAXPriorityQueueData` from the same module. The one test that exercised it
+directly moved from `test005_utils.py` to `test012_priority_queue_data.py` for
+the same reason -- it was testing code that no longer lives in `utils.py`.
+
+### Import-site fixing, again
+
+Same two gotchas as the `constants.py` rename bit again, at larger scale:
+
+- **Multi-name `from mwax_mover import a, b, c` lists.** `bf_stitching.py`
+  imported both beamformer utility modules this way
+  (`mwax_bf_filterbank_utils, mwax_bf_vdif_utils, utils`), and
+  `pawsey_outgoing.py` imported `mwa_archiver` alongside `mwax_db` and `utils`
+  the same way. A plain grep for `from mwax_mover.<old> import` misses these;
+  had to grep for the bare name anywhere in a `from mwax_mover import ...`
+  line and fix the list plus every in-body `<old_name>.` attribute access by
+  hand.
+- **`mock.patch("mwax_mover.<old_module>.<attr>")` string targets.** These
+  don't show up in an import-statement grep at all --
+  `test015_wqw_checksum_and_db.py` alone had 66 of them. Fixed with a
+  prefix-only substitution (`mwax_mover.mwax_wqw_checksum_and_db.` ->
+  `mwax_mover.processors.checksum_and_db.`) rather than touching the attribute
+  names after the prefix.
+
+Verified clean with a whole-repo grep for all three import forms (`from
+pkg.mod import sym`, `from pkg import mod`, `import pkg.mod`) plus a bare
+word-boundary grep for each of the 17 old names, before running the gates.
+
 ## Remaining phases
 
 Ordering principle: leaves first, to prove the tooling before it touches the
 high-fan-in god-modules.
-
-**Phase 1 -- leaf packages, one per commit.** `beamformer/`, `queues/`,
-`processors/`, `archive/`. Pure `git mv` plus import rewrites, low fan-in.
-Includes moving `scan_for_existing_files_and_add_to_priority_queue()` out of
-`utils` into `queues/`, which clears the one known upward import.
 
 **Phase 2 -- split `mwax_db.py`** (1219 lines) by table/domain into `db/`.
 Mechanical; 8 dependents.

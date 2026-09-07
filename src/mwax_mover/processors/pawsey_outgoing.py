@@ -9,9 +9,10 @@ the archive location and bucket, then deletes the local copy.
 import logging
 import os
 
-from mwax_mover import constants, mwa_archiver, mwax_db, utils
+from mwax_mover import constants, mwax_db, utils
+from mwax_mover.archive import archiver
 from mwax_mover.mwax_db import DataFileRow, MWAXDBHandler, get_data_file_row
-from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
+from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
 from mwax_mover.utils import ArchiveLocation
 
 logger = logging.getLogger(__name__)
@@ -147,7 +148,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
                 or self.archive_to_location == ArchiveLocation.Banksia
                 or self.archive_to_location == ArchiveLocation.AcaciaMWA
             ):  # Acacia or Banksia
-                archive_success = mwa_archiver.archive_file_rclone_haproxy(
+                archive_success = archiver.archive_file_rclone_haproxy(
                     self.s3_profile,
                     item,
                     bucket,

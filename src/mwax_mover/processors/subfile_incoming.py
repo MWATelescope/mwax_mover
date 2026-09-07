@@ -16,7 +16,7 @@ import time
 from mwax_mover import utils
 from mwax_mover.mwax_calvin_utils import get_solution_fits_filename
 from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME
-from mwax_mover.mwax_watch_queue_worker import MWAXWatchQueueWorker
+from mwax_mover.queues.watch_queue_worker import MWAXWatchQueueWorker
 
 METAFITS_EXPOSURE = "EXPOSURE"
 COMMAND_DADA_DISKDB = "dada_diskdb"

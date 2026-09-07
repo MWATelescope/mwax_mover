@@ -17,10 +17,10 @@ from queue import PriorityQueue, Queue
 from threading import Thread
 
 from mwax_mover import utils
-from mwax_mover.mwax_priority_queue_worker import PriorityQueueWorker
-from mwax_mover.mwax_priority_watcher import PriorityWatcher
-from mwax_mover.mwax_queue_worker import QueueWorker
-from mwax_mover.mwax_watcher import Watcher
+from mwax_mover.queues.priority_queue_worker import PriorityQueueWorker
+from mwax_mover.queues.priority_watcher import PriorityWatcher
+from mwax_mover.queues.queue_worker import QueueWorker
+from mwax_mover.queues.watcher import Watcher
 
 THREAD_JOIN_WAIT_TIMEOUT = 10
 

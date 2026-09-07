@@ -3,7 +3,7 @@ import os
 import pytest
 from tests_common import data_path, setup_test_directories
 
-from mwax_mover.mwax_bf_filterbank_utils import (
+from mwax_mover.beamformer.filterbank import (
     get_filterbank_components,
     get_stitched_filename,
     stitch_filterbank_files,

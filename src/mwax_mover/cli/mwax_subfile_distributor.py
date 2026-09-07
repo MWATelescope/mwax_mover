@@ -33,17 +33,17 @@ from mwax_mover import (
     version,
 )
 from mwax_mover.mwax_db import MWAXDBHandler
-from mwax_mover.mwax_watch_queue_worker import (
+from mwax_mover.queues.watch_queue_worker import (
     MWAXPriorityWatchQueueWorker,
     MWAXWatchQueueWorker,
 )
-from mwax_mover.mwax_wqw_bf_stitching_processor import BfStitchingProcessor
-from mwax_mover.mwax_wqw_checksum_and_db import ChecksumAndDBProcessor
-from mwax_mover.mwax_wqw_outgoing import OutgoingProcessor
-from mwax_mover.mwax_wqw_packet_stats_processor import PacketStatsProcessor
-from mwax_mover.mwax_wqw_subfile_incoming_processor import SubfileIncomingProcessor
-from mwax_mover.mwax_wqw_vis_cal_outgoing import VisCalOutgoingProcessor
-from mwax_mover.mwax_wqw_vis_stats import VisStatsProcessor
+from mwax_mover.processors.bf_stitching import BfStitchingProcessor
+from mwax_mover.processors.checksum_and_db import ChecksumAndDBProcessor
+from mwax_mover.processors.outgoing import OutgoingProcessor
+from mwax_mover.processors.packet_stats import PacketStatsProcessor
+from mwax_mover.processors.subfile_incoming import SubfileIncomingProcessor
+from mwax_mover.processors.vis_cal_outgoing import VisCalOutgoingProcessor
+from mwax_mover.processors.vis_stats import VisStatsProcessor
 
 # Setup root logger
 handler = logging.StreamHandler()

@@ -273,45 +273,6 @@ def test_scan_for_existing_files_and_add_to_queue():
     assert queue_target.get() == os.path.join(os.getcwd(), os.path.join(watch_dir, "1244973688_metafits.fits"))
 
 
-def test_scan_for_existing_files_and_add_to_priority_queue():
-    """Test we can find files and add to a priority queue"""
-    queue_target = queue.PriorityQueue()
-    watch_dir = obs_data_dir(1244973688)
-    pattern = ".fits"
-    recursive = False
-    metafits_path = watch_dir
-
-    #
-    # Run test
-    #
-    utils.scan_for_existing_files_and_add_to_priority_queue(
-        metafits_path,
-        watch_dir,
-        pattern,
-        recursive,
-        queue_target,
-        ["D0006"],
-        ["C001"],
-    )
-
-    assert queue_target.qsize() == 2
-
-    # Get first item
-    item1 = queue_target.get()
-
-    assert str(item1[1]) == os.path.join(os.getcwd(), os.path.join(watch_dir, "1244973688_metafits.fits"))
-    assert item1[0] == 1  # metafits ppd file
-
-    # get second item
-    item2 = queue_target.get()
-
-    assert str(item2[1]) == os.path.join(
-        os.getcwd(),
-        os.path.join(watch_dir, "1244973688_20190619100110_ch114_000.fits"),
-    )
-    assert item2[0] == 30  # Regular correlator obs
-
-
 def test_scan_directory():
     """Tests we can get a list of files in a dir"""
     watch_dir = obs_data_dir(1244973688)

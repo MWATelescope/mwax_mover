@@ -12,8 +12,8 @@ from tests_common import obs_metafits_path, setup_test_directories
 
 from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
 from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
-from mwax_mover.mwax_queue_worker import QueueWorker, calculate_backoff_seconds
-from mwax_mover.mwax_watch_queue_worker import (
+from mwax_mover.queues.queue_worker import QueueWorker, calculate_backoff_seconds
+from mwax_mover.queues.watch_queue_worker import (
     MWAXPriorityWatchQueueWorker,
     MWAXWatchQueueWorker,
 )

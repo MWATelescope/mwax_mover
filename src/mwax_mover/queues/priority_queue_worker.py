@@ -15,8 +15,8 @@ import threading
 import time
 
 from mwax_mover import constants, mwax_command
-from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
-from mwax_mover.mwax_queue_worker import calculate_backoff_seconds
+from mwax_mover.queues.priority_queue_data import MWAXPriorityQueueData
+from mwax_mover.queues.queue_worker import calculate_backoff_seconds
 
 logger = logging.getLogger(__name__)
 

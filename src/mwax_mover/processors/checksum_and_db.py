@@ -13,7 +13,7 @@ import shutil
 from mwax_mover import utils
 from mwax_mover.mwax_db import MWAXDBHandler, insert_data_file_row
 from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
-from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
+from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
 from mwax_mover.utils import MWADataFileType, ValidationData
 
 logger = logging.getLogger(__name__)

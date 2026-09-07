@@ -1,4 +1,4 @@
-"""Unit tests for ChecksumAndDBProcessor.handler() in mwax_wqw_checksum_and_db.py.
+"""Unit tests for ChecksumAndDBProcessor.handler() in mwax_mover.processors.checksum_and_db.
 
 Tests cover all routing branches:
   - Invalid filename → False
@@ -16,7 +16,7 @@ import pytest
 from tests_common import setup_test_directories
 
 from mwax_mover.mwax_db import MWAXDBHandler
-from mwax_mover.mwax_wqw_checksum_and_db import ChecksumAndDBProcessor
+from mwax_mover.processors.checksum_and_db import ChecksumAndDBProcessor
 from mwax_mover.utils import MWADataFileType, ValidationData
 
 # Setup root logger so processor log output is visible when running with -s
@@ -139,7 +139,7 @@ class TestInvalidFilename:
         item = dummy_item(dirs)
 
         with patch(
-            "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
+            "mwax_mover.processors.checksum_and_db.utils.validate_filename",
             return_value=make_invalid_val(),
         ):
             result = processor.handler(item)
@@ -162,10 +162,10 @@ class TestArchivingDisabled:
 
         with (
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
+                "mwax_mover.processors.checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(filetype_id, project_id),
             ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.shutil.move") as mock_move,
+            patch("mwax_mover.processors.checksum_and_db.shutil.move") as mock_move,
         ):
             result = processor.handler(item)
 
@@ -208,10 +208,10 @@ class TestArchivingDisabled:
 
         with (
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
+                "mwax_mover.processors.checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(filetype_id=99),
             ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.shutil.move"),
+            patch("mwax_mover.processors.checksum_and_db.shutil.move"),
         ):
             result = processor.handler(item)
 
@@ -232,24 +232,24 @@ class TestArchivingEnabledArchiveProject:
 
         with (
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
+                "mwax_mover.processors.checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(filetype_id, project_id="G0001"),
             ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()),
+            patch("mwax_mover.processors.checksum_and_db.os.stat", return_value=mock_stat()),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.do_checksum_md5",
+                "mwax_mover.processors.checksum_and_db.utils.do_checksum_md5",
                 return_value=DUMMY_CHECKSUM,
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.read_subfile_trigger_value",
+                "mwax_mover.processors.checksum_and_db.utils.read_subfile_trigger_value",
                 return_value=None,
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.insert_data_file_row",
+                "mwax_mover.processors.checksum_and_db.insert_data_file_row",
                 return_value=True,
             ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.shutil.move") as mock_move,
+            patch("mwax_mover.processors.checksum_and_db.os.path.exists", return_value=True),
+            patch("mwax_mover.processors.checksum_and_db.shutil.move") as mock_move,
         ):
             result = processor.handler(item)
 
@@ -292,23 +292,23 @@ class TestArchivingEnabledArchiveProject:
 
         with (
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
+                "mwax_mover.processors.checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(filetype_id=99, project_id="G0001"),
             ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()),
+            patch("mwax_mover.processors.checksum_and_db.os.stat", return_value=mock_stat()),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.do_checksum_md5",
+                "mwax_mover.processors.checksum_and_db.utils.do_checksum_md5",
                 return_value=DUMMY_CHECKSUM,
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.read_subfile_trigger_value",
+                "mwax_mover.processors.checksum_and_db.utils.read_subfile_trigger_value",
                 return_value=None,
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.insert_data_file_row",
+                "mwax_mover.processors.checksum_and_db.insert_data_file_row",
                 return_value=True,
             ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True),
+            patch("mwax_mover.processors.checksum_and_db.os.path.exists", return_value=True),
         ):
             result = processor.handler(item)
 
@@ -322,24 +322,24 @@ class TestArchivingEnabledArchiveProject:
 
         with (
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
+                "mwax_mover.processors.checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(MWADataFileType.MWAX_VOLTAGES.value, project_id="G0001"),
             ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()),
+            patch("mwax_mover.processors.checksum_and_db.os.stat", return_value=mock_stat()),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.do_checksum_md5",
+                "mwax_mover.processors.checksum_and_db.utils.do_checksum_md5",
                 return_value=DUMMY_CHECKSUM,
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.read_subfile_trigger_value",
+                "mwax_mover.processors.checksum_and_db.utils.read_subfile_trigger_value",
                 return_value=42,
             ) as mock_trigger,
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.insert_data_file_row",
+                "mwax_mover.processors.checksum_and_db.insert_data_file_row",
                 return_value=True,
             ) as mock_insert,
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.shutil.move"),
+            patch("mwax_mover.processors.checksum_and_db.os.path.exists", return_value=True),
+            patch("mwax_mover.processors.checksum_and_db.shutil.move"),
         ):
             result = processor.handler(item)
 
@@ -355,24 +355,24 @@ class TestArchivingEnabledArchiveProject:
 
         with (
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
+                "mwax_mover.processors.checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(MWADataFileType.MWAX_VISIBILITIES.value, project_id="G0001"),
             ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()),
+            patch("mwax_mover.processors.checksum_and_db.os.stat", return_value=mock_stat()),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.do_checksum_md5",
+                "mwax_mover.processors.checksum_and_db.utils.do_checksum_md5",
                 return_value=DUMMY_CHECKSUM,
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.read_subfile_trigger_value",
+                "mwax_mover.processors.checksum_and_db.utils.read_subfile_trigger_value",
                 return_value=None,
             ) as mock_trigger,
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.insert_data_file_row",
+                "mwax_mover.processors.checksum_and_db.insert_data_file_row",
                 return_value=True,
             ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.shutil.move"),
+            patch("mwax_mover.processors.checksum_and_db.os.path.exists", return_value=True),
+            patch("mwax_mover.processors.checksum_and_db.shutil.move"),
         ):
             result = processor.handler(item)
 
@@ -395,24 +395,24 @@ class TestArchivingEnabledNoArchiveProject:
 
         with (
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
+                "mwax_mover.processors.checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(filetype_id, project_id="C123"),
             ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()),
+            patch("mwax_mover.processors.checksum_and_db.os.stat", return_value=mock_stat()),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.do_checksum_md5",
+                "mwax_mover.processors.checksum_and_db.utils.do_checksum_md5",
                 return_value=DUMMY_CHECKSUM,
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.read_subfile_trigger_value",
+                "mwax_mover.processors.checksum_and_db.utils.read_subfile_trigger_value",
                 return_value=None,
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.insert_data_file_row",
+                "mwax_mover.processors.checksum_and_db.insert_data_file_row",
                 return_value=True,
             ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.shutil.move") as mock_move,
+            patch("mwax_mover.processors.checksum_and_db.os.path.exists", return_value=True),
+            patch("mwax_mover.processors.checksum_and_db.shutil.move") as mock_move,
         ):
             result = processor.handler(item)
 
@@ -463,11 +463,11 @@ class TestErrorConditions:
 
         with (
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
+                "mwax_mover.processors.checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(MWADataFileType.MWAX_VOLTAGES.value),
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.os.stat",
+                "mwax_mover.processors.checksum_and_db.os.stat",
                 side_effect=FileNotFoundError("gone"),
             ),
         ):
@@ -482,20 +482,20 @@ class TestErrorConditions:
 
         with (
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
+                "mwax_mover.processors.checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(MWADataFileType.MWAX_VOLTAGES.value),
             ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()),
+            patch("mwax_mover.processors.checksum_and_db.os.stat", return_value=mock_stat()),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.do_checksum_md5",
+                "mwax_mover.processors.checksum_and_db.utils.do_checksum_md5",
                 return_value=DUMMY_CHECKSUM,
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.read_subfile_trigger_value",
+                "mwax_mover.processors.checksum_and_db.utils.read_subfile_trigger_value",
                 return_value=None,
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.insert_data_file_row",
+                "mwax_mover.processors.checksum_and_db.insert_data_file_row",
                 return_value=False,
             ),
         ):
@@ -511,23 +511,23 @@ class TestErrorConditions:
 
         with (
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
+                "mwax_mover.processors.checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(MWADataFileType.MWAX_VOLTAGES.value),
             ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()),
+            patch("mwax_mover.processors.checksum_and_db.os.stat", return_value=mock_stat()),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.do_checksum_md5",
+                "mwax_mover.processors.checksum_and_db.utils.do_checksum_md5",
                 return_value=DUMMY_CHECKSUM,
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.read_subfile_trigger_value",
+                "mwax_mover.processors.checksum_and_db.utils.read_subfile_trigger_value",
                 return_value=None,
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.insert_data_file_row",
+                "mwax_mover.processors.checksum_and_db.insert_data_file_row",
                 return_value=True,
             ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=False),
+            patch("mwax_mover.processors.checksum_and_db.os.path.exists", return_value=False),
         ):
             result = processor.handler(item)
 
@@ -540,24 +540,24 @@ class TestErrorConditions:
 
         with (
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
+                "mwax_mover.processors.checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(MWADataFileType.MWAX_VISIBILITIES.value),
             ),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.stat", return_value=mock_stat()),
+            patch("mwax_mover.processors.checksum_and_db.os.stat", return_value=mock_stat()),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.do_checksum_md5",
+                "mwax_mover.processors.checksum_and_db.utils.do_checksum_md5",
                 return_value=DUMMY_CHECKSUM,
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.read_subfile_trigger_value",
+                "mwax_mover.processors.checksum_and_db.utils.read_subfile_trigger_value",
                 return_value=None,
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.insert_data_file_row",
+                "mwax_mover.processors.checksum_and_db.insert_data_file_row",
                 return_value=True,
             ) as mock_insert,
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.shutil.move"),
+            patch("mwax_mover.processors.checksum_and_db.os.path.exists", return_value=True),
+            patch("mwax_mover.processors.checksum_and_db.shutil.move"),
         ):
             result = processor.handler(item)
 
@@ -571,27 +571,27 @@ class TestErrorConditions:
 
         with (
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.validate_filename",
+                "mwax_mover.processors.checksum_and_db.utils.validate_filename",
                 return_value=make_valid_val(MWADataFileType.MWAX_VISIBILITIES.value),
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.os.stat",
+                "mwax_mover.processors.checksum_and_db.os.stat",
                 return_value=mock_stat(DUMMY_FILE_SIZE),
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.do_checksum_md5",
+                "mwax_mover.processors.checksum_and_db.utils.do_checksum_md5",
                 return_value=DUMMY_CHECKSUM,
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.utils.read_subfile_trigger_value",
+                "mwax_mover.processors.checksum_and_db.utils.read_subfile_trigger_value",
                 return_value=None,
             ),
             patch(
-                "mwax_mover.mwax_wqw_checksum_and_db.insert_data_file_row",
+                "mwax_mover.processors.checksum_and_db.insert_data_file_row",
                 return_value=True,
             ) as mock_insert,
-            patch("mwax_mover.mwax_wqw_checksum_and_db.os.path.exists", return_value=True),
-            patch("mwax_mover.mwax_wqw_checksum_and_db.shutil.move"),
+            patch("mwax_mover.processors.checksum_and_db.os.path.exists", return_value=True),
+            patch("mwax_mover.processors.checksum_and_db.shutil.move"),
         ):
             result = processor.handler(item)
 

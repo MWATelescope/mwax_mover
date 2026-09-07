@@ -55,15 +55,6 @@ LAYERS: dict[int, tuple[str, ...]] = {
     # L3: the watcher/queue-worker framework and other reusable machinery,
     # built on L2 but knowing nothing about calibration or MWAX data products.
     3: (
-        "mwax_watcher",
-        "mwax_priority_watcher",
-        "mwax_queue_worker",
-        "mwax_priority_queue_worker",
-        "mwax_priority_queue_data",
-        "mwax_watch_queue_worker",
-        "mwa_archiver",
-        "mwax_bf_vdif_utils",
-        "mwax_bf_filterbank_utils",
         "queues",
         "archive",
         "beamformer",
@@ -71,14 +62,6 @@ LAYERS: dict[int, tuple[str, ...]] = {
     # L4: domain logic -- the queue-worker processors, and everything
     # calibration. These know about MWA data products and pipelines.
     4: (
-        "mwax_wqw_subfile_incoming_processor",
-        "mwax_wqw_checksum_and_db",
-        "mwax_wqw_outgoing",
-        "mwax_wqw_pawsey_outgoing",
-        "mwax_wqw_vis_cal_outgoing",
-        "mwax_wqw_vis_stats",
-        "mwax_wqw_packet_stats_processor",
-        "mwax_wqw_bf_stitching_processor",
         "mwax_calvin_utils",
         "mwax_hyperdrive_solutions",
         "mwax_calvin_plots",
@@ -95,14 +78,11 @@ LAYERS: dict[int, tuple[str, ...]] = {
 # Imports that point up a layer. Each one is a bug to be fixed by the
 # restructure, not a licence to add more.
 #
-# ("utils", "mwax_priority_queue_data"):
-#     utils.scan_for_existing_files_and_add_to_priority_queue() needs
-#     MWAXPriorityQueueData. That function is queue-population logic, not a
-#     generic utility -- it belongs in the queues layer. Delete this entry when
-#     it moves there.
-KNOWN_UPWARD_IMPORTS: set[tuple[str, str]] = {
-    ("utils", "mwax_priority_queue_data"),
-}
+# Empty for now -- the one known violation (utils importing
+# mwax_priority_queue_data for scan_for_existing_files_and_add_to_priority_queue)
+# was fixed by moving that function into queues/priority_queue_data.py.
+KNOWN_UPWARD_IMPORTS: set[tuple[str, str]] = set()
+
 
 # Import cycles, as frozensets of the modules involved.
 #

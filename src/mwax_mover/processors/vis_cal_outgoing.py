@@ -10,7 +10,7 @@ import logging
 import threading
 
 from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME
-from mwax_mover.mwax_watch_queue_worker import MWAXWatchQueueWorker
+from mwax_mover.queues.watch_queue_worker import MWAXWatchQueueWorker
 
 logger = logging.getLogger(__name__)
 

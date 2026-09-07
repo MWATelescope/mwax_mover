@@ -25,7 +25,13 @@ print(q.get()[1])
     path1/file3.dat
 """
 
+import logging
 import os
+import queue
+
+from mwax_mover import utils
+
+logger = logging.getLogger(__name__)
 
 
 class MWAXPriorityQueueData:
@@ -139,3 +145,51 @@ class MWAXPriorityQueueData:
             True if this object's filename is greater than or equal to obj's filename.
         """
         return self._sort_key(self.value) >= self._sort_key(obj.value)
+
+
+def scan_for_existing_files_and_add_to_priority_queue(
+    metafits_path: str,
+    watch_dir: str,
+    pattern: str,
+    recursive: bool,
+    queue_target: queue.PriorityQueue,
+    list_of_correlator_high_priority_projects: list,
+    list_of_vcs_high_priority_projects: list,
+    exclude_pattern=None,
+):
+    """
+    Scan a directory for files matching a pattern and add them to a PriorityQueue.
+
+    Each file's priority is determined by ``get_priority()``. Files are sorted
+    before priority assignment to provide a deterministic ordering when multiple
+    files share the same priority.
+
+    Args:
+        metafits_path: Directory containing metafits files, passed through to
+            ``get_priority()`` for file type and project ID resolution.
+        watch_dir: Root directory to scan.
+        pattern: Glob suffix pattern to match (e.g. ``'.fits'``). Prepended
+            with ``'*'`` internally.
+        recursive: If True, scan all subdirectories recursively.
+        queue_target: The ``queue.PriorityQueue`` instance to add
+            ``(priority, MWAXPriorityQueueData)`` tuples to.
+        list_of_correlator_high_priority_projects: Project IDs that should
+            receive elevated priority for correlator observations.
+        list_of_vcs_high_priority_projects: Project IDs that should receive
+            elevated priority for VCS observations.
+        exclude_pattern: Optional glob suffix pattern. Files matching this
+            pattern are excluded from the results. Defaults to None (no exclusion).
+    """
+    files = utils.scan_directory(watch_dir, pattern, recursive, exclude_pattern)
+    files = sorted(files)
+    logger.info(f"{watch_dir}: Found {len(files)} files")
+
+    for filename in files:
+        priority = utils.get_priority(
+            filename,
+            metafits_path,
+            list_of_correlator_high_priority_projects,
+            list_of_vcs_high_priority_projects,
+        )
+        queue_target.put((priority, MWAXPriorityQueueData(filename)))
+        logger.info(f"{watch_dir}: {os.path.basename(filename)} added to queue with priority {priority}")

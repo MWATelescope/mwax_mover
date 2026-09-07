@@ -7,9 +7,9 @@ then deletes the local copy on success.
 
 import logging
 
-from mwax_mover.mwa_archiver import archive_file_xrootd
+from mwax_mover.archive.archiver import archive_file_xrootd
 from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
-from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
+from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
 from mwax_mover.utils import remove_file
 
 logger = logging.getLogger(__name__)

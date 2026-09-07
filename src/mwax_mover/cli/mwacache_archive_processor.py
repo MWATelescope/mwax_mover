@@ -26,8 +26,8 @@ from mwax_mover import (
     version,
 )
 from mwax_mover.mwax_db import MWAXDBHandler
-from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
-from mwax_mover.mwax_wqw_pawsey_outgoing import PawseyOutgoingProcessor
+from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
+from mwax_mover.processors.pawsey_outgoing import PawseyOutgoingProcessor
 from mwax_mover.utils import ArchiveLocation
 
 # Setup root logger
