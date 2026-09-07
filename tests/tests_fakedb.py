@@ -2,7 +2,7 @@
 
 This module provides FakeMWAXDBHandler, a subclass of MWAXDBHandler that
 replaces all database I/O with in-memory queues and call logs. It is intended
-for use in unit tests that need to exercise domain logic in mwax_mover.mwax_db
+for use in unit tests that need to exercise domain logic in mwax_mover.db
 without spinning up a real PostgreSQL instance.
 
 Use in conjunction with "dummy" values in the tests config files. That will
@@ -19,7 +19,7 @@ x.db_handler = FakeDBHandler()
 Typical usage::
 
     from tests.fake_db import FakeMWAXDBHandler
-    from mwax_mover.mwax_db import get_unattempted_calsolution_requests
+    from mwax_mover.db.calibration import get_unattempted_calsolution_requests
 
     def test_returns_none_when_no_requests():
         db = FakeMWAXDBHandler()
@@ -27,7 +27,7 @@ Typical usage::
         assert get_unattempted_calsolution_requests(db) is None
 """
 
-from mwax_mover.mwax_db import MWAXDBHandler
+from mwax_mover.db.handler import MWAXDBHandler
 
 
 class FakeMWAXDBHandler(MWAXDBHandler):

@@ -16,6 +16,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
+from mwax_mover.db.calibration import insert_calibration_fits_row, insert_calibration_solutions_row
+from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.mwax_calvin_plots import (
     generate_hyperdrive_plots_for_files,
     plot_outlier_gains,
@@ -29,11 +31,6 @@ from mwax_mover.mwax_calvin_utils import (
     get_sorted_solution_files,
     pad_gain_fit_info,
     write_readme_file,
-)
-from mwax_mover.mwax_db import (
-    MWAXDBHandler,
-    insert_calibration_fits_row,
-    insert_calibration_solutions_row,
 )
 from mwax_mover.mwax_hyperdrive_solutions import (
     HyperfitsSolution,

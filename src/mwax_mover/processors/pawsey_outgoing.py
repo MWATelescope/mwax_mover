@@ -9,9 +9,11 @@ the archive location and bucket, then deletes the local copy.
 import logging
 import os
 
-from mwax_mover import constants, mwax_db, utils
+from mwax_mover import constants, utils
 from mwax_mover.archive import archiver
-from mwax_mover.mwax_db import DataFileRow, MWAXDBHandler, get_data_file_row
+from mwax_mover.db import data_files
+from mwax_mover.db.data_files import DataFileRow, get_data_file_row
+from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
 from mwax_mover.utils import ArchiveLocation
 
@@ -160,7 +162,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
 
             if archive_success:
                 # Update record in metadata database
-                if not mwax_db.update_data_file_row_as_archived(
+                if not data_files.update_data_file_row_as_archived(
                     self.mro_db_handler_object,
                     val.obs_id,
                     item,

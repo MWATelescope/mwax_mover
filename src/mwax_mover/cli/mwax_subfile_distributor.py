@@ -28,15 +28,10 @@ from flask import Flask, request
 from werkzeug.serving import make_server
 
 from mwax_mover import (
-    mwax_db,
     utils,
     version,
 )
-from mwax_mover.mwax_db import MWAXDBHandler
-from mwax_mover.queues.watch_queue_worker import (
-    MWAXPriorityWatchQueueWorker,
-    MWAXWatchQueueWorker,
-)
+from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.processors.bf_stitching import BfStitchingProcessor
 from mwax_mover.processors.checksum_and_db import ChecksumAndDBProcessor
 from mwax_mover.processors.outgoing import OutgoingProcessor
@@ -44,6 +39,10 @@ from mwax_mover.processors.packet_stats import PacketStatsProcessor
 from mwax_mover.processors.subfile_incoming import SubfileIncomingProcessor
 from mwax_mover.processors.vis_cal_outgoing import VisCalOutgoingProcessor
 from mwax_mover.processors.vis_stats import VisStatsProcessor
+from mwax_mover.queues.watch_queue_worker import (
+    MWAXPriorityWatchQueueWorker,
+    MWAXWatchQueueWorker,
+)
 
 # Setup root logger
 handler = logging.StreamHandler()
@@ -160,7 +159,7 @@ class MWAXSubfileDistributor:
         self.outgoing_cal_list_lock: threading.Lock = threading.Lock()
 
         # Database handler for metadata db
-        self.db_handler: mwax_db.MWAXDBHandler
+        self.db_handler: MWAXDBHandler
 
     def initialise_from_command_line(self):
         """Initialize the distributor from command-line arguments.
@@ -525,7 +524,7 @@ class MWAXSubfileDistributor:
         if override_db_handler:
             self.db_handler = override_db_handler
         else:
-            self.db_handler = mwax_db.MWAXDBHandler(
+            self.db_handler = MWAXDBHandler(
                 host=self.cfg_metadatadb_host,
                 port=self.cfg_metadatadb_port,
                 db_name=self.cfg_metadatadb_db,

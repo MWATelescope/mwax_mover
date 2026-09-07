@@ -240,13 +240,68 @@ Verified clean with a whole-repo grep for all three import forms (`from
 pkg.mod import sym`, `from pkg import mod`, `import pkg.mod`) plus a bare
 word-boundary grep for each of the 17 old names, before running the gates.
 
+## Phase 2 (complete)
+
+Split `mwax_db.py` (1219 lines, 17 top-level symbols) by table/domain into
+`db/`, as one commit:
+
+| old | new |
+|---|---|
+| `MWAXDBHandler` | `db/handler.py` |
+| `DataFileRow`, `get_data_file_row`, `insert_data_file_row`, `update_data_file_row_as_archived` | `db/data_files.py` |
+| the other 12 functions (`calibration_request`/`calibration_fits`/`calibration_solutions`) | `db/calibration.py` |
+
+`db/calibration.py` is a distinct thing from the `calibration/` package Phase 3
+will create -- this one is the database layer for those tables (L2); Phase 3's
+`calibration/` is calibration *domain logic* (fitting, outliers) at L4. Same
+word, different layer, no actual import collision since the dotted paths
+differ (`mwax_mover.db.calibration` vs `mwax_mover.calibration`).
+
+`git mv mwax_db.py db/calibration.py` first (keeps history for the largest
+chunk), then wrote `handler.py` and `data_files.py` as new files, then deleted
+the non-calibration content back out of `calibration.py`.
+
+### Verifying a split, not just a move
+
+A rename's correctness check is "grep for the old name." A split needs more:
+content could be dropped, duplicated, or subtly edited while still leaving
+every name findable. Did two checks per the working agreement's AST-comparison
+rule, both before touching any caller:
+
+- **Symbol set.** `ast.parse` each of the three new files, collect top-level
+  `FunctionDef`/`ClassDef` names, union them, and diff against the same
+  collected from the original file at its last commit (`git show
+  <rev>:src/mwax_mover/mwax_db.py`). 17 in, 17 out, nothing dropped or added.
+- **Body equality.** Not enough on its own -- a function present by name could
+  still have been edited while moving it. `ast.get_source_segment` each
+  top-level node and compare the literal source text, old vs new, per symbol.
+  All 17 identical.
+
+### Import-site fixing found one new gotcha
+
+Same three forms as before, plus one the leaf-package phase didn't hit: a
+bare-module import colliding with an unrelated same-named variable.
+`mwacache_archive_processor.py` and `mwax_subfile_distributor.py` both define
+a module-level `handler = logging.StreamHandler()` for the root logger right
+next to where `from mwax_mover.db import handler` would have gone for the
+`mwax_db.MWAXDBHandler(...)` call sites. Importing the submodule under that
+name would have silently shadowed the logging handler instead of failing
+loudly -- `ty` doesn't catch a same-named rebind like this the way it catches
+a missing import. Used the direct-name import (`from mwax_mover.db.handler
+import MWAXDBHandler`) instead, which both files already had partially in
+place, and dropped the bare-module attribute access entirely rather than
+picking an alias.
+
+Also fixed two stale prose pointers while in the affected files anyway (not a
+Phase 5 sweep, just the ones sitting in files this commit already touched):
+`tests_fakedb.py`'s docstring said `mwax_mover.mwax_db`, and
+`mwax_calvin_controller.py` had a `` `mwax_db.insert_calibration_fits_row` ``
+cross-reference in a docstring.
+
 ## Remaining phases
 
 Ordering principle: leaves first, to prove the tooling before it touches the
 high-fan-in god-modules.
-
-**Phase 2 -- split `mwax_db.py`** (1219 lines) by table/domain into `db/`.
-Mechanical; 8 dependents.
 
 **Phase 3 -- split `utils.py` and `mwax_calvin_utils.py`** into `core/`,
 `fits/`, `filesystem/`, `net/`, `calibration/`, `calvin/`. Highest value and

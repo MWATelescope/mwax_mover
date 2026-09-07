@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from tests_common import setup_test_directories
 
-from mwax_mover.mwax_db import MWAXDBHandler
+from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.processors.checksum_and_db import ChecksumAndDBProcessor
 from mwax_mover.utils import MWADataFileType, ValidationData
 

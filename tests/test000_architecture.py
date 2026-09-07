@@ -49,9 +49,9 @@ LAYERS: dict[int, tuple[str, ...]] = {
     # L1: thin wrappers over the standard library and the OS.
     1: ("mwax_command", "core"),
     # L2: primitives -- config, filesystem, FITS, network, database. The
-    # god-modules utils.py and mwax_db.py live here until they are split into
-    # the packages listed alongside them.
-    2: ("utils", "mwax_db", "fits", "filesystem", "net", "db"),
+    # god-module utils.py lives here until it is split into the packages
+    # listed alongside it.
+    2: ("utils", "fits", "filesystem", "net", "db"),
     # L3: the watcher/queue-worker framework and other reusable machinery,
     # built on L2 but knowing nothing about calibration or MWAX data products.
     3: (

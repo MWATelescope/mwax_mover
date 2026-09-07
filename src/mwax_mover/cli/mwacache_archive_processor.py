@@ -21,13 +21,12 @@ from glob import glob
 import astropy
 
 from mwax_mover import (
-    mwax_db,
     utils,
     version,
 )
-from mwax_mover.mwax_db import MWAXDBHandler
-from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
+from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.processors.pawsey_outgoing import PawseyOutgoingProcessor
+from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
 from mwax_mover.utils import ArchiveLocation
 
 # Setup root logger
@@ -97,8 +96,8 @@ class MWACacheArchiveProcessor:
         self.fatal_exit_code: int = 0
         self.fatal_reason: str = ""
 
-        self.mro_db_handler: mwax_db.MWAXDBHandler
-        self.remote_db_handler: mwax_db.MWAXDBHandler
+        self.mro_db_handler: MWAXDBHandler
+        self.remote_db_handler: MWAXDBHandler
 
         self.watch_dirs: list[str] = []
         self.recursive: bool = False
@@ -457,7 +456,7 @@ class MWACacheArchiveProcessor:
         if override_mro_db_handler:
             self.mro_db_handler = override_mro_db_handler
         else:
-            self.mro_db_handler = mwax_db.MWAXDBHandler(
+            self.mro_db_handler = MWAXDBHandler(
                 host=self.mro_metadatadb_host,
                 port=self.mro_metadatadb_port,
                 db_name=self.mro_metadatadb_db,
@@ -485,7 +484,7 @@ class MWACacheArchiveProcessor:
         if override_remote_db_handler:
             self.remote_db_handler = override_remote_db_handler
         else:
-            self.remote_db_handler = mwax_db.MWAXDBHandler(
+            self.remote_db_handler = MWAXDBHandler(
                 host=self.remote_metadatadb_host,
                 port=self.remote_metadatadb_port,
                 db_name=self.remote_metadatadb_db,

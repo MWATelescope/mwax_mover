@@ -33,6 +33,13 @@ from mwax_mover import (
     version,
 )
 from mwax_mover.archive.archiver import copy_file_rsync
+from mwax_mover.db.calibration import (
+    update_calibration_request_assign_hostname_start_download,
+    update_calsolution_request_calibration_complete_status,
+    update_calsolution_request_calibration_started_status,
+    update_calsolution_request_download_complete_status,
+)
+from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.mwax_calvin_solutions import process_solutions
 from mwax_mover.mwax_calvin_utils import (
     CalvinJobType,
@@ -40,13 +47,6 @@ from mwax_mover.mwax_calvin_utils import (
     export_calibration_solutions,
     reap_orphaned_staging_dirs,
     upload_plot_files,
-)
-from mwax_mover.mwax_db import (
-    MWAXDBHandler,
-    update_calibration_request_assign_hostname_start_download,
-    update_calsolution_request_calibration_complete_status,
-    update_calsolution_request_calibration_started_status,
-    update_calsolution_request_download_complete_status,
 )
 from mwax_mover.utils import (
     extract_filename_from_mwa_asvo_signed_url,

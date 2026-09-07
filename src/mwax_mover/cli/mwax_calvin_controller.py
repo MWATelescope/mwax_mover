@@ -34,19 +34,19 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from mwax_mover import mwax_asvo_helper, utils, version
-from mwax_mover.mwax_calvin_utils import (
-    CalvinJobType,
-    count_slurm_asvo_jobs,
-    create_sbatch_script,
-    submit_sbatch,
-)
-from mwax_mover.mwax_db import (
-    MWAXDBHandler,
+from mwax_mover.db.calibration import (
     get_unattempted_calibration_requests,
     get_unattempted_unrequested_cal_obsids,
     insert_calibration_request_row,
     update_calibration_request_slurm_status,
     update_calsolution_request_submit_mwa_asvo_job_status,
+)
+from mwax_mover.db.handler import MWAXDBHandler
+from mwax_mover.mwax_calvin_utils import (
+    CalvinJobType,
+    count_slurm_asvo_jobs,
+    create_sbatch_script,
+    submit_sbatch,
 )
 
 # Setup root logger
@@ -78,7 +78,7 @@ def fit_dir_sort_key(fit_dir: Path) -> tuple[int, int, str]:
     """Build a sort key ordering fit directories newest (largest fitid) first.
 
     Fit directories are named for their fitid, which is a microsecond epoch
-    value (see ``mwax_db.insert_calibration_fits_row``), so a larger fitid is
+    value (see ``db.calibration.insert_calibration_fits_row``), so a larger fitid is
     always a more recent fit. Sorting numerically rather than lexicographically
     means the ordering does not silently depend on every fitid happening to have
     the same number of digits.
