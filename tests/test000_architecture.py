@@ -45,7 +45,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parent.parent / "src" / "mwax_mover"
 # works and why entries are prefixes.
 LAYERS: dict[int, tuple[str, ...]] = {
     # L0: constants and version only. Depends on nothing internal.
-    0: ("mwax_mover", "version", "constants"),
+    0: ("version", "constants"),
     # L1: thin wrappers over the standard library and the OS.
     1: ("mwax_command", "core"),
     # L2: primitives -- config, filesystem, FITS, network, database. The

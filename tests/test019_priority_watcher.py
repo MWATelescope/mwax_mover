@@ -33,7 +33,7 @@ from unittest import mock
 import inotify.constants
 import pytest
 
-from mwax_mover import mwax_mover
+from mwax_mover import constants
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
 from mwax_mover.mwax_priority_watcher import PriorityWatcher
 
@@ -110,7 +110,7 @@ def make_watcher(tmp_path, dest_queue):
         path: str = str(tmp_path),
         watcher_dest_queue: queue.PriorityQueue = dest_queue,
         pattern: str = ".fits",
-        mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
+        mode=constants.MODE_WATCH_DIR_FOR_RENAME,
         recursive: bool = False,
         metafits_path: str = "/dummy/metafits",
         list_of_correlator_high_priority_projects: list[str] = [],  # noqa: B006
@@ -263,7 +263,7 @@ class TestPriorityWatcherInit:
                 path="/nonexistent/path/xyz",
                 dest_queue=dest_queue,
                 pattern=".fits",
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
+                mode=constants.MODE_WATCH_DIR_FOR_NEW,
                 recursive=False,
                 metafits_path="/dummy",
                 list_of_correlator_high_priority_projects=[],
@@ -271,7 +271,7 @@ class TestPriorityWatcherInit:
             )
 
     def test_mask_new_mode(self, make_watcher):
-        w = make_watcher(mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW)
+        w = make_watcher(mode=constants.MODE_WATCH_DIR_FOR_NEW)
         assert w.mask == inotify.constants.IN_CLOSE_WRITE
 
     def test_mask_rename_mode(self, make_watcher):
@@ -279,7 +279,7 @@ class TestPriorityWatcherInit:
         assert w.mask == inotify.constants.IN_MOVED_TO
 
     def test_mask_rename_or_new_mode(self, make_watcher):
-        w = make_watcher(mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW)
+        w = make_watcher(mode=constants.MODE_WATCH_DIR_FOR_RENAME_OR_NEW)
         expected = inotify.constants.IN_MOVED_TO | inotify.constants.IN_CLOSE_WRITE
         assert w.mask == expected
 
@@ -515,7 +515,7 @@ class TestPriorityWatcherLiveInotify:
                 path=shm_watch_dir,
                 dest_queue=dest_queue,
                 pattern=".fits",
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
+                mode=constants.MODE_WATCH_DIR_FOR_RENAME,
                 recursive=False,
                 metafits_path="/dummy",
                 list_of_correlator_high_priority_projects=[],
@@ -553,7 +553,7 @@ class TestPriorityWatcherLiveInotify:
                 path=shm_watch_dir,
                 dest_queue=dest_queue,
                 pattern=".fits",
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
+                mode=constants.MODE_WATCH_DIR_FOR_NEW,
                 recursive=False,
                 metafits_path="/dummy",
                 list_of_correlator_high_priority_projects=[],
@@ -587,7 +587,7 @@ class TestPriorityWatcherLiveInotify:
                 path=shm_watch_dir,
                 dest_queue=dest_queue,
                 pattern=".fits",
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
+                mode=constants.MODE_WATCH_DIR_FOR_RENAME,
                 recursive=False,
                 metafits_path="/dummy",
                 list_of_correlator_high_priority_projects=[],

@@ -13,7 +13,7 @@ import os
 import shutil
 
 from mwax_mover import mwax_bf_filterbank_utils, mwax_bf_vdif_utils, utils
-from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
+from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME
 from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
 
 METAFITS_EXPOSURE = "EXPOSURE"

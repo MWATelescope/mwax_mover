@@ -9,7 +9,7 @@ the archive location and bucket, then deletes the local copy.
 import logging
 import os
 
-from mwax_mover import mwa_archiver, mwax_db, mwax_mover, utils
+from mwax_mover import constants, mwa_archiver, mwax_db, utils
 from mwax_mover.mwax_db import DataFileRow, MWAXDBHandler, get_data_file_row
 from mwax_mover.mwax_watch_queue_worker import MWAXPriorityWatchQueueWorker
 from mwax_mover.utils import ArchiveLocation
@@ -58,7 +58,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             name,
             metafits_path,
             watch_paths_and_exts,
-            mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
+            mode=constants.MODE_WATCH_DIR_FOR_RENAME,
             exclude_pattern=".part*",
             corr_hi_priority_projects=list_of_corr_hi_priority_projects,
             vcs_hi_priority_projects=list_of_vcs_hi_priority_projects,

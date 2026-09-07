@@ -13,7 +13,7 @@ import queue
 import inotify.adapters
 import inotify.constants
 
-from mwax_mover import mwax_mover, utils
+from mwax_mover import constants, utils
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +56,11 @@ class Watcher:
         self.exclude_pattern = exclude_pattern  # Can be None or ".ext"
         self.scan_completed = False
 
-        if self.mode == mwax_mover.MODE_WATCH_DIR_FOR_NEW:
+        if self.mode == constants.MODE_WATCH_DIR_FOR_NEW:
             self.mask = inotify.constants.IN_CLOSE_WRITE
-        elif self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME:
+        elif self.mode == constants.MODE_WATCH_DIR_FOR_RENAME:
             self.mask = inotify.constants.IN_MOVED_TO
-        elif self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW:
+        elif self.mode == constants.MODE_WATCH_DIR_FOR_RENAME_OR_NEW:
             self.mask = inotify.constants.IN_MOVED_TO | inotify.constants.IN_CLOSE_WRITE
 
         # Check that the path to watch exists
@@ -117,9 +117,9 @@ class Watcher:
         # If we're in NEW or RENAME mode, then scan the folder once we have
         # enqueued any waiting items
         if (
-            self.mode == mwax_mover.MODE_WATCH_DIR_FOR_NEW
-            or self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME
-            or self.mode == mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW
+            self.mode == constants.MODE_WATCH_DIR_FOR_NEW
+            or self.mode == constants.MODE_WATCH_DIR_FOR_RENAME
+            or self.mode == constants.MODE_WATCH_DIR_FOR_RENAME_OR_NEW
         ):
             utils.scan_for_existing_files_and_add_to_queue(
                 self.path,

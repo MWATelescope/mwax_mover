@@ -12,7 +12,7 @@ import os
 import shutil
 
 from mwax_mover import utils
-from mwax_mover.mwax_mover import MODE_WATCH_DIR_FOR_RENAME
+from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME
 from mwax_mover.mwax_watch_queue_worker import MWAXWatchQueueWorker
 from mwax_mover.utils import ValidationData
 

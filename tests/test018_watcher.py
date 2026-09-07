@@ -27,7 +27,7 @@ from unittest import mock
 import inotify.constants
 import pytest
 
-from mwax_mover import mwax_mover
+from mwax_mover import constants
 from mwax_mover.mwax_watcher import Watcher
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -91,7 +91,7 @@ class TestWatcherInit:
                 path="/nonexistent/path/xyz",
                 dest_queue=dest_queue,
                 pattern=".fits",
-                mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
+                mode=constants.MODE_WATCH_DIR_FOR_NEW,
                 recursive=False,
             )
 
@@ -101,7 +101,7 @@ class TestWatcherInit:
             path=str(tmp_path),
             dest_queue=dest_queue,
             pattern=".fits",
-            mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
+            mode=constants.MODE_WATCH_DIR_FOR_NEW,
             recursive=False,
         )
         assert w.mask == inotify.constants.IN_CLOSE_WRITE
@@ -112,7 +112,7 @@ class TestWatcherInit:
             path=str(tmp_path),
             dest_queue=dest_queue,
             pattern=".fits",
-            mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
+            mode=constants.MODE_WATCH_DIR_FOR_RENAME,
             recursive=False,
         )
         assert w.mask == inotify.constants.IN_MOVED_TO
@@ -123,7 +123,7 @@ class TestWatcherInit:
             path=str(tmp_path),
             dest_queue=dest_queue,
             pattern=".fits",
-            mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+            mode=constants.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
             recursive=False,
         )
         expected = inotify.constants.IN_MOVED_TO | inotify.constants.IN_CLOSE_WRITE
@@ -135,7 +135,7 @@ class TestWatcherInit:
             path=str(tmp_path),
             dest_queue=dest_queue,
             pattern=".*",
-            mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
+            mode=constants.MODE_WATCH_DIR_FOR_NEW,
             recursive=False,
             exclude_pattern=".metafits",
         )
@@ -147,7 +147,7 @@ class TestWatcherInit:
             path=str(tmp_path),
             dest_queue=dest_queue,
             pattern=".fits",
-            mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
+            mode=constants.MODE_WATCH_DIR_FOR_NEW,
             recursive=False,
         )
         assert w.exclude_pattern is None
@@ -158,7 +158,7 @@ class TestWatcherInit:
             path=str(tmp_path),
             dest_queue=dest_queue,
             pattern=".fits",
-            mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
+            mode=constants.MODE_WATCH_DIR_FOR_NEW,
             recursive=False,
         )
         assert w.watching is False
@@ -174,7 +174,7 @@ class TestGetStatus:
             path=str(tmp_path),
             dest_queue=dest_queue,
             pattern=".fits",
-            mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
+            mode=constants.MODE_WATCH_DIR_FOR_NEW,
             recursive=False,
         )
         status = w.get_status()
@@ -279,20 +279,20 @@ class TestDoWatchLoopFiltering:
         )
 
     def test_matching_extension_enqueued(self, dest_queue, tmp_path):
-        w = self._make_watcher(dest_queue, tmp_path, ".fits", mwax_mover.MODE_WATCH_DIR_FOR_RENAME)
+        w = self._make_watcher(dest_queue, tmp_path, ".fits", constants.MODE_WATCH_DIR_FOR_RENAME)
         event = _make_fake_event(inotify.constants.IN_MOVED_TO, str(tmp_path), "obs123.fits")
         _run_watcher_with_events(w, [event])
         assert dest_queue.qsize() == 1
         assert dest_queue.get() == str(tmp_path) + "/obs123.fits"
 
     def test_non_matching_extension_not_enqueued(self, dest_queue, tmp_path):
-        w = self._make_watcher(dest_queue, tmp_path, ".fits", mwax_mover.MODE_WATCH_DIR_FOR_RENAME)
+        w = self._make_watcher(dest_queue, tmp_path, ".fits", constants.MODE_WATCH_DIR_FOR_RENAME)
         event = _make_fake_event(inotify.constants.IN_MOVED_TO, str(tmp_path), "obs123.metafits")
         _run_watcher_with_events(w, [event])
         assert dest_queue.empty()
 
     def test_wildcard_pattern_enqueues_any_extension(self, dest_queue, tmp_path):
-        w = self._make_watcher(dest_queue, tmp_path, ".*", mwax_mover.MODE_WATCH_DIR_FOR_RENAME)
+        w = self._make_watcher(dest_queue, tmp_path, ".*", constants.MODE_WATCH_DIR_FOR_RENAME)
         event = _make_fake_event(inotify.constants.IN_MOVED_TO, str(tmp_path), "obs123.metafits")
         _run_watcher_with_events(w, [event])
         assert dest_queue.qsize() == 1
@@ -302,7 +302,7 @@ class TestDoWatchLoopFiltering:
             dest_queue,
             tmp_path,
             ".*",
-            mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
+            constants.MODE_WATCH_DIR_FOR_RENAME,
             exclude_pattern=".metafits",
         )
         event = _make_fake_event(inotify.constants.IN_MOVED_TO, str(tmp_path), "obs123.metafits")
@@ -314,7 +314,7 @@ class TestDoWatchLoopFiltering:
             dest_queue,
             tmp_path,
             ".*",
-            mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
+            constants.MODE_WATCH_DIR_FOR_RENAME,
             exclude_pattern=".metafits",
         )
         events = [
@@ -327,13 +327,13 @@ class TestDoWatchLoopFiltering:
 
     def test_wrong_event_type_not_enqueued(self, dest_queue, tmp_path):
         """IN_OPEN arriving on a IN_MOVED_TO watcher should be ignored."""
-        w = self._make_watcher(dest_queue, tmp_path, ".fits", mwax_mover.MODE_WATCH_DIR_FOR_RENAME)
+        w = self._make_watcher(dest_queue, tmp_path, ".fits", constants.MODE_WATCH_DIR_FOR_RENAME)
         event = _make_fake_event(inotify.constants.IN_OPEN, str(tmp_path), "obs123.fits")
         _run_watcher_with_events(w, [event])
         assert dest_queue.empty()
 
     def test_multiple_matching_events_all_enqueued(self, dest_queue, tmp_path):
-        w = self._make_watcher(dest_queue, tmp_path, ".fits", mwax_mover.MODE_WATCH_DIR_FOR_RENAME)
+        w = self._make_watcher(dest_queue, tmp_path, ".fits", constants.MODE_WATCH_DIR_FOR_RENAME)
         events = [_make_fake_event(inotify.constants.IN_MOVED_TO, str(tmp_path), f"obs{i}.fits") for i in range(5)]
         _run_watcher_with_events(w, events)
         assert dest_queue.qsize() == 5
@@ -377,7 +377,7 @@ class TestLiveInotify:
             path=shm_watch_dir,
             dest_queue=dest_queue,
             pattern=".fits",
-            mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
+            mode=constants.MODE_WATCH_DIR_FOR_RENAME,
             recursive=False,
         )
         thread = self._start_watcher_thread(watcher)
@@ -407,7 +407,7 @@ class TestLiveInotify:
             path=shm_watch_dir,
             dest_queue=dest_queue,
             pattern=".fits",
-            mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
+            mode=constants.MODE_WATCH_DIR_FOR_RENAME,
             recursive=False,
         )
         thread = self._start_watcher_thread(watcher)
@@ -436,7 +436,7 @@ class TestLiveInotify:
             path=shm_watch_dir,
             dest_queue=dest_queue,
             pattern=".fits",
-            mode=mwax_mover.MODE_WATCH_DIR_FOR_NEW,
+            mode=constants.MODE_WATCH_DIR_FOR_NEW,
             recursive=False,
         )
         thread = self._start_watcher_thread(watcher)
@@ -462,7 +462,7 @@ class TestLiveInotify:
             path=shm_watch_dir,
             dest_queue=dest_queue,
             pattern=".fits",
-            mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
+            mode=constants.MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
             recursive=False,
         )
         thread = self._start_watcher_thread(watcher)
@@ -500,7 +500,7 @@ class TestLiveInotify:
             path=shm_watch_dir,
             dest_queue=dest_queue,
             pattern=".*",
-            mode=mwax_mover.MODE_WATCH_DIR_FOR_RENAME,
+            mode=constants.MODE_WATCH_DIR_FOR_RENAME,
             recursive=False,
             exclude_pattern=".metafits",
         )

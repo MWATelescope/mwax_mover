@@ -14,7 +14,7 @@ import queue
 import threading
 import time
 
-from mwax_mover import mwax_command, mwax_mover
+from mwax_mover import constants, mwax_command
 from mwax_mover.mwax_priority_queue_data import MWAXPriorityQueueData
 from mwax_mover.mwax_queue_worker import calculate_backoff_seconds
 
@@ -238,10 +238,10 @@ class PriorityQueueWorker:
         command = f"{self._executable_path}"
 
         # Substitute the filename into the command
-        command = command.replace(mwax_mover.FILE_REPLACEMENT_TOKEN, filename)
+        command = command.replace(constants.FILE_REPLACEMENT_TOKEN, filename)
 
         filename_no_ext = os.path.splitext(filename)[0]
-        command = command.replace(mwax_mover.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext)
+        command = command.replace(constants.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext)
 
         return_value, _ = mwax_command.run_command_ext(command, -1, 60, True)
 
