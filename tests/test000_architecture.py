@@ -47,7 +47,7 @@ LAYERS: dict[int, tuple[str, ...]] = {
     # L0: constants and version only. Depends on nothing internal.
     0: ("version", "constants"),
     # L1: thin wrappers over the standard library and the OS.
-    1: ("mwax_command", "core"),
+    1: ("core",),
     # L2: primitives -- config, filesystem, FITS, network, database. The
     # god-module utils.py lives here until it is split into the packages
     # listed alongside it.

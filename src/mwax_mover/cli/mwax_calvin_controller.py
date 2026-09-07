@@ -34,6 +34,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from mwax_mover import mwax_asvo_helper, utils, version
+from mwax_mover.core.config import read_config, read_config_list, read_optional_config
+from mwax_mover.core.env import get_hostname, running_under_pytest
 from mwax_mover.db.calibration import (
     get_unattempted_calibration_requests,
     get_unattempted_unrequested_cal_obsids,
@@ -48,6 +50,7 @@ from mwax_mover.mwax_calvin_utils import (
     create_sbatch_script,
     submit_sbatch,
 )
+from mwax_mover.net.multicast import get_ip_address, send_multicast
 
 # Setup root logger
 handler = logging.StreamHandler()
@@ -853,7 +856,7 @@ class MWAXCalvinController:
 
             # Send the bytes
             try:
-                utils.send_multicast(
+                send_multicast(
                     self.health_multicast_interface_ip,
                     self.health_multicast_ip,
                     self.health_multicast_port,
@@ -1064,7 +1067,7 @@ class MWAXCalvinController:
         self.worker_config_filename = config_filename.replace("calvin_controller", "calvin_processor")
 
         # Get this hosts hostname
-        self.hostname = utils.get_hostname()
+        self.hostname = get_hostname()
 
         if not os.path.exists(config_filename):
             print(f"Configuration file location {config_filename} does not exist. Quitting.")
@@ -1086,7 +1089,7 @@ class MWAXCalvinController:
             sys.exit(1)
 
         # Read log level
-        config_file_log_level: str | None = utils.read_optional_config(config, "mwax mover", "log_level")
+        config_file_log_level: str | None = read_optional_config(config, "mwax mover", "log_level")
         if config_file_log_level:
             logger.setLevel(config_file_log_level)
 
@@ -1094,29 +1097,27 @@ class MWAXCalvinController:
         logger.info(f"Reading config file: {config_filename}")
 
         # health
-        self.health_multicast_ip = utils.read_config(config, "mwax mover", "health_multicast_ip")
-        self.health_multicast_port = int(utils.read_config(config, "mwax mover", "health_multicast_port"))
-        self.health_multicast_hops = int(utils.read_config(config, "mwax mover", "health_multicast_hops"))
-        self.health_multicast_interface_name = utils.read_config(
+        self.health_multicast_ip = read_config(config, "mwax mover", "health_multicast_ip")
+        self.health_multicast_port = int(read_config(config, "mwax mover", "health_multicast_port"))
+        self.health_multicast_hops = int(read_config(config, "mwax mover", "health_multicast_hops"))
+        self.health_multicast_interface_name = read_config(
             config,
             "mwax mover",
             "health_multicast_interface_name",
         )
 
         # get this hosts primary network interface ip
-        self.health_multicast_interface_ip = utils.get_ip_address(self.health_multicast_interface_name)
+        self.health_multicast_interface_ip = get_ip_address(self.health_multicast_interface_name)
         logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
 
         #
         # MRO database
         #
-        self.mro_metadatadb_host = utils.read_config(config, "mro metadata database", "host")
-        self.mro_metadatadb_db = utils.read_config(config, "mro metadata database", "db")
-        self.mro_metadatadb_user = utils.read_config(config, "mro metadata database", "user")
-        self.mro_metadatadb_pass = utils.read_config(
-            config, "mro metadata database", "pass", not utils.running_under_pytest()
-        )
-        self.mro_metadatadb_port = int(utils.read_config(config, "mro metadata database", "port"))
+        self.mro_metadatadb_host = read_config(config, "mro metadata database", "host")
+        self.mro_metadatadb_db = read_config(config, "mro metadata database", "db")
+        self.mro_metadatadb_user = read_config(config, "mro metadata database", "user")
+        self.mro_metadatadb_pass = read_config(config, "mro metadata database", "pass", not running_under_pytest())
+        self.mro_metadatadb_port = int(read_config(config, "mro metadata database", "port"))
 
         # Initiate database connection for mro metadata db
         if override_db_handler:
@@ -1134,7 +1135,7 @@ class MWAXCalvinController:
         # calvin config
         #
         # How long between iterations of the main loop (in seconds)
-        self.check_interval_seconds = int(utils.read_config(config, "calvin", "check_interval_seconds"))
+        self.check_interval_seconds = int(read_config(config, "calvin", "check_interval_seconds"))
 
         # script path (path for keeping all sbatch scripts)
         self.script_path = config.get("calvin", "script_path")
@@ -1154,17 +1155,15 @@ class MWAXCalvinController:
         #
         # How many seconds do we wait before rechecking when giant squid says
         # MWA ASVO has an outage?
-        self.mwa_asvo_outage_check_seconds = int(
-            utils.read_config(config, "giant squid", "mwa_asvo_outage_check_seconds")
-        )
+        self.mwa_asvo_outage_check_seconds = int(read_config(config, "giant squid", "mwa_asvo_outage_check_seconds"))
 
         # How many secs do we wait for MWA ASVO to get us a completed job??
         self.mwa_asvo_longest_wait_time_seconds = int(
-            utils.read_config(config, "giant squid", "mwa_asvo_longest_wait_time_seconds")
+            read_config(config, "giant squid", "mwa_asvo_longest_wait_time_seconds")
         )
 
         # Get the giant squid binary
-        self.giant_squid_binary_path = utils.read_config(
+        self.giant_squid_binary_path = read_config(
             config,
             "giant squid",
             "giant_squid_binary_path",
@@ -1176,33 +1175,31 @@ class MWAXCalvinController:
 
         # How long do we wait for giant-squid to execute a list subcommand
         self.giant_squid_list_timeout_seconds = int(
-            utils.read_config(config, "giant squid", "giant_squid_list_timeout_seconds")
+            read_config(config, "giant squid", "giant_squid_list_timeout_seconds")
         )
 
         # How long do we wait for giant-squid to execute a submit-vis subcommand
         self.giant_squid_submitvis_timeout_seconds = int(
-            utils.read_config(config, "giant squid", "giant_squid_submitvis_timeout_seconds")
+            read_config(config, "giant squid", "giant_squid_submitvis_timeout_seconds")
         )
 
         #
         # plots upload section
         #
-        self.s3_profile = str(utils.read_config(config, "plots upload", "s3_profile"))
-        self.s3_bucket = str(utils.read_config(config, "plots upload", "s3_bucket"))
-        self.plot_upload_paths: list[str] = utils.read_config_list(config, "plots upload", "plot_upload_paths")
+        self.s3_profile = str(read_config(config, "plots upload", "s3_profile"))
+        self.s3_bucket = str(read_config(config, "plots upload", "s3_bucket"))
+        self.plot_upload_paths: list[str] = read_config_list(config, "plots upload", "plot_upload_paths")
         for p in self.plot_upload_paths:
             if not os.path.exists(p):
                 logger.error(f"plot_upload_path: {p} does not exist. Quitting.")
                 sys.exit(1)
-        self.plot_upload_interval_secs: int = int(
-            utils.read_config(config, "plots upload", "plot_upload_interval_secs")
-        )
+        self.plot_upload_interval_secs: int = int(read_config(config, "plots upload", "plot_upload_interval_secs"))
 
         # Optional: how many fit dirs to upload per pass over each plot upload
         # path. Left optional so existing config files keep working unchanged.
         if config.has_option("plots upload", "plot_upload_max_fits_per_pass"):
             self.plot_upload_max_fits_per_pass = int(
-                utils.read_config(config, "plots upload", "plot_upload_max_fits_per_pass")
+                read_config(config, "plots upload", "plot_upload_max_fits_per_pass")
             )
 
             if self.plot_upload_max_fits_per_pass < 1:

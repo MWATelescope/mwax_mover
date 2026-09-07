@@ -13,8 +13,9 @@ import os
 import time
 import uuid
 
-from mwax_mover.mwax_command import run_command_ext
-from mwax_mover.utils import bytes_to_gigabytes, get_gbps, running_under_pytest
+from mwax_mover.core.command import run_command_ext
+from mwax_mover.core.env import running_under_pytest
+from mwax_mover.core.units import bytes_to_gigabytes, get_gbps
 
 logger = logging.getLogger(__name__)
 

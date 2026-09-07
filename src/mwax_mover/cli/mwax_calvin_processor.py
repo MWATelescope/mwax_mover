@@ -33,6 +33,10 @@ from mwax_mover import (
     version,
 )
 from mwax_mover.archive.archiver import copy_file_rsync
+from mwax_mover.core.config import read_config, read_config_bool, read_optional_config
+from mwax_mover.core.env import get_hostname, running_under_pytest
+from mwax_mover.core.gpstime import get_gpstime_of_now
+from mwax_mover.core.units import gigabyte_to_gibibyte, is_int
 from mwax_mover.db.calibration import (
     update_calibration_request_assign_hostname_start_download,
     update_calsolution_request_calibration_complete_status,
@@ -48,6 +52,7 @@ from mwax_mover.mwax_calvin_utils import (
     reap_orphaned_staging_dirs,
     upload_plot_files,
 )
+from mwax_mover.net.multicast import get_ip_address, send_multicast
 from mwax_mover.utils import (
     extract_filename_from_mwa_asvo_signed_url,
     extract_tar,
@@ -320,7 +325,7 @@ class MWAXCalvinProcessor:
 
             logger.info(
                 f"Observation UVFITS output is estimated to be : {self.estimated_uvfits_GB} GB "
-                f"({int(utils.gigabyte_to_gibibyte(self.estimated_uvfits_GB))} GiB)"
+                f"({int(gigabyte_to_gibibyte(self.estimated_uvfits_GB))} GiB)"
             )
 
             if self.estimated_uvfits_GB < 500:
@@ -330,7 +335,7 @@ class MWAXCalvinProcessor:
                 os.makedirs(name=self.working_path, exist_ok=True)
 
                 # Override the birli allowed memory
-                self.birli_max_mem_gib -= int(utils.gigabyte_to_gibibyte(self.estimated_uvfits_GB))
+                self.birli_max_mem_gib -= int(gigabyte_to_gibibyte(self.estimated_uvfits_GB))
                 logger.info(
                     f"Using temporary work dir {self.temp_working_path} for Birli output. Reduced "
                     f"allowed Birli memory to: {self.birli_max_mem_gib} GiB"
@@ -660,7 +665,7 @@ class MWAXCalvinProcessor:
         # Get the duration of the obs from the metafits and only proceed
         # if the current gps time is > the obs_id + duration + a constant
         exp_time = int(self.metafits_context.sched_duration_ms / 1000.0)
-        current_gpstime: int = utils.get_gpstime_of_now()
+        current_gpstime: int = get_gpstime_of_now()
 
         # We need to allow for some time for the observation to update the database,
         # so add an additional 180 seconds before we check
@@ -679,7 +684,7 @@ class MWAXCalvinProcessor:
                 f". Sleeping for {OBS_FINISH_WAIT_SECONDS} seconds..."
             )
             self.sleep(OBS_FINISH_WAIT_SECONDS)
-            current_gpstime: int = utils.get_gpstime_of_now()
+            current_gpstime: int = get_gpstime_of_now()
 
         # Ok, should be safe to get the list of files and hosts
         if self.running:
@@ -1016,7 +1021,7 @@ class MWAXCalvinProcessor:
 
             # Send the bytes
             try:
-                utils.send_multicast(
+                send_multicast(
                     self.health_multicast_interface_ip,
                     self.health_multicast_ip,
                     self.health_multicast_port,
@@ -1118,7 +1123,7 @@ class MWAXCalvinProcessor:
                 FakeMWAXDBHandler). Defaults to None.
         """
         # Get this hosts hostname
-        self.hostname = utils.get_hostname()
+        self.hostname = get_hostname()
         self.job_type = job_type
         self.mwa_asvo_download_url = mwa_asvo_download_url
         self.obs_id = obs_id
@@ -1148,7 +1153,7 @@ class MWAXCalvinProcessor:
             sys.exit(1)
 
         # Read log level
-        config_file_log_level: str | None = utils.read_optional_config(config, "mwax mover", "log_level")
+        config_file_log_level: str | None = read_optional_config(config, "mwax mover", "log_level")
         if config_file_log_level:
             logger.setLevel(config_file_log_level)
 
@@ -1158,14 +1163,12 @@ class MWAXCalvinProcessor:
         #
         # MRO database
         #
-        self.mro_metadatadb_host = utils.read_config(config, "mro metadata database", "host")
-        self.mro_metadatadb_db = utils.read_config(config, "mro metadata database", "db")
-        self.mro_metadatadb_user = utils.read_config(config, "mro metadata database", "user")
+        self.mro_metadatadb_host = read_config(config, "mro metadata database", "host")
+        self.mro_metadatadb_db = read_config(config, "mro metadata database", "db")
+        self.mro_metadatadb_user = read_config(config, "mro metadata database", "user")
         # Don't require base64 encoded password if running a pytest
-        self.mro_metadatadb_pass = utils.read_config(
-            config, "mro metadata database", "pass", not utils.running_under_pytest()
-        )
-        self.mro_metadatadb_port = int(utils.read_config(config, "mro metadata database", "port"))
+        self.mro_metadatadb_pass = read_config(config, "mro metadata database", "pass", not running_under_pytest())
+        self.mro_metadatadb_port = int(read_config(config, "mro metadata database", "port"))
 
         # Initiate database connection for mro metadata db
         if override_db_handler:
@@ -1184,32 +1187,30 @@ class MWAXCalvinProcessor:
         #
         try:
             # health
-            self.health_multicast_ip = utils.read_config(config, "mwax mover", "health_multicast_ip")
-            self.health_multicast_port = int(utils.read_config(config, "mwax mover", "health_multicast_port"))
-            self.health_multicast_hops = int(utils.read_config(config, "mwax mover", "health_multicast_hops"))
-            self.health_multicast_interface_name = utils.read_config(
+            self.health_multicast_ip = read_config(config, "mwax mover", "health_multicast_ip")
+            self.health_multicast_port = int(read_config(config, "mwax mover", "health_multicast_port"))
+            self.health_multicast_hops = int(read_config(config, "mwax mover", "health_multicast_hops"))
+            self.health_multicast_interface_name = read_config(
                 config,
                 "mwax mover",
                 "health_multicast_interface_name",
             )
 
             # get this hosts primary network interface ip
-            self.health_multicast_interface_ip = utils.get_ip_address(self.health_multicast_interface_name)
+            self.health_multicast_interface_ip = get_ip_address(self.health_multicast_interface_name)
             logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
 
             #
             # Downloading
             #
-            self.download_retries = int(utils.read_config(config, "downloading", "download_retries"))
-            self.download_retry_wait = int(utils.read_config(config, "downloading", "download_retry_wait"))
+            self.download_retries = int(read_config(config, "downloading", "download_retries"))
+            self.download_retry_wait = int(read_config(config, "downloading", "download_retry_wait"))
             self.realtime_download_file_timeout = int(
-                utils.read_config(config, "downloading", "realtime_download_file_timeout")
+                read_config(config, "downloading", "realtime_download_file_timeout")
             )
-            self.mwaasvo_download_obs_timeout = int(
-                utils.read_config(config, "downloading", "mwaasvo_download_obs_timeout")
-            )
+            self.mwaasvo_download_obs_timeout = int(read_config(config, "downloading", "mwaasvo_download_obs_timeout"))
             # Get the giant squid binary
-            self.giant_squid_binary_path = utils.read_config(
+            self.giant_squid_binary_path = read_config(
                 config,
                 "giant squid",
                 "giant_squid_binary_path",
@@ -1227,7 +1228,7 @@ class MWAXCalvinProcessor:
 
             # Birli timeout
             self.birli_timeout = int(
-                utils.read_config(
+                read_config(
                     config,
                     "birli",
                     "timeout",
@@ -1236,7 +1237,7 @@ class MWAXCalvinProcessor:
 
             # Get Birli max mem
             self.birli_max_mem_gib = int(
-                utils.read_config(
+                read_config(
                     config,
                     "birli",
                     "max_mem_gib",
@@ -1244,7 +1245,7 @@ class MWAXCalvinProcessor:
             )
 
             # Get the Birli binary
-            self.birli_binary_path = utils.read_config(
+            self.birli_binary_path = read_config(
                 config,
                 "birli",
                 "binary_path",
@@ -1256,7 +1257,7 @@ class MWAXCalvinProcessor:
 
             # Get Birli freq res
             self.birli_freq_res_khz = int(
-                utils.read_config(
+                read_config(
                     config,
                     "birli",
                     "freq_res_khz",
@@ -1265,7 +1266,7 @@ class MWAXCalvinProcessor:
 
             # Get Birli time res
             self.birli_int_time_res_sec = float(
-                utils.read_config(
+                read_config(
                     config,
                     "birli",
                     "int_time_res_sec",
@@ -1274,7 +1275,7 @@ class MWAXCalvinProcessor:
 
             # Get Birli edge width
             self.birli_edge_width_khz = int(
-                utils.read_config(
+                read_config(
                     config,
                     "birli",
                     "edge_width_khz",
@@ -1285,14 +1286,14 @@ class MWAXCalvinProcessor:
             # Hyperdrive config
             #
             self.num_sources = int(
-                utils.read_config(
+                read_config(
                     config,
                     "hyperdrive",
                     "num_sources",
                 )
             )
 
-            self.source_list_filename = utils.read_config(
+            self.source_list_filename = read_config(
                 config,
                 "hyperdrive",
                 "source_list_filename",
@@ -1302,7 +1303,7 @@ class MWAXCalvinProcessor:
                 logger.error(f"source_list_filename location  {self.source_list_filename} does not exist. Quitting.")
                 sys.exit(1)
 
-            self.source_list_type = utils.read_config(
+            self.source_list_type = read_config(
                 config,
                 "hyperdrive",
                 "source_list_type",
@@ -1310,7 +1311,7 @@ class MWAXCalvinProcessor:
 
             # hyperdrive timeout
             self.hyperdrive_timeout = int(
-                utils.read_config(
+                read_config(
                     config,
                     "hyperdrive",
                     "timeout",
@@ -1318,7 +1319,7 @@ class MWAXCalvinProcessor:
             )
 
             # Get the hyperdrive binary
-            self.hyperdrive_binary_path = utils.read_config(
+            self.hyperdrive_binary_path = read_config(
                 config,
                 "hyperdrive",
                 "binary_path",
@@ -1332,7 +1333,7 @@ class MWAXCalvinProcessor:
 
             # hyperdrive extra args
             self.hyperdrive_extra_args = str(
-                utils.read_config(
+                read_config(
                     config,
                     "hyperdrive",
                     "extra_args",
@@ -1343,7 +1344,7 @@ class MWAXCalvinProcessor:
             # processing config
             #
             # Get the job_input_path dir
-            self.job_input_path = utils.read_config(
+            self.job_input_path = read_config(
                 config,
                 "processing",
                 "job_input_path",
@@ -1354,7 +1355,7 @@ class MWAXCalvinProcessor:
                 sys.exit(1)
 
             # Get the job_output_path dir
-            self.job_output_path = utils.read_config(
+            self.job_output_path = read_config(
                 config,
                 "processing",
                 "job_output_path",
@@ -1365,7 +1366,7 @@ class MWAXCalvinProcessor:
                 sys.exit(1)
 
             # Get the temp working dir
-            self.temp_working_path = utils.read_config(
+            self.temp_working_path = read_config(
                 config,
                 "processing",
                 "temp_working_path",
@@ -1381,14 +1382,14 @@ class MWAXCalvinProcessor:
                     logger.error(f"temp_working_path location  {self.temp_working_path} does not exist. Quitting.")
                     sys.exit(1)
 
-            self.keep_completed_visibility_files = utils.read_config_bool(
+            self.keep_completed_visibility_files = read_config_bool(
                 config,
                 "processing",
                 "keep_completed_visibility_files",
             )
 
             # Get the cal_export_path dir
-            self.cal_export_path = utils.read_optional_config(
+            self.cal_export_path = read_optional_config(
                 config,
                 "processing",
                 "cal_export_path",
@@ -1402,7 +1403,7 @@ class MWAXCalvinProcessor:
                     sys.exit(1)
 
             self.cal_export_max_age_hours: int = int(
-                utils.read_config(
+                read_config(
                     config,
                     "processing",
                     "cal_export_max_age_hours",
@@ -1410,7 +1411,7 @@ class MWAXCalvinProcessor:
             )
 
             self.phase_fit_niter = int(
-                utils.read_config(
+                read_config(
                     config,
                     "processing",
                     "phase_fit_niter",
@@ -1418,7 +1419,7 @@ class MWAXCalvinProcessor:
             )
 
             self.phase_outlier_nstd = float(
-                utils.read_config(
+                read_config(
                     config,
                     "processing",
                     "phase_outlier_nstd",
@@ -1426,7 +1427,7 @@ class MWAXCalvinProcessor:
             )
 
             # Get the plot_upload_path dir
-            self.plot_upload_path = utils.read_config(
+            self.plot_upload_path = read_config(
                 config,
                 "processing",
                 "plot_upload_path",
@@ -1437,10 +1438,10 @@ class MWAXCalvinProcessor:
                 sys.exit(1)
 
             # Get the base url of our calibration web front end (in front of the S3 bucket)
-            self.plot_front_end_url = utils.read_config(config, "processing", "plot_front_end_url")
+            self.plot_front_end_url = read_config(config, "processing", "plot_front_end_url")
 
             if config.has_option("processing", "gains_cut_off_max"):
-                gains_cut_off_max: str = utils.read_config(config, "processing", "gains_cut_off_max")
+                gains_cut_off_max: str = read_config(config, "processing", "gains_cut_off_max")
 
                 try:
                     self.gains_cut_off_max = float(gains_cut_off_max)
@@ -1454,35 +1455,33 @@ class MWAXCalvinProcessor:
             else:
                 logger.info("Gains cut off/clipping disabled.")
 
-            self.acacia_projects_profile = utils.read_config(
+            self.acacia_projects_profile = read_config(
                 config=config, section="processing", key="acacia_projects_profile"
             )
-            self.acacia_projects_bucket = utils.read_config(
-                config=config, section="processing", key="acacia_projects_bucket"
-            )
+            self.acacia_projects_bucket = read_config(config=config, section="processing", key="acacia_projects_bucket")
 
             self.gain_outlier_poly_degree = int(
-                utils.read_config(config=config, section="processing", key="gain_outlier_poly_degree")
+                read_config(config=config, section="processing", key="gain_outlier_poly_degree")
             )
             self.gain_outlier_mad_residual_threshold = float(
-                utils.read_config(
+                read_config(
                     config=config,
                     section="processing",
                     key="gain_outlier_mad_residual_threshold",
                 )
             )
-            self.gain_outlier_modify_gains = utils.read_config_bool(
+            self.gain_outlier_modify_gains = read_config_bool(
                 config=config, section="processing", key="gain_outlier_modify_gains"
             )
             self.gain_outlier_plot_n_tiles_per_page = int(
-                utils.read_config(
+                read_config(
                     config=config,
                     section="processing",
                     key="gain_outlier_plot_n_tiles_per_page",
                 )
             )
             self.tile_bad_channel_fraction = float(
-                utils.read_config(
+                read_config(
                     config=config,
                     section="processing",
                     key="tile_bad_channel_fraction",
@@ -1546,14 +1545,14 @@ class MWAXCalvinProcessor:
         obs_id = args["obs_id"]
         print(f"Command line argument 'obs-id' == {obs_id}")
 
-        if not utils.is_int(obs_id):
+        if not is_int(obs_id):
             print(f"ERROR: cmd line argument obs-id {obs_id} is not a number. Aborting.")
             sys.exit(-1)
 
         slurm_job_id = args["slurm_job_id"]
         print(f"Command line argument 'slurm-job-id' == {slurm_job_id}")
 
-        if not utils.is_int(slurm_job_id):
+        if not is_int(slurm_job_id):
             print(f"ERROR: cmd line argument slurm-job-id {slurm_job_id} is not a number. Aborting.")
             sys.exit(-1)
 
@@ -1562,7 +1561,7 @@ class MWAXCalvinProcessor:
 
             asvo_job_id = int(args["asvo_job_id"])
 
-            if not utils.is_int(args["asvo_job_id"]):
+            if not is_int(args["asvo_job_id"]):
                 print(f"ERROR: cmd line argument asvo-job-id {args['asvo_job_id']} is not a number. Aborting.")
                 sys.exit(-1)
         else:
@@ -1593,7 +1592,7 @@ class MWAXCalvinProcessor:
 
         for request_id_str in request_ids_string_list:
             request_id_str = request_id_str.strip()
-            if utils.is_int(request_id_str):
+            if is_int(request_id_str):
                 request_ids.append(int(request_id_str))
             else:
                 print(

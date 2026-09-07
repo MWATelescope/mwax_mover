@@ -16,7 +16,7 @@ from pathlib import Path
 from queue import PriorityQueue, Queue
 from threading import Thread
 
-from mwax_mover import utils
+from mwax_mover.core.env import get_hostname
 from mwax_mover.queues.priority_queue_worker import PriorityQueueWorker
 from mwax_mover.queues.priority_watcher import PriorityWatcher
 from mwax_mover.queues.queue_worker import QueueWorker
@@ -314,7 +314,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
         """
         self.name = name
         self.metafits_path = metafits_path
-        self.hostname = utils.get_hostname()
+        self.hostname = get_hostname()
         self.threads: list[Thread] = []
 
         # Watch

@@ -3,13 +3,14 @@
 Key enumerations: CorrelatorMode, MWADataFileType, ArchiveLocation.
 Key classes: ValidationData (filename validation result).
 Key functions: validate_filename(), metafits creation/reading, MD5 checksumming,
-PSRDADA header parsing, Redis-based beamformer signalling, UDP multicast sending,
-and config file helpers (read_config, read_optional_config, read_config_list).
+PSRDADA header parsing, and Redis-based beamformer signalling.
+
+Config file helpers, unit/GPS-time conversions, host/environment introspection,
+and UDP multicast sending have moved to mwax_mover.core and mwax_mover.net
+(docs/RESTRUCTURE.md Phase 3). The fits/filesystem/net-domain functions still
+here move out in a later Phase 3 commit.
 """
 
-import base64
-import datetime
-import fcntl
 import glob
 import json
 import logging
@@ -17,28 +18,26 @@ import os
 import queue
 import random
 import re
-import socket
 import struct
 import subprocess
-import sys
 import tarfile
 import threading
 import time
-from configparser import ConfigParser
 from enum import Enum
 from pathlib import Path
 from urllib.parse import urlparse
 
 import redis
 import requests
-from astropy import time as astrotime
 from astropy.io import fits
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from mwax_mover import mwax_command
-from mwax_mover.mwax_command import run_command_ext
+from mwax_mover.core.command import run_command_ext
+from mwax_mover.core.env import running_under_pytest
+from mwax_mover.core.units import bytes_to_gigabytes
 
 logger = logging.getLogger(__name__)
+
 
 # number of lines of the PSRDADA header to read looking for keywords
 PSRDADA_HEADER_BYTES = 4096
@@ -643,173 +642,6 @@ def get_metafits_values(metafits_filename: str) -> tuple[bool, str, str]:
         ) from catch_all_exception
 
 
-def read_config(config: ConfigParser, section: str, key: str, b64encoded=False):
-    """
-    Read a required string value from a ConfigParser object.
-
-    If ``b64encoded`` is True the stored value is treated as Base64-encoded
-    UTF-8 and decoded before being returned. The decoded value is masked in
-    log output.
-
-    Args:
-        config: A ConfigParser instance with the configuration already loaded.
-        section: The INI section name containing the key.
-        key: The key name within the section.
-        b64encoded: If True, Base64-decode the raw string value before
-            returning it. Defaults to False.
-
-    Returns:
-        The configuration value as a string, Base64-decoded if requested.
-
-    Raises:
-        configparser.NoSectionError: If the section does not exist.
-        configparser.NoOptionError: If the key does not exist within the section.
-    """
-    raw_value = config.get(section, key)
-
-    if b64encoded:
-        value = base64.b64decode(raw_value).decode("utf-8")
-        value_to_log = "*" * len(value)
-    else:
-        value = raw_value
-        value_to_log = value
-
-    logger.info(f"Read cfg [{section}].{key} == {value_to_log}")
-    return value
-
-
-def read_optional_config(config: ConfigParser, section: str, key: str, b64encoded=False) -> str | None:
-    """
-    Read an optional string value from a ConfigParser object.
-
-    Returns None if the key is absent or its value is an empty string.
-    If ``b64encoded`` is True the stored value is treated as Base64-encoded
-    UTF-8 and decoded before being returned. The decoded value is masked in
-    log output.
-
-    Args:
-        config: A ConfigParser instance with the configuration already loaded.
-        section: The INI section name containing the key. The section must
-            exist or KeyError is raised.
-        key: The key name within the section. If absent, returns None.
-        b64encoded: If True, Base64-decode the raw string value before
-            returning it. Defaults to False. Has no effect if the value is
-            absent or empty.
-
-    Returns:
-        The configuration value as a string (Base64-decoded if requested),
-        or None if the key is missing or empty.
-
-    Raises:
-        KeyError: If ``section`` does not exist in the config.
-    """
-    value = None
-    value_to_log = ""
-
-    if config.has_section(section):
-        if config.has_option(section, key):
-            raw_value = config.get(section, key)
-        else:
-            raw_value = ""
-    else:
-        raise KeyError(f"Section {section} not found in config file")
-
-    if raw_value == "":
-        value = None
-        value_to_log = "None"
-    else:
-        if b64encoded:
-            value = base64.b64decode(raw_value).decode("utf-8")
-            value_to_log = "*" * len(value)
-        else:
-            value = raw_value
-            value_to_log = value
-
-    logger.info(f"Read cfg [{section}].{key} == {value_to_log}")
-    return value
-
-
-def read_config_list(config: ConfigParser, section: str, key: str):
-    """
-    Read a comma-separated string value from a ConfigParser object and return it as a list.
-
-    Leading and trailing whitespace is stripped from the raw value before
-    splitting. An empty (or whitespace-only) value returns an empty list.
-
-    Args:
-        config: A ConfigParser instance with the configuration already loaded.
-        section: The INI section name containing the key.
-        key: The key name within the section whose value is a comma-separated list.
-
-    Returns:
-        A list of strings split on commas. Returns an empty list if the value
-        is blank.
-
-    Raises:
-        configparser.NoSectionError: If the section does not exist.
-        configparser.NoOptionError: If the key does not exist within the section.
-    """
-    string_value = read_config(config, section, key, False)
-
-    # Ensure we trim string_value
-    string_value = string_value.rstrip().lstrip()
-
-    if len(string_value) > 0:
-        return_list = string_value.split(",")
-    else:
-        return_list = []
-
-    logger.info(
-        f"Read cfg [{section}].{key}: '{string_value}' converted to list of {len(return_list)} items: {return_list}"
-    )
-    return return_list
-
-
-def read_config_bool(config: ConfigParser, section: str, key: str):
-    """
-    Read a boolean value from a ConfigParser object.
-
-    Delegates to ConfigParser.getboolean(), which accepts the standard
-    truthy/falsy strings (``'1'``, ``'yes'``, ``'true'``, ``'on'`` and their
-    negatives).
-
-    Args:
-        config: A ConfigParser instance with the configuration already loaded.
-        section: The INI section name containing the key.
-        key: The key name within the section.
-
-    Returns:
-        The configuration value as a bool.
-
-    Raises:
-        configparser.NoSectionError: If the section does not exist.
-        configparser.NoOptionError: If the key does not exist within the section.
-        ValueError: If the value cannot be interpreted as a boolean.
-    """
-    value = config.getboolean(section, key)
-
-    logger.info(f"Read cfg [{section}].{key} == {value}")
-    return value
-
-
-def get_hostname() -> str:
-    """
-    Return the short hostname of the running machine in lowercase.
-
-    Any domain suffix (everything after the first ``.``) is stripped so that
-    the fully-qualified domain name is never returned.
-
-    Returns:
-        The lowercase short hostname string (e.g. ``'mwax01'``).
-    """
-    hostname = socket.gethostname()
-
-    # ensure we remove anything after a . in case we got the fqdn
-    split_hostname = hostname.split(".")[0]
-
-    return split_hostname.lower()
-
-
 def process_mwax_stats(
     mwax_stats_dir: str,
     full_filename: str,
@@ -847,7 +679,7 @@ def process_mwax_stats(
     logger.debug(f"{full_filename}- attempting to run stats: {cmd}")
 
     start_time = time.time()
-    return_value, stdout = mwax_command.run_command_ext(cmd, numa_node, timeout)
+    return_value, stdout = run_command_ext(cmd, numa_node, timeout)
     elapsed = time.time() - start_time
 
     if return_value:
@@ -893,7 +725,7 @@ def load_psrdada_ringbuffer(full_filename: str, ringbuffer_key: str, numa_node, 
         stdout = ""
     else:
         logger.debug(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
-        return_value, stdout = mwax_command.run_command_ext(cmd, numa_node, timeout)
+        return_value, stdout = run_command_ext(cmd, numa_node, timeout)
 
     elapsed = time.time() - start_time
 
@@ -935,7 +767,7 @@ def run_mwax_packet_stats(mwax_stats_dir: str, full_filename: str, output_dir: s
     cmd = f"{mwax_stats_dir}/mwax_packet_stats -o {output_dir} -s {full_filename}"
 
     start_time = time.time()
-    return_value, stdout = mwax_command.run_command_ext(cmd, numa_node, timeout)
+    return_value, stdout = run_command_ext(cmd, numa_node, timeout)
     elapsed = time.time() - start_time
 
     if return_value:
@@ -1012,92 +844,6 @@ def scan_directory(watch_dir: str, pattern: str, recursive: bool, exclude_patter
         return files
 
 
-def send_multicast(
-    multicast_interface_ip: str,
-    dest_multicast_ip: str,
-    dest_multicast_port: int,
-    message: bytes,
-    ttl_hops: int,
-):
-    """
-    Send a UDP datagram to an IP multicast group.
-
-    Creates a UDP socket, configures the outbound multicast interface and
-    TTL, then transmits ``message`` to the specified group address and port.
-    The socket is closed in a finally block regardless of outcome.
-
-    Args:
-        multicast_interface_ip: IP address of the local network interface to
-            use for outbound multicast traffic. Must be associated with a
-            multicast-capable interface.
-        dest_multicast_ip: Destination multicast group IP address
-            (e.g. ``'239.255.0.1'``).
-        dest_multicast_port: Destination UDP port number.
-        message: The raw bytes payload to transmit.
-        ttl_hops: IP multicast TTL / hop limit. Controls how many router hops
-            the datagram may traverse.
-
-    Raises:
-        Exception: If ``sendto`` sends zero bytes, or if any socket operation
-            raises an unexpected error.
-    """
-
-    # Create the datagram socket
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-
-    # Disable loopback so you do not receive your own datagrams.
-    # loopback = 0
-    # if sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP,
-    #                    loopback) != 0:
-    #    raise Exception("Error setsockopt IP_MULTICAST_LOOP failed")
-
-    # Set the time-to-live for messages.
-    hops = struct.pack("b", ttl_hops)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, hops)
-
-    # Set local interface for outbound multicast datagrams.
-    # The IP address specified must be associated with a local,
-    # multicast - capable interface.
-    sock.setsockopt(
-        socket.IPPROTO_IP,
-        socket.IP_MULTICAST_IF,
-        socket.inet_aton(multicast_interface_ip),
-    )
-
-    try:
-        # Send data to the multicast group
-        if sock.sendto(message, (dest_multicast_ip, dest_multicast_port)) == 0:
-            raise Exception("Error sock.sendto() sent 0 bytes")
-    finally:
-        sock.close()
-
-
-def get_ip_address(ifname: str) -> str:
-    """
-    Return the IPv4 address assigned to a named network interface.
-
-    Uses the ``SIOCGIFADDR`` ioctl to query the kernel directly.
-
-    Args:
-        ifname: The network interface name (e.g. ``'eth0'``, ``'bond0'``).
-            Only the first 15 characters are used.
-
-    Returns:
-        The IPv4 address as a dotted-decimal string (e.g. ``'192.168.1.10'``).
-
-    Raises:
-        OSError: If the ioctl call fails (e.g. the interface does not exist).
-    """
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    return socket.inet_ntoa(
-        fcntl.ioctl(
-            sock.fileno(),
-            0x8915,  # SIOCGIFADDR
-            struct.pack("256s", bytes(ifname[:15], "utf-8")),
-        )[20:24]
-    )
-
-
 def do_checksum_md5(full_filename: str, numa_node: int | None, timeout: int) -> str:
     """
     Compute the MD5 checksum of a file by running the system ``md5sum`` command.
@@ -1128,7 +874,7 @@ def do_checksum_md5(full_filename: str, numa_node: int | None, timeout: int) -> 
     size = os.path.getsize(full_filename)
 
     start_time = time.time()
-    return_value, md5output = mwax_command.run_command_ext(cmdline, numa_node, timeout, False)
+    return_value, md5output = run_command_ext(cmdline, numa_node, timeout, False)
     elapsed = time.time() - start_time
 
     size_megabytes = size / (1000 * 1000)
@@ -1755,94 +1501,6 @@ def remove_file(filename: str, raise_error: bool) -> bool:
             return True
 
 
-# For a given datetime, return the GPS seconds as an integer
-def get_gpstime_of_datetime(date_time: datetime.datetime) -> int:
-    """
-    Convert a UTC datetime to an integer GPS time (seconds since GPS epoch).
-
-    Args:
-        date_time: A timezone-aware or naive UTC ``datetime.datetime`` object.
-
-    Returns:
-        The GPS time as an integer number of seconds since the GPS epoch
-        (6 January 1980 00:00:00 UTC).
-    """
-    utc_datetime = astrotime.Time(date_time, scale="utc")
-    # astropy's stubs type `.gps` as possibly `Masked` for array inputs;
-    # not possible here since `date_time` is a scalar datetime.
-    return round(utc_datetime.gps)  # type: ignore[arg-type]
-
-
-# Return the GPS seconds as an integer of Now
-def get_gpstime_of_now() -> int:
-    """
-    Return the current time as an integer GPS time (seconds since GPS epoch).
-
-    Returns:
-        The current GPS time as an integer number of seconds since the GPS
-        epoch (6 January 1980 00:00:00 UTC).
-    """
-    return get_gpstime_of_datetime(datetime.datetime.now(datetime.UTC))
-
-
-def is_int(value) -> bool:
-    """
-    Check whether ``value`` can be interpreted as an integer.
-
-    Args:
-        value: Any value to test. Typically a string.
-
-    Returns:
-        True if ``int(value)`` succeeds without raising ``ValueError``,
-        False otherwise.
-    """
-    try:
-        int(value)
-    except ValueError:
-        return False
-    else:
-        return True
-
-
-def gigabyte_to_gibibyte(gigabytes: float) -> float:
-    """
-    Convert a size in gigabytes (SI, base-10) to gibibytes (IEC, base-2).
-
-    Args:
-        gigabytes: Size in gigabytes (1 GB = 10^9 bytes).
-
-    Returns:
-        Equivalent size in gibibytes (1 GiB = 2^30 bytes), as a float.
-    """
-    return gigabytes / 1.07374
-
-
-def gigabytes_to_gigabits(gigabytes: float) -> float:
-    """
-    Convert a size in gigabytes (SI, base-10) to gigabits.
-
-    Args:
-        gigabytes: Size in gigabytes (1 GB = 10^9 bytes).
-
-    Returns:
-        Equivalent size in gigabits, as a float.
-    """
-    return gigabytes * 8
-
-
-def bytes_to_gigabytes(num_bytes: int) -> float:
-    """
-    Convert a size in bytes to gigabytes (SI, base-10).
-
-    Args:
-        num_bytes: size in bytes
-
-    Returns:
-        Equivalent size in gigabytes: Size in gigabytes (1 GB = 10^9 bytes) as float.
-    """
-    return num_bytes / (1000.0 * 1000.0 * 1000.0)
-
-
 def delete_files_older_than(path: str, older_than_seconds: int, extensions: list[str]) -> list[str]:
     """
     Delete files in a directory that are older than a threshold and match given extensions.
@@ -2006,7 +1664,7 @@ def copy_subfile_to_disk_dd(
     )
 
     start_time = time.time()
-    retval, stdout = mwax_command.run_command_ext(command, numa_node, timeout, False)
+    retval, stdout = run_command_ext(command, numa_node, timeout, False)
 
     if retval:
         elapsed = time.time() - start_time
@@ -2025,34 +1683,6 @@ def copy_subfile_to_disk_dd(
         )
 
     return retval
-
-
-def running_under_pytest() -> bool:
-    """
-    Detect whether the current process is running under pytest.
-
-    Checks for the presence of the ``PYTEST_CURRENT_TEST`` environment variable,
-    which pytest sets automatically during test execution.
-
-    Returns:
-        True if running inside a pytest session, False otherwise.
-    """
-    # Returns True if we are running as part of pytest
-    return ("PYTEST_CURRENT_TEST" in os.environ) or ("pytest" in sys.modules)
-
-
-def get_gbps(size_gigabytes: float, start_time: float) -> float:
-    """Calculate throughput in Gbps.
-
-    Args:
-        size_gigabytes: Transfer size in gigabytes.
-        start_time: Start time of the transfer.
-
-    Returns:
-        Throughput in Gbps, or 0.0 if elapsed time is zero.
-    """
-    elapsed_seconds = time.time() - start_time
-    return gigabytes_to_gigabits(size_gigabytes) / elapsed_seconds if elapsed_seconds > 0 else 0.0
 
 
 def run_giant_squid(

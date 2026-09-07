@@ -32,16 +32,16 @@ from mwalib import MetafitsContext
 from numpy.typing import NDArray
 from scipy.optimize import minimize
 
-from mwax_mover.mwax_command import (
+from mwax_mover.core.command import (
     check_popen_finished,
     run_command_ext,
     run_command_popen,
 )
+from mwax_mover.core.units import is_int
 from mwax_mover.utils import (
     delete_files_older_than,
     extract_channels_from_filename,
     get_png_dimensions,
-    is_int,
 )
 
 logger = logging.getLogger(__name__)

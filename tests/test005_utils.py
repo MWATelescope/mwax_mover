@@ -19,6 +19,8 @@ import requests
 from tests_common import data_path, obs_data_dir, obs_metafits_path, render_test_config
 
 from mwax_mover import utils, version
+from mwax_mover.core.config import read_config_bool, read_config_list, read_optional_config
+from mwax_mover.core.env import running_under_pytest
 from mwax_mover.utils import (
     extract_filename_from_mwa_asvo_signed_url,
     extract_tar,
@@ -27,7 +29,7 @@ from mwax_mover.utils import (
 
 
 def test_running_under_pytest():
-    assert utils.running_under_pytest()
+    assert running_under_pytest()
 
 
 def test_correlator_mode_class():
@@ -473,7 +475,7 @@ def test_config_get_list_valid():
     config = ConfigParser()
     config.read(config_filename, encoding="utf-8")
 
-    return_list = utils.read_config_list(config, "correlator", "high_priority_vcs_projectids")
+    return_list = read_config_list(config, "correlator", "high_priority_vcs_projectids")
 
     assert return_list == ["D0006", "G0058"]
 
@@ -484,7 +486,7 @@ def test_config_get_bool_true():
     config = ConfigParser()
     config.read(config_filename, encoding="utf-8")
 
-    true_bool = utils.read_config_bool(config, "mwax mover", "archiving_enabled")
+    true_bool = read_config_bool(config, "mwax mover", "archiving_enabled")
 
     assert true_bool is True
 
@@ -495,7 +497,7 @@ def test_config_get_bool_false():
     config = ConfigParser()
     config.read(config_filename, encoding="utf-8")
 
-    false_bool = utils.read_config_bool(config, "beamformer", "bf_keep_original_files_after_stitching")
+    false_bool = read_config_bool(config, "beamformer", "bf_keep_original_files_after_stitching")
 
     assert false_bool is False
 
@@ -511,7 +513,7 @@ def test_config_get_list_empty():
     config = ConfigParser()
     config.read(config_filename, encoding="utf-8")
 
-    return_list = utils.read_config_list(config, "correlator", "high_priority_correlator_projectids")
+    return_list = read_config_list(config, "correlator", "high_priority_correlator_projectids")
 
     assert return_list == []
 
@@ -524,11 +526,11 @@ def test_config_get_optional_value():
     config = ConfigParser()
     config.read(config_filename, encoding="utf-8")
 
-    empty_return_val = utils.read_optional_config(config, "correlator", "high_priority_correlator_projectids")
+    empty_return_val = read_optional_config(config, "correlator", "high_priority_correlator_projectids")
 
-    non_empty_return_val = utils.read_optional_config(config, "correlator", "mwax_stats_timeout_sec")
+    non_empty_return_val = read_optional_config(config, "correlator", "mwax_stats_timeout_sec")
 
-    non_existing_key = utils.read_optional_config(config, "correlator", "non_existant_key")
+    non_existing_key = read_optional_config(config, "correlator", "non_existant_key")
 
     assert empty_return_val is None
     assert non_empty_return_val is not None
@@ -536,7 +538,7 @@ def test_config_get_optional_value():
 
     # Section that doesn't exist raises error
     with pytest.raises(KeyError):
-        non_existing_key = utils.read_optional_config(config, "non_existant_section", "non_existant_key")
+        non_existing_key = read_optional_config(config, "non_existant_section", "non_existant_key")
 
 
 def test_config_get_optional_value_spaces_not_empty_string():
@@ -547,7 +549,7 @@ def test_config_get_optional_value_spaces_not_empty_string():
     config = ConfigParser()
     config.read(config_filename, encoding="utf-8")
 
-    empty_return_val = utils.read_optional_config(config, "correlator", "test_with_spaces")
+    empty_return_val = read_optional_config(config, "correlator", "test_with_spaces")
 
     assert empty_return_val is None
 

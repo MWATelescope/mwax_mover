@@ -298,14 +298,94 @@ Phase 5 sweep, just the ones sitting in files this commit already touched):
 `mwax_calvin_controller.py` had a `` `mwax_db.insert_calibration_fits_row` ``
 cross-reference in a docstring.
 
+## Phase 3 (in progress)
+
+Splitting `utils.py` and `mwax_calvin_utils.py` into `core/`, `fits/`,
+`filesystem/`, `net/`, `calibration/`, `calvin/` is by far the largest phase --
+roughly 105 symbols across the two source files moving into ~19 new files,
+against a combined fan-in over 25. Being done as three commits by target
+group rather than one, per Greg's call on chunking:
+
+1. `core/` (this commit)
+2. `fits/` + `filesystem/` + `net/` (the rest of `utils.py`)
+3. `calibration/` + `calvin/` (`mwax_calvin_utils.py`, including resolving
+   the `KNOWN_CYCLES` entry with `mwax_hyperdrive_solutions`)
+
+### Commit 1: core/ (complete)
+
+| old | new |
+|---|---|
+| `mwax_command.py` (whole file) | `core/command.py` |
+| `read_config`, `read_optional_config`, `read_config_list`, `read_config_bool` | `core/config.py` |
+| `is_int`, `gigabyte_to_gibibyte`, `gigabytes_to_gigabits`, `bytes_to_gigabytes`, `get_gbps` | `core/units.py` |
+| `get_gpstime_of_datetime`, `get_gpstime_of_now` | `core/gpstime.py` |
+| `get_hostname`, `running_under_pytest` | `core/env.py` |
+| `send_multicast`, `get_ip_address` | `net/multicast.py` (see below) |
+
+`get_ip_address` reads like host/environment introspection by name alone, but
+every call site resolves an interface name to an IP immediately before
+passing it to `send_multicast()` -- it's multicast-interface resolution, not
+generic env querying, so it went to `net/multicast.py` instead of `core/env.py`.
+
+### Extraction, done twice
+
+First pass extracted each function with `ast.get_source_segment`. That drops
+anything outside the node's own span: a trailing same-line comment
+(`return round(utc_datetime.gps)  # type: ignore[arg-type]` in
+`get_gpstime_of_datetime`) and two standalone comment lines directly above a
+`def` (`# For a given datetime...`, `# Return the GPS seconds...` above the
+two gpstime functions) were silently dropped. Found by inspecting the
+diff before touching callers, not by a later test failure.
+
+Redone by taking full source *lines* (`node.lineno` to `node.end_lineno`,
+whole lines rather than column-sliced) plus a check for a comment-only line
+immediately preceding the node. Re-verified every moved symbol's exact
+original text -- comments included -- is present verbatim in its new file
+before deleting anything from `utils.py`.
+
+### Two new bare-module-import collisions
+
+Same category of bug as `mwacache_archive_processor.py`'s logging `handler`
+in Phase 2, found the same way (checking call sites before choosing an import
+style, not after):
+
+- `utils.copy_subfile_to_disk_dd()` has a local variable named `command` (the
+  shell command string being built). A bare `from mwax_mover.core import
+  command` would be shadowed by it, turning `command.run_command_ext(command,
+  ...)` into a string method lookup. Used the direct import everywhere in
+  `utils.py` instead -- checked first that no local variable anywhere in the
+  file was named `run_command_ext`.
+- Every CLI file's config-reading code assigns `config = ConfigParser()` and
+  passes it as the first argument to `utils.read_config(config, ...)`,
+  dozens of times per file. A bare `from mwax_mover.core import config` would
+  be shadowed by that local on essentially every call site. Used direct-name
+  imports (`read_config`, `read_config_bool`, etc.) for the whole config
+  family everywhere, rather than mixing styles file-by-file.
+
+### Reconnaissance missed call sites; the sweep caught them
+
+Initial per-function caller search (grepping each moved name against files
+already known to import `mwax_command`/`utils`) missed `send_multicast` in
+four CLI files, `get_hostname`/`running_under_pytest` in two more, and one
+`gigabyte_to_gibibyte` call -- all real, all would have been `NameError` at
+runtime. Caught by the same whole-repo word-boundary sweep used at the end of
+Phase 1 and Phase 2, run *before* the gates rather than assumed unnecessary
+because "the caller list was already built." Re-ran the sweep a second time
+after fixing the first batch, and a third covering direct-name imports and
+mock.patch strings, until all three came back empty.
+
+Verified: ruff check, ruff format --check, ty check src/ tests/ all clean.
+tests/test000_architecture.py: all 5 pass. Full test suite: 456 passed, 5
+deselected, 0 failed -- identical to the Phase 2 baseline.
+
 ## Remaining phases
 
 Ordering principle: leaves first, to prove the tooling before it touches the
 high-fan-in god-modules.
 
-**Phase 3 -- split `utils.py` and `mwax_calvin_utils.py`** into `core/`,
-`fits/`, `filesystem/`, `net/`, `calibration/`, `calvin/`. Highest value and
-highest churn (fan-in 20 and 9), done once the pattern is established.
+**Phase 3 (continued) -- `fits/` + `filesystem/` + `net/`** from the rest of
+`utils.py`, then **`calibration/` + `calvin/`** from `mwax_calvin_utils.py`.
+See the Phase 3 section above for the full breakdown and chunking rationale.
 
 **Phase 4 -- split `mwax_calvin_plots.py`** (2383 lines) into
 `calvin/plots/`. Note `fit_phase_line` is 265 lines on its own, so ~200-400 line

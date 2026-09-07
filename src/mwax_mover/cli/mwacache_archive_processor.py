@@ -20,11 +20,11 @@ from glob import glob
 
 import astropy
 
-from mwax_mover import (
-    utils,
-    version,
-)
+from mwax_mover import version
+from mwax_mover.core.config import read_config, read_config_bool, read_config_list, read_optional_config
+from mwax_mover.core.env import get_hostname, running_under_pytest
 from mwax_mover.db.handler import MWAXDBHandler
+from mwax_mover.net.multicast import get_ip_address, send_multicast
 from mwax_mover.processors.pawsey_outgoing import PawseyOutgoingProcessor
 from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
 from mwax_mover.utils import ArchiveLocation
@@ -50,11 +50,11 @@ class MWACacheArchiveProcessor:
         Sets up instance variables for database connections, archiving configuration,
         health monitoring, and worker management.
         """
-        if utils.running_under_pytest():
+        if running_under_pytest():
             # pretend I am mwacache99
             self.hostname = "mwacache99"
         else:
-            self.hostname: str = utils.get_hostname()
+            self.hostname: str = get_hostname()
 
         self.metafits_path: str = ""
         self.archive_to_location: ArchiveLocation = ArchiveLocation.Unknown
@@ -245,7 +245,7 @@ class MWACacheArchiveProcessor:
 
             # Send the bytes
             try:
-                utils.send_multicast(
+                send_multicast(
                     self.health_multicast_interface_ip,
                     self.health_multicast_ip,
                     self.health_multicast_port,
@@ -320,7 +320,7 @@ class MWACacheArchiveProcessor:
         config.read_file(open(config_filename, "r", encoding="utf-8"))
 
         # Read log level
-        config_file_log_level: str | None = utils.read_optional_config(config, "mwax mover", "log_level")
+        config_file_log_level: str | None = read_optional_config(config, "mwax mover", "log_level")
         if config_file_log_level:
             # It's now safe to start logging
             # start logging
@@ -342,16 +342,16 @@ class MWACacheArchiveProcessor:
         self.watch_dirs = []
 
         # Common config options
-        self.metafits_path = utils.read_config(config, "mwax mover", "metafits_path")
+        self.metafits_path = read_config(config, "mwax mover", "metafits_path")
 
         if not os.path.exists(self.metafits_path):
             logger.error(f"Metafits file location  {self.metafits_path} does not exist. Quitting.")
             sys.exit(1)
 
-        self.archive_to_location = ArchiveLocation(int(utils.read_config(config, "mwax mover", "archive_to_location")))
-        self.concurrent_archive_workers = int(utils.read_config(config, "mwax mover", "concurrent_archive_workers"))
+        self.archive_to_location = ArchiveLocation(int(read_config(config, "mwax mover", "archive_to_location")))
+        self.concurrent_archive_workers = int(read_config(config, "mwax mover", "concurrent_archive_workers"))
         self.archive_command_timeout_sec = int(
-            utils.read_config(
+            read_config(
                 config,
                 "mwax mover",
                 "archive_command_timeout_sec",
@@ -360,7 +360,7 @@ class MWACacheArchiveProcessor:
 
         # Seconds to wait between rclone copy and rclone check to ensure Banksia VSS nodes have synced
         self.rclone_check_wait_secs = int(
-            utils.read_config(
+            read_config(
                 config,
                 "mwax mover",
                 "rclone_check_wait_secs",
@@ -369,28 +369,28 @@ class MWACacheArchiveProcessor:
 
         # Get list of projectids which are to be given
         # high priority when archiving
-        self.high_priority_correlator_projectids = utils.read_config_list(
+        self.high_priority_correlator_projectids = read_config_list(
             config,
             "mwax mover",
             "high_priority_correlator_projectids",
         )
-        self.high_priority_vcs_projectids = utils.read_config_list(
+        self.high_priority_vcs_projectids = read_config_list(
             config,
             "mwax mover",
             "high_priority_vcs_projectids",
         )
 
         # health
-        self.health_multicast_ip = utils.read_config(config, "mwax mover", "health_multicast_ip")
-        self.health_multicast_port = int(utils.read_config(config, "mwax mover", "health_multicast_port"))
-        self.health_multicast_hops = int(utils.read_config(config, "mwax mover", "health_multicast_hops"))
-        self.health_multicast_interface_name = utils.read_config(
+        self.health_multicast_ip = read_config(config, "mwax mover", "health_multicast_ip")
+        self.health_multicast_port = int(read_config(config, "mwax mover", "health_multicast_port"))
+        self.health_multicast_hops = int(read_config(config, "mwax mover", "health_multicast_hops"))
+        self.health_multicast_interface_name = read_config(
             config,
             "mwax mover",
             "health_multicast_interface_name",
         )
         # get this hosts primary network interface ip
-        self.health_multicast_interface_ip = utils.get_ip_address(self.health_multicast_interface_name)
+        self.health_multicast_interface_ip = get_ip_address(self.health_multicast_interface_name)
         logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
 
         # We set different s3 options based on the location
@@ -409,7 +409,7 @@ class MWACacheArchiveProcessor:
             )
 
         # s3 options
-        self.s3_profile = utils.read_config(config, s3_section, "profile")
+        self.s3_profile = read_config(config, s3_section, "profile")
 
         #
         # Options specified per host
@@ -417,7 +417,7 @@ class MWACacheArchiveProcessor:
 
         # Look for data_path1.. data_pathN
         while config.has_option(self.hostname, f"incoming_path{i}"):
-            new_incoming_path = utils.read_config(config, self.hostname, f"incoming_path{i}")
+            new_incoming_path = read_config(config, self.hostname, f"incoming_path{i}")
             if not os.path.exists(new_incoming_path):
                 logger.error(
                     f"incoming file location in incoming_path{i} - {new_incoming_path} does not exist. Quitting."
@@ -436,21 +436,21 @@ class MWACacheArchiveProcessor:
             )
             sys.exit(1)
 
-        self.recursive = utils.read_config_bool(config, self.hostname, "recursive")
+        self.recursive = read_config_bool(config, self.hostname, "recursive")
 
         #
         # MRO database - this is one we will update
         #
-        self.mro_metadatadb_host = utils.read_config(config, "mro metadata database", "host")
+        self.mro_metadatadb_host = read_config(config, "mro metadata database", "host")
 
-        self.mro_metadatadb_db = utils.read_config(config, "mro metadata database", "db")
-        self.mro_metadatadb_user = utils.read_config(config, "mro metadata database", "user")
+        self.mro_metadatadb_db = read_config(config, "mro metadata database", "db")
+        self.mro_metadatadb_user = read_config(config, "mro metadata database", "user")
 
-        self.mro_metadatadb_pass = utils.read_config(
+        self.mro_metadatadb_pass = read_config(
             config, "mro metadata database", "pass", self.mro_metadatadb_host != "dummy"
         )
 
-        self.mro_metadatadb_port = int(utils.read_config(config, "mro metadata database", "port"))
+        self.mro_metadatadb_port = int(read_config(config, "mro metadata database", "port"))
 
         # Initiate database connection for mro metadata db
         if override_mro_db_handler:
@@ -468,17 +468,17 @@ class MWACacheArchiveProcessor:
         # Remote metadata db is ready only- just used to query file size and
         # date info
         #
-        self.remote_metadatadb_host = utils.read_config(config, "remote metadata database", "host")
+        self.remote_metadatadb_host = read_config(config, "remote metadata database", "host")
 
-        self.remote_metadatadb_db = utils.read_config(config, "remote metadata database", "db")
-        self.remote_metadatadb_user = utils.read_config(config, "remote metadata database", "user")
-        self.remote_metadatadb_pass = utils.read_config(
+        self.remote_metadatadb_db = read_config(config, "remote metadata database", "db")
+        self.remote_metadatadb_user = read_config(config, "remote metadata database", "user")
+        self.remote_metadatadb_pass = read_config(
             config,
             "remote metadata database",
             "pass",
             self.remote_metadatadb_db != "dummy",
         )
-        self.remote_metadatadb_port = int(utils.read_config(config, "remote metadata database", "port"))
+        self.remote_metadatadb_port = int(read_config(config, "remote metadata database", "port"))
 
         # Initiate database connection for remote metadata db
         if override_remote_db_handler:

@@ -43,6 +43,8 @@ from astropy.constants import c  # ty: ignore[unresolved-import]
 from matplotlib.colors import LinearSegmentedColormap
 from numpy.typing import NDArray
 
+from mwax_mover.core.command import run_command_ext
+from mwax_mover.core.env import running_under_pytest
 from mwax_mover.mwax_calvin_utils import (
     annotate_phase_outliers,
     ensure_system_byte_order,
@@ -52,13 +54,11 @@ from mwax_mover.mwax_calvin_utils import (
     textwrap,
     wrap_angle,
 )
-from mwax_mover.mwax_command import run_command_ext
 from mwax_mover.mwax_hyperdrive_solutions import (
     ChannelFlagReason,
     HyperfitsSolutionGroup,
     TileFlagReason,
 )
-from mwax_mover.utils import running_under_pytest
 
 logger = logging.getLogger(__name__)
 

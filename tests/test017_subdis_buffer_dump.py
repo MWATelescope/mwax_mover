@@ -14,7 +14,7 @@ from tests_common import create_observation_subfiles, obs_metafits_path, render_
 from tests_fakedb import FakeMWAXDBHandler
 
 from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
-from mwax_mover.utils import running_under_pytest
+from mwax_mover.core.env import running_under_pytest
 
 
 def test_running_under_pytest():
