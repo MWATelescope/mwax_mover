@@ -378,14 +378,138 @@ Verified: ruff check, ruff format --check, ty check src/ tests/ all clean.
 tests/test000_architecture.py: all 5 pass. Full test suite: 456 passed, 5
 deselected, 0 failed -- identical to the Phase 2 baseline.
 
+### Commit 2: fits/ + filesystem/ + net/ (complete)
+
+The rest of `utils.py` -- 55 top-level symbols (45 defs/classes, 7 `PSRDADA_*`
+constants, `metafits_file_lock`) -- split by domain rather than mechanism:
+
+| old | new |
+|---|---|
+| `download_metafits_file`, `get_metafits_value`, `get_metafits_value_from_hdu`, `get_metafits_values` | `fits/metafits.py` |
+| `CorrelatorMode`, the 7 `PSRDADA_*` constants, `inject_subfile_header`, `inject_beamformer_headers`, `read_subfile_value(s)`, `read_subfile_trigger_value`, `write_mock_subfile(_from_header)`, `process_mwax_stats`, `load_psrdada_ringbuffer`, `run_mwax_packet_stats`, `copy_subfile_to_disk_dd` | `fits/subfile.py` |
+| `ValidationData`, `MWADataFileType`, `ArchiveLocation`, `metafits_file_lock`, `validate_filename`, `determine_bucket`, `get_bucket_name_from_filename/obs_id`, `should_project_be_archived`, `extract_channels_from_filename`, `get_priority`, `get_data_files_for_obsid_from_webservice`, `get_data_files_with_hostname_for_obsid_from_webservice` | `filesystem/naming.py` |
+| `scan_directory`, `scan_for_existing_files_and_add_to_queue` | `filesystem/scan.py` |
+| `remove_file`, `delete_files_older_than`, `extract_tar`, `get_png_dimensions`, `do_checksum_md5` | `filesystem/files.py` |
+| `call_webservice` | `net/webservice.py` |
+| `push_message_to_redis` | `net/redis.py` |
+| `rclone_move`, `parse_rclone_stats`, `rclone_delete_file`, `check_remote_file_exists` | `net/s3.py` |
+| `GiantSquidException`, `GiantSquidMWAASVOOutageException`, `GiantSquidJobAlreadyExistsException`, `run_giant_squid`, `extract_filename_from_mwa_asvo_signed_url` | `net/asvo.py` (new -- not in the original target structure; ASVO/giant-squid job submission didn't fit `fits`/`filesystem`/`net`'s existing three-file split for `net`, so it got its own file rather than being wedged into `webservice.py`) |
+
+`utils.py` itself is now empty and has been deleted outright (not left as a
+stub) -- every one of its 55 symbols has a home, so there was nothing to keep
+it open for. `fits/hdu.py`, named in the target structure, is not created in
+this commit: nothing in `utils.py` maps to it (the metafits HDU functions are
+metafits-specific, not generic FITS-HDU utilities), so it's deferred until
+something actually needs it.
+
+Domain over mechanism, applied consistently: `process_mwax_stats`,
+`load_psrdada_ringbuffer`, `run_mwax_packet_stats` and `copy_subfile_to_disk_dd`
+are all thin `run_command_ext` wrappers around an external binary, which would
+suggest `filesystem/files.py` by mechanism. But all four act specifically on
+subfiles (per Greg's call), so they went to `fits/subfile.py` instead --
+grouped with the PSRDADA header functions by what they operate on, not how
+they're implemented. `do_checksum_md5` is the one external-binary wrapper that
+stayed in `filesystem/files.py`, since it works on any file, not just subfiles.
+
+### A cycle the target structure's own boundaries created
+
+`get_data_files_for_obsid_from_webservice` and
+`get_data_files_with_hostname_for_obsid_from_webservice` look like they belong
+in `net/webservice.py` -- they're webservice queries. But they filter results
+by `MWADataFileType`, and `download_metafits_file` (now in `fits/metafits.py`)
+calls `net.webservice.call_webservice`, and `validate_filename` (now in
+`filesystem/naming.py`) calls `download_metafits_file`. Putting the two
+data-file-listing functions in `net/webservice.py` would have closed a
+three-module cycle: `fits.metafits -> net.webservice -> filesystem.naming ->
+fits.metafits`.
+
+Same category of issue as Phase 1's upward import and Phase 3's
+`mwax_calvin_utils`/`mwax_hyperdrive_solutions` cycle: the fix is to put the
+function where its *dependency* points down, not where its *name* suggests.
+Moved both functions into `filesystem/naming.py` instead -- they depend on
+`MWADataFileType`, which already lives there, so the edge becomes
+`filesystem.naming -> net.webservice` (a leaf dependency, no cycle).
+`net/webservice.py` now contains only `call_webservice` itself. Caught before
+writing any caller-fixing code, by tracing the three files' planned imports on
+paper rather than after the architecture test failed.
+
+### A decorator dropped by line-based extraction
+
+The AST-extraction method (whole source lines, `node.lineno` to
+`node.end_lineno`, used since Phase 3 commit 1 to avoid the trailing-comment
+bug found there) has its own blind spot: `ast.FunctionDef.lineno` points at
+the `def` line, not at any decorator above it, since decorators are a
+separate `decorator_list` with their own line numbers. `remove_file`'s
+`@retry(stop=stop_after_attempt(3), wait=wait_fixed(10))` was silently
+dropped by the first extraction pass -- and the AST-based split-verification
+(symbol-set diff, body-equality diff) didn't catch it either, because both
+the "old" and "new" sides of that comparison were built with the same
+lineno-only extraction, so the dropped decorator wasn't a *mismatch*, it was
+an omission both sides agreed on.
+
+Caught by `ruff check` (`F401 tenacity.retry imported but unused` -- the
+import was there, the only thing using it wasn't), not by the split
+verification. Fixed the extraction method to take
+`min(decorator.lineno for decorator in node.decorator_list, node.lineno)` as
+the effective start line, re-ran extraction and verification from the
+original file's last commit, confirmed the fix, and re-verified the fix
+didn't affect any other symbol (only one decorated top-level definition
+existed in the whole of `utils.py`).
+
+Also caught by ruff: a missing `from enum import Enum` in `fits/subfile.py`
+(`CorrelatorMode` needs it; the import list was hand-written per file rather
+than mechanically carried over, and this one was missed).
+
+### Import-site fixing, third time
+
+Same three import forms, plus the same two gotchas (multi-name
+`from mwax_mover import a, b, c` lists; `mock.patch("mwax_mover.<old>.<attr>")`
+string targets) as Phase 1 and Phase 2, across 19 files this time
+(`mwax_asvo_helper.py`, 5 processors, 6 CLI entry points, `db/data_files.py`,
+3 queue files, and `mwax_calvin_utils.py`, plus 6 test files). One test-side
+wrinkle not seen before: three `mock.patch` targets
+(`mwax_mover.queues.priority_watcher.utils.get_priority`,
+`mwax_mover.queues.watcher.utils.scan_for_existing_files_and_add_to_queue`,
+`mwax_mover.cli.mwax_calvin_controller.utils.rclone_move`) patch a name
+*inside* the importing module's own namespace, which only works because that
+module previously did `from mwax_mover import utils` and called
+`utils.the_function(...)`. Switching to a direct-name import
+(`from ... import the_function`) moves the patch target too --
+`mwax_mover.queues.watcher.utils.scan_for_existing_files_and_add_to_queue`
+becomes `mwax_mover.queues.watcher.scan_for_existing_files_and_add_to_queue`
+-- easy to miss since the string still imports and still patches *something*,
+just not the call site the test thinks it's patching, so a stale target here
+fails as a silent no-op mock rather than an import error.
+
+Also fixed stale prose pointers in files this commit already touched (not a
+Phase 5 sweep): `update_calvin_plots_and_index.py` and `mwax_calvin_utils.py`
+each had a `:func:`-style cross-reference to `mwax_mover.utils.get_png_dimensions`,
+and two test docstrings (`test016_calvin_controller.py`, `test019_priority_watcher.py`)
+described mocking `utils.rclone_move`/`utils.get_priority` in prose.
+
+`tests/test005_utils.py` (the original test file for `utils.py`) was not
+split into per-new-module test files for this commit -- its docstring now
+explains why: moving test modules to mirror the package structure is called
+out in this doc as a separate, can-happen-any-time task, not something to
+fold into a source-restructure commit. Its imports and `utils.` call sites
+were updated in place; the file still tests the same functions, now imported
+from their new homes.
+
+Verified: ruff check, ruff format --check, ty check src/ tests/ all clean.
+tests/test000_architecture.py: all 5 pass (including the new `net.asvo` and
+`filesystem.naming` layer assignments, and no new upward imports or cycles).
+Full test suite: 456 passed, 5 deselected, 0 failed -- identical to the
+Phase 2 baseline, on a 16-minute run dominated by test020 as expected.
+
 ## Remaining phases
 
 Ordering principle: leaves first, to prove the tooling before it touches the
 high-fan-in god-modules.
 
-**Phase 3 (continued) -- `fits/` + `filesystem/` + `net/`** from the rest of
-`utils.py`, then **`calibration/` + `calvin/`** from `mwax_calvin_utils.py`.
-See the Phase 3 section above for the full breakdown and chunking rationale.
+**Phase 3 (continued) -- `calibration/` + `calvin/`** from
+`mwax_calvin_utils.py`, including resolving the `KNOWN_CYCLES` entry with
+`mwax_hyperdrive_solutions`. `fits/` + `filesystem/` + `net/` (commit 2) are
+done -- see the Phase 3 section above.
 
 **Phase 4 -- split `mwax_calvin_plots.py`** (2383 lines) into
 `calvin/plots/`. Note `fit_phase_line` is 265 lines on its own, so ~200-400 line

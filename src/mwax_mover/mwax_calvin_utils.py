@@ -38,11 +38,8 @@ from mwax_mover.core.command import (
     run_command_popen,
 )
 from mwax_mover.core.units import is_int
-from mwax_mover.utils import (
-    delete_files_older_than,
-    extract_channels_from_filename,
-    get_png_dimensions,
-)
+from mwax_mover.filesystem.files import delete_files_older_than, get_png_dimensions
+from mwax_mover.filesystem.naming import extract_channels_from_filename
 
 logger = logging.getLogger(__name__)
 
@@ -2318,7 +2315,7 @@ def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_
 
     Raises:
         OSError: If the file cannot be stat'd.
-        Exception: Any exception raised by :func:`mwax_mover.utils.get_png_dimensions`
+        Exception: Any exception raised by :func:`mwax_mover.filesystem.files.get_png_dimensions`
             for PNG files is propagated to the caller.
     """
     path = Path(filename)

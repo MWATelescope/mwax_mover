@@ -4,7 +4,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from mwax_mover.utils import write_mock_subfile
+from mwax_mover.fits.subfile import write_mock_subfile
 
 # Environment variable used to override where the tests create their scratch
 # directory tree. Set this in CI (or locally) to relocate the tree; if it is

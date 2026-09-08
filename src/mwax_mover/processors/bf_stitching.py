@@ -12,9 +12,10 @@ import logging
 import os
 import shutil
 
-from mwax_mover import utils
 from mwax_mover.beamformer import filterbank, vdif
 from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME
+from mwax_mover.filesystem.files import remove_file
+from mwax_mover.fits.metafits import get_metafits_value
 from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
 
 METAFITS_EXPOSURE = "EXPOSURE"
@@ -113,7 +114,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
             metafits_filename = os.path.join(self.metafits_path, f"{obs_id}_metafits.fits")
 
             try:
-                duration_sec = int(utils.get_metafits_value(metafits_filename, METAFITS_EXPOSURE))
+                duration_sec = int(get_metafits_value(metafits_filename, METAFITS_EXPOSURE))
             except Exception as exc:
                 # Chained deliberately: this one propagates out of the method, and
                 # the cause (missing metafits file vs missing key vs unparseable
@@ -171,7 +172,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
 
                     # If it worked, remove the files
                     for f in files:
-                        utils.remove_file(f, False)
+                        remove_file(f, False)
 
                     return True
 
@@ -205,7 +206,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
 
                     # If it worked, remove the files
                     for f in files:
-                        utils.remove_file(f, False)
+                        remove_file(f, False)
 
                     return True
                 else:

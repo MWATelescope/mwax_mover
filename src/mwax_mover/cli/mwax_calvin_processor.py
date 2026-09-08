@@ -29,7 +29,6 @@ from mwalib import MetafitsContext
 
 from mwax_mover import (
     mwax_calvin_utils,
-    utils,
     version,
 )
 from mwax_mover.archive.archiver import copy_file_rsync
@@ -44,6 +43,9 @@ from mwax_mover.db.calibration import (
     update_calsolution_request_download_complete_status,
 )
 from mwax_mover.db.handler import MWAXDBHandler
+from mwax_mover.filesystem.files import extract_tar, remove_file
+from mwax_mover.filesystem.naming import get_data_files_with_hostname_for_obsid_from_webservice
+from mwax_mover.fits.metafits import download_metafits_file
 from mwax_mover.mwax_calvin_solutions import process_solutions
 from mwax_mover.mwax_calvin_utils import (
     CalvinJobType,
@@ -52,13 +54,10 @@ from mwax_mover.mwax_calvin_utils import (
     reap_orphaned_staging_dirs,
     upload_plot_files,
 )
+from mwax_mover.net.asvo import extract_filename_from_mwa_asvo_signed_url, run_giant_squid
 from mwax_mover.net.multicast import get_ip_address, send_multicast
-from mwax_mover.utils import (
-    extract_filename_from_mwa_asvo_signed_url,
-    extract_tar,
-    rclone_delete_file,
-    run_giant_squid,
-)
+from mwax_mover.net.s3 import check_remote_file_exists, rclone_delete_file
+from mwax_mover.net.webservice import call_webservice
 
 # Setup root logger
 handler = logging.StreamHandler()
@@ -246,7 +245,7 @@ class MWAXCalvinProcessor:
             self.current_task_name = "Get metafits"
             logger.info(f"Downloading metafits file: {self.metafits_filename}")
             try:
-                utils.download_metafits_file(self.obs_id, self.job_input_path)
+                download_metafits_file(self.obs_id, self.job_input_path)
             except Exception as catch_all_exception:  # pylint: disable=broad-except
                 # NOTE: the continuation lines here were previously separate
                 # statements rather than an implicit concatenation, so
@@ -509,12 +508,12 @@ class MWAXCalvinProcessor:
                 # Remove visibilitiy files
                 visibility_files = glob.glob(os.path.join(self.job_input_path, f"{self.obs_id}_*_*_*.fits"))
                 for file_to_delete in visibility_files:
-                    utils.remove_file(file_to_delete, False)
+                    remove_file(file_to_delete, False)
 
                 # Now remove uvfits too
                 uvfits_files = glob.glob(os.path.join(self.job_input_path, "*.uvfits"))
                 for file_to_delete in uvfits_files:
-                    utils.remove_file(file_to_delete, False)
+                    remove_file(file_to_delete, False)
 
             # Final log message
             self.current_task_name = "Complete"
@@ -555,7 +554,7 @@ class MWAXCalvinProcessor:
             for hostname in hostnames:
                 # call webservice for each host to release the obsid's files
                 try:
-                    utils.call_webservice(
+                    call_webservice(
                         self.obs_id,
                         [
                             f"http://{hostname}:9999/release_cal_obs?obs_id={self.obs_id!s}",
@@ -689,8 +688,8 @@ class MWAXCalvinProcessor:
         # Ok, should be safe to get the list of files and hosts
         if self.running:
             try:
-                ws_filenames_and_hosts: list[tuple[str, str]] = (
-                    utils.get_data_files_with_hostname_for_obsid_from_webservice(self.obs_id)
+                ws_filenames_and_hosts: list[tuple[str, str]] = get_data_files_with_hostname_for_obsid_from_webservice(
+                    self.obs_id
                 )
             except Exception:
                 # The previous call would have already logged tonnes of errors so no need to log anything specific here
@@ -735,9 +734,7 @@ class MWAXCalvinProcessor:
             tar_filename = extract_filename_from_mwa_asvo_signed_url(self.mwa_asvo_download_url)
             full_tar_filename = os.path.join(self.job_input_path, tar_filename)
 
-            if not utils.check_remote_file_exists(
-                self.acacia_projects_profile, self.acacia_projects_bucket, tar_filename
-            ):
+            if not check_remote_file_exists(self.acacia_projects_profile, self.acacia_projects_bucket, tar_filename):
                 message = (
                     "MWA ASVO data no longer exists. It might have expired or been"
                     " deleted by a recent request for this obsid. Erroring job."
@@ -825,7 +822,7 @@ class MWAXCalvinProcessor:
         finally:
             # delete the tar file
             logger.info(f"Cleaning up {full_tar_filename}")
-            utils.remove_file(full_tar_filename, raise_error=False)
+            remove_file(full_tar_filename, raise_error=False)
 
         return exit_bool, exit_error_message, retry_this_download
 

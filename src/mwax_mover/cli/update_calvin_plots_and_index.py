@@ -16,7 +16,7 @@ from mwax_mover.db.calibration import get_fit_info_from_slurm_job_and_obsid
 from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.mwax_calvin_plots import generate_hyperdrive_plots
 from mwax_mover.mwax_calvin_utils import populate_index_json_entry
-from mwax_mover.utils import download_metafits_file
+from mwax_mover.fits.metafits import download_metafits_file
 
 
 class SolutionDir:
@@ -77,7 +77,7 @@ def update_plot_index_file_entry(
     matching the given filename, then derives updated values for ``size_bytes`` and
     ``last_modified`` from the file on disk. For PNG files, ``image_width`` and
     ``image_height`` are also updated using
-    :func:`mwax_mover.utils.get_png_dimensions`. The modified index is written
+    :func:`mwax_mover.filesystem.files.get_png_dimensions`. The modified index is written
     back to index.json in place.
 
     Args:

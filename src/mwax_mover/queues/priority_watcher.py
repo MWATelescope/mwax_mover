@@ -10,7 +10,8 @@ import queue
 import inotify.adapters
 import inotify.constants
 
-from mwax_mover import constants, utils
+from mwax_mover import constants
+from mwax_mover.filesystem.naming import get_priority
 from mwax_mover.queues.priority_queue_data import (
     MWAXPriorityQueueData,
     scan_for_existing_files_and_add_to_priority_queue,
@@ -169,7 +170,7 @@ class PriorityWatcher:
                                 dest_filename = os.path.join(path, filename)
 
                                 # We need to determine the priority
-                                priority = utils.get_priority(
+                                priority = get_priority(
                                     dest_filename,
                                     self.metafits_path,
                                     self.list_of_correlator_high_priority_projects,

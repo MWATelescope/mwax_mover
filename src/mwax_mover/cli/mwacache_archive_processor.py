@@ -27,7 +27,7 @@ from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.net.multicast import get_ip_address, send_multicast
 from mwax_mover.processors.pawsey_outgoing import PawseyOutgoingProcessor
 from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
-from mwax_mover.utils import ArchiveLocation
+from mwax_mover.filesystem.naming import ArchiveLocation
 
 # Setup root logger
 handler = logging.StreamHandler()

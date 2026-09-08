@@ -29,7 +29,8 @@ import logging
 import os
 import queue
 
-from mwax_mover import utils
+from mwax_mover.filesystem.naming import get_priority
+from mwax_mover.filesystem.scan import scan_directory
 
 logger = logging.getLogger(__name__)
 
@@ -180,12 +181,12 @@ def scan_for_existing_files_and_add_to_priority_queue(
         exclude_pattern: Optional glob suffix pattern. Files matching this
             pattern are excluded from the results. Defaults to None (no exclusion).
     """
-    files = utils.scan_directory(watch_dir, pattern, recursive, exclude_pattern)
+    files = scan_directory(watch_dir, pattern, recursive, exclude_pattern)
     files = sorted(files)
     logger.info(f"{watch_dir}: Found {len(files)} files")
 
     for filename in files:
-        priority = utils.get_priority(
+        priority = get_priority(
             filename,
             metafits_path,
             list_of_correlator_high_priority_projects,

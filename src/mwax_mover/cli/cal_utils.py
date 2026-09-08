@@ -67,7 +67,7 @@ from mwax_mover.mwax_hyperdrive_solutions import (
     HyperfitsSolution,
     HyperfitsSolutionGroup,
 )
-from mwax_mover.utils import download_metafits_file
+from mwax_mover.fits.metafits import download_metafits_file
 
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(message)s"))

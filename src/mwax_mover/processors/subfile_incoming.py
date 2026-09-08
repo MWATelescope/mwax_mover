@@ -13,9 +13,28 @@ import os
 import shutil
 import time
 
-from mwax_mover import utils
 from mwax_mover.mwax_calvin_utils import get_solution_fits_filename
 from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME
+from mwax_mover.fits.metafits import get_metafits_value_from_hdu
+from mwax_mover.fits.subfile import (
+    PSRDADA_COARSE_CHANNEL,
+    PSRDADA_HEADER_BYTES,
+    PSRDADA_MODE,
+    PSRDADA_NINPUTS,
+    PSRDADA_OBS_ID,
+    PSRDADA_SUBOBS_ID,
+    PSRDADA_TRANSFER_SIZE,
+    PSRDADA_TRIGGER_ID,
+    CorrelatorMode,
+    copy_subfile_to_disk_dd,
+    inject_subfile_header,
+    load_psrdada_ringbuffer,
+    read_subfile_trigger_value,
+    read_subfile_value,
+    read_subfile_values,
+    run_mwax_packet_stats,
+)
+from mwax_mover.net.redis import push_message_to_redis
 from mwax_mover.queues.watch_queue_worker import MWAXWatchQueueWorker
 
 METAFITS_EXPOSURE = "EXPOSURE"
@@ -144,40 +163,40 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         keep_subfiles_path = None
 
         # Read all the things from the subfile header here!
-        subfile_header_values = utils.read_subfile_values(
+        subfile_header_values = read_subfile_values(
             item,
             [
-                utils.PSRDADA_OBS_ID,
-                utils.PSRDADA_SUBOBS_ID,
-                utils.PSRDADA_TRANSFER_SIZE,
-                utils.PSRDADA_MODE,
-                utils.PSRDADA_COARSE_CHANNEL,
-                utils.PSRDADA_NINPUTS,
+                PSRDADA_OBS_ID,
+                PSRDADA_SUBOBS_ID,
+                PSRDADA_TRANSFER_SIZE,
+                PSRDADA_MODE,
+                PSRDADA_COARSE_CHANNEL,
+                PSRDADA_NINPUTS,
             ],
         )
 
         # Validate each one
-        if subfile_header_values[utils.PSRDADA_OBS_ID] is None:
-            raise ValueError(f"Keyword {utils.PSRDADA_OBS_ID} not found in {item}")
-        obs_id = int(subfile_header_values[utils.PSRDADA_OBS_ID])
+        if subfile_header_values[PSRDADA_OBS_ID] is None:
+            raise ValueError(f"Keyword {PSRDADA_OBS_ID} not found in {item}")
+        obs_id = int(subfile_header_values[PSRDADA_OBS_ID])
 
-        if subfile_header_values[utils.PSRDADA_SUBOBS_ID] is None:
-            raise ValueError(f"Keyword {utils.PSRDADA_SUBOBS_ID} not found in {item}")
-        subobs_id = int(subfile_header_values[utils.PSRDADA_SUBOBS_ID])
+        if subfile_header_values[PSRDADA_SUBOBS_ID] is None:
+            raise ValueError(f"Keyword {PSRDADA_SUBOBS_ID} not found in {item}")
+        subobs_id = int(subfile_header_values[PSRDADA_SUBOBS_ID])
 
         # Read TRANSFER_SIZE from subfile header
         # We only use this when writing a subfile to disk in case the subfile is
         # bigger than the data
-        # transfer_size_str = utils.read_subfile_value(item, utils.PSRDADA_TRANSFER_SIZE)
-        if subfile_header_values[utils.PSRDADA_TRANSFER_SIZE] is None:
-            raise ValueError(f"Keyword {utils.PSRDADA_TRANSFER_SIZE} not found in {item}")
-        transfer_size = int(subfile_header_values[utils.PSRDADA_TRANSFER_SIZE])
-        subfile_bytes_to_write = transfer_size + utils.PSRDADA_HEADER_BYTES  # We add the header to the transfer size
+        # transfer_size_str = read_subfile_value(item, PSRDADA_TRANSFER_SIZE)
+        if subfile_header_values[PSRDADA_TRANSFER_SIZE] is None:
+            raise ValueError(f"Keyword {PSRDADA_TRANSFER_SIZE} not found in {item}")
+        transfer_size = int(subfile_header_values[PSRDADA_TRANSFER_SIZE])
+        subfile_bytes_to_write = transfer_size + PSRDADA_HEADER_BYTES  # We add the header to the transfer size
 
         # Get Mode
-        if subfile_header_values[utils.PSRDADA_MODE] is None:
-            raise ValueError(f"Keyword {utils.PSRDADA_MODE} not found in {item}")
-        subfile_mode = subfile_header_values[utils.PSRDADA_MODE]
+        if subfile_header_values[PSRDADA_MODE] is None:
+            raise ValueError(f"Keyword {PSRDADA_MODE} not found in {item}")
+        subfile_mode = subfile_header_values[PSRDADA_MODE]
 
         # Update the current mode (only for subfile_distributor health info)
         self.current_subfile_mode = subfile_mode
@@ -186,7 +205,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         if self.packet_stats_dump_dir != "":
             # For all subfiles we need to extract the packet stats:
             # Ignore failures
-            utils.run_mwax_packet_stats(self.mwax_stats_binary_dir, item, self.packet_stats_dump_dir, -1, 3)
+            run_mwax_packet_stats(self.mwax_stats_binary_dir, item, self.packet_stats_dump_dir, -1, 3)
 
         try:
             #
@@ -214,17 +233,15 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
 
                 # See if there already is a TRIGGER_ID keyword in the subfile- if so
                 # don't overwrite it. We must have overlapping triggers happening
-                if not utils.read_subfile_trigger_value(item):
+                if not read_subfile_trigger_value(item):
                     # No TRIGGER_ID yet, so add it
-                    logger.info(
-                        f"{item}: injecting {utils.PSRDADA_TRIGGER_ID} {self.sd_ctx.dump_trigger_id} into subfile..."
-                    )
-                    utils.inject_subfile_header(
+                    logger.info(f"{item}: injecting {PSRDADA_TRIGGER_ID} {self.sd_ctx.dump_trigger_id} into subfile...")
+                    inject_subfile_header(
                         item,
-                        f"{utils.PSRDADA_TRIGGER_ID} {self.sd_ctx.dump_trigger_id}\n",
+                        f"{PSRDADA_TRIGGER_ID} {self.sd_ctx.dump_trigger_id}\n",
                     )
 
-                success = utils.copy_subfile_to_disk_dd(
+                success = copy_subfile_to_disk_dd(
                     item,
                     self.corr_devshm_numa_node,
                     self.voltdata_incoming_path,
@@ -248,12 +265,12 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
 
                 logger.debug(f"{item}: MODE is {subfile_mode}")
 
-                if utils.CorrelatorMode.is_correlator(subfile_mode):
+                if CorrelatorMode.is_correlator(subfile_mode):
                     # This is a normal MWAX_CORRELATOR obs, continue as normal
                     if self.archive_destination_enabled:
                         self.sd_ctx.pause_archiving(False)
 
-                    success = utils.load_psrdada_ringbuffer(
+                    success = load_psrdada_ringbuffer(
                         item,
                         self.corr_ringbuffer_key,
                         -1,
@@ -263,12 +280,12 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                     if self.always_keep_subfiles:
                         keep_subfiles_path = self.voltdata_incoming_path
 
-                elif utils.CorrelatorMode.is_vcs(subfile_mode):
+                elif CorrelatorMode.is_vcs(subfile_mode):
                     # Pause archiving so we have the disk to ourselves
                     if self.archive_destination_enabled:
                         self.sd_ctx.pause_archiving(True)
 
-                    success = utils.copy_subfile_to_disk_dd(
+                    success = copy_subfile_to_disk_dd(
                         item,
                         self.corr_devshm_numa_node,
                         self.voltdata_incoming_path,
@@ -277,22 +294,22 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                         subfile_bytes_to_write,
                     )
 
-                elif utils.CorrelatorMode.is_beamformer(subfile_mode):
+                elif CorrelatorMode.is_beamformer(subfile_mode):
                     # This is a beamformer obs, enable archiving as normal (if configured)
                     if self.archive_destination_enabled:
                         self.sd_ctx.pause_archiving(False)
 
                     # Get number of inputs and coarse channel from header
-                    if subfile_header_values[utils.PSRDADA_COARSE_CHANNEL] is None:
-                        raise ValueError(f"Keyword {utils.PSRDADA_COARSE_CHANNEL} not found in {item}")
-                    rec_chan_no = int(subfile_header_values[utils.PSRDADA_COARSE_CHANNEL])
+                    if subfile_header_values[PSRDADA_COARSE_CHANNEL] is None:
+                        raise ValueError(f"Keyword {PSRDADA_COARSE_CHANNEL} not found in {item}")
+                    rec_chan_no = int(subfile_header_values[PSRDADA_COARSE_CHANNEL])
 
                     # Get cal_obsid from metafits
                     metafits_filename = os.path.join(self.metafits_path, f"{obs_id}_metafits.fits")
                     METAFITS_CALOBSID = "CALOBSID"
                     METAFITS_CALIBDATA_HDU = "CALIBDATA"
                     try:
-                        cal_obs_id_str = utils.get_metafits_value_from_hdu(
+                        cal_obs_id_str = get_metafits_value_from_hdu(
                             metafits_filename,
                             METAFITS_CALIBDATA_HDU,
                             METAFITS_CALOBSID,
@@ -316,9 +333,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
 
                     success = self.signal_beamformer(item, cal_obs_id, rec_chan_no)
 
-                elif utils.CorrelatorMode.is_no_capture(subfile_mode) or utils.CorrelatorMode.is_voltage_buffer(
-                    subfile_mode
-                ):
+                elif CorrelatorMode.is_no_capture(subfile_mode) or CorrelatorMode.is_voltage_buffer(subfile_mode):
                     logger.info(f"{item}: ignoring due to mode: {subfile_mode}")
 
                     #
@@ -387,7 +402,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                 if self.always_keep_subfiles and keep_subfiles_path:
                     # we use -1 for numa node for now as this is really for
                     # debug so it does not matter
-                    utils.copy_subfile_to_disk_dd(
+                    copy_subfile_to_disk_dd(
                         item,
                         self.corr_devshm_numa_node,
                         keep_subfiles_path,
@@ -398,7 +413,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
 
                 # Rename to free but not if we are in MWAX_BEAMFORMER mode as the BF will
                 # take care of it when it has finished with it
-                if utils.CorrelatorMode.is_beamformer(subfile_mode):
+                if CorrelatorMode.is_beamformer(subfile_mode):
                     # Don't rename .sub to .free- the beamformer does it
                     pass
                 else:
@@ -459,7 +474,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         logger.info(f"{item}: Signalling beamformer with ({signal_value}) via redis {self.bf_redis_host}...")
         try:
             # Write the signal value- if reader disconnects it will auto-reopen unless timeout is hit
-            utils.push_message_to_redis(self.bf_redis_host, self.bf_redis_queue_key, signal_value)
+            push_message_to_redis(self.bf_redis_host, self.bf_redis_queue_key, signal_value)
             # Success
             logger.info(f"{item}: Signalling beamformer success")
             return True
@@ -501,16 +516,16 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         # Read TRANSFER_SIZE from subfile header
         # We only use this when writing a subfile to disk in case the subfile is
         # bigger than the data
-        transfer_size_str = utils.read_subfile_value(keep_filename, utils.PSRDADA_TRANSFER_SIZE)
+        transfer_size_str = read_subfile_value(keep_filename, PSRDADA_TRANSFER_SIZE)
         if transfer_size_str is None:
-            raise ValueError(f"Keyword {utils.PSRDADA_TRANSFER_SIZE} not found in {keep_filename}")
+            raise ValueError(f"Keyword {PSRDADA_TRANSFER_SIZE} not found in {keep_filename}")
 
         transfer_size = int(transfer_size_str)
-        subfile_bytes_to_write = transfer_size + utils.PSRDADA_HEADER_BYTES  # We add the header to the transfer size
+        subfile_bytes_to_write = transfer_size + PSRDADA_HEADER_BYTES  # We add the header to the transfer size
 
         # Copy the .keep file to the voltdata incoming dir
         # and ensure it is named as a ".sub" file
-        copy_success = utils.copy_subfile_to_disk_dd(
+        copy_success = copy_subfile_to_disk_dd(
             keep_filename,
             self.corr_diskdb_numa_node,
             self.voltdata_incoming_path,

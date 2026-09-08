@@ -344,9 +344,9 @@ class TestPriorityWatcherMaskLogic:
 
 
 def _run_priority_watcher_with_events(watcher: PriorityWatcher, fake_events: list, priority: int = 5):
-    """Patch inotify and utils on *watcher* and drive do_watch_loop with *fake_events*.
+    """Patch inotify and get_priority on *watcher* and drive do_watch_loop with *fake_events*.
 
-    utils.get_priority is mocked to return *priority* so tests are not coupled
+    get_priority is mocked to return *priority* so tests are not coupled
     to metafits lookup logic.
     """
     mock_inotify = mock.Mock()
@@ -362,7 +362,7 @@ def _run_priority_watcher_with_events(watcher: PriorityWatcher, fake_events: lis
     with (
         mock.patch("mwax_mover.queues.priority_watcher.scan_for_existing_files_and_add_to_priority_queue"),
         mock.patch(
-            "mwax_mover.queues.priority_watcher.utils.get_priority",
+            "mwax_mover.queues.priority_watcher.get_priority",
             return_value=priority,
         ),
     ):
@@ -483,7 +483,7 @@ class TestPriorityWatcherDoWatchLoopFiltering:
 class TestPriorityWatcherLiveInotify:
     """Integration tests using real inotify events on /dev/shm.
 
-    utils.get_priority is mocked so tests do not require real metafits files.
+    get_priority is mocked so tests do not require real metafits files.
     """
 
     TIMEOUT = 5.0
@@ -507,7 +507,7 @@ class TestPriorityWatcherLiveInotify:
     def test_rename_into_watch_dir_detected(self, dest_queue, shm_watch_dir):
         """A file renamed into the watch dir from the same filesystem is detected."""
         with (
-            mock.patch("mwax_mover.queues.priority_watcher.utils.get_priority", return_value=1),
+            mock.patch("mwax_mover.queues.priority_watcher.get_priority", return_value=1),
             mock.patch("mwax_mover.queues.priority_watcher.scan_for_existing_files_and_add_to_priority_queue"),
         ):
             watcher = PriorityWatcher(
@@ -545,7 +545,7 @@ class TestPriorityWatcherLiveInotify:
     def test_close_write_detected(self, dest_queue, shm_watch_dir):
         """A file written and closed in the watch dir is detected in NEW mode."""
         with (
-            mock.patch("mwax_mover.queues.priority_watcher.utils.get_priority", return_value=2),
+            mock.patch("mwax_mover.queues.priority_watcher.get_priority", return_value=2),
             mock.patch("mwax_mover.queues.priority_watcher.scan_for_existing_files_and_add_to_priority_queue"),
         ):
             watcher = PriorityWatcher(
@@ -579,7 +579,7 @@ class TestPriorityWatcherLiveInotify:
     def test_non_matching_extension_not_detected(self, dest_queue, shm_watch_dir):
         """A renamed file with a non-matching extension is not enqueued."""
         with (
-            mock.patch("mwax_mover.queues.priority_watcher.utils.get_priority", return_value=1),
+            mock.patch("mwax_mover.queues.priority_watcher.get_priority", return_value=1),
             mock.patch("mwax_mover.queues.priority_watcher.scan_for_existing_files_and_add_to_priority_queue"),
         ):
             watcher = PriorityWatcher(

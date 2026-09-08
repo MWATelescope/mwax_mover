@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from mwax_mover import mwax_asvo_helper, utils, version
+from mwax_mover import mwax_asvo_helper, version
 from mwax_mover.core.config import read_config, read_config_list, read_optional_config
 from mwax_mover.core.env import get_hostname, running_under_pytest
 from mwax_mover.db.calibration import (
@@ -51,6 +51,7 @@ from mwax_mover.mwax_calvin_utils import (
     submit_sbatch,
 )
 from mwax_mover.net.multicast import get_ip_address, send_multicast
+from mwax_mover.net.s3 import rclone_move
 
 # Setup root logger
 handler = logging.StreamHandler()
@@ -484,7 +485,7 @@ class MWAXCalvinController:
                 break
 
             try:
-                transfers, bytes_moved = utils.rclone_move(
+                transfers, bytes_moved = rclone_move(
                     str(fit_dir),
                     self.s3_profile,
                     self.s3_bucket,

@@ -10,7 +10,7 @@ import os
 import psycopg.errors
 
 from mwax_mover.db.handler import MWAXDBHandler
-from mwax_mover.utils import ArchiveLocation
+from mwax_mover.filesystem.naming import ArchiveLocation
 
 logger = logging.getLogger(__name__)
 

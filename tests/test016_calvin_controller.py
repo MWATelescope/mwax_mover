@@ -118,7 +118,7 @@ class TestUploadPublishedFitDirs:
 
     @staticmethod
     def fake_rclone_move(path, profile, bucket, dest_subpath=None, min_file_age_secs=0):
-        """Stand in for utils.rclone_move, emptying the source dir as rclone does.
+        """Stand in for net.s3.rclone_move, emptying the source dir as rclone does.
 
         rclone move deletes each source file once it is transferred and leaves
         the empty directory behind, which is what lets the caller rmdir it. A
@@ -138,7 +138,7 @@ class TestUploadPublishedFitDirs:
         mcal = self.make_controller()
 
         with patch(
-            "mwax_mover.cli.mwax_calvin_controller.utils.rclone_move",
+            "mwax_mover.cli.mwax_calvin_controller.rclone_move",
             side_effect=self.fake_rclone_move,
         ) as mock_move:
             mcal.upload_published_fit_dirs(str(base))
@@ -159,7 +159,7 @@ class TestUploadPublishedFitDirs:
         mcal = self.make_controller(max_fits_per_pass=3)
 
         with patch(
-            "mwax_mover.cli.mwax_calvin_controller.utils.rclone_move",
+            "mwax_mover.cli.mwax_calvin_controller.rclone_move",
             side_effect=self.fake_rclone_move,
         ) as mock_move:
             mcal.upload_published_fit_dirs(str(base))
@@ -181,7 +181,7 @@ class TestUploadPublishedFitDirs:
         mcal = self.make_controller()
 
         with patch(
-            "mwax_mover.cli.mwax_calvin_controller.utils.rclone_move",
+            "mwax_mover.cli.mwax_calvin_controller.rclone_move",
             side_effect=self.fake_rclone_move,
         ) as mock_move:
             mcal.upload_published_fit_dirs(str(base))
@@ -202,7 +202,7 @@ class TestUploadPublishedFitDirs:
             return self.fake_rclone_move(path, profile, bucket, dest_subpath, min_file_age_secs)
 
         with patch(
-            "mwax_mover.cli.mwax_calvin_controller.utils.rclone_move",
+            "mwax_mover.cli.mwax_calvin_controller.rclone_move",
             side_effect=fake_move,
         ) as mock_move:
             # Some dirs uploaded, so no exception should escape and the path
@@ -227,7 +227,7 @@ class TestUploadPublishedFitDirs:
         mcal = self.make_controller()
 
         with patch(
-            "mwax_mover.cli.mwax_calvin_controller.utils.rclone_move",
+            "mwax_mover.cli.mwax_calvin_controller.rclone_move",
             side_effect=subprocess.CalledProcessError(1, "rclone", stderr="s3 down"),
         ):
             with pytest.raises(subprocess.CalledProcessError):
@@ -243,7 +243,7 @@ class TestUploadPublishedFitDirs:
         """A non-existent base path is a warning, not an exception."""
         mcal = self.make_controller()
 
-        with patch("mwax_mover.cli.mwax_calvin_controller.utils.rclone_move") as mock_move:
+        with patch("mwax_mover.cli.mwax_calvin_controller.rclone_move") as mock_move:
             mcal.upload_published_fit_dirs(str(tmp_path / "does_not_exist"))
 
         mock_move.assert_not_called()
@@ -256,7 +256,7 @@ class TestUploadPublishedFitDirs:
         mcal = self.make_controller(max_fits_per_pass=2)
 
         with patch(
-            "mwax_mover.cli.mwax_calvin_controller.utils.rclone_move",
+            "mwax_mover.cli.mwax_calvin_controller.rclone_move",
             side_effect=self.fake_rclone_move,
         ):
             assert mcal.upload_published_fit_dirs(str(base)) is True
@@ -269,7 +269,7 @@ class TestUploadPublishedFitDirs:
         mcal = self.make_controller(max_fits_per_pass=10)
 
         with patch(
-            "mwax_mover.cli.mwax_calvin_controller.utils.rclone_move",
+            "mwax_mover.cli.mwax_calvin_controller.rclone_move",
             side_effect=self.fake_rclone_move,
         ):
             assert mcal.upload_published_fit_dirs(str(base)) is False
@@ -282,7 +282,7 @@ class TestUploadPublishedFitDirs:
         mcal = self.make_controller(max_fits_per_pass=2)
 
         with patch(
-            "mwax_mover.cli.mwax_calvin_controller.utils.rclone_move",
+            "mwax_mover.cli.mwax_calvin_controller.rclone_move",
             side_effect=self.fake_rclone_move,
         ):
             assert mcal.upload_published_fit_dirs(str(base)) is False
@@ -301,7 +301,7 @@ class TestUploadPublishedFitDirs:
             return self.fake_rclone_move(path, profile, bucket, dest_subpath, min_file_age_secs)
 
         with patch(
-            "mwax_mover.cli.mwax_calvin_controller.utils.rclone_move",
+            "mwax_mover.cli.mwax_calvin_controller.rclone_move",
             side_effect=stop_after_first,
         ) as mock_move:
             result = mcal.upload_published_fit_dirs(str(base), stop_event)
@@ -323,7 +323,7 @@ class TestUploadPublishedFitDirs:
         stop_event = threading.Event()
         stop_event.set()
 
-        with patch("mwax_mover.cli.mwax_calvin_controller.utils.rclone_move") as mock_move:
+        with patch("mwax_mover.cli.mwax_calvin_controller.rclone_move") as mock_move:
             assert mcal.upload_published_fit_dirs(str(base), stop_event) is False
 
         mock_move.assert_not_called()

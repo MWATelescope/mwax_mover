@@ -14,7 +14,7 @@ import threading
 from datetime import UTC, datetime
 from enum import Enum
 
-from mwax_mover.utils import (
+from mwax_mover.net.asvo import (
     GiantSquidJobAlreadyExistsException,
     GiantSquidMWAASVOOutageException,
     run_giant_squid,

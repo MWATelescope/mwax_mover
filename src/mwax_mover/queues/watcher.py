@@ -13,7 +13,8 @@ import queue
 import inotify.adapters
 import inotify.constants
 
-from mwax_mover import constants, utils
+from mwax_mover import constants
+from mwax_mover.filesystem.scan import scan_for_existing_files_and_add_to_queue
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,7 @@ class Watcher:
             or self.mode == constants.MODE_WATCH_DIR_FOR_RENAME
             or self.mode == constants.MODE_WATCH_DIR_FOR_RENAME_OR_NEW
         ):
-            utils.scan_for_existing_files_and_add_to_queue(
+            scan_for_existing_files_and_add_to_queue(
                 self.path,
                 self.pattern,
                 self.recursive,

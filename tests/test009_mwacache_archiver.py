@@ -13,7 +13,7 @@ from tests_common import obs_metafits_path, render_test_config, setup_test_direc
 from tests_fakedb import FakeMWAXDBHandler
 
 from mwax_mover.cli.mwacache_archive_processor import MWACacheArchiveProcessor
-from mwax_mover.utils import ArchiveLocation
+from mwax_mover.filesystem.naming import ArchiveLocation
 
 
 def test_mwacache_archiver_config_file():

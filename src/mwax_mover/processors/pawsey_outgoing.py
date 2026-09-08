@@ -9,13 +9,14 @@ the archive location and bucket, then deletes the local copy.
 import logging
 import os
 
-from mwax_mover import constants, utils
+from mwax_mover import constants
 from mwax_mover.archive import archiver
 from mwax_mover.db import data_files
 from mwax_mover.db.data_files import DataFileRow, get_data_file_row
 from mwax_mover.db.handler import MWAXDBHandler
+from mwax_mover.filesystem.files import do_checksum_md5, remove_file
+from mwax_mover.filesystem.naming import ArchiveLocation, ValidationData, determine_bucket, validate_filename
 from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
-from mwax_mover.utils import ArchiveLocation
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
         logger.info(f"{item}: Started...")
 
         # validate the filename
-        val: utils.ValidationData = utils.validate_filename(item, self.metafits_path)
+        val: ValidationData = validate_filename(item, self.metafits_path)
 
         # do some sanity checks!
         if val.valid:
@@ -109,7 +110,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             if actual_file_size == 0:
                 # File size is 0- lets just blow it away
                 logger.warning(f"{item}: File size is 0 bytes. Deleting file")
-                utils.remove_file(item, raise_error=False)
+                remove_file(item, raise_error=False)
 
                 # even though its a problem,we return true as we are finished
                 # with the item and it should not be requeued
@@ -119,7 +120,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
                 logger.warning(
                     f"{item}: File size {actual_file_size} does not match {database_file_size}. Deleting file"
                 )
-                utils.remove_file(item, raise_error=False)
+                remove_file(item, raise_error=False)
 
                 # even though its a problem,we return true as we are finished
                 # with the item and it should not be requeued
@@ -128,7 +129,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             logger.debug(f"{item}: File size matches metadata. Checking md5sum...")
 
             # Check md5sum
-            actual_checksum = utils.do_checksum_md5(item, None, 600)
+            actual_checksum = do_checksum_md5(item, None, 600)
 
             # Compare
             if actual_checksum != data_files_row.checksum:
@@ -138,7 +139,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             logger.debug(f"{item}: md5 checksum matches")
 
             # Determine where to archive it
-            bucket = utils.determine_bucket(
+            bucket = determine_bucket(
                 item,
                 self.archive_to_location,
             )
@@ -176,7 +177,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
                 # If all is well, we have the file safely archived and the
                 # database updated, so remove the file
                 logger.debug(f"{item}: Deleting file")
-                utils.remove_file(item, raise_error=False)
+                remove_file(item, raise_error=False)
 
                 logger.info(f"{item}: Finished")
                 return True

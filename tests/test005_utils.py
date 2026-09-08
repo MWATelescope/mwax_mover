@@ -1,5 +1,11 @@
 """
-Tests for the utils.py module
+Tests for the functions that used to live in utils.py, now split across
+fits.metafits, fits.subfile, filesystem.naming, filesystem.scan,
+filesystem.files, and net.asvo (docs/RESTRUCTURE.md Phase 3 commit 2).
+
+Kept as one file for this commit rather than split per new module -- see
+RESTRUCTURE.md's "Also outstanding" note on mirroring the test tree to the
+package structure, which is a separate, can-happen-any-time task.
 
 NOTE: some tests (e.g. validate_filename and get_priority) use filenames
 which do not exist in the git repo. This is fine as the main thing being
@@ -18,14 +24,35 @@ import pytest
 import requests
 from tests_common import data_path, obs_data_dir, obs_metafits_path, render_test_config
 
-from mwax_mover import utils, version
+from mwax_mover import version
 from mwax_mover.core.config import read_config_bool, read_config_list, read_optional_config
 from mwax_mover.core.env import running_under_pytest
-from mwax_mover.utils import (
-    extract_filename_from_mwa_asvo_signed_url,
-    extract_tar,
-    run_giant_squid,
+from mwax_mover.filesystem.files import delete_files_older_than, do_checksum_md5, extract_tar
+from mwax_mover.filesystem.naming import (
+    ArchiveLocation,
+    MWADataFileType,
+    ValidationData,
+    determine_bucket,
+    get_bucket_name_from_filename,
+    get_bucket_name_from_obs_id,
+    get_data_files_for_obsid_from_webservice,
+    get_priority,
+    should_project_be_archived,
+    validate_filename,
 )
+from mwax_mover.filesystem.scan import scan_directory, scan_for_existing_files_and_add_to_queue
+from mwax_mover.fits.metafits import download_metafits_file, get_metafits_values
+from mwax_mover.fits.subfile import (
+    PSRDADA_HEADER_BYTES,
+    PSRDADA_MODE,
+    CorrelatorMode,
+    inject_beamformer_headers,
+    read_subfile_value,
+    read_subfile_values,
+    write_mock_subfile,
+    write_mock_subfile_from_header,
+)
+from mwax_mover.net.asvo import extract_filename_from_mwa_asvo_signed_url, run_giant_squid
 
 
 def test_running_under_pytest():
@@ -33,35 +60,35 @@ def test_running_under_pytest():
 
 
 def test_correlator_mode_class():
-    assert utils.CorrelatorMode.is_no_capture("NO_CAPTURE")
-    assert not utils.CorrelatorMode.is_correlator("NO_CAPTURE")
-    assert not utils.CorrelatorMode.is_vcs("NO_CAPTURE")
-    assert not utils.CorrelatorMode.is_voltage_buffer("NO_CAPTURE")
-    assert not utils.CorrelatorMode.is_beamformer("NO_CAPTURE")
+    assert CorrelatorMode.is_no_capture("NO_CAPTURE")
+    assert not CorrelatorMode.is_correlator("NO_CAPTURE")
+    assert not CorrelatorMode.is_vcs("NO_CAPTURE")
+    assert not CorrelatorMode.is_voltage_buffer("NO_CAPTURE")
+    assert not CorrelatorMode.is_beamformer("NO_CAPTURE")
 
-    assert not utils.CorrelatorMode.is_no_capture("MWAX_CORRELATOR")
-    assert utils.CorrelatorMode.is_correlator("MWAX_CORRELATOR")
-    assert not utils.CorrelatorMode.is_vcs("MWAX_CORRELATOR")
-    assert not utils.CorrelatorMode.is_voltage_buffer("MWAX_CORRELATOR")
-    assert not utils.CorrelatorMode.is_beamformer("MWAX_CORRELATOR")
+    assert not CorrelatorMode.is_no_capture("MWAX_CORRELATOR")
+    assert CorrelatorMode.is_correlator("MWAX_CORRELATOR")
+    assert not CorrelatorMode.is_vcs("MWAX_CORRELATOR")
+    assert not CorrelatorMode.is_voltage_buffer("MWAX_CORRELATOR")
+    assert not CorrelatorMode.is_beamformer("MWAX_CORRELATOR")
 
-    assert not utils.CorrelatorMode.is_no_capture("MWAX_VCS")
-    assert not utils.CorrelatorMode.is_correlator("MWAX_VCS")
-    assert utils.CorrelatorMode.is_vcs("MWAX_VCS")
-    assert not utils.CorrelatorMode.is_voltage_buffer("MWAX_VCS")
-    assert not utils.CorrelatorMode.is_beamformer("MWAX_VCS")
+    assert not CorrelatorMode.is_no_capture("MWAX_VCS")
+    assert not CorrelatorMode.is_correlator("MWAX_VCS")
+    assert CorrelatorMode.is_vcs("MWAX_VCS")
+    assert not CorrelatorMode.is_voltage_buffer("MWAX_VCS")
+    assert not CorrelatorMode.is_beamformer("MWAX_VCS")
 
-    assert not utils.CorrelatorMode.is_no_capture("MWAX_BUFFER")
-    assert not utils.CorrelatorMode.is_correlator("MWAX_BUFFER")
-    assert not utils.CorrelatorMode.is_vcs("MWAX_BUFFER")
-    assert utils.CorrelatorMode.is_voltage_buffer("MWAX_BUFFER")
-    assert not utils.CorrelatorMode.is_beamformer("MWAX_BUFFER")
+    assert not CorrelatorMode.is_no_capture("MWAX_BUFFER")
+    assert not CorrelatorMode.is_correlator("MWAX_BUFFER")
+    assert not CorrelatorMode.is_vcs("MWAX_BUFFER")
+    assert CorrelatorMode.is_voltage_buffer("MWAX_BUFFER")
+    assert not CorrelatorMode.is_beamformer("MWAX_BUFFER")
 
-    assert not utils.CorrelatorMode.is_no_capture("MWAX_BEAMFORMER")
-    assert not utils.CorrelatorMode.is_correlator("MWAX_BEAMFORMER")
-    assert not utils.CorrelatorMode.is_vcs("MWAX_BEAMFORMER")
-    assert not utils.CorrelatorMode.is_voltage_buffer("MWAX_BEAMFORMER")
-    assert utils.CorrelatorMode.is_beamformer("MWAX_BEAMFORMER")
+    assert not CorrelatorMode.is_no_capture("MWAX_BEAMFORMER")
+    assert not CorrelatorMode.is_correlator("MWAX_BEAMFORMER")
+    assert not CorrelatorMode.is_vcs("MWAX_BEAMFORMER")
+    assert not CorrelatorMode.is_voltage_buffer("MWAX_BEAMFORMER")
+    assert CorrelatorMode.is_beamformer("MWAX_BEAMFORMER")
 
 
 def test_version():
@@ -81,11 +108,11 @@ def test_validate_filename_valid1():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(filename, metafits_path)
+    val: ValidationData = validate_filename(filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1244973688
-    assert val.filetype_id == utils.MWADataFileType.MWAX_VISIBILITIES.value
+    assert val.filetype_id == MWADataFileType.MWAX_VISIBILITIES.value
     assert val.file_ext == ".fits"
     assert val.calibrator is False
     assert val.project_id == "C001"
@@ -104,11 +131,11 @@ def test_validate_filename_valid2():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(filename, metafits_path)
+    val: ValidationData = validate_filename(filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1347318488
-    assert val.filetype_id == utils.MWADataFileType.MWAX_VISIBILITIES.value
+    assert val.filetype_id == MWADataFileType.MWAX_VISIBILITIES.value
     assert val.file_ext == ".fits"
     assert val.calibrator is True
     assert val.project_id == "G0080"
@@ -127,11 +154,11 @@ def test_validate_filename_valid3():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(filename, metafits_path)
+    val: ValidationData = validate_filename(filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1220738720
-    assert val.filetype_id == utils.MWADataFileType.MWAX_VOLTAGES.value
+    assert val.filetype_id == MWADataFileType.MWAX_VOLTAGES.value
     assert val.file_ext == ".sub"
     assert val.calibrator is False
     assert val.project_id == "G0024"
@@ -150,11 +177,11 @@ def test_validate_filename_valid4():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(filename, metafits_path)
+    val: ValidationData = validate_filename(filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1220738720
-    assert val.filetype_id == utils.MWADataFileType.MWAX_VOLTAGES.value
+    assert val.filetype_id == MWADataFileType.MWAX_VOLTAGES.value
     assert val.file_ext == ".sub"
     assert val.calibrator is False
     assert val.project_id == "G0024"
@@ -173,11 +200,11 @@ def test_validate_filename_valid5():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(filename, metafits_path)
+    val: ValidationData = validate_filename(filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1220738720
-    assert val.filetype_id == utils.MWADataFileType.MWAX_VOLTAGES.value
+    assert val.filetype_id == MWADataFileType.MWAX_VOLTAGES.value
     assert val.file_ext == ".sub"
     assert val.calibrator is False
     assert val.project_id == "G0024"
@@ -196,11 +223,11 @@ def test_validate_filename_valid6():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(filename, metafits_path)
+    val: ValidationData = validate_filename(filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1328239120
-    assert val.filetype_id == utils.MWADataFileType.MWA_PPD_FILE.value
+    assert val.filetype_id == MWADataFileType.MWA_PPD_FILE.value
     assert val.file_ext == ".fits"
     assert val.calibrator is False
     assert val.project_id == "C001"
@@ -219,11 +246,11 @@ def test_validate_filename_valid7():
     #
     # Run test
     #
-    val: utils.ValidationData = utils.validate_filename(filename, metafits_path)
+    val: ValidationData = validate_filename(filename, metafits_path)
 
     assert val.valid is True
     assert val.obs_id == 1328239120
-    assert val.filetype_id == utils.MWADataFileType.MWA_PPD_FILE.value
+    assert val.filetype_id == MWADataFileType.MWA_PPD_FILE.value
     assert val.file_ext == ".metafits"
     assert val.calibrator is False
     assert val.project_id == "C001"
@@ -237,7 +264,7 @@ def test_get_metafits_values_correlator():
     #
     # Run test
     #
-    is_calibrator, project_id, calib_src = utils.get_metafits_values(obs_metafits_path(1347318488))
+    is_calibrator, project_id, calib_src = get_metafits_values(obs_metafits_path(1347318488))
     assert is_calibrator is True
     assert project_id == "G0080"
     assert calib_src == "J063633-204225"
@@ -249,7 +276,7 @@ def test_get_metafits_values_non_cal():
     metafits which is not a calibrator- i.e. it has
     CALIBRAT=False and no CALIBSRC key
     """
-    is_calibrator, project_id, calib_src = utils.get_metafits_values(obs_metafits_path(1244973688))
+    is_calibrator, project_id, calib_src = get_metafits_values(obs_metafits_path(1244973688))
     assert is_calibrator is False
     assert project_id == "C001"
     assert calib_src == ""
@@ -265,7 +292,7 @@ def test_scan_for_existing_files_and_add_to_queue():
     #
     # Run test
     #
-    utils.scan_for_existing_files_and_add_to_queue(watch_dir, pattern, recursive, queue_target)
+    scan_for_existing_files_and_add_to_queue(watch_dir, pattern, recursive, queue_target)
 
     assert queue_target.qsize() == 2
     assert queue_target.get() == os.path.join(
@@ -284,7 +311,7 @@ def test_scan_directory():
     #
     # Run test
     #
-    list_of_files = utils.scan_directory(watch_dir, pattern, recursive, exclude_pattern=None)
+    list_of_files = scan_directory(watch_dir, pattern, recursive, exclude_pattern=None)
 
     assert len(list_of_files) == 2
     assert (
@@ -303,7 +330,7 @@ def test_get_priority_correlator_calibrator():
     # Run test
     #
 
-    priority = utils.get_priority(
+    priority = get_priority(
         data_path("1347318488", "1347318488_20190619100110_ch101_000.fits"),
         obs_data_dir(1347318488),
         ["D0006"],
@@ -321,7 +348,7 @@ def test_get_priority_correlator_high_priority_list():
     # Run test
     #
 
-    priority = utils.get_priority(
+    priority = get_priority(
         data_path("1122979144", "1122979144_20190619100110_ch101_000.fits"),
         obs_data_dir(1122979144),
         ["D0006"],
@@ -336,7 +363,7 @@ def test_get_priority_vcs_c001():
     # Run test
     #
 
-    priority = utils.get_priority(
+    priority = get_priority(
         data_path("1347063304", "1347063304_1347063304_114.sub"),
         obs_data_dir(1347063304),
         ["D0006"],
@@ -351,7 +378,7 @@ def test_get_priority_correlator_c001():
     # Run test
     #
 
-    priority = utils.get_priority(
+    priority = get_priority(
         data_path("1244973688", "1244973688_20190619100110_ch114_000.fits"),
         obs_data_dir(1244973688),
         ["D0006"],
@@ -366,7 +393,7 @@ def test_get_priority_vcs_g0024():
     # Run test
     #
 
-    priority = utils.get_priority(
+    priority = get_priority(
         data_path("1220738720", "1220738720_1220738720_123.sub"),
         obs_data_dir(1220738720),
         ["D0006"],
@@ -381,7 +408,7 @@ def test_get_priority_metafits_ppd():
     # Run test
     #
 
-    priority = utils.get_priority(
+    priority = get_priority(
         data_path("1328239120", "1328239120_metafits_ppds.fits"),
         obs_data_dir(1328239120),
         ["D0006"],
@@ -404,7 +431,7 @@ def test_do_checksum_md5():
     #
     # Run test
     #
-    md5sum = utils.do_checksum_md5(filename, numa_node, timeout)
+    md5sum = do_checksum_md5(filename, numa_node, timeout)
 
     assert md5sum == "c1024dd2184887bc293cffe07406046f"
 
@@ -415,11 +442,11 @@ def test_determine_bucket_acacia():
         os.getcwd(),
         data_path("1244973688", "1244973688_20190619100110_ch114_000.fits"),
     )
-    location = utils.ArchiveLocation.AcaciaIngest
+    location = ArchiveLocation.AcaciaIngest
     #
     # Run test
     #
-    bucket = utils.determine_bucket(full_filename, location)
+    bucket = determine_bucket(full_filename, location)
     assert bucket == "mwaingest-12449"
 
 
@@ -429,11 +456,11 @@ def test_determine_bucket_banksia():
         os.getcwd(),
         data_path("1244973688", "1244973688_20190619100110_ch114_000.fits"),
     )
-    location = utils.ArchiveLocation.Banksia
+    location = ArchiveLocation.Banksia
     #
     # Run test
     #
-    bucket = utils.determine_bucket(full_filename, location)
+    bucket = determine_bucket(full_filename, location)
     assert bucket == "mwaingest-12449"
 
 
@@ -447,7 +474,7 @@ def test_get_bucket_name_from_filename():
     #
     # Run test
     #
-    bucket = utils.get_bucket_name_from_filename(filename)
+    bucket = get_bucket_name_from_filename(filename)
 
     assert bucket == "mwaingest-12449"
 
@@ -459,7 +486,7 @@ def test_get_bucket_name_from_obs_id():
     #
     # Run test
     #
-    bucket = utils.get_bucket_name_from_obs_id(obs_id)
+    bucket = get_bucket_name_from_obs_id(obs_id)
 
     assert bucket == "mwaingest-12345"
 
@@ -563,7 +590,7 @@ def test_download_metafits_file():
     metafits_path = "/tmp"
     metafits_filename = os.path.join(metafits_path, f"{obs_id}_metafits.fits")
 
-    utils.download_metafits_file(obs_id, metafits_path)
+    download_metafits_file(obs_id, metafits_path)
 
     assert os.path.exists(metafits_filename)
 
@@ -576,7 +603,7 @@ def test_write_mock_subfile():
     output_filename = "/tmp/test005_test_subfile1.sub"
 
     # Write out the mock subfile
-    utils.write_mock_subfile(
+    write_mock_subfile(
         output_filename,
         obs_id=1234567890,
         subobs_id=1234567898,
@@ -701,7 +728,7 @@ def test_inject_beamformer_headers():
     assert len(test_header) == 720
 
     # Append the remainder of the 4096 bytes
-    remainder_len = utils.PSRDADA_HEADER_BYTES - len(test_header)
+    remainder_len = PSRDADA_HEADER_BYTES - len(test_header)
     padding = [0x0 for _ in range(remainder_len)]
     assert len(padding) == remainder_len
     # add 255 bytes of data to this subfile
@@ -710,20 +737,20 @@ def test_inject_beamformer_headers():
 
     # Write the subfile
     subfile_name = "/tmp/test005_test_subfile2.sub"
-    utils.write_mock_subfile_from_header(subfile_name, test_header)
+    write_mock_subfile_from_header(subfile_name, test_header)
 
     # inject the beamformer settings
-    utils.inject_beamformer_headers(subfile_name, beamformer_settings_string)
+    inject_beamformer_headers(subfile_name, beamformer_settings_string)
 
     # Check file size
-    assert os.path.getsize(subfile_name) == utils.PSRDADA_HEADER_BYTES + len(bytearray(data_padding))
+    assert os.path.getsize(subfile_name) == PSRDADA_HEADER_BYTES + len(bytearray(data_padding))
 
-    # we can also test utils.read_subfile_value(item, key)
-    assert utils.read_subfile_value(subfile_name, utils.PSRDADA_MODE) == "NO_CAPTURE"
-    assert utils.read_subfile_value(subfile_name, "NUM_INCOHERENT_BEAMS") == "2"
+    # we can also test read_subfile_value(item, key)
+    assert read_subfile_value(subfile_name, PSRDADA_MODE) == "NO_CAPTURE"
+    assert read_subfile_value(subfile_name, "NUM_INCOHERENT_BEAMS") == "2"
 
     # check for None on a non-existant key
-    assert utils.read_subfile_value(subfile_name, "MISSING_KEY123") is None
+    assert read_subfile_value(subfile_name, "MISSING_KEY123") is None
 
 
 def test_read_subfile_values():
@@ -771,11 +798,11 @@ def test_read_subfile_values():
     )
     # Write the subfile
     subfile_name = "/tmp/test005_test_subfile_3.sub"
-    utils.write_mock_subfile_from_header(subfile_name, test_header)
+    write_mock_subfile_from_header(subfile_name, test_header)
 
     keys = ["OBS_ID", "MODE", "EXPOSURE_SECS"]
 
-    results = utils.read_subfile_values(subfile_name, keys)
+    results = read_subfile_values(subfile_name, keys)
 
     assert results["OBS_ID"] == "1357616008"
     assert results["MODE"] == "NO_CAPTURE"
@@ -783,10 +810,10 @@ def test_read_subfile_values():
 
 
 def test_should_project_be_archived():
-    assert utils.should_project_be_archived("C001") is True
-    assert utils.should_project_be_archived("c001") is True
-    assert utils.should_project_be_archived("C123") is False
-    assert utils.should_project_be_archived("c123") is False
+    assert should_project_be_archived("C001") is True
+    assert should_project_be_archived("c001") is True
+    assert should_project_be_archived("C123") is False
+    assert should_project_be_archived("c123") is False
 
 
 @pytest.mark.integration
@@ -794,14 +821,14 @@ def test_get_data_files_for_obsid_from_webservice_404():
 
     # Unknown obsid- call_webservice raises once every url/retry is exhausted
     with pytest.raises(requests.RequestException):
-        utils.get_data_files_for_obsid_from_webservice(1234567890)
+        get_data_files_for_obsid_from_webservice(1234567890)
 
 
 @pytest.mark.integration
 def test_get_data_files_for_obsid_from_webservice_200():
 
     # Good obsid with 24 gpubox files and 1 flags and 1 metafits. Only return the 24 gpubox files
-    file_list = utils.get_data_files_for_obsid_from_webservice(1157306584)
+    file_list = get_data_files_for_obsid_from_webservice(1157306584)
     assert len(file_list) == 24
 
     assert file_list == [
@@ -875,7 +902,7 @@ def test_delete_files_older_than():
         f.write(test_content)
 
     # Do test delete
-    files_deleted = utils.delete_files_older_than(test_path, 5, [".txt", ".dat"])
+    files_deleted = delete_files_older_than(test_path, 5, [".txt", ".dat"])
 
     # 3 files should be deleted
     assert len(files_deleted) == 3

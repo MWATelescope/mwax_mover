@@ -10,12 +10,13 @@ import logging
 import os
 import shutil
 
-from mwax_mover import utils
 from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
 from mwax_mover.db.data_files import insert_data_file_row
 from mwax_mover.db.handler import MWAXDBHandler
+from mwax_mover.filesystem.files import do_checksum_md5
+from mwax_mover.filesystem.naming import MWADataFileType, ValidationData, should_project_be_archived, validate_filename
+from mwax_mover.fits.subfile import read_subfile_trigger_value
 from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
-from mwax_mover.utils import MWADataFileType, ValidationData
 
 logger = logging.getLogger(__name__)
 
@@ -126,12 +127,12 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
             file_size = os.stat(item).st_size
 
             checksum_type_id: int = 1  # MD5
-            checksum: str = utils.do_checksum_md5(item, None, 180)
+            checksum: str = do_checksum_md5(item, None, 180)
 
             # If the file is a VCS subfile, check whether it came from a triggered
             # observation and retrieve the trigger_id (None if not triggered).
             if val.filetype_id == MWADataFileType.MWAX_VOLTAGES.value:
-                trigger_id = utils.read_subfile_trigger_value(item)
+                trigger_id = read_subfile_trigger_value(item)
             else:
                 trigger_id = None
 
@@ -207,7 +208,7 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
         """
         logger.info(f"{item}: Started")
 
-        val: ValidationData = utils.validate_filename(item, self.metafits_path)
+        val: ValidationData = validate_filename(item, self.metafits_path)
 
         if not val.valid:
             logger.error(f"{item}: {val.validation_message}")
@@ -218,7 +219,7 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
             if result is not None:
                 return result
 
-        should_archive = utils.should_project_be_archived(val.project_id) and self.archiving_enabled
+        should_archive = should_project_be_archived(val.project_id) and self.archiving_enabled
         dest = self._get_destination(item, val, archive=should_archive)
 
         if dest is None:

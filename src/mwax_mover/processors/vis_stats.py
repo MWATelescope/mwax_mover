@@ -11,10 +11,10 @@ import logging
 import os
 import shutil
 
-from mwax_mover import utils
 from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME
+from mwax_mover.filesystem.naming import ValidationData, should_project_be_archived, validate_filename
+from mwax_mover.fits.subfile import process_mwax_stats
 from mwax_mover.queues.watch_queue_worker import MWAXWatchQueueWorker
-from mwax_mover.utils import ValidationData
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ class VisStatsProcessor(MWAXWatchQueueWorker):
         # Don't bother doing the 001, 002, etc if they exist
         if os.path.basename(item).endswith("_000.fits"):
             if (
-                utils.process_mwax_stats(
+                process_mwax_stats(
                     self.mwax_stats_binary_dir,
                     item,
                     None,
@@ -113,10 +113,10 @@ class VisStatsProcessor(MWAXWatchQueueWorker):
         # Is this host doing archiving?
         if self.archiving_enabled:
             # Validate and get info about the obs
-            obs_info: ValidationData = utils.validate_filename(item, self.metafits_path)
+            obs_info: ValidationData = validate_filename(item, self.metafits_path)
 
             # Should this project be archived?
-            if utils.should_project_be_archived(obs_info.project_id):
+            if should_project_be_archived(obs_info.project_id):
                 if obs_info.calibrator:
                     # Send to cal_outgoing
                     # Take the input filename - strip the path, then append the output path

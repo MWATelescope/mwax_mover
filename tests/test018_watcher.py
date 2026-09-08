@@ -260,7 +260,7 @@ def _run_watcher_with_events(watcher: Watcher, fake_events: list):
     watcher.inotify_tree = mock_inotify
     watcher.watching = True
 
-    with mock.patch("mwax_mover.queues.watcher.utils.scan_for_existing_files_and_add_to_queue"):
+    with mock.patch("mwax_mover.queues.watcher.scan_for_existing_files_and_add_to_queue"):
         watcher.do_watch_loop()
 
 

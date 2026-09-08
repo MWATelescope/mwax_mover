@@ -28,13 +28,21 @@ from flask import Flask, request
 from werkzeug.serving import make_server
 
 from mwax_mover import (
-    utils,
     version,
 )
 from mwax_mover.core.config import read_config, read_config_bool, read_config_list, read_optional_config
 from mwax_mover.core.env import get_hostname, running_under_pytest
 from mwax_mover.core.units import is_int
 from mwax_mover.db.handler import MWAXDBHandler
+from mwax_mover.filesystem.naming import ValidationData, should_project_be_archived, validate_filename
+from mwax_mover.fits.subfile import (
+    PSRDADA_MODE,
+    PSRDADA_TRIGGER_ID,
+    CorrelatorMode,
+    inject_subfile_header,
+    read_subfile_trigger_value,
+    read_subfile_value,
+)
 from mwax_mover.net.multicast import get_ip_address, send_multicast
 from mwax_mover.processors.bf_stitching import BfStitchingProcessor
 from mwax_mover.processors.checksum_and_db import ChecksumAndDBProcessor
@@ -737,10 +745,10 @@ class MWAXSubfileDistributor:
                     # Is this host doing archiving?
                     if self.cfg_corr_archive_destination_enabled:
                         # Validate and get info about the obs
-                        obs_info: utils.ValidationData = utils.validate_filename(item, self.cfg_corr_metafits_path)
+                        obs_info: ValidationData = validate_filename(item, self.cfg_corr_metafits_path)
 
                         # Should this project be archived?
-                        if utils.should_project_be_archived(obs_info.project_id):
+                        if should_project_be_archived(obs_info.project_id):
                             # Send to vis_outgoing
                             # Take the input filename - strip the path, then append the output path
                             outgoing_filename = os.path.join(
@@ -974,7 +982,7 @@ class MWAXSubfileDistributor:
                 # Now we need to check they are no VCS observations.
                 # If so, they are already archived so we don't bother
                 # archivng them again
-                if utils.read_subfile_value(free_filename, utils.PSRDADA_MODE) != utils.CorrelatorMode.MWAX_VCS.value:
+                if read_subfile_value(free_filename, PSRDADA_MODE) != CorrelatorMode.MWAX_VCS.value:
                     logger.info(
                         f"dump_voltages: keeping {free_filename}, and updating subfile header "
                         f"with 'TRIGGER_ID {trigger_id}'"
@@ -982,9 +990,9 @@ class MWAXSubfileDistributor:
 
                     # See if there already is a TRIGGER_ID keyword in the subfile- if so
                     # don't overwrite it. We must have overlapping triggers happening
-                    if not utils.read_subfile_trigger_value(free_filename):
+                    if not read_subfile_trigger_value(free_filename):
                         # No TRIGGER_ID yet, so add it
-                        utils.inject_subfile_header(free_filename, f"{utils.PSRDADA_TRIGGER_ID} {trigger_id}\n")
+                        inject_subfile_header(free_filename, f"{PSRDADA_TRIGGER_ID} {trigger_id}\n")
 
                     # For any that exist, rename them immediately to .keep
                     keep_filename = free_filename.replace(".free", ".keep")
