@@ -5,6 +5,10 @@ requests via giant-squid submitvis and polling their status via giant-squid list
 MWAASVOJob tracks a single job including its state, request IDs, submission
 timestamp, and download URL. MWAASVOJobState enumerates the possible ASVO job
 states. Typed exceptions are raised for outages and duplicate submissions.
+
+Moved here from mwax_asvo_helper.py (docs/RESTRUCTURE.md target structure's
+calvin/asvo.py) -- distinct from net/asvo.py, which holds the lower-level
+run_giant_squid CLI wrapper and its exceptions this module builds on.
 """
 
 import json

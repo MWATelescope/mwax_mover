@@ -33,7 +33,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from mwax_mover import mwax_asvo_helper, version
+from mwax_mover import version
+from mwax_mover.calvin.asvo import GiantSquidMWAASVOOutageException, MWAASVOHelper, MWAASVOJobState
 from mwax_mover.calvin.pipeline import CalvinJobType
 from mwax_mover.calvin.slurm import count_slurm_asvo_jobs, create_sbatch_script, submit_sbatch
 from mwax_mover.core.config import read_config, read_config_list, read_optional_config
@@ -185,7 +186,7 @@ class MWAXCalvinController:
         self.plot_uploader_stop_event = threading.Event()
 
         # Helper for MWA ASVO interactions and job record keeping
-        self.mwax_asvo_helper: mwax_asvo_helper.MWAASVOHelper = mwax_asvo_helper.MWAASVOHelper()
+        self.mwax_asvo_helper: MWAASVOHelper = MWAASVOHelper()
 
     def start(self):
         """Start the controller and main event loop.
@@ -730,7 +731,7 @@ class MWAXCalvinController:
         with self.mwax_asvo_helper.current_asvo_jobs_lock:
             for job in self.mwax_asvo_helper.current_asvo_jobs:
                 if not job.download_slurm_job_submitted:
-                    if job.job_state == mwax_asvo_helper.MWAASVOJobState.Error:
+                    if job.job_state == MWAASVOJobState.Error:
                         # MWA ASVO completed this job with error
                         error_message = "MWA ASVO completed this job with an Error state"
                         logger.warning(f"{job}: {error_message}")
@@ -758,7 +759,7 @@ class MWAXCalvinController:
                             logger.exception("Unable to update calibration_request table")
                             self.database_errors += 1
 
-                    elif job.job_state == mwax_asvo_helper.MWAASVOJobState.Ready:
+                    elif job.job_state == MWAASVOJobState.Ready:
                         try:
                             logger.debug(f"{job}: Submitting slurm job")
 
@@ -997,7 +998,7 @@ class MWAXCalvinController:
                     self.database_errors += 1
                     return False
 
-            except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
+            except GiantSquidMWAASVOOutageException:
                 # Handle me!
                 logger.warning(
                     f"RequestID: {request_id} ObsID: {obs_id} Cannot submit new download job: MWA ASVO has an outage"
@@ -1040,7 +1041,7 @@ class MWAXCalvinController:
             try:
                 self.mwax_asvo_helper.update_all_job_status()
 
-            except mwax_asvo_helper.GiantSquidMWAASVOOutageException:
+            except GiantSquidMWAASVOOutageException:
                 logger.warning("Cannot update MWA ASVO job states: MWA ASVO has an outage")
 
             except Exception:

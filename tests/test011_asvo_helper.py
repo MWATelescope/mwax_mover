@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from mwax_mover.mwax_asvo_helper import (
+from mwax_mover.calvin.asvo import (
     MWAASVOHelper,
     MWAASVOJobState,
     get_job_id_from_giant_squid_stdout,

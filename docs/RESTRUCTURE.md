@@ -764,17 +764,52 @@ actually gone, not just hidden by the ratchet. Full test suite: 456
 passed, 5 deselected, 0 failed -- identical to every prior baseline, on a
 20-minute run.
 
+## mwax_asvo_helper.py -> calvin/asvo.py (complete)
+
+The last file named in the target structure's `calvin/` list that hadn't
+moved. Small and clean by comparison with Phase 4: 5 symbols
+(`MWAASVOJobState`, `MWAASVOJob`, `MWAASVOHelper`,
+`get_job_id_from_giant_squid_stdout`, `get_job_info_from_giant_squid_json`),
+already importing only from `net/asvo.py` (a lower layer), no decorators,
+no module-level constants beyond `logger`. One-for-one lift-and-shift,
+verified byte-identical (5/5 symbols) the same way as every prior split.
+
+Distinct from `net/asvo.py` (Phase 3 commit 2): that one is the
+low-level `run_giant_squid` CLI wrapper and its exceptions; this one is
+the job-tracking layer built on top of it (submitting, polling, retrying
+through an outage).
+
+### A same-named instance attribute, correctly left alone
+
+`cli/mwax_calvin_controller.py` has both a bare module import
+(`from mwax_mover import mwax_asvo_helper`) and an instance attribute
+`self.mwax_asvo_helper` (an `MWAASVOHelper` instance) -- the exact shape
+of the bare-module-import collision flagged as a gotcha in earlier
+phases (`command`, `handler`, `config`). Not a real collision here,
+though: `self.mwax_asvo_helper` and the bare name `mwax_asvo_helper` are
+different namespaces, so switching the bare module import to direct-name
+imports (`MWAASVOHelper`, `MWAASVOJobState`, `GiantSquidMWAASVOOutageException`)
+doesn't touch the attribute at all. Fixed with a regex negative
+lookbehind (`(?<!self\.)\bmwax_asvo_helper\.`) rather than a plain
+substring replace, specifically so it could not touch the 13
+`self.mwax_asvo_helper.*` attribute accesses -- confirmed by count (6
+bare references replaced, 13 attribute accesses untouched) rather than
+by inspection alone.
+
+Verified: ruff check, ruff format --check, ty check src/ tests/ all clean
+on the first pass -- no missing imports this time, unlike commits 3 and 4.
+tests/test000_architecture.py: all 5 pass. Full test suite: 456 passed,
+5 deselected, 0 failed, on a 16-minute run.
+
 ## Remaining phases
 
 Ordering principle: leaves first, to prove the tooling before it touches the
 high-fan-in god-modules.
 
-**Phases 3 and 4 are complete.** `core/`, `fits/`+`filesystem/`+`net/`,
-`calibration/`+`calvin/`, and now the rest of `calvin/` (`plots/`,
-`hyperdrive.py`, `pipeline.py` fully merged) are all done; see those
-sections above. `mwax_asvo_helper.py` (`calvin/asvo.py` in the target
-structure) is the one file named there that still hasn't moved -- not
-scoped into Phase 4, and not yet scheduled as its own phase.
+**Phases 3 and 4 are complete, and every file named in the target
+structure's `calvin/` list has now moved** (`mwax_asvo_helper.py` ->
+`calvin/asvo.py` was the last one). `core/`, `fits/`+`filesystem/`+`net/`,
+`calibration/`+`calvin/` in full, are all done; see those sections above.
 
 **Phase 5 -- docs.** The 115 prose module references, `README.md`, `CALVIN.md`,
 `.pre-commit-config.yaml`.
