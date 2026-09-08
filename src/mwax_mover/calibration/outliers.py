@@ -415,7 +415,7 @@ def annotate_phase_outliers(
     docstring for why phase outliers are no longer flagged or modified),
     and calvin.plots.stats_table.write_before_after_stats (which feeds the
     same annotated DataFrame to both the stats.txt Flavor/PhOutlier
-    columns and, via calvin.plots.phase_fits.write_debug_phase_fit_plots,
+    columns and, via calvin.plots.phases.write_debug_phase_fit_plots,
     the phase-fit debug plots). Routing every caller through
     one function keeps that definition consistent -- previously the
     plotting path independently recomputed this with a hardcoded nstd,

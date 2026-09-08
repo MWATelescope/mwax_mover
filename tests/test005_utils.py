@@ -1,7 +1,8 @@
 """
 Tests for the functions that used to live in utils.py, now split across
 fits.metafits, fits.subfile, filesystem.naming, filesystem.scan,
-filesystem.files, and net.asvo (docs/RESTRUCTURE.md Phase 3 commit 2).
+filesystem.files, and (originally net.asvo, since relocated again to
+mwa_asvo.giant_squid) (docs/RESTRUCTURE.md Phase 3 commit 2).
 
 Kept as one file for this commit rather than split per new module -- see
 RESTRUCTURE.md's "Also outstanding" note on mirroring the test tree to the
@@ -52,7 +53,7 @@ from mwax_mover.fits.subfile import (
     write_mock_subfile,
     write_mock_subfile_from_header,
 )
-from mwax_mover.net.asvo import extract_filename_from_mwa_asvo_signed_url, run_giant_squid
+from mwax_mover.mwa_asvo.giant_squid import extract_filename_from_mwa_asvo_signed_url, run_giant_squid
 
 
 def test_running_under_pytest():

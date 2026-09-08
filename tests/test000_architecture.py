@@ -48,8 +48,11 @@ LAYERS: dict[int, tuple[str, ...]] = {
     0: ("version", "constants"),
     # L1: thin wrappers over the standard library and the OS.
     1: ("core",),
-    # L2: primitives -- config, filesystem, FITS, network, database.
-    2: ("fits", "filesystem", "net", "db"),
+    # L2: primitives -- config, filesystem, FITS, network, database, and the
+    # MWA ASVO client (job submission/tracking has no dependency on
+    # calibration or MWAX data products, despite calvin/ being its only
+    # current caller).
+    2: ("fits", "filesystem", "net", "db", "mwa_asvo"),
     # L3: the watcher/queue-worker framework and other reusable machinery,
     # built on L2 but knowing nothing about calibration or MWAX data products.
     3: (

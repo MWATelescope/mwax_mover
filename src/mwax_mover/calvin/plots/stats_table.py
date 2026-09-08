@@ -3,7 +3,7 @@ write_tile_stats_table.
 
 write_before_after_stats() is the HyperfitsSolutionGroup-level entry point
 -- split out of the old write_stats_and_debug_plots() so the stats-table
-half lives here and the plotting half lives in calvin.plots.phase_fits
+half lives here and the plotting half lives in calvin.plots.phases
 (docs/RESTRUCTURE.md Phase 4). Returns group.phase_fits (the final,
 annotated phase-fit DataFrame) so callers doing both stats and plots can
 pass it straight into write_debug_phase_fit_plots() without recomputing
@@ -258,7 +258,7 @@ def write_before_after_stats(
     flagged state.
 
     Split out of the old write_stats_and_debug_plots() (see
-    calvin.plots.phase_fits.write_debug_phase_fit_plots for the plotting
+    calvin.plots.phases.write_debug_phase_fit_plots for the plotting
     half, which needs this function's return value). Must be called after
     HyperfitsSolutionGroup.run_flagging_pipeline() has run -- its
     before_jones/before_tile_flag_reasons/before_channel_flag_reasons/

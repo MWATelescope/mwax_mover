@@ -1331,7 +1331,7 @@ class HyperfitsSolutionGroup:
         up equal to the truly final, fully-cleaned state --
         calvin.plots.stats_table.write_before_after_stats reuses it directly
         for the "after" stats-table row, and
-        calvin.plots.phase_fits.write_debug_phase_fit_plots reuses the same
+        calvin.plots.phases.write_debug_phase_fit_plots reuses the same
         value for every phase-fit plot, rather
         than paying for a second, equally expensive process_phase_fits()
         call to get the same thing (phase fitting isn't cheap: roughly
@@ -1426,7 +1426,7 @@ class HyperfitsSolutionGroup:
         detect_phase_outliers() deliberately runs last, not third: its
         result (self.phase_fits) is only ever actually consumed by
         calvin.plots.stats_table.write_before_after_stats() for the "after"
-        stats-table row and calvin.plots.phase_fits.write_debug_phase_fit_plots()
+        stats-table row and calvin.plots.phases.write_debug_phase_fit_plots()
         for every phase-fit plot, both of which want the
         truly final, fully-cleaned state -- the same state
         write_stats_and_debug_plots (the two functions' unsplit

@@ -35,25 +35,25 @@ import pytest
 from mwax_mover.calibration.models import Metafits
 from mwax_mover.calvin.hyperdrive import ChannelFlagReason, HyperfitsSolutionGroup, TileFlagReason
 from mwax_mover.calvin.plots.gains import (
+    _PAGE_RENDER_FALLBACK_WORKERS,
     SINGLE_FILE_SUBPLOT_WIDTH_IN,
     STITCH_GAP_CHANBLOCKS,
     STITCHED_SUBPLOT_WIDTH_IN,
     STITCHED_TILE_COLS,
-    _PAGE_RENDER_FALLBACK_WORKERS,
-    _available_memory_bytes,
     _build_stitched_axis,
+    _channel_reason_counts_text,
+    _channel_summary_text,
     _extract_combined_gains_bundle,
     _grid_shape,
     _max_render_workers,
     _page_grid,
-    _channel_reason_counts_text,
-    _channel_summary_text,
     _stitch_files,
     _stitch_reasons,
 )
 from mwax_mover.calvin.plots.hyperdrive_plots import generate_hyperdrive_plots, generate_hyperdrive_plots_for_files
-from mwax_mover.calvin.plots.phase_fits import plot_debug_phase_fits
+from mwax_mover.calvin.plots.phases import plot_debug_phase_fits
 from mwax_mover.calvin.plots.stats_table import build_tile_stats_rows, write_tile_stats_table
+from mwax_mover.core.env import available_memory_bytes
 
 _N_TILES = 3
 _N_CHANBLOCKS = 10
@@ -1096,7 +1096,7 @@ class TestAvailableMemoryBytes:
         monkeypatch.setattr("builtins.open", _open)
 
         # 4 GB limit minus 1 GB in use, not the node's 400 GB
-        assert _available_memory_bytes() == 3_000_000_000
+        assert available_memory_bytes() == 3_000_000_000
 
     def test_unlimited_cgroup_falls_through_to_meminfo(self, tmp_path, monkeypatch):
         """cgroup v2 "max" means no limit, so it must not be treated as a number."""
@@ -1116,7 +1116,7 @@ class TestAvailableMemoryBytes:
 
         monkeypatch.setattr("builtins.open", _open)
 
-        assert _available_memory_bytes() == 8_000_000 * 1024
+        assert available_memory_bytes() == 8_000_000 * 1024
 
     def test_returns_none_when_nothing_is_readable(self, monkeypatch):
         """Undetectable memory must be reported as such, not guessed as plenty."""
@@ -1126,7 +1126,7 @@ class TestAvailableMemoryBytes:
 
         monkeypatch.setattr("builtins.open", _open)
 
-        assert _available_memory_bytes() is None
+        assert available_memory_bytes() is None
 
 
 class TestMaxRenderWorkers:

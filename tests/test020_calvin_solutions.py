@@ -460,7 +460,7 @@ def test_process_solutions_calls_plot_debug_phase_fits(real_data_paths, tmp_path
             "mwax_mover.calvin.pipeline.insert_calibration_solutions_row",
             return_value=True,
         ),
-        patch("mwax_mover.calvin.plots.phase_fits.plot_debug_phase_fits") as mock_debug,
+        patch("mwax_mover.calvin.plots.phases.plot_debug_phase_fits") as mock_debug,
     ):
         process_solutions(
             db_handler_object=mock_db,

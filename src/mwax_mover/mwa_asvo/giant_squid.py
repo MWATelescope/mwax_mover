@@ -5,6 +5,10 @@ failures with backoff and raising a specific exception for a known ASVO
 outage or a definitive server-side error code.
 extract_filename_from_mwa_asvo_signed_url() pulls the filename out of an
 ASVO presigned download URL.
+
+Moved here from net/asvo.py, alongside mwa_asvo/jobs.py (the job-tracking
+layer built on top of this), consolidating all MWA-ASVO-related code into
+one package.
 """
 
 import logging

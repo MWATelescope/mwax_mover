@@ -27,7 +27,7 @@ from mwax_mover.calibration.models import GainFitInfo, Metafits, PhaseFitInfo
 from mwax_mover.calvin.hyperdrive import HyperfitsSolution, HyperfitsSolutionGroup, write_hyperdrive_stats
 from mwax_mover.calvin.plots.gains import plot_outlier_gains
 from mwax_mover.calvin.plots.hyperdrive_plots import generate_hyperdrive_plots_for_files
-from mwax_mover.calvin.plots.phase_fits import write_debug_phase_fit_plots
+from mwax_mover.calvin.plots.phases import write_debug_phase_fit_plots
 from mwax_mover.calvin.plots.stats_table import write_before_after_stats
 from mwax_mover.calvin.solution_files import get_sorted_solution_files
 from mwax_mover.core.command import write_readme_file

@@ -34,7 +34,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from mwax_mover import version
-from mwax_mover.calvin.asvo import GiantSquidMWAASVOOutageException, MWAASVOHelper, MWAASVOJobState
 from mwax_mover.calvin.pipeline import CalvinJobType
 from mwax_mover.calvin.slurm import count_slurm_asvo_jobs, create_sbatch_script, submit_sbatch
 from mwax_mover.core.config import read_config, read_config_list, read_optional_config
@@ -47,6 +46,8 @@ from mwax_mover.db.calibration import (
     update_calsolution_request_submit_mwa_asvo_job_status,
 )
 from mwax_mover.db.handler import MWAXDBHandler
+from mwax_mover.mwa_asvo.giant_squid import GiantSquidMWAASVOOutageException
+from mwax_mover.mwa_asvo.jobs import MWAASVOHelper, MWAASVOJobState
 from mwax_mover.net.multicast import get_ip_address, send_multicast
 from mwax_mover.net.s3 import rclone_move
 

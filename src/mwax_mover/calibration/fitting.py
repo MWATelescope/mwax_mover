@@ -4,7 +4,7 @@ fit_phase_line() fits a linear phase ramp to one tile/polarisation's
 solution (using an exact analytic Hessian -- see _phase_fit_hess_inv --
 rather than relying on scipy.optimize.minimize's own approximation).
 fit_gain() fits gain amplitude vs. frequency. poly_str()/textwrap() format
-fit results for display (used directly by calvin.plots.phase_fits too).
+fit results for display (used directly by calvin.plots.phases too).
 """
 
 import sys

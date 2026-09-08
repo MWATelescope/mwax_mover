@@ -1148,7 +1148,7 @@ def test_write_before_after_stats_reuses_final_phase_fit_without_recomputing():
     256-tile real observation in testing), so silently recomputing it a
     second time for reporting is a real cost, not just a theoretical one.
     """
-    from mwax_mover.calvin.plots.phase_fits import write_debug_phase_fit_plots
+    from mwax_mover.calvin.plots.phases import write_debug_phase_fit_plots
     from mwax_mover.calvin.plots.stats_table import write_before_after_stats
 
     n_tiles = 5
@@ -1169,7 +1169,7 @@ def test_write_before_after_stats_reuses_final_phase_fit_without_recomputing():
 
         with (
             patch.object(HyperfitsSolutionGroup, "process_phase_fits", counting_process_phase_fits),
-            patch("mwax_mover.calvin.plots.phase_fits.plot_debug_phase_fits", return_value=None),
+            patch("mwax_mover.calvin.plots.phases.plot_debug_phase_fits", return_value=None),
         ):
             final_phase_fits = write_before_after_stats(
                 group,

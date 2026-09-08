@@ -54,7 +54,7 @@ from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.filesystem.files import extract_tar, remove_file
 from mwax_mover.filesystem.naming import get_data_files_with_hostname_for_obsid_from_webservice
 from mwax_mover.fits.metafits import download_metafits_file
-from mwax_mover.net.asvo import extract_filename_from_mwa_asvo_signed_url, run_giant_squid
+from mwax_mover.mwa_asvo.giant_squid import extract_filename_from_mwa_asvo_signed_url, run_giant_squid
 from mwax_mover.net.multicast import get_ip_address, send_multicast
 from mwax_mover.net.s3 import check_remote_file_exists, rclone_delete_file
 from mwax_mover.net.webservice import call_webservice

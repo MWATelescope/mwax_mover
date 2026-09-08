@@ -865,6 +865,72 @@ clean. tests/test000_architecture.py: all 5 pass. No src/ or tests/
 files changed this phase, so the full suite was not re-run -- nothing
 in it could have regressed.
 
+## Post-restructure tweaks (complete)
+
+Three small follow-up changes requested after the phased restructure
+landed, none of which were part of the original plan:
+
+**`calvin/plots/phase_fits.py` -> `calvin/plots/phases.py`.** Pure
+rename, to match `gains.py`'s naming convention (domain noun, not
+`domain_noun.py`'s longer form). Fixed the 2 real imports
+(`cli/cal_utils.py`, `calvin/pipeline.py`), 6 prose cross-references
+across `calibration/fitting.py`, `calibration/outliers.py`,
+`calvin/plots/stats_table.py` (x2), `calvin/hyperdrive.py` (x2), and all
+references in 3 test files (imports and `mock.patch` strings).
+
+**`_available_memory_bytes` moved from `calvin/plots/gains.py` to
+`core/env.py`.** It reads cgroup limits and `/proc/meminfo` -- host/
+environment introspection, the same category as `get_hostname()` and
+`running_under_pytest()` already there, not plotting-specific at all;
+it only lived in `gains.py` because that was its one caller
+(`_max_render_workers`). `gains.py` now imports it rather than defining
+it. The 8 `mock.patch("mwax_mover.calvin.plots.gains._available_memory_bytes")`
+strings testing `_max_render_workers`'s reaction to different memory
+readings were deliberately left unchanged: `gains.py`'s own
+`from mwax_mover.core.env import _available_memory_bytes` gives it a
+module-level binding under that name regardless of where the function is
+defined, so patching it there still correctly intercepts the bare-name
+call inside `_max_render_workers` -- the same pattern used throughout
+every prior phase whenever a mocked function moved out from under its
+caller. The 3 tests that call the real function directly (not mocked)
+were switched to import it from `core.env`, its actual source now.
+Verified by running the affected tests directly, not just linting: both
+groups (the 3 direct behaviour tests and the 8 `_max_render_workers`
+reaction tests) pass.
+
+**All MWA ASVO code consolidated into `src/mwax_mover/mwa_asvo/`.**
+`net/asvo.py` (`run_giant_squid`, its 3 exceptions,
+`extract_filename_from_mwa_asvo_signed_url`) and `calvin/asvo.py`
+(`MWAASVOHelper`, `MWAASVOJob`, `MWAASVOJobState`, 2 helper functions)
+moved to `mwa_asvo/giant_squid.py` and `mwa_asvo/jobs.py` respectively --
+new names chosen to describe what each file actually does, since both
+old files were named plain `asvo.py` and couldn't both keep that name in
+one package. `mwa_asvo/jobs.py` imports from `mwa_asvo/giant_squid.py`
+(unchanged direction, no cycle). Verified byte-identical by the same
+AST-based split verification used for every other move in this project
+(5/5 symbols each file). Classified the whole new package as **L2**, not
+L4 where `calvin/asvo.py` used to sit: `calvin/asvo.py` never actually
+depended on anything calibration- or hyperdrive-specific (checked its
+real imports before deciding, the same way every other layer placement
+in this project was decided by evidence rather than by where a file
+happened to already live) -- its only real dependency was
+`net/asvo.py` itself, already L2. `calvin/` remains its only caller for
+now, an L4-importing-L2 edge, same shape as any other processor calling
+down into `net/` or `db/`.
+
+Fixed 2 real imports (`cli/mwax_calvin_controller.py`, which needed
+splitting across both new files since it used symbols from each;
+`cli/mwax_calvin_processor.py`) and 2 test files
+(`tests/test005_utils.py`, `tests/test011_asvo_helper.py`), plus one
+docstring in `test005_utils.py` noting the symbol's second move rather
+than silently updating it to look like it only ever lived in one place.
+
+Verified: ruff check, ruff format --check, ty check src/ tests/ all
+clean on the first pass across all three changes combined.
+tests/test000_architecture.py: all 5 pass, confirming `mwa_asvo` at L2
+introduces no cycle. Full test suite: 456 passed, 5 deselected, 0
+failed, on a 17-minute run.
+
 ## Remaining phases
 
 **All five phases are now complete.** Every item originally scoped --

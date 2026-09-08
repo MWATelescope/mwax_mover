@@ -6,9 +6,9 @@ MWAASVOJob tracks a single job including its state, request IDs, submission
 timestamp, and download URL. MWAASVOJobState enumerates the possible ASVO job
 states. Typed exceptions are raised for outages and duplicate submissions.
 
-Moved here from mwax_asvo_helper.py (docs/RESTRUCTURE.md target structure's
-calvin/asvo.py) -- distinct from net/asvo.py, which holds the lower-level
-run_giant_squid CLI wrapper and its exceptions this module builds on.
+Moved here from calvin/asvo.py, alongside mwa_asvo/giant_squid.py (the
+lower-level run_giant_squid CLI wrapper and its exceptions this module
+builds on), consolidating all MWA-ASVO-related code into one package.
 """
 
 import json
@@ -18,7 +18,7 @@ import threading
 from datetime import UTC, datetime
 from enum import Enum
 
-from mwax_mover.net.asvo import (
+from mwax_mover.mwa_asvo.giant_squid import (
     GiantSquidJobAlreadyExistsException,
     GiantSquidMWAASVOOutageException,
     run_giant_squid,
