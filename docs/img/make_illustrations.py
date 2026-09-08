@@ -2,8 +2,8 @@
 
 Uses synthetic, clearly-not-real data, but runs it through the actual
 pipeline functions (fit_phase_line, iterative_poly_clip_batch, reject_outliers)
-from mwax_calvin_utils so the plots reflect real algorithm behaviour, not
-just a hand-drawn approximation of it.
+from calibration.fitting/calibration.outliers so the plots reflect real
+algorithm behaviour, not just a hand-drawn approximation of it.
 
 NOTE: uses iterative_poly_clip_batch, not the per-tile iterative_poly_clip,
 because the batch version is the one the production pipeline actually calls
@@ -25,11 +25,8 @@ import pandas as pd
 
 sys.path.insert(0, "src")
 
-from mwax_mover.mwax_calvin_utils import (
-    fit_phase_line,
-    iterative_poly_clip_batch,
-    reject_outliers,
-)
+from mwax_mover.calibration.fitting import fit_phase_line
+from mwax_mover.calibration.outliers import iterative_poly_clip_batch, reject_outliers
 
 rng = np.random.default_rng(42)
 

@@ -801,20 +801,78 @@ on the first pass -- no missing imports this time, unlike commits 3 and 4.
 tests/test000_architecture.py: all 5 pass. Full test suite: 456 passed,
 5 deselected, 0 failed, on a 16-minute run.
 
+## Phase 5: docs (complete)
+
+The 115-prose-reference estimate from the original Migration surface table
+turned out to be almost entirely paid down already: every phase's own
+import-site sweep fixed the stale references it created as it went (each
+phase's write-up above documents that). What was actually left, found by
+grepping the whole repo for every renamed file's old name:
+
+- **README.md's "Module Reference" section** -- the real bulk of this
+  phase. ~115 lines describing every module by its pre-restructure flat
+  filename. Rewritten in full, reorganised to mirror the current package
+  tree (`core/`, `db/`, `fits/`, `filesystem/`, `net/`, `archive/`,
+  `queues/`, `processors/`, `calibration/`, `calvin/` including
+  `calvin/plots/`, `beamformer/`) rather than the old roughly-alphabetical
+  flat list, with each module's description re-derived from its current
+  docstring rather than copied forward unchanged.
+- **CALVIN.md** -- two mentions of `pad_gain_fit_info in mwax_calvin_utils.py`
+  (now `calibration/fitting.py`). Everything else in it already described
+  behaviour and class/method names, not file paths, so needed no change.
+- **`docs/img/make_illustrations.py`** -- a standalone script (not under
+  `src/` or `tests/`, but still in `ruff check .`'s scope per
+  `.github/workflows/ci.yml`) that imports `fit_phase_line`,
+  `iterative_poly_clip_batch`, `reject_outliers` from the long-deleted
+  `mwax_calvin_utils` to render CALVIN.md's illustration PNGs. Genuinely
+  broken (not just stale prose) -- would `ImportError` if run. Fixed and
+  actually re-run to confirm it still produces output; the regenerated
+  PNGs were reverted afterward (not byte-identical to the committed ones,
+  likely rendering/metadata noise rather than a real change, and
+  regenerating images is not this phase's concern).
+- **`.pre-commit-config.yaml` and `pyproject.toml`** -- both checked in
+  full. Neither contains a single file-path reference; both are already
+  entirely restructure-agnostic. Nothing to do.
+- **`CHANGELOG.md`** -- deliberately left alone. Its entries describe
+  past releases using the filenames that existed *at the time of each
+  entry*; rewriting them to current names would misrepresent history
+  rather than fix it, the opposite of what this phase is for.
+
+Everything else the sweep found (in `docs/RESTRUCTURE.md` itself, and in
+source docstrings/test module docstrings across `calvin/`,
+`calibration/`, `core/command.py`, and five test files) was already an
+intentional "moved from X" / "used to live in X" historical note, not a
+stale claim about current structure -- confirmed by reading each hit's
+surrounding context individually rather than assuming a name match means
+a fix is needed.
+
+**Resolved:** README.md's "## mwax_mover command line tool" section
+(usage, mode flags, a `./mwax_mover.py` invocation example) described a
+CLI tool that no longer exists anywhere in `src/` -- confirmed by
+grepping for its own documented flags (`WATCHDIR`, `WATCHEXT`,
+`EXECUTABLEPATH`), which appear nowhere in the codebase, and it was
+absent from `pyproject.toml`'s `[project.scripts]`. Predates the
+restructure and is a different kind of problem than a stale path
+reference, so raised with Greg rather than resolved unilaterally;
+confirmed, then deleted -- the whole section, its horizontal-rule
+separator (kept the one on the other side, so the doc still reads as
+one rule between sections, not zero or two), and its bullet in the
+intro's service list (also correcting "Five long-running services" to
+"Four").
+
+Verified: ruff check, ruff format --check, ty check src/ tests/ all
+clean. tests/test000_architecture.py: all 5 pass. No src/ or tests/
+files changed this phase, so the full suite was not re-run -- nothing
+in it could have regressed.
+
 ## Remaining phases
 
-Ordering principle: leaves first, to prove the tooling before it touches the
-high-fan-in god-modules.
+**All five phases are now complete.** Every item originally scoped --
+`core/`, `fits/`+`filesystem/`+`net/`, `calibration/`+`calvin/` in full
+(including the `mwax_asvo_helper.py` -> `calvin/asvo.py` move), and the
+docs pass -- is done; see the sections above.
 
-**Phases 3 and 4 are complete, and every file named in the target
-structure's `calvin/` list has now moved** (`mwax_asvo_helper.py` ->
-`calvin/asvo.py` was the last one). `core/`, `fits/`+`filesystem/`+`net/`,
-`calibration/`+`calvin/` in full, are all done; see those sections above.
-
-**Phase 5 -- docs.** The 115 prose module references, `README.md`, `CALVIN.md`,
-`.pre-commit-config.yaml`.
-
-**Also outstanding (test-side, can happen any time):** move test modules into a
+**Still outstanding (test-side, can happen any time):** move test modules into a
 mirror of the package structure (`tests/calibration/test_fitting.py`, etc.).
 Fixture data stays in one shared `tests/data/` -- it is 414 MB across 29 obsid
 directories, several shared between test modules, so splitting it per package
