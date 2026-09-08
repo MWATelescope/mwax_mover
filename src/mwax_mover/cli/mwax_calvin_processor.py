@@ -33,10 +33,10 @@ from mwax_mover import (
 from mwax_mover.archive.archiver import copy_file_rsync
 from mwax_mover.calvin.birli import estimate_birli_output_bytes, run_birli
 from mwax_mover.calvin.hyperdrive import run_hyperdrive
-from mwax_mover.calvin.pipeline import CalvinJobType
+from mwax_mover.calvin.pipeline import CalvinJobType, process_solutions
+from mwax_mover.calvin.plots.index import generate_plot_index_file
 from mwax_mover.calvin.solution_files import (
     export_calibration_solutions,
-    generate_plot_index_file,
     reap_orphaned_staging_dirs,
     upload_plot_files,
 )
@@ -54,7 +54,6 @@ from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.filesystem.files import extract_tar, remove_file
 from mwax_mover.filesystem.naming import get_data_files_with_hostname_for_obsid_from_webservice
 from mwax_mover.fits.metafits import download_metafits_file
-from mwax_mover.mwax_calvin_solutions import process_solutions
 from mwax_mover.net.asvo import extract_filename_from_mwa_asvo_signed_url, run_giant_squid
 from mwax_mover.net.multicast import get_ip_address, send_multicast
 from mwax_mover.net.s3 import check_remote_file_exists, rclone_delete_file

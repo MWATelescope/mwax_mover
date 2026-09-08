@@ -253,7 +253,7 @@ class GainFitInfo(NamedTuple):
 
     Note on naming: despite the names, `pol0`/`pol1` are NOT related to
     polarisation (XX/YY) -- a separate GainFitInfo is already computed per
-    polarisation (see e.g. x_gains/y_gains in mwax_calvin_solutions.py).
+    polarisation (see e.g. x_gains/y_gains in calvin.pipeline.process_solutions).
     Within a single GainFitInfo, `pol0`/`pol1` are the order-0 (intercept)
     and order-1 (slope) coefficients of a small linear polynomial fit to
     gain amplitude vs. chanblock index, done *within* each coarse channel

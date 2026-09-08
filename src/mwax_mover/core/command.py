@@ -3,15 +3,58 @@
 Provides run_command_ext() for synchronous execution (with optional NUMA node
 pinning, timeout, and shell mode), run_command_popen() for asynchronous execution
 returning a Popen handle, and check_popen_finished() to wait for a Popen process
-and retrieve its exit code and output.
+and retrieve its exit code and output. write_readme_file() is a generic
+command-log writer for callers of these (calvin.birli.run_birli(),
+calvin.hyperdrive.run_hyperdrive()) to record what was run, alongside its
+exit code and output, next to the job's output files -- moved here from
+calvin/pipeline.py (docs/RESTRUCTURE.md Phase 4) once merging
+mwax_hyperdrive_solutions.py into calvin.hyperdrive made keeping it there
+create a two-file import cycle (calvin.pipeline needs HyperfitsSolution
+from calvin.hyperdrive; calvin.hyperdrive needs write_readme_file from
+calvin.pipeline). It has no calvin-specific logic, so core.command --
+already the shared home for the run_command_ext/run_command_popen it logs
+the outcome of -- has no reason to ever import calvin, and the cycle can't
+recur.
 """
 
+import datetime
 import logging
 import os
 import shlex
 import subprocess
 
 logger = logging.getLogger(__name__)
+
+
+def write_readme_file(filename, cmd, exit_code, output, error):
+    """Write a readme file documenting the result of a command or operation.
+
+    Used both for subprocess results (birli, hyperdrive) and for recording
+    Python exception details on failure.
+
+    Args:
+        filename: Path to write the readme file to.
+        cmd: The command or operation that was executed.
+        exit_code: The exit code or error code (0 = success).
+        output: Standard output from the command, or empty string.
+        error: Standard error from the command, or exception traceback text.
+    """
+    try:
+        with open(filename, "w", encoding="UTF-8") as readme:
+            if exit_code == 0:
+                readme.write(f"This run succeeded at: {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
+            else:
+                readme.write(f"This run failed at: {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
+            readme.write(f"Command: {cmd}\n")
+            readme.write(f"Exit code: {exit_code}\n")
+            readme.write(f"output: {output}\n")
+            readme.write(f"error: {error}\n")
+
+    except Exception:
+        logger.warning(
+            (f"Could not write text file {filename} describing the problem observation."),
+            exc_info=True,
+        )
 
 
 def _apply_numa_binding(command: str, numa_node: int | None) -> str:

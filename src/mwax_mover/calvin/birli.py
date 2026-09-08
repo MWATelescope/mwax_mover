@@ -2,7 +2,7 @@
 
 run_birli() shells out to the Birli binary via a Popen handle (so it can be
 signalled/waited on alongside other work) and writes a readme
-(calvin.pipeline.write_readme_file) recording the command and outcome.
+(core.command.write_readme_file) recording the command and outcome.
 estimate_birli_output_bytes() is a pre-flight storage-size estimate from
 the observation's metafits parameters, used before running Birli at all.
 """
@@ -17,8 +17,7 @@ import numpy as np
 from mwalib import MetafitsContext
 
 from mwax_mover.calibration.models import Metafits
-from mwax_mover.calvin.pipeline import write_readme_file
-from mwax_mover.core.command import check_popen_finished, run_command_popen
+from mwax_mover.core.command import check_popen_finished, run_command_popen, write_readme_file
 
 logger = logging.getLogger(__name__)
 

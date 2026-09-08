@@ -12,7 +12,7 @@ import os
 import sys
 from pathlib import Path
 
-from mwax_mover.calvin.solution_files import generate_plot_index_file
+from mwax_mover.calvin.plots.index import generate_plot_index_file
 
 
 def main() -> None:

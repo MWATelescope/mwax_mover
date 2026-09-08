@@ -3,7 +3,7 @@
 Each function converts one HDU's raw FITS array data (SOLUTIONS, RESULTS,
 TILES, or BASELINES) into a more usable form. These are hyperdrive
 solution-format-specific, not generic FITS utilities -- see
-mwax_hyperdrive_solutions.py for the higher-level reader built on these.
+calvin.hyperdrive for the higher-level reader built on these.
 """
 
 import numpy as np

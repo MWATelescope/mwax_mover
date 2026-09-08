@@ -3,10 +3,11 @@
 reject_outliers() is the core robust (MAD-based), iteratively-refined
 per-group threshold test. annotate_phase_outliers() is the single shared
 definition of "phase outlier" used everywhere in the Calvin pipeline
-(both mwax_hyperdrive_solutions.py's reporting-only detection and
-mwax_calvin_plots.py's stats/debug plots route through it, so the
-threshold can never silently disagree between the two). iterative_poly_clip
-(_batch) fits a robust, sigma-clipped polynomial and flags outliers.
+(both calvin.hyperdrive's reporting-only detection and
+calvin.plots.stats_table/phase_fits's stats/debug plots route through it,
+so the threshold can never silently disagree between the two).
+iterative_poly_clip(_batch) fits a robust, sigma-clipped polynomial and
+flags outliers.
 """
 
 import numpy as np
@@ -412,9 +413,10 @@ def annotate_phase_outliers(
     everywhere in the Calvin pipeline: HyperfitsSolutionGroup.
     detect_phase_outliers (which only reports the result -- see its
     docstring for why phase outliers are no longer flagged or modified),
-    and mwax_calvin_plots.write_stats_and_debug_plots (which feeds the
+    and calvin.plots.stats_table.write_before_after_stats (which feeds the
     same annotated DataFrame to both the stats.txt Flavor/PhOutlier
-    columns and the phase-fit debug plots). Routing every caller through
+    columns and, via calvin.plots.phase_fits.write_debug_phase_fit_plots,
+    the phase-fit debug plots). Routing every caller through
     one function keeps that definition consistent -- previously the
     plotting path independently recomputed this with a hardcoded nstd,
     which could silently disagree with the actual detection threshold.

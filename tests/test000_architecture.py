@@ -60,9 +60,6 @@ LAYERS: dict[int, tuple[str, ...]] = {
     # L4: domain logic -- the queue-worker processors, and everything
     # calibration. These know about MWA data products and pipelines.
     4: (
-        "mwax_hyperdrive_solutions",
-        "mwax_calvin_plots",
-        "mwax_calvin_solutions",
         "mwax_asvo_helper",
         "processors",
         "calibration",

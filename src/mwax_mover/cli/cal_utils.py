@@ -57,17 +57,12 @@ import sys
 from pathlib import Path
 
 from mwax_mover.calibration.models import Metafits
+from mwax_mover.calvin.hyperdrive import HyperfitsSolution, HyperfitsSolutionGroup, write_hyperdrive_stats
+from mwax_mover.calvin.plots.gains import plot_outlier_gains
+from mwax_mover.calvin.plots.hyperdrive_plots import generate_hyperdrive_plots_for_files
+from mwax_mover.calvin.plots.phase_fits import write_debug_phase_fit_plots
+from mwax_mover.calvin.plots.stats_table import write_before_after_stats
 from mwax_mover.fits.metafits import download_metafits_file
-from mwax_mover.mwax_calvin_plots import (
-    generate_hyperdrive_plots_for_files,
-    plot_outlier_gains,
-    write_hyperdrive_stats,
-    write_stats_and_debug_plots,
-)
-from mwax_mover.mwax_hyperdrive_solutions import (
-    HyperfitsSolution,
-    HyperfitsSolutionGroup,
-)
 
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(message)s"))
@@ -159,18 +154,24 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
         print(f"Warning: hyperdrive plots failed for {failed_file}: {plots_error}")
 
     # Single combined stats file: before/after per-tile stats first, then
-    # hyperdrive convergence stats below -- write_stats_and_debug_plots()
-    # (shared with mwax_calvin_processor) also generates the phase-fit
-    # debug plots (rx_lengths/phase_fits_xx/yy/intercepts/residual).
+    # hyperdrive convergence stats below -- write_before_after_stats()
+    # (shared with calvin.pipeline.process_solutions) also generates the
+    # phase-fit debug plots via write_debug_phase_fit_plots()
+    # (rx_lengths/phase_fits_xx/yy/intercepts/residual).
     stats_path = os.path.join(args.output_path, f"{obs_id}_stats.txt")
     with open(stats_path, "w", encoding="utf-8") as stats_fd:
-        write_stats_and_debug_plots(
+        phase_fits = write_before_after_stats(
             soln_group,
-            refant["name"],
-            args.phase_fit_niter,
-            args.output_path,
             obs_id,
             stats_fd,
+            phase_outlier_nstd=args.phase_outlier_nstd,
+        )
+        write_debug_phase_fit_plots(
+            soln_group,
+            refant["name"],
+            phase_fits,
+            args.output_path,
+            obs_id,
             phase_outlier_nstd=args.phase_outlier_nstd,
         )
 

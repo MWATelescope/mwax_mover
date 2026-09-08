@@ -1,5 +1,6 @@
 """
-Tests for mwax_calvin_solutions.py
+Tests for process_solutions(), merged from mwax_calvin_solutions.py into
+calvin.pipeline (docs/RESTRUCTURE.md Phase 4).
 
 Covers process_solutions() using:
   - Real test data from tests/data/1365977896/
@@ -23,7 +24,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from tests_common import obs_data_dir, setup_test_directories
 
-from mwax_mover.mwax_calvin_solutions import process_solutions
+from mwax_mover.calvin.pipeline import process_solutions
 
 logger = logging.getLogger(__name__)
 
@@ -81,11 +82,11 @@ def _make_mock_db_handler(fit_id: int = 99, fit_success: bool = True, soln_succe
 
     with (
         patch(
-            "mwax_mover.mwax_calvin_solutions.insert_calibration_fits_row",
+            "mwax_mover.calvin.pipeline.insert_calibration_fits_row",
             return_value=fit_return,
         ),
         patch(
-            "mwax_mover.mwax_calvin_solutions.insert_calibration_solutions_row",
+            "mwax_mover.calvin.pipeline.insert_calibration_solutions_row",
             return_value=soln_success,
         ),
     ):
@@ -135,11 +136,11 @@ def test_process_solutions_success(real_data_paths, tmp_path):
 
     with (
         patch(
-            "mwax_mover.mwax_calvin_solutions.insert_calibration_fits_row",
+            "mwax_mover.calvin.pipeline.insert_calibration_fits_row",
             return_value=(True, 42),
         ) as mock_fit_insert,
         patch(
-            "mwax_mover.mwax_calvin_solutions.insert_calibration_solutions_row",
+            "mwax_mover.calvin.pipeline.insert_calibration_solutions_row",
             return_value=True,
         ),
     ):
@@ -271,7 +272,7 @@ def test_process_solutions_db_fit_insert_fails(real_data_paths, tmp_path):
     mock_db.pool.connection.return_value.__exit__ = MagicMock(return_value=False)
 
     with patch(
-        "mwax_mover.mwax_calvin_solutions.insert_calibration_fits_row",
+        "mwax_mover.calvin.pipeline.insert_calibration_fits_row",
         return_value=(False, None),
     ):
         success, error_msg, fit_id = process_solutions(
@@ -317,11 +318,11 @@ def test_process_solutions_db_soln_insert_fails(real_data_paths, tmp_path):
 
     with (
         patch(
-            "mwax_mover.mwax_calvin_solutions.insert_calibration_fits_row",
+            "mwax_mover.calvin.pipeline.insert_calibration_fits_row",
             return_value=(True, 55),
         ),
         patch(
-            "mwax_mover.mwax_calvin_solutions.insert_calibration_solutions_row",
+            "mwax_mover.calvin.pipeline.insert_calibration_solutions_row",
             return_value=False,
         ),
     ):
@@ -369,7 +370,7 @@ def test_process_solutions_readme_written_on_any_exception(real_data_paths, tmp_
     mock_conn.cursor.return_value = mock_cursor
 
     with patch(
-        "mwax_mover.mwax_calvin_solutions.insert_calibration_fits_row",
+        "mwax_mover.calvin.pipeline.insert_calibration_fits_row",
         side_effect=RuntimeError("injected test error"),
     ):
         success, error_msg, fit_id = process_solutions(
@@ -431,7 +432,7 @@ def test_process_solutions_no_solution_files_in_output(real_data_paths, tmp_path
 
 def test_process_solutions_calls_plot_debug_phase_fits(real_data_paths, tmp_path):
     """process_solutions() must call plot_debug_phase_fits (via
-    write_stats_and_debug_plots()) unconditionally -- there's no longer a
+    write_debug_phase_fit_plots()) unconditionally -- there's no longer a
     produce_debug_plots toggle to skip it. Mocked here so the test stays
     fast and doesn't require real matplotlib rendering.
     """
@@ -452,14 +453,14 @@ def test_process_solutions_calls_plot_debug_phase_fits(real_data_paths, tmp_path
 
     with (
         patch(
-            "mwax_mover.mwax_calvin_solutions.insert_calibration_fits_row",
+            "mwax_mover.calvin.pipeline.insert_calibration_fits_row",
             return_value=(True, 77),
         ),
         patch(
-            "mwax_mover.mwax_calvin_solutions.insert_calibration_solutions_row",
+            "mwax_mover.calvin.pipeline.insert_calibration_solutions_row",
             return_value=True,
         ),
-        patch("mwax_mover.mwax_calvin_plots.plot_debug_phase_fits") as mock_debug,
+        patch("mwax_mover.calvin.plots.phase_fits.plot_debug_phase_fits") as mock_debug,
     ):
         process_solutions(
             db_handler_object=mock_db,
@@ -525,7 +526,7 @@ def test_some_fits_false_logs_warning():
         ]
     )
 
-    with patch("mwax_mover.mwax_calvin_solutions.logger") as mock_logger:
+    with patch("mwax_mover.calvin.pipeline.logger") as mock_logger:
         # Reproduce the exact some_fits block from process_solutions
         some_fits = False
         try:
@@ -589,11 +590,11 @@ def test_process_solutions_success_2():
 
     with (
         patch(
-            "mwax_mover.mwax_calvin_solutions.insert_calibration_fits_row",
+            "mwax_mover.calvin.pipeline.insert_calibration_fits_row",
             return_value=(True, 999),
         ) as mock_fit_insert,
         patch(
-            "mwax_mover.mwax_calvin_solutions.insert_calibration_solutions_row",
+            "mwax_mover.calvin.pipeline.insert_calibration_solutions_row",
             return_value=True,
         ),
     ):
@@ -1040,11 +1041,11 @@ def test_process_solutions_partial_coarse_channels(tmp_path):
 
     with (
         patch(
-            "mwax_mover.mwax_calvin_solutions.insert_calibration_fits_row",
+            "mwax_mover.calvin.pipeline.insert_calibration_fits_row",
             return_value=(True, 42),
         ),
         patch(
-            "mwax_mover.mwax_calvin_solutions.insert_calibration_solutions_row",
+            "mwax_mover.calvin.pipeline.insert_calibration_solutions_row",
             side_effect=_capture_soln,
         ),
     ):

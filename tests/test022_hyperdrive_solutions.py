@@ -1,5 +1,7 @@
 """
-Tests for the mwax_hyperdrive_solutions.py module.
+Tests for the reading/flagging side of what used to be
+mwax_hyperdrive_solutions.py, now merged into calvin.hyperdrive
+(docs/RESTRUCTURE.md Phase 4).
 
 Covers:
   - HyperfitsSolution.get_jones / chanblock_converged / baseline_tile_flags / write_jones
@@ -7,10 +9,11 @@ Covers:
     enforce_whole_jones_nan / weights / process_phase_fits / process_gain_fits_for_db
 
 NOTE: HyperfitsSolution/HyperfitsSolutionGroup were moved out of
-mwax_calvin_utils.py into this module's source file
-(mwax_hyperdrive_solutions.py). Several tests below moved with them from
-test014_calvin_utils.py, where they previously lived (the weights tests,
-and process_phase_fits/process_gain_fits_for_db -- the latter now methods on
+mwax_calvin_utils.py into what was then this module's source file
+(mwax_hyperdrive_solutions.py, since merged into calvin/hyperdrive.py).
+Several tests below moved with them from test014_calvin_utils.py, where
+they previously lived (the weights tests, and process_phase_fits/
+process_gain_fits_for_db -- the latter now methods on
 HyperfitsSolutionGroup rather than free functions, so their tests were
 rewritten rather than moved verbatim).
 
@@ -37,7 +40,7 @@ from tests_common import data_path, obs_metafits_path
 
 from mwax_mover.calibration.models import Metafits
 from mwax_mover.calibration.outliers import reject_outliers
-from mwax_mover.mwax_hyperdrive_solutions import (
+from mwax_mover.calvin.hyperdrive import (
     ChannelFlagReason,
     HyperfitsSolution,
     HyperfitsSolutionGroup,
@@ -1094,8 +1097,8 @@ def test_run_flagging_pipeline_detect_phase_outliers_runs_last():
     by checking the end result (which can't distinguish the two orderings
     on its own, since detect_phase_outliers never affects flagging either
     way). This ordering is what lets group.phase_fits end up equal to the
-    truly final state, which write_stats_and_debug_plots then reuses
-    instead of recomputing (see the dedicated test for that).
+    truly final state, which write_before_after_stats/write_debug_phase_fit_plots
+    then reuse instead of recomputing (see the dedicated test for that).
     """
     n_tiles = 5
     group = _make_fake_group(n_tiles=n_tiles, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
@@ -1134,17 +1137,19 @@ def test_run_flagging_pipeline_detect_phase_outliers_runs_last():
     ]
 
 
-def test_write_stats_and_debug_plots_reuses_final_phase_fit_without_recomputing():
-    """write_stats_and_debug_plots must not call process_phase_fits again
-    for the "after" state -- group.phase_fits (populated by
-    detect_phase_outliers, now running last in run_flagging_pipeline) is
-    already the final state and should be reused directly, not
-    recomputed. Regression test for the whole point of the reordering:
-    phase fitting is expensive (~2 minutes for a 256-tile real
-    observation in testing), so silently recomputing it a second time
-    for reporting is a real cost, not just a theoretical one.
+def test_write_before_after_stats_reuses_final_phase_fit_without_recomputing():
+    """write_before_after_stats/write_debug_phase_fit_plots (split from the
+    former combined write_stats_and_debug_plots) must not call
+    process_phase_fits again for the "after" state -- group.phase_fits
+    (populated by detect_phase_outliers, now running last in
+    run_flagging_pipeline) is already the final state and should be
+    reused directly, not recomputed. Regression test for the whole point
+    of the reordering: phase fitting is expensive (~2 minutes for a
+    256-tile real observation in testing), so silently recomputing it a
+    second time for reporting is a real cost, not just a theoretical one.
     """
-    from mwax_mover.mwax_calvin_plots import write_stats_and_debug_plots
+    from mwax_mover.calvin.plots.phase_fits import write_debug_phase_fit_plots
+    from mwax_mover.calvin.plots.stats_table import write_before_after_stats
 
     n_tiles = 5
     group = _make_fake_group(n_tiles=n_tiles, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
@@ -1164,19 +1169,26 @@ def test_write_stats_and_debug_plots_reuses_final_phase_fit_without_recomputing(
 
         with (
             patch.object(HyperfitsSolutionGroup, "process_phase_fits", counting_process_phase_fits),
-            patch("mwax_mover.mwax_calvin_plots.plot_debug_phase_fits", return_value=None),
+            patch("mwax_mover.calvin.plots.phase_fits.plot_debug_phase_fits", return_value=None),
         ):
-            write_stats_and_debug_plots(
+            final_phase_fits = write_before_after_stats(
                 group,
-                "Tile001",
-                phase_fit_niter=1,
-                output_path="/tmp",
                 obs_id=1,
                 stats_fd=io.StringIO(),
                 phase_outlier_nstd=3.0,
             )
+            write_debug_phase_fit_plots(
+                group,
+                "Tile001",
+                final_phase_fits,
+                output_path="/tmp",
+                obs_id=1,
+                phase_outlier_nstd=3.0,
+            )
 
-    assert call_count == 0, "write_stats_and_debug_plots should reuse group.phase_fits, not recompute it"
+    assert call_count == 0, (
+        "write_before_after_stats/write_debug_phase_fit_plots should reuse group.phase_fits, not recompute it"
+    )
 
 
 # ===========================================================================
@@ -1270,7 +1282,7 @@ class TestResultsCaching:
         hs = HyperfitsSolution(SOLUTIONS_PATH)
         opens: list[str] = []
 
-        with patch("mwax_mover.mwax_hyperdrive_solutions.fits.open", side_effect=self._counting_fits_open(opens)):
+        with patch("mwax_mover.calvin.hyperdrive.fits.open", side_effect=self._counting_fits_open(opens)):
             first = hs.results
             for _ in range(5):
                 _ = hs.results
@@ -1292,7 +1304,7 @@ class TestResultsCaching:
         group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
         opens: list[str] = []
 
-        with patch("mwax_mover.mwax_hyperdrive_solutions.fits.open", side_effect=self._counting_fits_open(opens)):
+        with patch("mwax_mover.calvin.hyperdrive.fits.open", side_effect=self._counting_fits_open(opens)):
             _ = group.results
 
         # Previously two: one for the length-validation loop, one for the concat
@@ -1304,7 +1316,7 @@ class TestResultsCaching:
         group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
         opens: list[str] = []
 
-        with patch("mwax_mover.mwax_hyperdrive_solutions.fits.open", side_effect=self._counting_fits_open(opens)):
+        with patch("mwax_mover.calvin.hyperdrive.fits.open", side_effect=self._counting_fits_open(opens)):
             for _ in range(4):
                 _ = group.weights
 
@@ -1324,7 +1336,7 @@ class TestResultsCaching:
             opens.append(str(name))
             raise KeyError("RESULTS")
 
-        with patch("mwax_mover.mwax_hyperdrive_solutions.fits.open", side_effect=_open_without_results):
+        with patch("mwax_mover.calvin.hyperdrive.fits.open", side_effect=_open_without_results):
             for _ in range(3):
                 with pytest.raises(KeyError):
                     _ = hs.results

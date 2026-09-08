@@ -298,7 +298,7 @@ Phase 5 sweep, just the ones sitting in files this commit already touched):
 `mwax_calvin_controller.py` had a `` `mwax_db.insert_calibration_fits_row` ``
 cross-reference in a docstring.
 
-## Phase 3 (in progress)
+## Phase 3 (complete)
 
 Splitting `utils.py` and `mwax_calvin_utils.py` into `core/`, `fits/`,
 `filesystem/`, `net/`, `calibration/`, `calvin/` is by far the largest phase --
@@ -612,23 +612,169 @@ tests/test000_architecture.py: all 5 pass, `KNOWN_CYCLES` empty. Full test
 suite: 456 passed, 5 deselected, 0 failed -- identical to the Phase 2
 baseline, on a 20-minute run (the slowest yet, still dominated by test020).
 
+## Phase 4: mwax_calvin_plots.py + mwax_hyperdrive_solutions.py + mwax_calvin_solutions.py into calvin/ (complete)
+
+Originally scoped as just splitting `mwax_calvin_plots.py` (2377 lines, 41
+symbols) into `calvin/plots/{layout,phase_fits,hyperdrive_plots,gains,
+stats_table,index}.py`, per the target structure. Widened before writing
+any code, per Greg's call: `mwax_hyperdrive_solutions.py` (8 symbols) and
+`mwax_calvin_solutions.py` (`process_solutions`, the whole file) also fold
+into `calvin/` in this same commit, rather than waiting for a phase that
+was never separately scheduled.
+
+| old | new |
+|---|---|
+| `plot_dpi`, `plot_figsize`, plus their 2 `_PYTEST_PLOT_*` constants | `calvin/plots/layout.py` |
+| `plot_debug_phase_fits`, `plot_rx_lengths`, `plot_phase_fits`, `plot_phase_intercepts`, `plot_phase_residual` | `calvin/plots/phase_fits.py` |
+| `generate_hyperdrive_plots(_for_files)` | `calvin/plots/hyperdrive_plots.py` |
+| `plot_combined_gains`, `plot_outlier_gains`, ~19 private helpers/constants (stitching, paging, memory-budgeted rendering) | `calvin/plots/gains.py` |
+| `build_tile_stats_rows`, `write_tile_stats_table` | `calvin/plots/stats_table.py` |
+| `generate_plot_index_file`, `populate_index_json_entry`, `get_file_description` (relocated a second time -- see below) | `calvin/plots/index.py` |
+| all of `mwax_hyperdrive_solutions.py` (`TileFlagReason`, `ChannelFlagReason`, 4 private helpers, `HyperfitsSolution`, `HyperfitsSolutionGroup`), plus `get_convergence_summary` (relocated a second time) | `calvin/hyperdrive.py` (merged with the existing `run_hyperdrive`/`write_hyperdrive_stats` seed) |
+| `process_solutions` (all of `mwax_calvin_solutions.py`) | `calvin/pipeline.py` (merged with the existing `CalvinJobType` seed) |
+
+`mwax_calvin_plots.py`, `mwax_hyperdrive_solutions.py`, and
+`mwax_calvin_solutions.py` are all deleted outright.
+
+### Three decisions made before writing any code
+
+Confirmed with Greg first, since each changes the shape of the commit
+rather than just where a symbol lands:
+
+- **Deduplicate `write_hyperdrive_stats`.** `mwax_calvin_plots.py` had its
+  own copy, byte-for-byte identical to the one already in `calvin/hyperdrive.py`
+  from commit 3 -- noted then, not acted on. Checking actual callers before
+  choosing which copy to keep (rather than assuming the newer one) found
+  both real call sites (`mwax_calvin_solutions.py`, `cli/cal_utils.py`)
+  used the `mwax_calvin_plots.py` copy; the commit-3 copy in
+  `calvin/hyperdrive.py` had zero callers. Kept the `calvin/hyperdrive.py`
+  copy (its home was always going to be right, once
+  `mwax_hyperdrive_solutions.py` merged in beside it) and repointed both
+  callers to it.
+- **`generate_plot_index_file`/`populate_index_json_entry`/`get_file_description`
+  move a second time**, from `calvin/solution_files.py` (commit 3's best
+  guess, before `calvin/plots/` existed) to the new `calvin/plots/index.py`
+  -- the "index" slot the target structure's `plots/{...,index}` entry was
+  naming all along.
+- **Split `write_stats_and_debug_plots` by concern, not by file.** Rather
+  than picking one of `calvin.plots.stats_table`/`calvin.plots.phase_fits`
+  to own the whole function and importing the other's half in, it became
+  two functions: `write_before_after_stats()` (stats_table.py) and
+  `write_debug_phase_fit_plots()` (phase_fits.py), the latter taking the
+  former's return value (the final annotated phase-fit DataFrame) as a
+  parameter instead of recomputing it. This is the one place in this
+  commit that is not a pure lift-and-shift -- the function's actual logic
+  is unchanged, but its signature and call sites are new. Updated 2
+  production call sites (`calvin/pipeline.py`'s `process_solutions`,
+  `cli/cal_utils.py`'s `run_pipeline`) and the dedicated regression test
+  (`test022_hyperdrive_solutions.py::test_write_before_after_stats_reuses_final_phase_fit_without_recomputing`,
+  renamed from `test_write_stats_and_debug_plots_...`) to call both
+  functions in sequence, preserving the original ordering (stats first,
+  then plots) and the original behaviour the regression test guards:
+  `process_phase_fits` must not be called again for the "after" state.
+
+### Two new cycles, both created by this merge itself
+
+Neither existed before this commit; both came from putting two things in
+the same file that each needed something the other file provided:
+
+- **`calvin.pipeline` <-> `calvin.hyperdrive`.** Merging `process_solutions`
+  into `calvin/pipeline.py` meant it now needed `HyperfitsSolution`/
+  `HyperfitsSolutionGroup`/`write_hyperdrive_stats` from `calvin/hyperdrive.py`.
+  But `calvin/hyperdrive.py`'s `run_hyperdrive` needed `write_readme_file`
+  from `calvin/pipeline.py`. Fixed by moving `write_readme_file` into
+  `core/command.py` -- it has no calvin-specific logic (just logs a
+  command's outcome to a file) and `core.command` already owns
+  `run_command_ext`/`run_command_popen`, the thing it's logging the
+  outcome of, so it has no reason to ever import from `calvin` and the
+  cycle can't recur. Updated both callers (`calvin/birli.py`,
+  `calvin/hyperdrive.py`) to import it from there instead.
+- **`calvin.hyperdrive` <-> `calvin.solution_files`.** Merging
+  `HyperfitsSolution` into `calvin/hyperdrive.py` meant
+  `calvin/solution_files.py`'s `get_convergence_summary` (which
+  instantiates `HyperfitsSolution`) now imported from `calvin.hyperdrive`,
+  while `calvin/hyperdrive.py`'s `write_hyperdrive_stats` (its only other
+  caller) imported `get_convergence_summary` back from `calvin.solution_files`.
+  Fixed by moving `get_convergence_summary` into `calvin/hyperdrive.py`
+  too, right next to `HyperfitsSolution` and its only caller -- same fix
+  as commit 3's original cycle, one file up. `calvin/solution_files.py`
+  no longer imports anything calvin-hyperdrive-related at all.
+
+Both found by tracing the planned imports on paper before writing any
+caller-fixing code, same as commit 2's `net.webservice` cycle -- not by
+the architecture test failing first.
+
+### A backend-selection guard, now needed twice
+
+`mwax_calvin_plots.py` had a single `mpl.use("Agg")` call, positioned
+between `import matplotlib as mpl` and `import matplotlib.pyplot as plt`
+specifically because backend selection locks in at pyplot's first import
+anywhere in the process, and this pipeline never displays a figure
+interactively. Splitting the file put `from matplotlib import pyplot as plt`
+into two independent modules (`calvin/plots/phase_fits.py`,
+`calvin/plots/gains.py`) that may now be imported in either order, so the
+guard was duplicated into both, in the same position relative to the
+pyplot import, rather than centralised in `calvin/plots/layout.py` --
+centralising it would only have helped if every consumer's own import
+block happened to reach the `layout` import before its own `pyplot`
+import, which the normal (alphabetical, local-imports-last) import-block
+convention does not guarantee. Calling `mpl.use("Agg")` twice with the
+same backend, before either module's own first figure, is safe.
+`calvin/plots/hyperdrive_plots.py` needed no such guard -- it never
+imports pyplot at all.
+
+### A stats-table function's missing neighbours
+
+`build_tile_stats_rows` (now in `calvin/plots/stats_table.py`) calls
+`_format_flavor`, `_tile_flag_reason_text`, and `_channel_reason_counts_text`
+-- all three defined in `calvin/plots/gains.py`, since the original
+grouping only tracked which *file* a function moved to, not which other
+functions in the same old file it still called across the new split.
+Caught by `ty check` (`unresolved-import`... actually `unresolved-reference`
+inside the function body), not by the split verification, for the same
+reason as commit 3's four missing imports: verification confirms a body's
+*text* is unchanged, not that the file around it can resolve every name
+that text uses. Fixed with a same-layer import
+(`calvin.plots.stats_table -> calvin.plots.gains`, one direction only, no
+cycle).
+
+### Import-site fixing, fifth time
+
+Same three import forms as every previous phase. `cli/generate_index_json.py`
+and `tests/test021_gen_index_json.py` both still pointed at
+`calvin.solution_files.generate_plot_index_file` -- commit 3's location --
+after it moved a second time to `calvin.plots.index` in this commit; a
+grep sweep for the *old module names* (`mwax_calvin_plots`, etc.) doesn't
+catch a symbol that moved between two *new* locations, so this pair was
+caught by `ty check`, not the sweep. A useful reminder for any future
+phase that relocates something a second time: the sweep needs to check
+the symbol's immediately-prior location too, not just its original one.
+
+~35 `mock.patch` string targets across `test020_calvin_solutions.py`,
+`test022_hyperdrive_solutions.py`, and `test023_calvin_plots.py` were
+updated to their new module paths, each verified by comparing the
+occurrence count of the old and new target strings before and after the
+substitution (not just spot-checking a few), the same discipline as
+commit 2's `checksum_and_db` mock-patch fixes at similar scale.
+
+Verified: ruff check, ruff format --check, ty check src/ tests/ all clean.
+tests/test000_architecture.py: all 5 pass -- `test_no_unexpected_cycles`
+in particular, confirming both new cycles found during this commit are
+actually gone, not just hidden by the ratchet. Full test suite: 456
+passed, 5 deselected, 0 failed -- identical to every prior baseline, on a
+20-minute run.
+
 ## Remaining phases
 
 Ordering principle: leaves first, to prove the tooling before it touches the
 high-fan-in god-modules.
 
-**Phase 3 is complete** -- `core/`, `fits/`+`filesystem/`+`net/`, and
-`calibration/`+`calvin/` are all done; see the Phase 3 section above.
-`calvin/hyperdrive.py` and `calvin/pipeline.py` are seed files for now
-(only the symbols that came from `mwax_calvin_utils.py`) -- folding
-`mwax_hyperdrive_solutions.py` and `mwax_calvin_solutions.py` into them is
-not yet scheduled as its own phase; whoever picks up `mwax_calvin_plots.py`
-in Phase 4 should reassess then, since that move touches the same
-neighbourhood.
-
-**Phase 4 -- split `mwax_calvin_plots.py`** (2383 lines) into
-`calvin/plots/`. Note `fit_phase_line` is 265 lines on its own, so ~200-400 line
-files are a guide, not a rule.
+**Phases 3 and 4 are complete.** `core/`, `fits/`+`filesystem/`+`net/`,
+`calibration/`+`calvin/`, and now the rest of `calvin/` (`plots/`,
+`hyperdrive.py`, `pipeline.py` fully merged) are all done; see those
+sections above. `mwax_asvo_helper.py` (`calvin/asvo.py` in the target
+structure) is the one file named there that still hasn't moved -- not
+scoped into Phase 4, and not yet scheduled as its own phase.
 
 **Phase 5 -- docs.** The 115 prose module references, `README.md`, `CALVIN.md`,
 `.pre-commit-config.yaml`.
@@ -638,11 +784,6 @@ mirror of the package structure (`tests/calibration/test_fitting.py`, etc.).
 Fixture data stays in one shared `tests/data/` -- it is 414 MB across 29 obsid
 directories, several shared between test modules, so splitting it per package
 would duplicate or scatter it.
-
-**Also outstanding (found during commit 3, not acted on):** `mwax_calvin_plots.py`
-has its own `write_hyperdrive_stats`, byte-for-byte identical to the one now in
-`calvin/hyperdrive.py`. Worth deduplicating once both live in the same
-neighbourhood (see the Phase 4 note above), not before.
 
 ### Deliberately not doing
 

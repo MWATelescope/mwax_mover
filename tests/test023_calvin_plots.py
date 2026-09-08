@@ -1,11 +1,13 @@
 """
-Tests for the mwax_calvin_plots.py module.
+Tests for the functions that used to live in mwax_calvin_plots.py, now
+split across calvin.plots.layout/phase_fits/hyperdrive_plots/gains/
+stats_table/index (docs/RESTRUCTURE.md Phase 4).
 
 Covers:
   - build_tile_stats_rows / write_tile_stats_table
   - plot_debug_phase_fits byte-order handling (regression test only, see below)
 
-NOTE: the matplotlib-heavy plotting functions in this module
+NOTE: the matplotlib-heavy plotting functions this file exercises
 (plot_combined_gains, plot_outlier_gains, plot_debug_phase_fits, etc.) are
 otherwise exercised indirectly via tests/test020_calvin_solutions.py's
 real-fixture integration tests and manual smoke tests during development,
@@ -31,7 +33,8 @@ import pandas as pd
 import pytest
 
 from mwax_mover.calibration.models import Metafits
-from mwax_mover.mwax_calvin_plots import (
+from mwax_mover.calvin.hyperdrive import ChannelFlagReason, HyperfitsSolutionGroup, TileFlagReason
+from mwax_mover.calvin.plots.gains import (
     SINGLE_FILE_SUBPLOT_WIDTH_IN,
     STITCH_GAP_CHANBLOCKS,
     STITCHED_SUBPLOT_WIDTH_IN,
@@ -47,17 +50,10 @@ from mwax_mover.mwax_calvin_plots import (
     _channel_summary_text,
     _stitch_files,
     _stitch_reasons,
-    build_tile_stats_rows,
-    generate_hyperdrive_plots,
-    generate_hyperdrive_plots_for_files,
-    plot_debug_phase_fits,
-    write_tile_stats_table,
 )
-from mwax_mover.mwax_hyperdrive_solutions import (
-    ChannelFlagReason,
-    HyperfitsSolutionGroup,
-    TileFlagReason,
-)
+from mwax_mover.calvin.plots.hyperdrive_plots import generate_hyperdrive_plots, generate_hyperdrive_plots_for_files
+from mwax_mover.calvin.plots.phase_fits import plot_debug_phase_fits
+from mwax_mover.calvin.plots.stats_table import build_tile_stats_rows, write_tile_stats_table
 
 _N_TILES = 3
 _N_CHANBLOCKS = 10
@@ -852,7 +848,7 @@ class TestGenerateHyperdrivePlotsRename:
         other_amps.write_text("other picket")
 
         with patch(
-            "mwax_mover.mwax_calvin_plots.run_command_ext",
+            "mwax_mover.calvin.plots.hyperdrive_plots.run_command_ext",
             side_effect=self._fake_hyperdrive(tmp_path, stem),
         ):
             success, error = generate_hyperdrive_plots(
@@ -878,7 +874,7 @@ class TestGenerateHyperdrivePlotsRename:
         stem = "1391522232_ch62_solutions"
 
         with patch(
-            "mwax_mover.mwax_calvin_plots.run_command_ext",
+            "mwax_mover.calvin.plots.hyperdrive_plots.run_command_ext",
             side_effect=self._fake_hyperdrive(tmp_path, stem),
         ):
             success, _ = generate_hyperdrive_plots(
@@ -904,7 +900,7 @@ class TestGenerateHyperdrivePlotsRename:
         stem = "1391522232_ch62_solutions"
 
         with patch(
-            "mwax_mover.mwax_calvin_plots.run_command_ext",
+            "mwax_mover.calvin.plots.hyperdrive_plots.run_command_ext",
             side_effect=self._fake_hyperdrive(tmp_path, stem, suffixes=("amps", "phases", "delays")),
         ):
             generate_hyperdrive_plots(
@@ -924,7 +920,7 @@ class TestGenerateHyperdrivePlotsRename:
         (tmp_path / f"{stem}_amps_original.png").write_text("from an earlier run")
 
         with patch(
-            "mwax_mover.mwax_calvin_plots.run_command_ext",
+            "mwax_mover.calvin.plots.hyperdrive_plots.run_command_ext",
             side_effect=self._fake_hyperdrive(tmp_path, stem, suffixes=("phases",)),
         ):
             generate_hyperdrive_plots(
@@ -943,7 +939,7 @@ class TestGenerateHyperdrivePlotsRename:
         """A success with no matching plots is surfaced, not silently ignored."""
         stem = "1391522232_ch62_solutions"
 
-        with patch("mwax_mover.mwax_calvin_plots.run_command_ext", return_value=(True, "")):
+        with patch("mwax_mover.calvin.plots.hyperdrive_plots.run_command_ext", return_value=(True, "")):
             success, _ = generate_hyperdrive_plots(
                 1391522232,
                 str(tmp_path / f"{stem}.fits"),
@@ -964,7 +960,8 @@ class TestGenerateHyperdrivePlotsForFiles:
         """All solution files get a hyperdrive invocation."""
         files = [f"/data/obs_ch{c}_solutions.fits" for c in (62, 67, 73)]
 
-        with patch("mwax_mover.mwax_calvin_plots.generate_hyperdrive_plots", return_value=(True, "")) as mock_gen:
+        patch_target = "mwax_mover.calvin.plots.hyperdrive_plots.generate_hyperdrive_plots"
+        with patch(patch_target, return_value=(True, "")) as mock_gen:
             failures = generate_hyperdrive_plots_for_files(
                 123, files, "/fake/hyperdrive", "/fake/metafits.fits", "/out", before=True
             )
@@ -982,7 +979,7 @@ class TestGenerateHyperdrivePlotsForFiles:
                 return False, "hyperdrive exploded"
             return True, ""
 
-        with patch("mwax_mover.mwax_calvin_plots.generate_hyperdrive_plots", side_effect=_gen) as mock_gen:
+        with patch("mwax_mover.calvin.plots.hyperdrive_plots.generate_hyperdrive_plots", side_effect=_gen) as mock_gen:
             failures = generate_hyperdrive_plots_for_files(
                 123, files, "/fake/hyperdrive", "/fake/metafits.fits", "/out", before=True
             )
@@ -1001,7 +998,7 @@ class TestGenerateHyperdrivePlotsForFiles:
                 raise RuntimeError("boom")
             return True, ""
 
-        with patch("mwax_mover.mwax_calvin_plots.generate_hyperdrive_plots", side_effect=_gen):
+        with patch("mwax_mover.calvin.plots.hyperdrive_plots.generate_hyperdrive_plots", side_effect=_gen):
             failures = generate_hyperdrive_plots_for_files(
                 123, files, "/fake/hyperdrive", "/fake/metafits.fits", "/out", before=True
             )
@@ -1011,7 +1008,7 @@ class TestGenerateHyperdrivePlotsForFiles:
 
     def test_empty_file_list_is_a_no_op(self):
         """No files means no pool and no work."""
-        with patch("mwax_mover.mwax_calvin_plots.generate_hyperdrive_plots") as mock_gen:
+        with patch("mwax_mover.calvin.plots.hyperdrive_plots.generate_hyperdrive_plots") as mock_gen:
             assert (
                 generate_hyperdrive_plots_for_files(
                     123, [], "/fake/hyperdrive", "/fake/metafits.fits", "/out", before=True
@@ -1022,7 +1019,8 @@ class TestGenerateHyperdrivePlotsForFiles:
 
     def test_before_flag_is_passed_through(self):
         """The before/after distinction must survive the pool dispatch."""
-        with patch("mwax_mover.mwax_calvin_plots.generate_hyperdrive_plots", return_value=(True, "")) as mock_gen:
+        patch_target = "mwax_mover.calvin.plots.hyperdrive_plots.generate_hyperdrive_plots"
+        with patch(patch_target, return_value=(True, "")) as mock_gen:
             generate_hyperdrive_plots_for_files(
                 123, ["/data/a_solutions.fits"], "/fake/hyperdrive", "/fake/metafits.fits", "/out", before=False
             )
@@ -1142,7 +1140,7 @@ class TestMaxRenderWorkers:
     def test_scales_down_when_memory_is_tight(self):
         """Little memory means few concurrent renders, regardless of core count."""
         with (
-            patch("mwax_mover.mwax_calvin_plots._available_memory_bytes", return_value=int(2e9)),
+            patch("mwax_mover.calvin.plots.gains._available_memory_bytes", return_value=int(2e9)),
             patch("os.cpu_count", return_value=64),
         ):
             workers = _max_render_workers(16, stitched=True, n_pages=16)
@@ -1152,7 +1150,7 @@ class TestMaxRenderWorkers:
     def test_memory_cap_beats_cpu_count(self):
         """The bug was sizing the pool by cores alone; memory must dominate."""
         with (
-            patch("mwax_mover.mwax_calvin_plots._available_memory_bytes", return_value=int(8e9)),
+            patch("mwax_mover.calvin.plots.gains._available_memory_bytes", return_value=int(8e9)),
             patch("os.cpu_count", return_value=64),
         ):
             workers = _max_render_workers(16, stitched=True, n_pages=64)
@@ -1162,7 +1160,7 @@ class TestMaxRenderWorkers:
     def test_never_exceeds_the_page_count(self):
         """No point starting workers with no page to render."""
         with (
-            patch("mwax_mover.mwax_calvin_plots._available_memory_bytes", return_value=int(512e9)),
+            patch("mwax_mover.calvin.plots.gains._available_memory_bytes", return_value=int(512e9)),
             patch("os.cpu_count", return_value=64),
         ):
             assert _max_render_workers(16, stitched=True, n_pages=3) == 3
@@ -1170,7 +1168,7 @@ class TestMaxRenderWorkers:
     def test_never_exceeds_cpu_count(self):
         """Plenty of memory still shouldn't oversubscribe the CPUs."""
         with (
-            patch("mwax_mover.mwax_calvin_plots._available_memory_bytes", return_value=int(512e9)),
+            patch("mwax_mover.calvin.plots.gains._available_memory_bytes", return_value=int(512e9)),
             patch("os.cpu_count", return_value=2),
         ):
             assert _max_render_workers(16, stitched=True, n_pages=16) == 2
@@ -1178,7 +1176,7 @@ class TestMaxRenderWorkers:
     def test_falls_back_conservatively_when_memory_is_unknown(self):
         """Guessing low and rendering serially beats another ENOMEM."""
         with (
-            patch("mwax_mover.mwax_calvin_plots._available_memory_bytes", return_value=None),
+            patch("mwax_mover.calvin.plots.gains._available_memory_bytes", return_value=None),
             patch("os.cpu_count", return_value=64),
         ):
             assert _max_render_workers(16, stitched=True, n_pages=16) == _PAGE_RENDER_FALLBACK_WORKERS
@@ -1186,7 +1184,7 @@ class TestMaxRenderWorkers:
     def test_always_at_least_one(self):
         """Even an absurdly small budget must still make progress."""
         with (
-            patch("mwax_mover.mwax_calvin_plots._available_memory_bytes", return_value=1024),
+            patch("mwax_mover.calvin.plots.gains._available_memory_bytes", return_value=1024),
             patch("os.cpu_count", return_value=64),
         ):
             assert _max_render_workers(16, stitched=True, n_pages=16) == 1
@@ -1202,7 +1200,7 @@ class TestMaxRenderWorkers:
         available = int(8e9)
 
         with (
-            patch("mwax_mover.mwax_calvin_plots._available_memory_bytes", return_value=available),
+            patch("mwax_mover.calvin.plots.gains._available_memory_bytes", return_value=available),
             patch("os.cpu_count", return_value=64),
         ):
             workers = _max_render_workers(16, stitched=True, n_pages=64)
@@ -1212,7 +1210,7 @@ class TestMaxRenderWorkers:
     def test_stitched_pages_get_fewer_workers_than_single_file_pages(self):
         """A stitched page is bigger, so fewer of them fit at once."""
         with (
-            patch("mwax_mover.mwax_calvin_plots._available_memory_bytes", return_value=int(8e9)),
+            patch("mwax_mover.calvin.plots.gains._available_memory_bytes", return_value=int(8e9)),
             patch("os.cpu_count", return_value=64),
         ):
             stitched = _max_render_workers(16, stitched=True, n_pages=64)

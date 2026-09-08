@@ -3,7 +3,7 @@ import os
 
 from tests_common import data_path
 
-from mwax_mover.calvin.solution_files import generate_plot_index_file
+from mwax_mover.calvin.plots.index import generate_plot_index_file
 
 logger = logging.getLogger(__name__)
 logger.level = logging.DEBUG
