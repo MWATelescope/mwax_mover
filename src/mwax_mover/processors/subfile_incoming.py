@@ -13,7 +13,7 @@ import os
 import shutil
 import time
 
-from mwax_mover.mwax_calvin_utils import get_solution_fits_filename
+from mwax_mover.calvin.solution_files import get_solution_fits_filename
 from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME
 from mwax_mover.fits.metafits import get_metafits_value_from_hdu
 from mwax_mover.fits.subfile import (

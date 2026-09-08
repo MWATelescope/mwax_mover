@@ -1,5 +1,9 @@
 """
-Tests for the mwax_calvin_utils.py module
+Tests for the functions that used to live in mwax_calvin_utils.py, now split
+across calibration.models, calibration.solutions, calibration.fitting,
+calibration.outliers, calvin.pipeline, calvin.slurm, calvin.birli,
+calvin.hyperdrive, and calvin.solution_files (docs/RESTRUCTURE.md Phase 3
+commit 3).
 
 Covers:
   - estimate_birli_output_bytes()
@@ -35,28 +39,25 @@ from astropy import units as u
 from astropy.constants import c as speed_of_light  # ty: ignore[unresolved-import]
 
 from tests_common import obs_metafits_path
-import mwax_mover
-import mwax_mover.mwax_calvin_utils
-from mwax_mover.mwax_calvin_utils import (
-    MWA_NUM_COARSE_CHANS,
-    GainFitInfo,
-    PhaseFitInfo,
+from mwax_mover.calibration.fitting import (
     ensure_system_byte_order,
     fit_gain,
     fit_phase_line,
-    get_solution_fits_filename,
-    get_sorted_solution_files,
     pad_gain_fit_info,
     pad_gains_to_full_coarse,
     parse_csv_header,
-    parse_solution_channels,
-    read_results_hdu,
-    read_solutions_hdu_complex,
-    read_tiles_hdu,
-    reject_outliers,
     textwrap,
     wrap_angle,
-    write_readme_file,
+)
+from mwax_mover.calibration.models import MWA_NUM_COARSE_CHANS, GainFitInfo, PhaseFitInfo
+from mwax_mover.calibration.outliers import reject_outliers
+from mwax_mover.calibration.solutions import read_results_hdu, read_solutions_hdu_complex, read_tiles_hdu
+from mwax_mover.calvin.birli import estimate_birli_output_bytes
+from mwax_mover.calvin.pipeline import write_readme_file
+from mwax_mover.calvin.solution_files import (
+    get_solution_fits_filename,
+    get_sorted_solution_files,
+    parse_solution_channels,
 )
 
 logger = logging.getLogger(__name__)
@@ -117,7 +118,7 @@ def _make_phase_fits_df(lengths: list[float], pol: str = "XX", flavor: str = "RR
 def test_estimate_birli_output_bytes():
     test_metafits = obs_metafits_path(1244973688)
     metafits_context = mwalib.MetafitsContext(test_metafits, None)
-    calc_bytes: float = mwax_mover.mwax_calvin_utils.estimate_birli_output_bytes(metafits_context, 40, 2.0)
+    calc_bytes: float = estimate_birli_output_bytes(metafits_context, 40, 2.0)
     # Manually calculate the gigabytes
     # manual = timesteps * baselines * coarse_channels * fine_channels * pols * bytes_per_r_i (from Birli)
     manual_bytes: float = 60 * 8256 * 24 * 32 * 4 * 13
@@ -1284,7 +1285,7 @@ def test_fit_gain_basic_weighted_mean():
     solns = np.full(n_freqs, 2.0, dtype=complex)
     weights = np.ones(n_freqs)
 
-    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
+    result = fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
 
     assert len(result.gains) == n_coarse
     for g in result.gains:
@@ -1302,7 +1303,7 @@ def test_fit_gain_pol0_pol1_flat_amps():
     solns = np.full(n_freqs, 4.0, dtype=complex)
     weights = np.ones(n_freqs)
 
-    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
+    result = fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
 
     for i in range(n_coarse):
         assert result.pol0[i] == pytest.approx(0.25, rel=1e-5)  # intercept ~ 1/4.0
@@ -1319,7 +1320,7 @@ def test_fit_gain_sigma_resid_flat_amps():
     solns = np.full(n_freqs, 2.0, dtype=complex)
     weights = np.ones(n_freqs)
 
-    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
+    result = fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
 
     for i in range(n_coarse):
         assert result.sigma_resid[i] == pytest.approx(0.0, abs=1e-10)
@@ -1335,7 +1336,7 @@ def test_fit_gain_quality_all_valid():
     solns = np.full(n_freqs, 2.0, dtype=complex)
     weights = np.ones(n_freqs)
 
-    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
+    result = fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
 
     assert result.quality == pytest.approx(1.0, rel=1e-6)
 
@@ -1354,7 +1355,7 @@ def test_fit_gain_quality_reduced_by_flagged_channels():
     # Flag one entire coarse channel by zeroing its weights
     weights[:chanblocks_per_coarse] = 0.0
 
-    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
+    result = fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
 
     # Flagged coarse channel should produce nan gain
     assert np.isnan(result.gains[0])
@@ -1375,7 +1376,7 @@ def test_fit_gain_nan_solns_skipped():
     solns[:chanblocks_per_coarse] = np.nan  # entire first coarse channel is NaN
     weights = np.ones(n_freqs)
 
-    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
+    result = fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
 
     assert np.isnan(result.gains[0])
     assert not np.isnan(result.gains[1])
@@ -1391,7 +1392,7 @@ def test_fit_gain_output_lengths():
     solns = np.ones(n_freqs, dtype=complex)
     weights = np.ones(n_freqs)
 
-    result = mwax_mover.mwax_calvin_utils.fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
+    result = fit_gain(freqs_hz, solns, weights, chanblocks_per_coarse)
 
     assert len(result.gains) == n_coarse
     assert len(result.pol0) == n_coarse
@@ -1413,7 +1414,7 @@ def test_fit_phase_line_recovers_known_length():
     solns = np.exp(1j * phases)
     weights = np.ones(len(freqs_hz))
 
-    result = mwax_mover.mwax_calvin_utils.fit_phase_line(freqs_hz, solns, weights)
+    result = fit_phase_line(freqs_hz, solns, weights)
 
     assert result.length == pytest.approx(known_length_m, rel=1e-3)
 
@@ -1428,7 +1429,7 @@ def test_fit_phase_line_recovers_known_intercept():
     solns = np.exp(1j * phases)
     weights = np.ones(len(freqs_hz))
 
-    result = mwax_mover.mwax_calvin_utils.fit_phase_line(freqs_hz, solns, weights)
+    result = fit_phase_line(freqs_hz, solns, weights)
 
     assert result.intercept == pytest.approx(known_intercept, abs=1e-3)
 
@@ -1442,7 +1443,7 @@ def test_fit_phase_line_chi2dof_near_one_for_noisy_data():
     solns = np.exp(1j * (slope * freqs_hz + 0.1 + noise))
     weights = np.ones(len(freqs_hz))
 
-    result = mwax_mover.mwax_calvin_utils.fit_phase_line(freqs_hz, solns, weights)
+    result = fit_phase_line(freqs_hz, solns, weights)
 
     assert 0.0 < result.chi2dof < 10.0
 
@@ -1454,7 +1455,7 @@ def test_fit_phase_line_sigma_resid_low_for_clean_data():
     solns = np.exp(1j * (slope * freqs_hz + 0.1))
     weights = np.ones(len(freqs_hz))
 
-    result = mwax_mover.mwax_calvin_utils.fit_phase_line(freqs_hz, solns, weights)
+    result = fit_phase_line(freqs_hz, solns, weights)
 
     assert result.sigma_resid == pytest.approx(0.0, abs=1e-3)
 
@@ -1471,7 +1472,7 @@ def test_fit_phase_line_quality_reduced_by_outliers():
     solns = np.exp(1j * phases)
     weights = np.ones(len(freqs_hz))
 
-    result = mwax_mover.mwax_calvin_utils.fit_phase_line(freqs_hz, solns, weights)
+    result = fit_phase_line(freqs_hz, solns, weights)
 
     assert result.quality < 1.0
     assert 0.0 <= result.quality <= 1.0
@@ -1484,7 +1485,7 @@ def test_fit_phase_line_stderr_is_positive():
     solns = np.exp(1j * (slope * freqs_hz + 0.2))
     weights = np.ones(len(freqs_hz))
 
-    result = mwax_mover.mwax_calvin_utils.fit_phase_line(freqs_hz, solns, weights)
+    result = fit_phase_line(freqs_hz, solns, weights)
 
     assert np.isfinite(result.stderr)
     assert result.stderr > 0.0
@@ -1497,7 +1498,7 @@ def test_fit_phase_line_too_few_valid_raises():
     weights = np.ones(64)
 
     with pytest.raises(RuntimeError, match="Not enough valid phases"):
-        mwax_mover.mwax_calvin_utils.fit_phase_line(freqs_hz, solns, weights)
+        fit_phase_line(freqs_hz, solns, weights)
 
 
 class TestGetSortedSolutionFiles:

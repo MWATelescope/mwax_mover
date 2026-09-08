@@ -60,7 +60,6 @@ LAYERS: dict[int, tuple[str, ...]] = {
     # L4: domain logic -- the queue-worker processors, and everything
     # calibration. These know about MWA data products and pipelines.
     4: (
-        "mwax_calvin_utils",
         "mwax_hyperdrive_solutions",
         "mwax_calvin_plots",
         "mwax_calvin_solutions",
@@ -84,17 +83,15 @@ KNOWN_UPWARD_IMPORTS: set[tuple[str, str]] = set()
 
 # Import cycles, as frozensets of the modules involved.
 #
-# {mwax_calvin_utils, mwax_hyperdrive_solutions}:
-#     mwax_hyperdrive_solutions imports ChanInfo/Metafits/ensure_system_byte_order
-#     and the fitting helpers from mwax_calvin_utils at module level, while
-#     mwax_calvin_utils.get_convergence_summary() needs HyperfitsSolution and
-#     works around the cycle with a function-local import. The fix is to split
-#     the shared primitives down into the fits/ and calibration/ layers and move
-#     get_convergence_summary above the solutions reader, at which point this
-#     entry goes away.
-KNOWN_CYCLES: set[frozenset[str]] = {
-    frozenset({"mwax_calvin_utils", "mwax_hyperdrive_solutions"}),
-}
+# None currently known. The {mwax_calvin_utils, mwax_hyperdrive_solutions}
+# cycle (mwax_hyperdrive_solutions imported ChanInfo/Metafits/
+# ensure_system_byte_order/the fitting helpers from mwax_calvin_utils at
+# module level, while mwax_calvin_utils.get_convergence_summary() needed
+# HyperfitsSolution and worked around the cycle with a function-local
+# import) was fixed by splitting mwax_calvin_utils.py's shared primitives
+# down into calibration/ and moving get_convergence_summary into
+# calvin/solution_files.py, above the solutions reader.
+KNOWN_CYCLES: set[frozenset[str]] = set()
 
 
 def _module_name(path: Path) -> str:

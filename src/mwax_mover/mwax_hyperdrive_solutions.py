@@ -6,9 +6,10 @@ coarse-channel band, covering anywhere from 1 to 24 bands for MWA
 "picket fence" calibrators -- combined with the observation's metafits).
 
 This module is the single source of truth for reading, flagging, and
-(eventually) writing hyperdrive solutions; see mwax_calvin_utils.py for
-the pure numeric fitting functions (fit_phase_line, fit_gain, etc.) and
-mwax_calvin_plots.py for plotting.
+(eventually) writing hyperdrive solutions; see calibration/ for the shared
+data structures and pure numeric fitting/outlier functions (Metafits,
+fit_phase_line, fit_gain, annotate_phase_outliers, etc. -- formerly
+mwax_calvin_utils.py) and mwax_calvin_plots.py for plotting.
 """
 
 import itertools
@@ -25,16 +26,10 @@ from astropy.io import fits
 from numpy.typing import NDArray
 from pandas import DataFrame
 
-from mwax_mover.mwax_calvin_utils import (
-    ChanInfo,
-    GainFitInfo,
-    Metafits,
-    PhaseFitInfo,
-    annotate_phase_outliers,
-    ensure_system_byte_order,
-    fit_gain,
-    fit_phase_line,
-    iterative_poly_clip_batch,
+from mwax_mover.calibration.fitting import ensure_system_byte_order, fit_gain, fit_phase_line
+from mwax_mover.calibration.models import ChanInfo, GainFitInfo, Metafits, PhaseFitInfo
+from mwax_mover.calibration.outliers import annotate_phase_outliers, iterative_poly_clip_batch
+from mwax_mover.calibration.solutions import (
     read_baseline_tile_flags,
     read_results_hdu,
     read_solutions_hdu_complex,
@@ -1209,7 +1204,7 @@ class HyperfitsSolutionGroup:
 
         For each tile in each file, gx and gy amplitude are each fit
         independently with a sigma-clipped polynomial vs. chanblock index
-        (see iterative_poly_clip_batch in mwax_calvin_utils.py, which fits
+        (see iterative_poly_clip_batch in calibration/outliers.py, which fits
         all tiles for a pol/file at once). A channel is
         flagged if EITHER polarisation's fit residual exceeds
         mad_residual_threshold -- if one polarisation's gain is corrupted,
@@ -1294,7 +1289,7 @@ class HyperfitsSolutionGroup:
         reject_outliers) on either chi2dof or sigma_resid, relative to
         other tiles sharing both its polarisation *and* its receiver
         flavour (rx_type, e.g. RRI/SHAO/NI). Mirrors
-        mwax_calvin_utils.reject_outliers's existing use in
+        calibration.outliers.reject_outliers's existing use in
         debug_phase_fits (chi2dof then sigma_resid, sequentially).
 
         Grouping by flavour in addition to polarisation matters because

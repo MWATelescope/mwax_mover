@@ -34,6 +34,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from mwax_mover import mwax_asvo_helper, version
+from mwax_mover.calvin.pipeline import CalvinJobType
+from mwax_mover.calvin.slurm import count_slurm_asvo_jobs, create_sbatch_script, submit_sbatch
 from mwax_mover.core.config import read_config, read_config_list, read_optional_config
 from mwax_mover.core.env import get_hostname, running_under_pytest
 from mwax_mover.db.calibration import (
@@ -44,12 +46,6 @@ from mwax_mover.db.calibration import (
     update_calsolution_request_submit_mwa_asvo_job_status,
 )
 from mwax_mover.db.handler import MWAXDBHandler
-from mwax_mover.mwax_calvin_utils import (
-    CalvinJobType,
-    count_slurm_asvo_jobs,
-    create_sbatch_script,
-    submit_sbatch,
-)
 from mwax_mover.net.multicast import get_ip_address, send_multicast
 from mwax_mover.net.s3 import rclone_move
 
@@ -280,7 +276,7 @@ class MWAXCalvinController:
         shutdown does not have to wait out a whole pass of rclone transfers.
 
         A directory is "published" if its name does not start with a dot.
-        ``mwax_calvin_utils.upload_plot_files`` assembles each fit in a
+        ``calvin.solution_files.upload_plot_files`` assembles each fit in a
         ``.staging-<fit_id>`` directory and publishes it with a single atomic
         rename, so any directory we can see here is complete. That is what makes
         it safe to delete: this thread runs on a different host to the processor

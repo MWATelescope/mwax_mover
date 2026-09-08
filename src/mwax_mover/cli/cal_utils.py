@@ -56,18 +56,18 @@ import pstats
 import sys
 from pathlib import Path
 
+from mwax_mover.calibration.models import Metafits
+from mwax_mover.fits.metafits import download_metafits_file
 from mwax_mover.mwax_calvin_plots import (
     generate_hyperdrive_plots_for_files,
     plot_outlier_gains,
     write_hyperdrive_stats,
     write_stats_and_debug_plots,
 )
-from mwax_mover.mwax_calvin_utils import Metafits
 from mwax_mover.mwax_hyperdrive_solutions import (
     HyperfitsSolution,
     HyperfitsSolutionGroup,
 )
-from mwax_mover.fits.metafits import download_metafits_file
 
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(message)s"))

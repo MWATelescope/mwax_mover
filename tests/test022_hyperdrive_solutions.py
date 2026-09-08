@@ -35,7 +35,8 @@ from astropy.constants import c as speed_of_light  # ty: ignore[unresolved-impor
 
 from tests_common import data_path, obs_metafits_path
 
-from mwax_mover.mwax_calvin_utils import Metafits, reject_outliers
+from mwax_mover.calibration.models import Metafits
+from mwax_mover.calibration.outliers import reject_outliers
 from mwax_mover.mwax_hyperdrive_solutions import (
     ChannelFlagReason,
     HyperfitsSolution,

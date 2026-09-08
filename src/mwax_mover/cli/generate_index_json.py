@@ -3,7 +3,7 @@
 Scans a fit directory and writes an index.json describing each file (size,
 modification time, MIME type, PNG dimensions and a description), suitable for
 upload to S3 alongside the files themselves. See
-mwax_calvin_utils.generate_plot_index_file.
+calvin.solution_files.generate_plot_index_file.
 """
 
 import argparse
@@ -12,13 +12,13 @@ import os
 import sys
 from pathlib import Path
 
-from mwax_mover.mwax_calvin_utils import generate_plot_index_file
+from mwax_mover.calvin.solution_files import generate_plot_index_file
 
 
 def main() -> None:
     """Entry point for the generate_index_json command line tool.
 
-    Parses arguments and calls mwax_calvin_utils.generate_plot_index_file(),
+    Parses arguments and calls calvin.solution_files.generate_plot_index_file(),
     printing a summary on success or an error message on failure.
     """
     parser = argparse.ArgumentParser(

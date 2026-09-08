@@ -501,15 +501,130 @@ tests/test000_architecture.py: all 5 pass (including the new `net.asvo` and
 Full test suite: 456 passed, 5 deselected, 0 failed -- identical to the
 Phase 2 baseline, on a 16-minute run dominated by test020 as expected.
 
+### Commit 3: calibration/ + calvin/ (complete)
+
+`mwax_calvin_utils.py` -- 49 top-level symbols (46 defs/classes, 3 module
+constants) -- split into calibration/ (leaf, no dependency on
+mwax_hyperdrive_solutions) and calvin/ (depends on it):
+
+| old | new |
+|---|---|
+| `MWA_NUM_COARSE_CHANS`, `Tile`, `Input`, `ChanInfo`, `TimeInfo`, `Metafits`, `PhaseFitInfo`, `GainFitInfo` | `calibration/models.py` |
+| `read_solutions_hdu_complex`, `read_results_hdu`, `read_tiles_hdu`, `read_baseline_tile_flags` | `calibration/solutions.py` (not `fits/` -- see below) |
+| `pad_gains_to_full_coarse`, `pad_gain_fit_info`, `ensure_system_byte_order`, `parse_csv_header`, `wrap_angle`, `_MIN_CLIP_THRESHOLD_RAD`, `_phase_fit_hess_inv`, `fit_phase_line`, `fit_gain`, `poly_str`, `textwrap` | `calibration/fitting.py` |
+| `iterative_poly_clip(_batch)`, `reject_outliers`, `annotate_phase_outliers`, `pivot_phase_fits` | `calibration/outliers.py` |
+| `CalvinJobType`, `write_readme_file` | `calvin/pipeline.py` (new seed file -- see below) |
+| `create_sbatch_script`, `submit_sbatch`, `count_slurm_asvo_jobs` | `calvin/slurm.py` |
+| `run_birli`, `estimate_birli_output_bytes` | `calvin/birli.py` |
+| `run_hyperdrive`, `write_hyperdrive_stats` | `calvin/hyperdrive.py` (new seed file -- see below) |
+| `get_solution_fits_filename`, `parse_solution_channels`, `get_sorted_solution_files`, `get_file_description`, `generate_plot_index_file`, `populate_index_json_entry`, `export_calibration_solutions`, `STAGING_DIR_PREFIX`, `get_staging_path`, `reap_orphaned_staging_dirs`, `upload_plot_files`, `get_convergence_summary` | `calvin/solution_files.py` |
+
+`mwax_calvin_utils.py` is now empty and deleted outright, same as `utils.py`
+in commit 2.
+
+**Scope, decided up front:** the doc's own Phase 3 plan says "calibration/ +
+calvin/ from `mwax_calvin_utils.py`" -- it does not say `mwax_hyperdrive_solutions.py`,
+`mwax_calvin_solutions.py`, or `mwax_asvo_helper.py` move too, only that the
+*cycle* with `mwax_hyperdrive_solutions` gets resolved. Confirmed with Greg
+before writing anything: those three files (and `mwax_calvin_plots.py`) stay
+where they are for now; only their imports change. This left two clusters of
+symbols (`run_hyperdrive`/`write_hyperdrive_stats`, and `CalvinJobType`/
+`write_readme_file`) without an existing target-structure file to land in,
+since their natural homes (`calvin/hyperdrive.py`, a merge of run-hyperdrive
+logic with `mwax_hyperdrive_solutions.py`'s solution-reading logic; and
+`calvin/pipeline.py`, eventually `mwax_calvin_solutions.py` itself) don't
+exist yet as full files. Created both as small seed files instead, containing
+only what came from `mwax_calvin_utils.py` -- to be filled in when the bigger
+files actually move, per Greg's go-ahead.
+
+**One correction to the doc's own plan:** it says the shared primitives
+dissolving the cycle split "down into `fits/` and `calibration/fitting.py`."
+Having read them, `read_solutions_hdu_complex`/`read_results_hdu`/
+`read_tiles_hdu`/`read_baseline_tile_flags` are specifically about
+hyperdrive's SOLUTIONS/RESULTS/TILES/BASELINES HDU formats -- not generic
+FITS the way `fits/metafits.py` is. All four went to `calibration/solutions.py`
+instead, confirmed with Greg.
+
+### The cycle, and how it actually broke
+
+`mwax_calvin_utils.get_convergence_summary()` did a function-local import of
+`HyperfitsSolution` from `mwax_hyperdrive_solutions.py` specifically to dodge
+a module-level circular dependency, since `mwax_hyperdrive_solutions.py`
+itself imported `ChanInfo`/`GainFitInfo`/`Metafits`/`PhaseFitInfo`/
+`annotate_phase_outliers`/`ensure_system_byte_order`/`fit_gain`/
+`fit_phase_line`/`iterative_poly_clip_batch`/the 4 HDU readers from
+`mwax_calvin_utils.py` at module level.
+
+Moving those shared primitives into `calibration/` -- which has no reason to
+ever import `mwax_hyperdrive_solutions.py` -- let `mwax_hyperdrive_solutions.py`
+import them from there instead, a one-directional edge. Moving
+`get_convergence_summary` into `calvin/solution_files.py` -- which already
+needs to import `HyperfitsSolution` for exactly this function -- let that
+import move to module level too, since nothing in `calibration/` or
+`mwax_hyperdrive_solutions.py` needs anything from `calvin/`. The
+function-local import and its explanatory comment were removed as part of
+this fix (the one deliberate content edit in this commit, beyond pure
+lift-and-shift, called for explicitly by the doc's own plan). `KNOWN_CYCLES`
+in `tests/test000_architecture.py` is now empty; the entry is deleted per the
+ratchet rule rather than left in place.
+
+Verified by running `tests/test000_architecture.py` after the fix: all 5
+checks pass with `KNOWN_CYCLES` empty, meaning `test_no_unexpected_cycles`
+found no cycle anywhere in the import graph -- not just this one instance,
+which is the actual guarantee the ratchet gives.
+
+### A duplicate function, found and left alone
+
+`mwax_calvin_plots.py` already has its own `write_hyperdrive_stats` --
+byte-for-byte identical to the one moved out of `mwax_calvin_utils.py` into
+`calvin/hyperdrive.py`. Two independent copies existed before this commit;
+they still do after it, in different files now. Per the standing instruction
+to track refactor/reduce opportunities without acting on them mid-restructure,
+this is noted here rather than deduplicated. `cli/cal_utils.py` imports its
+copy from `mwax_calvin_plots.py`, unaffected by this commit.
+
+### Import-site fixing, fourth time
+
+Same three import forms as every previous phase, across 14 files this time
+(`mwax_hyperdrive_solutions.py`, `mwax_calvin_plots.py`, `mwax_calvin_solutions.py`,
+`net/s3.py`, `processors/subfile_incoming.py`, 6 CLI entry points, plus 5 test
+files). Three bare-module call sites in `cli/mwax_calvin_processor.py`
+(`mwax_calvin_utils.generate_plot_index_file/run_birli/run_hyperdrive`) were
+switched to direct-name calls, consistent with every prior phase's convention.
+`tests/test014_calvin_utils.py` (the original test file for
+`mwax_calvin_utils.py`) had its imports rebuilt across six new modules, its
+docstring updated, and ~13 lines of already-commented-out dead code
+(`split_aocal_file_into_coarse_channels`, `get_aocal_filename` -- functions
+that don't exist anywhere in the current codebase) deliberately left alone,
+being unrelated to this restructure.
+
+Four missing imports were caught by ruff check rather than by the split
+verification, since they're new *cross-file* wiring the verification
+doesn't check (it only confirms each moved symbol's body is unchanged, not
+that its new file can resolve every name that body uses): `NDArray` in
+`calibration/models.py` (needed by `ChanInfo`'s type hint); `Metafits` and
+`numpy` in `calvin/birli.py` (both were same-file neighbours in the old
+`mwax_calvin_utils.py`, invisible as separate dependencies until split);
+`datetime` and a `logger` in `calvin/pipeline.py`, for the same reason.
+
+Verified: ruff check, ruff format --check, ty check src/ tests/ all clean.
+tests/test000_architecture.py: all 5 pass, `KNOWN_CYCLES` empty. Full test
+suite: 456 passed, 5 deselected, 0 failed -- identical to the Phase 2
+baseline, on a 20-minute run (the slowest yet, still dominated by test020).
+
 ## Remaining phases
 
 Ordering principle: leaves first, to prove the tooling before it touches the
 high-fan-in god-modules.
 
-**Phase 3 (continued) -- `calibration/` + `calvin/`** from
-`mwax_calvin_utils.py`, including resolving the `KNOWN_CYCLES` entry with
-`mwax_hyperdrive_solutions`. `fits/` + `filesystem/` + `net/` (commit 2) are
-done -- see the Phase 3 section above.
+**Phase 3 is complete** -- `core/`, `fits/`+`filesystem/`+`net/`, and
+`calibration/`+`calvin/` are all done; see the Phase 3 section above.
+`calvin/hyperdrive.py` and `calvin/pipeline.py` are seed files for now
+(only the symbols that came from `mwax_calvin_utils.py`) -- folding
+`mwax_hyperdrive_solutions.py` and `mwax_calvin_solutions.py` into them is
+not yet scheduled as its own phase; whoever picks up `mwax_calvin_plots.py`
+in Phase 4 should reassess then, since that move touches the same
+neighbourhood.
 
 **Phase 4 -- split `mwax_calvin_plots.py`** (2383 lines) into
 `calvin/plots/`. Note `fit_phase_line` is 265 lines on its own, so ~200-400 line
@@ -523,6 +638,11 @@ mirror of the package structure (`tests/calibration/test_fitting.py`, etc.).
 Fixture data stays in one shared `tests/data/` -- it is 414 MB across 29 obsid
 directories, several shared between test modules, so splitting it per package
 would duplicate or scatter it.
+
+**Also outstanding (found during commit 3, not acted on):** `mwax_calvin_plots.py`
+has its own `write_hyperdrive_stats`, byte-for-byte identical to the one now in
+`calvin/hyperdrive.py`. Worth deduplicating once both live in the same
+neighbourhood (see the Phase 4 note above), not before.
 
 ### Deliberately not doing
 

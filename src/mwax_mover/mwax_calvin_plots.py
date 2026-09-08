@@ -43,17 +43,11 @@ from astropy.constants import c  # ty: ignore[unresolved-import]
 from matplotlib.colors import LinearSegmentedColormap
 from numpy.typing import NDArray
 
+from mwax_mover.calibration.fitting import ensure_system_byte_order, poly_str, textwrap, wrap_angle
+from mwax_mover.calibration.outliers import annotate_phase_outliers, pivot_phase_fits
+from mwax_mover.calvin.solution_files import get_convergence_summary
 from mwax_mover.core.command import run_command_ext
 from mwax_mover.core.env import running_under_pytest
-from mwax_mover.mwax_calvin_utils import (
-    annotate_phase_outliers,
-    ensure_system_byte_order,
-    get_convergence_summary,
-    pivot_phase_fits,
-    poly_str,
-    textwrap,
-    wrap_angle,
-)
 from mwax_mover.mwax_hyperdrive_solutions import (
     ChannelFlagReason,
     HyperfitsSolutionGroup,
@@ -139,7 +133,7 @@ def plot_debug_phase_fits(
     Args:
         phase_fits: Already flavour-merged and outlier-annotated phase
             fits -- i.e. the output of
-            mwax_calvin_utils.annotate_phase_outliers, not a bare
+            calibration.outliers.annotate_phase_outliers, not a bare
             process_phase_fits() result. Must include 'flavor' and
             'outlier' columns (a bare process_phase_fits() result will
             raise a KeyError). Callers needing "the" outlier verdict
@@ -453,7 +447,7 @@ def plot_phase_residual(
         residual_vmax: Maximum value for residual plot y-axis.
         flavor_fits: DataFrame with phase fit results per receiver
             flavor, already annotated with an 'outlier' column (see
-            mwax_calvin_utils.annotate_phase_outliers).
+            calibration.outliers.annotate_phase_outliers).
         nstd: Number of (MAD-derived) standard deviations used for the
             shaded outlier-range band on each facet -- must match the
             nstd that produced flavor_fits's 'outlier' column, or the
@@ -2065,7 +2059,7 @@ def build_tile_stats_rows(
             e.g. group.channel_flag_reasons at the point of this snapshot.
         phase_fits: Ideally already flavour-merged and outlier-annotated
             phase fits -- i.e. the output of
-            mwax_calvin_utils.annotate_phase_outliers, computed against
+            calibration.outliers.annotate_phase_outliers, computed against
             the same snapshot (pristine data for "before", final data
             for "after") -- NOT necessarily group.phase_fits, which
             reflects whatever detect_phase_outliers last computed. If

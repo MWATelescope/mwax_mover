@@ -28,10 +28,18 @@ import mwalib
 from mwalib import MetafitsContext
 
 from mwax_mover import (
-    mwax_calvin_utils,
     version,
 )
 from mwax_mover.archive.archiver import copy_file_rsync
+from mwax_mover.calvin.birli import estimate_birli_output_bytes, run_birli
+from mwax_mover.calvin.hyperdrive import run_hyperdrive
+from mwax_mover.calvin.pipeline import CalvinJobType
+from mwax_mover.calvin.solution_files import (
+    export_calibration_solutions,
+    generate_plot_index_file,
+    reap_orphaned_staging_dirs,
+    upload_plot_files,
+)
 from mwax_mover.core.config import read_config, read_config_bool, read_optional_config
 from mwax_mover.core.env import get_hostname, running_under_pytest
 from mwax_mover.core.gpstime import get_gpstime_of_now
@@ -47,13 +55,6 @@ from mwax_mover.filesystem.files import extract_tar, remove_file
 from mwax_mover.filesystem.naming import get_data_files_with_hostname_for_obsid_from_webservice
 from mwax_mover.fits.metafits import download_metafits_file
 from mwax_mover.mwax_calvin_solutions import process_solutions
-from mwax_mover.mwax_calvin_utils import (
-    CalvinJobType,
-    estimate_birli_output_bytes,
-    export_calibration_solutions,
-    reap_orphaned_staging_dirs,
-    upload_plot_files,
-)
 from mwax_mover.net.asvo import extract_filename_from_mwa_asvo_signed_url, run_giant_squid
 from mwax_mover.net.multicast import get_ip_address, send_multicast
 from mwax_mover.net.s3 import check_remote_file_exists, rclone_delete_file
@@ -421,7 +422,7 @@ class MWAXCalvinProcessor:
                     # Try and generate an index file
                     # NOTE: generate_plot_index_file returns a (success, index)
                     # tuple. Unpack it- a bare `if` on the tuple is always True.
-                    index_success, _index = mwax_calvin_utils.generate_plot_index_file(
+                    index_success, _index = generate_plot_index_file(
                         fit_id,
                         self.plot_front_end_url,
                         self.job_output_path,
@@ -918,7 +919,7 @@ class MWAXCalvinProcessor:
 
         # Run Birli
         logger.info(f"{self.obs_id}: Running Birli...")
-        birli_success = mwax_calvin_utils.run_birli(
+        birli_success = run_birli(
             self.job_input_path,
             self.metafits_filename,
             self.uvfits_filename,
@@ -960,7 +961,7 @@ class MWAXCalvinProcessor:
         uvfits_files = glob.glob(os.path.join(self.working_path, "*.uvfits"))
 
         # Run hyperdrive (might be multiple times if picket fence)
-        hyperdrive_success, calibration_command = mwax_calvin_utils.run_hyperdrive(
+        hyperdrive_success, calibration_command = run_hyperdrive(
             uvfits_files,
             self.metafits_filename,
             self.job_output_path,

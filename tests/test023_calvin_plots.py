@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from mwax_mover.mwax_calvin_utils import Metafits
+from mwax_mover.calibration.models import Metafits
 from mwax_mover.mwax_calvin_plots import (
     SINGLE_FILE_SUBPLOT_WIDTH_IN,
     STITCH_GAP_CHANBLOCKS,

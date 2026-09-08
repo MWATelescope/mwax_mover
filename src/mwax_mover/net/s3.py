@@ -69,7 +69,7 @@ def rclone_move(
             so it can arrive already older than any threshold set here. Callers
             that need completion detection should have the writer publish a
             fully-populated directory atomically instead -- see
-            mwax_calvin_utils.upload_plot_files.
+            calvin.solution_files.upload_plot_files.
 
     Returns:
         tuple of transfers and bytes_transferred
