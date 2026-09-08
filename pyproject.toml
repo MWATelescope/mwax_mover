@@ -103,10 +103,6 @@ log_cli = true
 log_cli_level = "DEBUG"
 log_format = "%(asctime)s %(levelname)s %(name)s.%(funcName)s %(message)s"
 log_date_format = "%Y-%m-%d %H:%M:%S"
-# Our test modules are named testNNN_*.py, which does NOT match pytest's
-# default python_files patterns (test_*.py / *_test.py). Without this,
-# `pytest` collects zero tests and exits successfully.
-python_files = ["test*.py"]
 # Be more verbose and never truncate asserts. Deliberately no -x: a full run
 # should report every failure, not stop at the first. Pass -x on the command
 # line when iterating on a single failure.

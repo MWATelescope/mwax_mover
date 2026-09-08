@@ -1,0 +1,75 @@
+"""
+This is to test if MWAXSubfileDistributor correctly handles a MWAX_BEAMFORMER observation, stitching VDIF files.
+"""
+
+import os
+import shutil
+import signal
+import threading
+import time
+
+from tests_common import data_path, obs_metafits_path, render_test_config, setup_test_directories
+from tests_fakedb import FakeMWAXDBHandler
+
+from mwax_mover.cli.mwax_subfile_distributor import MWAXSubfileDistributor
+
+TEST_METAFITS = obs_metafits_path(1454343736)
+
+# VDIF
+TEST_VDIF = [
+    data_path("1454343736", "1454343736_1454343736_ch109_beam00"),
+    data_path("1454343736", "1454343736_1454343744_ch109_beam00"),
+    data_path("1454343736", "1454343736_1454343736_ch109_beam01"),
+    data_path("1454343736", "1454343736_1454343744_ch109_beam01"),
+]
+
+
+def test_beamformer_archiver_vdif():
+    #
+    # This test will test how the mwax_archive_processor handles new vdif files
+    #
+
+    # Setup dirs
+    setup_test_directories("beamformer_vdif")
+
+    # Create a subfile distributor
+    sd = MWAXSubfileDistributor()
+    # Override db_handler with a fake one
+    fake_db_handler = FakeMWAXDBHandler()
+    # Add any select results (in order in the code below-or keep commented if none)
+    # e.g. fake_db_handler.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
+
+    sd.initialise(render_test_config("beamformer_vdif"), fake_db_handler)
+
+    # setup test data (metafits file and cal files)
+    metafits = os.path.join(sd.cfg_corr_metafits_path, os.path.basename(TEST_METAFITS))
+    shutil.copyfile(TEST_METAFITS, metafits)
+
+    # start processor
+    # Create and start a thread for the processor
+    thrd = threading.Thread(name="msd_thread", target=sd.start, daemon=True)
+
+    # Copy VDIF data in (we are simulating the beamformer dumping in files as tmp then renaming)
+    for v in TEST_VDIF:
+        # Create the temp vdif file
+        shutil.copyfile(
+            v + ".vdif",
+            os.path.join(sd.cfg_bf_incoming_path, os.path.basename(v) + ".vdif"),
+        )
+
+    #
+    # NOTE! wsl does not support iNotify, so the only way to test is to put the test files in the incoming dirs
+    # BEFORE we start the processor as there is a glob.glob call that scans for and processes existing files.
+    #
+
+    # Start the processor
+    thrd.start()
+
+    # allow things to start
+    time.sleep(20)
+
+    # Quit
+    # Ok time's up! Stop the processor
+    sd.signal_handler(signal.SIGINT, 0)
+
+    thrd.join(30)

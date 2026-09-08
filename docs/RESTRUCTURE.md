@@ -931,18 +931,109 @@ tests/test000_architecture.py: all 5 pass, confirming `mwa_asvo` at L2
 introduces no cycle. Full test suite: 456 passed, 5 deselected, 0
 failed, on a 17-minute run.
 
+## Test-tree reorg (complete)
+
+Moved every `testNNN_*.py` module into a mirror of the `src/` package
+structure, and (per the wider brief this time, not just "can happen any
+time") renamed every file from the numeric-code convention to
+`test_<module>.py`, dropping the `python_files = ["test*.py"]` override
+in `pyproject.toml` now that every file matches pytest's own default
+pattern. `tests/test000_architecture.py` renamed to `test_architecture.py`
+for the same consistency, even though it tests the whole tree rather than
+one module. `conftest.py`, `tests_common.py`, `tests_fakedb.py`, `__init__.py`
+stay at `tests/` root as shared infra. `tests/data/`'s 29 shared obsid
+directories are keyed by obs ID, not test code, so none of them moved;
+only the 9 testNNN-keyed scratch/fixture directories that actually existed
+did, renamed to match their test file's new name (and `test013`'s second
+cfg variant renamed to `mwax_calvin_processor_no_gains_cutoff.cfg`
+alongside it).
+
+**Straightforward one-to-one moves (14 files):** beamformer, queues
+(`test004_wqw.py` -> `queues/test_watch_queue_worker.py`, since its own
+docstring says it tests the `watch_queue_worker` ABC despite using
+`MWAXSubfileDistributor` as a harness), processors, `mwa_asvo/test_jobs.py`,
+and all 9 `cli/` scenario files (`mwax_subfile_distributor`'s six
+scenarios kept the module name in full per Greg's preference:
+`test_mwax_subfile_distributor_<scenario>.py`, rather than a shorter
+`test_subfile_distributor_*`). `net/` got four empty placeholder files
+(`test_multicast.py` etc.) per Greg's preference, since nothing in the
+suite tests `net.*` directly yet -- `filesystem.naming`'s
+`get_data_files_for_obsid_from_webservice` is the only place it's
+exercised, and that test lives with `filesystem.naming`'s own tests.
+
+**The four "god" files spanning multiple packages, split into one file
+per target module (Greg's preference over a single best-fit move) --
+by far the larger part of this work:**
+
+- `test005_utils.py` (987 lines, 42 tests) -> 9 new files:
+  `test_version.py` (root, since `version.py` is top-level alongside
+  `constants.py`), `core/test_env.py`, `core/test_config.py`,
+  `fits/test_metafits.py`, `fits/test_subfile.py`,
+  `filesystem/test_naming.py`, `filesystem/test_scan.py`,
+  `filesystem/test_files.py`, `mwa_asvo/test_giant_squid.py`.
+- `test014_calvin_utils.py` (1923 lines, 95 tests) -> 7 new files:
+  `calvin/test_birli.py`, `calvin/test_solution_files.py`,
+  `calibration/test_fitting.py` (56 tests -- by far the biggest single
+  split-out, unsurprising since `fitting.py` is the biggest calibration
+  module), `calibration/test_models.py`, `calibration/test_outliers.py`,
+  `core/test_command.py` (new -- `write_readme_file`'s tests, which
+  moved with the function itself in the post-restructure tweaks above;
+  `run_command_ext`/`run_command_popen`/`check_popen_finished` still have
+  no dedicated tests), `calibration/test_solutions.py`. Two private
+  fixture helpers (`_make_phase_ramp`/`_FREQS_HZ`/etc. for
+  `fit_phase_line`/`fit_gain`; `_make_phase_fits_df` for
+  `reject_outliers`) turned out not to overlap between targets once
+  actually checked, so no duplication was needed.
+- `test022_hyperdrive_solutions.py` (1378 lines, 64 tests) -> a single
+  move to `calvin/test_hyperdrive.py`, no split needed: every test in it
+  is genuinely about `HyperfitsSolution`/`HyperfitsSolutionGroup`: the
+  `Metafits`/`reject_outliers` imports are just fixture-construction
+  helpers, not things under test.
+- `test023_calvin_plots.py` (1219 lines, 29 tests + `TestAvailableMemoryBytes`
+  appended to the `core/test_env.py` created above) -> 4 new files:
+  `calvin/plots/test_gains.py`, `calvin/plots/test_hyperdrive_plots.py`,
+  `calvin/plots/test_stats_table.py`, `calvin/plots/test_phases.py`.
+  Two shared constants (`_N_TILES`/`_N_CHANBLOCKS`) needed duplicating
+  into both `test_gains.py` and `test_stats_table.py` since both actually
+  use them (checked before assuming either way, same as test014's helpers
+  above).
+
+**Bug found and fixed along the way, distinct from the reorg itself:**
+`test023`'s `TestMaxRenderWorkers` (8 tests) were failing on `origin`
+*before* this reorg touched anything -- confirmed by running the original
+file first. `available_memory_bytes` lost its leading underscore in
+`core/env.py`/`gains.py` at some point after these tests were written
+(likely when applying an earlier diff), but the 8
+`mock.patch("mwax_mover.calvin.plots.gains._available_memory_bytes", ...)`
+string literals were never updated to match -- invisible to ruff/ty
+since a mock target is a plain string, not a real reference, so nothing
+but actually running the suite could have caught it. Fixed as part of
+moving these tests into `calvin/plots/test_gains.py`, confirmed with a
+targeted rerun: all 8 now pass.
+
+Every split was extracted with the same AST-based approach used for
+every source-code split earlier in this project (whole-line spans
+including decorators and leading comments, verified byte-for-byte
+identical against the original afterward -- 42/42, 95/95, and 34/34
+symbols matched exactly, modulo the one deliberate bugfix substitution
+above), rather than by hand, given the volume involved (five files,
+~230 test functions total).
+
+Verified: ruff check, ruff format --check, ty check src/ tests/ all
+clean. `pytest --collect-only`: 456/461 collected (5 deselected),
+matching the pre-reorg baseline exactly -- no collisions, nothing lost.
+Full test suite: 456 passed, 5 deselected, 0 failed, on a 25-minute run
+(longer than the usual ~17-20 minutes, but the result is identical;
+likely just system load).
+
 ## Remaining phases
 
-**All five phases are now complete.** Every item originally scoped --
-`core/`, `fits/`+`filesystem/`+`net/`, `calibration/`+`calvin/` in full
-(including the `mwax_asvo_helper.py` -> `calvin/asvo.py` move), and the
-docs pass -- is done; see the sections above.
-
-**Still outstanding (test-side, can happen any time):** move test modules into a
-mirror of the package structure (`tests/calibration/test_fitting.py`, etc.).
-Fixture data stays in one shared `tests/data/` -- it is 414 MB across 29 obsid
-directories, several shared between test modules, so splitting it per package
-would duplicate or scatter it.
+**All five phases, the post-restructure tweaks, and the test-tree reorg
+are now complete.** Every item originally scoped -- `core/`,
+`fits/`+`filesystem/`+`net/`, `calibration/`+`calvin/` in full (including
+the `mwax_asvo_helper.py` -> `calvin/asvo.py` move), the docs pass, and
+mirroring the test tree to the package structure -- is done; see the
+sections above.
 
 ### Deliberately not doing
 
@@ -954,11 +1045,6 @@ would duplicate or scatter it.
   processors genuinely depend on the calibration domain rather than being pure
   framework. Nesting them would put a subpackage at a higher layer than its
   parent -- a layer inversion in the directory tree. `processors/` is top-level.
-- **Renaming `testNNN_*.py` to `test_<module>.py`** as part of this work. The
-  numeric codes are load-bearing: `tests/data/test001...test021` directories are
-  keyed by them and `setup_test_directories("test016")` looks them up by string.
-  Renaming means renaming those data directories too -- a separate step. (It
-  would also allow dropping the `python_files` override in `pyproject.toml`.)
 
 ## Working agreements
 
