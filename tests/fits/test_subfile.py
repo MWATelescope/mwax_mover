@@ -201,7 +201,7 @@ def test_inject_beamformer_headers():
     assert read_subfile_value(subfile_name, PSRDADA_MODE) == "NO_CAPTURE"
     assert read_subfile_value(subfile_name, "NUM_INCOHERENT_BEAMS") == "2"
 
-    # check for None on a non-existant key
+    # check for None on a non-existent key
     assert read_subfile_value(subfile_name, "MISSING_KEY123") is None
 
 

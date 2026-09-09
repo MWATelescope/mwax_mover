@@ -37,8 +37,13 @@ def running_under_pytest() -> bool:
     """
     Detect whether the current process is running under pytest.
 
-    Checks for the presence of the ``PYTEST_CURRENT_TEST`` environment variable,
-    which pytest sets automatically during test execution.
+    Checks for the presence of the ``PYTEST_CURRENT_TEST`` environment variable
+    (set by pytest during the execution of each individual test) or the
+    presence of ``pytest`` itself in ``sys.modules`` (true for the whole
+    process once pytest has been imported, including collection and fixture
+    setup/teardown outside of any test). The second condition is broader and
+    fires in most real cases -- ``PYTEST_CURRENT_TEST`` alone would miss
+    anything that runs before/after the test body itself.
 
     Returns:
         True if running inside a pytest session, False otherwise.

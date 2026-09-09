@@ -127,7 +127,6 @@ def plot_debug_phase_fits(
             weights,
             prefix,
             title,
-            plot_residual,
             residual_vmax,
             flavor_fits,
             nstd=phase_outlier_nstd,
@@ -359,7 +358,6 @@ def plot_phase_residual(
     weights,
     prefix,
     title,
-    plot_res,
     residual_vmax,
     flavor_fits,
     nstd=3.0,
@@ -373,7 +371,6 @@ def plot_phase_residual(
         weights: Weight values for each frequency.
         prefix: Output directory prefix for saving plots and data.
         title: Title for plots.
-        plot_res: Whether to plot residuals.
         residual_vmax: Maximum value for residual plot y-axis.
         flavor_fits: DataFrame with phase fit results per receiver
             flavor, already annotated with an 'outlier' column (see

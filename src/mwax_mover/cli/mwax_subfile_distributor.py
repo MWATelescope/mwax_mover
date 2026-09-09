@@ -416,7 +416,7 @@ class MWAXSubfileDistributor:
         self.cfg_metadatadb_host = read_config(self.config, "mwa metadata database", "host")
         self.cfg_metadatadb_db = read_config(self.config, "mwa metadata database", "db")
         self.cfg_metadatadb_user = read_config(self.config, "mwa metadata database", "user")
-        # Only read the password as base64 encoded if host is not dummy
+        # Only read the password as base64 encoded if db is not dummy
         self.cfg_metadatadb_pass = read_config(
             self.config,
             "mwa metadata database",
@@ -840,7 +840,7 @@ class MWAXSubfileDistributor:
     def endpoint_release_cal_obs(self):
         """Web service endpoint to release calibration observation files."""
         try:
-            logger.info("Recieved call to release_cal_obs()")
+            logger.info("Received call to release_cal_obs()")
 
             obs_id = request.args.get("obs_id")  # returns None if missing
 

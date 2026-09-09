@@ -29,7 +29,7 @@ class PriorityQueueWorker:
         priority (integer - lowest items are taken off queue first)
         item (T - the payload you are queueing)
 
-    Thus for each item, item[0] is the priorty number and item[1] is the
+    Thus for each item, item[0] is the priority number and item[1] is the
     payload.
     """
 

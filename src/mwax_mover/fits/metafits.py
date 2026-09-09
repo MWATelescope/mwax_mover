@@ -96,7 +96,7 @@ def get_metafits_value_from_hdu(metafits_filename: str, hdu_name: str, key: str)
     """
     try:
         with fits.open(metafits_filename) as hdul:
-            # Read key from primary HDU
+            # Read key from the named HDU
             return hdul[hdu_name].header[key]
 
     except Exception as catch_all_exception:

@@ -447,7 +447,7 @@ class MWACacheArchiveProcessor:
         self.mro_metadatadb_user = read_config(config, "mro metadata database", "user")
 
         self.mro_metadatadb_pass = read_config(
-            config, "mro metadata database", "pass", self.mro_metadatadb_host != "dummy"
+            config, "mro metadata database", "pass", self.mro_metadatadb_db != "dummy"
         )
 
         self.mro_metadatadb_port = int(read_config(config, "mro metadata database", "port"))

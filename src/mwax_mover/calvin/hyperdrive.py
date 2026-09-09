@@ -161,7 +161,7 @@ def _phase_fit_one(
     tile = id_matches.iloc[0]
     if tile.flag:
         return None
-    name = tile.name
+    name = tile["name"]
     try:
         fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)
     except Exception as exc:
@@ -206,7 +206,7 @@ def _gain_fit_one(
     tile = id_matches.iloc[0]
     if tile.flag:
         return None
-    name = tile.name
+    name = tile["name"]
     try:
         fit = fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse)
     except Exception as exc:

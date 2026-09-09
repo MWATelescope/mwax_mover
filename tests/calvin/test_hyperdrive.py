@@ -607,6 +607,31 @@ def test_process_phase_fits_bad_solution_skipped_not_raised():
     assert 3 in result["tile_id"].values
 
 
+def test_process_phase_fits_bad_solution_warning_includes_tile_name(caplog):
+    """The skip warning for a failed fit must name the tile, not its DataFrame index label.
+
+    Regression test for the `name = tile.name` bug (pandas Series.name is the
+    index label, not the "name" column) -- see docs/CLEANUP.md 1.1. Tile ID 2
+    sits at DataFrame index label 1 here, deliberately different from its
+    "name" value "Tile002", so the test can't pass vacuously.
+    """
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    # Corrupt tile ID 2 (index label 1, not the reference tile) with NaN so
+    # fit_phase_line raises and the except-branch warning fires.
+    group.jones[0][1, :, :, :] = np.nan + 1j * np.nan
+
+    tile_row = group.metafits_tiles_df.loc[group.metafits_tiles_df["id"] == 2].iloc[0]
+    assert tile_row.name != tile_row["name"], (
+        "fixture invariant: the index label must differ from the tile name, "
+        "or this test would pass even with the bug present"
+    )
+
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        group.process_phase_fits(refant_name="Tile001", phase_fit_niter=1)
+
+    assert "Tile002" in caplog.text
+
+
 def test_process_gain_fits_for_db_returns_dataframe_with_correct_columns():
     group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[3])
     with _patched_uniform_weights(_FIT_N_CHANBLOCKS):

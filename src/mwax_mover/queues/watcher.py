@@ -133,7 +133,7 @@ class Watcher:
 
         while self.watching:
             for event in self.inotify_tree.event_gen(timeout_s=0.1, yield_nones=False):
-                # This if is redundant as we don't yeild nones
+                # This if is redundant as we don't yield nones
                 if event:
                     (header, _, path, filename) = event
 

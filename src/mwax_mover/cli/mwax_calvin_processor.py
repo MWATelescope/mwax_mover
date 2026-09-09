@@ -41,7 +41,7 @@ from mwax_mover.calvin.solution_files import (
     upload_plot_files,
 )
 from mwax_mover.core.config import read_config, read_config_bool, read_optional_config
-from mwax_mover.core.env import get_hostname, running_under_pytest
+from mwax_mover.core.env import get_hostname
 from mwax_mover.core.gpstime import get_gpstime_of_now
 from mwax_mover.core.units import gigabyte_to_gibibyte, is_int
 from mwax_mover.db.calibration import (
@@ -443,7 +443,7 @@ class MWAXCalvinProcessor:
                         )
 
                 else:
-                    # We returned True (no unexpected errors occured)
+                    # We returned True (no unexpected errors occurred)
                     # but we didn't get a fit_id. This is due to
                     # things like "no unflagged tiles found" which is
                     # an error, however there is nothing more we can do
@@ -575,7 +575,7 @@ class MWAXCalvinProcessor:
                     # A much worse error occurred- definitely try again
                     pass
 
-            # All remaining hosts have been tried- remove the sucessful ones from the set
+            # All remaining hosts have been tried- remove the successful ones from the set
             for hostname in successful_hosts:
                 hostnames.remove(hostname)
 
@@ -1163,8 +1163,10 @@ class MWAXCalvinProcessor:
         self.mro_metadatadb_host = read_config(config, "mro metadata database", "host")
         self.mro_metadatadb_db = read_config(config, "mro metadata database", "db")
         self.mro_metadatadb_user = read_config(config, "mro metadata database", "user")
-        # Don't require base64 encoded password if running a pytest
-        self.mro_metadatadb_pass = read_config(config, "mro metadata database", "pass", not running_under_pytest())
+        # Only read the password as base64 encoded if db is not dummy
+        self.mro_metadatadb_pass = read_config(
+            config, "mro metadata database", "pass", self.mro_metadatadb_db != "dummy"
+        )
         self.mro_metadatadb_port = int(read_config(config, "mro metadata database", "port"))
 
         # Initiate database connection for mro metadata db

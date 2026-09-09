@@ -37,7 +37,7 @@ from mwax_mover import version
 from mwax_mover.calvin.pipeline import CalvinJobType
 from mwax_mover.calvin.slurm import count_slurm_asvo_jobs, create_sbatch_script, submit_sbatch
 from mwax_mover.core.config import read_config, read_config_list, read_optional_config
-from mwax_mover.core.env import get_hostname, running_under_pytest
+from mwax_mover.core.env import get_hostname
 from mwax_mover.db.calibration import (
     get_unattempted_calibration_requests,
     get_unattempted_unrequested_cal_obsids,
@@ -1115,7 +1115,9 @@ class MWAXCalvinController:
         self.mro_metadatadb_host = read_config(config, "mro metadata database", "host")
         self.mro_metadatadb_db = read_config(config, "mro metadata database", "db")
         self.mro_metadatadb_user = read_config(config, "mro metadata database", "user")
-        self.mro_metadatadb_pass = read_config(config, "mro metadata database", "pass", not running_under_pytest())
+        self.mro_metadatadb_pass = read_config(
+            config, "mro metadata database", "pass", self.mro_metadatadb_db != "dummy"
+        )
         self.mro_metadatadb_port = int(read_config(config, "mro metadata database", "port"))
 
         # Initiate database connection for mro metadata db

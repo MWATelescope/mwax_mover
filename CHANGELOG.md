@@ -1,9 +1,12 @@
 # Changelog
 
-# Unreleased (1.11.0)
+# Unreleased (3.0.0)
 
 * Restructure of source code.
-  * Added architecture tests to ensure compliance with top down structure (i.e. high level modules only call lower level modules).
+* calvin: fixed tile name bug in log messages
+* processors: Unified base64 password predicate on db != "dummy" across all 4 daemons
+* calvin: Removed dead plot_res parameter in phase plots
+* Fixed 3 incorrect docstrings/comments, 7 typos, logging message in archiver.
 
 # 1.10.2 26-Aug-2026
 

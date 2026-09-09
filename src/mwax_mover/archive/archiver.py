@@ -15,7 +15,7 @@ import uuid
 
 from mwax_mover.core.command import run_command_ext
 from mwax_mover.core.env import running_under_pytest
-from mwax_mover.core.units import bytes_to_gigabytes, get_gbps
+from mwax_mover.core.units import bytes_to_gigabytes, get_gbps, gigabytes_to_gigabits
 
 logger = logging.getLogger(__name__)
 
@@ -284,7 +284,7 @@ def archive_file_rclone_haproxy(
         logger.info(
             f"{full_filename}: archive_file_rclone_haproxy success."
             f" Copied ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at"
-            f" {get_gbps(size_gigabytes, start_time):.3f} Gbps)."
+            f" {gigabytes_to_gigabits(size_gigabytes) / elapsed:.3f} Gbps)."
             f" Check took {check_elapsed:.3f} seconds."
         )
         return True
