@@ -9,7 +9,9 @@ which do not exist in the git repo. This is fine as the main thing being
 tested is the filename and metafits file (which is included).
 """
 
+import json
 import os
+import queue
 
 import pytest
 import requests
@@ -18,6 +20,7 @@ from tests_common import data_path, obs_data_dir
 
 from mwax_mover.filesystem.naming import (
     ArchiveLocation,
+    ArchivePriority,
     MWADataFileType,
     ValidationData,
     get_bucket_name_for_location,
@@ -282,6 +285,53 @@ def test_get_priority_metafits_ppd():
         ["C001"],
     )
     assert priority == 1
+
+
+def test_archive_priority_values_match_documented_scheme():
+    """Lock in the nine priority levels get_priority()'s docstring describes.
+
+    Regression test for docs/CLEANUP.md 4.2: these used to be magic integers
+    duplicated between get_priority()'s body and its own docstring table, with
+    no single source of truth. If one of these values ever needs to change,
+    this test should be updated deliberately, not silently pass either way.
+    """
+    assert ArchivePriority.METAFITS_OR_PPD == 1
+    assert ArchivePriority.CALIBRATOR_CORRELATOR == 2
+    assert ArchivePriority.HIGH_PRIORITY_CORRELATOR == 3
+    assert ArchivePriority.HIGH_PRIORITY_VCS_BEAMFORMED == 5
+    assert ArchivePriority.NORMAL_VCS_BEAMFORMED == 10
+    assert ArchivePriority.HIGH_PRIORITY_VCS_VOLTAGE == 20
+    assert ArchivePriority.NORMAL_CORRELATOR == 30
+    assert ArchivePriority.NORMAL_VCS_VOLTAGE == 90
+    assert ArchivePriority.DEFAULT == 100
+
+
+def test_archive_priority_sorts_as_int_in_a_priority_queue():
+    """ArchivePriority members must sort exactly like the plain ints they replaced.
+
+    A queue.PriorityQueue dequeues the lowest value first; get_priority()'s
+    callers rely on that to dequeue high-priority (low-numbered) files first.
+    """
+    q = queue.PriorityQueue()
+    q.put((ArchivePriority.NORMAL_CORRELATOR, "normal"))
+    q.put((ArchivePriority.METAFITS_OR_PPD, "metafits"))
+    q.put((ArchivePriority.HIGH_PRIORITY_CORRELATOR, "high"))
+
+    assert q.get()[1] == "metafits"
+    assert q.get()[1] == "high"
+    assert q.get()[1] == "normal"
+
+
+def test_archive_priority_serializes_as_plain_int():
+    """json.dumps and str() must render an ArchivePriority as its bare integer.
+
+    This is what makes the switch from a magic int to an IntEnum safe for the
+    health-multicast JSON payload and log messages: nothing downstream sees a
+    different value or a qualified enum name.
+    """
+    assert json.dumps(ArchivePriority.HIGH_PRIORITY_CORRELATOR) == "3"
+    assert str(ArchivePriority.HIGH_PRIORITY_CORRELATOR) == "3"
+    assert f"{ArchivePriority.HIGH_PRIORITY_CORRELATOR}" == "3"
 
 
 def test_get_bucket_name_for_location_acacia():
