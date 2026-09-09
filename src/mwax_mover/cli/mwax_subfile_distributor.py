@@ -31,7 +31,13 @@ from werkzeug.serving import make_server
 from mwax_mover import (
     version,
 )
-from mwax_mover.constants import EXIT_FAILURE, SECTION_BEAMFORMER, SECTION_CORRELATOR, SECTION_MWAX_MOVER
+from mwax_mover.constants import (
+    EXIT_FAILURE,
+    SECTION_BEAMFORMER,
+    SECTION_CORRELATOR,
+    SECTION_MWA_DATABASE,
+    SECTION_MWAX_MOVER,
+)
 from mwax_mover.core.config import read_config, read_config_bool, read_config_list, read_optional_config
 from mwax_mover.core.env import get_hostname, running_under_pytest
 from mwax_mover.core.units import is_int
@@ -157,11 +163,11 @@ class MWAXSubfileDistributor:
         self.cfg_corr_metafits_path: str = ""
 
         # Connection info for metadata db
-        self.cfg_metadatadb_host: str = ""
-        self.cfg_metadatadb_db: str = ""
-        self.cfg_metadatadb_user: str = ""
-        self.cfg_metadatadb_pass: str = ""
-        self.cfg_metadatadb_port: int = 5432
+        self.cfg_db_host: str = ""
+        self.cfg_db_name: str = ""
+        self.cfg_db_user: str = ""
+        self.cfg_db_pass: str = ""
+        self.cfg_db_port: int = 5432
 
         # Archiving stuff
         self.archiving_paused: bool = False
@@ -427,18 +433,18 @@ class MWAXSubfileDistributor:
             logger.error(f"metafits location {self.cfg_corr_metafits_path} does not exist. Quitting.")
             sys.exit(EXIT_FAILURE)
 
-        self.cfg_metadatadb_host = read_config(self.config, "mwa metadata database", "host")
-        self.cfg_metadatadb_db = read_config(self.config, "mwa metadata database", "db")
-        self.cfg_metadatadb_user = read_config(self.config, "mwa metadata database", "user")
+        self.cfg_db_host = read_config(self.config, SECTION_MWA_DATABASE, "host")
+        self.cfg_db_name = read_config(self.config, SECTION_MWA_DATABASE, "db")
+        self.cfg_db_user = read_config(self.config, SECTION_MWA_DATABASE, "user")
         # Only read the password as base64 encoded if db is not dummy
-        self.cfg_metadatadb_pass = read_config(
+        self.cfg_db_pass = read_config(
             self.config,
-            "mwa metadata database",
+            SECTION_MWA_DATABASE,
             "pass",
-            self.cfg_metadatadb_db != "dummy",
+            self.cfg_db_name != "dummy",
         )
 
-        self.cfg_metadatadb_port = int(read_config(self.config, "mwa metadata database", "port"))
+        self.cfg_db_port = int(read_config(self.config, SECTION_MWA_DATABASE, "port"))
 
         # Read config specific to this host
         self.cfg_corr_archive_destination_host = read_config(
@@ -549,11 +555,11 @@ class MWAXSubfileDistributor:
             self.db_handler = override_db_handler
         else:
             self.db_handler = MWAXDBHandler(
-                host=self.cfg_metadatadb_host,
-                port=self.cfg_metadatadb_port,
-                db_name=self.cfg_metadatadb_db,
-                user=self.cfg_metadatadb_user,
-                password=self.cfg_metadatadb_pass,
+                host=self.cfg_db_host,
+                port=self.cfg_db_port,
+                db_name=self.cfg_db_name,
+                user=self.cfg_db_user,
+                password=self.cfg_db_pass,
             )
 
         # Read master archiving enabled option
@@ -1104,7 +1110,7 @@ class MWAXSubfileDistributor:
         # creating database connection pool(s)
         logger.info("Starting database connection pool...")
 
-        if self.cfg_metadatadb_host != "dummy":
+        if self.cfg_db_host != "dummy":
             # Dont start it if we are "dummy"- we are probably doing
             # a unit test which does not need a db
             self.db_handler.start_database_pool()

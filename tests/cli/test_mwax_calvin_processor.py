@@ -48,30 +48,30 @@ def test_mwax_calvin_processor():
     #
 
     # mwax_mover section
-    assert mcal.log_path == os.path.join(base_dir, "logs"), (
-        f"log path mismatch: {mcal.log_path} {os.path.join(base_dir, 'logs')}"
+    assert mcal.cfg_log_path == os.path.join(base_dir, "logs"), (
+        f"log path mismatch: {mcal.cfg_log_path} {os.path.join(base_dir, 'logs')}"
     )
 
-    assert mcal.health_multicast_interface_name == "lo"
-    assert mcal.health_multicast_ip == "127.0.0.1"
-    assert mcal.health_multicast_port == 8011
-    assert mcal.health_multicast_hops == 1
+    assert mcal.cfg_health_multicast_interface_name == "lo"
+    assert mcal.cfg_health_multicast_ip == "127.0.0.1"
+    assert mcal.cfg_health_multicast_port == 8011
+    assert mcal.cfg_health_multicast_hops == 1
 
-    assert mcal.job_input_path == os.path.join(base_dir, "data/calvin/in_jobs")
-    assert mcal.job_output_path == os.path.join(base_dir, "data/calvin/out_jobs")
-    assert mcal.source_list_filename == os.path.join(bin_dir, "srclist.txt")
-    assert mcal.source_list_type == "rts"
-    assert mcal.hyperdrive_binary_path == os.path.join(bin_dir, "hyperdrive")
-    assert mcal.hyperdrive_timeout == 7200
-    assert mcal.birli_binary_path == os.path.join(bin_dir, "birli")
-    assert mcal.birli_timeout == 3600
-    assert mcal.keep_completed_visibility_files == 0
-    assert mcal.cal_export_max_age_hours == 24
+    assert mcal.cfg_proc_job_input_path == os.path.join(base_dir, "data/calvin/in_jobs")
+    assert mcal.cfg_proc_job_output_path == os.path.join(base_dir, "data/calvin/out_jobs")
+    assert mcal.cfg_hyperdrive_source_list_filename == os.path.join(bin_dir, "srclist.txt")
+    assert mcal.cfg_hyperdrive_source_list_type == "rts"
+    assert mcal.cfg_hyperdrive_binary_path == os.path.join(bin_dir, "hyperdrive")
+    assert mcal.cfg_hyperdrive_timeout == 7200
+    assert mcal.cfg_birli_binary_path == os.path.join(bin_dir, "birli")
+    assert mcal.cfg_birli_timeout == 3600
+    assert mcal.cfg_proc_keep_completed_visibility_files == 0
+    assert mcal.cfg_proc_cal_export_max_age_hours == 24
     assert (
         mcal.hyperdrive_extra_args == "--uvw-min 50m --uvw-max 1667l --max-iterations 500 --stop-thresh 1e-20"
         " --veto-threshold 0.0 --source-dist-cutoff 50"
     )
-    assert mcal.phase_fit_niter == 3
+    assert mcal.cfg_proc_phase_fit_niter == 3
     assert mcal.gains_cut_off_max == 100.0
 
 
@@ -116,28 +116,28 @@ def test_mwax_calvin_processor_no_gains_cutoff():
     #
 
     # mwax_mover section
-    assert mcal.log_path == os.path.join(base_dir, "logs"), (
-        f"log path mismatch: {mcal.log_path} {os.path.join(base_dir, 'logs')}"
+    assert mcal.cfg_log_path == os.path.join(base_dir, "logs"), (
+        f"log path mismatch: {mcal.cfg_log_path} {os.path.join(base_dir, 'logs')}"
     )
 
-    assert mcal.health_multicast_interface_name == "lo"
-    assert mcal.health_multicast_ip == "127.0.0.1"
-    assert mcal.health_multicast_port == 8011
-    assert mcal.health_multicast_hops == 1
+    assert mcal.cfg_health_multicast_interface_name == "lo"
+    assert mcal.cfg_health_multicast_ip == "127.0.0.1"
+    assert mcal.cfg_health_multicast_port == 8011
+    assert mcal.cfg_health_multicast_hops == 1
 
-    assert mcal.job_input_path == os.path.join(base_dir, "data/calvin/in_jobs")
-    assert mcal.job_output_path == os.path.join(base_dir, "data/calvin/out_jobs")
-    assert mcal.source_list_filename == os.path.join(bin_dir, "srclist.txt")
-    assert mcal.source_list_type == "rts"
-    assert mcal.hyperdrive_binary_path == os.path.join(bin_dir, "hyperdrive")
-    assert mcal.hyperdrive_timeout == 7200
-    assert mcal.birli_binary_path == os.path.join(bin_dir, "birli")
-    assert mcal.birli_timeout == 3600
-    assert mcal.keep_completed_visibility_files == 0
-    assert mcal.cal_export_max_age_hours == 24
+    assert mcal.cfg_proc_job_input_path == os.path.join(base_dir, "data/calvin/in_jobs")
+    assert mcal.cfg_proc_job_output_path == os.path.join(base_dir, "data/calvin/out_jobs")
+    assert mcal.cfg_hyperdrive_source_list_filename == os.path.join(bin_dir, "srclist.txt")
+    assert mcal.cfg_hyperdrive_source_list_type == "rts"
+    assert mcal.cfg_hyperdrive_binary_path == os.path.join(bin_dir, "hyperdrive")
+    assert mcal.cfg_hyperdrive_timeout == 7200
+    assert mcal.cfg_birli_binary_path == os.path.join(bin_dir, "birli")
+    assert mcal.cfg_birli_timeout == 3600
+    assert mcal.cfg_proc_keep_completed_visibility_files == 0
+    assert mcal.cfg_proc_cal_export_max_age_hours == 24
     assert (
         mcal.hyperdrive_extra_args == "--uvw-min 50m --uvw-max 1667l --max-iterations 500 --stop-thresh 1e-20"
         " --veto-threshold 0.0 --source-dist-cutoff 50"
     )
-    assert mcal.phase_fit_niter == 3
+    assert mcal.cfg_proc_phase_fit_niter == 3
     assert mcal.gains_cut_off_max is None

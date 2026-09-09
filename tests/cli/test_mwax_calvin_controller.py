@@ -49,23 +49,23 @@ def test_mwax_calvin_controller():
     #
 
     # mwax_mover section
-    assert mcal.log_path == os.path.join(base_dir, "logs"), (
-        f"log path mismatch: {mcal.log_path} {os.path.join(base_dir, 'logs')}"
+    assert mcal.cfg_log_path == os.path.join(base_dir, "logs"), (
+        f"log path mismatch: {mcal.cfg_log_path} {os.path.join(base_dir, 'logs')}"
     )
 
-    assert mcal.health_multicast_interface_name == "lo"
-    assert mcal.health_multicast_ip == "127.0.0.1"
-    assert mcal.health_multicast_port == 8012
-    assert mcal.health_multicast_hops == 1
+    assert mcal.cfg_health_multicast_interface_name == "lo"
+    assert mcal.cfg_health_multicast_ip == "127.0.0.1"
+    assert mcal.cfg_health_multicast_port == 8012
+    assert mcal.cfg_health_multicast_hops == 1
     assert mcal.max_in_progress_asvo_jobs == 10
-    assert mcal.s3_profile == "mwa-calvin-s3"
-    assert mcal.s3_bucket == "mwa_calvin_solutions"
-    assert mcal.plot_upload_paths == [
+    assert mcal.cfg_plots_s3_profile == "mwa-calvin-s3"
+    assert mcal.cfg_plots_s3_bucket == "mwa_calvin_solutions"
+    assert mcal.cfg_plots_upload_paths == [
         os.path.join(base_dir, "shared/data/calvin11/plots"),
         os.path.join(base_dir, "shared/data/calvin12/plots"),
     ]
     # Not present in the test config, so the default applies
-    assert mcal.plot_upload_max_fits_per_pass == DEFAULT_PLOT_UPLOAD_MAX_FITS_PER_PASS
+    assert mcal.cfg_plots_upload_max_fits_per_pass == DEFAULT_PLOT_UPLOAD_MAX_FITS_PER_PASS
 
 
 class TestFitDirSortKey:
@@ -103,9 +103,9 @@ class TestUploadPublishedFitDirs:
     def make_controller(max_fits_per_pass: int = 100) -> MWAXCalvinController:
         """Build a controller with only the fields the upload path needs."""
         mcal = MWAXCalvinController()
-        mcal.s3_profile = "test-profile"
-        mcal.s3_bucket = "test-bucket"
-        mcal.plot_upload_max_fits_per_pass = max_fits_per_pass
+        mcal.cfg_plots_s3_profile = "test-profile"
+        mcal.cfg_plots_s3_bucket = "test-bucket"
+        mcal.cfg_plots_upload_max_fits_per_pass = max_fits_per_pass
         return mcal
 
     @staticmethod
@@ -358,11 +358,11 @@ class TestPlotUploadHandler:
     def make_controller(tmp_path) -> MWAXCalvinController:
         """Build a controller with one upload path and a production-like interval."""
         mcal = MWAXCalvinController()
-        mcal.s3_profile = "test-profile"
-        mcal.s3_bucket = "test-bucket"
-        mcal.plot_upload_paths = [str(tmp_path)]
-        mcal.plot_upload_interval_secs = 600
-        mcal.plot_upload_max_fits_per_pass = 100
+        mcal.cfg_plots_s3_profile = "test-profile"
+        mcal.cfg_plots_s3_bucket = "test-bucket"
+        mcal.cfg_plots_upload_paths = [str(tmp_path)]
+        mcal.cfg_plots_upload_interval_secs = 600
+        mcal.cfg_plots_upload_max_fits_per_pass = 100
         return mcal
 
     def test_uses_short_delay_when_backlog_pending(self, tmp_path):
@@ -403,7 +403,7 @@ class TestPlotUploadHandler:
     def test_stop_event_prevents_further_paths(self, tmp_path):
         """Once shutdown is requested, remaining paths in the pass are skipped."""
         mcal = self.make_controller(tmp_path)
-        mcal.plot_upload_paths = [str(tmp_path / "a"), str(tmp_path / "b"), str(tmp_path / "c")]
+        mcal.cfg_plots_upload_paths = [str(tmp_path / "a"), str(tmp_path / "b"), str(tmp_path / "c")]
         stop_event = RecordingStopEvent()
 
         def stop_during_first_path(plot_upload_path, event=None):

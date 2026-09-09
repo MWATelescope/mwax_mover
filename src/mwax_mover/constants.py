@@ -35,6 +35,11 @@ SECTION_DOWNLOADING = "downloading"
 SECTION_PROCESSING = "processing"
 SECTION_ARCHIVING = "archiving"
 
+# The single consolidated metadata-database section. Previously three
+# separate sections (mwa/mro/remote metadata database) all pointing at the
+# same database -- see docs/CLEANUP.md 5.2.
+SECTION_MWA_DATABASE = "mwa database"
+
 # The two MWA webservice hosts, tried in order (MRO-local first, then
 # public) by every caller that queries the metadata webservice. Identical
 # in every deployment, so these are constants rather than config.

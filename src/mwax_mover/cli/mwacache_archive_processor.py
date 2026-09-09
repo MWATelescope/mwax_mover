@@ -2,8 +2,8 @@
 
 MWACacheArchiveProcessor runs on the mwacache servers at Curtin. It monitors one
 or more incoming directories for files sent from MWAX boxes, validates their size
-and checksum against the remote metadata database, archives them to Pawsey Long-Term
-Storage (Acacia or Banksia) via rclone, updates the MRO metadata database to
+and checksum against the metadata database, archives them to Pawsey Long-Term
+Storage (Acacia or Banksia) via rclone, updates the metadata database to
 confirm successful archival, then deletes the local copy.
 """
 
@@ -21,7 +21,7 @@ from glob import glob
 import astropy
 
 from mwax_mover import version
-from mwax_mover.constants import EXIT_FAILURE, SECONDS_PER_HOUR, SECTION_MWAX_MOVER
+from mwax_mover.constants import EXIT_FAILURE, SECONDS_PER_HOUR, SECTION_MWA_DATABASE, SECTION_MWAX_MOVER
 from mwax_mover.core.config import read_config, read_config_bool, read_config_list, read_optional_config
 from mwax_mover.core.env import get_hostname, running_under_pytest
 from mwax_mover.db.handler import MWAXDBHandler
@@ -57,36 +57,30 @@ class MWACacheArchiveProcessor:
         else:
             self.hostname: str = get_hostname()
 
-        self.metafits_path: str = ""
+        self.cfg_metafits_path: str = ""
         self.archive_to_location: ArchiveLocation = ArchiveLocation.Unknown
-        self.concurrent_archive_workers: int = 0
-        self.archive_command_timeout_sec: int = 0
-        self.rclone_check_wait_secs: int = 0
+        self.cfg_concurrent_archive_workers: int = 0
+        self.cfg_archive_command_timeout_sec: int = 0
+        self.cfg_rclone_check_wait_secs: int = 0
 
         # database config
-        self.remote_metadatadb_db: str = ""
-        self.remote_metadatadb_host: str = ""
-        self.remote_metadatadb_user: str = ""
-        self.remote_metadatadb_pass: str = ""
-        self.remote_metadatadb_port: int = 5432
-
-        self.mro_metadatadb_db: str = ""
-        self.mro_metadatadb_host: str = ""
-        self.mro_metadatadb_user: str = ""
-        self.mro_metadatadb_pass: str = ""
-        self.mro_metadatadb_port: int = 5432
+        self.cfg_db_host: str = ""
+        self.cfg_db_name: str = ""
+        self.cfg_db_user: str = ""
+        self.cfg_db_pass: str = ""
+        self.cfg_db_port: int = 5432
 
         # s3 config
         self.s3_profile: str = ""
 
         self.health_multicast_interface_ip: str = ""
-        self.health_multicast_ip: str = ""
-        self.health_multicast_port: int = 0
-        self.health_multicast_hops: int = 1
-        self.health_multicast_interface_name: str = ""
+        self.cfg_health_multicast_ip: str = ""
+        self.cfg_health_multicast_port: int = 0
+        self.cfg_health_multicast_hops: int = 1
+        self.cfg_health_multicast_interface_name: str = ""
 
-        self.high_priority_correlator_projectids: list[str] = []
-        self.high_priority_vcs_projectids: list[str] = []
+        self.cfg_high_priority_correlator_projectids: list[str] = []
+        self.cfg_high_priority_vcs_projectids: list[str] = []
 
         # MWAX servers will copy in a temp file, then rename once it is good
         self.running: bool = False
@@ -97,8 +91,7 @@ class MWACacheArchiveProcessor:
         self.fatal_exit_code: int = 0
         self.fatal_reason: str = ""
 
-        self.mro_db_handler: MWAXDBHandler
-        self.remote_db_handler: MWAXDBHandler
+        self.db_handler: MWAXDBHandler
 
         self.watch_dirs: list[str] = []
         self.recursive: bool = False
@@ -114,14 +107,10 @@ class MWACacheArchiveProcessor:
         """
         self.running = True
 
-        # creating database connection pool(s)
-        if self.mro_metadatadb_host != "dummy":
-            logger.info("Starting MRO database connection pool...")
-            self.mro_db_handler.start_database_pool()
-
-        if self.remote_metadatadb_host != "dummy":
-            logger.info("Starting remotedb database connection pool...")
-            self.remote_db_handler.start_database_pool()
+        # creating database connection pool
+        if self.cfg_db_host != "dummy":
+            logger.info("Starting database connection pool...")
+            self.db_handler.start_database_pool()
 
         # create a health thread
         logger.info("Starting health_thread...")
@@ -224,12 +213,9 @@ class MWACacheArchiveProcessor:
             if w.is_running():
                 w.stop()
 
-        # Close database connections
-        if self.mro_db_handler:
-            self.mro_db_handler.close()
-
-        if self.remote_db_handler:
-            self.remote_db_handler.close()
+        # Close database connection
+        if self.db_handler:
+            self.db_handler.close()
 
     def health_handler(self):
         """Periodically send health status via UDP multicast.
@@ -248,10 +234,10 @@ class MWACacheArchiveProcessor:
             try:
                 send_multicast(
                     self.health_multicast_interface_ip,
-                    self.health_multicast_ip,
-                    self.health_multicast_port,
+                    self.cfg_health_multicast_ip,
+                    self.cfg_health_multicast_port,
                     status_bytes,
-                    self.health_multicast_hops,
+                    self.cfg_health_multicast_hops,
                 )
             except Exception as catch_all_exception:
                 logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
@@ -298,17 +284,13 @@ class MWACacheArchiveProcessor:
     def initialise(
         self,
         config_filename,
-        override_mro_db_handler: MWAXDBHandler | None = None,
-        override_remote_db_handler: MWAXDBHandler | None = None,
+        override_db_handler: MWAXDBHandler | None = None,
     ):
         """Initialize the processor from a configuration file.
 
         Args:
             config_filename: Path to the configuration file.
-            override_mro_db_handler: If present, this will override the default
-                MWAXDBHandler (this is used for testing via tests/tests_fakedb.py
-                FakeMWAXDBHandler). Defaults to None.
-            override_remote_db_handler: If present, this will override the default
+            override_db_handler: If present, this will override the default
                 MWAXDBHandler (this is used for testing via tests/tests_fakedb.py
                 FakeMWAXDBHandler). Defaults to None.
         """
@@ -343,15 +325,15 @@ class MWACacheArchiveProcessor:
         self.watch_dirs = []
 
         # Common config options
-        self.metafits_path = read_config(config, SECTION_MWAX_MOVER, "metafits_path")
+        self.cfg_metafits_path = read_config(config, SECTION_MWAX_MOVER, "metafits_path")
 
-        if not os.path.exists(self.metafits_path):
-            logger.error(f"Metafits file location  {self.metafits_path} does not exist. Quitting.")
+        if not os.path.exists(self.cfg_metafits_path):
+            logger.error(f"Metafits file location  {self.cfg_metafits_path} does not exist. Quitting.")
             sys.exit(EXIT_FAILURE)
 
         self.archive_to_location = ArchiveLocation(int(read_config(config, SECTION_MWAX_MOVER, "archive_to_location")))
-        self.concurrent_archive_workers = int(read_config(config, SECTION_MWAX_MOVER, "concurrent_archive_workers"))
-        self.archive_command_timeout_sec = int(
+        self.cfg_concurrent_archive_workers = int(read_config(config, SECTION_MWAX_MOVER, "concurrent_archive_workers"))
+        self.cfg_archive_command_timeout_sec = int(
             read_config(
                 config,
                 SECTION_MWAX_MOVER,
@@ -360,7 +342,7 @@ class MWACacheArchiveProcessor:
         )
 
         # Seconds to wait between rclone copy and rclone check to ensure Banksia VSS nodes have synced
-        self.rclone_check_wait_secs = int(
+        self.cfg_rclone_check_wait_secs = int(
             read_config(
                 config,
                 SECTION_MWAX_MOVER,
@@ -370,28 +352,31 @@ class MWACacheArchiveProcessor:
 
         # Get list of projectids which are to be given
         # high priority when archiving
-        self.high_priority_correlator_projectids = read_config_list(
+        self.cfg_high_priority_correlator_projectids = read_config_list(
             config,
             SECTION_MWAX_MOVER,
             "high_priority_correlator_projectids",
         )
-        self.high_priority_vcs_projectids = read_config_list(
+        self.cfg_high_priority_vcs_projectids = read_config_list(
             config,
             SECTION_MWAX_MOVER,
             "high_priority_vcs_projectids",
         )
 
         # health
-        self.health_multicast_ip = read_config(config, SECTION_MWAX_MOVER, "health_multicast_ip")
-        self.health_multicast_port = int(read_config(config, SECTION_MWAX_MOVER, "health_multicast_port"))
-        self.health_multicast_hops = int(read_config(config, SECTION_MWAX_MOVER, "health_multicast_hops"))
-        self.health_multicast_interface_name = read_config(
+        self.cfg_health_multicast_ip = read_config(config, SECTION_MWAX_MOVER, "health_multicast_ip")
+        self.cfg_health_multicast_port = int(read_config(config, SECTION_MWAX_MOVER, "health_multicast_port"))
+        self.cfg_health_multicast_hops = int(read_config(config, SECTION_MWAX_MOVER, "health_multicast_hops"))
+        self.cfg_health_multicast_interface_name = read_config(
             config,
             SECTION_MWAX_MOVER,
             "health_multicast_interface_name",
         )
         # get this hosts primary network interface ip
-        self.health_multicast_interface_ip = get_ip_address(self.health_multicast_interface_name)
+        # Deliberately no cfg_ prefix: this is derived at runtime from
+        # cfg_health_multicast_interface_name, not read directly from config
+        # (see docs/CLEANUP.md 5.1). Do not "fix" this inconsistency.
+        self.health_multicast_interface_ip = get_ip_address(self.cfg_health_multicast_interface_name)
         logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
 
         # We set different s3 options based on the location
@@ -440,57 +425,24 @@ class MWACacheArchiveProcessor:
         self.recursive = read_config_bool(config, self.hostname, "recursive")
 
         #
-        # MRO database - this is one we will update
+        # MWA database
         #
-        self.mro_metadatadb_host = read_config(config, "mro metadata database", "host")
+        self.cfg_db_host = read_config(config, SECTION_MWA_DATABASE, "host")
+        self.cfg_db_name = read_config(config, SECTION_MWA_DATABASE, "db")
+        self.cfg_db_user = read_config(config, SECTION_MWA_DATABASE, "user")
+        self.cfg_db_pass = read_config(config, SECTION_MWA_DATABASE, "pass", self.cfg_db_name != "dummy")
+        self.cfg_db_port = int(read_config(config, SECTION_MWA_DATABASE, "port"))
 
-        self.mro_metadatadb_db = read_config(config, "mro metadata database", "db")
-        self.mro_metadatadb_user = read_config(config, "mro metadata database", "user")
-
-        self.mro_metadatadb_pass = read_config(
-            config, "mro metadata database", "pass", self.mro_metadatadb_db != "dummy"
-        )
-
-        self.mro_metadatadb_port = int(read_config(config, "mro metadata database", "port"))
-
-        # Initiate database connection for mro metadata db
-        if override_mro_db_handler:
-            self.mro_db_handler = override_mro_db_handler
+        # Initiate database connection
+        if override_db_handler:
+            self.db_handler = override_db_handler
         else:
-            self.mro_db_handler = MWAXDBHandler(
-                host=self.mro_metadatadb_host,
-                port=self.mro_metadatadb_port,
-                db_name=self.mro_metadatadb_db,
-                user=self.mro_metadatadb_user,
-                password=self.mro_metadatadb_pass,
-            )
-
-        #
-        # Remote metadata db is ready only- just used to query file size and
-        # date info
-        #
-        self.remote_metadatadb_host = read_config(config, "remote metadata database", "host")
-
-        self.remote_metadatadb_db = read_config(config, "remote metadata database", "db")
-        self.remote_metadatadb_user = read_config(config, "remote metadata database", "user")
-        self.remote_metadatadb_pass = read_config(
-            config,
-            "remote metadata database",
-            "pass",
-            self.remote_metadatadb_db != "dummy",
-        )
-        self.remote_metadatadb_port = int(read_config(config, "remote metadata database", "port"))
-
-        # Initiate database connection for remote metadata db
-        if override_remote_db_handler:
-            self.remote_db_handler = override_remote_db_handler
-        else:
-            self.remote_db_handler = MWAXDBHandler(
-                host=self.remote_metadatadb_host,
-                port=self.remote_metadatadb_port,
-                db_name=self.remote_metadatadb_db,
-                user=self.remote_metadatadb_user,
-                password=self.remote_metadatadb_pass,
+            self.db_handler = MWAXDBHandler(
+                host=self.cfg_db_host,
+                port=self.cfg_db_port,
+                db_name=self.cfg_db_name,
+                user=self.cfg_db_user,
+                password=self.cfg_db_pass,
             )
 
         # Assemble paths and extensions
@@ -500,15 +452,14 @@ class MWACacheArchiveProcessor:
         for i, p_and_e in enumerate(paths_and_exts):
             worker = PawseyOutgoingProcessor(
                 f"PawseyOutgoingProcessor{i}",
-                self.metafits_path,
+                self.cfg_metafits_path,
                 [p_and_e],
-                self.high_priority_correlator_projectids,
-                self.high_priority_vcs_projectids,
-                self.mro_db_handler,
-                self.remote_db_handler,
+                self.cfg_high_priority_correlator_projectids,
+                self.cfg_high_priority_vcs_projectids,
+                self.db_handler,
                 self.s3_profile,
                 self.archive_to_location,
-                self.rclone_check_wait_secs,
+                self.cfg_rclone_check_wait_secs,
                 self.recursive,
             )
             self.workers.append(worker)

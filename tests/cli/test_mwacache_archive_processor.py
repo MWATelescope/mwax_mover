@@ -30,51 +30,41 @@ def test_mwacache_archiver_config_file():
     # Call to read config <-- this is what we're testing!
     mcap.initialise(config_filename)
     # Override db_handler with a fake one
-    mcap.mro_db_handler = FakeMWAXDBHandler()
+    mcap.db_handler = FakeMWAXDBHandler()
     # Add any select results (in order in the code below-or keep commented if none)
-    # e.g. mcap.mro_db_handler_object.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
-    mcap.remote_db_handler = FakeMWAXDBHandler()
-    # Add any select results (in order in the code below-or keep commented if none)
-    # e.g. mcap.remote_db_handler_object.select_results =
-    #          [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
+    # e.g. mcap.db_handler.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
 
     #
     # Now confirm the params all match the config file
     #
 
     # mwax_mover section
-    assert mcap.metafits_path == os.path.join(base_dir, "vulcan/metafits")
+    assert mcap.cfg_metafits_path == os.path.join(base_dir, "vulcan/metafits")
     assert mcap.archive_to_location == ArchiveLocation.AcaciaMWA
 
-    assert mcap.health_multicast_interface_name == "lo"
-    assert mcap.health_multicast_ip == "224.250.0.0"
-    assert mcap.health_multicast_port == 8004
-    assert mcap.health_multicast_hops == 1
+    assert mcap.cfg_health_multicast_interface_name == "lo"
+    assert mcap.cfg_health_multicast_ip == "224.250.0.0"
+    assert mcap.cfg_health_multicast_port == 8004
+    assert mcap.cfg_health_multicast_hops == 1
 
-    assert mcap.concurrent_archive_workers == 4
-    assert mcap.archive_command_timeout_sec == 1800
-    assert mcap.rclone_check_wait_secs == 60
+    assert mcap.cfg_concurrent_archive_workers == 4
+    assert mcap.cfg_archive_command_timeout_sec == 1800
+    assert mcap.cfg_rclone_check_wait_secs == 60
 
     assert mcap.s3_profile == "test_profile"
 
-    assert mcap.remote_metadatadb_host == "dummy"
-    assert mcap.remote_metadatadb_db == "dummy"
-    assert mcap.remote_metadatadb_port == 5432
-    assert mcap.remote_metadatadb_user == "dummy"
-    assert mcap.remote_metadatadb_pass == "dummy"
-
-    assert mcap.mro_metadatadb_host == "dummy"
-    assert mcap.mro_metadatadb_db == "dummy"
-    assert mcap.mro_metadatadb_port == 5432
-    assert mcap.mro_metadatadb_user == "dummy"
-    assert mcap.mro_metadatadb_pass == "dummy"
+    assert mcap.cfg_db_host == "dummy"
+    assert mcap.cfg_db_name == "dummy"
+    assert mcap.cfg_db_port == 5432
+    assert mcap.cfg_db_user == "dummy"
+    assert mcap.cfg_db_pass == "dummy"
 
     assert len(mcap.watch_dirs) == 3
     assert mcap.watch_dirs[0] == os.path.join(base_dir, "volume1/incoming")
 
     # test list of projects
-    assert mcap.high_priority_correlator_projectids == ["D0006"]
-    assert not mcap.high_priority_vcs_projectids
+    assert mcap.cfg_high_priority_correlator_projectids == ["D0006"]
+    assert not mcap.cfg_high_priority_vcs_projectids
 
 
 def test_mwacache_archiver_metafits_file():
@@ -95,12 +85,9 @@ def test_mwacache_archiver_metafits_file():
     shutil.copyfile(TEST_METAFITS, incoming)
 
     # Override db_handler with a fake one
-    fake_mro_db_handler = FakeMWAXDBHandler()
+    fake_db_handler = FakeMWAXDBHandler()
     # Add any select results (in order in the code below-or keep commented if none)
-    # e.g. mcap.mro_db_handler.select_results = [[{"observation_num": 123, "size": 1024, "checksum": "abc123"}]]
-    fake_remote_db_handler = FakeMWAXDBHandler()
-    # Add any select results (in order in the code below-or keep commented if none)
-    fake_remote_db_handler.select_results = [
+    fake_db_handler.select_results = [
         [
             {
                 "observation_num": 1122979144,
@@ -111,7 +98,7 @@ def test_mwacache_archiver_metafits_file():
     ]
 
     # Call to read config <-- this is what we're testing!
-    mcap.initialise(config_filename, fake_mro_db_handler, fake_remote_db_handler)
+    mcap.initialise(config_filename, fake_db_handler)
 
     # start processor
     # Create and start a thread for the processor

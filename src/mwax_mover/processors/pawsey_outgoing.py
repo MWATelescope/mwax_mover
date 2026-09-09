@@ -1,8 +1,8 @@
 """Watch-queue-worker that validates and archives mwacache files to Pawsey Long-Term Storage.
 
 Runs on the mwacache servers at Curtin. For each file, validates the filename,
-verifies its size and MD5 checksum against the remote metadata database, archives
-it to Acacia or Banksia via rclone, updates the MRO metadata database to record
+verifies its size and MD5 checksum against the metadata database, archives
+it to Acacia or Banksia via rclone, updates the metadata database to record
 the archive location and bucket, then deletes the local copy.
 """
 
@@ -39,8 +39,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
         watch_paths_exts: list[tuple[str, str]],
         high_priority_correlator_projects: list[str],
         high_priority_vcs_projects: list[str],
-        mro_db_handler_object: MWAXDBHandler,
-        remote_db_handler_object: MWAXDBHandler,
+        db_handler_object: MWAXDBHandler,
         s3_profile: str,
         archive_to_location: ArchiveLocation,
         rclone_check_wait_secs: int,
@@ -54,8 +53,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             watch_paths_exts: List of (directory, file_extension) tuples to monitor.
             high_priority_correlator_projects: List of high-priority correlator project IDs.
             high_priority_vcs_projects: List of high-priority VCS project IDs.
-            mro_db_handler_object: Database handler for the MRO metadata database.
-            remote_db_handler_object: Database handler for the remote metadata database.
+            db_handler_object: Database handler for the MWA metadata database.
             s3_profile: rclone profile name to upload with (see rclone.conf).
             archive_to_location: Target archive location (Acacia, Banksia, or AcaciaMWA).
             rclone_check_wait_secs: Number of seconds to wait between rclone copy and
@@ -74,8 +72,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             recursive=recursive,
             requeue_to_eoq_on_failure=True,
         )
-        self.mro_db_handler_object = mro_db_handler_object
-        self.remote_db_handler_object = remote_db_handler_object
+        self.db_handler_object = db_handler_object
         self.s3_profile = s3_profile
         self.archive_to_location = archive_to_location
         self.rclone_check_wait_secs = rclone_check_wait_secs
@@ -108,7 +105,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             logger.debug(f"{item}: file size on disk is {actual_file_size} bytes")
 
             # Lookup file from db
-            data_files_row: DataFileRow = get_data_file_row(self.remote_db_handler_object, item, val.obs_id)
+            data_files_row: DataFileRow = get_data_file_row(self.db_handler_object, item, val.obs_id)
             database_file_size = data_files_row.size
 
             # Check for 0 size
@@ -169,7 +166,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             if archive_success:
                 # Update record in metadata database
                 if not data_files.update_data_file_row_as_archived(
-                    self.mro_db_handler_object,
+                    self.db_handler_object,
                     val.obs_id,
                     item,
                     self.archive_to_location,

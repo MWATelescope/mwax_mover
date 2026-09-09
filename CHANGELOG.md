@@ -12,6 +12,7 @@
 * Removed all 11 vestigial pylint pragmas.
 * Renamed various attributes across modules for consistency.
 * Config file variable naming consistency.
+* Config file sections for databases now are all standardised to "[mwa database]".
 
 # 1.10.2 26-Aug-2026
 

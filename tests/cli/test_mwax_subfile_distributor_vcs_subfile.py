@@ -75,11 +75,11 @@ def test_correlator_config_file():
     assert not sd.cfg_corr_high_priority_vcs_projectids
 
     # metadata db section
-    assert sd.cfg_metadatadb_host == "dummy"
-    assert sd.cfg_metadatadb_db == "dummy"
-    assert sd.cfg_metadatadb_port == 5432
-    assert sd.cfg_metadatadb_user == "dummy"
-    assert sd.cfg_metadatadb_pass == "dummy"
+    assert sd.cfg_db_host == "dummy"
+    assert sd.cfg_db_name == "dummy"
+    assert sd.cfg_db_port == 5432
+    assert sd.cfg_db_user == "dummy"
+    assert sd.cfg_db_pass == "dummy"
 
     # test_server section
     assert sd.cfg_corr_archive_destination_host == "host1.destination.com://dest/path"

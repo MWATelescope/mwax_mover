@@ -41,6 +41,7 @@ from mwax_mover.constants import (
     SECONDS_PER_HOUR,
     SECTION_CALVIN,
     SECTION_GIANT_SQUID,
+    SECTION_MWA_DATABASE,
     SECTION_MWAX_MOVER,
     SECTION_PLOTS_UPLOAD,
 )
@@ -146,7 +147,7 @@ class MWAXCalvinController:
         requests, database connections, and health monitoring.
         """
         # General
-        self.log_path: str = ""
+        self.cfg_log_path: str = ""
         self.hostname: str = ""
         self.db_handler: MWAXDBHandler
         self.config_filename: str = ""
@@ -156,10 +157,10 @@ class MWAXCalvinController:
 
         # health
         self.health_multicast_interface_ip: str = ""
-        self.health_multicast_interface_name: str = ""
-        self.health_multicast_ip: str = ""
-        self.health_multicast_port: int = 0
-        self.health_multicast_hops: int = 0
+        self.cfg_health_multicast_interface_name: str = ""
+        self.cfg_health_multicast_ip: str = ""
+        self.cfg_health_multicast_port: int = 0
+        self.cfg_health_multicast_hops: int = 0
         # We update these two only every 10 seconds (in the health thread) to not hammer the server(s)
         self.slurm_queue_size: int = 0
         self.mwa_asvo_vis_jobs_in_progress: int = 0
@@ -172,24 +173,24 @@ class MWAXCalvinController:
         self.mwa_asvo_errors: int = 0
 
         # calvin settings
-        self.check_interval_seconds: int = 0
-        self.script_path = ""
+        self.cfg_calvin_check_interval_seconds: int = 0
+        self.cfg_calvin_script_path = ""
         self.oldest_cal_obs_id: int = 0
         self.max_in_progress_asvo_jobs: int = 999
         self.mwa_asvo_calibration_requests_queued = 0
 
         # giant-squid
-        self.mwa_asvo_outage_check_seconds: int = 0
-        self.mwa_asvo_longest_wait_time_seconds: int = 0
-        self.giant_squid_binary_path: str = ""
-        self.giant_squid_list_timeout_seconds: int = 0
-        self.giant_squid_submitvis_timeout_seconds: int = 0
+        self.cfg_gs_mwa_asvo_outage_check_seconds: int = 0
+        self.cfg_gs_mwa_asvo_longest_wait_time_seconds: int = 0
+        self.cfg_gs_binary_path: str = ""
+        self.cfg_gs_list_timeout_seconds: int = 0
+        self.cfg_gs_submitvis_timeout_seconds: int = 0
 
         # S3 upload settings
-        self.s3_profile: str = ""
-        self.s3_bucket: str = ""
-        self.plot_upload_interval_secs = 120
-        self.plot_upload_max_fits_per_pass: int = DEFAULT_PLOT_UPLOAD_MAX_FITS_PER_PASS
+        self.cfg_plots_s3_profile: str = ""
+        self.cfg_plots_s3_bucket: str = ""
+        self.cfg_plots_upload_interval_secs = 120
+        self.cfg_plots_upload_max_fits_per_pass: int = DEFAULT_PLOT_UPLOAD_MAX_FITS_PER_PASS
 
         # Create a stop event handler for the plot uploader thread
         self.plot_uploader_stop_event = threading.Event()
@@ -256,8 +257,8 @@ class MWAXCalvinController:
 
             # If we're still running, wait before we do the next loop
             if self.running:
-                logger.debug(f"Sleeping for {self.check_interval_seconds} seconds")
-                self.sleep(self.check_interval_seconds)
+                logger.debug(f"Sleeping for {self.cfg_calvin_check_interval_seconds} seconds")
+                self.sleep(self.cfg_calvin_check_interval_seconds)
         #
         # Finished- do some clean up
         #
@@ -270,9 +271,9 @@ class MWAXCalvinController:
     def plot_upload_handler(self, stop_event: threading.Event) -> None:
         """Main loop for the background upload thread.
 
-        Every ``self.plot_upload_interval_secs`` seconds, walks each path in
-        ``self.plot_upload_paths`` looking for published fit directories, uploads
-        the newest ``self.plot_upload_max_fits_per_pass`` of them to S3, and
+        Every ``self.cfg_plots_upload_interval_secs`` seconds, walks each path in
+        ``self.cfg_plots_upload_paths`` looking for published fit directories, uploads
+        the newest ``self.cfg_plots_upload_max_fits_per_pass`` of them to S3, and
         removes each directory once it is empty. Per-path exponential backoff is
         applied when a pass uploads nothing at all.
 
@@ -321,7 +322,8 @@ class MWAXCalvinController:
 
         # initialise the upload trackers
         upload_trackers: list[UploadPathTracker] = [
-            UploadPathTracker(plot_upload_path=t, next_attempt_time=time.monotonic()) for t in self.plot_upload_paths
+            UploadPathTracker(plot_upload_path=t, next_attempt_time=time.monotonic())
+            for t in self.cfg_plots_upload_paths
         ]
 
         while not stop_event.is_set():
@@ -379,11 +381,11 @@ class MWAXCalvinController:
             if backlog_pending:
                 logger.debug(
                     f"Backlog remains, next pass in {PLOT_UPLOAD_BACKLOG_DELAY_SECS}s"
-                    f" instead of {self.plot_upload_interval_secs}s."
+                    f" instead of {self.cfg_plots_upload_interval_secs}s."
                 )
                 stop_event.wait(timeout=PLOT_UPLOAD_BACKLOG_DELAY_SECS)
             else:
-                stop_event.wait(timeout=self.plot_upload_interval_secs)
+                stop_event.wait(timeout=self.cfg_plots_upload_interval_secs)
 
         logger.debug("Plot upload thread completed successfully.")
 
@@ -399,7 +401,7 @@ class MWAXCalvinController:
         index.json by ``populate_index_json_entry``.
 
         Directories are uploaded newest fitid first, and at most
-        ``self.plot_upload_max_fits_per_pass`` of them per call. Both matter when
+        ``self.cfg_plots_upload_max_fits_per_pass`` of them per call. Both matter when
         a backlog builds up: fitids are monotonically increasing, so newest-first
         gets the freshest solutions into S3 without waiting on older ones, and
         the batch limit bounds how long a pass takes so that a fit published
@@ -459,7 +461,7 @@ class MWAXCalvinController:
 
         # Newest fitid first, then take only this pass's batch.
         candidates.sort(key=fit_dir_sort_key)
-        batch = candidates[: self.plot_upload_max_fits_per_pass]
+        batch = candidates[: self.cfg_plots_upload_max_fits_per_pass]
 
         if not batch:
             logger.debug(f"No published fit dirs to upload in {plot_upload_path}")
@@ -493,8 +495,8 @@ class MWAXCalvinController:
             try:
                 transfers, bytes_moved = rclone_move(
                     str(fit_dir),
-                    self.s3_profile,
-                    self.s3_bucket,
+                    self.cfg_plots_s3_profile,
+                    self.cfg_plots_s3_bucket,
                     dest_subpath=fit_dir.name,
                 )
             except Exception as e:
@@ -577,7 +579,7 @@ class MWAXCalvinController:
             # There was an outage at some point.
             # If it's been long enough reset the outage and retry
             elapsed: timedelta = datetime.now() - self.mwa_asvo_helper.mwa_asvo_outage_datetime
-            if elapsed.total_seconds() >= self.mwa_asvo_outage_check_seconds:
+            if elapsed.total_seconds() >= self.cfg_gs_mwa_asvo_outage_check_seconds:
                 # Reset the MWA ASVO outage so we retry
                 self.mwa_asvo_helper.mwa_asvo_outage_datetime = None
 
@@ -674,7 +676,7 @@ class MWAXCalvinController:
             self.worker_config_filename,
             realtime_request.obs_id,
             CalvinJobType.realtime,
-            self.log_path,
+            self.cfg_log_path,
             [realtime_request.request_id],
             False,
             "",
@@ -686,7 +688,7 @@ class MWAXCalvinController:
         # submit sbatch script
         try:
             (success, slurm_job_id) = submit_sbatch(
-                self.script_path,
+                self.cfg_calvin_script_path,
                 script,
                 realtime_request.obs_id,
                 [
@@ -776,7 +778,7 @@ class MWAXCalvinController:
                                 self.worker_config_filename,
                                 job.obs_id,
                                 CalvinJobType.mwa_asvo,
-                                self.log_path,
+                                self.cfg_log_path,
                                 job.request_ids,
                                 job.bulk_request,
                                 f'--mwa-asvo-download-url="{job.download_url}" --asvo-job-id={job.job_id}',
@@ -787,7 +789,7 @@ class MWAXCalvinController:
                             slurm_job_id = None
                             try:
                                 (success, slurm_job_id) = submit_sbatch(
-                                    self.script_path,
+                                    self.cfg_calvin_script_path,
                                     script,
                                     job.obs_id,
                                     job.request_ids,
@@ -865,10 +867,10 @@ class MWAXCalvinController:
             try:
                 send_multicast(
                     self.health_multicast_interface_ip,
-                    self.health_multicast_ip,
-                    self.health_multicast_port,
+                    self.cfg_health_multicast_ip,
+                    self.cfg_health_multicast_port,
                     status_bytes,
-                    self.health_multicast_hops,
+                    self.cfg_health_multicast_hops,
                 )
             except Exception as catch_all_exception:
                 logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
@@ -1089,10 +1091,10 @@ class MWAXCalvinController:
         config.read_file(open(config_filename, "r", encoding="utf-8"))
 
         # read from config file
-        self.log_path = config.get(SECTION_MWAX_MOVER, "log_path")
+        self.cfg_log_path = config.get(SECTION_MWAX_MOVER, "log_path")
 
-        if not os.path.exists(self.log_path):
-            print(f"log_path {self.log_path} does not exist. Quiting.")
+        if not os.path.exists(self.cfg_log_path):
+            print(f"log_path {self.cfg_log_path} does not exist. Quiting.")
             sys.exit(EXIT_FAILURE)
 
         # Read log level
@@ -1104,53 +1106,54 @@ class MWAXCalvinController:
         logger.info(f"Reading config file: {config_filename}")
 
         # health
-        self.health_multicast_ip = read_config(config, SECTION_MWAX_MOVER, "health_multicast_ip")
-        self.health_multicast_port = int(read_config(config, SECTION_MWAX_MOVER, "health_multicast_port"))
-        self.health_multicast_hops = int(read_config(config, SECTION_MWAX_MOVER, "health_multicast_hops"))
-        self.health_multicast_interface_name = read_config(
+        self.cfg_health_multicast_ip = read_config(config, SECTION_MWAX_MOVER, "health_multicast_ip")
+        self.cfg_health_multicast_port = int(read_config(config, SECTION_MWAX_MOVER, "health_multicast_port"))
+        self.cfg_health_multicast_hops = int(read_config(config, SECTION_MWAX_MOVER, "health_multicast_hops"))
+        self.cfg_health_multicast_interface_name = read_config(
             config,
             SECTION_MWAX_MOVER,
             "health_multicast_interface_name",
         )
 
         # get this hosts primary network interface ip
-        self.health_multicast_interface_ip = get_ip_address(self.health_multicast_interface_name)
+        # Deliberately no cfg_ prefix: this is derived at runtime from
+        # cfg_health_multicast_interface_name, not read directly from config
+        # (see docs/CLEANUP.md 5.1). Do not "fix" this inconsistency.
+        self.health_multicast_interface_ip = get_ip_address(self.cfg_health_multicast_interface_name)
         logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
 
         #
-        # MRO database
+        # MWA database
         #
-        self.mro_metadatadb_host = read_config(config, "mro metadata database", "host")
-        self.mro_metadatadb_db = read_config(config, "mro metadata database", "db")
-        self.mro_metadatadb_user = read_config(config, "mro metadata database", "user")
-        self.mro_metadatadb_pass = read_config(
-            config, "mro metadata database", "pass", self.mro_metadatadb_db != "dummy"
-        )
-        self.mro_metadatadb_port = int(read_config(config, "mro metadata database", "port"))
+        self.cfg_db_host = read_config(config, SECTION_MWA_DATABASE, "host")
+        self.cfg_db_name = read_config(config, SECTION_MWA_DATABASE, "db")
+        self.cfg_db_user = read_config(config, SECTION_MWA_DATABASE, "user")
+        self.cfg_db_pass = read_config(config, SECTION_MWA_DATABASE, "pass", self.cfg_db_name != "dummy")
+        self.cfg_db_port = int(read_config(config, SECTION_MWA_DATABASE, "port"))
 
         # Initiate database connection for mro metadata db
         if override_db_handler:
             self.db_handler = override_db_handler
         else:
             self.db_handler = MWAXDBHandler(
-                host=self.mro_metadatadb_host,
-                port=self.mro_metadatadb_port,
-                db_name=self.mro_metadatadb_db,
-                user=self.mro_metadatadb_user,
-                password=self.mro_metadatadb_pass,
+                host=self.cfg_db_host,
+                port=self.cfg_db_port,
+                db_name=self.cfg_db_name,
+                user=self.cfg_db_user,
+                password=self.cfg_db_pass,
             )
 
         #
         # calvin config
         #
         # How long between iterations of the main loop (in seconds)
-        self.check_interval_seconds = int(read_config(config, SECTION_CALVIN, "check_interval_seconds"))
+        self.cfg_calvin_check_interval_seconds = int(read_config(config, SECTION_CALVIN, "check_interval_seconds"))
 
         # script path (path for keeping all sbatch scripts)
-        self.script_path = config.get(SECTION_CALVIN, "script_path")
+        self.cfg_calvin_script_path = config.get(SECTION_CALVIN, "script_path")
 
-        if not os.path.exists(self.script_path):
-            print(f"script_path {self.script_path} does not exist. Quiting.")
+        if not os.path.exists(self.cfg_calvin_script_path):
+            print(f"script_path {self.cfg_calvin_script_path} does not exist. Quiting.")
             sys.exit(EXIT_FAILURE)
 
         # oldest calvin obsid (when looking for new calibrator obs in the schedule, don't
@@ -1164,73 +1167,75 @@ class MWAXCalvinController:
         #
         # How many seconds do we wait before rechecking when giant squid says
         # MWA ASVO has an outage?
-        self.mwa_asvo_outage_check_seconds = int(
+        self.cfg_gs_mwa_asvo_outage_check_seconds = int(
             read_config(config, SECTION_GIANT_SQUID, "mwa_asvo_outage_check_seconds")
         )
 
         # How many secs do we wait for MWA ASVO to get us a completed job??
-        self.mwa_asvo_longest_wait_time_seconds = int(
+        self.cfg_gs_mwa_asvo_longest_wait_time_seconds = int(
             read_config(config, SECTION_GIANT_SQUID, "mwa_asvo_longest_wait_time_seconds")
         )
 
         # Get the giant squid binary
-        self.giant_squid_binary_path = read_config(
+        self.cfg_gs_binary_path = read_config(
             config,
             SECTION_GIANT_SQUID,
             "giant_squid_binary_path",
         )
 
-        if not os.path.exists(self.giant_squid_binary_path):
-            logger.error(f"giant_squid_binary_path location  {self.giant_squid_binary_path} does not exist. Quitting.")
+        if not os.path.exists(self.cfg_gs_binary_path):
+            logger.error(f"giant_squid_binary_path location  {self.cfg_gs_binary_path} does not exist. Quitting.")
             sys.exit(EXIT_FAILURE)
 
         # How long do we wait for giant-squid to execute a list subcommand
-        self.giant_squid_list_timeout_seconds = int(
+        self.cfg_gs_list_timeout_seconds = int(
             read_config(config, SECTION_GIANT_SQUID, "giant_squid_list_timeout_seconds")
         )
 
         # How long do we wait for giant-squid to execute a submit-vis subcommand
-        self.giant_squid_submitvis_timeout_seconds = int(
+        self.cfg_gs_submitvis_timeout_seconds = int(
             read_config(config, SECTION_GIANT_SQUID, "giant_squid_submitvis_timeout_seconds")
         )
 
         #
         # plots upload section
         #
-        self.s3_profile = str(read_config(config, SECTION_PLOTS_UPLOAD, "s3_profile"))
-        self.s3_bucket = str(read_config(config, SECTION_PLOTS_UPLOAD, "s3_bucket"))
-        self.plot_upload_paths: list[str] = read_config_list(config, SECTION_PLOTS_UPLOAD, "plot_upload_paths")
-        for p in self.plot_upload_paths:
+        self.cfg_plots_s3_profile = str(read_config(config, SECTION_PLOTS_UPLOAD, "s3_profile"))
+        self.cfg_plots_s3_bucket = str(read_config(config, SECTION_PLOTS_UPLOAD, "s3_bucket"))
+        self.cfg_plots_upload_paths: list[str] = read_config_list(config, SECTION_PLOTS_UPLOAD, "plot_upload_paths")
+        for p in self.cfg_plots_upload_paths:
             if not os.path.exists(p):
                 logger.error(f"plot_upload_path: {p} does not exist. Quitting.")
                 sys.exit(EXIT_FAILURE)
-        self.plot_upload_interval_secs: int = int(
+        self.cfg_plots_upload_interval_secs: int = int(
             read_config(config, SECTION_PLOTS_UPLOAD, "plot_upload_interval_secs")
         )
 
         # Optional: how many fit dirs to upload per pass over each plot upload
         # path. Left optional so existing config files keep working unchanged.
         if config.has_option(SECTION_PLOTS_UPLOAD, "plot_upload_max_fits_per_pass"):
-            self.plot_upload_max_fits_per_pass = int(
+            self.cfg_plots_upload_max_fits_per_pass = int(
                 read_config(config, SECTION_PLOTS_UPLOAD, "plot_upload_max_fits_per_pass")
             )
 
-            if self.plot_upload_max_fits_per_pass < 1:
+            if self.cfg_plots_upload_max_fits_per_pass < 1:
                 logger.error(
                     "plot_upload_max_fits_per_pass must be at least 1, got"
-                    f" {self.plot_upload_max_fits_per_pass}. Quitting."
+                    f" {self.cfg_plots_upload_max_fits_per_pass}. Quitting."
                 )
                 sys.exit(EXIT_FAILURE)
         else:
-            self.plot_upload_max_fits_per_pass = DEFAULT_PLOT_UPLOAD_MAX_FITS_PER_PASS
+            self.cfg_plots_upload_max_fits_per_pass = DEFAULT_PLOT_UPLOAD_MAX_FITS_PER_PASS
 
-        logger.info(f"Uploading up to {self.plot_upload_max_fits_per_pass} fit dir(s) per pass, newest fitid first.")
+        logger.info(
+            f"Uploading up to {self.cfg_plots_upload_max_fits_per_pass} fit dir(s) per pass, newest fitid first."
+        )
 
         # Setup the MWA ASVO Helper
         self.mwa_asvo_helper.initialise(
-            self.giant_squid_binary_path,
-            self.giant_squid_list_timeout_seconds,
-            self.giant_squid_submitvis_timeout_seconds,
+            self.cfg_gs_binary_path,
+            self.cfg_gs_list_timeout_seconds,
+            self.cfg_gs_submitvis_timeout_seconds,
         )
 
     def initialise_from_command_line(self):

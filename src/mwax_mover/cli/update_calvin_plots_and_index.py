@@ -13,7 +13,7 @@ import requests
 
 from mwax_mover.calvin.plots import hyperdrive
 from mwax_mover.calvin.plots.index import populate_index_json_entry
-from mwax_mover.constants import EXIT_FAILURE
+from mwax_mover.constants import EXIT_FAILURE, SECTION_MWA_DATABASE
 from mwax_mover.core.config import read_config
 from mwax_mover.db.calibration import get_fit_info_from_slurm_job_and_obsid
 from mwax_mover.db.handler import MWAXDBHandler
@@ -232,20 +232,20 @@ def main() -> None:
     # Parse config file
     config = ConfigParser()
     config.read_file(open(args.cfg, "r", encoding="utf-8"))
-    mro_metadatadb_host = read_config(config, "mro metadata database", "host")
-    mro_metadatadb_db = read_config(config, "mro metadata database", "db")
-    mro_metadatadb_user = read_config(config, "mro metadata database", "user")
+    db_host = read_config(config, SECTION_MWA_DATABASE, "host")
+    db_name = read_config(config, SECTION_MWA_DATABASE, "db")
+    db_user = read_config(config, SECTION_MWA_DATABASE, "user")
     # Don't require base64 encoded password if running a pytest
-    mro_metadatadb_pass = read_config(config, "mro metadata database", "pass", True)
-    mro_metadatadb_port = int(read_config(config, "mro metadata database", "port"))
+    db_pass = read_config(config, SECTION_MWA_DATABASE, "pass", True)
+    db_port = int(read_config(config, SECTION_MWA_DATABASE, "port"))
 
-    # Initiate database connection for mro metadata db
+    # Initiate database connection
     db_handler = MWAXDBHandler(
-        host=mro_metadatadb_host,
-        port=mro_metadatadb_port,
-        db_name=mro_metadatadb_db,
-        user=mro_metadatadb_user,
-        password=mro_metadatadb_pass,
+        host=db_host,
+        port=db_port,
+        db_name=db_name,
+        user=db_user,
+        password=db_pass,
         ssl_mode="?sslmode=require",
     )
 
