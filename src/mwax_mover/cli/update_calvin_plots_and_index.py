@@ -13,6 +13,7 @@ import requests
 
 from mwax_mover.calvin.plots import hyperdrive
 from mwax_mover.calvin.plots.index import populate_index_json_entry
+from mwax_mover.constants import EXIT_FAILURE
 from mwax_mover.core.config import read_config
 from mwax_mover.db.calibration import get_fit_info_from_slurm_job_and_obsid
 from mwax_mover.db.handler import MWAXDBHandler
@@ -221,12 +222,12 @@ def main() -> None:
 
     if not os.path.exists(solution_root):
         print(f"Solution_directory: {solution_root} does not exist. Exiting")
-        sys.exit(1)
+        sys.exit(EXIT_FAILURE)
 
     # Read database info from config file
     if not os.path.exists(args.cfg):
         print(f"Configuration file location {args.cfg} does not exist. Quitting.")
-        sys.exit(1)
+        sys.exit(EXIT_FAILURE)
 
     # Parse config file
     config = ConfigParser()
@@ -255,12 +256,12 @@ def main() -> None:
             base_upload_dir: str = args.base_upload_dir
         else:
             print("When --dry-run is not passed, you must provide a --base-upload-dir value.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
     hyperdrive_binary_path: str = args.hyperdrive_binary_path
     if not os.path.exists(hyperdrive_binary_path):
         print(f"hyperdrive binary path: {hyperdrive_binary_path} does not exist. Exiting")
-        sys.exit(1)
+        sys.exit(EXIT_FAILURE)
 
     # Start db pool
     db_handler.start_database_pool()
@@ -341,17 +342,17 @@ def main() -> None:
             if resp is not None:
                 if resp.status_code == 404:
                     print(f"Fit id {sol.fit_id} not found in S3")
-                    sys.exit(1)
+                    sys.exit(EXIT_FAILURE)
                 else:
                     print(f"HTTP error when downloading the index.json file: {resp.status_code}")
-                    sys.exit(1)
+                    sys.exit(EXIT_FAILURE)
             else:
                 print(f"HTTP error when downloading the index.json file: no response received {httpe!s}")
-                sys.exit(1)
+                sys.exit(EXIT_FAILURE)
 
         except Exception as e:
             print(f"Error downloading plot file: {e}")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         # Get all the solution files
         solution_files = glob.glob(os.path.join(sol.dir_path, "*_solutions.fits"))
@@ -375,7 +376,7 @@ def main() -> None:
             # Exit early on failure
             if not success:
                 sol.log(f"Error generating plots for {file}: {error_message}")
-                sys.exit(1)
+                sys.exit(EXIT_FAILURE)
 
         # Open and read the JSON
         with open(index_filename, "r") as f:
@@ -447,7 +448,7 @@ def main() -> None:
 
             except Exception as e:
                 print(f"Error moving files to upload dir {upload_dir}: {e!s}")
-                sys.exit(1)
+                sys.exit(EXIT_FAILURE)
         else:
             print(f"Not uploading files: {files_to_upload} to S3 (bucket={sol.fit_id}) as dry-run = true.")
 

@@ -21,6 +21,7 @@ from glob import glob
 import astropy
 
 from mwax_mover import version
+from mwax_mover.constants import EXIT_FAILURE, SECONDS_PER_HOUR, SECTION_MWAX_MOVER
 from mwax_mover.core.config import read_config, read_config_bool, read_config_list, read_optional_config
 from mwax_mover.core.env import get_hostname, running_under_pytest
 from mwax_mover.db.handler import MWAXDBHandler
@@ -139,7 +140,7 @@ class MWACacheArchiveProcessor:
                 # In theory we could be starting up as mwax is sending
                 # us a new file and we don't want to delete an real
                 # in progress file.
-                min_partial_purge_age_secs = 3600
+                min_partial_purge_age_secs = SECONDS_PER_HOUR
 
                 if time.time() - os.path.getmtime(partial_file) > min_partial_purge_age_secs:
                     logger.warning(
@@ -171,7 +172,7 @@ class MWACacheArchiveProcessor:
             for w in self.workers:
                 if self.running:
                     if not w.is_running():
-                        self.request_fatal_shutdown(4, f"Worker {w.name} has stopped unexpectedly.")
+                        self.request_fatal_shutdown(EXIT_FAILURE, f"Worker {w.name} has stopped unexpectedly.")
                         break
 
             time.sleep(0.1)
@@ -313,14 +314,14 @@ class MWACacheArchiveProcessor:
         """
         if not os.path.exists(config_filename):
             print(f"Configuration file location {config_filename} does not exist. Quitting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         # Parse config file
         config = ConfigParser()
         config.read_file(open(config_filename, "r", encoding="utf-8"))
 
         # Read log level
-        config_file_log_level: str | None = read_optional_config(config, "mwax mover", "log_level")
+        config_file_log_level: str | None = read_optional_config(config, SECTION_MWAX_MOVER, "log_level")
         if config_file_log_level:
             # It's now safe to start logging
             # start logging
@@ -342,18 +343,18 @@ class MWACacheArchiveProcessor:
         self.watch_dirs = []
 
         # Common config options
-        self.metafits_path = read_config(config, "mwax mover", "metafits_path")
+        self.metafits_path = read_config(config, SECTION_MWAX_MOVER, "metafits_path")
 
         if not os.path.exists(self.metafits_path):
             logger.error(f"Metafits file location  {self.metafits_path} does not exist. Quitting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
-        self.archive_to_location = ArchiveLocation(int(read_config(config, "mwax mover", "archive_to_location")))
-        self.concurrent_archive_workers = int(read_config(config, "mwax mover", "concurrent_archive_workers"))
+        self.archive_to_location = ArchiveLocation(int(read_config(config, SECTION_MWAX_MOVER, "archive_to_location")))
+        self.concurrent_archive_workers = int(read_config(config, SECTION_MWAX_MOVER, "concurrent_archive_workers"))
         self.archive_command_timeout_sec = int(
             read_config(
                 config,
-                "mwax mover",
+                SECTION_MWAX_MOVER,
                 "archive_command_timeout_sec",
             )
         )
@@ -362,7 +363,7 @@ class MWACacheArchiveProcessor:
         self.rclone_check_wait_secs = int(
             read_config(
                 config,
-                "mwax mover",
+                SECTION_MWAX_MOVER,
                 "rclone_check_wait_secs",
             )
         )
@@ -371,22 +372,22 @@ class MWACacheArchiveProcessor:
         # high priority when archiving
         self.high_priority_correlator_projectids = read_config_list(
             config,
-            "mwax mover",
+            SECTION_MWAX_MOVER,
             "high_priority_correlator_projectids",
         )
         self.high_priority_vcs_projectids = read_config_list(
             config,
-            "mwax mover",
+            SECTION_MWAX_MOVER,
             "high_priority_vcs_projectids",
         )
 
         # health
-        self.health_multicast_ip = read_config(config, "mwax mover", "health_multicast_ip")
-        self.health_multicast_port = int(read_config(config, "mwax mover", "health_multicast_port"))
-        self.health_multicast_hops = int(read_config(config, "mwax mover", "health_multicast_hops"))
+        self.health_multicast_ip = read_config(config, SECTION_MWAX_MOVER, "health_multicast_ip")
+        self.health_multicast_port = int(read_config(config, SECTION_MWAX_MOVER, "health_multicast_port"))
+        self.health_multicast_hops = int(read_config(config, SECTION_MWAX_MOVER, "health_multicast_hops"))
         self.health_multicast_interface_name = read_config(
             config,
-            "mwax mover",
+            SECTION_MWAX_MOVER,
             "health_multicast_interface_name",
         )
         # get this hosts primary network interface ip
@@ -422,7 +423,7 @@ class MWACacheArchiveProcessor:
                 logger.error(
                     f"incoming file location in incoming_path{i} - {new_incoming_path} does not exist. Quitting."
                 )
-                sys.exit(1)
+                sys.exit(EXIT_FAILURE)
             self.watch_dirs.append(new_incoming_path)
             i += 1
 
@@ -434,7 +435,7 @@ class MWACacheArchiveProcessor:
                 " hostname of the machine running this). This host's name is:"
                 f" '{self.hostname}'. Quitting."
             )
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         self.recursive = read_config_bool(config, self.hostname, "recursive")
 
@@ -554,7 +555,7 @@ def main():
         processor.start()
     except Exception:
         logger.exception("Exited with error")
-        sys.exit(1)
+        sys.exit(EXIT_FAILURE)
 
     # Surface a worker thread's fatal exit code (see request_fatal_shutdown).
     # This used to be an unconditional sys.exit(0).

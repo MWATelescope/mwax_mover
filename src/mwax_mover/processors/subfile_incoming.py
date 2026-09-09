@@ -14,7 +14,7 @@ import shutil
 import time
 
 from mwax_mover.calvin.solution_files import get_solution_fits_filename
-from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME
+from mwax_mover.constants import EXIT_FAILURE, MODE_WATCH_DIR_FOR_RENAME
 from mwax_mover.fits.metafits import get_metafits_value_from_hdu
 from mwax_mover.fits.subfile import (
     PSRDADA_COARSE_CHANNEL,
@@ -432,7 +432,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                         # NOTE: this used to be sys.exit(2), which on a worker
                         # thread only kills the thread and discards the code.
                         self.sd_ctx.request_fatal_shutdown(
-                            2,
+                            EXIT_FAILURE,
                             f"{item}: Could not rename {item} back to {free_filename}. Error {move_exception}",
                         )
                         return False
@@ -489,7 +489,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
             # daemon running and reporting success.
             logger.exception(f"{item}: signal_beamformer failed.")
             self.sd_ctx.request_fatal_shutdown(
-                3, f"{item}: could not signal the beamformer via redis {self.bf_redis_host}."
+                EXIT_FAILURE, f"{item}: could not signal the beamformer via redis {self.bf_redis_host}."
             )
             return False
 
@@ -544,7 +544,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                 # NOTE: this used to be sys.exit(2), which on a worker thread
                 # only kills the thread and discards the code.
                 self.sd_ctx.request_fatal_shutdown(
-                    2,
+                    EXIT_FAILURE,
                     f"Could not rename {keep_filename} back to {free_filename}. Error {move_exception}",
                 )
                 return False

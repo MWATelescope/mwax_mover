@@ -86,6 +86,7 @@ def make_processor(dirs: dict, archiving_enabled: bool) -> ChecksumAndDBProcesso
         high_priority_vcs_projects=[],
         db_handler_object=db,
         archiving_enabled=archiving_enabled,
+        do_not_archive_projectids=["C123"],
     )
 
 

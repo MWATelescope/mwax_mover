@@ -36,6 +36,14 @@ from pathlib import Path
 from mwax_mover import version
 from mwax_mover.calvin.pipeline import CalvinJobType
 from mwax_mover.calvin.slurm import count_slurm_asvo_jobs, create_sbatch_script, submit_sbatch
+from mwax_mover.constants import (
+    EXIT_FAILURE,
+    SECONDS_PER_HOUR,
+    SECTION_CALVIN,
+    SECTION_GIANT_SQUID,
+    SECTION_MWAX_MOVER,
+    SECTION_PLOTS_UPLOAD,
+)
 from mwax_mover.core.config import read_config, read_config_list, read_optional_config
 from mwax_mover.core.env import get_hostname
 from mwax_mover.db.calibration import (
@@ -306,7 +314,7 @@ class MWAXCalvinController:
                     Backoff delay in seconds, capped at BACKOFF_MAX_SECS.
                 """
                 BACKOFF_BASE_SECS = 10
-                BACKOFF_MAX_SECS = 3600  # 1 hour
+                BACKOFF_MAX_SECS = SECONDS_PER_HOUR
 
                 delay = BACKOFF_BASE_SECS * (2 ** (self.consecutive_failures - 1))
                 return min(delay, BACKOFF_MAX_SECS)
@@ -1070,7 +1078,7 @@ class MWAXCalvinController:
 
         if not os.path.exists(config_filename):
             print(f"Configuration file location {config_filename} does not exist. Quitting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         # Make sure we can Ctrl-C / kill out of this
         signal.signal(signal.SIGINT, self.signal_handler)
@@ -1081,14 +1089,14 @@ class MWAXCalvinController:
         config.read_file(open(config_filename, "r", encoding="utf-8"))
 
         # read from config file
-        self.log_path = config.get("mwax mover", "log_path")
+        self.log_path = config.get(SECTION_MWAX_MOVER, "log_path")
 
         if not os.path.exists(self.log_path):
             print(f"log_path {self.log_path} does not exist. Quiting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         # Read log level
-        config_file_log_level: str | None = read_optional_config(config, "mwax mover", "log_level")
+        config_file_log_level: str | None = read_optional_config(config, SECTION_MWAX_MOVER, "log_level")
         if config_file_log_level:
             logger.setLevel(config_file_log_level)
 
@@ -1096,12 +1104,12 @@ class MWAXCalvinController:
         logger.info(f"Reading config file: {config_filename}")
 
         # health
-        self.health_multicast_ip = read_config(config, "mwax mover", "health_multicast_ip")
-        self.health_multicast_port = int(read_config(config, "mwax mover", "health_multicast_port"))
-        self.health_multicast_hops = int(read_config(config, "mwax mover", "health_multicast_hops"))
+        self.health_multicast_ip = read_config(config, SECTION_MWAX_MOVER, "health_multicast_ip")
+        self.health_multicast_port = int(read_config(config, SECTION_MWAX_MOVER, "health_multicast_port"))
+        self.health_multicast_hops = int(read_config(config, SECTION_MWAX_MOVER, "health_multicast_hops"))
         self.health_multicast_interface_name = read_config(
             config,
-            "mwax mover",
+            SECTION_MWAX_MOVER,
             "health_multicast_interface_name",
         )
 
@@ -1136,71 +1144,75 @@ class MWAXCalvinController:
         # calvin config
         #
         # How long between iterations of the main loop (in seconds)
-        self.check_interval_seconds = int(read_config(config, "calvin", "check_interval_seconds"))
+        self.check_interval_seconds = int(read_config(config, SECTION_CALVIN, "check_interval_seconds"))
 
         # script path (path for keeping all sbatch scripts)
-        self.script_path = config.get("calvin", "script_path")
+        self.script_path = config.get(SECTION_CALVIN, "script_path")
 
         if not os.path.exists(self.script_path):
             print(f"script_path {self.script_path} does not exist. Quiting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         # oldest calvin obsid (when looking for new calibrator obs in the schedule, don't
         # look before this obsid)
-        self.oldest_cal_obs_id = int(config.get("calvin", "oldest_calibrator_obs_id"))
+        self.oldest_cal_obs_id = int(config.get(SECTION_CALVIN, "oldest_calibrator_obs_id"))
 
-        self.max_in_progress_asvo_jobs = int(config.get("calvin", "max_in_progress_asvo_jobs"))
+        self.max_in_progress_asvo_jobs = int(config.get(SECTION_CALVIN, "max_in_progress_asvo_jobs"))
 
         #
         # giant-squid config
         #
         # How many seconds do we wait before rechecking when giant squid says
         # MWA ASVO has an outage?
-        self.mwa_asvo_outage_check_seconds = int(read_config(config, "giant squid", "mwa_asvo_outage_check_seconds"))
+        self.mwa_asvo_outage_check_seconds = int(
+            read_config(config, SECTION_GIANT_SQUID, "mwa_asvo_outage_check_seconds")
+        )
 
         # How many secs do we wait for MWA ASVO to get us a completed job??
         self.mwa_asvo_longest_wait_time_seconds = int(
-            read_config(config, "giant squid", "mwa_asvo_longest_wait_time_seconds")
+            read_config(config, SECTION_GIANT_SQUID, "mwa_asvo_longest_wait_time_seconds")
         )
 
         # Get the giant squid binary
         self.giant_squid_binary_path = read_config(
             config,
-            "giant squid",
+            SECTION_GIANT_SQUID,
             "giant_squid_binary_path",
         )
 
         if not os.path.exists(self.giant_squid_binary_path):
             logger.error(f"giant_squid_binary_path location  {self.giant_squid_binary_path} does not exist. Quitting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         # How long do we wait for giant-squid to execute a list subcommand
         self.giant_squid_list_timeout_seconds = int(
-            read_config(config, "giant squid", "giant_squid_list_timeout_seconds")
+            read_config(config, SECTION_GIANT_SQUID, "giant_squid_list_timeout_seconds")
         )
 
         # How long do we wait for giant-squid to execute a submit-vis subcommand
         self.giant_squid_submitvis_timeout_seconds = int(
-            read_config(config, "giant squid", "giant_squid_submitvis_timeout_seconds")
+            read_config(config, SECTION_GIANT_SQUID, "giant_squid_submitvis_timeout_seconds")
         )
 
         #
         # plots upload section
         #
-        self.s3_profile = str(read_config(config, "plots upload", "s3_profile"))
-        self.s3_bucket = str(read_config(config, "plots upload", "s3_bucket"))
-        self.plot_upload_paths: list[str] = read_config_list(config, "plots upload", "plot_upload_paths")
+        self.s3_profile = str(read_config(config, SECTION_PLOTS_UPLOAD, "s3_profile"))
+        self.s3_bucket = str(read_config(config, SECTION_PLOTS_UPLOAD, "s3_bucket"))
+        self.plot_upload_paths: list[str] = read_config_list(config, SECTION_PLOTS_UPLOAD, "plot_upload_paths")
         for p in self.plot_upload_paths:
             if not os.path.exists(p):
                 logger.error(f"plot_upload_path: {p} does not exist. Quitting.")
-                sys.exit(1)
-        self.plot_upload_interval_secs: int = int(read_config(config, "plots upload", "plot_upload_interval_secs"))
+                sys.exit(EXIT_FAILURE)
+        self.plot_upload_interval_secs: int = int(
+            read_config(config, SECTION_PLOTS_UPLOAD, "plot_upload_interval_secs")
+        )
 
         # Optional: how many fit dirs to upload per pass over each plot upload
         # path. Left optional so existing config files keep working unchanged.
-        if config.has_option("plots upload", "plot_upload_max_fits_per_pass"):
+        if config.has_option(SECTION_PLOTS_UPLOAD, "plot_upload_max_fits_per_pass"):
             self.plot_upload_max_fits_per_pass = int(
-                read_config(config, "plots upload", "plot_upload_max_fits_per_pass")
+                read_config(config, SECTION_PLOTS_UPLOAD, "plot_upload_max_fits_per_pass")
             )
 
             if self.plot_upload_max_fits_per_pass < 1:
@@ -1208,7 +1220,7 @@ class MWAXCalvinController:
                     "plot_upload_max_fits_per_pass must be at least 1, got"
                     f" {self.plot_upload_max_fits_per_pass}. Quitting."
                 )
-                sys.exit(1)
+                sys.exit(EXIT_FAILURE)
         else:
             self.plot_upload_max_fits_per_pass = DEFAULT_PLOT_UPLOAD_MAX_FITS_PER_PASS
 

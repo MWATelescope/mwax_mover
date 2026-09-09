@@ -13,9 +13,10 @@ import os
 import time
 import uuid
 
+from mwax_mover.constants import SECONDS_PER_MINUTE
 from mwax_mover.core.command import run_command
 from mwax_mover.core.env import running_under_pytest
-from mwax_mover.core.units import bytes_to_gigabytes, get_gbps, gigabytes_to_gigabits
+from mwax_mover.core.units import bytes_to_gigabytes, get_gbps
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +72,8 @@ def copy_file_rsync(
 
         elapsed = time.time() - start_time
 
-        size_gigabytes = float(file_size) / (1000.0 * 1000.0 * 1000.0)
-        gbps_per_sec = (size_gigabytes * 8) / elapsed
+        size_gigabytes = bytes_to_gigabytes(file_size)
+        gbps_per_sec = get_gbps(size_gigabytes, elapsed)
 
         logger.info(
             f"{source_filename}: copy_file_rsync success ({size_gigabytes:.3f}GB in"
@@ -145,8 +146,8 @@ def archive_file_xrootd(
     if return_val:
         elapsed = time.time() - start_time
 
-        size_gigabytes = float(file_size) / (1000.0 * 1000.0 * 1000.0)
-        gbps_per_sec = (size_gigabytes * 8) / elapsed
+        size_gigabytes = bytes_to_gigabytes(file_size)
+        gbps_per_sec = get_gbps(size_gigabytes, elapsed)
 
         logger.info(
             f"{full_filename}: archive_file_xrootd success"
@@ -273,7 +274,7 @@ def archive_file_rclone_haproxy(
     rclone_timeout = f"{rclone_timeout_mins}m"
     # Subprocess wall-clock limit accounts for full retry cycle:
     # each retry can take up to rclone_timeout_mins, plus a small buffer.
-    subprocess_timeout_secs = rclone_timeout_mins * rclone_retries * 60
+    subprocess_timeout_secs = rclone_timeout_mins * rclone_retries * SECONDS_PER_MINUTE
 
     #
     # TODO: Ugly solution here for testing - should replace this with a Mock pattern
@@ -284,7 +285,7 @@ def archive_file_rclone_haproxy(
         logger.info(
             f"{full_filename}: archive_file_rclone_haproxy success."
             f" Copied ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at"
-            f" {gigabytes_to_gigabits(size_gigabytes) / elapsed:.3f} Gbps)."
+            f" {get_gbps(size_gigabytes, elapsed):.3f} Gbps)."
             f" Check took {check_elapsed:.3f} seconds."
         )
         return True
@@ -391,7 +392,7 @@ def archive_file_rclone_haproxy(
                 logger.info(
                     f"{full_filename}: archive_file_rclone_haproxy success."
                     f" Copied ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at"
-                    f" {get_gbps(size_gigabytes, start_time):.3f} Gbps)."
+                    f" {get_gbps(size_gigabytes, elapsed):.3f} Gbps)."
                     f" Check took {check_elapsed:.3f} seconds."
                 )
                 return True

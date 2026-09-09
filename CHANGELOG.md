@@ -11,6 +11,7 @@
 * Replaced hand-rolled textwrap() with stdlib textwrap.fill(); removed its 4 now-pointless unit tests; verified wrapping is byte-identical for real equation strings
 * Removed all 11 vestigial pylint pragmas.
 * Renamed various attributes across modules for consistency.
+* Config file variable naming consistency.
 
 # 1.10.2 26-Aug-2026
 

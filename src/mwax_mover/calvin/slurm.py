@@ -12,6 +12,7 @@ import os
 import sys
 
 from mwax_mover.calvin.pipeline import CalvinJobType
+from mwax_mover.constants import EXIT_FAILURE
 from mwax_mover.core.command import run_command
 from mwax_mover.core.units import is_int
 
@@ -152,7 +153,7 @@ def submit_sbatch(script_path: str, script: str, obs_id: int, request_ids: list[
                 # This deserves to be a massive failure, as if SBATCH returned true it should always give
                 # us the SLURM job id!
                 logger.error(f"Slurm job submitted OK, but could not get slurm_job_id from: {stdout}. Aborting")
-                sys.exit(-10)
+                sys.exit(EXIT_FAILURE)
         else:
             logger.error(f"{script_filename} failed to be submitted to SLURM. Error {stdout}")
 

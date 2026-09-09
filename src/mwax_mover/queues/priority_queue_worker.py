@@ -16,6 +16,7 @@ import time
 
 from mwax_mover import constants
 from mwax_mover.core.command import run_command
+from mwax_mover.filesystem.naming import ArchivePriority
 from mwax_mover.queues.priority_queue_data import MWAXPriorityQueueData
 from mwax_mover.queues.queue_worker import calculate_backoff_seconds
 
@@ -137,7 +138,7 @@ class PriorityQueueWorker:
                     start_time = time.time()
 
                     if self.current_item[0] is None:
-                        filename_priority = 99
+                        filename_priority = ArchivePriority.DEFAULT
                     else:
                         filename_priority = int(self.current_item[0])
                     filename = str(self.current_item[1])

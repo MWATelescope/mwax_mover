@@ -17,10 +17,11 @@ import logging
 import os
 import re
 import threading
-from enum import Enum
+from enum import Enum, IntEnum
 
 import requests
 
+from mwax_mover.constants import MWA_WEBSERVICE_HOSTS
 from mwax_mover.fits.metafits import download_metafits_file, get_calibrator_info
 from mwax_mover.net.webservice import call_webservice
 
@@ -100,6 +101,20 @@ class ArchiveLocation(Enum):
     AcaciaIngest = 2
     Banksia = 3
     AcaciaMWA = 4
+
+
+class ArchivePriority(IntEnum):
+    """Archive queue priority. Lower dequeues first."""
+
+    METAFITS_OR_PPD = 1
+    CALIBRATOR_CORRELATOR = 2
+    HIGH_PRIORITY_CORRELATOR = 3
+    HIGH_PRIORITY_VCS_BEAMFORMED = 5
+    NORMAL_VCS_BEAMFORMED = 10
+    HIGH_PRIORITY_VCS_VOLTAGE = 20
+    NORMAL_CORRELATOR = 30
+    NORMAL_VCS_VOLTAGE = 90
+    DEFAULT = 100
 
 
 def validate_filename(
@@ -391,19 +406,8 @@ def get_priority(
     Determine the archive priority integer for a given MWA data file.
 
     A lower integer means higher priority (i.e. the file will be dequeued
-    first from a ``PriorityQueue``). The priority scheme is:
-
-    ====  ==========================================================
-    1     Metafits / PPD files (small, quick to archive)
-    2     Calibrator correlator observations
-    3     Correlator observations for high-priority projects
-    5     VDIF / filterbank files for high-priority VCS projects
-    10    VDIF / filterbank files for normal VCS projects
-    20    VCS voltage files for high-priority projects
-    30    Normal correlator observations
-    90    Normal VCS voltage observations
-    100   Default / unrecognised (should not occur for valid files)
-    ====  ==========================================================
+    first from a ``PriorityQueue``). See ``ArchivePriority`` for the full
+    priority scheme.
 
     Args:
         filename: Full path to the MWA data file.
@@ -420,7 +424,7 @@ def get_priority(
     Raises:
         Exception: If ``validate_filename`` reports the file as invalid.
     """
-    return_priority = 100  # default if we don't do anything else
+    return_priority = ArchivePriority.DEFAULT  # default if we don't do anything else
 
     # get info about this file
     val: ValidationData = validate_filename(filename, metafits_path)
@@ -428,47 +432,47 @@ def get_priority(
     if val.valid:
         if val.filetype_id == MWADataFileType.MWAX_VISIBILITIES.value:
             if val.calibrator:
-                return_priority = 2
+                return_priority = ArchivePriority.CALIBRATOR_CORRELATOR
             else:
                 if val.project_id in high_priority_correlator_projects:
-                    return_priority = 3
+                    return_priority = ArchivePriority.HIGH_PRIORITY_CORRELATOR
                 else:
-                    return_priority = 30
+                    return_priority = ArchivePriority.NORMAL_CORRELATOR
         elif val.filetype_id == MWADataFileType.MWAX_VOLTAGES.value:
             if val.project_id in high_priority_vcs_projects:
-                return_priority = 20
+                return_priority = ArchivePriority.HIGH_PRIORITY_VCS_VOLTAGE
             else:
-                return_priority = 90
+                return_priority = ArchivePriority.NORMAL_VCS_VOLTAGE
         elif val.filetype_id == MWADataFileType.MWA_PPD_FILE.value:
-            return_priority = 1
+            return_priority = ArchivePriority.METAFITS_OR_PPD
         elif val.filetype_id == MWADataFileType.VDIF.value or val.filetype_id == MWADataFileType.FILTERBANK.value:
             # VDIF and filterbank files are treated as high priority as they are small and quick to archive
             if val.project_id in high_priority_vcs_projects:
-                return_priority = 5
+                return_priority = ArchivePriority.HIGH_PRIORITY_VCS_BEAMFORMED
             else:
-                return_priority = 10
+                return_priority = ArchivePriority.NORMAL_VCS_BEAMFORMED
     else:
         raise Exception(f"File {filename} is not valid! Reason: {val.validation_message}")
 
     return return_priority
 
 
-def should_project_be_archived(project_id: str) -> bool:
+def should_project_be_archived(project_id: str, do_not_archive_projectids: list[str]) -> bool:
     """
     Determine whether data for a given project ID should be archived.
 
-    Project ``C123`` is a test/commissioning project whose data should not
-    be archived. If this list grows or changes frequently it should be moved
-    into a configuration file.
-
     Args:
         project_id: The MWA project ID string (case-insensitive).
+        do_not_archive_projectids: Project IDs whose data should not be
+            archived (case-insensitive). ``C123`` is a test/commissioning
+            project and is the default when a config has not been updated
+            with this key (see docs/CLEANUP.md 4.3).
 
     Returns:
-        False if ``project_id`` is ``'C123'`` (case-insensitive), True for
-        all other project IDs.
+        False if ``project_id`` is in ``do_not_archive_projectids``
+        (case-insensitive), True otherwise.
     """
-    return project_id.upper() != "C123"
+    return project_id.upper() not in {p.upper() for p in do_not_archive_projectids}
 
 
 def extract_channels_from_filename(filename: str) -> dict | None:
@@ -514,10 +518,7 @@ def get_data_files_for_obsid_from_webservice(
     Raises:
         Exception: If the web service cannot be reached after all retries.
     """
-    urls = [
-        "http://mro.mwa128t.org/metadata/data_files",
-        "http://ws.mwatelescope.org/metadata/data_files",
-    ]
+    urls = [f"{host}/metadata/data_files" for host in MWA_WEBSERVICE_HOSTS]
     data = {"obs_id": obs_id, "terse": False, "all_files": True}
 
     # On failure of all urls and retries it will raise an exception
@@ -555,10 +556,7 @@ def get_data_files_with_hostname_for_obsid_from_webservice(
     Raises:
         Exception: If the web service cannot be reached after all retries.
     """
-    urls = [
-        "http://mro.mwa128t.org/metadata/data_files",
-        "http://ws.mwatelescope.org/metadata/data_files",
-    ]
+    urls = [f"{host}/metadata/data_files" for host in MWA_WEBSERVICE_HOSTS]
     data = {"obs_id": obs_id, "terse": False, "all_files": True}
 
     # On failure of all urls and retries it will raise an exception

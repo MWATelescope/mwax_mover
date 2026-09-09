@@ -5,8 +5,6 @@ calculation (get_gbps), and a generic int-parseable check (is_int) used
 across the CLI entry points for validating string arguments.
 """
 
-import time
-
 
 def is_int(value) -> bool:
     """
@@ -37,7 +35,7 @@ def gigabyte_to_gibibyte(gigabytes: float) -> float:
     Returns:
         Equivalent size in gibibytes (1 GiB = 2^30 bytes), as a float.
     """
-    return gigabytes / 1.07374
+    return gigabytes * 10**9 / 2**30
 
 
 def gigabytes_to_gigabits(gigabytes: float) -> float:
@@ -66,15 +64,16 @@ def bytes_to_gigabytes(num_bytes: int) -> float:
     return num_bytes / (1000.0 * 1000.0 * 1000.0)
 
 
-def get_gbps(size_gigabytes: float, start_time: float) -> float:
+def get_gbps(size_gigabytes: float, elapsed_seconds: float) -> float:
     """Calculate throughput in Gbps.
 
     Args:
         size_gigabytes: Transfer size in gigabytes.
-        start_time: Start time of the transfer.
+        elapsed_seconds: Elapsed time of the transfer, in seconds. Clock-agnostic --
+            pass whatever duration you already have, from time.time() or
+            time.monotonic() as appropriate to the caller.
 
     Returns:
         Throughput in Gbps, or 0.0 if elapsed time is zero.
     """
-    elapsed_seconds = time.time() - start_time
     return gigabytes_to_gigabits(size_gigabytes) / elapsed_seconds if elapsed_seconds > 0 else 0.0

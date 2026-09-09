@@ -44,6 +44,7 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
         high_priority_vcs_projects: list[str],
         db_handler_object: MWAXDBHandler,
         archiving_enabled: bool,
+        do_not_archive_projectids: list[str],
     ):
         """Initialise the processor and register the watch directories.
 
@@ -64,6 +65,8 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
             db_handler_object: Initialised MWAXDBHandler used for metadata database inserts.
             archiving_enabled: When False the checksum/DB step is skipped and files are routed
                 to dont_archive paths regardless of their project ID.
+            do_not_archive_projectids: Project IDs whose data should not be archived
+                (see filesystem.naming.should_project_be_archived).
         """
         super().__init__(
             "ChecksumAndDBProcessor",
@@ -101,6 +104,7 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
 
         self.db_handler_object = db_handler_object
         self.archiving_enabled = archiving_enabled
+        self.do_not_archive_projectids = do_not_archive_projectids
 
     def _checksum_and_insert_db(self, item: str, val: ValidationData) -> bool | None:
         """Compute the MD5 checksum and insert a metadata database record.
@@ -219,7 +223,9 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
             if result is not None:
                 return result
 
-        should_archive = should_project_be_archived(val.project_id) and self.archiving_enabled
+        should_archive = (
+            should_project_be_archived(val.project_id, self.do_not_archive_projectids) and self.archiving_enabled
+        )
         dest = self._get_destination(item, val, archive=should_archive)
 
         if dest is None:

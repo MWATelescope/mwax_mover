@@ -26,6 +26,7 @@ import shutil
 import time
 from pathlib import Path
 
+from mwax_mover.constants import SECONDS_PER_HOUR
 from mwax_mover.filesystem.files import delete_files_older_than
 
 logger = logging.getLogger(__name__)
@@ -169,7 +170,7 @@ def export_calibration_solutions(solution_files: list[str], cal_export_path: str
 
     # Clean up old files
     ext_list = ["fits", "bin"]
-    files_removed = delete_files_older_than(cal_export_path, cal_export_max_age_hours * 3600, ext_list)
+    files_removed = delete_files_older_than(cal_export_path, cal_export_max_age_hours * SECONDS_PER_HOUR, ext_list)
     if len(files_removed) > 0:
         logger.debug(
             f"Removed the following files from {cal_export_path} as they were older"
@@ -231,7 +232,7 @@ def reap_orphaned_staging_dirs(base_path: str, max_age_hours: int = 24) -> list[
         logger.debug(f"reap_orphaned_staging_dirs: {base_path} is not a directory. Nothing to do.")
         return removed
 
-    cutoff_seconds = max_age_hours * 3600
+    cutoff_seconds = max_age_hours * SECONDS_PER_HOUR
     now = time.time()
 
     for entry in base.iterdir():
@@ -246,7 +247,7 @@ def reap_orphaned_staging_dirs(base_path: str, max_age_hours: int = 24) -> list[
             if age_seconds < cutoff_seconds:
                 logger.info(
                     f"reap_orphaned_staging_dirs: leaving {entry} alone"
-                    f" ({age_seconds / 3600:.1f}h old, threshold is {max_age_hours}h)"
+                    f" ({age_seconds / SECONDS_PER_HOUR:.1f}h old, threshold is {max_age_hours}h)"
                 )
                 continue
 
@@ -254,7 +255,7 @@ def reap_orphaned_staging_dirs(base_path: str, max_age_hours: int = 24) -> list[
             removed.append(str(entry))
             logger.warning(
                 f"reap_orphaned_staging_dirs: removed orphaned staging dir {entry}"
-                f" ({age_seconds / 3600:.1f}h old). Its plots were never published."
+                f" ({age_seconds / SECONDS_PER_HOUR:.1f}h old). Its plots were never published."
             )
         except Exception:
             # One bad entry must not stop us reaping the rest

@@ -313,7 +313,7 @@ def copy_subfile_to_disk_dd(
 
     if retval:
         elapsed = time.time() - start_time
-        speed = (bytes_to_write / elapsed) / (1000.0 * 1000.0 * 1000.0)
+        speed = bytes_to_gigabytes(bytes_to_write) / elapsed
 
         logger.info(
             f"{filename}- Copying first {bytes_to_write} bytes of file into"

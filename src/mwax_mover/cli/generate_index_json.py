@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from mwax_mover.calvin.plots.index import generate_plot_index_file
+from mwax_mover.constants import EXIT_FAILURE
 
 
 def main() -> None:
@@ -76,7 +77,7 @@ def main() -> None:
             fit_id = int(p.name)
         except Exception:
             print(f"Could not infer FitID from {args.directory}- please specify fit-id instead.")
-            sys.exit(-3)
+            sys.exit(EXIT_FAILURE)
     else:
         fit_id = int(args.fit_id)
 
@@ -96,10 +97,10 @@ def main() -> None:
                 print(f"Written {output_filename}")
     except NotADirectoryError as e:
         print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EXIT_FAILURE)
     except OSError as e:
         print(f"Error writing index file: {e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EXIT_FAILURE)
 
 
 if __name__ == "__main__":

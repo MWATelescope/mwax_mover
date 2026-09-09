@@ -340,10 +340,17 @@ def test_get_bucket_name_from_obs_id():
 
 
 def test_should_project_be_archived():
-    assert should_project_be_archived("C001") is True
-    assert should_project_be_archived("c001") is True
-    assert should_project_be_archived("C123") is False
-    assert should_project_be_archived("c123") is False
+    assert should_project_be_archived("C001", ["C123"]) is True
+    assert should_project_be_archived("c001", ["C123"]) is True
+    assert should_project_be_archived("C123", ["C123"]) is False
+    assert should_project_be_archived("c123", ["C123"]) is False
+
+
+def test_should_project_be_archived_custom_list():
+    """The do-not-archive list is config-driven, not hardcoded to C123."""
+    assert should_project_be_archived("C123", ["D0006"]) is True
+    assert should_project_be_archived("D0006", ["D0006"]) is False
+    assert should_project_be_archived("d0006", ["D0006"]) is False
 
 
 @pytest.mark.integration

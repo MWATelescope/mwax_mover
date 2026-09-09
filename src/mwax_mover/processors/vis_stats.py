@@ -36,6 +36,7 @@ class VisStatsProcessor(MWAXWatchQueueWorker):
         visdata_outgoing_path: str,
         visdata_outgoing_cal_path: str,
         visdata_dont_archive_path: str,
+        do_not_archive_projectids: list[str],
     ):
         """Initialise the visibility statistics processor.
 
@@ -49,6 +50,8 @@ class VisStatsProcessor(MWAXWatchQueueWorker):
             visdata_outgoing_path: Destination for archivable visibility files.
             visdata_outgoing_cal_path: Destination for calibrator visibility files.
             visdata_dont_archive_path: Destination for non-archivable visibility files.
+            do_not_archive_projectids: Project IDs whose data should not be archived
+                (see filesystem.naming.should_project_be_archived).
         """
         super().__init__(
             "VisStatsProcessor",
@@ -66,6 +69,7 @@ class VisStatsProcessor(MWAXWatchQueueWorker):
         self.visdata_outgoing_path = visdata_outgoing_path
         self.visdata_outgoing_cal_path = visdata_outgoing_cal_path
         self.visdata_dont_archive_path = visdata_dont_archive_path
+        self.do_not_archive_projectids = do_not_archive_projectids
 
     def handler(self, item: str) -> bool:
         """Process visibility FITS files through statistics and route to archive or calibration.
@@ -116,7 +120,7 @@ class VisStatsProcessor(MWAXWatchQueueWorker):
             obs_info: ValidationData = validate_filename(item, self.metafits_path)
 
             # Should this project be archived?
-            if should_project_be_archived(obs_info.project_id):
+            if should_project_be_archived(obs_info.project_id, self.do_not_archive_projectids):
                 if obs_info.calibrator:
                     # Send to cal_outgoing
                     # Take the input filename - strip the path, then append the output path

@@ -10,6 +10,7 @@ import os
 
 from astropy.io import fits
 
+from mwax_mover.constants import MWA_WEBSERVICE_HOSTS
 from mwax_mover.net.webservice import call_webservice
 
 
@@ -35,10 +36,7 @@ def download_metafits_file(obs_id: int, metafits_path: str) -> str:
     metafits_file_path = os.path.join(metafits_path, f"{obs_id}_metafits.fits")
 
     # Try the MRO one first
-    urls = [
-        f"http://mro.mwa128t.org/metadata/fits?obs_id={obs_id}",
-        f"http://ws.mwatelescope.org/metadata/fits?obs_id={obs_id}",
-    ]
+    urls = [f"{host}/metadata/fits?obs_id={obs_id}" for host in MWA_WEBSERVICE_HOSTS]
 
     # On failure of all urls and retries it will raise an exception
     response = call_webservice(obs_id, urls, None)

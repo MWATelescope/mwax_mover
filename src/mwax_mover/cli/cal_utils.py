@@ -62,6 +62,7 @@ from mwax_mover.calvin.plots import hyperdrive
 from mwax_mover.calvin.plots.gains import plot_outlier_gains
 from mwax_mover.calvin.plots.phases import write_debug_phase_fit_plots
 from mwax_mover.calvin.plots.stats_table import write_before_after_stats
+from mwax_mover.constants import EXIT_FAILURE
 from mwax_mover.fits.metafits import download_metafits_file
 
 handler = logging.StreamHandler()
@@ -329,11 +330,11 @@ def main() -> None:
     #
     if not os.path.exists(args.output_path):
         print(f"Error --output-path not found: {args.output_path}")
-        sys.exit(-1)
+        sys.exit(EXIT_FAILURE)
 
     if not os.path.exists(args.hyperdrive_binary_path):
         print(f"Error --hyperdrive-binary-path not found: {args.hyperdrive_binary_path}")
-        sys.exit(-1)
+        sys.exit(EXIT_FAILURE)
 
     # argparse nargs="+" guarantees at least one filename, so there is no
     # empty case to handle here (the previous code had one, and it referenced
@@ -347,14 +348,14 @@ def main() -> None:
     obs_id_str = os.path.basename(args.solution_filenames[0])[0:10]
     if not obs_id_str.isdigit():
         print(f"Error: Could not parse a 10 digit obs_id from: {args.solution_filenames[0]}")
-        sys.exit(-1)
+        sys.exit(EXIT_FAILURE)
     obs_id: int = int(obs_id_str)
 
     for f in args.solution_filenames:
         print(f)
         if os.path.basename(f)[0:10] != obs_id_str:
             print(f"Error: The solution files passed all must be for the same obsid '{obs_id}'. Got: {f}")
-            sys.exit(-1)
+            sys.exit(EXIT_FAILURE)
 
     if args.metafits_filename is None:
         # user did not pass a metafits filename
@@ -373,7 +374,7 @@ def main() -> None:
         if not os.path.exists(args.metafits_filename):
             # But it didn't exist
             print(f"Error: The metafits file provided '{metafits_filename}' does not exist")
-            sys.exit(-1)
+            sys.exit(EXIT_FAILURE)
 
     if args.profile:
         profiler = cProfile.Profile()
