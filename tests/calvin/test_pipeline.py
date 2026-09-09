@@ -114,6 +114,26 @@ def real_data_paths():
 # Tests using real test data
 # ---------------------------------------------------------------------------
 
+# Some of the tests below exercise DB-insert/exception paths that never
+# look at plot output, and mock out process_solutions()'s plot-generating
+# calls to avoid paying for real PNG rendering plus a second, otherwise
+# redundant phase-fit pass. Notes on why each individual patch is safe:
+#
+# - generate_hyperdrive_plots_for_files: called for its (failed_file,
+#   plots_error) iteration side effect only; an empty iterator means "no
+#   plot failures to report", which is what a real run would see too once
+#   the underlying `hyperdrive_binary_path` argument used in these tests is
+#   nonexistent, since the real function already fails fast in that case.
+# - plot_outlier_gains: return value is never used by the caller.
+# - write_before_after_stats: normally computes a second, separate phase
+#   fit for the "before" snapshot (see its own docstring) in the course of
+#   writing the stats table, then returns the *"after"* fits -- which
+#   run_flagging_pipeline() already computed for real into
+#   group.phase_fits before this is ever called. Returning that directly
+#   skips only the redundant "before" refit and the table-writing, not the
+#   data the caller actually needs downstream (phase_fits.set_index(...)).
+# - write_debug_phase_fit_plots: return value is never used by the caller.
+
 
 def test_process_solutions_success(real_data_paths, tmp_path):
     """Happy path: real files + mocked DB returning fit_id=42 -> (True, '', 42)."""
@@ -271,9 +291,21 @@ def test_process_solutions_db_fit_insert_fails(real_data_paths, tmp_path):
     mock_db.pool.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
     mock_db.pool.connection.return_value.__exit__ = MagicMock(return_value=False)
 
-    with patch(
-        "mwax_mover.calvin.pipeline.insert_calibration_fits_row",
-        return_value=(False, None),
+    with (
+        patch(
+            "mwax_mover.calvin.pipeline.insert_calibration_fits_row",
+            return_value=(False, None),
+        ),
+        # This test only checks the insert_calibration_fits_row failure path
+        # and never looks at plot output -- see the module-level note above
+        # "Tests using real test data" for why these mocks are safe.
+        patch("mwax_mover.calvin.pipeline.generate_hyperdrive_plots_for_files", return_value=iter([])),
+        patch("mwax_mover.calvin.pipeline.plot_outlier_gains", return_value=None),
+        patch(
+            "mwax_mover.calvin.pipeline.write_before_after_stats",
+            side_effect=lambda group, obs_id, stats_fd, phase_outlier_nstd=3.0: group.phase_fits,
+        ),
+        patch("mwax_mover.calvin.pipeline.write_debug_phase_fit_plots", return_value=None),
     ):
         success, error_msg, fit_id = process_solutions(
             db_handler_object=mock_db,
@@ -325,6 +357,20 @@ def test_process_solutions_db_soln_insert_fails(real_data_paths, tmp_path):
             "mwax_mover.calvin.pipeline.insert_calibration_solutions_row",
             return_value=False,
         ),
+        # This test only checks the insert_calibration_solutions_row failure
+        # path and never looks at plot output -- see the module-level note
+        # above "Tests using real test data" for why these mocks are safe.
+        # Unlike the other two tests here, this one *does* reach the
+        # downstream phase_fits.set_index(...) call, which is exactly why
+        # write_before_after_stats is stubbed to return the real
+        # group.phase_fits rather than an empty placeholder.
+        patch("mwax_mover.calvin.pipeline.generate_hyperdrive_plots_for_files", return_value=iter([])),
+        patch("mwax_mover.calvin.pipeline.plot_outlier_gains", return_value=None),
+        patch(
+            "mwax_mover.calvin.pipeline.write_before_after_stats",
+            side_effect=lambda group, obs_id, stats_fd, phase_outlier_nstd=3.0: group.phase_fits,
+        ),
+        patch("mwax_mover.calvin.pipeline.write_debug_phase_fit_plots", return_value=None),
     ):
         success, error_msg, fit_id = process_solutions(
             db_handler_object=mock_db,
@@ -369,9 +415,21 @@ def test_process_solutions_readme_written_on_any_exception(real_data_paths, tmp_
     mock_cursor = MagicMock()
     mock_conn.cursor.return_value = mock_cursor
 
-    with patch(
-        "mwax_mover.calvin.pipeline.insert_calibration_fits_row",
-        side_effect=RuntimeError("injected test error"),
+    with (
+        patch(
+            "mwax_mover.calvin.pipeline.insert_calibration_fits_row",
+            side_effect=RuntimeError("injected test error"),
+        ),
+        # This test only checks that any exception produces readme_error.txt
+        # and never looks at plot output -- see the module-level note above
+        # "Tests using real test data" for why these mocks are safe.
+        patch("mwax_mover.calvin.pipeline.generate_hyperdrive_plots_for_files", return_value=iter([])),
+        patch("mwax_mover.calvin.pipeline.plot_outlier_gains", return_value=None),
+        patch(
+            "mwax_mover.calvin.pipeline.write_before_after_stats",
+            side_effect=lambda group, obs_id, stats_fd, phase_outlier_nstd=3.0: group.phase_fits,
+        ),
+        patch("mwax_mover.calvin.pipeline.write_debug_phase_fit_plots", return_value=None),
     ):
         success, error_msg, fit_id = process_solutions(
             db_handler_object=mock_db,
