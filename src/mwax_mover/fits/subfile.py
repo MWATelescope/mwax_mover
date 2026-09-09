@@ -15,7 +15,7 @@ import os
 import time
 from enum import Enum
 
-from mwax_mover.core.command import run_command_ext
+from mwax_mover.core.command import run_command
 from mwax_mover.core.env import running_under_pytest
 from mwax_mover.core.units import bytes_to_gigabytes
 
@@ -168,7 +168,7 @@ def process_mwax_stats(
     logger.debug(f"{full_filename}- attempting to run stats: {cmd}")
 
     start_time = time.time()
-    return_value, stdout = run_command_ext(cmd, numa_node, timeout)
+    return_value, stdout = run_command(cmd, numa_node, timeout)
     elapsed = time.time() - start_time
 
     if return_value:
@@ -214,7 +214,7 @@ def load_psrdada_ringbuffer(full_filename: str, ringbuffer_key: str, numa_node, 
         stdout = ""
     else:
         logger.debug(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
-        return_value, stdout = run_command_ext(cmd, numa_node, timeout)
+        return_value, stdout = run_command(cmd, numa_node, timeout)
 
     elapsed = time.time() - start_time
 
@@ -256,7 +256,7 @@ def run_mwax_packet_stats(mwax_stats_dir: str, full_filename: str, output_dir: s
     cmd = f"{mwax_stats_dir}/mwax_packet_stats -o {output_dir} -s {full_filename}"
 
     start_time = time.time()
-    return_value, stdout = run_command_ext(cmd, numa_node, timeout)
+    return_value, stdout = run_command(cmd, numa_node, timeout)
     elapsed = time.time() - start_time
 
     if return_value:
@@ -309,7 +309,7 @@ def copy_subfile_to_disk_dd(
     )
 
     start_time = time.time()
-    retval, stdout = run_command_ext(command, numa_node, timeout, False)
+    retval, stdout = run_command(command, numa_node, timeout, False)
 
     if retval:
         elapsed = time.time() - start_time

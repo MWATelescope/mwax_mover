@@ -37,7 +37,7 @@ from numpy.typing import NDArray
 from mwax_mover.calibration.fitting import ensure_system_byte_order, poly_str, wrap_angle
 from mwax_mover.calibration.outliers import pivot_phase_fits
 from mwax_mover.calvin.hyperdrive import HyperfitsSolutionGroup
-from mwax_mover.calvin.plots.layout import plot_dpi, plot_figsize
+from mwax_mover.calvin.plots.layout import resolve_plot_dpi, scale_plot_figsize
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +214,7 @@ def plot_rx_lengths(flavor_fits, prefix, show, title):
         plt.show()
     if prefix:
         plt.tight_layout()
-        fig.savefig(f"{prefix}rx_lengths.png", dpi=plot_dpi(300), bbox_inches="tight")
+        fig.savefig(f"{prefix}rx_lengths.png", dpi=resolve_plot_dpi(300), bbox_inches="tight")
 
     return means
 
@@ -235,7 +235,7 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fi
     """
     rxs = np.sort(np.unique(phase_fits_pivot["rx"]))
     slots = np.sort(np.unique(phase_fits_pivot["slot"]))
-    figsize = plot_figsize(float(np.clip(len(slots) * 2.5, 5, 20)), float(np.clip(len(rxs) * 3, 5, 30)))
+    figsize = scale_plot_figsize(float(np.clip(len(slots) * 2.5, 5, 20)), float(np.clip(len(rxs) * 3, 5, 30)))
 
     for pol, soln in zip(["xx", "yy"], [soln_xx, soln_yy], strict=True):
         plt.clf()
@@ -306,7 +306,7 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fi
             plt.show()
         if prefix:
             plt.tight_layout()
-            fig.savefig(f"{prefix}phase_fits_{pol}.png", dpi=plot_dpi(300), bbox_inches="tight")
+            fig.savefig(f"{prefix}phase_fits_{pol}.png", dpi=resolve_plot_dpi(300), bbox_inches="tight")
 
 
 def plot_phase_intercepts(prefix, show, title, flavor_fits):
@@ -349,7 +349,7 @@ def plot_phase_intercepts(prefix, show, title, flavor_fits):
         plt.show()
     if prefix:
         plt.tight_layout()
-        fig.savefig(f"{prefix}intercepts.png", dpi=plot_dpi(300), bbox_inches="tight")
+        fig.savefig(f"{prefix}intercepts.png", dpi=resolve_plot_dpi(300), bbox_inches="tight")
 
 
 def plot_phase_residual(
@@ -550,7 +550,7 @@ def plot_phase_residual(
     if title:
         fig.suptitle(title)
         fig.subplots_adjust(top=0.95)
-    fig.savefig(f"{prefix}residual.png", dpi=plot_dpi(200), bbox_inches="tight")
+    fig.savefig(f"{prefix}residual.png", dpi=resolve_plot_dpi(200), bbox_inches="tight")
     df.to_csv(f"{prefix}residual.tsv", sep="\t", index=False)
 
 

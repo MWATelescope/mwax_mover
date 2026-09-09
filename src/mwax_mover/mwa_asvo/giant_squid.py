@@ -18,7 +18,7 @@ import re
 import time
 from urllib.parse import urlparse
 
-from mwax_mover.core.command import run_command_ext
+from mwax_mover.core.command import run_command
 from mwax_mover.core.env import running_under_pytest
 
 logger = logging.getLogger(__name__)
@@ -101,7 +101,7 @@ def run_giant_squid(
 
         start_time = time.time()
 
-        success, stdout = run_command_ext(
+        success, stdout = run_command(
             command=cmdline,
             numa_node=None,
             timeout=timeout_seconds,

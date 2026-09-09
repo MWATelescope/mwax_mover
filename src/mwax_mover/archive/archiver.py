@@ -13,7 +13,7 @@ import os
 import time
 import uuid
 
-from mwax_mover.core.command import run_command_ext
+from mwax_mover.core.command import run_command
 from mwax_mover.core.env import running_under_pytest
 from mwax_mover.core.units import bytes_to_gigabytes, get_gbps, gigabytes_to_gigabits
 
@@ -60,7 +60,7 @@ def copy_file_rsync(
     start_time = time.time()
 
     # run rsync
-    return_val, stdout = run_command_ext(cmdline, None, timeout, False)
+    return_val, stdout = run_command(cmdline, None, timeout, False)
 
     if return_val:
         try:
@@ -140,7 +140,7 @@ def archive_file_xrootd(
     start_time = time.time()
 
     # run xrdcp
-    return_val, stdout = run_command_ext(cmdline, archive_numa_node, timeout, False)
+    return_val, stdout = run_command(cmdline, archive_numa_node, timeout, False)
 
     if return_val:
         elapsed = time.time() - start_time
@@ -162,7 +162,7 @@ def archive_file_xrootd(
 
         # run the mv command to rename the temp file to the final file
         # If this works, then mwacache will actually do its thing
-        return_val, stdout = run_command_ext(cmdline, archive_numa_node, timeout, False)
+        return_val, stdout = run_command(cmdline, archive_numa_node, timeout, False)
 
         if return_val:
             logger.info(
@@ -330,7 +330,7 @@ def archive_file_rclone_haproxy(
             f" {full_filename} {rclone_profile}:/{bucket_name}/{filename}"
         )
 
-        return_val, stdout = run_command_ext(cmdline, None, subprocess_timeout_secs, False)
+        return_val, stdout = run_command(cmdline, None, subprocess_timeout_secs, False)
 
         if return_val:
             elapsed = time.time() - start_time
@@ -375,7 +375,7 @@ def archive_file_rclone_haproxy(
                     f" of {_RCLONE_CHECK_RETRIES} against {rclone_profile}"
                     f" bucket {bucket_name} via HAProxy..."
                 )
-                return_val, stdout = run_command_ext(cmdline, None, subprocess_timeout_secs, False)
+                return_val, stdout = run_command(cmdline, None, subprocess_timeout_secs, False)
 
                 if not return_val and check_attempt < _RCLONE_CHECK_RETRIES:
                     logger.warning(

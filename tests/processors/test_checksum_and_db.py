@@ -82,8 +82,8 @@ def make_processor(dirs: dict, archiving_enabled: bool) -> ChecksumAndDBProcesso
         bf_stitching_path=dirs["bf_stitching"],
         bf_outgoing_path=dirs["bf_outgoing"],
         bf_dont_archive_path=dirs["bf_dont_archive"],
-        list_of_corr_hi_priority_projects=[],
-        list_of_vcs_hi_priority_projects=[],
+        high_priority_correlator_projects=[],
+        high_priority_vcs_projects=[],
         db_handler_object=db,
         archiving_enabled=archiving_enabled,
     )

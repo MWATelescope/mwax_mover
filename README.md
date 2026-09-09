@@ -610,7 +610,7 @@ Provides `get_mwax_mover_version_string()`, which reads the installed package ve
 ### Core (`core/`)
 
 **`core/command.py`**
-Thin wrappers around `subprocess`: `run_command_ext()` runs a command synchronously (optionally pinned to a NUMA node), `run_command_popen()` starts one asynchronously and returns a `Popen` object, `check_popen_finished()` waits for it and returns `(exit_code, stdout, stderr)`. Also `write_readme_file()`, a generic command-log writer used by `calvin/birli.py` and `calvin/hyperdrive.py`.
+Thin wrappers around `subprocess`: `run_command()` runs a command synchronously (optionally pinned to a NUMA node), `start_command()` starts one asynchronously and returns a `Popen` object, `check_popen_finished()` waits for it and returns `(exit_code, stdout, stderr)`. Also `write_readme_file()`, a generic command-log writer used by `calvin/birli.py` and `calvin/hyperdrive.py`.
 
 **`core/config.py`**
 INI config-file reading helpers built on `configparser`: `read_config()` (required values), `read_optional_config()`, `read_config_list()` (comma-separated), `read_config_bool()`. All accept an optional Base64-decode step.
@@ -646,7 +646,7 @@ PSRDADA subfile header reading/writing (`read_subfile_value(s)`, `inject_subfile
 ### Filesystem (`filesystem/`)
 
 **`filesystem/naming.py`**
-`validate_filename()` is the central check: classifies a filename, cross-references its metafits file, and reports project ID and calibrator status. Also `MWADataFileType`, `ArchiveLocation`, `ValidationData` (its result struct), `determine_bucket()`/`get_bucket_name_from_*` (archive bucket names), and `get_priority()` (archiving order).
+`validate_filename()` is the central check: classifies a filename, cross-references its metafits file, and reports project ID and calibrator status. Also `MWADataFileType`, `ArchiveLocation`, `ValidationData` (its result struct), `get_bucket_name_for_location()`/`get_bucket_name_from_*` (archive bucket names), and `get_priority()` (archiving order).
 
 **`filesystem/scan.py`**
 `scan_directory()` returns glob matches as a list; `scan_for_existing_files_and_add_to_queue()` scans and enqueues them onto a plain `queue.Queue` in sorted order.
@@ -763,9 +763,9 @@ Manages interaction with the MWA ASVO data download service via the `giant-squid
 Solution-file naming (`get_solution_fits_filename()`, `parse_solution_channels()`, `get_sorted_solution_files()`), export (`export_calibration_solutions()`), and staged/atomic publishing of a fit's plots and stats (`upload_plot_files()`, `get_staging_path()`, `reap_orphaned_staging_dirs()`).
 
 **`calvin/plots/`** — plotting and plot-adjacent reporting
-- `layout.py` — figure-sizing helpers (`plot_dpi()`, `plot_figsize()`) shared by every plot here.
+- `layout.py` — figure-sizing helpers (`resolve_plot_dpi()`, `scale_plot_figsize()`) shared by every plot here.
 - `phase_fits.py` — phase-fit diagnostic plots (intercepts, residuals, per-tile fits) and `write_debug_phase_fit_plots()`, the `HyperfitsSolutionGroup`-level entry point.
-- `hyperdrive_plots.py` — `generate_hyperdrive_plots(_for_files)`, which run hyperdrive's own `solutions-plot` subcommand.
+- `hyperdrive.py` — `generate_plots(_for_files)`, which run hyperdrive's own `solutions-plot` subcommand.
 - `gains.py` — the paged, paginated amplitude-outlier plots (`plot_combined_gains()`, `plot_outlier_gains()`), stitching multiple picket-fence files onto one continuous x-axis and budgeting concurrent rendering workers against available memory.
 - `stats_table.py` — the before/after per-tile stats table (`build_tile_stats_rows()`, `write_tile_stats_table()`, `write_before_after_stats()`).
 - `index.py` — `index.json` manifest generation for a fit's uploaded files (`generate_plot_index_file()`, `populate_index_json_entry()`).

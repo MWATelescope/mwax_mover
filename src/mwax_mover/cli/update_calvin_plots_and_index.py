@@ -11,7 +11,7 @@ from pathlib import Path
 
 import requests
 
-from mwax_mover.calvin.plots.hyperdrive_plots import generate_hyperdrive_plots
+from mwax_mover.calvin.plots import hyperdrive
 from mwax_mover.calvin.plots.index import populate_index_json_entry
 from mwax_mover.core.config import read_config
 from mwax_mover.db.calibration import get_fit_info_from_slurm_job_and_obsid
@@ -149,7 +149,7 @@ def parse_job_dir(directory: str) -> tuple[int, int]:
 def main() -> None:
     """Entry point for the update_hyperdrive_plots_and_index command line tool.
 
-    Parses arguments and calls generate_hyperdrive_plots(), downloads the old index.json,
+    Parses arguments and calls hyperdrive.generate_plots(), downloads the old index.json,
     updates index.json then copies the files to the local upload directory for
     calvin controller to upload, printing a summary on success or an error
     message on failure.
@@ -157,7 +157,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Scans recursively for solution directories. For each solution directory,"
-            " calls generate_hyperdrive_plots(), downloads the old index.json, updates"
+            " calls hyperdrive.generate_plots(), downloads the old index.json, updates"
             " index.json then re-uploads it"
         ),
     )
@@ -362,7 +362,7 @@ def main() -> None:
         # Regenerate the plots for each solutions file
         for file in solution_files:
             sol.log(f"Generating new plots for {file} in index.json...")
-            success, error_message = generate_hyperdrive_plots(
+            success, error_message = hyperdrive.generate_plots(
                 sol.obs_id,
                 file,
                 hyperdrive_binary_path,

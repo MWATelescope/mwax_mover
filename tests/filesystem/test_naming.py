@@ -20,7 +20,7 @@ from mwax_mover.filesystem.naming import (
     ArchiveLocation,
     MWADataFileType,
     ValidationData,
-    determine_bucket,
+    get_bucket_name_for_location,
     get_bucket_name_from_filename,
     get_bucket_name_from_obs_id,
     get_data_files_for_obsid_from_webservice,
@@ -284,7 +284,7 @@ def test_get_priority_metafits_ppd():
     assert priority == 1
 
 
-def test_determine_bucket_acacia():
+def test_get_bucket_name_for_location_acacia():
     """Tests we get the correct bucket and folder given a filename and location"""
     full_filename = os.path.join(
         os.getcwd(),
@@ -294,11 +294,11 @@ def test_determine_bucket_acacia():
     #
     # Run test
     #
-    bucket = determine_bucket(full_filename, location)
+    bucket = get_bucket_name_for_location(full_filename, location)
     assert bucket == "mwaingest-12449"
 
 
-def test_determine_bucket_banksia():
+def test_get_bucket_name_for_location_banksia():
     """Tests we get the correct bucket and folder given a filename and location"""
     full_filename = os.path.join(
         os.getcwd(),
@@ -308,7 +308,7 @@ def test_determine_bucket_banksia():
     #
     # Run test
     #
-    bucket = determine_bucket(full_filename, location)
+    bucket = get_bucket_name_for_location(full_filename, location)
     assert bucket == "mwaingest-12449"
 
 

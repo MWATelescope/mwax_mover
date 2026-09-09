@@ -40,8 +40,8 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
         bf_stitching_path: str,
         bf_outgoing_path: str,
         bf_dont_archive_path: str,
-        list_of_corr_hi_priority_projects: list[str],
-        list_of_vcs_hi_priority_projects: list[str],
+        high_priority_correlator_projects: list[str],
+        high_priority_vcs_projects: list[str],
         db_handler_object: MWAXDBHandler,
         archiving_enabled: bool,
     ):
@@ -59,8 +59,8 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
             bf_stitching_path: Directory watched for beamformer files awaiting stitching (all extensions).
             bf_outgoing_path: Destination for beamformer files being sent to the archive.
             bf_dont_archive_path: Destination for beamformer files that should not be archived.
-            list_of_corr_hi_priority_projects: Project IDs that get elevated priority in the correlator queue.
-            list_of_vcs_hi_priority_projects: Project IDs that get elevated priority in the VCS queue.
+            high_priority_correlator_projects: Project IDs that get elevated priority in the correlator queue.
+            high_priority_vcs_projects: Project IDs that get elevated priority in the VCS queue.
             db_handler_object: Initialised MWAXDBHandler used for metadata database inserts.
             archiving_enabled: When False the checksum/DB step is skipped and files are routed
                 to dont_archive paths regardless of their project ID.
@@ -74,8 +74,8 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
                 (bf_stitching_path, ".*"),
             ],
             mode=MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
-            corr_hi_priority_projects=list_of_corr_hi_priority_projects,
-            vcs_hi_priority_projects=list_of_vcs_hi_priority_projects,
+            high_priority_correlator_projects=high_priority_correlator_projects,
+            high_priority_vcs_projects=high_priority_vcs_projects,
             # Order does not matter here, so a failed item is requeued to the
             # back of the queue rather than retried in place. Retrying in place
             # meant one permanently-bad file (e.g. an unrecognised filetype,
@@ -228,7 +228,7 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
 
         logger.debug(f"{item}: moving file to {os.path.dirname(dest)}")
         shutil.move(item, dest)
-        logger.info(f"{item}: moved file to {os.path.dirname(dest)}. Queue size: {self.pqueue.qsize()}")
+        logger.info(f"{item}: moved file to {os.path.dirname(dest)}. Queue size: {self.queue.qsize()}")
 
         logger.info(f"{item}: Finished")
         return True

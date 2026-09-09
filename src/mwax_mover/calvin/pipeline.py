@@ -25,8 +25,8 @@ import numpy as np
 from mwax_mover.calibration.fitting import pad_gain_fit_info
 from mwax_mover.calibration.models import GainFitInfo, Metafits, PhaseFitInfo
 from mwax_mover.calvin.hyperdrive import HyperfitsSolution, HyperfitsSolutionGroup, write_hyperdrive_stats
+from mwax_mover.calvin.plots import hyperdrive
 from mwax_mover.calvin.plots.gains import plot_outlier_gains
-from mwax_mover.calvin.plots.hyperdrive_plots import generate_hyperdrive_plots_for_files
 from mwax_mover.calvin.plots.phases import write_debug_phase_fit_plots
 from mwax_mover.calvin.plots.stats_table import write_before_after_stats
 from mwax_mover.calvin.solution_files import get_sorted_solution_files
@@ -190,7 +190,7 @@ def process_solutions(
         # Run concurrently: each is an external hyperdrive process, and a
         # picket fence has one solution file per coarse channel (24 serial
         # launches here and another 24 below, versus 2 for a contiguous obs).
-        for failed_file, plots_error in generate_hyperdrive_plots_for_files(
+        for failed_file, plots_error in hyperdrive.generate_plots_for_files(
             obs_id, fits_solution_files, hyperdrive_binary_path, metafits_file, output_data_path, before=True
         ):
             logger.warning(f"{obs_id}: 'before' hyperdrive plots failed for {failed_file}: {plots_error}")
@@ -247,7 +247,7 @@ def process_solutions(
 
         # "After" plots: hyperdrive's own binary-generated amp/phase plots,
         # against the now-committed files.
-        for failed_file, plots_error in generate_hyperdrive_plots_for_files(
+        for failed_file, plots_error in hyperdrive.generate_plots_for_files(
             obs_id, fits_solution_files, hyperdrive_binary_path, metafits_file, output_data_path, before=False
         ):
             logger.warning(f"{obs_id}: hyperdrive plots failed for {failed_file}: {plots_error}")

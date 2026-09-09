@@ -35,8 +35,8 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
         bf_incoming_path: str,
         bf_stitching_path: str,
         bf_dont_archive_path: str,
-        list_of_corr_hi_priority_projects: list[str],
-        list_of_vcs_hi_priority_projects: list[str],
+        high_priority_correlator_projects: list[str],
+        high_priority_vcs_projects: list[str],
         archiving_enabled: bool,
         keep_original_files_after_stitching: bool,
     ):
@@ -47,8 +47,8 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
             bf_incoming_path: Directory watched for incoming beamformer subobservation files.
             bf_stitching_path: Directory where stitched beamformer files are written.
             bf_dont_archive_path: Directory for non-archivable beamformer files or originals.
-            list_of_corr_hi_priority_projects: Correlator project IDs with elevated priority.
-            list_of_vcs_hi_priority_projects: VCS project IDs with elevated priority.
+            high_priority_correlator_projects: Correlator project IDs with elevated priority.
+            high_priority_vcs_projects: VCS project IDs with elevated priority.
             archiving_enabled: Whether archiving is enabled for this host.
             keep_original_files_after_stitching: Whether to keep original subobs files after stitching.
         """
@@ -60,15 +60,15 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
             ],
             mode=MODE_WATCH_DIR_FOR_RENAME,
             exclude_pattern=".tmp",
-            corr_hi_priority_projects=list_of_corr_hi_priority_projects,
-            vcs_hi_priority_projects=list_of_vcs_hi_priority_projects,
+            high_priority_correlator_projects=high_priority_correlator_projects,
+            high_priority_vcs_projects=high_priority_vcs_projects,
             requeue_to_eoq_on_failure=False,
         )
         self.bf_incoming_path = bf_incoming_path
         self.bf_stitching_path = bf_stitching_path
         self.bf_dont_archive_path = bf_dont_archive_path
-        self.list_of_correlator_high_priority_projects = list_of_corr_hi_priority_projects
-        self.list_of_vcs_high_priority_projects = list_of_vcs_hi_priority_projects
+        self.high_priority_correlator_projects = high_priority_correlator_projects
+        self.high_priority_vcs_projects = high_priority_vcs_projects
         self.archiving_enabled = archiving_enabled
         self.keep_original_files_after_stitching = keep_original_files_after_stitching
 

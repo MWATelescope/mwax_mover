@@ -154,8 +154,8 @@ def scan_for_existing_files_and_add_to_priority_queue(
     pattern: str,
     recursive: bool,
     queue_target: queue.PriorityQueue,
-    list_of_correlator_high_priority_projects: list,
-    list_of_vcs_high_priority_projects: list,
+    high_priority_correlator_projects: list,
+    high_priority_vcs_projects: list,
     exclude_pattern=None,
 ):
     """
@@ -174,9 +174,9 @@ def scan_for_existing_files_and_add_to_priority_queue(
         recursive: If True, scan all subdirectories recursively.
         queue_target: The ``queue.PriorityQueue`` instance to add
             ``(priority, MWAXPriorityQueueData)`` tuples to.
-        list_of_correlator_high_priority_projects: Project IDs that should
+        high_priority_correlator_projects: Project IDs that should
             receive elevated priority for correlator observations.
-        list_of_vcs_high_priority_projects: Project IDs that should receive
+        high_priority_vcs_projects: Project IDs that should receive
             elevated priority for VCS observations.
         exclude_pattern: Optional glob suffix pattern. Files matching this
             pattern are excluded from the results. Defaults to None (no exclusion).
@@ -189,8 +189,8 @@ def scan_for_existing_files_and_add_to_priority_queue(
         priority = get_priority(
             filename,
             metafits_path,
-            list_of_correlator_high_priority_projects,
-            list_of_vcs_high_priority_projects,
+            high_priority_correlator_projects,
+            high_priority_vcs_projects,
         )
         queue_target.put((priority, MWAXPriorityQueueData(filename)))
         logger.info(f"{watch_dir}: {os.path.basename(filename)} added to queue with priority {priority}")

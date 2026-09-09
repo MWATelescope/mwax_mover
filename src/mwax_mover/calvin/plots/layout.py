@@ -1,6 +1,6 @@
 """Figure sizing helpers shared by every plot in calvin.plots.
 
-plot_dpi()/plot_figsize() reduce output resolution/size under pytest, so
+resolve_plot_dpi()/scale_plot_figsize() reduce output resolution/size under pytest, so
 the test suite isn't saving full-resolution production figures to disk on
 every run.
 """
@@ -25,7 +25,7 @@ _PYTEST_PLOT_DPI = 40
 _PYTEST_PLOT_FIGSIZE_SCALE = 0.35
 
 
-def plot_dpi(production_dpi: int) -> int:
+def resolve_plot_dpi(production_dpi: int) -> int:
     """Return the DPI to save a figure at, reduced when running under pytest.
 
     Args:
@@ -38,7 +38,7 @@ def plot_dpi(production_dpi: int) -> int:
     return _PYTEST_PLOT_DPI if running_under_pytest() else production_dpi
 
 
-def plot_figsize(width_inches: float, height_inches: float) -> tuple[float, float]:
+def scale_plot_figsize(width_inches: float, height_inches: float) -> tuple[float, float]:
     """Scale a figure size down when running under pytest.
 
     Args:

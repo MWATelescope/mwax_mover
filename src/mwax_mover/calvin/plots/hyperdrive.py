@@ -1,10 +1,10 @@
 """Generating solution plots via the hyperdrive binary itself.
 
-generate_hyperdrive_plots() runs hyperdrive's own `solutions-plot`
-subcommand for a single solution file; generate_hyperdrive_plots_for_files()
-runs it across several files concurrently. (Reading and writing
-convergence stats for an already-produced solution file is a related but
-separate concern -- see calvin.hyperdrive.write_hyperdrive_stats.)
+generate_plots() runs hyperdrive's own `solutions-plot` subcommand for a
+single solution file; generate_plots_for_files() runs it across several
+files concurrently. (Reading and writing convergence stats for an
+already-produced solution file is a related but separate concern -- see
+the sibling calvin.hyperdrive module's write_hyperdrive_stats.)
 """
 
 import logging
@@ -12,12 +12,12 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from mwax_mover.core.command import run_command_ext
+from mwax_mover.core.command import run_command
 
 logger = logging.getLogger(__name__)
 
 
-def generate_hyperdrive_plots(
+def generate_plots(
     obs_id: int,
     hyperdrive_solution_filename: str,
     hyperdrive_binary_path: str,
@@ -30,7 +30,7 @@ def generate_hyperdrive_plots(
 
     This is the single implementation. A second, near-identical copy used to
     live in mwax_calvin_utils.py -- it accepted max_amp but not before, and it
-    discarded run_command_ext's return code, so a failed hyperdrive run was
+    discarded run_command's return code, so a failed hyperdrive run was
     reported as a success. Callers of that copy now come here instead.
 
     Args:
@@ -66,7 +66,7 @@ def generate_hyperdrive_plots(
             f" {metafits_filename} {hyperdrive_solution_filename}"
         )
 
-        success, output = run_command_ext(cmd, -1, timeout=60, use_shell=False)
+        success, output = run_command(cmd, -1, timeout=60, use_shell=False)
 
         if not success:
             logger.warning(f"{obs_id} hyperdrive solutions-plot failed for {hyperdrive_solution_filename}: {output}")
@@ -113,7 +113,7 @@ def generate_hyperdrive_plots(
     return True, ""
 
 
-def generate_hyperdrive_plots_for_files(
+def generate_plots_for_files(
     obs_id: int,
     solution_filenames: list[str],
     hyperdrive_binary_path: str,
@@ -123,7 +123,7 @@ def generate_hyperdrive_plots_for_files(
     max_amp: int | None = None,
     max_workers: int | None = None,
 ) -> list[tuple[str, str]]:
-    """Run generate_hyperdrive_plots for every solution file, concurrently.
+    """Run generate_plots for every solution file, concurrently.
 
     Each call is an external ``hyperdrive solutions-plot`` process, so these are
     IO/subprocess bound and a thread pool parallelises them fine -- the GIL is
@@ -132,7 +132,7 @@ def generate_hyperdrive_plots_for_files(
     "before" pass and again for the "after" pass, so 24 files meant 48 serial
     process launches versus 2 for a contiguous observation.
 
-    Safe to run concurrently only because generate_hyperdrive_plots's "before"
+    Safe to run concurrently only because generate_plots's "before"
     rename is scoped to its own input file's stem. It previously globbed the
     whole output directory, which would have had concurrent calls renaming each
     other's files.
@@ -147,8 +147,8 @@ def generate_hyperdrive_plots_for_files(
         hyperdrive_binary_path: Path to the hyperdrive executable.
         metafits_filename: Path to the metafits file.
         output_dir: Where to write the plots.
-        before: See generate_hyperdrive_plots.
-        max_amp: See generate_hyperdrive_plots.
+        before: See generate_plots.
+        max_amp: See generate_plots.
         max_workers: Concurrent hyperdrive processes. Defaults to
             min(len(solution_filenames), os.cpu_count()), so a contiguous
             observation still runs exactly one process.
@@ -167,7 +167,7 @@ def generate_hyperdrive_plots_for_files(
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
             executor.submit(
-                generate_hyperdrive_plots,
+                generate_plots,
                 obs_id,
                 f,
                 hyperdrive_binary_path,

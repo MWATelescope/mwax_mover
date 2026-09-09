@@ -46,9 +46,9 @@ from mwax_mover.core.gpstime import get_gpstime_of_now
 from mwax_mover.core.units import gigabyte_to_gibibyte, is_int
 from mwax_mover.db.calibration import (
     update_calibration_request_assign_hostname_start_download,
-    update_calsolution_request_calibration_complete_status,
-    update_calsolution_request_calibration_started_status,
-    update_calsolution_request_download_complete_status,
+    update_calibration_request_calibration_complete_status,
+    update_calibration_request_calibration_started_status,
+    update_calibration_request_download_complete_status,
 )
 from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.filesystem.files import extract_tar, remove_file
@@ -134,7 +134,7 @@ class MWAXCalvinProcessor:
         self.download_retries: int = 0
         self.download_retry_wait: int = 0
         self.realtime_download_file_timeout: int = 0
-        self.mwaasvo_download_obs_timeout: int = 0
+        self.mwa_asvo_download_obs_timeout: int = 0
         self.giant_squid_binary_path: str = ""
 
         # processing
@@ -354,7 +354,7 @@ class MWAXCalvinProcessor:
 
             # Update database that we are processing this obsid and we finished the download
             if result:
-                update_calsolution_request_calibration_started_status(
+                update_calibration_request_calibration_started_status(
                     self.db_handler,
                     self.slurm_job_id,
                     datetime.datetime.now().astimezone(),
@@ -590,7 +590,7 @@ class MWAXCalvinProcessor:
         error_datetime = datetime.datetime.now().astimezone()
         # Update database
         try:
-            update_calsolution_request_download_complete_status(
+            update_calibration_request_download_complete_status(
                 self.db_handler,
                 self.slurm_job_id,
                 self.request_id_list,
@@ -601,7 +601,7 @@ class MWAXCalvinProcessor:
         except Exception as e:
             if logger:
                 logger.info(
-                    "Failed to update_calsolution_request_download_complete_status. "
+                    "Failed to update_calibration_request_download_complete_status. "
                     f"Params: {self.request_id_list}, None, {error_datetime}, {error_message}. "
                     f"Error: {e!s}"
                 )
@@ -618,7 +618,7 @@ class MWAXCalvinProcessor:
 
         # Update database
         try:
-            update_calsolution_request_calibration_complete_status(
+            update_calibration_request_calibration_complete_status(
                 self.db_handler,
                 self.slurm_job_id,
                 None,
@@ -629,7 +629,7 @@ class MWAXCalvinProcessor:
         except Exception as e:
             if logger:
                 logger.info(
-                    "Failed to update_calsolution_request_calibration_complete_status. "
+                    "Failed to update_calibration_request_calibration_complete_status. "
                     f"Params: {self.obs_id}, None,  None, None, {error_datetime}, {error_message}. "
                     f"Error: {e!s}"
                 )
@@ -643,7 +643,7 @@ class MWAXCalvinProcessor:
             fit_id: The ID of the fit/solution that was created.
         """
         # Update database
-        update_calsolution_request_calibration_complete_status(
+        update_calibration_request_calibration_complete_status(
             self.db_handler,
             self.slurm_job_id,
             datetime.datetime.now().astimezone(),
@@ -766,7 +766,7 @@ class MWAXCalvinProcessor:
                 self.giant_squid_binary_path,
                 subcmd,
                 args,
-                self.mwaasvo_download_obs_timeout,
+                self.mwa_asvo_download_obs_timeout,
                 env_args={
                     "HTTPS_PROXY": "http://localhost:3128",
                     "NO_PROXY": "asvo.mwatelescope.org",
@@ -1207,7 +1207,11 @@ class MWAXCalvinProcessor:
             self.realtime_download_file_timeout = int(
                 read_config(config, "downloading", "realtime_download_file_timeout")
             )
-            self.mwaasvo_download_obs_timeout = int(read_config(config, "downloading", "mwaasvo_download_obs_timeout"))
+            # Attribute renamed for spelling consistency with the rest of the
+            # codebase (mwa_asvo, not mwaasvo/mwax_asvo) -- the config key
+            # itself is left as mwaasvo_download_obs_timeout for backwards
+            # compatibility with deployed .cfg files (see docs/CLEANUP.md 3.1).
+            self.mwa_asvo_download_obs_timeout = int(read_config(config, "downloading", "mwaasvo_download_obs_timeout"))
             # Get the giant squid binary
             self.giant_squid_binary_path = read_config(
                 config,

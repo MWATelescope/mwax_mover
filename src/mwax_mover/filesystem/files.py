@@ -16,7 +16,7 @@ from pathlib import Path
 
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from mwax_mover.core.command import run_command_ext
+from mwax_mover.core.command import run_command
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +174,7 @@ def do_checksum_md5(full_filename: str, numa_node: int | None, timeout: int) -> 
     size = os.path.getsize(full_filename)
 
     start_time = time.time()
-    return_value, md5output = run_command_ext(cmdline, numa_node, timeout, False)
+    return_value, md5output = run_command(cmdline, numa_node, timeout, False)
     elapsed = time.time() - start_time
 
     size_megabytes = size / (1000 * 1000)

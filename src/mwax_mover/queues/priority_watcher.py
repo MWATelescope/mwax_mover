@@ -32,8 +32,8 @@ class PriorityWatcher:
         mode,
         recursive,
         metafits_path,
-        list_of_correlator_high_priority_projects: list[str],
-        list_of_vcs_high_priority_projects: list[str],
+        high_priority_correlator_projects: list[str],
+        high_priority_vcs_projects: list[str],
         exclude_pattern: str | None = None,
     ):
         """Initialize a priority directory watcher.
@@ -46,8 +46,8 @@ class PriorityWatcher:
             mode: The watch mode (NEW, RENAME, or RENAME_OR_NEW).
             recursive: Whether to watch subdirectories recursively.
             metafits_path: Path to metafits files for priority determination.
-            list_of_correlator_high_priority_projects: Projects with high priority.
-            list_of_vcs_high_priority_projects: VCS projects with high priority.
+            high_priority_correlator_projects: Projects with high priority.
+            high_priority_vcs_projects: VCS projects with high priority.
             exclude_pattern: File extension to exclude from matching. Defaults to None.
 
         Raises:
@@ -63,8 +63,8 @@ class PriorityWatcher:
         self.pattern = pattern  # must be ".ext" or ".*"
         self.exclude_pattern = exclude_pattern  # Can be None or ".ext"
         self.metafits_path = metafits_path
-        self.list_of_correlator_high_priority_projects: list = list_of_correlator_high_priority_projects
-        self.list_of_vcs_high_priority_projects: list = list_of_vcs_high_priority_projects
+        self.high_priority_correlator_projects: list = high_priority_correlator_projects
+        self.high_priority_vcs_projects: list = high_priority_vcs_projects
         # This is a flag used so callers can know when,
         # on startup that the scan for existing files
         # has completed. This is useful for the workers
@@ -145,8 +145,8 @@ class PriorityWatcher:
                 self.pattern,
                 self.recursive,
                 self.dest_queue,
-                self.list_of_correlator_high_priority_projects,
-                self.list_of_vcs_high_priority_projects,
+                self.high_priority_correlator_projects,
+                self.high_priority_vcs_projects,
                 self.exclude_pattern,
             )
         self.scan_completed = True
@@ -173,8 +173,8 @@ class PriorityWatcher:
                                 priority = get_priority(
                                     dest_filename,
                                     self.metafits_path,
-                                    self.list_of_correlator_high_priority_projects,
-                                    self.list_of_vcs_high_priority_projects,
+                                    self.high_priority_correlator_projects,
+                                    self.high_priority_vcs_projects,
                                 )
 
                                 new_queue_item = (

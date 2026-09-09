@@ -3,7 +3,7 @@
 Split out of the former test014_calvin_utils.py (docs/RESTRUCTURE.md
 test-tree reorg). write_readme_file() itself moved from calvin/pipeline.py
 to core/command.py in a post-restructure tweak -- these tests moved with
-it. run_command_ext()/run_command_popen()/check_popen_finished() have no
+it. run_command()/start_command()/check_popen_finished() have no
 dedicated tests yet.
 """
 

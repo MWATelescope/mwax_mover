@@ -15,7 +15,12 @@ from mwax_mover.db import data_files
 from mwax_mover.db.data_files import DataFileRow, get_data_file_row
 from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.filesystem.files import do_checksum_md5, remove_file
-from mwax_mover.filesystem.naming import ArchiveLocation, ValidationData, determine_bucket, validate_filename
+from mwax_mover.filesystem.naming import (
+    ArchiveLocation,
+    ValidationData,
+    get_bucket_name_for_location,
+    validate_filename,
+)
 from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
 
 logger = logging.getLogger(__name__)
@@ -31,9 +36,9 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
         self,
         name: str,
         metafits_path: str,
-        watch_paths_and_exts: list[tuple[str, str]],
-        list_of_corr_hi_priority_projects: list[str],
-        list_of_vcs_hi_priority_projects: list[str],
+        watch_paths_exts: list[tuple[str, str]],
+        high_priority_correlator_projects: list[str],
+        high_priority_vcs_projects: list[str],
         mro_db_handler_object: MWAXDBHandler,
         remote_db_handler_object: MWAXDBHandler,
         s3_profile: str,
@@ -46,9 +51,9 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
         Args:
             name: Processor name for logging and identification.
             metafits_path: Path to the metafits file for priority detection.
-            watch_paths_and_exts: List of (directory, file_extension) tuples to monitor.
-            list_of_corr_hi_priority_projects: List of high-priority correlator project IDs.
-            list_of_vcs_hi_priority_projects: List of high-priority VCS project IDs.
+            watch_paths_exts: List of (directory, file_extension) tuples to monitor.
+            high_priority_correlator_projects: List of high-priority correlator project IDs.
+            high_priority_vcs_projects: List of high-priority VCS project IDs.
             mro_db_handler_object: Database handler for the MRO metadata database.
             remote_db_handler_object: Database handler for the remote metadata database.
             s3_profile: rclone profile name to upload with (see rclone.conf).
@@ -61,11 +66,11 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
         super().__init__(
             name,
             metafits_path,
-            watch_paths_and_exts,
+            watch_paths_exts,
             mode=constants.MODE_WATCH_DIR_FOR_RENAME,
             exclude_pattern=".part*",
-            corr_hi_priority_projects=list_of_corr_hi_priority_projects,
-            vcs_hi_priority_projects=list_of_vcs_hi_priority_projects,
+            high_priority_correlator_projects=high_priority_correlator_projects,
+            high_priority_vcs_projects=high_priority_vcs_projects,
             recursive=recursive,
             requeue_to_eoq_on_failure=True,
         )
@@ -139,7 +144,7 @@ class PawseyOutgoingProcessor(MWAXPriorityWatchQueueWorker):
             logger.debug(f"{item}: md5 checksum matches")
 
             # Determine where to archive it
-            bucket = determine_bucket(
+            bucket = get_bucket_name_for_location(
                 item,
                 self.archive_to_location,
             )

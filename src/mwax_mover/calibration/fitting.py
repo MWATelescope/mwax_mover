@@ -133,7 +133,7 @@ def wrap_angle(angle):
 _MIN_CLIP_THRESHOLD_RAD = 1e-6
 
 
-def _phase_fit_hess_inv(ν: NDArray[np.float64]) -> NDArray[np.float64]:
+def _phase_fit_hess_inv(freqs_hz: NDArray[np.float64]) -> NDArray[np.float64]:
     """Exact inverse Hessian of the phase-ramp fit objective w.r.t. (m, c).
 
     residual_i(m, c) = wrap(θ_i - m·ν_i - c) is piecewise-linear in (m, c)
@@ -151,15 +151,15 @@ def _phase_fit_hess_inv(ν: NDArray[np.float64]) -> NDArray[np.float64]:
     before that approximation has accumulated real curvature information.
 
     Args:
-        ν: Frequencies (Hz) of the currently-valid points.
+        freqs_hz: Frequencies (Hz) of the currently-valid points.
 
     Returns:
         The 2x2 inverse Hessian, ordered (m, c) to match `params`.
     """
-    n = len(ν)
-    sum_ν = np.sum(ν)
-    sum_ν2 = np.sum(ν**2)
-    hessian = 2.0 * np.array([[sum_ν2, sum_ν], [sum_ν, n]])
+    n = len(freqs_hz)
+    sum_freqs = np.sum(freqs_hz)
+    sum_freqs_sq = np.sum(freqs_hz**2)
+    hessian = 2.0 * np.array([[sum_freqs_sq, sum_freqs], [sum_freqs, n]])
     return np.linalg.inv(hessian)
 
 
@@ -223,7 +223,7 @@ def fit_phase_line(
     # - Do not assume the arrays are ordered in increasing frequency
     # Get the minimum difference between two (now-ordered) consecutive bins, and
     # declare this to be the bin width
-    dν = np.min(np.diff(freqs_hz)) * u.Hz
+    d_freq = np.min(np.diff(freqs_hz)) * u.Hz
 
     # remove nans and zero weights
     mask = np.where(np.logical_and(np.isfinite(solution), weights > 0))[0]
@@ -244,9 +244,9 @@ def fit_phase_line(
     # Now we want to "adjust" the solution data so that it
     # - is roughly centered on the DC bin
     # - has a large amount of zero padding on either side
-    ν = freqs_hz * u.Hz
+    freqs_hz = freqs_hz * u.Hz
 
-    bins = np.round((ν / dν).decompose().value).astype(int)
+    bins = np.round((freqs_hz / d_freq).decompose().value).astype(int)
     ctr_bin = (np.min(bins) + np.max(bins)) // 2
     shifted_bins = bins - ctr_bin  # Now "bins" represents where I want to put the solution values
 
@@ -255,8 +255,8 @@ def fit_phase_line(
     # This is set by the resolution I want in delay space (Nyquist rate)
     dm = 0.01 * u.m
     dt = dm / c  # The target time resolution
-    νmax = 0.5 / dt  # The Nyquist rate
-    N = 2 * int(np.round(νmax / dν))  # The number of bins to use during the FFTs
+    nyquist_freq_hz = 0.5 / dt  # The Nyquist rate
+    N = 2 * int(np.round(nyquist_freq_hz / d_freq))  # The number of bins to use during the FFTs
 
     shifted_bins[shifted_bins < 0] += (
         N  # Now the "negative" frequencies are put at the end, which is where FFT wants them
@@ -271,7 +271,7 @@ def fit_phase_line(
 
     # IFFT of sol0 to get the approximate solution as the peak in delay space
     isol0 = np.fft.ifft(sol0)
-    t = -np.fft.fftfreq(len(sol0), d=dν.to(u.Hz).value) * u.s  # (Not sure why this negative is needed)
+    t = -np.fft.fftfreq(len(sol0), d=d_freq.to(u.Hz).value) * u.s  # (Not sure why this negative is needed)
     d = np.fft.fftshift(c * t)
     isol0 = np.fft.fftshift(isol0)
 
@@ -289,13 +289,13 @@ def fit_phase_line(
     # To get the y-intercept, divide the original data by the constructed data
     # and find the average phase of the result
 
-    def model(ν, m, c):
-        return np.exp(1j * (m * ν + c))
+    def model(freqs_hz, m, c):
+        return np.exp(1j * (m * freqs_hz + c))
 
-    y_int = np.angle(np.mean(solution / model(ν.to(u.Hz).value, slope.value, 0)))
+    y_int = np.angle(np.mean(solution / model(freqs_hz.to(u.Hz).value, slope.value, 0)))
     params = (slope.value, y_int)
 
-    def objective_and_grad(params, ν, data):
+    def objective_and_grad(params, freqs_hz, data):
         # Combines cost and its exact gradient into one call (jac=True
         # below) so minimize() never falls back to finite-difference
         # gradient estimation -- which was re-evaluating this same
@@ -309,10 +309,10 @@ def fit_phase_line(
         # d(residual_i)/dc = -1, giving:
         #   d(cost)/dm = -2 * sum(residual_i * ν_i)
         #   d(cost)/dc = -2 * sum(residual_i)
-        constructed = model(ν, *params)
+        constructed = model(freqs_hz, *params)
         residuals = wrap_angle(np.angle(data) - np.angle(constructed))
         cost = np.sum(np.abs(residuals) ** 2)
-        grad = np.array([-2.0 * np.sum(residuals * ν), -2.0 * np.sum(residuals)])
+        grad = np.array([-2.0 * np.sum(residuals * freqs_hz), -2.0 * np.sum(residuals)])
         return cost, grad
 
     if niter < 1:
@@ -336,15 +336,15 @@ def fit_phase_line(
             warnings.filterwarnings(
                 "ignore", message="The line search algorithm did not converge", category=RuntimeWarning
             )
-            res = minimize(objective_and_grad, params, args=(ν.to(u.Hz).value, solution), jac=True)
+            res = minimize(objective_and_grad, params, args=(freqs_hz.to(u.Hz).value, solution), jac=True)
         params = res.x
 
-        constructed = model(ν.to(u.Hz).value, *params)
+        constructed = model(freqs_hz.to(u.Hz).value, *params)
         residuals = wrap_angle(np.angle(solution) - np.angle(constructed))
         chi2dof = np.sum(np.abs(residuals) ** 2) / (len(residuals) - len(params))
         resid_std = residuals.std()
         resid_var = residuals.var(ddof=len(params))
-        stderr = np.sqrt(np.diag(_phase_fit_hess_inv(ν.to(u.Hz).value)) * resid_var)
+        stderr = np.sqrt(np.diag(_phase_fit_hess_inv(freqs_hz.to(u.Hz).value)) * resid_var)
 
         # Sigma-clip using a robust median+MAD scale of residuals
         # (radians), not stderr[0] (rad/Hz). stderr[0] is the standard
@@ -403,7 +403,7 @@ def fit_phase_line(
         if len(mask) < 2:
             break
         solution = solution[mask]
-        ν = ν[mask]
+        freqs_hz = freqs_hz[mask]
 
     period = ((params[0] * u.rad / u.Hz) / (2 * np.pi * u.rad)).to(u.s)
     quality = len(mask) / nfreqs

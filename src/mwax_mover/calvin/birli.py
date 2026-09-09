@@ -17,7 +17,7 @@ import numpy as np
 from mwalib import MetafitsContext
 
 from mwax_mover.calibration.models import Metafits
-from mwax_mover.core.command import check_popen_finished, run_command_popen, write_readme_file
+from mwax_mover.core.command import check_popen_finished, start_command, write_readme_file
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,7 @@ def run_birli(
             f" {avg_arg} {data_file_arg}"
         )
 
-        birli_popen_process = run_command_popen(cmdline, -1, False, False)
+        birli_popen_process = start_command(cmdline, -1, False, False)
 
         exit_code, stdout, stderr = check_popen_finished(
             birli_popen_process,

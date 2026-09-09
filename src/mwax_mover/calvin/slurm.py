@@ -12,7 +12,7 @@ import os
 import sys
 
 from mwax_mover.calvin.pipeline import CalvinJobType
-from mwax_mover.core.command import run_command_ext
+from mwax_mover.core.command import run_command
 from mwax_mover.core.units import is_int
 
 logger = logging.getLogger(__name__)
@@ -135,7 +135,7 @@ def submit_sbatch(script_path: str, script: str, obs_id: int, request_ids: list[
     return_val: bool = False
     stdout = ""
     try:
-        return_val, stdout = run_command_ext(cmdline, None, 60, True)
+        return_val, stdout = run_command(cmdline, None, 60, True)
 
         # remove crlf from stdout
         stdout = stdout.replace("\n", " ")
@@ -172,7 +172,7 @@ def count_slurm_asvo_jobs() -> int:
         The number of matching jobs, or -1 if the command failed.
     """
     try:
-        success, output = run_command_ext(
+        success, output = run_command(
             command="squeue --format=%j --noheader",
             numa_node=None,
         )

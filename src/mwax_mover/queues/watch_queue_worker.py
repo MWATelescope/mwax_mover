@@ -281,7 +281,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
     This class is responsible for watching a set of paths and putting any files
     that are found into a Python priority queue for processing.
 
-    watch_path_exts: a list of tuples, where each tuple contains a path to watch and a pattern to match files against.
+    watch_paths_exts: a list of tuples, where each tuple contains a path to watch and a pattern to match files against.
                      For example: [("/data/level7", ".fits"), ("/data/level8", ".txt")]
     """
 
@@ -289,10 +289,10 @@ class MWAXPriorityWatchQueueWorker(ABC):
         self,
         name: str,
         metafits_path: str,
-        watch_path_exts: list[tuple[str, str]],
+        watch_paths_exts: list[tuple[str, str]],
         mode,
-        corr_hi_priority_projects: list[str],
-        vcs_hi_priority_projects: list[str],
+        high_priority_correlator_projects: list[str],
+        high_priority_vcs_projects: list[str],
         exclude_pattern: str | None = None,
         recursive=False,
         exit_once_queue_empty: bool = False,
@@ -303,10 +303,10 @@ class MWAXPriorityWatchQueueWorker(ABC):
         Args:
             name: A descriptive name for this worker instance.
             metafits_path: Path to metafits files for priority determination.
-            watch_path_exts: List of (path, extension_pattern) tuples to watch.
+            watch_paths_exts: List of (path, extension_pattern) tuples to watch.
             mode: The watch mode (NEW, RENAME, or RENAME_OR_NEW).
-            corr_hi_priority_projects: Correlator projects with high priority.
-            vcs_hi_priority_projects: VCS projects with high priority.
+            high_priority_correlator_projects: Correlator projects with high priority.
+            high_priority_vcs_projects: VCS projects with high priority.
             exclude_pattern: File extension to exclude from matching. Defaults to None.
             recursive: Whether to watch subdirectories recursively. Defaults to False.
             exit_once_queue_empty: Exit the worker once the queue is empty. Defaults to False.
@@ -318,44 +318,44 @@ class MWAXPriorityWatchQueueWorker(ABC):
         self.threads: list[Thread] = []
 
         # Watch
-        self.pwatchers: list[PriorityWatcher] = []
-        self.pwatcher_threads: list[Thread] = []
+        self.watchers: list[PriorityWatcher] = []
+        self.watcher_threads: list[Thread] = []
 
         # queue
-        self.pqueue = PriorityQueue()
+        self.queue = PriorityQueue()
 
         # queue worker
-        self.pqueue_worker = PriorityQueueWorker(
+        self.queue_worker = PriorityQueueWorker(
             f"{self.name}_worker",
-            self.pqueue,
+            self.queue,
             None,
             self.handler,
             exit_once_queue_empty,
             requeue_to_eoq_on_failure,
         )
 
-        self.pqueue_worker_thread = Thread(name="worker_thread", target=self.pqueue_worker.start, daemon=True)
-        self.threads.append(self.pqueue_worker_thread)
+        self.queue_worker_thread = Thread(name="worker_thread", target=self.queue_worker.start, daemon=True)
+        self.threads.append(self.queue_worker_thread)
 
         # Create a watcher and watcher thread for each path we're watching
-        for p in watch_path_exts:
+        for p in watch_paths_exts:
             watch_path = p[0]
             pattern = p[1]
 
             new_watcher = PriorityWatcher(
                 get_watcher_name(self.name, watch_path, pattern),
                 watch_path,
-                self.pqueue,
+                self.queue,
                 pattern,
                 mode,
                 recursive,
                 metafits_path,
-                corr_hi_priority_projects,
-                vcs_hi_priority_projects,
+                high_priority_correlator_projects,
+                high_priority_vcs_projects,
                 exclude_pattern,
             )
             # Store the new watcher
-            self.pwatchers.append(new_watcher)
+            self.watchers.append(new_watcher)
 
             # Create and store the new thread
             new_thread = Thread(
@@ -363,7 +363,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
                 target=new_watcher.start,
                 daemon=True,
             )
-            self.pwatcher_threads.append(new_thread)
+            self.watcher_threads.append(new_thread)
             self.threads.append(new_thread)
 
     def is_running(self) -> bool:
@@ -384,21 +384,21 @@ class MWAXPriorityWatchQueueWorker(ABC):
         starting the priority queue worker thread. This ensures all existing files
         are enqueued with correct priorities before processing begins.
         """
-        for w in self.pwatcher_threads:
+        for w in self.watcher_threads:
             w.start()
 
         logger.info(f"{self.name}: Waiting for all watchers to finish scanning....")
-        count_of_watchers_still_scanning = len(self.pwatchers)
+        count_of_watchers_still_scanning = len(self.watchers)
         while count_of_watchers_still_scanning > 0:
             count_of_watchers_still_scanning = 0
-            for watcher in self.pwatchers:
+            for watcher in self.watchers:
                 if not watcher.scan_completed:
                     logger.debug(f"{watcher.name}: still scanning!")
                     count_of_watchers_still_scanning += 1
             time.sleep(1)  # hold off for another second
         logger.info(f"{self.name}: Watchers are finished scanning.")
 
-        self.pqueue_worker_thread.start()
+        self.queue_worker_thread.start()
 
         logger.info(f"{self.name} started.")
 
@@ -409,12 +409,12 @@ class MWAXPriorityWatchQueueWorker(ABC):
         for their threads to finish execution.
         """
         logger.info(f"{self.name} stopping.")
-        for w in self.pwatchers:
+        for w in self.watchers:
             w.stop()
-        self.pqueue_worker.stop()
+        self.queue_worker.stop()
 
         # Wait for threads to finish
-        for watcher_thread in self.pwatcher_threads:
+        for watcher_thread in self.watcher_threads:
             if watcher_thread:
                 thread_name = watcher_thread.name
                 logger.debug(f"{thread_name} Stopping...")
@@ -422,11 +422,11 @@ class MWAXPriorityWatchQueueWorker(ABC):
                     watcher_thread.join(THREAD_JOIN_WAIT_TIMEOUT)
                 logger.debug(f"{thread_name} Stopped")
 
-        if self.pqueue_worker_thread:
-            logger.debug(f"{self.pqueue_worker_thread.name} Stopping...")
-            if self.pqueue_worker_thread.is_alive():
-                self.pqueue_worker_thread.join(THREAD_JOIN_WAIT_TIMEOUT)
-            logger.debug(f"{self.pqueue_worker_thread.name} Stopped")
+        if self.queue_worker_thread:
+            logger.debug(f"{self.queue_worker_thread.name} Stopping...")
+            if self.queue_worker_thread.is_alive():
+                self.queue_worker_thread.join(THREAD_JOIN_WAIT_TIMEOUT)
+            logger.debug(f"{self.queue_worker_thread.name} Stopped")
 
         logger.info(f"{self.name} stopped.")
 
@@ -439,9 +439,9 @@ class MWAXPriorityWatchQueueWorker(ABC):
         status = {
             "name": self.name,
             "watchers": [],
-            "queue_worker": self.pqueue_worker.get_status(),
+            "queue_worker": self.queue_worker.get_status(),
         }
-        for watcher in self.pwatchers:
+        for watcher in self.watchers:
             status["watchers"].append(watcher.get_status())
         return status
 
@@ -451,7 +451,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
         Returns:
             True if all watchers have completed scanning, False otherwise.
         """
-        for watcher in self.pwatchers:
+        for watcher in self.watchers:
             if not watcher.scan_completed:
                 return False
         return True
@@ -462,7 +462,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
         Args:
             pause: True to pause processing, False to resume.
         """
-        self.pqueue_worker.pause(pause)
+        self.queue_worker.pause(pause)
 
     @abstractmethod
     def handler(self, item: str) -> bool:

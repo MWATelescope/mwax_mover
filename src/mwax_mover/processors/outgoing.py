@@ -27,8 +27,8 @@ class OutgoingProcessor(MWAXPriorityWatchQueueWorker):
         visdata_outgoing_path: str,
         voltdata_outgoing_path: str,
         bf_outgoing_path: str,
-        list_of_corr_hi_priority_projects: list[str],
-        list_of_vcs_hi_priority_projects: list[str],
+        high_priority_correlator_projects: list[str],
+        high_priority_vcs_projects: list[str],
         archive_command_numa_node: int,
         archive_destination_host: str,
         archive_command_timeout_sec: int,
@@ -40,8 +40,8 @@ class OutgoingProcessor(MWAXPriorityWatchQueueWorker):
             visdata_outgoing_path: Path to the visibility data outgoing directory.
             voltdata_outgoing_path: Path to the voltage data outgoing directory.
             bf_outgoing_path: Path to the beamformer data outgoing directory.
-            list_of_corr_hi_priority_projects: List of high-priority correlator project IDs.
-            list_of_vcs_hi_priority_projects: List of high-priority VCS project IDs.
+            high_priority_correlator_projects: List of high-priority correlator project IDs.
+            high_priority_vcs_projects: List of high-priority VCS project IDs.
             archive_command_numa_node: NUMA node to use for archive commands.
             archive_destination_host: Destination hostname for archiving via xrootd.
             archive_command_timeout_sec: Timeout in seconds for archive operations.
@@ -55,8 +55,8 @@ class OutgoingProcessor(MWAXPriorityWatchQueueWorker):
                 (bf_outgoing_path, ".*"),
             ],
             mode=MODE_WATCH_DIR_FOR_RENAME_OR_NEW,
-            corr_hi_priority_projects=list_of_corr_hi_priority_projects,
-            vcs_hi_priority_projects=list_of_vcs_hi_priority_projects,
+            high_priority_correlator_projects=high_priority_correlator_projects,
+            high_priority_vcs_projects=high_priority_vcs_projects,
             # Order does not matter here, so a failed item is requeued to the
             # back of the queue rather than retried in place. Retrying in place
             # meant one permanently-bad file (e.g. an unrecognised filetype,

@@ -1,4 +1,4 @@
-"""Tests for calvin.plots.hyperdrive_plots: generating solution plots via
+"""Tests for calvin.plots.hyperdrive: generating solution plots via
 the hyperdrive binary.
 
 Split out of the former test023_calvin_plots.py (docs/RESTRUCTURE.md
@@ -8,10 +8,10 @@ test-tree reorg).
 from pathlib import Path
 from unittest.mock import patch
 
-from mwax_mover.calvin.plots.hyperdrive_plots import generate_hyperdrive_plots, generate_hyperdrive_plots_for_files
+from mwax_mover.calvin.plots.hyperdrive import generate_plots, generate_plots_for_files
 
 
-class TestGenerateHyperdrivePlotsRename:
+class TestGeneratePlotsRename:
     """Tests that the "before" rename only touches its own input's plots.
 
     The rename used to glob the whole output directory, which was only safe
@@ -23,7 +23,7 @@ class TestGenerateHyperdrivePlotsRename:
 
     @staticmethod
     def _fake_hyperdrive(output_dir, stem, suffixes=("amps", "phases")):
-        """Return a run_command_ext stand-in that creates hyperdrive's plots."""
+        """Return a run_command stand-in that creates hyperdrive's plots."""
 
         def _run(cmd, *args, **kwargs):
             for suffix in suffixes:
@@ -40,10 +40,10 @@ class TestGenerateHyperdrivePlotsRename:
         other_amps.write_text("other picket")
 
         with patch(
-            "mwax_mover.calvin.plots.hyperdrive_plots.run_command_ext",
+            "mwax_mover.calvin.plots.hyperdrive.run_command",
             side_effect=self._fake_hyperdrive(tmp_path, stem),
         ):
-            success, error = generate_hyperdrive_plots(
+            success, error = generate_plots(
                 1391522232,
                 str(tmp_path / f"{stem}.fits"),
                 "/fake/hyperdrive",
@@ -66,10 +66,10 @@ class TestGenerateHyperdrivePlotsRename:
         stem = "1391522232_ch62_solutions"
 
         with patch(
-            "mwax_mover.calvin.plots.hyperdrive_plots.run_command_ext",
+            "mwax_mover.calvin.plots.hyperdrive.run_command",
             side_effect=self._fake_hyperdrive(tmp_path, stem),
         ):
-            success, _ = generate_hyperdrive_plots(
+            success, _ = generate_plots(
                 1391522232,
                 str(tmp_path / f"{stem}.fits"),
                 "/fake/hyperdrive",
@@ -92,10 +92,10 @@ class TestGenerateHyperdrivePlotsRename:
         stem = "1391522232_ch62_solutions"
 
         with patch(
-            "mwax_mover.calvin.plots.hyperdrive_plots.run_command_ext",
+            "mwax_mover.calvin.plots.hyperdrive.run_command",
             side_effect=self._fake_hyperdrive(tmp_path, stem, suffixes=("amps", "phases", "delays")),
         ):
-            generate_hyperdrive_plots(
+            generate_plots(
                 1391522232,
                 str(tmp_path / f"{stem}.fits"),
                 "/fake/hyperdrive",
@@ -112,10 +112,10 @@ class TestGenerateHyperdrivePlotsRename:
         (tmp_path / f"{stem}_amps_original.png").write_text("from an earlier run")
 
         with patch(
-            "mwax_mover.calvin.plots.hyperdrive_plots.run_command_ext",
+            "mwax_mover.calvin.plots.hyperdrive.run_command",
             side_effect=self._fake_hyperdrive(tmp_path, stem, suffixes=("phases",)),
         ):
-            generate_hyperdrive_plots(
+            generate_plots(
                 1391522232,
                 str(tmp_path / f"{stem}.fits"),
                 "/fake/hyperdrive",
@@ -131,8 +131,8 @@ class TestGenerateHyperdrivePlotsRename:
         """A success with no matching plots is surfaced, not silently ignored."""
         stem = "1391522232_ch62_solutions"
 
-        with patch("mwax_mover.calvin.plots.hyperdrive_plots.run_command_ext", return_value=(True, "")):
-            success, _ = generate_hyperdrive_plots(
+        with patch("mwax_mover.calvin.plots.hyperdrive.run_command", return_value=(True, "")):
+            success, _ = generate_plots(
                 1391522232,
                 str(tmp_path / f"{stem}.fits"),
                 "/fake/hyperdrive",
@@ -145,16 +145,16 @@ class TestGenerateHyperdrivePlotsRename:
         assert "produced no plots matching" in caplog.text
 
 
-class TestGenerateHyperdrivePlotsForFiles:
+class TestGeneratePlotsForFiles:
     """Tests for the concurrent per-file hyperdrive plot wrapper."""
 
     def test_every_file_is_attempted(self):
         """All solution files get a hyperdrive invocation."""
         files = [f"/data/obs_ch{c}_solutions.fits" for c in (62, 67, 73)]
 
-        patch_target = "mwax_mover.calvin.plots.hyperdrive_plots.generate_hyperdrive_plots"
+        patch_target = "mwax_mover.calvin.plots.hyperdrive.generate_plots"
         with patch(patch_target, return_value=(True, "")) as mock_gen:
-            failures = generate_hyperdrive_plots_for_files(
+            failures = generate_plots_for_files(
                 123, files, "/fake/hyperdrive", "/fake/metafits.fits", "/out", before=True
             )
 
@@ -171,8 +171,8 @@ class TestGenerateHyperdrivePlotsForFiles:
                 return False, "hyperdrive exploded"
             return True, ""
 
-        with patch("mwax_mover.calvin.plots.hyperdrive_plots.generate_hyperdrive_plots", side_effect=_gen) as mock_gen:
-            failures = generate_hyperdrive_plots_for_files(
+        with patch("mwax_mover.calvin.plots.hyperdrive.generate_plots", side_effect=_gen) as mock_gen:
+            failures = generate_plots_for_files(
                 123, files, "/fake/hyperdrive", "/fake/metafits.fits", "/out", before=True
             )
 
@@ -190,8 +190,8 @@ class TestGenerateHyperdrivePlotsForFiles:
                 raise RuntimeError("boom")
             return True, ""
 
-        with patch("mwax_mover.calvin.plots.hyperdrive_plots.generate_hyperdrive_plots", side_effect=_gen):
-            failures = generate_hyperdrive_plots_for_files(
+        with patch("mwax_mover.calvin.plots.hyperdrive.generate_plots", side_effect=_gen):
+            failures = generate_plots_for_files(
                 123, files, "/fake/hyperdrive", "/fake/metafits.fits", "/out", before=True
             )
 
@@ -200,20 +200,17 @@ class TestGenerateHyperdrivePlotsForFiles:
 
     def test_empty_file_list_is_a_no_op(self):
         """No files means no pool and no work."""
-        with patch("mwax_mover.calvin.plots.hyperdrive_plots.generate_hyperdrive_plots") as mock_gen:
+        with patch("mwax_mover.calvin.plots.hyperdrive.generate_plots") as mock_gen:
             assert (
-                generate_hyperdrive_plots_for_files(
-                    123, [], "/fake/hyperdrive", "/fake/metafits.fits", "/out", before=True
-                )
-                == []
+                generate_plots_for_files(123, [], "/fake/hyperdrive", "/fake/metafits.fits", "/out", before=True) == []
             )
         mock_gen.assert_not_called()
 
     def test_before_flag_is_passed_through(self):
         """The before/after distinction must survive the pool dispatch."""
-        patch_target = "mwax_mover.calvin.plots.hyperdrive_plots.generate_hyperdrive_plots"
+        patch_target = "mwax_mover.calvin.plots.hyperdrive.generate_plots"
         with patch(patch_target, return_value=(True, "")) as mock_gen:
-            generate_hyperdrive_plots_for_files(
+            generate_plots_for_files(
                 123, ["/data/a_solutions.fits"], "/fake/hyperdrive", "/fake/metafits.fits", "/out", before=False
             )
 

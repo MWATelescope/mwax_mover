@@ -29,7 +29,7 @@ from matplotlib import pyplot as plt
 from numpy.typing import NDArray
 
 from mwax_mover.calvin.hyperdrive import ChannelFlagReason, HyperfitsSolutionGroup, TileFlagReason
-from mwax_mover.calvin.plots.layout import plot_dpi, plot_figsize
+from mwax_mover.calvin.plots.layout import resolve_plot_dpi, scale_plot_figsize
 from mwax_mover.core.env import available_memory_bytes
 
 logger = logging.getLogger(__name__)
@@ -717,8 +717,8 @@ def _render_combined_gains_figure(
     fig, axes = plt.subplots(
         n_rows,
         n_cols,
-        figsize=plot_figsize(subplot_width_in * n_cols, 4 * n_rows),
-        dpi=plot_dpi(150),
+        figsize=scale_plot_figsize(subplot_width_in * n_cols, 4 * n_rows),
+        dpi=resolve_plot_dpi(150),
         squeeze=False,
     )
 
@@ -1021,7 +1021,7 @@ def _render_and_save_combined_gains_page(
     """
     try:
         fig = _render_combined_gains_figure(bundle, first_tile_index, n_tiles, solution_file_will_be_modified)
-        fig.savefig(page_path, dpi=plot_dpi(150), bbox_inches="tight")
+        fig.savefig(page_path, dpi=resolve_plot_dpi(150), bbox_inches="tight")
         plt.close(fig)
         return True, ""
     except Exception as exc:  # reported to the caller, not raised in the worker

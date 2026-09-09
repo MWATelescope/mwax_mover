@@ -113,8 +113,8 @@ def make_watcher(tmp_path, dest_queue):
         mode=constants.MODE_WATCH_DIR_FOR_RENAME,
         recursive: bool = False,
         metafits_path: str = "/dummy/metafits",
-        list_of_correlator_high_priority_projects: list[str] = [],  # noqa: B006
-        list_of_vcs_high_priority_projects: list[str] = [],  # noqa: B006
+        high_priority_correlator_projects: list[str] = [],  # noqa: B006
+        high_priority_vcs_projects: list[str] = [],  # noqa: B006
         exclude_pattern: str | None = None,
     ) -> PriorityWatcher:
         return PriorityWatcher(
@@ -125,8 +125,8 @@ def make_watcher(tmp_path, dest_queue):
             mode=mode,
             recursive=recursive,
             metafits_path=metafits_path,
-            list_of_correlator_high_priority_projects=list(list_of_correlator_high_priority_projects),
-            list_of_vcs_high_priority_projects=list(list_of_vcs_high_priority_projects),
+            high_priority_correlator_projects=list(high_priority_correlator_projects),
+            high_priority_vcs_projects=list(high_priority_vcs_projects),
             exclude_pattern=exclude_pattern,
         )
 
@@ -266,8 +266,8 @@ class TestPriorityWatcherInit:
                 mode=constants.MODE_WATCH_DIR_FOR_NEW,
                 recursive=False,
                 metafits_path="/dummy",
-                list_of_correlator_high_priority_projects=[],
-                list_of_vcs_high_priority_projects=[],
+                high_priority_correlator_projects=[],
+                high_priority_vcs_projects=[],
             )
 
     def test_mask_new_mode(self, make_watcher):
@@ -518,8 +518,8 @@ class TestPriorityWatcherLiveInotify:
                 mode=constants.MODE_WATCH_DIR_FOR_RENAME,
                 recursive=False,
                 metafits_path="/dummy",
-                list_of_correlator_high_priority_projects=[],
-                list_of_vcs_high_priority_projects=[],
+                high_priority_correlator_projects=[],
+                high_priority_vcs_projects=[],
             )
             thread = self._start_watcher_thread(watcher)
 
@@ -556,8 +556,8 @@ class TestPriorityWatcherLiveInotify:
                 mode=constants.MODE_WATCH_DIR_FOR_NEW,
                 recursive=False,
                 metafits_path="/dummy",
-                list_of_correlator_high_priority_projects=[],
-                list_of_vcs_high_priority_projects=[],
+                high_priority_correlator_projects=[],
+                high_priority_vcs_projects=[],
             )
             thread = self._start_watcher_thread(watcher)
 
@@ -590,8 +590,8 @@ class TestPriorityWatcherLiveInotify:
                 mode=constants.MODE_WATCH_DIR_FOR_RENAME,
                 recursive=False,
                 metafits_path="/dummy",
-                list_of_correlator_high_priority_projects=[],
-                list_of_vcs_high_priority_projects=[],
+                high_priority_correlator_projects=[],
+                high_priority_vcs_projects=[],
             )
             thread = self._start_watcher_thread(watcher)
 

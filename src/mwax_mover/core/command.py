@@ -1,7 +1,7 @@
 """Thin wrappers around subprocess for executing external commands.
 
-Provides run_command_ext() for synchronous execution (with optional NUMA node
-pinning, timeout, and shell mode), run_command_popen() for asynchronous execution
+Provides run_command() for synchronous execution (with optional NUMA node
+pinning, timeout, and shell mode), start_command() for asynchronous execution
 returning a Popen handle, and check_popen_finished() to wait for a Popen process
 and retrieve its exit code and output. write_readme_file() is a generic
 command-log writer for callers of these (calvin.birli.run_birli(),
@@ -12,7 +12,7 @@ mwax_hyperdrive_solutions.py into calvin.hyperdrive made keeping it there
 create a two-file import cycle (calvin.pipeline needs HyperfitsSolution
 from calvin.hyperdrive; calvin.hyperdrive needs write_readme_file from
 calvin.pipeline). It has no calvin-specific logic, so core.command --
-already the shared home for the run_command_ext/run_command_popen it logs
+already the shared home for the run_command/start_command it logs
 the outcome of -- has no reason to ever import calvin, and the cycle can't
 recur.
 """
@@ -75,7 +75,7 @@ def _apply_numa_binding(command: str, numa_node: int | None) -> str:
     return f"numactl --cpunodebind={numa_node!s} --membind={numa_node!s} {command}"
 
 
-def run_command_ext(
+def run_command(
     command: str,
     numa_node: int | None,
     timeout: int = 60,
@@ -178,7 +178,7 @@ def run_command_ext(
 # This will return a popen process object which can be polled for exit
 # use shell should be used when you are using wildcards and other shell
 # features
-def run_command_popen(
+def start_command(
     command: str,
     numa_node: int | None,
     use_shell: bool = False,

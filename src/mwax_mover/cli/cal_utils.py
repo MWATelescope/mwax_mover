@@ -58,8 +58,8 @@ from pathlib import Path
 
 from mwax_mover.calibration.models import Metafits
 from mwax_mover.calvin.hyperdrive import HyperfitsSolution, HyperfitsSolutionGroup, write_hyperdrive_stats
+from mwax_mover.calvin.plots import hyperdrive
 from mwax_mover.calvin.plots.gains import plot_outlier_gains
-from mwax_mover.calvin.plots.hyperdrive_plots import generate_hyperdrive_plots_for_files
 from mwax_mover.calvin.plots.phases import write_debug_phase_fit_plots
 from mwax_mover.calvin.plots.stats_table import write_before_after_stats
 from mwax_mover.fits.metafits import download_metafits_file
@@ -106,13 +106,13 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
     # "Before" plots: hyperdrive's own binary-generated amp/phase plots,
     # against the still-pristine on-disk files -- nothing has been
     # touched yet. Written with "_original" filenames (see
-    # generate_hyperdrive_plots) so the "after" run below (same
+    # hyperdrive.generate_plots) so the "after" run below (same
     # filenames, since hyperdrive derives them from the input file)
     # doesn't overwrite these. (This only touches the on-disk files via
     # a read-only hyperdrive invocation; it's independent of the
     # in-memory run_flagging_pipeline() below regardless of ordering,
     # since nothing gets written to disk until commit().)
-    for failed_file, plots_error in generate_hyperdrive_plots_for_files(
+    for failed_file, plots_error in hyperdrive.generate_plots_for_files(
         obs_id, args.solution_filenames, args.hyperdrive_binary_path, metafits_filename, args.output_path, before=True
     ):
         print(f"Warning: 'before' hyperdrive plots failed for {failed_file}: {plots_error}")
@@ -148,7 +148,7 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
     # hyperdrive's own plots/stats run regardless of --modify-solutions,
     # matching this tool's historical behaviour (that flag only ever
     # controlled whether outlier-flagged gains were written to disk).
-    for failed_file, plots_error in generate_hyperdrive_plots_for_files(
+    for failed_file, plots_error in hyperdrive.generate_plots_for_files(
         obs_id, args.solution_filenames, args.hyperdrive_binary_path, metafits_filename, args.output_path, before=False
     ):
         print(f"Warning: hyperdrive plots failed for {failed_file}: {plots_error}")

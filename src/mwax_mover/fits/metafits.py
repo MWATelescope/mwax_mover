@@ -105,7 +105,7 @@ def get_metafits_value_from_hdu(metafits_filename: str, hdu_name: str, key: str)
         ) from catch_all_exception
 
 
-def get_metafits_values(metafits_filename: str) -> tuple[bool, str, str]:
+def get_calibrator_info(metafits_filename: str) -> tuple[bool, str, str]:
     """
     Read calibrator status, project ID, and calibrator source from a metafits file.
 

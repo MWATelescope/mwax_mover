@@ -43,7 +43,7 @@ from mwax_mover.db.calibration import (
     get_unattempted_unrequested_cal_obsids,
     insert_calibration_request_row,
     update_calibration_request_slurm_status,
-    update_calsolution_request_submit_mwa_asvo_job_status,
+    update_calibration_request_mwa_asvo_job_status,
 )
 from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.mwa_asvo.giant_squid import GiantSquidMWAASVOOutageException
@@ -187,7 +187,7 @@ class MWAXCalvinController:
         self.plot_uploader_stop_event = threading.Event()
 
         # Helper for MWA ASVO interactions and job record keeping
-        self.mwax_asvo_helper: MWAASVOHelper = MWAASVOHelper()
+        self.mwa_asvo_helper: MWAASVOHelper = MWAASVOHelper()
 
     def start(self):
         """Start the controller and main event loop.
@@ -224,8 +224,8 @@ class MWAXCalvinController:
             self.main_loop_handler()
 
             tracked_asvo_job_count: int = 0
-            with self.mwax_asvo_helper.current_asvo_jobs_lock:
-                for job in self.mwax_asvo_helper.current_asvo_jobs:
+            with self.mwa_asvo_helper.current_asvo_jobs_lock:
+                for job in self.mwa_asvo_helper.current_asvo_jobs:
                     if job.download_slurm_job_submitted is False and job.download_error_datetime is None:
                         tracked_asvo_job_count += 1
                         logger.debug(
@@ -565,17 +565,17 @@ class MWAXCalvinController:
             self.realtime_submit_to_slurm(cal_request)
 
         # now handle ASVO if we don't have an outage
-        if self.mwax_asvo_helper.mwa_asvo_outage_datetime is not None:
+        if self.mwa_asvo_helper.mwa_asvo_outage_datetime is not None:
             # There was an outage at some point.
             # If it's been long enough reset the outage and retry
-            elapsed: timedelta = datetime.now() - self.mwax_asvo_helper.mwa_asvo_outage_datetime
+            elapsed: timedelta = datetime.now() - self.mwa_asvo_helper.mwa_asvo_outage_datetime
             if elapsed.total_seconds() >= self.mwa_asvo_outage_check_seconds:
                 # Reset the MWA ASVO outage so we retry
-                self.mwax_asvo_helper.mwa_asvo_outage_datetime = None
+                self.mwa_asvo_helper.mwa_asvo_outage_datetime = None
 
         # We repeat this check here since above we might have reset the outage
         # GO and add jobs up to the limit
-        if self.mwax_asvo_helper.mwa_asvo_outage_datetime is None:
+        if self.mwa_asvo_helper.mwa_asvo_outage_datetime is None:
             requests_queued = 0
             # we keep our own local var here so we don't go over the limit
             vis_jobs_in_progress = self.mwa_asvo_vis_jobs_in_progress
@@ -729,8 +729,8 @@ class MWAXCalvinController:
         processor. Handles error states appropriately.
         """
 
-        with self.mwax_asvo_helper.current_asvo_jobs_lock:
-            for job in self.mwax_asvo_helper.current_asvo_jobs:
+        with self.mwa_asvo_helper.current_asvo_jobs_lock:
+            for job in self.mwa_asvo_helper.current_asvo_jobs:
                 if not job.download_slurm_job_submitted:
                     if job.job_state == MWAASVOJobState.Error:
                         # MWA ASVO completed this job with error
@@ -744,7 +744,7 @@ class MWAXCalvinController:
 
                         # Update database
                         try:
-                            update_calsolution_request_submit_mwa_asvo_job_status(
+                            update_calibration_request_mwa_asvo_job_status(
                                 self.db_handler,
                                 job.request_ids,
                                 job.job_id,
@@ -845,7 +845,7 @@ class MWAXCalvinController:
 
         while self.running:
             # Update the jobs in progress
-            self.mwa_asvo_vis_jobs_in_progress = self.mwax_asvo_helper.get_in_progress_asvo_job_count()
+            self.mwa_asvo_vis_jobs_in_progress = self.mwa_asvo_helper.get_in_progress_asvo_job_count()
 
             # Code to run by the health thread
             status_dict = self.get_status()
@@ -972,19 +972,19 @@ class MWAXCalvinController:
             Exception: For other errors during job submission.
         """
 
-        if not self.mwax_asvo_helper.does_request_exist(request_id):
+        if not self.mwa_asvo_helper.does_request_exist(request_id):
             logger.debug(
                 f"Attempting to submit visibility download job for {obs_id} (request: {request_id}) to MWA ASVO..."
             )
 
             try:
                 # Submit job and add to the ones we are tracking
-                new_job = self.mwax_asvo_helper.submit_download_job(request_id, obs_id, bulk_request)
+                new_job = self.mwa_asvo_helper.submit_download_job(request_id, obs_id, bulk_request)
 
                 # We submitted a new MWA ASVO job, update the request table so we know we're on it!
                 # Update database
                 try:
-                    update_calsolution_request_submit_mwa_asvo_job_status(
+                    update_calibration_request_mwa_asvo_job_status(
                         self.db_handler,
                         new_job.request_ids,
                         new_job.job_id,
@@ -1011,7 +1011,7 @@ class MWAXCalvinController:
                 error_message = f"Error submitting job for ObsID {obs_id} RequestID {request_id}."
                 logger.exception(error_message)
                 error_message = error_message + f" {e!s}"
-                update_calsolution_request_submit_mwa_asvo_job_status(
+                update_calibration_request_mwa_asvo_job_status(
                     self.db_handler,
                     [
                         request_id,
@@ -1040,7 +1040,7 @@ class MWAXCalvinController:
         if self.running:
             logger.debug("Getting latest MWA ASVO job statuses...")
             try:
-                self.mwax_asvo_helper.update_all_job_status()
+                self.mwa_asvo_helper.update_all_job_status()
 
             except GiantSquidMWAASVOOutageException:
                 logger.warning("Cannot update MWA ASVO job states: MWA ASVO has an outage")
@@ -1215,7 +1215,7 @@ class MWAXCalvinController:
         logger.info(f"Uploading up to {self.plot_upload_max_fits_per_pass} fit dir(s) per pass, newest fitid first.")
 
         # Setup the MWA ASVO Helper
-        self.mwax_asvo_helper.initialise(
+        self.mwa_asvo_helper.initialise(
             self.giant_squid_binary_path,
             self.giant_squid_list_timeout_seconds,
             self.giant_squid_submitvis_timeout_seconds,

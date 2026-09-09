@@ -4,7 +4,7 @@ Key enums/classes: MWADataFileType, ArchiveLocation, ValidationData (the
 validate_filename() result). validate_filename() is the central check: it
 classifies a filename, cross-references its metafits file (downloading one
 via fits.metafits if needed), and reports the project ID and calibrator
-status. determine_bucket()/get_bucket_name_from_* derive archive bucket
+status. get_bucket_name_for_location()/get_bucket_name_from_* derive archive bucket
 names; get_priority() ranks files for archiving order; get_data_files_*
 query which data files exist for an obs_id via the MWA web service -- kept
 here rather than in net.webservice because they depend on MWADataFileType,
@@ -21,7 +21,7 @@ from enum import Enum
 
 import requests
 
-from mwax_mover.fits.metafits import download_metafits_file, get_metafits_values
+from mwax_mover.fits.metafits import download_metafits_file, get_calibrator_info
 from mwax_mover.net.webservice import call_webservice
 
 logger = logging.getLogger(__name__)
@@ -92,7 +92,7 @@ class ArchiveLocation(Enum):
     The integer values are the ones stored in the MWA metadata database's
     data_files.remote_archived location column, so they must not be renumbered.
     DMF and Versity are defined for historical/database completeness but are not
-    implemented by determine_bucket().
+    implemented by get_bucket_name_for_location().
     """
 
     Unknown = 0
@@ -289,7 +289,7 @@ def validate_filename(
                     )
 
             if valid:
-                calibrator, project_id, calib_source = get_metafits_values(metafits_filename)
+                calibrator, project_id, calib_source = get_calibrator_info(metafits_filename)
 
                 # if calib_source is SUN then ignore
                 if calib_source.upper() == "SUN":
@@ -306,7 +306,7 @@ def validate_filename(
     )
 
 
-def determine_bucket(full_filename: str, location: ArchiveLocation) -> str:
+def get_bucket_name_for_location(full_filename: str, location: ArchiveLocation) -> str:
     """
     Return the destination bucket name for a file given its target archive location.
 
@@ -384,8 +384,8 @@ def get_bucket_name_from_obs_id(obs_id: int) -> str:
 def get_priority(
     filename: str,
     metafits_path: str,
-    list_of_correlator_high_priority_projects: list,
-    list_of_vcs_high_priority_projects: list,
+    high_priority_correlator_projects: list,
+    high_priority_vcs_projects: list,
 ) -> int:
     """
     Determine the archive priority integer for a given MWA data file.
@@ -409,9 +409,9 @@ def get_priority(
         filename: Full path to the MWA data file.
         metafits_path: Directory containing metafits files, used by
             ``validate_filename`` to resolve project ID and calibrator status.
-        list_of_correlator_high_priority_projects: Project IDs that receive
+        high_priority_correlator_projects: Project IDs that receive
             elevated priority (level 3) for correlator observations.
-        list_of_vcs_high_priority_projects: Project IDs that receive elevated
+        high_priority_vcs_projects: Project IDs that receive elevated
             priority (levels 5 and 20) for VCS / beamformer observations.
 
     Returns:
@@ -430,12 +430,12 @@ def get_priority(
             if val.calibrator:
                 return_priority = 2
             else:
-                if val.project_id in list_of_correlator_high_priority_projects:
+                if val.project_id in high_priority_correlator_projects:
                     return_priority = 3
                 else:
                     return_priority = 30
         elif val.filetype_id == MWADataFileType.MWAX_VOLTAGES.value:
-            if val.project_id in list_of_vcs_high_priority_projects:
+            if val.project_id in high_priority_vcs_projects:
                 return_priority = 20
             else:
                 return_priority = 90
@@ -443,7 +443,7 @@ def get_priority(
             return_priority = 1
         elif val.filetype_id == MWADataFileType.VDIF.value or val.filetype_id == MWADataFileType.FILTERBANK.value:
             # VDIF and filterbank files are treated as high priority as they are small and quick to archive
-            if val.project_id in list_of_vcs_high_priority_projects:
+            if val.project_id in high_priority_vcs_projects:
                 return_priority = 5
             else:
                 return_priority = 10

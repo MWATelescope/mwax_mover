@@ -366,7 +366,7 @@ def get_unattempted_calibration_requests(
         raise
 
 
-def update_calsolution_request_submit_mwa_asvo_job_status(
+def update_calibration_request_mwa_asvo_job_status(
     db_handler_object: MWAXDBHandler,
     request_ids: list[int],
     mwa_asvo_job_id: int | None,
@@ -469,7 +469,7 @@ def update_calibration_request_slurm_status(
 #
 # Calvin processor functions
 #
-def update_calsolution_request_download_complete_status(
+def update_calibration_request_download_complete_status(
     db_handler_object: MWAXDBHandler,
     slurm_job_id: int | None,
     request_ids: list[int],
@@ -587,7 +587,7 @@ def update_calibration_request_assign_hostname_start_download(
         raise
 
 
-def update_calsolution_request_calibration_started_status(
+def update_calibration_request_calibration_started_status(
     db_handler_object: MWAXDBHandler,
     slurm_job_id: int,
     calibration_started_datetime: datetime.datetime,
@@ -637,7 +637,7 @@ def update_calsolution_request_calibration_started_status(
         raise
 
 
-def update_calsolution_request_calibration_complete_status(
+def update_calibration_request_calibration_complete_status(
     db_handler_object: MWAXDBHandler,
     slurm_job_id: int,
     calibration_completed_datetime: datetime.datetime | None,

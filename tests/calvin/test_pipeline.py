@@ -119,7 +119,7 @@ def real_data_paths():
 # calls to avoid paying for real PNG rendering plus a second, otherwise
 # redundant phase-fit pass. Notes on why each individual patch is safe:
 #
-# - generate_hyperdrive_plots_for_files: called for its (failed_file,
+# - generate_plots_for_files: called for its (failed_file,
 #   plots_error) iteration side effect only; an empty iterator means "no
 #   plot failures to report", which is what a real run would see too once
 #   the underlying `hyperdrive_binary_path` argument used in these tests is
@@ -299,7 +299,7 @@ def test_process_solutions_db_fit_insert_fails(real_data_paths, tmp_path):
         # This test only checks the insert_calibration_fits_row failure path
         # and never looks at plot output -- see the module-level note above
         # "Tests using real test data" for why these mocks are safe.
-        patch("mwax_mover.calvin.pipeline.generate_hyperdrive_plots_for_files", return_value=iter([])),
+        patch("mwax_mover.calvin.plots.hyperdrive.generate_plots_for_files", return_value=iter([])),
         patch("mwax_mover.calvin.pipeline.plot_outlier_gains", return_value=None),
         patch(
             "mwax_mover.calvin.pipeline.write_before_after_stats",
@@ -364,7 +364,7 @@ def test_process_solutions_db_soln_insert_fails(real_data_paths, tmp_path):
         # downstream phase_fits.set_index(...) call, which is exactly why
         # write_before_after_stats is stubbed to return the real
         # group.phase_fits rather than an empty placeholder.
-        patch("mwax_mover.calvin.pipeline.generate_hyperdrive_plots_for_files", return_value=iter([])),
+        patch("mwax_mover.calvin.plots.hyperdrive.generate_plots_for_files", return_value=iter([])),
         patch("mwax_mover.calvin.pipeline.plot_outlier_gains", return_value=None),
         patch(
             "mwax_mover.calvin.pipeline.write_before_after_stats",
@@ -423,7 +423,7 @@ def test_process_solutions_readme_written_on_any_exception(real_data_paths, tmp_
         # This test only checks that any exception produces readme_error.txt
         # and never looks at plot output -- see the module-level note above
         # "Tests using real test data" for why these mocks are safe.
-        patch("mwax_mover.calvin.pipeline.generate_hyperdrive_plots_for_files", return_value=iter([])),
+        patch("mwax_mover.calvin.plots.hyperdrive.generate_plots_for_files", return_value=iter([])),
         patch("mwax_mover.calvin.pipeline.plot_outlier_gains", return_value=None),
         patch(
             "mwax_mover.calvin.pipeline.write_before_after_stats",
