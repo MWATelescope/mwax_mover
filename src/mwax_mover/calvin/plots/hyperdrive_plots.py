@@ -183,7 +183,7 @@ def generate_hyperdrive_plots_for_files(
             filename = futures[future]
             try:
                 success, error = future.result()
-            except Exception as exc:  # noqa: BLE001 -- reported, not raised
+            except Exception as exc:  # reported, not raised
                 failures.append((filename, str(exc)))
                 continue
             if not success:

@@ -769,9 +769,10 @@ def test_flag_amplitude_outliers_catches_injected_spike():
 
     # _make_fake_group's ramp has unit amplitude everywhere (zero intrinsic
     # scatter), which is unrealistically clean: it drives the MAD in
-    # iterative_poly_clip to near-zero, amplifying ordinary floating-point
-    # noise into spurious "outliers" elsewhere. Real gain data always has
-    # some scatter, so add a small amount here to avoid that degenerate case.
+    # iterative_poly_clip_batch to near-zero, amplifying ordinary
+    # floating-point noise into spurious "outliers" elsewhere. Real gain
+    # data always has some scatter, so add a small amount here to avoid
+    # that degenerate case.
     rng = np.random.default_rng(7)
     noise = 1.0 + rng.normal(scale=0.01, size=_FIT_N_CHANBLOCKS)
     group.jones[0][1, :, 0, 0] *= noise

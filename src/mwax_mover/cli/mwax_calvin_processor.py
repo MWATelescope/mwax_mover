@@ -246,7 +246,7 @@ class MWAXCalvinProcessor:
             logger.info(f"Downloading metafits file: {self.metafits_filename}")
             try:
                 download_metafits_file(self.obs_id, self.job_input_path)
-            except Exception as catch_all_exception:  # pylint: disable=broad-except
+            except Exception as catch_all_exception:
                 # NOTE: the continuation lines here were previously separate
                 # statements rather than an implicit concatenation, so
                 # error_message contained only the first fragment and the

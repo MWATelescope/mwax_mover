@@ -55,7 +55,7 @@ def remove_file(filename: str, raise_error: bool) -> bool:
         logger.info(f"{filename}- file deleted")
         return True
 
-    except Exception as delete_exception:  # pylint: disable=broad-except
+    except Exception as delete_exception:
         if raise_error:
             logger.error(f"{filename}- Error deleting: {delete_exception}. Retrying up to 3 times.")
             raise

@@ -701,7 +701,7 @@ def update_calsolution_request_calibration_complete_status(
         db_handler_object.execute_dml(sql, params, None)
         logger.debug("Successfully updated calibration_request table.")
 
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         logger.exception(f"error updating calibration_request record. SQL was {sql}, params were: {params}")
 
         # Re-raise error

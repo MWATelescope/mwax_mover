@@ -735,10 +735,10 @@ Shared data structures and pure numeric functions used by the Calvin pipeline â€
 Raw hyperdrive solution-file HDU array readers: `read_solutions_hdu_complex()`, `read_results_hdu()`, `read_tiles_hdu()`, `read_baseline_tile_flags()`.
 
 **`calibration/fitting.py`**
-`fit_phase_line()` (linear phase-ramp fit via an exact analytic Hessian) and `fit_gain()` (gain amplitude vs. frequency), plus the numeric helpers they depend on. `poly_str()`/`textwrap()` format fit results for display.
+`fit_phase_line()` (linear phase-ramp fit via an exact analytic Hessian) and `fit_gain()` (gain amplitude vs. frequency), plus the numeric helpers they depend on. `poly_str()` formats fit results for display.
 
 **`calibration/outliers.py`**
-`reject_outliers()` is the core robust (MAD-based) threshold test. `annotate_phase_outliers()` is the single shared definition of "phase outlier" used everywhere in the Calvin pipeline. `iterative_poly_clip(_batch)` fits a robust, sigma-clipped polynomial and flags outliers.
+`reject_outliers()` is the core robust (MAD-based) threshold test. `annotate_phase_outliers()` is the single shared definition of "phase outlier" used everywhere in the Calvin pipeline. `iterative_poly_clip_batch()` fits a robust, sigma-clipped polynomial (batched across tiles) and flags outliers.
 
 ### Calvin Calibration Pipeline (`calvin/`)
 

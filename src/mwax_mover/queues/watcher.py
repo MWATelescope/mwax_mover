@@ -100,7 +100,7 @@ class Watcher:
         if self.recursive:
             pass
         else:
-            self.inotify_tree.remove_watch(self.path)  # type: ignore
+            self.inotify_tree.remove_watch(self.path)  # ty: ignore[unresolved-attribute]
 
         # Destroy the inotify adpater
         try:

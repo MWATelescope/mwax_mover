@@ -24,7 +24,7 @@ def get_gpstime_of_datetime(date_time: datetime.datetime) -> int:
     utc_datetime = astrotime.Time(date_time, scale="utc")
     # astropy's stubs type `.gps` as possibly `Masked` for array inputs;
     # not possible here since `date_time` is a scalar datetime.
-    return round(utc_datetime.gps)  # type: ignore[arg-type]
+    return round(utc_datetime.gps)
 
 
 # Return the GPS seconds as an integer of Now

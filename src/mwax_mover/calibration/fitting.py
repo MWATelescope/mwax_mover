@@ -3,8 +3,8 @@
 fit_phase_line() fits a linear phase ramp to one tile/polarisation's
 solution (using an exact analytic Hessian -- see _phase_fit_hess_inv --
 rather than relying on scipy.optimize.minimize's own approximation).
-fit_gain() fits gain amplitude vs. frequency. poly_str()/textwrap() format
-fit results for display (used directly by calvin.plots.phases too).
+fit_gain() fits gain amplitude vs. frequency. poly_str() formats fit
+results for display (used directly by calvin.plots.phases too).
 """
 
 import sys
@@ -168,10 +168,6 @@ def fit_phase_line(
     solution: NDArray[np.complex128],
     weights: NDArray[np.float64],
     niter: int = 1,
-    fit_iono: bool = False,
-    # chanblocks_per_coarse: int,
-    # bin_size: int = 10,
-    # typical_thickness: float = 3.9,
 ) -> PhaseFitInfo:
     """Fit a linear phase ramp to calibration solutions.
 
@@ -185,8 +181,6 @@ def fit_phase_line(
             rejecting outliers more than 2 robust scale units (median + MAD, see
             the sigma-clip comment in the loop below) from the median residual.
             Must be >= 1.
-        fit_iono: Accepted but currently unused; ionospheric dispersion is not
-            fitted.
 
     Returns:
         PhaseFitInfo object containing fitted parameters and quality metrics.
@@ -294,11 +288,6 @@ def fit_phase_line(
     # Now that we're near a local minimum, get a better one by doing a standard minimisation
     # To get the y-intercept, divide the original data by the constructed data
     # and find the average phase of the result
-
-    # if fit_iono:
-    #     model = lambda ν, m, c, α: np.exp(1j * (m * ν + c + α / ν**2))
-    #     y_int = np.angle(np.mean(solution / model(ν.to(u.Hz).value, slope.value, 0, 0)))
-    #     params = (slope.value, y_int, 0)
 
     def model(ν, m, c):
         return np.exp(1j * (m * ν + c))
@@ -545,31 +534,3 @@ def poly_str(coeffs, independent_var="x"):
         filter(None, [f"{coeff:+.3}{xpow(i)}" for i, coeff in enumerate(coeffs[::-1])])
         # if abs(coeff) > 1e-20 else ""
     )
-
-
-def textwrap(s, width=70):
-    """Wrap text to a specified width.
-
-    Args:
-        s: Input string to wrap.
-        width: Maximum line width in characters (default: 70).
-
-    Returns:
-        Wrapped text with lines joined by newlines.
-    """
-    words = s.split()
-    lines = []
-    current_line = []
-    current_length = 0
-
-    for word in words:
-        if current_length + len(word) <= width:
-            current_line.append(word)
-            current_length += len(word) + 1  # +1 for the space
-        else:
-            lines.append(" ".join(current_line))
-            current_line = [word]
-            current_length = len(word)
-
-    lines.append(" ".join(current_line))
-    return "\n".join(lines)

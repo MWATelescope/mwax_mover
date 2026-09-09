@@ -7,6 +7,9 @@
 * processors: Unified base64 password predicate on db != "dummy" across all 4 daemons
 * calvin: Removed dead plot_res parameter in phase plots
 * Fixed 3 incorrect docstrings/comments, 7 typos, logging message in archiver.
+* Removed iterative_poly_clip and fit_iono; rewrote iterative_poly_clip_batch's docstring to stand alone; fixed 2 stale references.
+* Replaced hand-rolled textwrap() with stdlib textwrap.fill(); removed its 4 now-pointless unit tests; verified wrapping is byte-identical for real equation strings
+* Removed all 11 vestigial pylint pragmas
 
 # 1.10.2 26-Aug-2026
 

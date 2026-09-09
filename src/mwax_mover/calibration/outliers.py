@@ -6,98 +6,12 @@ definition of "phase outlier" used everywhere in the Calvin pipeline
 (both calvin.hyperdrive's reporting-only detection and
 calvin.plots.stats_table/phase_fits's stats/debug plots route through it,
 so the threshold can never silently disagree between the two).
-iterative_poly_clip(_batch) fits a robust, sigma-clipped polynomial and
-flags outliers.
+iterative_poly_clip_batch() fits a robust, sigma-clipped polynomial
+(batched across tiles) and flags outliers.
 """
 
 import numpy as np
 import pandas as pd
-
-
-def iterative_poly_clip(
-    x: np.ndarray,
-    y: np.ndarray,
-    degree: int,
-    residual_threshold: float,
-    initial_valid: np.ndarray,
-    max_iter: int = 10,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, float, float]:
-    """Fit a robust, sigma-clipped polynomial to y(x) and flag outliers.
-
-    Iteratively fits a degree-N polynomial on the currently-valid points,
-    computes residuals against that fit, rejects points whose residual
-    exceeds residual_threshold MADs (median absolute deviations) from the
-    median residual, and refits -- repeating until the valid set stops
-    changing (or max_iter is reached). This guards against a single
-    extreme outlier dragging a one-shot least-squares fit far enough off
-    course that it masks the very outlier it should catch.
-
-    Ported from the now-deleted mwax_calvin_quality._iterative_poly_clip as
-    a standalone pure function, for reuse by
-    HyperfitsSolutionGroup.flag_amplitude_outliers.
-
-    Args:
-        x: 1D array of independent variable values (e.g. chanblock index).
-        y: 1D array of dependent variable values (e.g. gain amplitude).
-        degree: Polynomial degree to fit.
-        residual_threshold: Number of residual-MADs beyond which a point
-            is considered an outlier. Dimensionless -- e.g. 5.0 means "5x
-            the typical residual scatter for this tile/pol", not an
-            absolute gain value.
-        initial_valid: Boolean mask of points eligible to be fit at all
-            (e.g. already excludes points flagged for unrelated reasons
-            like non-convergence). Outliers found here are only ever a
-            subset of this mask.
-        max_iter: Maximum number of fit/clip iterations.
-
-    Returns:
-        A tuple (valid, residual, fit, mad, med):
-        - valid: Boolean array, True for points considered good (within
-          initial_valid and not rejected as an outlier).
-        - residual: Float array, |y - fit - median_residual| / mad at
-          every point (including points outside initial_valid, computed
-          against the final fit). NaN everywhere if no fit could ever be
-          computed (too few valid points).
-        - fit: Float array, the final polynomial fit evaluated at every x.
-          NaN everywhere if no fit could be computed at all.
-        - mad: The median absolute deviation of residuals from the final
-          fit iteration (scalar, same units as y). NaN if no fit could be
-          computed.
-        - med: The median residual from the final fit iteration (scalar,
-          same units as y). NaN if no fit could be computed.
-    """
-    n = len(y)
-    valid = initial_valid.copy()
-    residual = np.full(n, np.nan, dtype=np.float64)
-    fit = np.full(n, np.nan, dtype=np.float64)
-    mad = np.nan
-    med = np.nan
-
-    if valid.sum() < degree + 2:
-        return valid, residual, fit, mad, med
-
-    for _ in range(max_iter):
-        coeffs = np.polyfit(x[valid], y[valid], degree)
-        fit = np.polyval(coeffs, x)
-        resid_all = y - fit
-
-        med = np.median(resid_all[valid])
-        mad = np.median(np.abs(resid_all[valid] - med))
-        if mad == 0:
-            residual[:] = 0.0
-            break
-
-        residual = np.abs(resid_all - med) / mad
-        new_valid = initial_valid & (residual <= residual_threshold)
-
-        if new_valid.sum() < degree + 2:
-            break
-        if np.array_equal(new_valid, valid):
-            valid = new_valid
-            break
-        valid = new_valid
-
-    return valid, residual, fit, mad, med
 
 
 def iterative_poly_clip_batch(
@@ -108,20 +22,28 @@ def iterative_poly_clip_batch(
     initial_valid: np.ndarray,
     max_iter: int = 10,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Vectorized, batched equivalent of iterative_poly_clip, fitting every
-    row (tile) at once instead of looping and calling np.polyfit per tile.
+    """Fit a robust, sigma-clipped polynomial to every row (tile) of Y at once.
 
-    Equivalent to calling iterative_poly_clip(x, Y[t], ...) for each tile t
-    independently -- same per-tile stopping conditions, same MAD-based
-    clipping -- with one deliberate difference: the per-tile version treats a
-    residual MAD of exactly 0 as "perfect fit", whereas this one uses a 1e-9
-    tolerance (see the zero_mad comment below), because the batched
-    normal-equations solve and np.polyfit's SVD land on different tiny
-    floating-point residues for the same data. This is also why
-    docs/img/make_illustrations.py uses this function rather than the per-tile
-    one -- so the illustrations show what the pipeline actually does.
+    Iteratively fits a degree-N polynomial per tile on that tile's
+    currently-valid points (against a design matrix shared across all
+    tiles, since every tile shares the same x-grid), computes residuals
+    against that fit, rejects points whose residual exceeds
+    residual_threshold MADs (median absolute deviations) from the tile's
+    median residual, and refits -- repeating per tile until its valid set
+    reaches a fixed point (new_valid == valid) or max_iter is reached.
+    This guards against a single extreme outlier dragging a one-shot
+    least-squares fit far enough off course that it masks the very
+    outlier it should catch.
 
-    Replaces what was previously up to
+    A tile with fewer than degree + 2 initially-valid points is never fit
+    at all and keeps its original valid mask -- too few points to fit a
+    degree-N polynomial meaningfully. A tile whose residual MAD is
+    (numerically) zero -- see the zero_mad tolerance comment below -- is
+    treated as a perfect fit: its residual is set to 0.0 everywhere and
+    it stops iterating early.
+
+    Batches every tile's fit in one pass instead of looping and calling
+    np.polyfit per tile: replaces what would otherwise be up to
     (n_tiles * max_iter) separate np.polyfit/np.polyval calls with a
     handful of batched numpy operations per outer iteration. Since every
     tile shares the same x-grid (chanblock index), a per-tile weighted
@@ -129,7 +51,10 @@ def iterative_poly_clip_batch(
     equations solve against a shared design matrix, which batches
     trivially across tiles via einsum + batched np.linalg.solve, instead
     of paying np.polyfit's (comparatively large) fixed per-call overhead
-    thousands of times over.
+    thousands of times over. This is also why
+    docs/img/make_illustrations.py uses this function rather than a
+    per-tile loop -- so the illustrations show what the pipeline actually
+    does.
 
     Args:
         x: 1D array of independent variable values (e.g. chanblock
@@ -143,10 +68,27 @@ def iterative_poly_clip_batch(
         max_iter: Maximum number of fit/clip iterations.
 
     Returns:
-        A tuple (valid, residual, fit, mad, med), each matching
-        iterative_poly_clip's per-tile return but with an added leading
-        tile axis: valid/residual/fit shape (n_tiles, n_chan), mad/med
-        shape (n_tiles,).
+        A tuple (valid, residual, fit, mad, med), each with a leading
+        tile axis:
+        - valid: Boolean array, shape (n_tiles, n_chan), True for points
+          considered good (within initial_valid and not rejected as an
+          outlier) per tile.
+        - residual: Float array, shape (n_tiles, n_chan), |y - fit -
+          median_residual| / mad at every point per tile (including
+          points outside initial_valid, computed against that tile's
+          final fit). NaN wherever the tile's Y is NaN, or everywhere for
+          a tile whose fit could never be computed (too few valid
+          points).
+        - fit: Float array, shape (n_tiles, n_chan), each tile's final
+          polynomial fit evaluated at every x. NaN everywhere for a tile
+          whose fit could not be computed at all.
+        - mad: Float array, shape (n_tiles,), the median absolute
+          deviation of residuals from each tile's final fit iteration
+          (same units as Y). NaN for a tile whose fit could not be
+          computed.
+        - med: Float array, shape (n_tiles,), the median residual from
+          each tile's final fit iteration (same units as Y). NaN for a
+          tile whose fit could not be computed.
     """
     n_tiles, n = Y.shape
     valid = initial_valid.copy()
@@ -249,10 +191,10 @@ def iterative_poly_clip_batch(
             new_valid_kg = new_valid_nz[keep_going]
             unchanged = np.all(new_valid_kg == valid[kg_idx], axis=1)
 
-            # Apply new_valid regardless of whether it changed (matches
-            # iterative_poly_clip's `valid = new_valid` in both the
-            # "unchanged" and "keep going" branches); only the stopping
-            # decision differs between them.
+            # Apply new_valid regardless of whether it changed -- valid
+            # must reflect the latest clip either way; only the stopping
+            # decision (done) differs between the "unchanged" and
+            # "keep going" cases.
             valid[kg_idx] = new_valid_kg
             done[kg_idx[unchanged]] = True
 
@@ -284,7 +226,7 @@ def reject_outliers(data, quality_key, group_cols=("pol",), nstd=3.0, max_iter=1
     iterating lets the threshold tighten again each time an outlier is
     set aside, so a cluster of comparably-bad rows gets caught round by
     round instead of masking each other. Mirrors the median/MAD +
-    iterative-clip approach already used by iterative_poly_clip for
+    iterative-clip approach already used by iterative_poly_clip_batch for
     amplitude-outlier detection.
 
     Also fixes a pre-existing bug: the previous implementation computed

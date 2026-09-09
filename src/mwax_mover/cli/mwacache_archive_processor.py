@@ -252,7 +252,7 @@ class MWACacheArchiveProcessor:
                     status_bytes,
                     self.health_multicast_hops,
                 )
-            except Exception as catch_all_exception:  # pylint: disable=broad-except
+            except Exception as catch_all_exception:
                 logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
 
             # Sleep for a second

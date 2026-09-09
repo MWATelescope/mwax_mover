@@ -149,7 +149,7 @@ def run_giant_squid(
             )
 
     logger.error(f"run_giant_squid: all {max_retries + 1} attempts failed for {cmdline}. Last error: {last_exception}")
-    raise last_exception  # type: ignore[misc]  # always set if we reach here
+    raise last_exception  # always set if we reach here
 
 
 def extract_filename_from_mwa_asvo_signed_url(url: str) -> str:

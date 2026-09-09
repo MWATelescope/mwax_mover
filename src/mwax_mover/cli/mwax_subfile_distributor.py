@@ -918,10 +918,10 @@ class MWAXSubfileDistributor:
                         400,
                     )
 
-        except ValueError as parameters_exception:  # pylint: disable=broad-except
+        except ValueError as parameters_exception:
             return f"Value Error: {parameters_exception}".encode(), 400
 
-        except Exception as dump_voltages_exception:  # pylint: disable=broad-except
+        except Exception as dump_voltages_exception:
             return f"ERROR: {dump_voltages_exception}".encode(), 500
 
     def dump_voltages(self, start_gps_time: int, end_gps_time: int, trigger_id: int) -> bool:
@@ -1028,7 +1028,7 @@ class MWAXSubfileDistributor:
                     status_bytes,
                     self.cfg_health_multicast_hops,
                 )
-            except Exception as catch_all_exception:  # pylint: disable=broad-except
+            except Exception as catch_all_exception:
                 logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
 
             # Sleep for a second

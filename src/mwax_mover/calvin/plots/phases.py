@@ -12,6 +12,7 @@ Phase 4).
 
 import logging
 import os
+import textwrap
 import warnings
 
 import matplotlib as mpl
@@ -33,7 +34,7 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from numpy.typing import NDArray
 
-from mwax_mover.calibration.fitting import ensure_system_byte_order, poly_str, textwrap, wrap_angle
+from mwax_mover.calibration.fitting import ensure_system_byte_order, poly_str, wrap_angle
 from mwax_mover.calibration.outliers import pivot_phase_fits
 from mwax_mover.calvin.hyperdrive import HyperfitsSolutionGroup
 from mwax_mover.calvin.plots.layout import plot_dpi, plot_figsize
@@ -527,7 +528,7 @@ def plot_phase_residual(
         if best_coeffs is not None and best_indep is not None:
             sns.lineplot(x=freqs, y=np.poly1d(best_coeffs)(freqs), **kwargs)
             eqn = poly_str(best_coeffs, independent_var=best_indep)
-            poly_wrap = textwrap(f"[{len(best_coeffs)}] {eqn}", width=40)
+            poly_wrap = textwrap.fill(f"[{len(best_coeffs)}] {eqn}", width=40)
             plt.text(0.05, 0.1, poly_wrap, transform=plt.gca().transAxes, fontsize=7)
         if band is not None:
             plt.text(

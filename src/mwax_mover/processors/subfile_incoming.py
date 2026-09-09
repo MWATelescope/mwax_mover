@@ -391,7 +391,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                     self.sd_ctx.dump_end_gps = None
                     self.sd_ctx.dump_trigger_id = None
 
-        except Exception as handler_exception:  # pylint: disable=broad-except
+        except Exception as handler_exception:
             logger.error(f"{item}: {handler_exception}")
             success = False
 
@@ -428,7 +428,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                         except FileNotFoundError:
                             pass
 
-                    except Exception as move_exception:  # pylint: disable=broad-except
+                    except Exception as move_exception:
                         # NOTE: this used to be sys.exit(2), which on a worker
                         # thread only kills the thread and discards the code.
                         self.sd_ctx.request_fatal_shutdown(
@@ -540,7 +540,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
 
             try:
                 shutil.move(keep_filename, free_filename)
-            except Exception as move_exception:  # pylint: disable=broad-except
+            except Exception as move_exception:
                 # NOTE: this used to be sys.exit(2), which on a worker thread
                 # only kills the thread and discards the code.
                 self.sd_ctx.request_fatal_shutdown(

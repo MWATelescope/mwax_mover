@@ -21,7 +21,6 @@ from mwax_mover.calibration.fitting import (
     pad_gain_fit_info,
     pad_gains_to_full_coarse,
     parse_csv_header,
-    textwrap,
     wrap_angle,
 )
 from mwax_mover.calibration.models import GainFitInfo, PhaseFitInfo
@@ -133,36 +132,6 @@ def test_ensure_system_byte_order_swapped():
 
     result = ensure_system_byte_order(genuinely_swapped)
     np.testing.assert_array_equal(result, native)
-
-
-def test_textwrap_short_string():
-    s = "hello world"
-    result = textwrap(s, width=70)
-    assert result == s
-
-
-def test_textwrap_long_string():
-    words = ["word"] * 30
-    s = " ".join(words)
-    result = textwrap(s, width=20)
-    lines = result.split("\n")
-    assert len(lines) > 1
-    for line in lines:
-        assert len(line) <= 20
-
-
-def test_textwrap_exact_width():
-    # "abc def" is 7 chars — fits on one line at width=7
-    s = "abc def"
-    result = textwrap(s, width=7)
-    assert "\n" not in result
-
-
-def test_textwrap_preserves_all_words():
-    s = "the quick brown fox jumps over the lazy dog"
-    result = textwrap(s, width=15)
-    for word in s.split():
-        assert word in result
 
 
 def test_fit_phase_line_recovers_length():
