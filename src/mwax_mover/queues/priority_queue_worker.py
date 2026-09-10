@@ -135,7 +135,7 @@ class PriorityQueueWorker:
 
                     logger.info(f"Processing {self.current_item}...")
 
-                    start_time = time.time()
+                    start_time = time.monotonic()
 
                     if self.current_item[0] is None:
                         filename_priority = ArchivePriority.DEFAULT
@@ -166,7 +166,7 @@ class PriorityQueueWorker:
                         self.source_queue.task_done()
                         continue
 
-                    elapsed = time.time() - start_time
+                    elapsed = time.monotonic() - start_time
                     logger.info(f"Complete. Queue size: {self.source_queue.qsize()} Elapsed: {elapsed:.2f} sec")
 
                     if success:

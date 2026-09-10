@@ -1183,10 +1183,10 @@ class MWAXCalvinController(MWAXDaemon):
         start of each call and so always refreshed on that call's first
         interval. See __init__'s comment on _last_slurm_queue_update.
         """
-        if time.time() - self._last_slurm_queue_update > SLURM_REFRESH_INTERVAL:
+        if time.monotonic() - self._last_slurm_queue_update > SLURM_REFRESH_INTERVAL:
             # Only update the slurm jobs every 10 seconds so we don't kill the server
             self.slurm_queue_size = count_slurm_asvo_jobs()
-            self._last_slurm_queue_update = time.time()
+            self._last_slurm_queue_update = time.monotonic()
 
 
 def main():

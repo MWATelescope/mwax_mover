@@ -70,8 +70,8 @@ def get_gbps(size_gigabytes: float, elapsed_seconds: float) -> float:
     Args:
         size_gigabytes: Transfer size in gigabytes.
         elapsed_seconds: Elapsed time of the transfer, in seconds. Clock-agnostic --
-            pass whatever duration you already have, from time.time() or
-            time.monotonic() as appropriate to the caller.
+            pass whatever duration you already have, from time.monotonic()
+            (preferred for elapsed durations) or time.time().
 
     Returns:
         Throughput in Gbps, or 0.0 if elapsed time is zero.

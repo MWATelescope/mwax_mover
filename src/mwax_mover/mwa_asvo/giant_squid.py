@@ -99,7 +99,7 @@ def run_giant_squid(
             )
             time.sleep(delay)
 
-        start_time = time.time()
+        start_time = time.monotonic()
 
         success, stdout = run_command(
             command=cmdline,
@@ -110,7 +110,7 @@ def run_giant_squid(
             extra_env_vars=env_args,
         )
 
-        elapsed = time.time() - start_time
+        elapsed = time.monotonic() - start_time
         logger.debug(
             f"run_giant_squid: attempt {attempt + 1}/{max_retries} completed in "
             f"{elapsed:.3f} seconds [Success={success}]"

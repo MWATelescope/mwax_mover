@@ -1572,7 +1572,7 @@ def run_hyperdrive(
 
         # Outside the try block so it is always bound before the exception
         # handler below computes `elapsed` from it.
-        start_time = time.time()
+        start_time = time.monotonic()
 
         try:
             hyperdrive_solution_full_filename = os.path.join(job_output_path, f"{obsid_and_band}_solutions.fits")
@@ -1600,7 +1600,7 @@ def run_hyperdrive(
                 hyperdrive_timeout,
             )
 
-            elapsed = time.time() - start_time
+            elapsed = time.monotonic() - start_time
 
             if exit_code == 0:
                 logger.info(
@@ -1631,7 +1631,7 @@ def run_hyperdrive(
                 break
 
         except Exception as hyperdrive_run_exception:
-            elapsed = time.time() - start_time
+            elapsed = time.monotonic() - start_time
             logger.error(
                 f"{obs_id}: hyperdrive run"
                 f" {hyperdrive_run + 1}/{len(input_uvfits_files)} FAILED:"

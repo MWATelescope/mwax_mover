@@ -58,7 +58,7 @@ def copy_file_rsync(
         f"{source_filename} {destination_dir}"
     )
 
-    start_time = time.time()
+    start_time = time.monotonic()
 
     # run rsync
     return_val, stdout = run_command(cmdline, None, timeout, False)
@@ -70,7 +70,7 @@ def copy_file_rsync(
             logger.exception(f"{source_filename}: Error determining destination file size.")
             return False
 
-        elapsed = time.time() - start_time
+        elapsed = time.monotonic() - start_time
 
         size_gigabytes = bytes_to_gigabytes(file_size)
         gbps_per_sec = get_gbps(size_gigabytes, elapsed)
@@ -138,13 +138,13 @@ def archive_file_xrootd(
         f" {full_filename} xroot://{archive_destination_host}/{temp_filename}"
     )
 
-    start_time = time.time()
+    start_time = time.monotonic()
 
     # run xrdcp
     return_val, stdout = run_command(cmdline, archive_numa_node, timeout, False)
 
     if return_val:
-        elapsed = time.time() - start_time
+        elapsed = time.monotonic() - start_time
 
         size_gigabytes = bytes_to_gigabytes(file_size)
         gbps_per_sec = get_gbps(size_gigabytes, elapsed)
@@ -270,7 +270,7 @@ def archive_file_rclone_haproxy(
         return False
     size_gigabytes = bytes_to_gigabytes(file_size)
 
-    start_time = time.time()
+    start_time = time.monotonic()
     rclone_timeout = f"{rclone_timeout_mins}m"
     # Subprocess wall-clock limit accounts for full retry cycle:
     # each retry can take up to rclone_timeout_mins, plus a small buffer.
@@ -334,7 +334,7 @@ def archive_file_rclone_haproxy(
         return_val, stdout = run_command(cmdline, None, subprocess_timeout_secs, False)
 
         if return_val:
-            elapsed = time.time() - start_time
+            elapsed = time.monotonic() - start_time
 
             # Check immediately - no blind pre-sleep. With balance uri routing
             # in haproxy.cfg, this file's copyto and the check below hash to
@@ -364,7 +364,7 @@ def archive_file_rclone_haproxy(
                 f" {full_filename} {rclone_profile}:/{bucket_name}"
             )
 
-            check_start = time.time()
+            check_start = time.monotonic()
             check_attempt = 0
             return_val = False
             backoff_secs = _RCLONE_CHECK_BACKOFF_BASE_SECS
@@ -388,7 +388,7 @@ def archive_file_rclone_haproxy(
                     backoff_secs = min(backoff_secs * 2, rclone_check_wait_secs)
 
             if return_val:
-                check_elapsed = time.time() - check_start
+                check_elapsed = time.monotonic() - check_start
                 logger.info(
                     f"{full_filename}: archive_file_rclone_haproxy success."
                     f" Copied ({size_gigabytes:.3f}GB in {elapsed:.3f} seconds at"

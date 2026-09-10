@@ -56,7 +56,7 @@ def run_birli(
         True if execution succeeded, False otherwise.
     """
     birli_success: bool = False
-    start_time = time.time()
+    start_time = time.monotonic()
     stderr = ""
 
     cmdline = None
@@ -117,7 +117,7 @@ def run_birli(
             birli_timeout,
         )
 
-        elapsed = time.time() - start_time
+        elapsed = time.monotonic() - start_time
 
         if exit_code == 0:
             # Success!
@@ -137,7 +137,7 @@ def run_birli(
         else:
             logger.error(f"{obs_id}: Birli run FAILED: Exit code of {exit_code} in {elapsed:.3f} seconds: {stderr}")
     except Exception as birli_run_exception:
-        elapsed = time.time() - start_time
+        elapsed = time.monotonic() - start_time
         logger.error(
             f"{obs_id}: birli run FAILED: Unhandled exception {birli_run_exception} in {elapsed:.3f} seconds: {stderr}"
         )

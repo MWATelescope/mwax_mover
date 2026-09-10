@@ -148,7 +148,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
 
         logger.info(f"{item}: SubfileIncomingProcessor.subfile_handler is handling {item}...")
 
-        handler_starttime = time.time()
+        handler_starttime = time.monotonic()
 
         # `keep_subfiles_path` is used after doing the main work. If we are
         # running in with `always_keep_subfiles`=1,
@@ -437,7 +437,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                         )
                         return False
 
-            handler_elapsed = time.time() - handler_starttime
+            handler_elapsed = time.monotonic() - handler_starttime
 
             logger.info(
                 f"{item}: SubfileIncomingProcessor.subfile_handler finished handling in {handler_elapsed:.3f} secs."

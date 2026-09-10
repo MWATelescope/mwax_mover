@@ -167,9 +167,9 @@ def process_mwax_stats(
 
     logger.debug(f"{full_filename}- attempting to run stats: {cmd}")
 
-    start_time = time.time()
+    start_time = time.monotonic()
     return_value, stdout = run_command(cmd, numa_node, timeout)
-    elapsed = time.time() - start_time
+    elapsed = time.monotonic() - start_time
 
     if return_value:
         logger.info(f"{full_filename} mwax_stats success in {elapsed:.3f} seconds")
@@ -203,7 +203,7 @@ def load_psrdada_ringbuffer(full_filename: str, ringbuffer_key: str, numa_node, 
 
     size = os.path.getsize(full_filename)
 
-    start_time = time.time()
+    start_time = time.monotonic()
 
     if running_under_pytest():
         logger.debug(
@@ -216,7 +216,7 @@ def load_psrdada_ringbuffer(full_filename: str, ringbuffer_key: str, numa_node, 
         logger.debug(f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key}")
         return_value, stdout = run_command(cmd, numa_node, timeout)
 
-    elapsed = time.time() - start_time
+    elapsed = time.monotonic() - start_time
 
     size_gigabytes = bytes_to_gigabytes(size)
     gbps_per_sec = (size_gigabytes * 8) / elapsed
@@ -255,9 +255,9 @@ def run_mwax_packet_stats(mwax_stats_dir: str, full_filename: str, output_dir: s
 
     cmd = f"{mwax_stats_dir}/mwax_packet_stats -o {output_dir} -s {full_filename}"
 
-    start_time = time.time()
+    start_time = time.monotonic()
     return_value, stdout = run_command(cmd, numa_node, timeout)
-    elapsed = time.time() - start_time
+    elapsed = time.monotonic() - start_time
 
     if return_value:
         logger.info(f"{full_filename} mwax_packet_stats success in {elapsed:.3f} sec")
@@ -308,11 +308,11 @@ def copy_subfile_to_disk_dd(
         f" bs=4M oflag=direct iflag=count_bytes count={bytes_to_write}"
     )
 
-    start_time = time.time()
+    start_time = time.monotonic()
     retval, stdout = run_command(command, numa_node, timeout, False)
 
     if retval:
-        elapsed = time.time() - start_time
+        elapsed = time.monotonic() - start_time
         speed = bytes_to_gigabytes(bytes_to_write) / elapsed
 
         logger.info(

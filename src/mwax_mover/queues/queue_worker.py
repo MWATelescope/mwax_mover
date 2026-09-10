@@ -155,7 +155,7 @@ class QueueWorker:
 
                     logger.info(f"Processing {self.current_item}...")
 
-                    start_time = time.time()
+                    start_time = time.monotonic()
 
                     # Check file exists (maybe someone deleted it?)
                     if os.path.exists(self.current_item):
@@ -180,7 +180,7 @@ class QueueWorker:
                         self.source_queue.task_done()
                         continue
 
-                    elapsed = time.time() - start_time
+                    elapsed = time.monotonic() - start_time
                     logger.info(f"Complete. Queue size: {self.source_queue.qsize()} Elapsed: {elapsed:.2f} sec")
 
                     if success:
