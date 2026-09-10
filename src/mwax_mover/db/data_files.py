@@ -87,6 +87,21 @@ def insert_data_file_row(
 ) -> bool:
     """Insert a data_files row
 
+    Args:
+        db_handler_object: A populated database handler (dummy or real).
+        obsid: The observation ID this file belongs to.
+        archive_filename: Full path of the file. Only its basename is stored;
+            the full path is used to locate and delete the file if the
+            observation has been deleted by M&C (see Returns below).
+        filetype: The file's MWADataFileType value.
+        hostname: Hostname of the local machine recording this file.
+        checksum_type: Integer code identifying the checksum algorithm used
+            (1 = MD5).
+        checksum: The file's computed checksum, as a hex string.
+        trigger_id: The VCS trigger ID if this file came from a triggered
+            observation, or None (or -1, treated the same as None) otherwise.
+        file_size: The file's size in bytes.
+
     Returns:
         True if the insert succeeded, or if the observation was deleted by
         M&C (the file is removed from disk and the caller should still check
@@ -165,6 +180,16 @@ def update_data_file_row_as_archived(
     folder: str | None,
 ) -> bool:
     """Updates a data_files row as archived (at Pawsey)
+
+    Args:
+        db_handler_object: A populated database handler (dummy or real).
+        obsid: The observation ID this file belongs to.
+        archive_filename: Full path of the file; only its basename is used
+            to find the row to update.
+        location: The Pawsey location the file was archived to (Acacia or Banksia).
+        bucket: Name of the S3 bucket the file was archived to.
+        folder: Optional S3 folder/prefix within bucket the file was archived
+            to, or None if not applicable.
 
     Returns:
         True if the update succeeded, False otherwise.

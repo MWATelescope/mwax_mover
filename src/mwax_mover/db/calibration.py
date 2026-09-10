@@ -155,6 +155,49 @@ def insert_calibration_solutions_row(
     the caller has to manage commiting or rolling back the fit, plus
     1..n calibration_solutions rows.
 
+    Args:
+        db_handler_object: A populated database handler (dummy or real).
+        transaction_cursor: An open transaction cursor; the caller manages
+            commit/rollback of this row alongside its parent
+            calibration_fit row.
+        fit_id: ID of the parent calibration_fit row this solution belongs to.
+        obs_id: The observation ID this calibration solution is for.
+        tile_id: The tile ID this row's solution is for.
+        x_delay_m: XX polarisation's fitted equivalent cable length in
+            metres -- the negative of PhaseFitInfo.length, since the legacy
+            calibration pipeline used the inverse sign convention.
+        x_intercept: XX polarisation's fitted phase intercept, in radians
+            (PhaseFitInfo.intercept).
+        x_gains: XX polarisation's per-coarse-channel gain values
+            (GainFitInfo.gains).
+        y_delay_m: YY polarisation's fitted equivalent cable length in
+            metres. See x_delay_m for the sign convention.
+        y_intercept: YY polarisation's fitted phase intercept, in radians.
+        y_gains: YY polarisation's per-coarse-channel gain values.
+        x_gains_pol1: XX polarisation's per-coarse-channel order-1 (slope)
+            coefficient of the within-coarse-channel gain amplitude fit
+            (GainFitInfo.pol1). Diagnostic only.
+        y_gains_pol1: YY polarisation's equivalent of x_gains_pol1.
+        x_phase_sigma_resid: XX polarisation's phase-fit residual standard
+            deviation, in radians (PhaseFitInfo.sigma_resid).
+        x_phase_chi2dof: XX polarisation's phase-fit chi-squared per degree
+            of freedom (PhaseFitInfo.chi2dof).
+        x_phase_fit_quality: XX polarisation's phase-fit quality -- fraction
+            of frequency channels surviving the sigma-clip, in [0, 1]
+            (PhaseFitInfo.quality).
+        y_phase_sigma_resid: YY polarisation's equivalent of x_phase_sigma_resid.
+        y_phase_chi2dof: YY polarisation's equivalent of x_phase_chi2dof.
+        y_phase_fit_quality: YY polarisation's equivalent of x_phase_fit_quality.
+        x_gains_fit_quality: XX polarisation's gain-fit quality (GainFitInfo.quality).
+        y_gains_fit_quality: YY polarisation's equivalent of x_gains_fit_quality.
+        x_gains_sigma_resid: XX polarisation's per-coarse-channel gain-fit
+            residual standard deviation (GainFitInfo.sigma_resid).
+        y_gains_sigma_resid: YY polarisation's equivalent of x_gains_sigma_resid.
+        x_gains_pol0: XX polarisation's per-coarse-channel order-0 (intercept)
+            coefficient of the within-coarse-channel gain amplitude fit
+            (GainFitInfo.pol0). Diagnostic only.
+        y_gains_pol0: YY polarisation's equivalent of x_gains_pol0.
+
     Returns:
         True if the insert succeeded, False otherwise.
     """
