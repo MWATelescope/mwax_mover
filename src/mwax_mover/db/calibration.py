@@ -153,7 +153,11 @@ def insert_calibration_solutions_row(
     This row represents the calibration solution for a tile/obsid.
     We assume that caller is passing in a valid transaction cursor which means
     the caller has to manage commiting or rolling back the fit, plus
-    1..n calibration_solutions rows."""
+    1..n calibration_solutions rows.
+
+    Returns:
+        True if the insert succeeded, False otherwise.
+    """
 
     sql = """INSERT INTO calibration_solutions (fitid,obsid,tileid,
                                                 x_delay_m,x_intercept,x_gains,
@@ -376,15 +380,21 @@ def update_calibration_request_mwa_asvo_job_status(
 ):
     """Update a calibration_request request with status info regarding the MWA ASVO job submitted.
 
-    Parameters:
-            db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
-            request_ids (int): The request_id of the calibration_request to update
-                               (could be many including old!).
-            mwa_asvo_job_submitted_error_datetime (datetime): The date/time the MWA ASVO job failed to be submitted
-            mwa_asvo_job_submitted_error_message (str): The error when submitting
+    Args:
+        db_handler_object: A populated database handler (dummy or real).
+        request_ids: The request_id(s) of the calibration_request to update
+            (could be many including old!).
+        mwa_asvo_job_id: The MWA ASVO job ID that was submitted, or None on error.
+        mwa_asvo_job_submitted_datetime: The date/time the MWA ASVO job was
+            submitted, or None on error.
+        mwa_asvo_job_submitted_error_datetime: The date/time the MWA ASVO job
+            failed to be submitted, or None on success.
+        mwa_asvo_job_submitted_error_message: The error when submitting, or
+            None on success.
 
-    Returns:
-            Nothing. Raises exceptions on error"""
+    Raises:
+        Exception: If the database update fails.
+    """
 
     sql = """
     UPDATE public.calibration_request
@@ -477,18 +487,24 @@ def update_calibration_request_download_complete_status(
     download_error_datetime: datetime.datetime | None,
     download_error_message: str | None,
 ):
-    """Update a calsolution request with updated download completed status info.
+    """Update a calibration_request with updated download completed status info.
 
-    Parameters:
-            db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
-            slurm_job_id Optional(int): slurm job id for this run (if we have it)
-            request_ids: list[int]: All the request ids for this job
-            download_completed_datetime (datetime): Date/time the download succeeded or None on error
-            download_error_datetime (datetime): Date/time the download failed with an error OR None if success
-            download_error_message (str): Error message if download_error_datetime is provided OR None if success
+    Args:
+        db_handler_object: A populated database handler (dummy or real).
+        slurm_job_id: Slurm job id for this run, if we have it.
+        request_ids: All the request ids for this job.
+        download_completed_datetime: Date/time the download succeeded, or
+            None on error.
+        download_error_datetime: Date/time the download failed with an error,
+            or None on success.
+        download_error_message: Error message if download_error_datetime is
+            provided, or None on success.
 
-    Returns:
-            Nothing. Raises exceptions on error"""
+    Raises:
+        Exception: If the database update fails.
+        ValueError: If download_completed_datetime is not mutually exclusive
+            with download_error_datetime and download_error_message.
+    """
 
     sql = """
         UPDATE public.calibration_request
@@ -592,19 +608,18 @@ def update_calibration_request_calibration_started_status(
     slurm_job_id: int,
     calibration_started_datetime: datetime.datetime,
 ):
-    """Update a calsolution request with updated calibration start status info.
+    """Update a calibration_request with updated calibration start status info.
+
     This makes the very valid assumption that the download has completed too.
 
-    Parameters:
-            db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
-            obs_id (int): Obs ID this cal soltution is for
-            request_ids (int) | None: The request_id(s) of the calibration_request to update
-                               (could be many including old!). None is passed by calvin_processor
-                               as it has no idea about which request_ids this could be for (if any)
-            calibration_started_datetime (datetime): The date/time the calibration started
+    Args:
+        db_handler_object: A populated database handler (dummy or real).
+        slurm_job_id: Identifies the row/rows of requests for this slurm job.
+        calibration_started_datetime: The date/time the calibration started.
 
-    Returns:
-            Nothing. Raises exceptions on error"""
+    Raises:
+        Exception: If the database update fails.
+    """
 
     sql = """
     UPDATE public.calibration_request
@@ -645,18 +660,25 @@ def update_calibration_request_calibration_complete_status(
     calibration_error_datetime: datetime.datetime | None,
     calibration_error_message: str | None,
 ):
-    """Update a calsolution request with updated calibration completed status info.
+    """Update a calibration_request with updated calibration completed status info.
 
-    Parameters:
-            db_handler_object (MWAXDBHandler): A populated database handler (dummy or real)
-            slurm_job_id (int): identifies the row/rows of requests for this slurm job
-            calibration_completed_datetime (datetime): Date/time the calibration succeeded or None on error
-            calibration_fit_id (int): ID of the fit inserted or None on error
-            calibration_error_datetime (datetime): Date/time the calibration failed with an error OR None if success
-            calibration_error_message (str): Error message if calibration_error_datetime is provided OR None if success
+    Args:
+        db_handler_object: A populated database handler (dummy or real).
+        slurm_job_id: Identifies the row/rows of requests for this slurm job.
+        calibration_completed_datetime: Date/time the calibration succeeded,
+            or None on error.
+        calibration_fit_id: ID of the fit inserted, or None on error.
+        calibration_error_datetime: Date/time the calibration failed with an
+            error, or None on success.
+        calibration_error_message: Error message if calibration_error_datetime
+            is provided, or None on success.
 
-    Returns:
-            Nothing. Raises exceptions on error"""
+    Raises:
+        Exception: If the database update fails.
+        ValueError: If (calibration_completed_datetime, calibration_fit_id)
+            is not mutually exclusive with (calibration_error_datetime,
+            calibration_error_message).
+    """
 
     sql = """
     UPDATE public.calibration_request

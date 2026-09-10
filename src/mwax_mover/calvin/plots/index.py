@@ -24,6 +24,11 @@ def get_file_description(filename: str) -> str:
     """Given a filename, attempt to generate a description of it
     Args:
         filename: The filename to be described
+
+    Returns:
+        A human-readable description of the file, with a channel-range
+        suffix appended where the filename identifies one, or "Miscellaneous
+        file" if the filename doesn't match any known pattern.
     """
 
     # If it has a "chNNN" then this is a single coarse channel output

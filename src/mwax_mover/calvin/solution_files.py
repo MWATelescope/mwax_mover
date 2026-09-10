@@ -143,16 +143,15 @@ def get_sorted_solution_files(directory: str, obs_id: int, extension: str = "fit
     )
 
 
-def export_calibration_solutions(solution_files: list[str], cal_export_path: str, cal_export_max_age_hours: int):
+def export_calibration_solutions(
+    solution_files: list[str], cal_export_path: str, cal_export_max_age_hours: int
+) -> None:
     """Export calibration solution FITS files to the configured export directory and delete stale files.
 
     Args:
         solution_files: List of hyperdrive solution filenames
         cal_export_path: Path to copy solution files to
         cal_export_max_age_hours: Files older than this many hours will be deleted from the cal_export_path
-
-    Returns:
-        Nothing
     """
     # if cal_export_path is set then:
     # 1. copy the solution FITS files to the export dir

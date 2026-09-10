@@ -175,9 +175,6 @@ def run_command(
         return False, error
 
 
-# This will return a popen process object which can be polled for exit
-# use shell should be used when you are using wildcards and other shell
-# features
 def start_command(
     command: str,
     numa_node: int | None,

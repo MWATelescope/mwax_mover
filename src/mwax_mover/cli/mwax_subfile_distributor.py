@@ -807,28 +807,49 @@ class MWAXSubfileDistributor(MWAXDaemon):
             if self.outgoing_processor:
                 self.outgoing_processor.pause(paused)
 
-    def endpoint_shutdown(self):
-        """Web service endpoint to shutdown the processor."""
+    def endpoint_shutdown(self) -> tuple[bytes, int]:
+        """Web service endpoint to shutdown the processor.
+
+        Returns:
+            (b"OK", 200).
+        """
         self.stop()
         return b"OK", http.HTTPStatus.OK
 
-    def endpoint_status(self):
-        """Web service endpoint to retrieve processor status."""
+    def endpoint_status(self) -> tuple[bytes, int]:
+        """Web service endpoint to retrieve processor status.
+
+        Returns:
+            (the JSON-encoded status from get_status(), 200).
+        """
         data = json.dumps(self.get_status())
         return data.encode("utf-8"), http.HTTPStatus.OK
 
-    def endpoint_pause_archiving(self):
-        """Web service endpoint to pause archiving operations."""
+    def endpoint_pause_archiving(self) -> tuple[bytes, int]:
+        """Web service endpoint to pause archiving operations.
+
+        Returns:
+            (b"OK", 200).
+        """
         self.pause_archiving(paused=True)
         return b"OK", http.HTTPStatus.OK
 
-    def endpoint_resume_archiving(self):
-        """Web service endpoint to resume archiving operations."""
+    def endpoint_resume_archiving(self) -> tuple[bytes, int]:
+        """Web service endpoint to resume archiving operations.
+
+        Returns:
+            (b"OK", 200).
+        """
         self.pause_archiving(paused=False)
         return b"OK", http.HTTPStatus.OK
 
-    def endpoint_release_cal_obs(self):
-        """Web service endpoint to release calibration observation files."""
+    def endpoint_release_cal_obs(self) -> tuple[bytes, int]:
+        """Web service endpoint to release calibration observation files.
+
+        Returns:
+            (b"OK", 200) on success; an error message and 500 if obs_id is
+            missing, is not an integer, or release_cal_obs() raises.
+        """
         try:
             logger.info("Received call to release_cal_obs()")
 
@@ -847,10 +868,16 @@ class MWAXSubfileDistributor(MWAXDaemon):
         except Exception as ws_exception:
             return f"ERROR: {ws_exception}".encode(), 500
 
-    def endpoint_dump_voltages(self):
+    def endpoint_dump_voltages(self) -> tuple[bytes, int]:
         """Web service endpoint to request voltage buffer dump.
 
         Validates parameters and initiates a voltage buffer dump operation.
+
+        Returns:
+            (b"OK", 200) on success, including the start==end==0 test-mode
+            no-op; (message, 400) if a parameter is missing or invalid, a
+            dump is already in progress, or dump_voltages() itself fails to
+            start; (message, 500) on any other error.
         """
         # Check for correct params
         try:

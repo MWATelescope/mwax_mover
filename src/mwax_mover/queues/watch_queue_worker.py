@@ -174,7 +174,7 @@ class MWAXWatchQueueWorker(ABC):
         for w in self.watcher_threads:
             w.start()
 
-        logger.info(f"{self.name} Waiting for all watchers to finish scanning....")
+        logger.info(f"{self.name}: Waiting for all watchers to finish scanning....")
         count_of_watchers_still_scanning = len(self.watchers)
         while count_of_watchers_still_scanning > 0:
             count_of_watchers_still_scanning = 0
@@ -183,7 +183,7 @@ class MWAXWatchQueueWorker(ABC):
                     logger.debug(f"{watcher.name} still scanning!")
                     count_of_watchers_still_scanning += 1
             time.sleep(1)  # hold off for another second
-        logger.info(f"{self.name} Watchers are finished scanning.")
+        logger.info(f"{self.name}: Watchers are finished scanning.")
 
         self.queue_worker_thread.start()
 
@@ -251,7 +251,7 @@ class MWAXWatchQueueWorker(ABC):
             status["watchers"].append(watcher.get_status())
         return status
 
-    def scan_completed(self) -> bool:
+    def all_scans_completed(self) -> bool:
         """Check if all watchers have completed their initial directory scan.
 
         Returns:
@@ -445,7 +445,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
             status["watchers"].append(watcher.get_status())
         return status
 
-    def scan_completed(self) -> bool:
+    def all_scans_completed(self) -> bool:
         """Check if all priority watchers have completed their initial directory scan.
 
         Returns:

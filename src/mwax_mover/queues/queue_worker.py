@@ -54,19 +54,6 @@ def calculate_backoff_seconds(
 class QueueWorker:
     """This class represents a worker process, processing items off a queue"""
 
-    # Either pass an event handler or pass an executable path to run
-    #
-    # requeue_to_eoq_on_failure: if work fails, True  = requeue to back of
-    #                                                   queue, try the next
-    #                                                   item (order does not
-    #                                                   matter)
-    #                                         , False = keep retrying this
-    #                                                   item (i.e. order
-    #                                                   of items matters)
-    # requeue_on_error: if True the above logic holds. if False,
-    #                   it will not be retried or requeued. It's up to the event_handler
-    #                   to know what to do here. E.g. log it and ignore. Move to a "failed"
-    #                   dir, etc.
     def __init__(
         self,
         name: str,
@@ -90,13 +77,22 @@ class QueueWorker:
             event_handler: A callable to process each item. Required if executable_path
                 is None.
             exit_once_queue_empty: Whether to exit after the queue becomes empty.
-            requeue_to_eoq_on_failure: If True, requeue failed items to the end of
-                the queue. Defaults to True.
+            requeue_to_eoq_on_failure: On failure, True requeues the item to the
+                back of the queue and moves on to the next item (item order does
+                not matter); False keeps retrying this same item instead (item
+                order matters). Defaults to True.
             backoff_initial_seconds: Initial backoff time in seconds. Defaults to 1.
             backoff_factor: Multiplier applied per additional consecutive failure,
                 giving initial * factor**(n-1). Defaults to 2.
             backoff_limit_seconds: Maximum backoff time in seconds. Defaults to 60.
-            requeue_on_error: Whether to requeue or retry failed items. Defaults to True.
+            requeue_on_error: If True, requeue_to_eoq_on_failure governs retry
+                behaviour as described above. If False, a failed item is neither
+                retried nor requeued -- it is up to event_handler to decide what
+                to do (log and ignore it, move it to a "failed" directory, etc).
+                Defaults to True. PriorityQueueWorker deliberately has no
+                equivalent parameter -- see docs/CLEANUP.md, "Deliberately out
+                of scope"; it was never needed for that use case, so do not add
+                it there on the strength of this docstring.
 
         Raises:
             Exception: If both or neither of executable_path and event_handler are provided.

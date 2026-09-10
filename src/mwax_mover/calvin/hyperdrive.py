@@ -909,7 +909,7 @@ class HyperfitsSolutionGroup:
         return self.metafits_tiles_df.iloc[best_idx]
 
     @property
-    def calibrator(self):
+    def calibrator(self) -> str | None:
         """Get calibrator source name(s) from metafits file."""
         return self.metafits.calibrator
 

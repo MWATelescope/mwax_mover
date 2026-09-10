@@ -51,8 +51,13 @@ def call_webservice(
     """
 
     def call_webservice_inner(obs_id: int, url_list: list[str], data) -> requests.Response:
-        """Call each url in the list until: a response of
-        200 (in which case return the response)
+        """Call each url in the list until one returns HTTP 200.
+
+        Returns:
+            The first successful ``requests.Response`` object (HTTP status 200).
+
+        Raises:
+            requests.RequestException: If every URL in url_list fails.
         """
         i = 0
 

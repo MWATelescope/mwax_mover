@@ -85,7 +85,13 @@ def insert_data_file_row(
     trigger_id,
     file_size: int,
 ) -> bool:
-    """Insert a data_files row"""
+    """Insert a data_files row
+
+    Returns:
+        True if the insert succeeded, or if the observation was deleted by
+        M&C (the file is removed from disk and the caller should still check
+        whether it exists before archiving it). False on any other error.
+    """
     # Prepare the fields
     # immediately add this file to the db so we insert a record into metadata
     # data_files table
@@ -158,7 +164,11 @@ def update_data_file_row_as_archived(
     bucket: str,
     folder: str | None,
 ) -> bool:
-    """Updates a data_files row as archived (at Pawsey)"""
+    """Updates a data_files row as archived (at Pawsey)
+
+    Returns:
+        True if the update succeeded, False otherwise.
+    """
     # Prepare the fields
     filename = os.path.basename(archive_filename)
 

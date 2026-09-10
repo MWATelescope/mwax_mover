@@ -1,6 +1,13 @@
-"""
-Module to watch a folder for file events and add file to a
-priority queue
+"""inotify-based directory watcher that enqueues detected files with a priority.
+
+The PriorityWatcher class monitors a directory (recursively or flat) for inotify
+events (IN_CLOSE_WRITE, IN_MOVED_TO, or both) and deposits matching files into a
+queue.PriorityQueue as (priority, MWAXPriorityQueueData) tuples, where the
+priority is computed per file by get_priority() from the file's type, project
+ID, and the high-priority project lists passed to __init__. On startup it
+performs a one-shot scan of pre-existing files before entering the live event
+loop, so that the queue's ordering reflects every file's priority from the
+start rather than just arrival order.
 """
 
 import logging
