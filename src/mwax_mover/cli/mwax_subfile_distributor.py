@@ -9,7 +9,6 @@ also exposes a Flask web service for health reporting, archiving pause/resume, a
 calibration observation release.
 """
 
-import argparse
 import glob
 import http
 import json
@@ -51,9 +50,10 @@ from mwax_mover.fits.subfile import (
     read_subfile_trigger_value,
     read_subfile_value,
 )
-from mwax_mover.net.multicast import get_ip_address, send_multicast
+from mwax_mover.net.multicast import get_ip_address
 from mwax_mover.processors.bf_stitching import BfStitchingProcessor
 from mwax_mover.processors.checksum_and_db import ChecksumAndDBProcessor
+from mwax_mover.processors.daemon import MWAXDaemon
 from mwax_mover.processors.outgoing import OutgoingProcessor
 from mwax_mover.processors.packet_stats import PacketStatsProcessor
 from mwax_mover.processors.subfile_incoming import SubfileIncomingProcessor
@@ -72,8 +72,16 @@ logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
 
 
-class MWAXSubfileDistributor:
+class MWAXSubfileDistributor(MWAXDaemon):
     """Class for MWAXSubfileDistributor- the main engine of MWAX"""
+
+    DESCRIPTION = (
+        "mwax_subfile_distributor: a command line tool which is part of"
+        " the mwax suite for the MWA. It will perform different tasks"
+        " based on the configuration file. In addition, it will"
+        " automatically archive files in /voltdata and /visdata to the"
+        " mwacache servers at the Curtin Data Centre."
+    )
 
     def __init__(self):
         """Initialize MWAXSubfileDistributor with default values.
@@ -81,6 +89,7 @@ class MWAXSubfileDistributor:
         Sets up instance variables for configuration, workers, Flask web server,
         archiving, and database connections.
         """
+        super().__init__()
 
         # Config parser
         self.config: ConfigParser
@@ -90,18 +99,7 @@ class MWAXSubfileDistributor:
             # pretend I am mwax99
             self.hostname = "mwax99"
         else:
-            self.hostname: str = get_hostname()
-        self.running: bool = False
-
-        # Set by request_fatal_shutdown() when a worker thread hits an
-        # unrecoverable error. Worker threads cannot terminate the process
-        # themselves (sys.exit() on a non-main thread only ends that thread and
-        # its exit code is discarded), so they record the intended exit code
-        # here and the main thread acts on it. Non-zero means "we did NOT
-        # complete successfully" and is what main() exits with, so that systemd
-        # / the alerting on top of it sees a failure rather than a clean stop.
-        self.fatal_exit_code: int = 0
-        self.fatal_reason: str = ""
+            self.hostname = get_hostname()
 
         # Web server
         self.flask_app = Flask(__name__)
@@ -126,10 +124,6 @@ class MWAXSubfileDistributor:
         self.cfg_psrdada_timeout_sec: int = 0
         self.cfg_copy_subfile_to_disk_timeout_sec: int = 0
         self.cfg_master_archiving_enabled: bool = False
-        self.cfg_health_multicast_interface_ip: str = ""
-        self.cfg_health_multicast_interface_name: str = ""
-        self.cfg_health_multicast_ip: str = ""
-        self.cfg_health_multicast_port: int = 0
         self.cfg_health_multicast_hops: int = 1
         self.cfg_packet_stats_dump_dir: str = ""
         self.cfg_packet_stats_destination_dir: str = ""
@@ -180,32 +174,6 @@ class MWAXSubfileDistributor:
 
         # Database handler for metadata db
         self.db_handler: MWAXDBHandler
-
-    def initialise_from_command_line(self):
-        """Initialize the distributor from command-line arguments.
-
-        Parses command-line arguments (config file and mode) and calls initialise()
-        with the extracted parameters.
-        """
-
-        # Get command line args
-        parser = argparse.ArgumentParser()
-        parser.description = (
-            "mwax_subfile_distributor: a command line tool which is part of"
-            " the mwax suite for the MWA. It will perform different tasks"
-            " based on the configuration file. In addition, it will"
-            " automatically archive files in /voltdata and /visdata to the"
-            " mwacache servers at the Curtin Data Centre."
-        )
-
-        parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
-
-        args = vars(parser.parse_args())
-
-        # Check that config file exists
-        config_filename = args["cfg"]
-
-        self.initialise(config_filename)
 
     def initialise(
         self,
@@ -276,8 +244,8 @@ class MWAXSubfileDistributor:
         )
 
         # get this hosts primary network interface ip
-        self.cfg_health_multicast_interface_ip = get_ip_address(self.cfg_health_multicast_interface_name)
-        logger.info(f"IP for sending multicast: {self.cfg_health_multicast_interface_ip}")
+        self.health_multicast_interface_ip = get_ip_address(self.cfg_health_multicast_interface_name)
+        logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
 
         if not os.path.exists(self.cfg_voltdata_dont_archive_path):
             logger.error(
@@ -1028,69 +996,32 @@ class MWAXSubfileDistributor:
         logger.info("dump_voltages: complete")
         return True
 
-    def health_handler(self):
-        """Periodically send health status via UDP multicast.
-
-        Runs in a separate thread and sends status information every second while
-        the distributor is running.
-        """
-        while self.running:
-            # Code to run by the health thread
-            status_dict = self.get_status()
-
-            # Convert the status to bytes
-            status_bytes = json.dumps(status_dict).encode("utf-8")
-
-            # Send the bytes
-            try:
-                send_multicast(
-                    self.cfg_health_multicast_interface_ip,
-                    self.cfg_health_multicast_ip,
-                    self.cfg_health_multicast_port,
-                    status_bytes,
-                    self.cfg_health_multicast_hops,
-                )
-            except Exception as catch_all_exception:
-                logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
-
-            # Sleep for a second
-            time.sleep(1)
-
-    def get_status(self) -> dict:
-        """Return processor status and worker statuses as a dictionary.
+    def get_extra_status(self) -> dict:
+        """Daemon-specific status keys: the current subfile mode and archiving flag.
 
         Returns:
-            A dictionary containing main processor status and individual worker statuses.
+            A dict with "mode" and "archiving" keys.
         """
-        main_status = {
-            "unix_timestamp": time.time(),
-            "process": type(self).__name__,
-            "version": version.get_mwax_mover_version_string(),
-            "host": self.hostname,
-            "running": self.running,
+        return {
             "mode": self.subfile_incoming_processor.current_subfile_mode,
             "archiving": self.cfg_corr_archive_destination_enabled,
-            "cmdline": " ".join(sys.argv[1:]),
         }
 
-        worker_status_list = []
+    def get_worker_status(self) -> list[dict]:
+        """Per-worker status, for get_status()'s "workers" key.
 
-        for w in self.workers:
-            worker_status_list.append(w.get_status())
-
-        status = {"main": main_status, "workers": worker_status_list}
-
-        return status
-
-    def signal_handler(self, _signum, _frame):
-        """Handle SIGINT and SIGTERM signals for graceful shutdown.
-
-        Args:
-            _signum: Signal number (unused).
-            _frame: Stack frame (unused).
+        Returns:
+            A list of each worker's status dict.
         """
-        logger.warning(f"Interrupted. Shutting down {len(self.workers)} workers...")
-        self.stop()
+        return [w.get_status() for w in self.workers]
+
+    def shutdown_log_detail(self) -> str:
+        """Worker count, for the signal-handler shutdown message.
+
+        Returns:
+            " N workers", so the message reads "Shutting down N workers...".
+        """
+        return f" {len(self.workers)} workers"
 
     def start(self):
         """Start the distributor and begin monitoring with all workers.
@@ -1117,7 +1048,7 @@ class MWAXSubfileDistributor:
 
         # create a health thread
         logger.info("Starting health_thread...")
-        health_thread = threading.Thread(name="health_thread", target=self.health_handler, daemon=True)
+        health_thread = threading.Thread(name="health_thread", target=self.health_loop, daemon=True)
         health_thread.start()
         logger.info("health_thread started.")
 
@@ -1147,34 +1078,6 @@ class MWAXSubfileDistributor:
             logger.error(f"Shutting down with exit code {self.fatal_exit_code}: {self.fatal_reason}")
         else:
             logger.info("Completed Successfully")
-
-    def request_fatal_shutdown(self, exit_code: int, reason: str) -> None:
-        """Ask the main thread to shut the whole processor down and exit non-zero.
-
-        Worker threads cannot terminate the process themselves: sys.exit() on a
-        non-main thread raises SystemExit in that thread only, which kills the
-        thread and discards the exit code, leaving the daemon running with one
-        fewer worker. Worker code that hits an unrecoverable error should call
-        this instead, then stop what it is doing.
-
-        The first caller wins, so the exit code reflects the original cause
-        rather than any knock-on failure. Safe to call more than once and from
-        any thread.
-
-        Args:
-            exit_code: Non-zero process exit code for main() to exit with.
-            reason: Human-readable description, logged and included in the
-                final shutdown message.
-        """
-        if self.fatal_exit_code:
-            # Already shutting down for an earlier (root cause) reason.
-            logger.warning(f"Additional fatal error while shutting down: {reason}")
-            return
-
-        logger.error(f"FATAL: {reason} Requesting shutdown with exit code {exit_code}.")
-        self.fatal_exit_code = exit_code
-        self.fatal_reason = reason
-        self.running = False
 
     def stop(self):
         """Stop the distributor and shutdown all workers and servers.

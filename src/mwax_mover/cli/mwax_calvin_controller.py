@@ -19,8 +19,6 @@ calibration form the calvin HPC cluster
    * Clean up
 """
 
-import argparse
-import json
 import logging
 import os
 import signal
@@ -57,8 +55,9 @@ from mwax_mover.db.calibration import (
 from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.mwa_asvo.giant_squid import GiantSquidMWAASVOOutageException
 from mwax_mover.mwa_asvo.jobs import MWAASVOHelper, MWAASVOJobState
-from mwax_mover.net.multicast import get_ip_address, send_multicast
+from mwax_mover.net.multicast import get_ip_address
 from mwax_mover.net.s3 import rclone_move
+from mwax_mover.processors.daemon import MWAXDaemon
 
 # Setup root logger
 handler = logging.StreamHandler()
@@ -83,6 +82,10 @@ DEFAULT_PLOT_UPLOAD_MAX_FITS_PER_PASS = 100
 # skipped a file, so rmdir fails) stays in the backlog, and with no floor delay
 # a path in that state would be retried in a tight loop.
 PLOT_UPLOAD_BACKLOG_DELAY_SECS = 5
+
+# Minimum interval, in seconds, between during_sleep_interval() calls to
+# count_slurm_asvo_jobs() -- so we don't hammer the Slurm server.
+SLURM_REFRESH_INTERVAL = 10
 
 
 def fit_dir_sort_key(fit_dir: Path) -> tuple[int, int, str]:
@@ -127,7 +130,7 @@ class CalibrationRequest:
         self.bulk_request: bool = False
 
 
-class MWAXCalvinController:
+class MWAXCalvinController(MWAXDaemon):
     """The main class managing calvin processes:
 
     realtime: Get new realtime calibration requests, copies data from mwax
@@ -138,6 +141,12 @@ class MWAXCalvinController:
     NOTE: no downloading is done in this code. It is handled by CalvinProcessor as it
     will be running on the calvin HPC nodes"""
 
+    DESCRIPTION = (
+        "mwax_calvin_controller: a command line tool which is part of the "
+        "MWA correlator for the MWA. It will submit SBATCH jobs as needed "
+        "to process real time or MWA ASVO calibration jobs."
+    )
+
     def __init__(
         self,
     ):
@@ -146,24 +155,23 @@ class MWAXCalvinController:
         Sets up instance variables for managing realtime and MWA ASVO calibration
         requests, database connections, and health monitoring.
         """
+        super().__init__()
+
         # General
         self.cfg_log_path: str = ""
-        self.hostname: str = ""
         self.db_handler: MWAXDBHandler
         self.config_filename: str = ""
         self.worker_config_filename: str = ""
-        self.running: bool = False
         self.ready_to_exit: bool = False
 
         # health
-        self.health_multicast_interface_ip: str = ""
-        self.cfg_health_multicast_interface_name: str = ""
-        self.cfg_health_multicast_ip: str = ""
-        self.cfg_health_multicast_port: int = 0
-        self.cfg_health_multicast_hops: int = 0
         # We update these two only every 10 seconds (in the health thread) to not hammer the server(s)
         self.slurm_queue_size: int = 0
         self.mwa_asvo_vis_jobs_in_progress: int = 0
+        # Persists across sleep() calls, unlike the pre-migration code (which
+        # reset to 0 at the start of every sleep() call and so always
+        # refreshed on a new call's first interval) -- see during_sleep_interval().
+        self._last_slurm_queue_update: float = 0
 
         self.realtime_slurm_jobs_submitted: int = 0
         self.mwa_asvo_slurm_jobs_submitted: int = 0
@@ -846,51 +854,17 @@ class MWAXCalvinController:
 
         self.ready_to_exit = True
 
-    def health_loop(self):
-        """Periodically send health status via UDP multicast.
+    def before_health_send(self) -> None:
+        """Refresh the ASVO-jobs-in-progress counter before each health iteration."""
+        self.mwa_asvo_vis_jobs_in_progress = self.mwa_asvo_helper.get_in_progress_asvo_job_count()
 
-        Runs in a separate thread and sends status information every second while
-        the controller is running.
-        """
-
-        while self.running:
-            # Update the jobs in progress
-            self.mwa_asvo_vis_jobs_in_progress = self.mwa_asvo_helper.get_in_progress_asvo_job_count()
-
-            # Code to run by the health thread
-            status_dict = self.get_status()
-
-            # Convert the status to bytes
-            status_bytes = json.dumps(status_dict).encode("utf-8")
-
-            # Send the bytes
-            try:
-                send_multicast(
-                    self.health_multicast_interface_ip,
-                    self.cfg_health_multicast_ip,
-                    self.cfg_health_multicast_port,
-                    status_bytes,
-                    self.cfg_health_multicast_hops,
-                )
-            except Exception as catch_all_exception:
-                logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
-
-            # Sleep for a second
-            self.sleep(1)
-
-    def get_status(self) -> dict:
-        """Return status of all processes as a dictionary.
+    def get_extra_status(self) -> dict:
+        """Daemon-specific status keys: job counters and error counts.
 
         Returns:
-            A dictionary containing process status information including running
-            state, job counters, and error counts.
+            A dict of the controller's queue-size and error-count counters.
         """
-        main_status = {
-            "unix_timestamp": time.time(),
-            "process": type(self).__name__,
-            "version": version.get_mwax_mover_version_string(),
-            "host": self.hostname,
-            "running": self.running,
+        return {
             "slurm_queue": self.slurm_queue_size,
             "mwa_asvo_calibration_requests_queued": self.mwa_asvo_calibration_requests_queued,
             "mwa_asvo_vis_jobs_in_progress": self.mwa_asvo_vis_jobs_in_progress,
@@ -901,20 +875,6 @@ class MWAXCalvinController:
             "database_errors": self.database_errors,
             "slurm_errors": self.slurm_errors,
         }
-
-        return {"main": main_status}
-
-    def signal_handler(self, _signum, _frame):
-        """Handle SIGINT and SIGTERM signals for graceful shutdown.
-
-        Args:
-            _signum: Signal number (unused).
-            _frame: Stack frame (unused).
-        """
-        logger.warning("Interrupted. Shutting down processor...")
-
-        # Stop any Processors
-        self.stop()
 
     def get_new_calibration_requests(
         self,
@@ -1238,60 +1198,19 @@ class MWAXCalvinController:
             self.cfg_gs_submitvis_timeout_seconds,
         )
 
-    def initialise_from_command_line(self):
-        """Initialize the controller from command-line arguments.
+    def during_sleep_interval(self) -> None:
+        """Refresh the Slurm queue size at most once per SLURM_REFRESH_INTERVAL seconds.
 
-        Parses command-line arguments and calls initialise() with the configuration
-        file path.
+        Called once per SECS_PER_INTERVAL-second interval by the inherited
+        sleep(). Uses a persistent timestamp rather than resetting on every
+        sleep() call -- unlike the pre-migration code, which reset to 0 at the
+        start of each call and so always refreshed on that call's first
+        interval. See __init__'s comment on _last_slurm_queue_update.
         """
-
-        # Get command line args
-        parser = argparse.ArgumentParser()
-        parser.description = (
-            "mwax_calvin_controller: a command line tool which is part of the "
-            "MWA correlator for the MWA. It will submit SBATCH jobs as needed "
-            "to process real time or MWA ASVO calibration jobs."
-        )
-
-        parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
-
-        args = vars(parser.parse_args())
-
-        # Check that config file exists
-        config_filename = args["cfg"]
-
-        self.initialise(config_filename)
-
-    def sleep(self, seconds):
-        """Sleep for a specified duration while remaining responsive to shutdown.
-
-        Breaks long sleeps into intervals to remain responsive to the running
-        flag and shutdown directives.
-
-        Args:
-            seconds: Duration to sleep in seconds.
-        """
-        SECS_PER_INTERVAL: int = 5
-        SLURM_REFRESH_INTERVAL: int = 10
-
-        if self.running:
-            last_slurm_queue_update = 0
-            if seconds <= SECS_PER_INTERVAL:
-                time.sleep(seconds)
-            else:
-                integer_intervals, remainder_secs = divmod(seconds, SECS_PER_INTERVAL)
-
-                while self.running and integer_intervals > 0:
-                    time.sleep(SECS_PER_INTERVAL)
-                    integer_intervals -= 1
-
-                    if time.time() - last_slurm_queue_update > SLURM_REFRESH_INTERVAL:
-                        # Only update the slurm jobs every 10 seconds so we don't kill the server
-                        self.slurm_queue_size = count_slurm_asvo_jobs()
-                        last_slurm_queue_update = time.time()
-
-                if self.running and remainder_secs > 0:
-                    time.sleep(remainder_secs)
+        if time.time() - self._last_slurm_queue_update > SLURM_REFRESH_INTERVAL:
+            # Only update the slurm jobs every 10 seconds so we don't kill the server
+            self.slurm_queue_size = count_slurm_asvo_jobs()
+            self._last_slurm_queue_update = time.time()
 
 
 def main():

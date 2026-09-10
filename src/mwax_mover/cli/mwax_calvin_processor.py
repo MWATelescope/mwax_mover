@@ -11,7 +11,6 @@ the calibrator visibility files for archiving or discard.
 import argparse
 import datetime
 import glob
-import json
 import logging
 import os
 import shutil
@@ -66,9 +65,10 @@ from mwax_mover.filesystem.files import extract_tar, remove_file
 from mwax_mover.filesystem.naming import get_data_files_with_hostname_for_obsid_from_webservice
 from mwax_mover.fits.metafits import download_metafits_file
 from mwax_mover.mwa_asvo.giant_squid import extract_filename_from_mwa_asvo_signed_url, run_giant_squid
-from mwax_mover.net.multicast import get_ip_address, send_multicast
+from mwax_mover.net.multicast import get_ip_address
 from mwax_mover.net.s3 import check_remote_file_exists, rclone_delete_file
 from mwax_mover.net.webservice import call_webservice
+from mwax_mover.processors.daemon import MWAXDaemon
 
 # Setup root logger
 handler = logging.StreamHandler()
@@ -102,8 +102,16 @@ def _pool_worker_init() -> None:
     signal.signal(signal.SIGUSR1, signal.SIG_DFL)
 
 
-class MWAXCalvinProcessor:
+class MWAXCalvinProcessor(MWAXDaemon):
     """The main class processing calibration solutions"""
+
+    DESCRIPTION = (
+        "A command line tool which is part of the"
+        " MWA correlator for the MWA. It will be launched via a SLURM "
+        " job and either download a realtime calibrator obs from MWAX or "
+        "download data from an MWA ASVO URL. Either way it will then run "
+        "Birli and Hyperdrive and then upload the calibration solution."
+    )
 
     def __init__(
         self,
@@ -113,17 +121,11 @@ class MWAXCalvinProcessor:
         Sets up instance variables for job parameters, data paths, processing
         configuration, and status tracking.
         """
+        super().__init__()
+
         # General
         self.cfg_log_path: str = ""
-        self.hostname: str = ""
         self.db_handler: MWAXDBHandler
-
-        # health
-        self.health_multicast_interface_ip: str = ""
-        self.cfg_health_multicast_interface_name: str = ""
-        self.cfg_health_multicast_ip: str = ""
-        self.cfg_health_multicast_port: int = 0
-        self.cfg_health_multicast_hops: int = 0
 
         # Metadata
         self.current_task_name: str = "unknown"
@@ -1021,58 +1023,16 @@ class MWAXCalvinProcessor:
 
         sys.exit(exit_code)
 
-    def health_loop(self):
-        """Periodically send health status via UDP multicast.
-
-        Runs in a separate thread and sends status information every second while
-        the processor is running.
-        """
-        while self.running:
-            # Code to run by the health thread
-            status_dict = self.get_status()
-
-            # Convert the status to bytes
-            status_bytes = json.dumps(status_dict).encode("utf-8")
-
-            # Send the bytes
-            try:
-                send_multicast(
-                    self.health_multicast_interface_ip,
-                    self.cfg_health_multicast_ip,
-                    self.cfg_health_multicast_port,
-                    status_bytes,
-                    self.cfg_health_multicast_hops,
-                )
-            except Exception:
-                logger.exception("health_handler: Failed to send health information. Ignoring and continuing")
-
-            # Sleep for a second
-            self.sleep(1)
-
-    def get_status(self) -> dict:
-        """Return status of the processor as a dictionary.
+    def get_extra_status(self) -> dict:
+        """Daemon-specific status keys: the current job's identifying details.
 
         Returns:
-            A dict with a single key, "main", mapping to a dict with keys:
-                unix_timestamp (float): Current time (time.time()).
-                process (str): This class's name.
-                version (str): mwax_mover version string.
-                host (str): This host's hostname.
-                running (bool): Whether the processor is running.
-                slurm_job_id (int): Current Slurm job ID (0 if none/not set).
-                obs_id (int): Observation ID currently being processed (0 if none).
-                job_type (str): CalvinJobType value ("realtime" or "mwa_asvo").
-                task (str): Name of the current processing task/stage.
-                requests (str): Comma-separated request IDs.
+            A dict with slurm_job_id, obs_id, job_type, task, and requests
+            (a comma-separated string of request IDs).
         """
         requests = ",".join(str(r) for r in self.request_id_list)
 
-        main_status = {
-            "unix_timestamp": time.time(),
-            "process": type(self).__name__,
-            "version": version.get_mwax_mover_version_string(),
-            "host": self.hostname,
-            "running": self.running,
+        return {
             "slurm_job_id": self.slurm_job_id,
             "obs_id": self.obs_id,
             "job_type": self.job_type.value,
@@ -1080,26 +1040,22 @@ class MWAXCalvinProcessor:
             "requests": requests,
         }
 
-        status = {"main": main_status}
-
-        return status
-
-    def signal_handler(self, signum, _frame):
+    def signal_handler(self, _signum, _frame):
         """Handle SIGINT, SIGTERM, and SIGUSR1 signals for graceful shutdown.
 
         Args:
-            signum: The signal number received.
+            _signum: The signal number received.
             _frame: Stack frame (unused).
         """
         # Update the database that this job has been cancelled
-        if signum == signal.SIGUSR1:
+        if _signum == signal.SIGUSR1:
             signal_message = "Slurm hit walltime"
-        elif signum == signal.SIGINT:
+        elif _signum == signal.SIGINT:
             signal_message = "Received SIGINT"
-        elif signum == signal.SIGTERM:
+        elif _signum == signal.SIGTERM:
             signal_message = "Received SIGTERM"
         else:
-            signal_message = f"Received unknown signal {signum}"
+            signal_message = f"Received unknown signal {_signum}"
 
         logger.warning("Updating job to cancelled...")
         if self.data_downloaded:
@@ -1656,30 +1612,6 @@ class MWAXCalvinProcessor:
             mwa_asvo_download_url,
             request_ids,
         )
-
-    def sleep(self, seconds):
-        """Sleep for a specified duration while remaining responsive to shutdown.
-
-        Breaks long sleeps into intervals to remain responsive to the running
-        flag and shutdown directives.
-
-        Args:
-            seconds: Duration to sleep in seconds.
-        """
-        SECS_PER_INTERVAL: int = 5
-
-        if self.running:
-            if seconds <= SECS_PER_INTERVAL:
-                time.sleep(seconds)
-            else:
-                integer_intervals, remainder_secs = divmod(seconds, SECS_PER_INTERVAL)
-
-                while self.running and integer_intervals > 0:
-                    time.sleep(SECS_PER_INTERVAL)
-                    integer_intervals -= 1
-
-                if self.running and remainder_secs > 0:
-                    time.sleep(remainder_secs)
 
 
 def main():

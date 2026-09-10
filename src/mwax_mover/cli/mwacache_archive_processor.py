@@ -7,8 +7,6 @@ Storage (Acacia or Banksia) via rclone, updates the metadata database to
 confirm successful archival, then deletes the local copy.
 """
 
-import argparse
-import json
 import logging
 import os
 import signal
@@ -25,7 +23,8 @@ from mwax_mover.constants import EXIT_FAILURE, SECONDS_PER_HOUR, SECTION_MWA_DAT
 from mwax_mover.core.config import read_config, read_config_bool, read_config_list, read_optional_config
 from mwax_mover.core.env import get_hostname, running_under_pytest
 from mwax_mover.db.handler import MWAXDBHandler
-from mwax_mover.net.multicast import get_ip_address, send_multicast
+from mwax_mover.net.multicast import get_ip_address
+from mwax_mover.processors.daemon import MWAXDaemon
 from mwax_mover.processors.pawsey_outgoing import PawseyOutgoingProcessor
 from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
 from mwax_mover.filesystem.naming import ArchiveLocation
@@ -38,12 +37,20 @@ logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
 
 
-class MWACacheArchiveProcessor:
+class MWACacheArchiveProcessor(MWAXDaemon):
     """
     A class representing an instance which sends
     MWAX data products from the mwacache servers
     to the Pawsey LTS.
     """
+
+    DESCRIPTION = (
+        "mwacache_archive_processor: a command line tool which is part of"
+        " the MWA correlator for the MWA. It will monitor various"
+        " directories on each mwacache server and, upon detecting a file,"
+        " send it to Pawsey's LTS. It will then remove the file from the"
+        " local disk."
+    )
 
     def __init__(self):
         """Initialize MWACacheArchiveProcessor with default values.
@@ -51,11 +58,13 @@ class MWACacheArchiveProcessor:
         Sets up instance variables for database connections, archiving configuration,
         health monitoring, and worker management.
         """
+        super().__init__()
+
         if running_under_pytest():
             # pretend I am mwacache99
             self.hostname = "mwacache99"
         else:
-            self.hostname: str = get_hostname()
+            self.hostname = get_hostname()
 
         self.cfg_metafits_path: str = ""
         self.archive_to_location: ArchiveLocation = ArchiveLocation.Unknown
@@ -73,23 +82,10 @@ class MWACacheArchiveProcessor:
         # s3 config
         self.s3_profile: str = ""
 
-        self.health_multicast_interface_ip: str = ""
-        self.cfg_health_multicast_ip: str = ""
-        self.cfg_health_multicast_port: int = 0
         self.cfg_health_multicast_hops: int = 1
-        self.cfg_health_multicast_interface_name: str = ""
 
         self.cfg_high_priority_correlator_projectids: list[str] = []
         self.cfg_high_priority_vcs_projectids: list[str] = []
-
-        # MWAX servers will copy in a temp file, then rename once it is good
-        self.running: bool = False
-
-        # See request_fatal_shutdown(). Non-zero means we did NOT complete
-        # successfully, and is what main() exits with so systemd (and the
-        # alerting on top of it) sees a failure rather than a clean stop.
-        self.fatal_exit_code: int = 0
-        self.fatal_reason: str = ""
 
         self.db_handler: MWAXDBHandler
 
@@ -114,7 +110,7 @@ class MWACacheArchiveProcessor:
 
         # create a health thread
         logger.info("Starting health_thread...")
-        health_thread = threading.Thread(name="health_thread", target=self.health_handler, daemon=True)
+        health_thread = threading.Thread(name="health_thread", target=self.health_loop, daemon=True)
         health_thread.start()
 
         logger.info("Cleaning up old temp files...")
@@ -175,32 +171,6 @@ class MWACacheArchiveProcessor:
         else:
             logger.info("Completed Successfully")
 
-    def request_fatal_shutdown(self, exit_code: int, reason: str) -> None:
-        """Ask the main thread to shut the whole processor down and exit non-zero.
-
-        Worker threads cannot terminate the process themselves: sys.exit() on a
-        non-main thread raises SystemExit in that thread only, killing the thread
-        and discarding the exit code. Worker code that hits an unrecoverable
-        error should call this instead, then stop what it is doing.
-
-        The first caller wins, so the exit code reflects the original cause
-        rather than any knock-on failure. Safe to call more than once and from
-        any thread.
-
-        Args:
-            exit_code: Non-zero process exit code for main() to exit with.
-            reason: Human-readable description, logged and included in the
-                final shutdown message.
-        """
-        if self.fatal_exit_code:
-            logger.warning(f"Additional fatal error while shutting down: {reason}")
-            return
-
-        logger.error(f"FATAL: {reason} Requesting shutdown with exit code {exit_code}.")
-        self.fatal_exit_code = exit_code
-        self.fatal_reason = reason
-        self.running = False
-
     def stop(self):
         """Stop the processor and shutdown all workers and connections.
 
@@ -217,69 +187,21 @@ class MWACacheArchiveProcessor:
         if self.db_handler:
             self.db_handler.close()
 
-    def health_handler(self):
-        """Periodically send health status via UDP multicast.
-
-        Runs in a separate thread and sends status information every second while
-        the processor is running.
-        """
-        while self.running:
-            # Code to run by the health thread
-            status_dict = self.get_status()
-
-            # Convert the status to bytes
-            status_bytes = json.dumps(status_dict).encode("utf-8")
-
-            # Send the bytes
-            try:
-                send_multicast(
-                    self.health_multicast_interface_ip,
-                    self.cfg_health_multicast_ip,
-                    self.cfg_health_multicast_port,
-                    status_bytes,
-                    self.cfg_health_multicast_hops,
-                )
-            except Exception as catch_all_exception:
-                logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
-
-            # Sleep for a second
-            time.sleep(1)
-
-    def get_status(self) -> dict:
-        """Return status of the processor and all workers as a dictionary.
+    def get_extra_status(self) -> dict:
+        """No daemon-specific status keys beyond the base class's.
 
         Returns:
-            A dictionary containing main processor status and individual worker statuses.
+            An empty dict; the workers list is reported via get_worker_status().
         """
-        main_status = {
-            "unix_timestamp": time.time(),
-            "process": type(self).__name__,
-            "version": version.get_mwax_mover_version_string(),
-            "host": self.hostname,
-            "running": self.running,
-            "cmdline": " ".join(sys.argv[1:]),
-        }
+        return {}
 
-        worker_status_list = []
+    def get_worker_status(self) -> list[dict]:
+        """Per-worker status, for get_status()'s "workers" key.
 
-        for w in self.workers:
-            worker_status_list.append(w.get_status())
-
-        status = {"main": main_status, "workers": worker_status_list}
-
-        return status
-
-    def signal_handler(self, _signum, _frame):
-        """Handle SIGINT and SIGTERM signals for graceful shutdown.
-
-        Args:
-            _signum: Signal number (unused).
-            _frame: Stack frame (unused).
+        Returns:
+            A list of each worker's status dict.
         """
-        logger.warning("Interrupted. Shutting down processor...")
-
-        # Stop any Processors
-        self.stop()
+        return [w.get_status() for w in self.workers]
 
     def initialise(
         self,
@@ -469,32 +391,6 @@ class MWACacheArchiveProcessor:
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
         logger.info("Ready to start...")
-
-    def initialise_from_command_line(self):
-        """Initialize the processor from command-line arguments.
-
-        Parses command-line arguments and calls initialise() with the configuration
-        file path.
-        """
-
-        # Get command line args
-        parser = argparse.ArgumentParser()
-        parser.description = (
-            "mwacache_archive_processor: a command line tool which is part of"
-            " the MWA correlator for the MWA. It will monitor various"
-            " directories on each mwacache server and, upon detecting a file,"
-            " send it to Pawsey's LTS. It will then remove the file from the"
-            " local disk."
-        )
-
-        parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
-
-        args = vars(parser.parse_args())
-
-        # Check that config file exists
-        config_filename = args["cfg"]
-
-        self.initialise(config_filename)
 
 
 def main():
