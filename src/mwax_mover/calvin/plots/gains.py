@@ -575,24 +575,108 @@ def plot_combined_gains(
     return _render_combined_gains_figure(bundle, first_tile_index, n_tiles, solution_file_will_be_modified)
 
 
-def _render_combined_gains_figure(
+def _draw_gain_subplot(
+    ax: plt.Axes,
+    tile: int,
+    tile_name: str,
+    pol_label: str,
+    x_padded: NDArray[np.float64],
+    x_real: NDArray[np.float64],
+    data: NDArray[np.float64],
+    fit_data: NDArray[np.float64],
+    band_lower: NDArray[np.float64],
+    band_upper: NDArray[np.float64],
+    before_real: NDArray[np.float64],
+    data_color: str,
+    fit_color: str,
+    flagged_other_mask: NDArray[np.bool_],
+    gain_cutoff_mask: NDArray[np.bool_],
+    n_flagged_here: int,
+) -> str:
+    """Draw one polarisation's subplot: data, fit line, shaded acceptance
+    band, and flag markers (see _draw_tile_panel's docstring for the
+    marker/shading conventions -- identical for gx and gy, just applied to
+    each polarisation's own data/colour here).
+
+    Args:
+        ax: The axes to draw into (gx's or gy's).
+        tile: Index of the tile being drawn.
+        tile_name: Display name of the tile, for the title.
+        pol_label: "gx" or "gy", used in labels and the title.
+        x_padded: Padded (NaN between pickets) x-axis positions.
+        x_real: Unpadded x-axis positions, aligned with the flag masks.
+        data: This polarisation's per-tile amplitude data (padded).
+        fit_data: This polarisation's per-tile fit line (padded).
+        band_lower: This polarisation's per-tile band lower bound (padded).
+        band_upper: This polarisation's per-tile band upper bound (padded).
+        before_real: This polarisation's per-tile amplitude data (unpadded),
+            for marker placement.
+        data_color: Colour for the raw data line and band.
+        fit_color: Colour for the fit line.
+        flagged_other_mask: Channels flagged for a reason other than the
+            gain-magnitude cutoff, marked with a black 'x'.
+        gain_cutoff_mask: Channels flagged by the gain-magnitude cutoff,
+            marked with a black '+'.
+        n_flagged_here: Total flagged-channel count for this tile, to decide
+            whether the title needs a "(no flags)" suffix.
+
+    Returns:
+        This subplot's title (before any "- FULLY FLAGGED" suffix the
+        caller may still append).
+    """
+    ax.fill_between(
+        x_padded,
+        band_lower[tile],
+        band_upper[tile],
+        color=data_color,
+        alpha=0.15,
+        zorder=0,
+        label=f"{pol_label} band",
+    )
+    ax.plot(x_padded, data[tile], color=data_color, alpha=0.7, linewidth=0.8, label=pol_label)
+    ax.plot(
+        x_padded, fit_data[tile], color=fit_color, linestyle="--", alpha=0.8, linewidth=0.8, label=f"{pol_label} fit"
+    )
+    if flagged_other_mask.any():
+        ax.scatter(
+            x_real[flagged_other_mask],
+            before_real[tile][flagged_other_mask],
+            color="black",
+            marker="x",
+            s=15,
+            zorder=3,
+            label="flagged",
+        )
+    if gain_cutoff_mask.any():
+        ax.scatter(
+            x_real[gain_cutoff_mask],
+            before_real[tile][gain_cutoff_mask],
+            color="black",
+            marker="+",
+            s=30,
+            zorder=3,
+            label="gain cutoff",
+        )
+
+    title = f"Tile {tile} ({tile_name}) - {pol_label} amplitude"
+    if n_flagged_here == 0:
+        title += " (no flags)"
+    ax.set_title(title, fontsize=9)
+    ax.yaxis.set_major_formatter(mticker.ScalarFormatter(useOffset=False, useMathText=True))
+    ax.tick_params(labelsize=7)
+    return title
+
+
+def _draw_tile_panel(
+    ax_gx: plt.Axes,
+    ax_gy: plt.Axes,
+    tile: int,
     bundle: dict,
-    first_tile_index: int,
-    n_tiles: int,
-    solution_file_will_be_modified: bool,
-) -> plt.Figure:
-    """Render one page of the combined gx/gy amplitude plot from an
-    extracted data bundle (see _extract_combined_gains_bundle).
-
-    Every solution file appears on one compressed x-axis, with a marked
-    break at each picket boundary (see _build_stitched_axis). The axis is
-    therefore not linear in frequency; ticks are labelled with the real
-    coarse channel number of each segment.
-
-    This is the actual rendering logic behind plot_combined_gains, kept
-    as a standalone function (touching only plain data, never a
-    HyperfitsSolutionGroup) so it can run directly inside a
-    ProcessPoolExecutor worker.
+    bad_mask: NDArray[np.bool_],
+    new_amplitude_bad_mask: NDArray[np.bool_],
+    new_gain_cutoff_bad_mask: NDArray[np.bool_],
+) -> None:
+    """Draw one tile's gx/gy subplot pair into the already-created axes.
 
     Every tile except one flagged structurally, before Calvin's own
     analysis ever ran (metafits / TILES-HDU / BASELINES-HDU-inferred --
@@ -626,44 +710,37 @@ def _render_combined_gains_figure(
     nothing to show and are left blank -- this is an inherent data
     limitation, not a bug to work around with a fabricated fallback.
 
-    For every tile, each gets two adjacent subplots (gx, then gy),
-    showing the raw gain amplitude, the polynomial fit line, and a
-    shaded band showing the acceptable range around the fit (see
-    HyperfitsSolutionGroup.flag_amplitude_outliers) -- except a
-    structurally-flagged tile, which has none of this to show. Channels
-    caught by amplitude-outlier detection are shaded orange and marked
-    with a black 'x'; channels caught by the absolute gain-magnitude
-    sanity cutoff instead (see HyperfitsSolutionGroup.
-    flag_gain_max_cutoff) are also shaded orange, but marked with a
-    black '+' -- the two reasons are told apart by marker shape, not
-    colour. Shading (and the 'x'/'+' markers) is restricted to channels
-    with their own genuine per-channel reason, not every channel of a
-    fully-flagged tile (flag_mostly_bad_tiles NaNs every channel of a
-    promoted tile regardless of whether that specific channel ever
-    earned its own reason, so blindly using the tile-wide bad mask here
-    would mark innocent channels as if they had been individually
-    caught).
+    Otherwise, each polarisation gets its data, fit line, and shaded
+    acceptance band drawn by _draw_gain_subplot. Channels caught by
+    amplitude-outlier detection are shaded orange and marked with a black
+    'x'; channels caught by the absolute gain-magnitude sanity cutoff
+    instead (see HyperfitsSolutionGroup.flag_gain_max_cutoff) are also
+    shaded orange, but marked with a black '+' -- the two reasons are
+    told apart by marker shape, not colour. Shading (and the 'x'/'+'
+    markers) is restricted to channels with their own genuine per-channel
+    reason, not every channel of a fully-flagged tile (flag_mostly_bad_tiles
+    NaNs every channel of a promoted tile regardless of whether that
+    specific channel ever earned its own reason, so blindly using the
+    tile-wide bad mask here would mark innocent channels as if they had
+    been individually caught).
 
     Args:
+        ax_gx: The gx subplot's axes.
+        ax_gy: The gy subplot's axes.
+        tile: Index of the tile to draw.
         bundle: Extracted data from _extract_combined_gains_bundle.
-        first_tile_index: Index of the first tile to include in this page.
-        n_tiles: Number of tiles to plot starting from first_tile_index.
-            Also determines the subplot grid shape (see _grid_shape),
-            except for a stitched multi-file plot, which uses the fixed
-            STITCHED_TILE_COLS instead.
-        solution_file_will_be_modified: If True, a note is added to the
-            figure title.
-
-    Returns:
-        The matplotlib Figure containing the grid of per-tile subplot pairs.
+        bad_mask: Per-tile-per-channel "bad" mask, combining every file's
+            channel reasons with any whole-tile flag.
+        new_amplitude_bad_mask: Channels caught specifically by
+            amplitude-outlier detection.
+        new_gain_cutoff_bad_mask: Channels caught specifically by the
+            absolute gain-magnitude sanity cutoff.
     """
-    n_files = bundle["n_files"]
     axis = bundle["axis"]
     x_padded = axis["x_padded"]
     x_real = axis["x_real"]
     gap_centres = axis["gap_centres"]
-    stitched = n_files > 1
-
+    stitched = bundle["n_files"] > 1
     tile_names = bundle["tile_names"]
 
     # Padded (NaN between pickets) -- continuous series only, so nothing is
@@ -682,6 +759,240 @@ def _render_combined_gains_figure(
     file_reasons = bundle["chan_reasons"]
     tile_reasons = bundle["tile_reasons"]
     mad_residual_threshold = bundle["mad_residual_threshold"]
+
+    flagged = bad_mask[tile, :]
+    n_flagged_here = int(flagged.sum())
+    has_new_amplitude_bad_mask = bool(new_amplitude_bad_mask[tile, :].any())
+    has_new_gain_cutoff_bad_mask = bool(new_gain_cutoff_bad_mask[tile, :].any())
+    tile_name = tile_names[tile]
+    tile_fully_flagged = bool(flagged.all())
+
+    if tile_fully_flagged:
+        reason = _tile_flag_reason_text(tile, tile_reasons)
+        # Tiles flagged before Calvin's own analysis ever ran
+        # (apply_tile_flags() NaNs them immediately) have no real
+        # data to show even in the pristine snapshot -- text only,
+        # same as before. A tile Calvin itself fully flagged (e.g.
+        # promoted via flag_mostly_bad_tiles) still has real pristine
+        # data, so it falls through to the normal plotting path below
+        # instead, with the reason text and border added on top.
+        structural_reason = bool(
+            tile_reasons[tile]
+            & (TileFlagReason.METAFITS | TileFlagReason.HYPERDRIVE_TILE | TileFlagReason.HYPERDRIVE_BASELINE)
+        )
+        if structural_reason:
+            for ax in (ax_gx, ax_gy):
+                ax.axis("on")
+                ax.set_xticks([])
+                ax.set_yticks([])
+                ax.text(
+                    0.5,
+                    0.92,
+                    reason,
+                    ha="center",
+                    va="top",
+                    wrap=True,
+                    fontsize=8,
+                    color="red",
+                    transform=ax.transAxes,
+                )
+                for spine in ax.spines.values():
+                    spine.set_edgecolor("red")
+                    spine.set_linewidth(2.5)
+
+            ax_gx.set_title(f"Tile {tile} ({tile_name}) - gx amplitude - FULLY FLAGGED", fontsize=9)
+            ax_gy.set_title(f"Tile {tile} ({tile_name}) - gy amplitude - FULLY FLAGGED", fontsize=9)
+            return
+
+    # Channels with a genuine per-channel reason of their own, as
+    # opposed to `flagged` (bad_mask), which also broadcasts a
+    # whole-tile reason (e.g. MOSTLY_BAD_CHANNELS) across every
+    # chanblock regardless of that channel's own history. Used below
+    # to keep the black 'x' marker restricted to channels that were
+    # actually individually flagged -- a channel only NaN'd because
+    # flag_mostly_bad_tiles promoted the whole tile never earned its
+    # own reason and shouldn't look like it did.
+    channel_level_flagged = file_reasons[tile, :] != ChannelFlagReason.NONE
+
+    # -- shade flagged channels with a translucent orange band --
+    # orange indicates partial (some-channels) flagging regardless of
+    # reason; red is reserved for a fully flagged tile (see the
+    # border-colour logic below), not for which specific check caught
+    # the channel. Amplitude-outlier and gain-max-cutoff channels get
+    # the same shading; the two are told apart by marker shape ('x' vs
+    # '+' below).
+    #
+    # Drawn as one masked fill per axis rather than an axvspan per
+    # channel. A stitched picket-fence plot has every file's chanblocks
+    # on one axis (768 for a 24x32 observation), so a per-channel
+    # axvspan loop could add tens of thousands of Rectangle patches to
+    # a single page. step="mid" reproduces the old +/-0.5 span
+    # boundaries and merges runs of adjacent flagged channels.
+    shade_mask = new_amplitude_bad_mask[tile, :] | new_gain_cutoff_bad_mask[tile, :]
+    if shade_mask.any():
+        for ax in (ax_gx, ax_gy):
+            ax.fill_between(
+                x_real,
+                0,
+                1,
+                where=shade_mask,
+                step="mid",
+                color="orange",
+                alpha=0.15,
+                zorder=0,
+                transform=mtransforms.blended_transform_factory(ax.transData, ax.transAxes),
+            )
+
+    # Identical for gx and gy: neither mask depends on polarisation, only on
+    # the channel's own flag reason, so both subplots share one computation.
+    flagged_other = channel_level_flagged & ~new_gain_cutoff_bad_mask[tile, :]
+    gain_cutoff_here = new_gain_cutoff_bad_mask[tile, :]
+
+    # -- gx subplot: data, fit line, shaded acceptance band --
+    gx_title = _draw_gain_subplot(
+        ax_gx,
+        tile,
+        tile_name,
+        "gx",
+        x_padded,
+        x_real,
+        before_gx,
+        fit["gx"],
+        band_lower_gx,
+        band_upper_gx,
+        before_gx_real,
+        "tab:blue",
+        "black",
+        flagged_other,
+        gain_cutoff_here,
+        n_flagged_here,
+    )
+
+    # -- gy subplot: data, fit line, shaded acceptance band --
+    gy_title = _draw_gain_subplot(
+        ax_gy,
+        tile,
+        tile_name,
+        "gy",
+        x_padded,
+        x_real,
+        before_gy,
+        fit["gy"],
+        band_lower_gy,
+        band_upper_gy,
+        before_gy_real,
+        "tab:green",
+        "gray",
+        flagged_other,
+        gain_cutoff_here,
+        n_flagged_here,
+    )
+
+    if stitched:
+        # Mark every picket boundary, and label each segment with its real
+        # coarse channel number so the compressed gaps are unambiguous.
+        # vlines takes the whole array, so all boundaries cost one
+        # LineCollection per axis rather than one artist each.
+        for ax in (ax_gx, ax_gy):
+            ax.vlines(
+                gap_centres,
+                *ax.get_ylim(),
+                color="0.55",
+                linestyles=(0, (2, 2)),
+                linewidth=0.9,
+                zorder=1,
+            )
+            ax.set_xticks(axis["tick_pos"])
+            ax.set_xticklabels(axis["tick_labels"], fontsize=_STITCHED_TICK_FONTSIZE)
+            ax.set_xlabel("coarse channel (gaps compressed, not to scale)", fontsize=7)
+
+    # Every tile reaching this point has already had its structural
+    # case (metafits/TILES-HDU/BASELINES-HDU) handled above via
+    # return -- there's no per-channel data to summarise for that
+    # case, but for every other tile (clean, partially flagged, or
+    # fully flagged by Calvin itself), this is worth showing
+    # regardless of severity: a clean tile just shows "100% Good".
+    channel_summary = _channel_summary_text(tile, file_reasons, mad_residual_threshold)
+    if tile_fully_flagged:
+        border_color = "red"
+    elif has_new_gain_cutoff_bad_mask or has_new_amplitude_bad_mask:
+        border_color = "orange"
+    else:
+        border_color = None
+    # Text colour matches border colour (both track the same
+    # severity), falling back to black for a clean tile, which gets
+    # no border colour change at all.
+    # NOTE: orange is too hard to read, so using black
+    if border_color == "orange":
+        text_color = "black"
+    else:
+        text_color = border_color if border_color is not None else "black"
+
+    for ax in (ax_gx, ax_gy):
+        if border_color is not None:
+            for spine in ax.spines.values():
+                spine.set_edgecolor(border_color)
+                spine.set_linewidth(2.5)
+        ax.text(
+            0.5,
+            0.92,
+            channel_summary,
+            ha="center",
+            va="top",
+            wrap=True,
+            fontsize=8,
+            color=text_color,
+            transform=ax.transAxes,
+            zorder=10,
+            bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
+        )
+
+    if tile_fully_flagged:
+        ax_gx.set_title(gx_title + " - FULLY FLAGGED", fontsize=9)
+        ax_gy.set_title(gy_title + " - FULLY FLAGGED", fontsize=9)
+
+
+def _render_combined_gains_figure(
+    bundle: dict,
+    first_tile_index: int,
+    n_tiles: int,
+    solution_file_will_be_modified: bool,
+) -> plt.Figure:
+    """Render one page of the combined gx/gy amplitude plot from an
+    extracted data bundle (see _extract_combined_gains_bundle).
+
+    Every solution file appears on one compressed x-axis, with a marked
+    break at each picket boundary (see _build_stitched_axis). The axis is
+    therefore not linear in frequency; ticks are labelled with the real
+    coarse channel number of each segment.
+
+    This is the actual rendering logic behind plot_combined_gains, kept
+    as a standalone function (touching only plain data, never a
+    HyperfitsSolutionGroup) so it can run directly inside a
+    ProcessPoolExecutor worker.
+
+    Builds the grid of per-tile subplot pairs and delegates each tile's
+    actual drawing to _draw_tile_panel -- see its docstring for the
+    flagging/shading/summary conventions that apply to every tile.
+
+    Args:
+        bundle: Extracted data from _extract_combined_gains_bundle.
+        first_tile_index: Index of the first tile to include in this page.
+        n_tiles: Number of tiles to plot starting from first_tile_index.
+            Also determines the subplot grid shape (see _grid_shape),
+            except for a stitched multi-file plot, which uses the fixed
+            STITCHED_TILE_COLS instead.
+        solution_file_will_be_modified: If True, a note is added to the
+            figure title.
+
+    Returns:
+        The matplotlib Figure containing the grid of per-tile subplot pairs.
+    """
+    n_files = bundle["n_files"]
+    stitched = n_files > 1
+
+    file_reasons = bundle["chan_reasons"]
+    tile_reasons = bundle["tile_reasons"]
 
     n_tiles_total = file_reasons.shape[0]
     last_tile_index = min(first_tile_index + n_tiles, n_tiles_total)
@@ -726,236 +1037,7 @@ def _render_combined_gains_figure(
         col_pair = (i % n_tile_cols) * 2
         ax_gx = axes[row, col_pair]
         ax_gy = axes[row, col_pair + 1]
-
-        flagged = bad_mask[tile, :]
-        n_flagged_here = int(flagged.sum())
-        has_new_amplitude_bad_mask = bool(new_amplitude_bad_mask[tile, :].any())
-        has_new_gain_cutoff_bad_mask = bool(new_gain_cutoff_bad_mask[tile, :].any())
-        tile_name = tile_names[tile]
-        tile_fully_flagged = bool(flagged.all())
-
-        if tile_fully_flagged:
-            reason = _tile_flag_reason_text(tile, tile_reasons)
-            # Tiles flagged before Calvin's own analysis ever ran
-            # (apply_tile_flags() NaNs them immediately) have no real
-            # data to show even in the pristine snapshot -- text only,
-            # same as before. A tile Calvin itself fully flagged (e.g.
-            # promoted via flag_mostly_bad_tiles) still has real pristine
-            # data, so it falls through to the normal plotting path below
-            # instead, with the reason text and border added on top.
-            structural_reason = bool(
-                tile_reasons[tile]
-                & (TileFlagReason.METAFITS | TileFlagReason.HYPERDRIVE_TILE | TileFlagReason.HYPERDRIVE_BASELINE)
-            )
-            if structural_reason:
-                for ax in (ax_gx, ax_gy):
-                    ax.axis("on")
-                    ax.set_xticks([])
-                    ax.set_yticks([])
-                    ax.text(
-                        0.5,
-                        0.92,
-                        reason,
-                        ha="center",
-                        va="top",
-                        wrap=True,
-                        fontsize=8,
-                        color="red",
-                        transform=ax.transAxes,
-                    )
-                    for spine in ax.spines.values():
-                        spine.set_edgecolor("red")
-                        spine.set_linewidth(2.5)
-
-                ax_gx.set_title(f"Tile {tile} ({tile_name}) - gx amplitude - FULLY FLAGGED", fontsize=9)
-                ax_gy.set_title(f"Tile {tile} ({tile_name}) - gy amplitude - FULLY FLAGGED", fontsize=9)
-                continue
-
-        # Channels with a genuine per-channel reason of their own, as
-        # opposed to `flagged` (bad_mask), which also broadcasts a
-        # whole-tile reason (e.g. MOSTLY_BAD_CHANNELS) across every
-        # chanblock regardless of that channel's own history. Used below
-        # to keep the black 'x' marker restricted to channels that were
-        # actually individually flagged -- a channel only NaN'd because
-        # flag_mostly_bad_tiles promoted the whole tile never earned its
-        # own reason and shouldn't look like it did.
-        channel_level_flagged = file_reasons[tile, :] != ChannelFlagReason.NONE
-
-        # -- shade flagged channels with a translucent orange band --
-        # orange indicates partial (some-channels) flagging regardless of
-        # reason; red is reserved for a fully flagged tile (see the
-        # border-colour logic below), not for which specific check caught
-        # the channel. Amplitude-outlier and gain-max-cutoff channels get
-        # the same shading; the two are told apart by marker shape ('x' vs
-        # '+' below).
-        #
-        # Drawn as one masked fill per axis rather than an axvspan per
-        # channel. A stitched picket-fence plot has every file's chanblocks
-        # on one axis (768 for a 24x32 observation), so a per-channel
-        # axvspan loop could add tens of thousands of Rectangle patches to
-        # a single page. step="mid" reproduces the old +/-0.5 span
-        # boundaries and merges runs of adjacent flagged channels.
-        shade_mask = new_amplitude_bad_mask[tile, :] | new_gain_cutoff_bad_mask[tile, :]
-        if shade_mask.any():
-            for ax in (ax_gx, ax_gy):
-                ax.fill_between(
-                    x_real,
-                    0,
-                    1,
-                    where=shade_mask,
-                    step="mid",
-                    color="orange",
-                    alpha=0.15,
-                    zorder=0,
-                    transform=mtransforms.blended_transform_factory(ax.transData, ax.transAxes),
-                )
-
-        # -- gx subplot: data, fit line, shaded acceptance band --
-        ax_gx.fill_between(
-            x_padded,
-            band_lower_gx[tile],
-            band_upper_gx[tile],
-            color="tab:blue",
-            alpha=0.15,
-            zorder=0,
-            label="gx band",
-        )
-        ax_gx.plot(x_padded, before_gx[tile], color="tab:blue", alpha=0.7, linewidth=0.8, label="gx")
-        ax_gx.plot(x_padded, fit["gx"][tile], color="black", linestyle="--", alpha=0.8, linewidth=0.8, label="gx fit")
-        flagged_other_gx = channel_level_flagged & ~new_gain_cutoff_bad_mask[tile, :]
-        if flagged_other_gx.any():
-            ax_gx.scatter(
-                x_real[flagged_other_gx],
-                before_gx_real[tile][flagged_other_gx],
-                color="black",
-                marker="x",
-                s=15,
-                zorder=3,
-                label="flagged",
-            )
-        if new_gain_cutoff_bad_mask[tile, :].any():
-            ax_gx.scatter(
-                x_real[new_gain_cutoff_bad_mask[tile, :]],
-                before_gx_real[tile][new_gain_cutoff_bad_mask[tile, :]],
-                color="black",
-                marker="+",
-                s=30,
-                zorder=3,
-                label="gain cutoff",
-            )
-
-        gx_title = f"Tile {tile} ({tile_name}) - gx amplitude"
-        if n_flagged_here == 0:
-            gx_title += " (no flags)"
-        ax_gx.set_title(gx_title, fontsize=9)
-        ax_gx.yaxis.set_major_formatter(mticker.ScalarFormatter(useOffset=False, useMathText=True))
-        ax_gx.tick_params(labelsize=7)
-
-        # -- gy subplot: data, fit line, shaded acceptance band --
-        ax_gy.fill_between(
-            x_padded,
-            band_lower_gy[tile],
-            band_upper_gy[tile],
-            color="tab:green",
-            alpha=0.15,
-            zorder=0,
-            label="gy band",
-        )
-        ax_gy.plot(x_padded, before_gy[tile], color="tab:green", alpha=0.7, linewidth=0.8, label="gy")
-        ax_gy.plot(x_padded, fit["gy"][tile], color="gray", linestyle="--", alpha=0.8, linewidth=0.8, label="gy fit")
-        flagged_other_gy = channel_level_flagged & ~new_gain_cutoff_bad_mask[tile, :]
-        if flagged_other_gy.any():
-            ax_gy.scatter(
-                x_real[flagged_other_gy],
-                before_gy_real[tile][flagged_other_gy],
-                color="black",
-                marker="x",
-                s=15,
-                zorder=3,
-                label="flagged",
-            )
-        if new_gain_cutoff_bad_mask[tile, :].any():
-            ax_gy.scatter(
-                x_real[new_gain_cutoff_bad_mask[tile, :]],
-                before_gy_real[tile][new_gain_cutoff_bad_mask[tile, :]],
-                color="black",
-                marker="+",
-                s=30,
-                zorder=3,
-                label="gain cutoff",
-            )
-
-        gy_title = f"Tile {tile} ({tile_name}) - gy amplitude"
-        if n_flagged_here == 0:
-            gy_title += " (no flags)"
-        ax_gy.set_title(gy_title, fontsize=9)
-        ax_gy.yaxis.set_major_formatter(mticker.ScalarFormatter(useOffset=False, useMathText=True))
-        ax_gy.tick_params(labelsize=7)
-
-        if stitched:
-            # Mark every picket boundary, and label each segment with its real
-            # coarse channel number so the compressed gaps are unambiguous.
-            # vlines takes the whole array, so all boundaries cost one
-            # LineCollection per axis rather than one artist each.
-            for ax in (ax_gx, ax_gy):
-                ax.vlines(
-                    gap_centres,
-                    *ax.get_ylim(),
-                    color="0.55",
-                    linestyles=(0, (2, 2)),
-                    linewidth=0.9,
-                    zorder=1,
-                )
-                ax.set_xticks(axis["tick_pos"])
-                ax.set_xticklabels(axis["tick_labels"], fontsize=_STITCHED_TICK_FONTSIZE)
-                ax.set_xlabel("coarse channel (gaps compressed, not to scale)", fontsize=7)
-
-        # Every tile reaching this point has already had its structural
-        # case (metafits/TILES-HDU/BASELINES-HDU) handled above via
-        # continue -- there's no per-channel data to summarise for that
-        # case, but for every other tile (clean, partially flagged, or
-        # fully flagged by Calvin itself), this is worth showing
-        # regardless of severity: a clean tile just shows "100% Good".
-        channel_summary = _channel_summary_text(tile, file_reasons, mad_residual_threshold)
-        if tile_fully_flagged:
-            border_color = "red"
-        elif has_new_gain_cutoff_bad_mask or has_new_amplitude_bad_mask:
-            border_color = "orange"
-        else:
-            border_color = None
-        # Text colour matches border colour (both track the same
-        # severity), falling back to black for a clean tile, which gets
-        # no border colour change at all.
-        # NOTE: orange is too hard to read, so using black
-        if border_color == "orange":
-            text_color = "black"
-        else:
-            text_color = border_color if border_color is not None else "black"
-
-        for ax in (ax_gx, ax_gy):
-            if border_color is not None:
-                for spine in ax.spines.values():
-                    spine.set_edgecolor(border_color)
-                    spine.set_linewidth(2.5)
-            ax.text(
-                0.5,
-                0.92,
-                channel_summary,
-                ha="center",
-                va="top",
-                wrap=True,
-                fontsize=8,
-                color=text_color,
-                transform=ax.transAxes,
-                zorder=10,
-                bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
-            )
-
-        if tile_fully_flagged:
-            gx_title += " - FULLY FLAGGED"
-            gy_title += " - FULLY FLAGGED"
-            ax_gx.set_title(gx_title, fontsize=9)
-            ax_gy.set_title(gy_title, fontsize=9)
+        _draw_tile_panel(ax_gx, ax_gy, tile, bundle, bad_mask, new_amplitude_bad_mask, new_gain_cutoff_bad_mask)
 
     for i in range(n_plotted, n_rows * n_tile_cols):
         row = i // n_tile_cols
