@@ -1,7 +1,6 @@
 """Amplitude-outlier gain plots: plot_combined_gains and plot_outlier_gains.
 
-Rewritten (per this module's original split from mwax_calvin_utils.py) to
-work from a HyperfitsSolutionGroup's flag-reason state (TileFlagReason/
+Works from a HyperfitsSolutionGroup's flag-reason state (TileFlagReason/
 ChannelFlagReason) rather than the old bad_mask/band/fit tuple. Renders
 tile-pair pages (amplitude + residual per tile), stitching multiple
 picket-fence files into one continuous x-axis where needed, and budgets

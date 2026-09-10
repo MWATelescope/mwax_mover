@@ -1,27 +1,12 @@
-"""
-Tests for the reading/flagging side of what used to be
-mwax_hyperdrive_solutions.py, now merged into calvin.hyperdrive
-(docs/RESTRUCTURE.md Phase 4).
+"""Tests for the reading/flagging side of calvin.hyperdrive's
+HyperfitsSolution and HyperfitsSolutionGroup.
 
 Covers:
   - HyperfitsSolution.get_jones / chanblock_converged / baseline_tile_flags / write_jones
   - HyperfitsSolutionGroup.load / combined_tile_flags / apply_tile_flags /
     enforce_whole_jones_nan / weights / process_phase_fits / process_gain_fits_for_db
 
-NOTE: HyperfitsSolution/HyperfitsSolutionGroup were moved out of
-mwax_calvin_utils.py into what was then this module's source file
-(mwax_hyperdrive_solutions.py, since merged into calvin/hyperdrive.py).
-Several tests below moved with them from test014_calvin_utils.py, where
-they previously lived (the weights tests, and process_phase_fits/
-process_gain_fits_for_db -- the latter now methods on
-HyperfitsSolutionGroup rather than free functions, so their tests were
-rewritten rather than moved verbatim).
-
-TestSharedHduHelpersAgreeAcrossCallers (which cross-checked HyperfitsSolution
-against mwax_calvin_quality.CalSolutionQuality) has since been removed from
-test014_calvin_utils.py entirely, now that mwax_calvin_quality.py has been
-deleted -- there's no longer a second independent reader to cross-check
-against.
+See docs/RESTRUCTURE.md's Test-tree reorg section for this file's history.
 """
 
 import io

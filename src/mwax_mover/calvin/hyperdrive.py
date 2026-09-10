@@ -13,13 +13,8 @@ run_hyperdrive() shells out to the hyperdrive binary via a Popen handle and
 writes a readme (core.command.write_readme_file) recording the command
 and outcome, mirroring calvin.birli.run_birli(). write_hyperdrive_stats()
 writes get_convergence_summary()'s convergence summary for a
-just-produced solution file.
-
-mwax_hyperdrive_solutions.py and this file's own run_hyperdrive/
-write_hyperdrive_stats seed content were merged into this single module in
-docs/RESTRUCTURE.md Phase 4, once mwax_calvin_plots.py's plots split gave
-calvin/plots/ enough of its own files that "reading" and "running"
-hyperdrive no longer needed to stay apart pending that split.
+just-produced solution file. See docs/RESTRUCTURE.md Phase 4 for how this
+module reached its current shape.
 """
 
 import itertools
@@ -807,9 +802,7 @@ class HyperfitsSolutionGroup:
           read_baseline_tile_flags).
 
         Note: `refant` and `apply_tile_flags` both use this, so all three
-        sources are honoured consistently. (An earlier version of this
-        docstring said `refant` still computed its own weaker metafits-OR-TILES
-        check; that stopped being true once `refant` was switched over.)
+        sources are honoured consistently.
 
         Returns:
             Boolean array, shape (n_tiles,). True where the tile is flagged
@@ -917,9 +910,8 @@ class HyperfitsSolutionGroup:
     def results(self) -> NDArray[np.float64]:
         """Get the combined results array from all solutions."""
         # Each file's results are fetched once and reused for both the length
-        # check and the concatenate. Previously .results was touched twice per
-        # file here, which (before HyperfitsSolution cached it) meant two FITS
-        # opens per file per access to this property.
+        # check and the concatenate, to avoid opening the underlying FITS file
+        # twice per access to this property.
         per_file_results = [soln.results for soln in self.solns]
 
         for soln, chanblocks_hz, soln_results in zip(self.solns, self.all_chanblocks_hz, per_file_results, strict=True):

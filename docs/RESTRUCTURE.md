@@ -989,6 +989,17 @@ by far the larger part of this work:**
   is genuinely about `HyperfitsSolution`/`HyperfitsSolutionGroup`: the
   `Metafits`/`reject_outliers` imports are just fixture-construction
   helpers, not things under test.
+
+  `calvin/test_hyperdrive.py` also absorbed a handful of tests that
+  moved from `test014_calvin_utils.py` rather than `test022`: the
+  `weights` tests, and `process_phase_fits`/`process_gain_fits_for_db`
+  (rewritten rather than moved verbatim, since these are now methods on
+  `HyperfitsSolutionGroup` rather than free functions). One test class,
+  `TestSharedHduHelpersAgreeAcrossCallers`, was dropped entirely rather
+  than moved: it cross-checked `HyperfitsSolution` against
+  `mwax_calvin_quality.CalSolutionQuality`, and `mwax_calvin_quality.py`
+  had already been deleted as dead code (docs/CLEANUP.md 2.1), leaving
+  no second independent reader to cross-check against.
 - `test023_calvin_plots.py` (1219 lines, 29 tests + `TestAvailableMemoryBytes`
   appended to the `core/test_env.py` created above) -> 4 new files:
   `calvin/plots/test_gains.py`, `calvin/plots/test_hyperdrive_plots.py`,

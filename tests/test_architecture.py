@@ -74,22 +74,16 @@ LAYERS: dict[int, tuple[str, ...]] = {
 # Imports that point up a layer. Each one is a bug to be fixed by the
 # restructure, not a licence to add more.
 #
-# Empty for now -- the one known violation (utils importing
-# mwax_priority_queue_data for scan_for_existing_files_and_add_to_priority_queue)
-# was fixed by moving that function into queues/priority_queue_data.py.
+# Empty for now -- the one known violation was fixed; see
+# docs/RESTRUCTURE.md for the history.
 KNOWN_UPWARD_IMPORTS: set[tuple[str, str]] = set()
 
 
 # Import cycles, as frozensets of the modules involved.
 #
-# None currently known. The {mwax_calvin_utils, mwax_hyperdrive_solutions}
-# cycle (mwax_hyperdrive_solutions imported ChanInfo/Metafits/
-# ensure_system_byte_order/the fitting helpers from mwax_calvin_utils at
-# module level, while mwax_calvin_utils.get_convergence_summary() needed
-# HyperfitsSolution and worked around the cycle with a function-local
-# import) was fixed by splitting mwax_calvin_utils.py's shared primitives
-# down into calibration/ and moving get_convergence_summary into
-# calvin/solution_files.py, above the solutions reader.
+# None currently known -- the one cycle found during the restructure was
+# fixed by splitting the shared primitives it depended on out into their
+# own modules; see docs/RESTRUCTURE.md for the history.
 KNOWN_CYCLES: set[frozenset[str]] = set()
 
 

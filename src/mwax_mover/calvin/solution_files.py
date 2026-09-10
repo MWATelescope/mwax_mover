@@ -9,13 +9,8 @@ them with a single atomic rename, so a concurrently-reading controller never
 observes a partially-written fit directory; reap_orphaned_staging_dirs()
 cleans up a staging dir orphaned by a crash.
 
-index.json generation (generate_plot_index_file, populate_index_json_entry,
-get_file_description) and convergence-summary reading (get_convergence_summary)
-used to live here too -- moved to calvin.plots.index and calvin.hyperdrive
-respectively once calvin/plots/ existed as a real destination and merging
-mwax_hyperdrive_solutions.py into calvin.hyperdrive made keeping
-get_convergence_summary here create a two-file import cycle
-(docs/RESTRUCTURE.md Phase 4).
+index.json generation lives in calvin.plots.index and convergence-summary
+reading in calvin.hyperdrive, not here -- see docs/RESTRUCTURE.md Phase 4.
 """
 
 import glob

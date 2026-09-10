@@ -27,11 +27,9 @@ def calculate_backoff_seconds(
 ) -> float:
     """Calculate the exponential backoff delay after a run of failures.
 
-    NOTE: this used to be computed inline (identically, in both QueueWorker and
-    PriorityQueueWorker) as
-    ``backoff_initial_seconds * backoff_factor * consecutive_error_count``,
-    which grows *linearly* -- 2, 4, 6, 8, ... -- despite everything describing
-    it as exponential. It is now genuinely exponential: 1, 2, 4, 8, 16, ...
+    NOTE: this used to grow *linearly* -- 2, 4, 6, 8, ... -- despite
+    everything describing it as exponential. It is now genuinely
+    exponential: 1, 2, 4, 8, 16, ...
 
     Args:
         consecutive_error_count: Number of consecutive failures so far. The

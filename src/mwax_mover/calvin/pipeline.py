@@ -3,15 +3,14 @@ into the database.
 
 CalvinJobType distinguishes a realtime job from an MWA ASVO download job
 (affects Slurm partition/priority -- see calvin.slurm.create_sbatch_script).
-process_solutions() (merged in from mwax_calvin_solutions.py,
-docs/RESTRUCTURE.md Phase 4) loads hyperfits solution files and metafits,
-runs the full flagging pipeline, commits the result to disk, fits final
-phases and gains, and inserts the resulting calibration fit and solution
-records into the MWA metadata database.
+process_solutions() loads hyperfits solution files and metafits, runs the
+full flagging pipeline, commits the result to disk, fits final phases and
+gains, and inserts the resulting calibration fit and solution records into
+the MWA metadata database. See docs/RESTRUCTURE.md Phase 4 for how this
+module reached its current shape.
 
-write_readme_file() used to live here too -- moved to core.command once
-merging mwax_hyperdrive_solutions.py into calvin.hyperdrive made keeping
-it here create a two-file import cycle (see core/command.py's docstring).
+write_readme_file() lives in core.command, not here, to avoid a two-file
+import cycle with calvin.hyperdrive (see core/command.py's docstring).
 """
 
 import logging
