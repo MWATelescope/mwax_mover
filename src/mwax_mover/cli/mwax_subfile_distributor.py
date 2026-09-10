@@ -34,7 +34,6 @@ from mwax_mover.constants import (
     EXIT_FAILURE,
     SECTION_BEAMFORMER,
     SECTION_CORRELATOR,
-    SECTION_MWA_DATABASE,
     SECTION_MWAX_MOVER,
 )
 from mwax_mover.core.config import read_config, read_config_bool, read_config_list, read_optional_config
@@ -50,7 +49,6 @@ from mwax_mover.fits.subfile import (
     read_subfile_trigger_value,
     read_subfile_value,
 )
-from mwax_mover.net.multicast import get_ip_address
 from mwax_mover.processors.bf_stitching import BfStitchingProcessor
 from mwax_mover.processors.checksum_and_db import ChecksumAndDBProcessor
 from mwax_mover.processors.daemon import MWAXDaemon
@@ -217,14 +215,7 @@ class MWAXSubfileDistributor(MWAXDaemon):
         self.cfg_subfile_incoming_path = read_config(self.config, SECTION_MWAX_MOVER, "subfile_incoming_path")
         self.cfg_voltdata_incoming_path = read_config(self.config, SECTION_MWAX_MOVER, "voltdata_incoming_path")
         self.cfg_voltdata_outgoing_path = read_config(self.config, SECTION_MWAX_MOVER, "voltdata_outgoing_path")
-        self.cfg_health_multicast_interface_name = read_config(
-            self.config,
-            SECTION_MWAX_MOVER,
-            "health_multicast_interface_name",
-        )
-        self.cfg_health_multicast_ip = read_config(self.config, SECTION_MWAX_MOVER, "health_multicast_ip")
-        self.cfg_health_multicast_port = int(read_config(self.config, SECTION_MWAX_MOVER, "health_multicast_port"))
-        self.cfg_health_multicast_hops = int(read_config(self.config, SECTION_MWAX_MOVER, "health_multicast_hops"))
+        self._read_health_config(self.config)
 
         self.cfg_psrdada_timeout_sec = int(read_config(self.config, SECTION_MWAX_MOVER, "psrdada_timeout_sec"))
         self.cfg_copy_subfile_to_disk_timeout_sec = int(
@@ -242,10 +233,6 @@ class MWAXSubfileDistributor(MWAXDaemon):
                 "archive_command_timeout_sec",
             )
         )
-
-        # get this hosts primary network interface ip
-        self.health_multicast_interface_ip = get_ip_address(self.cfg_health_multicast_interface_name)
-        logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
 
         if not os.path.exists(self.cfg_voltdata_dont_archive_path):
             logger.error(
@@ -401,18 +388,15 @@ class MWAXSubfileDistributor(MWAXDaemon):
             logger.error(f"metafits location {self.cfg_corr_metafits_path} does not exist. Quitting.")
             sys.exit(EXIT_FAILURE)
 
-        self.cfg_db_host = read_config(self.config, SECTION_MWA_DATABASE, "host")
-        self.cfg_db_name = read_config(self.config, SECTION_MWA_DATABASE, "db")
-        self.cfg_db_user = read_config(self.config, SECTION_MWA_DATABASE, "user")
-        # Only read the password as base64 encoded if db is not dummy
-        self.cfg_db_pass = read_config(
-            self.config,
-            SECTION_MWA_DATABASE,
-            "pass",
-            self.cfg_db_name != "dummy",
-        )
+        db_handler_from_config = MWAXDBHandler.from_config(self.config)
+        self.cfg_db_host = db_handler_from_config.host
+        self.cfg_db_name = db_handler_from_config.db_name
+        self.cfg_db_user = db_handler_from_config.user
+        self.cfg_db_pass = db_handler_from_config.password
+        self.cfg_db_port = db_handler_from_config.port
 
-        self.cfg_db_port = int(read_config(self.config, SECTION_MWA_DATABASE, "port"))
+        # Initiate database connection pool for metadata db
+        self.db_handler = override_db_handler if override_db_handler else db_handler_from_config
 
         # Read config specific to this host
         self.cfg_corr_archive_destination_host = read_config(
@@ -517,18 +501,6 @@ class MWAXSubfileDistributor(MWAXDaemon):
         self.cfg_bf_keep_original_files_after_stitching = read_config_bool(
             self.config, SECTION_BEAMFORMER, "bf_keep_original_files_after_stitching"
         )
-
-        # Initiate database connection pool for metadata db
-        if override_db_handler:
-            self.db_handler = override_db_handler
-        else:
-            self.db_handler = MWAXDBHandler(
-                host=self.cfg_db_host,
-                port=self.cfg_db_port,
-                db_name=self.cfg_db_name,
-                user=self.cfg_db_user,
-                password=self.cfg_db_pass,
-            )
 
         # Read master archiving enabled option
         self.cfg_master_archiving_enabled = (

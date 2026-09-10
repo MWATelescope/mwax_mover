@@ -2,10 +2,11 @@
 
 Tests exercise the base class in isolation via a minimal concrete subclass
 implementing only the four abstract methods (get_extra_status, initialise,
-start, stop). No real daemon inherits from MWAXDaemon yet -- see
-docs/CLEANUP.md 6.4, step 1.
+start, stop), rather than through any of the four real daemons that now
+inherit from it.
 """
 
+from configparser import ConfigParser
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -293,3 +294,30 @@ class TestDefaultHooks:
         assert daemon.during_sleep_interval() is None
         assert daemon.get_worker_status() is None
         assert daemon.shutdown_log_detail() == ""
+
+
+class TestReadHealthConfig:
+    def test_reads_the_four_cfg_attributes_and_derives_the_interface_ip(self):
+        """All four cfg_health_multicast_* attributes are read, and the interface IP is derived."""
+        daemon = _FakeDaemon()
+        config = ConfigParser()
+        config.read_dict(
+            {
+                "mwax mover": {
+                    "health_multicast_interface_name": "eth0",
+                    "health_multicast_ip": "224.0.0.1",
+                    "health_multicast_port": "8000",
+                    "health_multicast_hops": "2",
+                }
+            }
+        )
+
+        with patch("mwax_mover.processors.daemon.get_ip_address", return_value="10.0.0.5") as mock_get_ip:
+            daemon._read_health_config(config)
+
+        assert daemon.cfg_health_multicast_interface_name == "eth0"
+        assert daemon.cfg_health_multicast_ip == "224.0.0.1"
+        assert daemon.cfg_health_multicast_port == 8000
+        assert daemon.cfg_health_multicast_hops == 2
+        assert daemon.health_multicast_interface_ip == "10.0.0.5"
+        mock_get_ip.assert_called_once_with("eth0")

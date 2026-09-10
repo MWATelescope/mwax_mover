@@ -19,11 +19,10 @@ from glob import glob
 import astropy
 
 from mwax_mover import version
-from mwax_mover.constants import EXIT_FAILURE, SECONDS_PER_HOUR, SECTION_MWA_DATABASE, SECTION_MWAX_MOVER
+from mwax_mover.constants import EXIT_FAILURE, SECONDS_PER_HOUR, SECTION_MWAX_MOVER
 from mwax_mover.core.config import read_config, read_config_bool, read_config_list, read_optional_config
 from mwax_mover.core.env import get_hostname, running_under_pytest
 from mwax_mover.db.handler import MWAXDBHandler
-from mwax_mover.net.multicast import get_ip_address
 from mwax_mover.processors.daemon import MWAXDaemon
 from mwax_mover.processors.pawsey_outgoing import PawseyOutgoingProcessor
 from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
@@ -286,20 +285,7 @@ class MWACacheArchiveProcessor(MWAXDaemon):
         )
 
         # health
-        self.cfg_health_multicast_ip = read_config(config, SECTION_MWAX_MOVER, "health_multicast_ip")
-        self.cfg_health_multicast_port = int(read_config(config, SECTION_MWAX_MOVER, "health_multicast_port"))
-        self.cfg_health_multicast_hops = int(read_config(config, SECTION_MWAX_MOVER, "health_multicast_hops"))
-        self.cfg_health_multicast_interface_name = read_config(
-            config,
-            SECTION_MWAX_MOVER,
-            "health_multicast_interface_name",
-        )
-        # get this hosts primary network interface ip
-        # Deliberately no cfg_ prefix: this is derived at runtime from
-        # cfg_health_multicast_interface_name, not read directly from config
-        # (see docs/CLEANUP.md 5.1). Do not "fix" this inconsistency.
-        self.health_multicast_interface_ip = get_ip_address(self.cfg_health_multicast_interface_name)
-        logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
+        self._read_health_config(config)
 
         # We set different s3 options based on the location
         # 2 == Acacia Ingest
@@ -349,23 +335,15 @@ class MWACacheArchiveProcessor(MWAXDaemon):
         #
         # MWA database
         #
-        self.cfg_db_host = read_config(config, SECTION_MWA_DATABASE, "host")
-        self.cfg_db_name = read_config(config, SECTION_MWA_DATABASE, "db")
-        self.cfg_db_user = read_config(config, SECTION_MWA_DATABASE, "user")
-        self.cfg_db_pass = read_config(config, SECTION_MWA_DATABASE, "pass", self.cfg_db_name != "dummy")
-        self.cfg_db_port = int(read_config(config, SECTION_MWA_DATABASE, "port"))
+        db_handler_from_config = MWAXDBHandler.from_config(config)
+        self.cfg_db_host = db_handler_from_config.host
+        self.cfg_db_name = db_handler_from_config.db_name
+        self.cfg_db_user = db_handler_from_config.user
+        self.cfg_db_pass = db_handler_from_config.password
+        self.cfg_db_port = db_handler_from_config.port
 
         # Initiate database connection
-        if override_db_handler:
-            self.db_handler = override_db_handler
-        else:
-            self.db_handler = MWAXDBHandler(
-                host=self.cfg_db_host,
-                port=self.cfg_db_port,
-                db_name=self.cfg_db_name,
-                user=self.cfg_db_user,
-                password=self.cfg_db_pass,
-            )
+        self.db_handler = override_db_handler if override_db_handler else db_handler_from_config
 
         # Assemble paths and extensions
         paths_and_exts = [(s, ".*") for s in self.watch_dirs]

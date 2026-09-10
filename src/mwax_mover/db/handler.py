@@ -7,6 +7,7 @@ table/domain: data_files.py and calibration.py.
 """
 
 import logging
+from configparser import ConfigParser
 
 import psycopg
 import psycopg.errors
@@ -18,6 +19,9 @@ from tenacity import (
     stop_after_attempt,
     wait_fixed,
 )
+
+from mwax_mover.constants import SECTION_MWA_DATABASE
+from mwax_mover.core.config import read_config
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +56,30 @@ class MWAXDBHandler:
                     f"postgresql://{user}:{password}@{host}:{port}/{db_name}{'' if ssl_mode is None else ssl_mode}"
                 ),
             )
+
+    @classmethod
+    def from_config(cls, config: ConfigParser) -> "MWAXDBHandler":
+        """Build an MWAXDBHandler from the [mwa database] config section.
+
+        Reads host, db, user, pass, and port from SECTION_MWA_DATABASE,
+        applying the same "only base64-decode a real password" predicate
+        every caller used to write out by hand: pass is decoded unless db
+        is "dummy" (see docs/CLEANUP.md 1.2).
+
+        Args:
+            config: A ConfigParser instance with the configuration already loaded.
+
+        Returns:
+            A new MWAXDBHandler for the database described by [mwa database].
+        """
+        db_name = read_config(config, SECTION_MWA_DATABASE, "db")
+        return cls(
+            host=read_config(config, SECTION_MWA_DATABASE, "host"),
+            port=int(read_config(config, SECTION_MWA_DATABASE, "port")),
+            db_name=db_name,
+            user=read_config(config, SECTION_MWA_DATABASE, "user"),
+            password=read_config(config, SECTION_MWA_DATABASE, "pass", db_name != "dummy"),
+        )
 
     def close(self):
         """Close the database connection pool if it is open."""

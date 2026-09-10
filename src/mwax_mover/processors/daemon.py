@@ -16,9 +16,12 @@ import logging
 import sys
 import time
 from abc import ABC, abstractmethod
+from configparser import ConfigParser
 
 from mwax_mover import version
-from mwax_mover.net.multicast import send_multicast
+from mwax_mover.constants import SECTION_MWAX_MOVER
+from mwax_mover.core.config import read_config
+from mwax_mover.net.multicast import get_ip_address, send_multicast
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +93,31 @@ class MWAXDaemon(ABC):
         self.fatal_exit_code = exit_code
         self.fatal_reason = reason
         self.running = False
+
+    def _read_health_config(self, config: ConfigParser) -> None:
+        """Read the [mwax mover] health-multicast config used by health_loop().
+
+        Sets the four cfg_health_multicast_* attributes plus the derived
+        health_multicast_interface_ip (see docs/CLEANUP.md 5.1) -- kept
+        together since the derivation depends on one of the reads. Call
+        this from initialise().
+
+        Args:
+            config: A ConfigParser instance with the configuration already loaded.
+        """
+        self.cfg_health_multicast_interface_name = read_config(
+            config, SECTION_MWAX_MOVER, "health_multicast_interface_name"
+        )
+        self.cfg_health_multicast_ip = read_config(config, SECTION_MWAX_MOVER, "health_multicast_ip")
+        self.cfg_health_multicast_port = int(read_config(config, SECTION_MWAX_MOVER, "health_multicast_port"))
+        self.cfg_health_multicast_hops = int(read_config(config, SECTION_MWAX_MOVER, "health_multicast_hops"))
+
+        # get this hosts primary network interface ip
+        # Deliberately no cfg_ prefix: this is derived at runtime from
+        # cfg_health_multicast_interface_name, not read directly from config
+        # (see docs/CLEANUP.md 5.1). Do not "fix" this inconsistency.
+        self.health_multicast_interface_ip = get_ip_address(self.cfg_health_multicast_interface_name)
+        logger.info(f"IP for sending multicast: {self.health_multicast_interface_ip}")
 
     def health_loop(self) -> None:
         """Periodically send health status via UDP multicast.
