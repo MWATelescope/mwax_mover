@@ -194,7 +194,13 @@ def process_solutions(
         # picket fence has one solution file per coarse channel (24 serial
         # launches here and another 24 below, versus 2 for a contiguous obs).
         for failed_file, plots_error in hyperdrive.generate_plots_for_files(
-            obs_id, fits_solution_files, hyperdrive_binary_path, metafits_file, output_data_path, before=True
+            obs_id,
+            fits_solution_files,
+            hyperdrive_binary_path,
+            metafits_file,
+            output_data_path,
+            before=True,
+            reftile=refant["name"],
         ):
             logger.warning(f"{obs_id}: 'before' hyperdrive plots failed for {failed_file}: {plots_error}")
 
@@ -251,7 +257,13 @@ def process_solutions(
         # "After" plots: hyperdrive's own binary-generated amp/phase plots,
         # against the now-committed files.
         for failed_file, plots_error in hyperdrive.generate_plots_for_files(
-            obs_id, fits_solution_files, hyperdrive_binary_path, metafits_file, output_data_path, before=False
+            obs_id,
+            fits_solution_files,
+            hyperdrive_binary_path,
+            metafits_file,
+            output_data_path,
+            before=False,
+            reftile=refant["name"],
         ):
             logger.warning(f"{obs_id}: hyperdrive plots failed for {failed_file}: {plots_error}")
 

@@ -116,7 +116,13 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
     # in-memory run_flagging_pipeline() below regardless of ordering,
     # since nothing gets written to disk until commit().)
     for failed_file, plots_error in hyperdrive.generate_plots_for_files(
-        obs_id, args.solution_filenames, args.hyperdrive_binary_path, metafits_filename, args.output_path, before=True
+        obs_id,
+        args.solution_filenames,
+        args.hyperdrive_binary_path,
+        metafits_filename,
+        args.output_path,
+        before=True,
+        reftile=refant["name"],
     ):
         print(f"Warning: 'before' hyperdrive plots failed for {failed_file}: {plots_error}")
 
@@ -152,7 +158,13 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
     # matching this tool's historical behaviour (that flag only ever
     # controlled whether outlier-flagged gains were written to disk).
     for failed_file, plots_error in hyperdrive.generate_plots_for_files(
-        obs_id, args.solution_filenames, args.hyperdrive_binary_path, metafits_filename, args.output_path, before=False
+        obs_id,
+        args.solution_filenames,
+        args.hyperdrive_binary_path,
+        metafits_filename,
+        args.output_path,
+        before=False,
+        reftile=refant["name"],
     ):
         print(f"Warning: hyperdrive plots failed for {failed_file}: {plots_error}")
 

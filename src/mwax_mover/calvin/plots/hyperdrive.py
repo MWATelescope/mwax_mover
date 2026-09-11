@@ -25,6 +25,7 @@ def generate_plots(
     output_dir: str,
     before: bool,
     max_amp: int | None = None,
+    reftile: str | None = None,
 ) -> tuple[bool, str]:
     """Generate solution plots via the hyperdrive binary itself.
 
@@ -45,6 +46,11 @@ def generate_plots(
             run (which hyperdrive names identically) does not overwrite them.
         max_amp: Optionally pass a max value for Hyperdrive to clip to when
             plotting amps. None means let Hyperdrive figure it out.
+        reftile: Reference tile name to pass as hyperdrive's own --reftile,
+            so these plots are calibrated against the same reference calvin
+            itself used (see HyperfitsSolutionGroup.select_refant). None
+            omits the flag, leaving hyperdrive to pick its own default --
+            existing callers that don't pass this keep today's behaviour.
 
     Returns:
         A tuple of (success: bool, error_message: str).
@@ -59,6 +65,9 @@ def generate_plots(
 
         if max_amp is not None:
             hyp_soln_plot_args += f" --max-amp {max_amp}"
+
+        if reftile is not None:
+            hyp_soln_plot_args += f" --reftile {reftile}"
 
         cmd = (
             f"{hyperdrive_binary_path} solutions-plot {hyp_soln_plot_args} "
@@ -122,6 +131,7 @@ def generate_plots_for_files(
     before: bool,
     max_amp: int | None = None,
     max_workers: int | None = None,
+    reftile: str | None = None,
 ) -> list[tuple[str, str]]:
     """Run generate_plots for every solution file, concurrently.
 
@@ -152,6 +162,7 @@ def generate_plots_for_files(
         max_workers: Concurrent hyperdrive processes. Defaults to
             min(len(solution_filenames), os.cpu_count()), so a contiguous
             observation still runs exactly one process.
+        reftile: See generate_plots. Passed identically to every file's call.
 
     Returns:
         A list of (solution_filename, error_message) for the files that failed,
@@ -175,6 +186,7 @@ def generate_plots_for_files(
                 output_dir,
                 before,
                 max_amp,
+                reftile,
             ): f
             for f in solution_filenames
         }
