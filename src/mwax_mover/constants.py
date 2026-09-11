@@ -33,7 +33,9 @@ Calibration numerics: MAD_TO_STD_SCALE_FACTOR, the MAD-to-standard-
 deviation conversion used by the outlier-rejection code; the di-calibrate
 memory-estimate constants (JONES_F32_BYTES, JONES_F64_BYTES, F32_BYTES);
 HYPERDRIVE_MEMORY_HEADROOM_FRACTION and HYPERDRIVE_FALLBACK_WORKERS, used
-to size concurrent hyperdrive runs across picket-fence bands.
+to size concurrent hyperdrive runs across picket-fence bands; and the
+REFTILE_* gates used by select_refant to choose a calibration-quality-
+aware reference tile.
 """
 
 # The full filename with path
@@ -164,3 +166,12 @@ HYPERDRIVE_MEMORY_HEADROOM_FRACTION = 0.15
 # hyperdrive run is a failed calibration, not just a slow plot, so
 # guessing low here costs more to get wrong.
 HYPERDRIVE_FALLBACK_WORKERS = 1
+
+# Reference-tile selection gates (calvin/hyperfits_solution_group.py
+# select_refant). A tile below phase/gain fit quality, or with too extreme
+# a chi2dof, in EITHER polarisation, fails that gate -- see
+# docs/REF_TILE_SELECTION.md.
+REFTILE_PHASE_QUALITY_MIN = 0.8
+REFTILE_PHASE_CHI2DOF_MIN = 0.2
+REFTILE_PHASE_CHI2DOF_MAX = 3.0
+REFTILE_GAIN_QUALITY_MIN = 0.8

@@ -37,8 +37,10 @@ from numpy.typing import NDArray
 from mwax_mover.calibration.df_columns import (
     COL_CHI2DOF,
     COL_FLAVOR,
+    COL_LENGTH,
     COL_OUTLIER,
     COL_POL,
+    COL_QUALITY,
     COL_SIGMA_RESID,
     COL_SOLN_IDX,
     COL_TILE_ID,
@@ -155,11 +157,11 @@ def plot_debug_phase_fits(
         COL_TILE_ID,
         COL_SOLN_IDX,
         COL_POL,
-        "length",
+        COL_LENGTH,
         "intercept",
         COL_SIGMA_RESID,
         COL_CHI2DOF,
-        "quality",
+        COL_QUALITY,
         "stderr",
         COL_OUTLIER,
     ]
@@ -199,10 +201,10 @@ def plot_rx_lengths(flavor_fits, prefix, show, title):
     """
     good_fits = flavor_fits[~flavor_fits[COL_OUTLIER]]
     rxs = sorted(good_fits["rx"].unique())
-    means = good_fits.groupby(["rx"])["length"].mean()
+    means = good_fits.groupby(["rx"])[COL_LENGTH].mean()
 
     plt.clf()
-    box_plot = sns.boxplot(data=good_fits, y="rx", x="length", hue=COL_POL, orient="h", fliersize=0.5)
+    box_plot = sns.boxplot(data=good_fits, y="rx", x=COL_LENGTH, hue=COL_POL, orient="h", fliersize=0.5)
     box_plot.grid(axis="x")
     x_text = np.max(box_plot.get_xlim())
 
@@ -350,7 +352,7 @@ def plot_phase_intercepts(prefix, show, title, flavor_fits):
     g.map(
         (lambda theta, r, size, **kwargs: plt.scatter(x=theta, y=r, s=10 / (0.1 + size), **kwargs)),
         "intercept",
-        "length",
+        COL_LENGTH,
         COL_SIGMA_RESID,
     )
     fig = plt.gcf()
@@ -555,7 +557,7 @@ def plot_phase_residual(
             ylim = float(residual_vmax)
             plt.ylim(-ylim, ylim)
 
-    g.map(plot_residual, COL_SOLN_IDX, COL_POL, COL_FLAVOR, "length", "intercept")
+    g.map(plot_residual, COL_SOLN_IDX, COL_POL, COL_FLAVOR, COL_LENGTH, "intercept")
     g.set_axis_labels("freq", "phase")
 
     fig = plt.gcf()

@@ -10,6 +10,7 @@ docs/HYPERDRIVE_PARALLELISM.md Phase 1.
 import io
 import os
 import shutil
+from typing import cast
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import numpy as np
@@ -21,6 +22,15 @@ from astropy.constants import c as speed_of_light  # ty: ignore[unresolved-impor
 
 from tests_common import data_path, obs_metafits_path
 
+from mwax_mover.calibration.df_columns import (
+    COL_CHI2DOF,
+    COL_LENGTH,
+    COL_POL,
+    COL_QUALITY,
+    COL_SIGMA_RESID,
+    COL_SOLN_IDX,
+    COL_TILE_ID,
+)
 from mwax_mover.calibration.models import Metafits
 from mwax_mover.calibration.outliers import reject_outliers
 from mwax_mover.calvin.hyperfits_solution import HyperfitsSolution
@@ -41,18 +51,18 @@ METAFITS_PATH = obs_metafits_path(1391522232)
 # ===========================================================================
 
 
-def test_refant_is_unflagged_lowest_id():
-    """refant returns the lowest-ID tile not flagged by any of the three sources."""
+def test_bootstrap_refant_is_unflagged_lowest_id():
+    """_bootstrap_refant returns the lowest-ID tile not flagged by any of the three sources."""
     metafits = Metafits(METAFITS_PATH)
     group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
-    refant = group.refant
-    assert not group.combined_tile_flags[refant.name]  # .name is the DataFrame index here
+    refant = group._bootstrap_refant()
+    assert not group.combined_tile_flags[cast(int, refant.name)]  # .name is the DataFrame index here
     candidate_ids = group.metafits_tiles_df["id"].to_numpy()
     unflagged_ids = candidate_ids[~group.combined_tile_flags]
     assert refant["id"] == unflagged_ids.min()
 
 
-def test_refant_excludes_baseline_only_flagged_tile():
+def test_bootstrap_refant_excludes_baseline_only_flagged_tile():
     """A tile flagged only via BASELINES inference (not metafits/TILES) is never chosen as refant."""
     metafits = Metafits(METAFITS_PATH)
     mock_soln = MagicMock(spec=HyperfitsSolution)
@@ -70,7 +80,7 @@ def test_refant_excludes_baseline_only_flagged_tile():
     group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
     group.solns = [mock_soln]
 
-    assert group.refant.name != lowest_unflagged_idx
+    assert group._bootstrap_refant().name != lowest_unflagged_idx
 
 
 def test_combined_tile_flags_matches_metafits_when_no_other_flags():
@@ -1255,3 +1265,197 @@ class TestResultsCaching:
         fresh = HyperfitsSolution(str(soln_path)).results
         assert np.array_equal(hs.results, cached_before, equal_nan=True)
         assert np.array_equal(hs.results, fresh, equal_nan=True)
+
+
+# ===========================================================================
+# HyperfitsSolutionGroup.select_refant
+# ===========================================================================
+
+
+def _fake_phase_fits(rows: dict) -> pd.DataFrame:
+    """Build a synthetic process_phase_fits()-shaped DataFrame.
+
+    Args:
+        rows: {tile_id: {"XX": (quality, chi2dof, length), "YY": (...)}}.
+            A tile may omit a pol entirely, or omit itself completely, to
+            simulate _phase_fit_one returning None for that (tile, pol).
+    """
+    records = []
+    for tile_id, pols in rows.items():
+        for pol, (quality, chi2dof, length) in pols.items():
+            records.append(
+                {
+                    COL_TILE_ID: tile_id,
+                    COL_SOLN_IDX: tile_id,
+                    COL_POL: pol,
+                    COL_LENGTH: length,
+                    "intercept": 0.0,
+                    COL_SIGMA_RESID: 0.1,
+                    COL_CHI2DOF: chi2dof,
+                    COL_QUALITY: quality,
+                    "stderr": 0.0,
+                }
+            )
+    return pd.DataFrame(records)
+
+
+def _fake_gain_fits(rows: dict) -> pd.DataFrame:
+    """Build a synthetic process_gain_fits_for_db()-shaped DataFrame.
+
+    Args:
+        rows: {tile_id: {"XX": quality, "YY": quality}}. A tile may omit a
+            pol, or omit itself completely, to simulate _gain_fit_one
+            returning None for that (tile, pol).
+    """
+    records = []
+    for tile_id, pols in rows.items():
+        for pol, quality in pols.items():
+            records.append(
+                {
+                    COL_TILE_ID: tile_id,
+                    COL_SOLN_IDX: tile_id,
+                    COL_POL: pol,
+                    COL_QUALITY: quality,
+                    "gains": [],
+                    "pol0": [],
+                    "pol1": [],
+                    COL_SIGMA_RESID: [],
+                }
+            )
+    return pd.DataFrame(records)
+
+
+def _group_for_refant_tests() -> HyperfitsSolutionGroup:
+    """A real group (real metafits_tiles_df/combined_tile_flags), for
+    select_refant tests that then stub out process_phase_fits/
+    process_gain_fits_for_db with synthetic data. Tile IDs 11-14 are all
+    genuinely unflagged in this fixture.
+    """
+    metafits = Metafits(METAFITS_PATH)
+    return HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+
+
+def test_select_refant_prefers_clean_fit_over_smaller_length_deviation():
+    """A tile failing the chi2dof gate loses even if its length is closer to the median."""
+    group = _group_for_refant_tests()
+    # Tile 12's length (5.0) is exactly the median of {5.0, 15.0} -- the
+    # smallest possible deviation -- but its chi2dof is way outside the
+    # gate. Tile 11 has a larger deviation but passes every gate.
+    phase_fits = _fake_phase_fits(
+        {
+            11: {"XX": (1.0, 1.0, 10.0), "YY": (1.0, 1.0, 10.0)},
+            12: {"XX": (1.0, 50.0, 5.0), "YY": (1.0, 50.0, 5.0)},
+        }
+    )
+    gain_fits = _fake_gain_fits({11: {"XX": 1.0, "YY": 1.0}, 12: {"XX": 1.0, "YY": 1.0}})
+
+    with (
+        patch.object(group, "_bootstrap_refant", return_value=group.metafits_tiles_df.iloc[0]),
+        patch.object(group, "process_phase_fits", return_value=phase_fits),
+        patch.object(group, "process_gain_fits_for_db", return_value=gain_fits),
+    ):
+        chosen = group.select_refant(phase_fit_niter=10)
+
+    assert chosen["id"] == 11
+
+
+def test_select_refant_worst_of_xx_yy_pol():
+    """A tile good on XX but bad on YY still fails the gate -- worst-of-pol, not best-of."""
+    group = _group_for_refant_tests()
+    phase_fits = _fake_phase_fits(
+        {
+            11: {"XX": (1.0, 1.0, 10.0), "YY": (1.0, 1.0, 10.0)},
+            # Good XX, but YY quality fails the gate.
+            12: {"XX": (1.0, 1.0, 10.0), "YY": (0.1, 1.0, 10.0)},
+        }
+    )
+    gain_fits = _fake_gain_fits({11: {"XX": 1.0, "YY": 1.0}, 12: {"XX": 1.0, "YY": 1.0}})
+
+    with (
+        patch.object(group, "_bootstrap_refant", return_value=group.metafits_tiles_df.iloc[0]),
+        patch.object(group, "process_phase_fits", return_value=phase_fits),
+        patch.object(group, "process_gain_fits_for_db", return_value=gain_fits),
+    ):
+        chosen = group.select_refant(phase_fit_niter=10)
+
+    assert chosen["id"] == 11
+
+
+def test_select_refant_degrades_gracefully_when_none_pass_every_gate():
+    """When no tile passes every gate, the tile failing fewest still wins -- no exception."""
+    group = _group_for_refant_tests()
+    phase_fits = _fake_phase_fits(
+        {
+            # Fails only the chi2dof gate (1 failure).
+            11: {"XX": (1.0, 50.0, 10.0), "YY": (1.0, 50.0, 10.0)},
+            # Fails both the quality gate and the chi2dof gate (2 failures).
+            12: {"XX": (0.1, 50.0, 5.0), "YY": (0.1, 50.0, 5.0)},
+        }
+    )
+    gain_fits = _fake_gain_fits({11: {"XX": 1.0, "YY": 1.0}, 12: {"XX": 1.0, "YY": 1.0}})
+
+    with (
+        patch.object(group, "_bootstrap_refant", return_value=group.metafits_tiles_df.iloc[0]),
+        patch.object(group, "process_phase_fits", return_value=phase_fits),
+        patch.object(group, "process_gain_fits_for_db", return_value=gain_fits),
+    ):
+        chosen = group.select_refant(phase_fit_niter=10)
+
+    assert chosen["id"] == 11  # fewer failures, even though neither is clean
+
+
+def test_select_refant_missing_tile_data_sorts_last():
+    """A tile absent from the fit DataFrames (simulating a None fit result) loses to real data."""
+    group = _group_for_refant_tests()
+    # Tile 12 has no rows at all in either DataFrame.
+    phase_fits = _fake_phase_fits({11: {"XX": (0.85, 1.5, 10.0), "YY": (0.85, 1.5, 10.0)}})
+    gain_fits = _fake_gain_fits({11: {"XX": 0.85, "YY": 0.85}})
+
+    with (
+        patch.object(group, "_bootstrap_refant", return_value=group.metafits_tiles_df.iloc[0]),
+        patch.object(group, "process_phase_fits", return_value=phase_fits),
+        patch.object(group, "process_gain_fits_for_db", return_value=gain_fits),
+    ):
+        chosen = group.select_refant(phase_fit_niter=10)
+
+    assert chosen["id"] == 11
+
+
+def test_select_refant_tie_break_is_deterministic_by_tile_id():
+    """Two tiles with identical scores are broken by tile ID, not arbitrary/insertion order."""
+    group = _group_for_refant_tests()
+    # Identical quality/chi2dof/length for both -- a genuine tie on every
+    # scored dimension.
+    phase_fits = _fake_phase_fits(
+        {
+            14: {"XX": (1.0, 1.0, 10.0), "YY": (1.0, 1.0, 10.0)},
+            13: {"XX": (1.0, 1.0, 10.0), "YY": (1.0, 1.0, 10.0)},
+        }
+    )
+    gain_fits = _fake_gain_fits({14: {"XX": 1.0, "YY": 1.0}, 13: {"XX": 1.0, "YY": 1.0}})
+
+    with (
+        patch.object(group, "_bootstrap_refant", return_value=group.metafits_tiles_df.iloc[0]),
+        patch.object(group, "process_phase_fits", return_value=phase_fits),
+        patch.object(group, "process_gain_fits_for_db", return_value=gain_fits),
+    ):
+        chosen = group.select_refant(phase_fit_niter=10)
+
+    assert chosen["id"] == 13  # lower tile ID wins the tie
+
+
+def test_select_refant_all_tiles_clean_returns_valid_unflagged_tile():
+    """Sanity check: with every candidate equally clean, the result is still a real unflagged tile."""
+    group = _group_for_refant_tests()
+    unflagged_ids = group.metafits_tiles_df["id"].to_numpy()[~group.combined_tile_flags]
+    phase_fits = _fake_phase_fits({int(tid): {"XX": (1.0, 1.0, 10.0), "YY": (1.0, 1.0, 10.0)} for tid in unflagged_ids})
+    gain_fits = _fake_gain_fits({int(tid): {"XX": 1.0, "YY": 1.0} for tid in unflagged_ids})
+
+    with (
+        patch.object(group, "_bootstrap_refant", return_value=group.metafits_tiles_df.iloc[0]),
+        patch.object(group, "process_phase_fits", return_value=phase_fits),
+        patch.object(group, "process_gain_fits_for_db", return_value=gain_fits),
+    ):
+        chosen = group.select_refant(phase_fit_niter=10)
+
+    assert chosen["id"] in unflagged_ids

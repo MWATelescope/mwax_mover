@@ -25,13 +25,30 @@ import mwalib
 import numpy as np
 from astropy.io import fits
 from numpy.typing import NDArray
-from pandas import DataFrame
+from pandas import DataFrame, Series
 
-from mwax_mover.calibration.df_columns import COL_GX, COL_GY, COL_POL, COL_SOLN_IDX, COL_TILE_ID, COL_XX, COL_YY
+from mwax_mover.calibration.df_columns import (
+    COL_CHI2DOF,
+    COL_GX,
+    COL_GY,
+    COL_LENGTH,
+    COL_POL,
+    COL_QUALITY,
+    COL_SOLN_IDX,
+    COL_TILE_ID,
+    COL_XX,
+    COL_YY,
+)
 from mwax_mover.calibration.fitting import fit_gain, fit_phase_line
 from mwax_mover.calibration.models import ChanInfo, GainFitInfo, Metafits, PhaseFitInfo
 from mwax_mover.calibration.outliers import annotate_phase_outliers, iterative_poly_clip_batch
 from mwax_mover.calvin.hyperfits_solution import HyperfitsSolution
+from mwax_mover.constants import (
+    REFTILE_GAIN_QUALITY_MIN,
+    REFTILE_PHASE_CHI2DOF_MAX,
+    REFTILE_PHASE_CHI2DOF_MIN,
+    REFTILE_PHASE_QUALITY_MIN,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -603,21 +620,17 @@ class HyperfitsSolutionGroup:
         """
         return np.concatenate(self.all_chanblocks_hz).astype(np.float64)
 
-    @property
-    def refant(self):
-        """Get reference antenna (unflagged tile with lowest ID).
+    def _bootstrap_refant(self) -> Series:
+        """Cheap structural pick: unflagged tile with lowest ID.
 
-        Returns the first unflagged tile in the solutions and metafits,
-        checking against combined_tile_flags (all three flag sources:
-        metafits, TILES HDU, and BASELINES-HDU-inferred). Previously this
-        computed its own metafits-OR-TILES-HDU check locally, missing the
-        BASELINES source; now that combined_tile_flags is actually used
-        elsewhere in the real pipeline, leaving refant on the weaker check
-        would be a real correctness gap (it could pick a BASELINES-flagged
-        tile as reference).
+        Used only as a throwaway reference for select_refant's ranking
+        pass -- see that method's docstring for why a single pass can't
+        rank tiles by their own fitted phase-slope length directly. Not
+        itself quality-aware; nothing about this pick's own suitability as
+        a reference matters, since select_refant never has to accept it.
 
         Returns:
-            A pandas Series representing the reference antenna row.
+            A pandas Series representing the bootstrap tile row.
 
         Raises:
             ValueError: If no unflagged tiles are found.
@@ -630,6 +643,104 @@ class HyperfitsSolutionGroup:
         candidate_ids = self.metafits_tiles_df["id"].to_numpy()
         best_idx = np.where(unflagged_mask)[0][np.argmin(candidate_ids[unflagged_mask])]
         return self.metafits_tiles_df.iloc[best_idx]
+
+    def select_refant(self, phase_fit_niter: int) -> Series:
+        """Choose the reference tile for calibration.
+
+        Two-stage, to break a circularity in the obvious approach: a
+        tile's fitted phase-slope length (PhaseFitInfo.length) is fitted
+        on *reference-normalised* solutions, so it is a difference from
+        whichever tile was used as reference, not an absolute measurement
+        -- the reference tile's own row always fits to exactly 0. Picking
+        "smallest |length|" without accounting for this would just
+        re-select whatever reference was already used to compute it.
+
+        Stage 1 (bootstrap): _bootstrap_refant()'s cheap structural pick is
+        used to run a throwaway, read-only process_phase_fits/
+        process_gain_fits_for_db pass (neither mutates self.jones) purely
+        to gather ranking data for every unflagged tile.
+
+        Stage 2 (rank): each unflagged tile is scored by how many quality
+        gates it fails (phase quality, phase chi2dof range, gain quality --
+        each checked on the worse of XX/YY, so a tile is only as
+        trustworthy as its worse polarisation) and, among tiles with equal
+        failure counts, by how far its fitted length deviates from the
+        *population median* length (not from zero -- median-relative
+        deviation is invariant to which tile the bootstrap stage happened
+        to use, unlike the raw fitted value). Tile ID breaks any remaining
+        tie, for a deterministic result. This degrades gracefully when no
+        tile passes every gate: the tile failing fewest still wins, with no
+        separate "nothing qualified" case needed. See
+        docs/REF_TILE_SELECTION.md for the full design discussion.
+
+        A tile missing from either fit DataFrame entirely (e.g.
+        _phase_fit_one/_gain_fit_one returned None for it) is treated as
+        failing every gate that row would have covered, and sorts behind
+        any tile with real data, rather than raising.
+
+        Args:
+            phase_fit_niter: Number of iterations for the throwaway phase
+                fit (see process_phase_fits).
+
+        Returns:
+            A pandas Series for the chosen tile (same shape
+            _bootstrap_refant/the old refant property returned).
+
+        Raises:
+            ValueError: If no unflagged tiles are found.
+        """
+        bootstrap = self._bootstrap_refant()
+        phase_fits = self.process_phase_fits(bootstrap["name"], phase_fit_niter)
+        gain_fits = self.process_gain_fits_for_db(bootstrap["name"])
+
+        phase_by_pol = {pol: phase_fits[phase_fits[COL_POL] == pol].set_index(COL_TILE_ID) for pol in (COL_XX, COL_YY)}
+        gain_by_pol = {pol: gain_fits[gain_fits[COL_POL] == pol].set_index(COL_TILE_ID) for pol in (COL_XX, COL_YY)}
+        median_length = {pol: phase_by_pol[pol][COL_LENGTH].median() for pol in (COL_XX, COL_YY)}
+
+        # _bootstrap_refant() above already raised if there were no
+        # unflagged tiles at all, so this mask is guaranteed non-empty here.
+        unflagged_mask = ~self.combined_tile_flags
+        candidate_ids = self.metafits_tiles_df["id"].to_numpy()[unflagged_mask]
+
+        scored = []
+        for tile_id in candidate_ids:
+            failures = 0
+            length_deviation = float("inf")
+
+            if tile_id in phase_by_pol[COL_XX].index and tile_id in phase_by_pol[COL_YY].index:
+                phase_xx = phase_by_pol[COL_XX].loc[tile_id]
+                phase_yy = phase_by_pol[COL_YY].loc[tile_id]
+
+                if min(phase_xx[COL_QUALITY], phase_yy[COL_QUALITY]) < REFTILE_PHASE_QUALITY_MIN:
+                    failures += 1
+
+                chi2dof_in_range = all(
+                    REFTILE_PHASE_CHI2DOF_MIN <= fit[COL_CHI2DOF] <= REFTILE_PHASE_CHI2DOF_MAX
+                    for fit in (phase_xx, phase_yy)
+                )
+                if not chi2dof_in_range:
+                    failures += 1
+
+                length_deviation = max(
+                    abs(phase_xx[COL_LENGTH] - median_length[COL_XX]),
+                    abs(phase_yy[COL_LENGTH] - median_length[COL_YY]),
+                )
+            else:
+                failures += 2
+
+            if tile_id in gain_by_pol[COL_XX].index and tile_id in gain_by_pol[COL_YY].index:
+                gain_xx = gain_by_pol[COL_XX].loc[tile_id]
+                gain_yy = gain_by_pol[COL_YY].loc[tile_id]
+                if min(gain_xx[COL_QUALITY], gain_yy[COL_QUALITY]) < REFTILE_GAIN_QUALITY_MIN:
+                    failures += 1
+            else:
+                failures += 1
+
+            scored.append((failures, length_deviation, tile_id))
+
+        scored.sort()
+        best_tile_id = scored[0][2]
+        return self.metafits_tiles_df[self.metafits_tiles_df["id"] == best_tile_id].iloc[0]
 
     @property
     def calibrator(self) -> str | None:

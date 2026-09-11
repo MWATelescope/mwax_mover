@@ -104,7 +104,7 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
     assert soln_group.jones is not None
     pristine_jones = [file_jones.copy() for file_jones in soln_group.jones]
 
-    refant = soln_group.refant
+    refant = soln_group.select_refant(args.phase_fit_niter)
 
     # "Before" plots: hyperdrive's own binary-generated amp/phase plots,
     # against the still-pristine on-disk files -- nothing has been

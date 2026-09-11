@@ -151,7 +151,7 @@ def process_solutions(
             # nothing more we can do
             return True, "No unflagged tiles found", None
 
-        refant = soln_group.refant
+        refant = soln_group.select_refant(phase_fit_niter)
         logger.debug(f"{refant['name']=} ({refant['id']})")
 
         # get channel info
