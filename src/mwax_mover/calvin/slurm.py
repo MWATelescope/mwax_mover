@@ -161,8 +161,15 @@ def submit_sbatch(script_path: str, script: str, obs_id: int, request_ids: list[
         logger.exception(f"{script_filename} failure running sbatch.")
         return_val = False
 
-    if not return_val:
-        return (False, None)
+    # Every path where run_command succeeded and returned True already
+    # returned or exited above (successful parse -> return; unparseable
+    # slurm_job_id -> sys.exit). Reaching here therefore always means
+    # return_val is False, from either the "else" branch above or the
+    # except block just above -- but that isn't provable by static
+    # analysis (mypy flags this function as possibly falling off the end
+    # without a return), so this is unconditional rather than gated on
+    # `if not return_val` to make the guarantee explicit and satisfy it.
+    return (False, None)
 
 
 def count_slurm_asvo_jobs() -> int:

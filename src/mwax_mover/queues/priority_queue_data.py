@@ -44,7 +44,7 @@ class MWAXPriorityQueueData:
     # Unhashable by design: __eq__ is filename-only so instances must not be
     # used as dict keys or set members (Python 3 would set this implicitly, but
     # we make it explicit for clarity).
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]
 
     def __init__(self, full_filename: str):
         """Initialize a priority queue data item with a full file path.

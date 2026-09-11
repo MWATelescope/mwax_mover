@@ -709,7 +709,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 f". Sleeping for {OBS_FINISH_WAIT_SECONDS} seconds..."
             )
             self.sleep(OBS_FINISH_WAIT_SECONDS)
-            current_gpstime: int = get_gpstime_of_now()
+            current_gpstime = get_gpstime_of_now()
 
         # Ok, should be safe to get the list of files and hosts
         if self.running:
@@ -1381,7 +1381,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
                     logger.error(f"cal_export_path location  {self.cfg_proc_cal_export_path} does not exist. Quitting.")
                     sys.exit(EXIT_FAILURE)
 
-            self.cfg_proc_cal_export_max_age_hours: int = int(
+            self.cfg_proc_cal_export_max_age_hours = int(
                 read_config(
                     config,
                     SECTION_PROCESSING,

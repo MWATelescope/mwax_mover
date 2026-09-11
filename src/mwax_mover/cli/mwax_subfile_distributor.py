@@ -139,7 +139,7 @@ class MWAXSubfileDistributor(MWAXDaemon):
         self.dump_start_gps = None
         self.dump_end_gps = None
         self.dump_trigger_id = None
-        self.dump_keep_file_queue = queue.Queue()
+        self.dump_keep_file_queue: queue.Queue[str] = queue.Queue()
 
         # Correlator
         self.cfg_corr_input_ringbuffer_key: str = ""
@@ -867,7 +867,7 @@ class MWAXSubfileDistributor(MWAXDaemon):
                 raise ValueError("start parameter missing from dump_voltages() call")
             else:
                 if is_int(starttime):
-                    starttime = int(starttime)
+                    starttime_int = int(starttime)
                 else:
                     raise ValueError("start parameter is not an integer")
 
@@ -876,7 +876,7 @@ class MWAXSubfileDistributor(MWAXDaemon):
                 raise ValueError("end parameter missing from dump_voltages() call")
             else:
                 if is_int(endtime):
-                    endtime = int(endtime)
+                    endtime_int = int(endtime)
                 else:
                     raise ValueError("end parameter is not an integer")
 
@@ -885,27 +885,27 @@ class MWAXSubfileDistributor(MWAXDaemon):
                 raise ValueError("trigger_id parameter missing from dump_voltages() call")
             else:
                 if is_int(trigger_id):
-                    trigger_id = int(trigger_id)
+                    trigger_id_int = int(trigger_id)
                 else:
                     raise ValueError("trigger_id parameter is not an integer")
 
             # Special test mode- if start and end == 0 just return 200
-            if starttime == endtime == 0:
+            if starttime_int == endtime_int == 0:
                 return b"OK", http.HTTPStatus.OK
             else:
-                if len(str(starttime)) != 10 and starttime != 0:
+                if len(str(starttime_int)) != 10 and starttime_int != 0:
                     raise ValueError("start must be gps seconds and length 10 (or 0 for as early as possible)")
 
-                if len(str(endtime)) != 10:
+                if len(str(endtime_int)) != 10:
                     raise ValueError("end must be gps seconds and length 10")
 
-                if endtime - starttime <= 0:
+                if endtime_int - starttime_int <= 0:
                     raise ValueError("end must be after start")
 
                 # Check to see if we aren't already doing a dump
                 if self.dump_start_gps is None and self.dump_end_gps is None:
                     # Now call the method to dump the voltages
-                    if self.dump_voltages(starttime, endtime, trigger_id):
+                    if self.dump_voltages(starttime_int, endtime_int, trigger_id_int):
                         return b"OK", http.HTTPStatus.OK
                     else:
                         return b"Failed to start Voltage Buffer Dump", http.HTTPStatus.BAD_REQUEST

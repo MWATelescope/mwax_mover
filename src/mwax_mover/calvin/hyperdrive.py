@@ -18,6 +18,7 @@ import os
 import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
 
 import mwalib
 import numpy as np
@@ -479,7 +480,7 @@ def get_convergence_summary(solutions_fits_file: str):
     soln = HyperfitsSolution(solutions_fits_file)
     results = soln.results
     converged_channel_indices = np.where(~np.isnan(results))
-    summary = []
+    summary: list[tuple[str, Any]] = []
     summary.append(("Converged channel indices", converged_channel_indices))
     summary.append(("Total number of channels", len(results)))
     summary.append(

@@ -10,6 +10,7 @@ import datetime
 import logging
 import math
 import time
+from typing import Any
 
 import psycopg
 
@@ -559,7 +560,7 @@ def update_calibration_request_download_complete_status(
 
     if slurm_job_id:
         sql = f"{sql} slurm_job_id = %s"
-        params = [
+        params: list[Any] = [
             download_completed_datetime,
             download_error_datetime,
             download_error_message,
@@ -732,7 +733,7 @@ def update_calibration_request_calibration_complete_status(
         calibration_error_message = %s
     WHERE
     slurm_job_id = %s"""
-    params = ""
+    params: list[Any] = []
 
     # check for validity, raise exception if not valid
     # ^ is XOR if you were wondering!

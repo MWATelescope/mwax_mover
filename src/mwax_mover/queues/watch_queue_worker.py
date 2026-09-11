@@ -15,6 +15,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from queue import PriorityQueue, Queue
 from threading import Thread
+from typing import Any
 
 from mwax_mover.core.env import get_hostname
 from mwax_mover.queues.priority_queue_worker import PriorityQueueWorker
@@ -123,7 +124,7 @@ class MWAXWatchQueueWorker(ABC):
         self.watcher_threads: list[Thread] = []
 
         # queue
-        self.queue = Queue()
+        self.queue: Queue[str] = Queue()
 
         # queue
         self.queue_worker = QueueWorker(
@@ -242,7 +243,7 @@ class MWAXWatchQueueWorker(ABC):
         Returns:
             A dictionary containing worker name, watcher statuses, and queue worker status.
         """
-        status = {
+        status: dict[str, Any] = {
             "name": self.name,
             "watchers": [],
             "queue_worker": self.queue_worker.get_status(),
@@ -322,7 +323,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
         self.watcher_threads: list[Thread] = []
 
         # queue
-        self.queue = PriorityQueue()
+        self.queue: PriorityQueue[tuple[int, str]] = PriorityQueue()
 
         # queue worker
         self.queue_worker = PriorityQueueWorker(
@@ -436,7 +437,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
         Returns:
             A dictionary containing worker name, watcher statuses, and queue worker status.
         """
-        status = {
+        status: dict[str, Any] = {
             "name": self.name,
             "watchers": [],
             "queue_worker": self.queue_worker.get_status(),

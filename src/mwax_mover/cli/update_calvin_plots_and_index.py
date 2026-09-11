@@ -243,7 +243,7 @@ def main() -> None:
         base_upload_dir = ""
     else:
         if args.base_upload_dir is not None:
-            base_upload_dir: str = args.base_upload_dir
+            base_upload_dir = args.base_upload_dir
         else:
             print("When --dry-run is not passed, you must provide a --base-upload-dir value.")
             sys.exit(EXIT_FAILURE)
@@ -425,16 +425,16 @@ def main() -> None:
                 pass
 
             try:
-                for f in files_to_upload:
-                    dest_filename = os.path.join(upload_dir, os.path.basename(f))
+                for upload_path in files_to_upload:
+                    dest_filename = os.path.join(upload_dir, os.path.basename(upload_path))
 
                     # copy the solutions files, move the rest
                     if "_solutions.fits" in dest_filename or "_solutions.original.fits" in dest_filename:
-                        shutil.copy(f, dest_filename)
-                        sol.log(f"Copied {f} to {dest_filename}")
+                        shutil.copy(upload_path, dest_filename)
+                        sol.log(f"Copied {upload_path} to {dest_filename}")
                     else:
-                        shutil.move(f, dest_filename)
-                        sol.log(f"Moved {f} to {dest_filename}")
+                        shutil.move(upload_path, dest_filename)
+                        sol.log(f"Moved {upload_path} to {dest_filename}")
 
             except Exception as e:
                 print(f"Error moving files to upload dir {upload_dir}: {e!s}")

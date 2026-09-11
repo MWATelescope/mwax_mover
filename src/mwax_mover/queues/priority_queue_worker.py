@@ -115,7 +115,7 @@ class PriorityQueueWorker:
         # disabled for the rest of the process's life. Clear it on start so a
         # restarted worker backs off properly again.
         self.event.clear()
-        backoff = 0
+        backoff: float = 0
 
         while self._running:
             if self._paused:
@@ -137,6 +137,7 @@ class PriorityQueueWorker:
 
                     start_time = time.monotonic()
 
+                    filename_priority: int
                     if self.current_item[0] is None:
                         filename_priority = ArchivePriority.DEFAULT
                     else:

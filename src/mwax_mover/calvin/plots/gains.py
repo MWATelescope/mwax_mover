@@ -10,6 +10,7 @@ concurrent page-rendering workers against available memory.
 import logging
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from typing import cast
 
 import matplotlib as mpl
 
@@ -1241,5 +1242,6 @@ def _channel_reason_counts_text(tile_idx: int, channel_reasons: list[NDArray[np.
                 continue
             for flag in ChannelFlagReason:
                 if flag != ChannelFlagReason.NONE and reason & flag:
-                    counts[flag.name] = counts.get(flag.name, 0) + 1
+                    flag_name = cast(str, flag.name)
+                    counts[flag_name] = counts.get(flag_name, 0) + 1
     return ", ".join(f"{name}({n}ch)" for name, n in counts.items())

@@ -462,7 +462,7 @@ def read_subfile_values(filename: str, keys: list[str]) -> dict:
         A dict mapping each key in ``keys`` to its value string, or None for
         any keyword not found in the header.
     """
-    subfile_values = {}
+    subfile_values: dict[str, str | None] = {}
 
     # Create the dict with None values for all keys
     for key in keys:

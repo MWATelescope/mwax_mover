@@ -134,7 +134,7 @@ def wrap_angle(angle):
 _MIN_CLIP_THRESHOLD_RAD = 1e-6
 
 
-def _phase_fit_hess_inv(freqs_hz: NDArray[np.float64]) -> NDArray[np.float64]:
+def _phase_fit_hess_inv(freqs_hz: NDArray[np.float64]) -> NDArray[np.floating]:
     """Exact inverse Hessian of the phase-ramp fit objective w.r.t. (m, c).
 
     residual_i(m, c) = wrap(θ_i - m·ν_i - c) is piecewise-linear in (m, c)
@@ -245,9 +245,9 @@ def fit_phase_line(
     # Now we want to "adjust" the solution data so that it
     # - is roughly centered on the DC bin
     # - has a large amount of zero padding on either side
-    freqs_hz = freqs_hz * u.Hz
+    freqs_hz_qty = freqs_hz * u.Hz
 
-    bins = np.round((freqs_hz / d_freq).decompose().value).astype(int)
+    bins = np.round((freqs_hz_qty / d_freq).decompose().value).astype(int)
     ctr_bin = (np.min(bins) + np.max(bins)) // 2
     shifted_bins = bins - ctr_bin  # Now "bins" represents where I want to put the solution values
 
@@ -293,7 +293,7 @@ def fit_phase_line(
     def model(freqs_hz, m, c):
         return np.exp(1j * (m * freqs_hz + c))
 
-    y_int = np.angle(np.mean(solution / model(freqs_hz.to(u.Hz).value, slope.value, 0)))
+    y_int = np.angle(np.mean(solution / model(freqs_hz_qty.to(u.Hz).value, slope.value, 0)))
     params = (slope.value, y_int)
 
     def objective_and_grad(params, freqs_hz, data):
@@ -337,15 +337,15 @@ def fit_phase_line(
             warnings.filterwarnings(
                 "ignore", message="The line search algorithm did not converge", category=RuntimeWarning
             )
-            res = minimize(objective_and_grad, params, args=(freqs_hz.to(u.Hz).value, solution), jac=True)
+            res = minimize(objective_and_grad, params, args=(freqs_hz_qty.to(u.Hz).value, solution), jac=True)
         params = res.x
 
-        constructed = model(freqs_hz.to(u.Hz).value, *params)
+        constructed = model(freqs_hz_qty.to(u.Hz).value, *params)
         residuals = wrap_angle(np.angle(solution) - np.angle(constructed))
         chi2dof = np.sum(np.abs(residuals) ** 2) / (len(residuals) - len(params))
         resid_std = residuals.std()
         resid_var = residuals.var(ddof=len(params))
-        stderr = np.sqrt(np.diag(_phase_fit_hess_inv(freqs_hz.to(u.Hz).value)) * resid_var)
+        stderr = np.sqrt(np.diag(_phase_fit_hess_inv(freqs_hz_qty.to(u.Hz).value)) * resid_var)
 
         # Sigma-clip using a robust median+MAD scale of residuals
         # (radians), not stderr[0] (rad/Hz). stderr[0] is the standard

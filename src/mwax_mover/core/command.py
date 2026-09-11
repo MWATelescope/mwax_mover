@@ -122,6 +122,7 @@ def run_command(
         logger.debug(f"Executing {cmdline}...")
 
         # Parse the command into executable and args
+        args: str | list[str]
         if use_shell:
             #
             # NOTE: using shell=true in subprocess.run requires a string.
@@ -208,7 +209,7 @@ def start_command(
     logger.debug(f"Executing {cmdline}...")
 
     # Parse the command into executable and args
-
+    args: str | list[str]
     if use_shell:
         #
         # NOTE: using shell=true in subprocess.run requires a string.

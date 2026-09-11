@@ -135,7 +135,7 @@ class QueueWorker:
         # disabled for the rest of the process's life. Clear it on start so a
         # restarted worker backs off properly again.
         self.event.clear()
-        backoff = 0
+        backoff: float = 0
 
         while self._running:
             if self._paused:

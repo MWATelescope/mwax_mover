@@ -1147,7 +1147,7 @@ class MWAXCalvinController(MWAXDaemon):
             if not os.path.exists(p):
                 logger.error(f"plot_upload_path: {p} does not exist. Quitting.")
                 sys.exit(EXIT_FAILURE)
-        self.cfg_plots_upload_interval_secs: int = int(
+        self.cfg_plots_upload_interval_secs = int(
             read_config(config, SECTION_PLOTS_UPLOAD, "plot_upload_interval_secs")
         )
 

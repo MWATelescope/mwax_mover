@@ -242,7 +242,7 @@ class MWAASVOHelper:
 
         except GiantSquidJobAlreadyExistsException as already_exists_exception:
             # Job already exists in queued, processing or ready state, get the job id
-            job_id: int = already_exists_exception.job_id
+            job_id = already_exists_exception.job_id
 
             logger.info(f"{obs_id}: MWA ASVO job {job_id} already exists.")
 
