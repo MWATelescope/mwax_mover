@@ -43,6 +43,7 @@ from mwax_mover.constants import (
     CONFIG_KEY_GIANT_SQUID_BINARY_PATH,
     CONFIG_KEY_LOG_LEVEL,
     EXIT_FAILURE,
+    EXT_UVFITS,
     HEALTH_THREAD_NAME,
     INDEX_JSON_FILENAME,
     LOG_FORMAT,
@@ -368,7 +369,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 logger.info(f"Using work dir {self.working_path} for Birli output.")
 
             # Set uvfits filename
-            self.uvfits_filename = os.path.join(self.working_path, f"{self.obs_id}.uvfits")
+            self.uvfits_filename = os.path.join(self.working_path, f"{self.obs_id}{EXT_UVFITS}")
             logger.info(f"Job Output UVFITS file(s) will be created as: {self.uvfits_filename}")
 
             # All files we could get are now in the processing_path
@@ -536,7 +537,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
                     remove_file(file_to_delete, False)
 
                 # Now remove uvfits too
-                uvfits_files = glob.glob(os.path.join(self.cfg_proc_job_input_path, "*.uvfits"))
+                uvfits_files = glob.glob(os.path.join(self.cfg_proc_job_input_path, f"*{EXT_UVFITS}"))
                 for file_to_delete in uvfits_files:
                     remove_file(file_to_delete, False)
 
@@ -981,7 +982,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
         # Therefore we need to run hyperdrive N times too
         #
         # get a list of the uvfits files
-        uvfits_files = glob.glob(os.path.join(self.working_path, "*.uvfits"))
+        uvfits_files = glob.glob(os.path.join(self.working_path, f"*{EXT_UVFITS}"))
 
         # Run hyperdrive (might be multiple times if picket fence)
         hyperdrive_success, calibration_command = run_hyperdrive(

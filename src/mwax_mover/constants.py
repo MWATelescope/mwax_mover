@@ -18,8 +18,10 @@ HEALTH_THREAD_NAME, the health-reporting thread name shared by the four CLI
 daemons; DUMMY_CONFIG_VALUE, the "no real database configured" sentinel;
 DEFAULT_POSTGRES_PORT; METAFITS_KEY_EXPOSURE, the FITS/metafits
 exposure-duration header key; the CONFIG_KEY_* names for config keys
-read identically by two or more CLI daemons; and COMMAND_DADA_DISKDB, the
-external binary name used to load a subfile into a PSRDADA ring buffer.
+read identically by two or more CLI daemons; COMMAND_DADA_DISKDB, the
+external binary name used to load a subfile into a PSRDADA ring buffer;
+the di-calibrate memory-estimate constants (JONES_F32_BYTES,
+JONES_F64_BYTES, F32_BYTES); and EXT_UVFITS.
 """
 
 # The full filename with path
@@ -125,3 +127,14 @@ CONFIG_KEY_ARCHIVE_COMMAND_TIMEOUT_SEC = "archive_command_timeout_sec"
 # previously an unused local constant in processors/subfile_incoming.py
 # while fits/subfile.py independently hardcoded the same name.
 COMMAND_DADA_DISKDB = "dada_diskdb"
+
+# Bytes per Jones matrix element in di-calibrate's working arrays -- a
+# Jones<f32> is 4 complex numbers at 4 bytes each (real+imag), Jones<f64>
+# the same at 8 bytes each. Used by estimate_di_calibrate_peak_ram_bytes.
+# See docs/HYPERDRIVE_PARALLELISM.md 2.1.
+JONES_F32_BYTES = 32
+JONES_F64_BYTES = 64
+F32_BYTES = 4
+
+# UVFITS output extension, produced by Birli and consumed by hyperdrive.
+EXT_UVFITS = ".uvfits"

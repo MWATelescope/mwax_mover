@@ -4,10 +4,12 @@ run_hyperdrive() shells out to the hyperdrive binary via a Popen handle and
 writes a readme (core.command.write_readme_file) recording the command and
 outcome, mirroring calvin.birli.run_birli(). write_hyperdrive_stats() writes
 get_convergence_summary()'s convergence summary for a just-produced solution
-file. See calvin.hyperfits_solution/calvin.hyperfits_solution_group for
-reading/flagging solutions (this module used to hold those two classes too
--- see docs/HYPERDRIVE_PARALLELISM.md Phase 1 for the split) and calvin.plots
-for plotting.
+file. estimate_di_calibrate_peak_ram_bytes() and _uvfits_num_coarse_chans()
+support parallelising run_hyperdrive() across picket-fence bands -- see
+docs/HYPERDRIVE_PARALLELISM.md Phases 2-4. See calvin.hyperfits_solution/
+calvin.hyperfits_solution_group for reading/flagging solutions (this module
+used to hold those two classes too -- see docs/HYPERDRIVE_PARALLELISM.md
+Phase 1 for the split) and calvin.plots for plotting.
 """
 
 import logging
@@ -15,12 +17,134 @@ import os
 import shutil
 import time
 
+import mwalib
 import numpy as np
+from astropy.io import fits
 
 from mwax_mover.calvin.hyperfits_solution import HyperfitsSolution
+from mwax_mover.constants import EXT_UVFITS, F32_BYTES, JONES_F32_BYTES, JONES_F64_BYTES
 from mwax_mover.core.command import check_popen_finished, start_command, write_readme_file
 
 logger = logging.getLogger(__name__)
+
+
+def _uvfits_num_coarse_chans(uvfits_filename: str, metafits_context: mwalib.MetafitsContext) -> int:
+    """Determine how many MWA coarse channels a uvfits file covers.
+
+    Reads only the primary HDU's header (no data): scans CTYPE2..CTYPEn for
+    the FREQ axis (its index isn't fixed -- it depends on how many random-
+    group parameter axes precede it, e.g. it's CTYPE4 for a typical
+    Birli-produced file) and computes that axis's total bandwidth from
+    NAXIS * |CDELT|. Divides by the coarse-channel width (a fixed ~1.28 MHz
+    for MWA, from metafits_context.coarse_chan_width_hz) rather than the
+    metafits' raw fine-channel count, since Birli's own --avg-freq-res can
+    coarsen the fine-channel resolution independently of the metafits --
+    dividing by fine-channel *count* would silently give the wrong answer
+    whenever Birli's averaging differs from the metafits' native
+    resolution; dividing actual bandwidth by the coarse-channel width
+    (which averaging never changes) doesn't have that failure mode.
+
+    Args:
+        uvfits_filename: Path to a single uvfits file (one picket).
+        metafits_context: Metafits context for the observation.
+
+    Returns:
+        Number of coarse channels this uvfits file covers, at least 1.
+
+    Raises:
+        StopIteration: If no axis has CTYPE == 'FREQ' (malformed uvfits).
+    """
+    header = fits.getheader(uvfits_filename)
+    naxis = header["NAXIS"]
+    freq_axis = next(i for i in range(2, naxis + 1) if header.get(f"CTYPE{i}") == "FREQ")
+    bandwidth_hz = header[f"NAXIS{freq_axis}"] * abs(header[f"CDELT{freq_axis}"])
+    return max(1, round(bandwidth_hz / metafits_context.coarse_chan_width_hz))
+
+
+def estimate_di_calibrate_peak_ram_bytes(
+    metafits_context: mwalib.MetafitsContext,
+    edge_width_hz: int,
+    num_sources: int,
+    coarse_chan_start: int,
+    coarse_chan_end: int,
+) -> int:
+    """Estimate mwa_hyperdrive di-calibrate's peak host RAM, derived almost
+    entirely from an already-populated mwalib.MetafitsContext for a
+    contiguous band of an MWA calibration observation.
+
+    Based on reading MWATelescope/mwa_hyperdrive source, the dominant
+    memory consumers during a di-calibrate run are:
+
+    1. The three big visibility arrays (vis_data, vis_model, vis_weights),
+       shaped (n_timesteps, n_chanblocks, n_cross_baselines) -- see
+       `DiCalParams::get_cal_vis()` in mwa_hyperdrive: src/params/di_calibration.rs.
+    2. The sky-model component flux-density arrays, shaped
+       (n_chanblocks, n_components) per component type (points/gaussians/
+       shapelets) -- see `ComponentList::new()` in
+       mwa_hyperdrive:src/srclist/types/components/mod.rs.
+    3. The transient per-timestep beam-response cache, shaped
+       (n_unique_beam_freqs, n_components) -- see `get_beam_responses()`
+       in mwa_hyperdrive: src/model/cpu.rs. Assumes one unique beam tile
+       (no per-tile dipole flagging).
+    4. The DI solutions array, shaped (n_unflagged_tiles, n_chanblocks),
+       assuming one calibration timeblock (hyperdrive's `-t 0` default,
+       i.e. all timesteps averaged into a single solution).
+
+    Fine-channel and tile flagging replicate hyperdrive's own defaults
+    for *raw* MWA correlator data (mwa_hyperdrive: src/io/read/raw/mod.rs):
+    a tile is flagged if its X-pol input is flagged, and fine channels are
+    flagged 80 kHz's worth at each coarse-channel edge, plus the centre
+    channel for legacy (non-MWAX) data. This assumes default resolution (no
+    --time-average/--freq-average) and no extra --tile-flags.
+
+    n_points/n_gaussians/n_shapelets (sky-model *component* counts, not
+    source counts) aren't in the metafits -- mwalib has no idea what sky
+    model you're using. Read them off hyperdrive's own "Using N sources
+    with a total of M components" log line (printed even with --dry-run)
+    or as has been done in this function, just guess.
+
+    Args:
+        metafits_context: Metafits context to get metafits values.
+        edge_width_hz: The amount that each coarse channel edge is flagged (in Hz).
+        num_sources: Fed from the config file, how many sources should Calvin tell
+            Hyperdrive to use for the skymodel.
+        coarse_chan_start: Receiver channel number of first coarse channel in this contiguous band.
+        coarse_chan_end: Receiver channel number of last coarse channel in this contiguous band.
+
+    Returns:
+        An int which is the max RAM consumption, in bytes, estimated based on the input
+    """
+    n_points: int = num_sources  # Most sources in the sky model are point sources anyway
+    n_gaussians: int = num_sources // 4  # no good way to estimate this, so guess for now
+    n_shapelets: int = num_sources // 8  # no good way to estimate this, so guess for now
+
+    n_unflagged_tiles = sum(1 for rf in metafits_context.rf_inputs if rf.pol == mwalib.Pol.X and not rf.flagged)
+    n_cross_baselines = n_unflagged_tiles * (n_unflagged_tiles - 1) // 2
+
+    n_coarse_channels = (coarse_chan_end - coarse_chan_start) + 1
+    num_fine_chans_per_coarse = metafits_context.num_corr_fine_chans_per_coarse
+
+    num_flagged_per_edge = edge_width_hz // metafits_context.corr_fine_chan_width_hz
+    num_flagged_per_coarse = 2 * num_flagged_per_edge
+    n_chanblocks = n_coarse_channels * max(num_fine_chans_per_coarse - num_flagged_per_coarse, 0)
+
+    n_timesteps = metafits_context.num_metafits_timesteps
+
+    # The FEE beam snaps to its own ~1.28 MHz-spaced frequency grid;
+    # empirically, about 2 unique beam frequencies per coarse channel
+    # (fine channels near a coarse-channel boundary often snap to the
+    # neighbouring tabulated frequency rather than their own).
+    n_unique_beam_freqs = 2 * n_coarse_channels
+
+    n_components_total = n_points + n_gaussians + n_shapelets
+    n_components_max = max(n_points, n_gaussians, n_shapelets)
+
+    vis_arrays = n_timesteps * n_chanblocks * n_cross_baselines * (2 * JONES_F32_BYTES + F32_BYTES)
+    sky_model_components = n_chanblocks * n_components_total * JONES_F64_BYTES
+    beam_response_cache = n_unique_beam_freqs * n_components_max * JONES_F64_BYTES
+    solutions_array = n_unflagged_tiles * n_chanblocks * JONES_F64_BYTES
+
+    return vis_arrays + sky_model_components + beam_response_cache + solutions_array
 
 
 def run_hyperdrive(
@@ -70,7 +194,7 @@ def run_hyperdrive(
     calibration_command = ""
 
     for hyperdrive_run, uvfits_file in enumerate(input_uvfits_files):
-        obsid_and_band = os.path.basename(uvfits_file.replace(".uvfits", ""))
+        obsid_and_band = os.path.basename(uvfits_file.replace(EXT_UVFITS, ""))
 
         # Outside the try block so it is always bound before the exception
         # handler below computes `elapsed` from it.

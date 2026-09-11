@@ -836,7 +836,7 @@ def _draw_tile_panel(
                 x_real,
                 0,
                 1,
-                where=shade_mask,
+                where=shade_mask.tolist(),
                 step="mid",
                 color="orange",
                 alpha=0.15,
