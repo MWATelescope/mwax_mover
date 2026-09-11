@@ -5,6 +5,12 @@ calculation (get_gbps), and a generic int-parseable check (is_int) used
 across the CLI entry points for validating string arguments.
 """
 
+# Bytes per gigabyte (SI, base-10). See docs/CONSTANTS_CLEANUP.md 3.1 --
+# named so gigabyte_to_gibibyte and bytes_to_gigabytes use the same
+# constant instead of two different-looking (but numerically identical)
+# expressions for 10^9.
+BYTES_PER_GIGABYTE = 10**9
+
 
 def is_int(value) -> bool:
     """
@@ -35,7 +41,7 @@ def gigabyte_to_gibibyte(gigabytes: float) -> float:
     Returns:
         Equivalent size in gibibytes (1 GiB = 2^30 bytes), as a float.
     """
-    return gigabytes * 10**9 / 2**30
+    return gigabytes * BYTES_PER_GIGABYTE / 2**30
 
 
 def gigabytes_to_gigabits(gigabytes: float) -> float:
@@ -61,7 +67,7 @@ def bytes_to_gigabytes(num_bytes: int) -> float:
     Returns:
         Equivalent size in gigabytes: Size in gigabytes (1 GB = 10^9 bytes) as float.
     """
-    return num_bytes / (1000.0 * 1000.0 * 1000.0)
+    return num_bytes / BYTES_PER_GIGABYTE
 
 
 def get_gbps(size_gigabytes: float, elapsed_seconds: float) -> float:

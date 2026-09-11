@@ -17,8 +17,9 @@ INDEX_JSON_FILENAME, the calibration-fit index manifest filename;
 HEALTH_THREAD_NAME, the health-reporting thread name shared by the four CLI
 daemons; DUMMY_CONFIG_VALUE, the "no real database configured" sentinel;
 DEFAULT_POSTGRES_PORT; METAFITS_KEY_EXPOSURE, the FITS/metafits
-exposure-duration header key; and the CONFIG_KEY_* names for config keys
-read identically by two or more CLI daemons.
+exposure-duration header key; the CONFIG_KEY_* names for config keys
+read identically by two or more CLI daemons; and COMMAND_DADA_DISKDB, the
+external binary name used to load a subfile into a PSRDADA ring buffer.
 """
 
 # The full filename with path
@@ -118,3 +119,9 @@ CONFIG_KEY_GIANT_SQUID_BINARY_PATH = "giant_squid_binary_path"
 CONFIG_KEY_HIGH_PRIORITY_CORRELATOR_PROJECTIDS = "high_priority_correlator_projectids"
 CONFIG_KEY_HIGH_PRIORITY_VCS_PROJECTIDS = "high_priority_vcs_projectids"
 CONFIG_KEY_ARCHIVE_COMMAND_TIMEOUT_SEC = "archive_command_timeout_sec"
+
+# The dada_diskdb binary name, used to build the command line that loads a
+# subfile into a PSRDADA ring buffer. See docs/CONSTANTS_CLEANUP.md 3.3 --
+# previously an unused local constant in processors/subfile_incoming.py
+# while fits/subfile.py independently hardcoded the same name.
+COMMAND_DADA_DISKDB = "dada_diskdb"

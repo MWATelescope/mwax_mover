@@ -16,11 +16,9 @@ from mwax_mover.calvin.plots.index import populate_index_json_entry
 from mwax_mover.constants import (
     EXIT_FAILURE,
     INDEX_JSON_FILENAME,
-    SECTION_MWA_DATABASE,
     SOLUTIONS_FITS_GLOB,
     SOLUTIONS_ORIGINAL_FITS_GLOB,
 )
-from mwax_mover.core.config import read_config
 from mwax_mover.db.calibration import get_fit_info_from_slurm_job_and_obsid
 from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.fits.metafits import download_metafits_file
@@ -238,22 +236,8 @@ def main() -> None:
     # Parse config file
     config = ConfigParser()
     config.read_file(open(args.cfg, "r", encoding="utf-8"))
-    db_host = read_config(config, SECTION_MWA_DATABASE, "host")
-    db_name = read_config(config, SECTION_MWA_DATABASE, "db")
-    db_user = read_config(config, SECTION_MWA_DATABASE, "user")
-    # Don't require base64 encoded password if running a pytest
-    db_pass = read_config(config, SECTION_MWA_DATABASE, "pass", True)
-    db_port = int(read_config(config, SECTION_MWA_DATABASE, "port"))
-
     # Initiate database connection
-    db_handler = MWAXDBHandler(
-        host=db_host,
-        port=db_port,
-        db_name=db_name,
-        user=db_user,
-        password=db_pass,
-        ssl_mode="?sslmode=require",
-    )
+    db_handler = MWAXDBHandler.from_config(config, ssl_mode="?sslmode=require")
 
     if dry_run:
         base_upload_dir = ""

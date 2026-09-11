@@ -19,6 +19,13 @@ from mwax_mover.fits.subfile import CorrelatorMode
 
 logger = logging.getLogger(__name__)
 
+# Streaming read buffer size for stitch_vdif_files_and_write_hdr. See
+# docs/CONSTANTS_CLEANUP.md 3.2 -- named to match the concept (a streaming
+# read chunk) shared with beamformer.filterbank.CHUNK_SIZE, but not
+# unified with it: the two file formats' chunk sizes are independent
+# choices that happen to differ (1 MiB here vs. 8 MiB there).
+_READ_CHUNK_SIZE = 1024 * 1024
+
 
 class VDIFHeader:
     """A VDIF beamformer file header, populated from an observation's metafits."""
@@ -227,7 +234,7 @@ def stitch_vdif_files_and_write_hdr(metafits_filename: str, files: list[str], ou
             for f in sorted_files:
                 with open(f, "rb") as input_file:
                     while True:
-                        chunk = input_file.read(1024 * 1024)
+                        chunk = input_file.read(_READ_CHUNK_SIZE)
                         if not chunk:
                             break
                         output.write(chunk)

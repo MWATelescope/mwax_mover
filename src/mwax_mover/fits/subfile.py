@@ -15,6 +15,7 @@ import os
 import time
 from enum import Enum
 
+from mwax_mover.constants import COMMAND_DADA_DISKDB
 from mwax_mover.core.command import run_command
 from mwax_mover.core.env import running_under_pytest
 from mwax_mover.core.units import bytes_to_gigabytes
@@ -199,7 +200,7 @@ def load_psrdada_ringbuffer(full_filename: str, ringbuffer_key: str, numa_node, 
         True if ``dada_diskdb`` exited successfully, False otherwise.
     """
 
-    cmd = f"dada_diskdb -k {ringbuffer_key} -f {full_filename}"
+    cmd = f"{COMMAND_DADA_DISKDB} -k {ringbuffer_key} -f {full_filename}"
 
     size = os.path.getsize(full_filename)
 
