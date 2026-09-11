@@ -2,17 +2,103 @@
 
 # Unreleased (3.0.0)
 
-* Restructure of source code.
-* calvin: fixed tile name bug in log messages
-* processors: Unified base64 password predicate on db != "dummy" across all 4 daemons
-* calvin: Removed dead plot_res parameter in phase plots
-* Fixed 3 incorrect docstrings/comments, 7 typos, logging message in archiver.
-* Removed iterative_poly_clip and fit_iono; rewrote iterative_poly_clip_batch's docstring to stand alone; fixed 2 stale references.
-* Replaced hand-rolled textwrap() with stdlib textwrap.fill(); removed its 4 now-pointless unit tests; verified wrapping is byte-identical for real equation strings
-* Removed all 11 vestigial pylint pragmas.
-* Renamed various attributes across modules for consistency.
-* Config file variable naming consistency.
-* Config file sections for databases now are all standardised to "[mwa database]".
+## Breaking Configuration changes
+### 1. Database section consolidation
+
+* All four daemons' production configs need their database section(s) replaced with a single `[mwa database]` section, keys `host`, `db`, `user`, `pass`, `port`:
+
+| Daemon | Old section(s) to remove |
+|---|---|
+| `mwax_subfile_distributor` | `mwa metadata database` |
+| `mwacache_archive_processor` | `mro metadata database` **and** `remote metadata database` (both collapse into one) |
+| `mwax_calvin_controller` | `mro metadata database` |
+| `mwax_calvin_processor` | `mro metadata database` |
+
+### 2. New key: `do_not_archive_projectids` (Phase 4.3)
+
+* Add to `[correlator]` in the `mwax_subfile_distributor` production config(s): `do_not_archive_projectids=C123`
+
+### 3. New optional keys: `https_proxy` / `no_proxy` (Phase 4.5)
+
+* Add to `[downloading]` in the `mwax_calvin_processor` production config, if you want them configurable rather than hardcoded:
+```text
+https_proxy=http://localhost:3128
+no_proxy=asvo.mwatelescope.org
+```
+
+## Phase 0 — Prerequisites
+
+- Added `__init__.py` to all 14 subpackages (previously implicit namespace packages); no re-exports added, so no new import paths.
+- Added a `[build-system]` table using `uv_build`, pinned to the installed uv version.
+- Declared `numpy` explicitly in `[project].dependencies` — it was already used in 11 modules but only arrived transitively.
+- Recorded baseline test suite numbers in the commit message before further changes.
+
+## Phase 1 — Bug fixes
+
+- Fixed `tile.name` returning a pandas index label instead of the tile name column in two hyperdrive fit-skip warnings (log-only impact).
+- Unified four different spellings of the "is this a dummy DB config" check to a single `db != "dummy"` predicate; fixed a comment that contradicted the code it sat above.
+- Removed the dead `plot_res` parameter from `plot_phase_residual`, which was accepted but never read.
+- Fixed inaccurate docstrings/comments (three sites) and typos (7 files, plus 8 `.cfg` comments).
+- Fixed a log line in the archiver's pytest branch reporting a pinned elapsed time next to a throughput computed from the real elapsed time.
+
+## Phase 2 — Dead code removal
+
+- Removed unused `iterative_poly_clip` (87 lines, zero callers); rewrote the still-used `iterative_poly_clip_batch`'s docstring to stand on its own rather than reference the deleted function.
+- Removed the never-implemented `fit_iono` parameter and related commented-out code from `fit_phase_line`.
+- Replaced a hand-rolled `textwrap.fill()` reimplementation with the stdlib version (minor wrap-point shift in one debug-plot annotation).
+- Removed 11 vestigial `# pylint: disable` pragmas (project lints with ruff, not pylint).
+- Converted stray mypy-style `# type: ignore` pragmas to `ty`-style, or deleted where `ty` didn't flag the line.
+
+## Phase 3 — Naming
+
+- Standardized three ASVO spellings (`mwax_asvo`/`mwaasvo`/`mwa_asvo`) on `mwa_asvo` for attributes; config keys and class names left untouched.
+- Consolidated five different names for the high-priority project list parameters into `high_priority_correlator_projects`/`high_priority_vcs_projects` (~60 sites).
+- Standardized `watch_path(s)_exts` spelling across `queues/` and `processors/`.
+- Dropped a meaningless `p` prefix from `MWAXPriorityWatchQueueWorker`'s attributes.
+- Renamed six misleadingly-named functions (e.g. `get_metafits_values` → `get_calibrator_info`, `run_command_ext` → `run_command`).
+- Renamed four `update_calsolution_request_*` DB functions to `update_calibration_request_*`, matching the actual table name.
+- Renamed `hyperdrive_plots.py` → `hyperdrive.py` and shortened its two public functions accordingly.
+- Replaced Greek-letter (`ν`) identifiers in `calibration/fitting.py` with ASCII names; left non-ASCII math notation in docstrings/comments alone.
+
+## Phase 4 — Constants and configuration
+
+- Added `SECTION_*` constants for 115 hard-coded INI section-name literals (values unchanged; database sections deferred to 5.2).
+- Replaced `get_priority`'s nine magic integers with an `ArchivePriority` `IntEnum`; changed one unused fallback value from 99 → 100.
+- Moved the hard-coded `C123` do-not-archive project check into config (`do_not_archive_projectids`), defaulting to `C123` for compatibility.
+- Extracted duplicated MWA webservice URLs into a shared `MWA_WEBSERVICE_HOSTS` constant.
+- Moved a hard-coded HTTPS proxy/no-proxy pair into two new optional config keys, defaulting to the old values.
+- Fixed an imprecise GiB conversion constant (`/1.07374` → exact `*10**9/2**30`).
+- Changed `get_gbps()` to take `elapsed_seconds` directly instead of computing it internally from `time.time()`, making it clock-agnostic.
+- Replaced scattered numeric literals (`3600`, `60`, `200`, `1000.0`) with named constants where they genuinely represented seconds/HTTP-status/byte conversions.
+- Introduced a single `EXIT_FAILURE = 1` constant, replacing all non-zero `sys.exit()` codes (`-1` now exits `1` instead of `255` at the shell).
+
+## Phase 5 — `cfg_` prefix rollout and database consolidation
+
+- Rolled out the `self.cfg_<section>_<key>` naming convention across all four CLI daemons (previously only one daemon followed it); one deliberate exception kept unprefixed (`health_multicast_interface_ip`, since it's derived, not read from config).
+- Consolidated three near-identical database config sections (`mro`/`remote`/`mwa metadata database`) into one `[mwa database]` section with one handler; merged `mwacache_archive_processor`'s separate read/write DB handlers into a single handler.
+
+## Phase 6 — Shared daemon base class
+
+- Added `MWAXDaemon` abstract base class at `processors/daemon.py`, unifying lifecycle logic across the four CLI daemons (mwacache, calvin controller, calvin processor, subfile distributor).
+- Unified `request_fatal_shutdown` into the base (previously duplicated in two daemons, byte-for-byte identical logic).
+- Unified `signal_handler` for three of four daemons; `MWAXCalvinProcessor` overrides it for its SIGUSR1/Slurm-specific handling. Added a `shutdown_log_detail()` hook to preserve the subfile distributor's worker-count detail in shutdown logs.
+- Merged `health_handler`/`health_loop` into a single `health_loop` method with a `before_health_send()` hook; standardized on `self.sleep(1)` and `logger.exception`; fixed a stale log-message prefix.
+- Unified `sleep` with a `during_sleep_interval()` hook (used by the controller to refresh its Slurm queue size); gives two daemons an interruptible sleep they lacked (immaterial at 1s).
+- Unified `get_status()`: five common keys plus `cmdline` built in the base, merged with each daemon's `get_extra_status()`; `workers` key included only when present. `cmdline` added to the controller/processor health payloads as a documented, intentional payload change.
+- Unified `initialise_from_command_line` for three of four daemons; `MWAXCalvinProcessor` keeps its own override for its argument validation.
+- Left `stop` and `start` abstract — implementations too divergent to unify safely.
+- Placed the base class in `processors/` (layer 4) rather than `core/` (layer 1); verified against the architecture layering tests with no changes to `LAYERS` needed.
+- Migrated all four daemons to inherit from `MWAXDaemon` one at a time, diffing health JSON output after each migration to confirm no unintended payload changes.
+
+## Phase 7 — Docstrings, conventions and long functions
+
+- Converted four `db/calibration.py` functions from non-standard `Parameters:` docstrings to Google-style `Args:`/`Raises:`, documenting previously-undocumented parameters.
+- Documented an exemption for trivial one-line properties from requiring `Returns:` blocks; added missing return annotations/`Returns:` docs elsewhere, including six undocumented HTTP endpoint methods in `mwax_subfile_distributor.py`.
+- Moved outdated "restructure archaeology" (references to files/phases that no longer exist) out of module docstrings into `docs/RESTRUCTURE.md`, while keeping the underlying design rationale in place.
+- Brought `priority_watcher.py`/`priority_queue_worker.py` docstrings up to their non-priority siblings' level of detail; renamed `MWAXWatchQueueWorker.scan_completed()` → `all_scans_completed()` (leaving the unrelated `Watcher.scan_completed` attribute untouched); standardized log-prefix punctuation.
+- Decomposed `_render_combined_gains_figure` (415 lines) by extracting a `_draw_tile_panel` helper; verified byte-identical PNG output before/after. Densest numerical functions (`fit_phase_line`, `process_solutions`) left untouched per plan.
+- Added shared config-reading helpers: health-config reading folded into `MWAXDaemon`; added an `MWAXDBHandler.from_config()` classmethod for reading the consolidated `[mwa database]` section.
+- Retry-strategy (`tenacity` vs hand-rolled loops) and clock consistency (`time.time()` vs `time.monotonic()`) audits noted as optional/lowest-priority — largely deferred beyond what Phase 4.8 already fixed.
 
 # 1.10.2 26-Aug-2026
 
@@ -20,14 +106,14 @@
 
 # 1.10.1 26-Aug-2026
 
-* Fixed gain-outlier pages failing with `[Errno 12] Cannot allocate memory` on a 256-tile picket fence (seen via `cal_utils`). `plot_outlier_gains()` created its `ProcessPoolExecutor` with no `max_workers`, so it spawned `os.cpu_count()` workers, and a stitched page peaks at ~322MB measured (10800x3600px for the `cal_utils` default of 16 tiles per page: a 156MB raw RGBA buffer, roughly doubled because `savefig(bbox_inches="tight")` renders once to measure the bounding box and again to write the file). On a many-core calvin node that was tens of GB of live render buffers. The pool is now bounded by `_max_render_workers()`, which takes the smallest of the page count, the CPU count, and how many page-sized allocations fit in a fraction of the memory actually available. Memory detection checks the cgroup limit before the node's `MemAvailable`, since these run as Slurm jobs and the node can have hundreds of GB free while the job is confined to a fraction of it; if neither can be read it falls back to 4 workers rather than assuming plenty. Page geometry now comes from a shared `_page_grid()` helper used by both the renderer and the estimator, so the memory estimate cannot drift from the figure actually created. `plot_outlier_gains()` also takes an optional `max_workers` override. Note the per-worker bundle copy was measured at only ~5% of the per-page peak (16.5MB against 322MB), so slicing the bundle per page was deliberately not done -- it would have meant threading a tile offset through the renderer for a negligible saving.
-* Picket-fence post-hyperdrive performance. Benchmarked against real fixtures (`tests/data/1391522232`, 24 pickets x 32 chanblocks, vs `tests/data/1094488624`, 1 file, both 768 total chanblocks): the group-level stages are **not** picket-sensitive at all -- 127.6s vs 126.1s, of which ~98% is phase fitting, which already runs on the whole group's concatenated chanblocks. The 3-5x runtime gap was entirely in the per-file loops in `process_solutions()`.
-* `plot_outlier_gains()` was the bulk of that gap: it was called once per solution file, so a 24-file observation created 24 `ProcessPoolExecutor`s and rendered 120 pages against 4 for a contiguous observation, for the same number of data points (4 of 24 files measured at 223s, i.e. ~22 minutes extrapolated, vs 56s contiguous). It now renders **one** paginated set for the whole observation from a single pool: 5 pages, 22.4MB, 186s single-core measured. Outlier detection is untouched and remains strictly per file -- a polynomial fit across a picket-fence frequency gap would be meaningless -- so only presentation changed.
-* Gain-outlier plots now stitch every coarse channel onto one compressed ("broken") x-axis instead of one plot per picket, which is what a human reviewer asked for: 24 separate plots per observation was unmanageable. Each picket keeps its true uniform spacing, gaps are compressed to a fixed token width (`STITCH_GAP_CHANBLOCKS`) with a dashed break line at every boundary, and ticks are labelled with the real coarse channel number. Plotting against true frequency was rejected: 1391522232 spans 78.7-241.2 MHz with only 18.9% of that span covered by data, so over 80% of the axis would have been empty. A real broken axis (one subplot per segment) was rejected too -- ~1500 axes per page would have cost more than the per-file plotting it replaced. Stitched pages use wider subplots on a narrower grid (`STITCHED_SUBPLOT_WIDTH_IN`/`STITCHED_TILE_COLS`), since 768 chanblocks at the single-file width gave only ~38px per picket; single-file observations keep the previous layout unchanged. **Note two behaviour changes:** output filenames no longer carry a `_ch<N>` component (`generate_plot_index_file` matches on the `gain_outliers_tiles` substring, so the index still categorises them correctly), and the per-tile "% Good" summary is now counted across the whole observation rather than per picket.
-* Per-channel `axvspan` shading in the gain-outlier plots replaced with a single masked `fill_between(..., step="mid")` per axis. Equivalent output, but with every file's chanblocks now on one axis the old per-channel loop could have added tens of thousands of `Rectangle` patches to a single page.
-* `generate_hyperdrive_plots()` is now driven by `generate_hyperdrive_plots_for_files()`, which runs the per-file invocations concurrently on a thread pool (each is an external hyperdrive process, so the GIL is released while waiting on the child). A picket fence previously did 48 serial process launches -- 24 for the "before" pass and 24 for "after" -- against 2 for a contiguous observation. Failures are collected and returned rather than raised, so one bad file neither aborts the rest nor fails an otherwise good calibration.
-* That parallelism required fixing the "before" rename in `generate_hyperdrive_plots()`, which globbed the **whole output directory** for `*_solutions_amps.png`. It was only correct serially (an already-renamed file stops matching), cost a full directory scan per file (O(N^2) for a picket fence), and would have had concurrent calls renaming each other's output. It is now scoped to its own input file's stem -- still a glob rather than hardcoded `_amps`/`_phases` suffixes, so a hyperdrive version emitting a different plot type still gets its "before" copy protected, and it now warns if a run that reported success produced no matching plots.
-* `HyperfitsSolution.results` now caches the RESULTS HDU instead of reopening the file on every access, and `HyperfitsSolutionGroup.results` no longer reads each file twice per access (once in the length-validation loop, once in the concatenate). `weights` goes through that several times per pipeline run, so a 24-file observation was opening solution files 192 times per run against 8 for a contiguous one, over a shared filesystem. A missing RESULTS HDU is cached as missing, so it keeps raising `KeyError` for the uniform-weights fallback without re-reading. Safe because `write_jones()` only rewrites the SOLUTIONS HDU -- there is a regression test pinning that.
+* Fixed OOM in gain-outlier plotting ([Errno 12] Cannot allocate memory on a 256-tile picket fence). plot_outlier_gains()'s ProcessPoolExecutor had no max_workers, so it spawned os.cpu_count() workers, each holding a page render peaking at ~322MB (10800x3600px, doubled by savefig(bbox_inches="tight")'s two-pass render). On a many-core calvin node this meant tens of GB of buffers. Now bounded by _max_render_workers() (min of page count, CPU count, and memory-fitted pages), checking cgroup limit before MemAvailable since jobs run under Slurm with only a fraction of node memory; falls back to 4 workers if neither is readable. Page geometry now comes from a shared _page_grid() so the estimate can't drift from the actual figure. Added an optional max_workers override. (Per-worker bundle copy is only ~5% of per-page peak, so wasn't sliced per page — not worth the added complexity.)
+* Picket-fence calibration was 3-5x slower than contiguous for the same data volume — isolated to process_solutions()'s per-file loops, not the group-level phase-fitting stages (127.6s vs 126.1s, benchmarked on real fixtures).
+* plot_outlier_gains() was the main cause: called once per file, so a 24-file observation spun up 24 pools and rendered 120 pages vs. 4 for a contiguous observation with equal data (measured ~22min extrapolated vs. 56s). Now renders one paginated set for the whole observation from a single pool (5 pages, 22.4MB, 186s single-core). Per-file outlier detection is unchanged — fitting across a picket-fence frequency gap would be meaningless — only the presentation is consolidated.
+* Gain-outlier plots now stitch all coarse channels onto one compressed x-axis instead of one plot per picket (24 plots/observation was unmanageable). True spacing preserved within each picket; gaps compressed to a fixed width with dashed break lines; ticks show real channel numbers. Rejected alternatives: true frequency axis (one fixture spans 78.7-241.2MHz with only 18.9% covered — mostly empty space) and a real broken-axis subplot-per-segment approach (~1500 axes/page, too costly). Stitched pages use wider subplots on a narrower grid (single-file layout unchanged). Behavior changes: output filenames drop the _ch<N> suffix (index categorization still works via substring match), and "% Good" is now summarized per observation rather than per picket.
+* Per-channel axvspan shading replaced with a single masked fill_between(..., step="mid") per axis — avoids potentially tens of thousands of Rectangle patches per page now that a whole observation shares one axis.
+* generate_hyperdrive_plots() now runs per-file invocations concurrently via generate_hyperdrive_plots_for_files() (thread pool — each call is an external process, so the GIL is released while waiting). Cuts a picket fence from 48 serial launches to effectively 2. Failures are collected and returned rather than raised, so one bad file doesn't sink the rest.
+* That parallelism exposed a bug in the "before" file rename: it globbed the whole output directory for *_solutions_amps.png, which only worked serially (O(N²), and concurrent calls would rename each other's output). Now scoped to each input file's stem (still a glob, so future hyperdrive plot types stay protected); warns if a reported-successful run produced no matching plots.
+* HyperfitsSolution.results now caches the RESULTS HDU instead of reopening the file on every access; HyperfitsSolutionGroup.results no longer double-reads files. This cut a 24-file observation from 192 file opens down to 8 (matching the contiguous case). A missing RESULTS HDU is cached as missing so the KeyError fallback still fires without re-reading. Safe because write_jones() only touches the SOLUTIONS HDU (pinned by a regression test).
 
 # 1.10.0 26-Aug-2026
 

@@ -83,10 +83,8 @@ class MWAXDBHandler:
 
     def close(self):
         """Close the database connection pool if it is open."""
-        # This set of 3 ifs covers all cases where the pool may not be instantiated or open
+        # This set of ifs covers all cases where the pool may not be instantiated or open
         if getattr(self, "pool", None) is None:
-            return
-        if self.pool is None:
             return
         if self.pool.closed:
             return

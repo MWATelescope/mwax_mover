@@ -267,8 +267,10 @@ class QueueWorker:
         Returns:
             A dictionary containing the worker name, current item, and queue size.
         """
+        # We add 1 to the count if we have a current item, because the queue size does not include the item
+        # currently being processed.
         return {
             "name": self.name,
             "current_item": self.current_item,
-            "queue_size": self.source_queue.qsize(),
+            "queue_size": self.source_queue.qsize() + (0 if self.current_item is None else 1),
         }

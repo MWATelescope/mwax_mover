@@ -261,8 +261,10 @@ class PriorityQueueWorker:
             if self.current_item[1]:
                 current = str(self.current_item[1])
 
+        # We add 1 to the count if we have a current item, because the queue size does not include the item
+        # currently being processed.
         return {
             "name": self.name,
             "current_item": current,
-            "queue_size": self.source_queue.qsize(),
+            "queue_size": self.source_queue.qsize() + (0 if self.current_item is None else 1),
         }

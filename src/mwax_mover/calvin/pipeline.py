@@ -29,6 +29,7 @@ from mwax_mover.calvin.plots.gains import plot_outlier_gains
 from mwax_mover.calvin.plots.phases import write_debug_phase_fit_plots
 from mwax_mover.calvin.plots.stats_table import write_before_after_stats
 from mwax_mover.calvin.solution_files import get_sorted_solution_files
+from mwax_mover.constants import EXIT_FAILURE
 from mwax_mover.core.command import write_readme_file
 from mwax_mover.db.calibration import insert_calibration_fits_row, insert_calibration_solutions_row
 from mwax_mover.db.handler import MWAXDBHandler
@@ -417,7 +418,7 @@ def process_solutions(
         write_readme_file(
             os.path.join(output_data_path, "readme_error.txt"),
             "process_solutions()",
-            -999,
+            EXIT_FAILURE,
             "",
             error_text,
         )
