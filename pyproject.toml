@@ -43,6 +43,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "mypy",
     "pre-commit",
     "pytest",
     "pytest-cov",
@@ -137,3 +138,19 @@ markers = [
 # repository root on the module search path instead of tests/. Keep the two in
 # step -- if one is changed, change the other.
 extra-paths = ["tests"]
+
+[tool.mypy]
+# Set this to your project's Python version (e.g., 3.10, 3.11, 3.12)
+python_version = "3.12"
+
+# Silences errors about external libraries that lack type hints
+ignore_missing_imports = true
+
+# Shows error codes in the output (e.g., [assignment]), making it easier to skip specific lines
+show_error_codes = true
+
+# Warns you if a configuration line isn't actually doing anything
+warn_unused_configs = true
+
+# Type-checks the body of functions even if they don't have return type hints
+check_untyped_defs = true
