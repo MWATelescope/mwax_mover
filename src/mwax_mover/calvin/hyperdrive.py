@@ -17,6 +17,7 @@ import logging
 import os
 import shutil
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import mwalib
 import numpy as np
@@ -192,8 +193,8 @@ def _max_hyperdrive_workers(per_run_bytes: list[int]) -> int:
     return workers
 
 
-def run_hyperdrive(
-    input_uvfits_files: list[str],
+def _run_hyperdrive_one(
+    uvfits_file: str,
     metafits_filename: str,
     job_output_path: str,
     obs_id: int,
@@ -203,13 +204,13 @@ def run_hyperdrive(
     num_sources: int,
     hyperdrive_timeout: int,
     hyperdrive_extra_args: str,
-) -> tuple[bool, str]:
-    """Run hyperdrive calibration on UV FITS files.
+    run_index: int,
+    total_runs: int,
+) -> tuple[bool, str, str, int, str, str]:
+    """Run hyperdrive di-calibrate on a single uvfits file (one picket).
 
     Args:
-        input_uvfits_files: List of input UV FITS files, one per contiguous
-            coarse-channel band (so 1 for a normal observation, up to 24 for a
-            picket fence).
+        uvfits_file: Path to this picket's input UV FITS file.
         metafits_filename: Path to the metafits file.
         job_output_path: Output directory for hyperdrive.
         obs_id: Observation ID.
@@ -219,100 +220,211 @@ def run_hyperdrive(
         num_sources: Number of sources in the list.
         hyperdrive_timeout: Timeout in seconds for hyperdrive execution.
         hyperdrive_extra_args: Any additional command line args provided from the calvin_processor config file.
+        run_index: This picket's position in the original file list, for log
+            messages only -- pickets may run concurrently, so this reflects
+            list order, not real-time completion order.
+        total_runs: Total number of pickets, for the same log messages.
+
+    Returns:
+        (success, calibration_command, cmdline, exit_code, stdout, stderr).
+        cmdline/exit_code/stdout/stderr describe this picket's own attempt,
+        for the caller to report if this run failed.
+    """
+    obsid_and_band = os.path.basename(uvfits_file.replace(EXT_UVFITS, ""))
+    start_time = time.monotonic()
+    stdout = ""
+    stderr = ""
+    exit_code = 0
+    cmdline = ""
+
+    calibration_command = (
+        f"--num-sources {num_sources}"
+        f" --source-list {source_list_filename}"
+        f" --source-list-type {source_list_type}"
+        f" {hyperdrive_extra_args}"
+    )
+
+    try:
+        hyperdrive_solution_full_filename = os.path.join(job_output_path, f"{obsid_and_band}_solutions.fits")
+        bin_solution_filename = f"{obsid_and_band}_solutions.bin"
+        bin_solution_full_filename = os.path.join(job_output_path, bin_solution_filename)
+
+        cmdline = (
+            f"{hyperdrive_binary_path} di-calibrate"
+            f" --no-progress-bars {calibration_command}"
+            f" --data {uvfits_file} {metafits_filename} "
+            f" --outputs {hyperdrive_solution_full_filename} {bin_solution_full_filename}"
+        )
+
+        logger.info(f"{obs_id}: Running hyperdrive on {uvfits_file}...")
+        hyperdrive_popen_process = start_command(cmdline, -1, False, False)
+
+        exit_code, stdout, stderr = check_popen_finished(
+            hyperdrive_popen_process,
+            hyperdrive_timeout,
+        )
+
+        elapsed = time.monotonic() - start_time
+
+        if exit_code == 0:
+            logger.info(f"{obs_id}: hyperdrive run {run_index + 1}/{total_runs} successful in {elapsed:.3f} seconds")
+
+            # Joined with job_output_path so the readme lands in the job's
+            # output directory rather than the current working directory.
+            readme_filename = os.path.join(job_output_path, f"{obsid_and_band}_hyperdrive_readme.txt")
+            write_readme_file(
+                readme_filename,
+                cmdline,
+                exit_code,
+                stdout,
+                stderr,
+            )
+
+            return True, calibration_command, cmdline, exit_code, stdout, stderr
+
+        logger.error(
+            f"{obs_id}: hyperdrive run {run_index + 1}/{total_runs} FAILED:"
+            f" Exit code of {exit_code} in {elapsed:.3f} seconds. StdErr: {stderr}"
+        )
+        return False, calibration_command, cmdline, exit_code, stdout, stderr
+
+    except Exception as hyperdrive_run_exception:
+        elapsed = time.monotonic() - start_time
+        logger.error(
+            f"{obs_id}: hyperdrive run {run_index + 1}/{total_runs} FAILED:"
+            " Unhandled exception"
+            f" {hyperdrive_run_exception} in"
+            f" {elapsed:.3f} seconds. StdErr: {stderr}"
+        )
+        return False, calibration_command, cmdline, exit_code, stdout, stderr
+
+
+def run_hyperdrive(
+    input_uvfits_files: list[str],
+    metafits_filename: str,
+    metafits_context: mwalib.MetafitsContext,
+    job_output_path: str,
+    obs_id: int,
+    hyperdrive_binary_path: str,
+    source_list_filename: str,
+    source_list_type: str,
+    num_sources: int,
+    hyperdrive_timeout: int,
+    hyperdrive_extra_args: str,
+    edge_width_hz: int,
+) -> tuple[bool, str]:
+    """Run hyperdrive calibration on UV FITS files, concurrently across picket-fence bands.
+
+    Every picket runs regardless of whether another one fails -- unlike the
+    previous serial implementation, which stopped at the first failure and
+    left later pickets un-run. Only the aggregate result (did every picket
+    succeed) determines the return value and the error-dir/readme_error.txt
+    path, same as before. See docs/HYPERDRIVE_PARALLELISM.md 4.2 for why.
+
+    Concurrency is memory-bounded (see _max_hyperdrive_workers): each
+    picket's peak RAM is estimated from its own uvfits file
+    (_uvfits_num_coarse_chans) and the observation's metafits
+    (estimate_di_calibrate_peak_ram_bytes), and the worker count is capped
+    so the worst-case picket always fits within the live-probed available
+    memory. If any picket's estimate can't be computed (e.g. a malformed
+    uvfits header), concurrency is disabled for this call (falls back to
+    fully serial) rather than raising -- a file hyperdrive itself can't
+    parse either should still get its own clean per-picket failure and
+    readme, not an unhandled exception before any run even starts.
+
+    Args:
+        input_uvfits_files: List of input UV FITS files, one per contiguous
+            coarse-channel band (so 1 for a normal observation, up to 24 for a
+            picket fence).
+        metafits_filename: Path to the metafits file.
+        metafits_context: Metafits context for the observation, used to
+            estimate each picket's peak RAM.
+        job_output_path: Output directory for hyperdrive.
+        obs_id: Observation ID.
+        hyperdrive_binary_path: Path to the hyperdrive executable.
+        source_list_filename: Path to the source list file.
+        source_list_type: Type of source list (e.g., 'gleam').
+        num_sources: Number of sources in the list.
+        hyperdrive_timeout: Timeout in seconds for hyperdrive execution.
+        hyperdrive_extra_args: Any additional command line args provided from the calvin_processor config file.
+        edge_width_hz: The amount that each coarse channel edge is flagged (in Hz), for the memory estimate.
 
     Returns:
         tuple[True, calibration_command] if all runs succeeded, [False, calibration_command] if any failed.
     """
-    logger.info(
-        f"{obs_id}: {len(input_uvfits_files)} contiguous bands detected."
-        f" Running hyperdrive {len(input_uvfits_files)} times...."
-    )
+    total_runs = len(input_uvfits_files)
+    if total_runs == 0:
+        # Vacuously successful -- matches the previous implementation's
+        # behaviour (an empty list never took the "not all succeeded" path
+        # below either, since 0 == 0).
+        return True, ""
 
-    hyperdrive_runs_success: int = 0
-    stdout = ""
-    stderr = ""
-    elapsed = -1
-    cmdline = ""
-    exit_code = 0
-    # Initialised here so it is always bound, even if input_uvfits_files is
-    # empty, which would otherwise be an UnboundLocalError at the return sites.
-    calibration_command = ""
+    logger.info(f"{obs_id}: {total_runs} contiguous band(s) detected. Running hyperdrive {total_runs} time(s)....")
 
-    for hyperdrive_run, uvfits_file in enumerate(input_uvfits_files):
-        obsid_and_band = os.path.basename(uvfits_file.replace(EXT_UVFITS, ""))
-
-        # Outside the try block so it is always bound before the exception
-        # handler below computes `elapsed` from it.
-        start_time = time.monotonic()
-
-        try:
-            hyperdrive_solution_full_filename = os.path.join(job_output_path, f"{obsid_and_band}_solutions.fits")
-            bin_solution_filename = f"{obsid_and_band}_solutions.bin"
-            bin_solution_full_filename = os.path.join(job_output_path, bin_solution_filename)
-
-            calibration_command = (
-                f"--num-sources {num_sources}"
-                f" --source-list {source_list_filename}"
-                f" --source-list-type {source_list_type}"
-                f" {hyperdrive_extra_args}"
+    try:
+        per_run_bytes = [
+            estimate_di_calibrate_peak_ram_bytes(
+                metafits_context,
+                edge_width_hz,
+                num_sources,
+                0,
+                _uvfits_num_coarse_chans(uvfits_file, metafits_context) - 1,
             )
-            cmdline = (
-                f"{hyperdrive_binary_path} di-calibrate"
-                f" --no-progress-bars {calibration_command}"
-                f" --data {uvfits_file} {metafits_filename} "
-                f" --outputs {hyperdrive_solution_full_filename} {bin_solution_full_filename}"
-            )
+            for uvfits_file in input_uvfits_files
+        ]
+        workers = _max_hyperdrive_workers(per_run_bytes)
+    except Exception as estimate_exception:
+        logger.warning(
+            f"{obs_id}: could not estimate per-picket hyperdrive memory usage ({estimate_exception}); running serially."
+        )
+        workers = 1
 
-            logger.info(f"{obs_id}: Running hyperdrive on {uvfits_file}...")
-            hyperdrive_popen_process = start_command(cmdline, -1, False, False)
+    results: list[tuple[bool, str, str, int, str, str] | None] = [None] * total_runs
 
-            exit_code, stdout, stderr = check_popen_finished(
-                hyperdrive_popen_process,
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        future_to_index = {
+            executor.submit(
+                _run_hyperdrive_one,
+                uvfits_file,
+                metafits_filename,
+                job_output_path,
+                obs_id,
+                hyperdrive_binary_path,
+                source_list_filename,
+                source_list_type,
+                num_sources,
                 hyperdrive_timeout,
+                hyperdrive_extra_args,
+                i,
+                total_runs,
+            ): i
+            for i, uvfits_file in enumerate(input_uvfits_files)
+        }
+        for future in as_completed(future_to_index):
+            results[future_to_index[future]] = future.result()
+
+    # Every slot was filled by a completed future above -- ThreadPoolExecutor's
+    # __exit__ waits for all of them, and the loop just above assigns every
+    # index before we get here.
+    filled_results = [result for result in results if result is not None]
+    assert len(filled_results) == total_runs
+
+    hyperdrive_runs_success = sum(1 for result in filled_results if result[0])
+    calibration_command = filled_results[0][1]
+
+    if hyperdrive_runs_success != total_runs:
+        _, calibration_command, cmdline, exit_code, stdout, stderr = next(
+            result for result in filled_results if not result[0]
+        )
+
+        num_other_failures = (total_runs - hyperdrive_runs_success) - 1
+        if num_other_failures:
+            logger.warning(
+                f"{obs_id}: {num_other_failures} additional hyperdrive run(s) also failed"
+                " -- see the log above for each one's own error. readme_error.txt below"
+                " describes only the first, by input order."
             )
 
-            elapsed = time.monotonic() - start_time
-
-            if exit_code == 0:
-                logger.info(
-                    f"{obs_id}: hyperdrive run"
-                    f" {hyperdrive_run + 1}/{len(input_uvfits_files)} successful"
-                    f" in {elapsed:.3f} seconds"
-                )
-
-                # Joined with job_output_path so the readme lands in the job's
-                # output directory rather than the current working directory.
-                readme_filename = os.path.join(job_output_path, f"{obsid_and_band}_hyperdrive_readme.txt")
-                write_readme_file(
-                    readme_filename,
-                    cmdline,
-                    exit_code,
-                    stdout,
-                    stderr,
-                )
-
-                hyperdrive_runs_success += 1
-            else:
-                logger.error(
-                    f"{obs_id}: hyperdrive run"
-                    f" {hyperdrive_run + 1}/{len(input_uvfits_files)} FAILED:"
-                    f" Exit code of {exit_code} in"
-                    f" {elapsed:.3f} seconds. StdErr: {stderr}"
-                )
-                break
-
-        except Exception as hyperdrive_run_exception:
-            elapsed = time.monotonic() - start_time
-            logger.error(
-                f"{obs_id}: hyperdrive run"
-                f" {hyperdrive_run + 1}/{len(input_uvfits_files)} FAILED:"
-                " Unhandled exception"
-                f" {hyperdrive_run_exception} in"
-                f" {elapsed:.3f} seconds. StdErr: {stderr}"
-            )
-            break
-
-    if hyperdrive_runs_success != len(input_uvfits_files):
         logger.info(
             f"{obs_id}: moving failed files to {job_output_path} for manual analysis and writing readme_error.txt"
         )

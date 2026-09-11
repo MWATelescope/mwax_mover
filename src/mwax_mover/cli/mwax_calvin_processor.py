@@ -988,6 +988,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
         hyperdrive_success, calibration_command = run_hyperdrive(
             uvfits_files,
             self.metafits_filename,
+            metafits_context,
             self.cfg_proc_job_output_path,
             self.obs_id,
             self.cfg_hyperdrive_binary_path,
@@ -996,6 +997,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
             self.cfg_hyperdrive_num_sources,
             self.cfg_hyperdrive_timeout,
             self.hyperdrive_extra_args,
+            self.cfg_birli_edge_width_khz * 1000,
         )
 
         if hyperdrive_success:

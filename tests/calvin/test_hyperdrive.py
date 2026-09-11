@@ -1,13 +1,16 @@
 """Tests for calvin.hyperdrive's run/stats functions.
 
-Covers estimate_di_calibrate_peak_ram_bytes and _uvfits_num_coarse_chans,
-the memory-estimation support added for parallelising run_hyperdrive across
-picket-fence bands (see docs/HYPERDRIVE_PARALLELISM.md Phases 2-4).
-run_hyperdrive/write_hyperdrive_stats/get_convergence_summary themselves
-have no test coverage yet -- see that plan document for why.
+Covers estimate_di_calibrate_peak_ram_bytes, _uvfits_num_coarse_chans, and
+_max_hyperdrive_workers -- the memory-estimation and concurrency-sizing
+support for parallelising run_hyperdrive across picket-fence bands -- plus
+run_hyperdrive itself now that it's wired up (see
+docs/HYPERDRIVE_PARALLELISM.md Phases 2-4). write_hyperdrive_stats/
+get_convergence_summary still have no test coverage.
 """
 
-from unittest.mock import patch
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import mwalib
 import pytest
@@ -19,6 +22,7 @@ from mwax_mover.calvin.hyperdrive import (
     _max_hyperdrive_workers,
     _uvfits_num_coarse_chans,
     estimate_di_calibrate_peak_ram_bytes,
+    run_hyperdrive,
 )
 
 # Same fixture calvin/test_birli.py uses for its own memory-estimate test.
@@ -229,3 +233,177 @@ def test_max_hyperdrive_workers_never_exceeds_picket_count():
         workers = _max_hyperdrive_workers([100, 100])
 
     assert workers == 2
+
+
+# ===========================================================================
+# run_hyperdrive
+# ===========================================================================
+
+
+def test_run_hyperdrive_runs_every_picket_regardless_of_earlier_failures(tmp_path):
+    """Every picket runs even if an earlier one (by input order) fails.
+
+    Unlike the old serial implementation (which stopped at the first
+    failure), every picket must be attempted, and only the aggregate result
+    (not all succeeded) triggers the error-dir move + readme_error.txt.
+
+    Uses non-FITS placeholder uvfits files, so the per-picket memory
+    estimate can't be computed and run_hyperdrive falls back to serial
+    (workers=1) -- this also exercises that fallback path. Serial execution
+    still must not stop early, since that behaviour comes from removing the
+    old loop's `break`, not from concurrency itself.
+    """
+    job_output_path = tmp_path / "output"
+    job_output_path.mkdir()
+
+    uvfits_files = []
+    for i in range(4):
+        f = tmp_path / f"1234567890_ch{i}.uvfits"
+        f.write_text("not a real fits file")
+        uvfits_files.append(str(f))
+
+    # Picket 0 fails; the other three succeed. Proves later pickets still
+    # run even though (by input order) an earlier one failed.
+    exit_codes = {uvfits_files[0]: 1, uvfits_files[1]: 0, uvfits_files[2]: 0, uvfits_files[3]: 0}
+    attempted = []
+
+    def fake_start_command(cmdline, *args, **kwargs):
+        return cmdline  # the "popen process" placeholder is just the cmdline string
+
+    def fake_check_popen_finished(popen_process, timeout):
+        matching = next(f for f in uvfits_files if f in popen_process)
+        attempted.append(matching)
+        return exit_codes[matching], "stdout", "stderr"
+
+    with (
+        patch("mwax_mover.calvin.hyperdrive.start_command", side_effect=fake_start_command),
+        patch("mwax_mover.calvin.hyperdrive.check_popen_finished", side_effect=fake_check_popen_finished),
+    ):
+        success, calibration_command = run_hyperdrive(
+            uvfits_files,
+            "fake_metafits.fits",
+            MagicMock(),  # metafits_context -- never reached; the memory estimate fails first
+            str(job_output_path),
+            1234567890,
+            "/bin/hyperdrive",
+            "srclist.txt",
+            "gleam",
+            500,
+            60,
+            "",
+            80000,
+        )
+
+    # All four pickets were attempted, not just up to the first failure.
+    assert sorted(attempted) == sorted(uvfits_files)
+    assert success is False
+    assert "--num-sources 500" in calibration_command
+
+    # The three successful pickets each got their own readme; picket 0 (the
+    # failure) did not, since that write only happens on the success path.
+    for i in (1, 2, 3):
+        assert (job_output_path / f"1234567890_ch{i}_hyperdrive_readme.txt").exists()
+    assert not (job_output_path / "1234567890_ch0_hyperdrive_readme.txt").exists()
+
+    # Aggregate failure: every uvfits file moved to the error dir, one
+    # combined readme_error.txt written.
+    for i in range(4):
+        assert (job_output_path / f"1234567890_ch{i}.uvfits").exists()
+        assert not Path(uvfits_files[i]).exists()
+    assert (job_output_path / "readme_error.txt").exists()
+
+
+def test_run_hyperdrive_all_succeed_no_error_dir(tmp_path):
+    """When every picket succeeds, nothing is moved and no readme_error.txt is written."""
+    job_output_path = tmp_path / "output"
+    job_output_path.mkdir()
+
+    uvfits_files = []
+    for i in range(2):
+        f = tmp_path / f"1234567890_ch{i}.uvfits"
+        f.write_text("not a real fits file")
+        uvfits_files.append(str(f))
+
+    with (
+        patch("mwax_mover.calvin.hyperdrive.start_command", return_value="popen"),
+        patch("mwax_mover.calvin.hyperdrive.check_popen_finished", return_value=(0, "stdout", "stderr")),
+    ):
+        success, calibration_command = run_hyperdrive(
+            uvfits_files,
+            "fake_metafits.fits",
+            MagicMock(),
+            str(job_output_path),
+            1234567890,
+            "/bin/hyperdrive",
+            "srclist.txt",
+            "gleam",
+            500,
+            60,
+            "",
+            80000,
+        )
+
+    assert success is True
+    assert not (job_output_path / "readme_error.txt").exists()
+    for uvfits_file in uvfits_files:
+        assert Path(uvfits_file).exists()  # not moved
+
+
+def test_run_hyperdrive_empty_input_is_vacuously_successful():
+    """An empty uvfits-file list returns success with no calibration command."""
+    success, calibration_command = run_hyperdrive(
+        [],
+        "fake_metafits.fits",
+        MagicMock(),
+        "/tmp/nonexistent",
+        1234567890,
+        "/bin/hyperdrive",
+        "srclist.txt",
+        "gleam",
+        500,
+        60,
+        "",
+        80000,
+    )
+
+    assert success is True
+    assert calibration_command == ""
+
+
+def test_run_hyperdrive_worker_count_comes_from_max_hyperdrive_workers(tmp_path):
+    """The ThreadPoolExecutor is actually sized by _max_hyperdrive_workers's decision.
+
+    Mocks the whole memory-estimate chain so the wiring can be checked
+    directly, without depending on real uvfits/metafits fixtures.
+    """
+    job_output_path = tmp_path / "output"
+    job_output_path.mkdir()
+    uvfits_files = [str(tmp_path / f"1234567890_ch{i}.uvfits") for i in range(3)]
+    for f in uvfits_files:
+        Path(f).write_text("not a real fits file")
+
+    with (
+        patch("mwax_mover.calvin.hyperdrive._uvfits_num_coarse_chans", return_value=1),
+        patch("mwax_mover.calvin.hyperdrive.estimate_di_calibrate_peak_ram_bytes", return_value=1000),
+        patch("mwax_mover.calvin.hyperdrive._max_hyperdrive_workers", return_value=3) as mock_max_workers,
+        patch("mwax_mover.calvin.hyperdrive.ThreadPoolExecutor", wraps=ThreadPoolExecutor) as mock_executor,
+        patch("mwax_mover.calvin.hyperdrive.start_command", return_value="popen"),
+        patch("mwax_mover.calvin.hyperdrive.check_popen_finished", return_value=(0, "stdout", "stderr")),
+    ):
+        run_hyperdrive(
+            uvfits_files,
+            "fake_metafits.fits",
+            MagicMock(),
+            str(job_output_path),
+            1234567890,
+            "/bin/hyperdrive",
+            "srclist.txt",
+            "gleam",
+            500,
+            60,
+            "",
+            80000,
+        )
+
+    mock_max_workers.assert_called_once_with([1000, 1000, 1000])
+    mock_executor.assert_called_once_with(max_workers=3)
