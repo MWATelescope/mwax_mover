@@ -34,6 +34,17 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from numpy.typing import NDArray
 
+from mwax_mover.calibration.df_columns import (
+    COL_CHI2DOF,
+    COL_FLAVOR,
+    COL_OUTLIER,
+    COL_POL,
+    COL_SIGMA_RESID,
+    COL_SOLN_IDX,
+    COL_TILE_ID,
+    COL_XX,
+    COL_YY,
+)
 from mwax_mover.calibration.fitting import ensure_system_byte_order, poly_str, wrap_angle
 from mwax_mover.calibration.outliers import pivot_phase_fits
 from mwax_mover.calvin.hyperdrive import HyperfitsSolutionGroup
@@ -98,14 +109,14 @@ def plot_debug_phase_fits(
 
     flavor_fits = phase_fits
 
-    n_good = len(flavor_fits[~flavor_fits["outlier"]])
+    n_good = len(flavor_fits[~flavor_fits[COL_OUTLIER]])
     if n_good == 0:
         return None
 
-    bad_fits = flavor_fits[flavor_fits["outlier"]]
+    bad_fits = flavor_fits[flavor_fits[COL_OUTLIER]]
     if len(bad_fits) > 0:
         logger.debug(f"{len(bad_fits)} of {n_total} fits are phase-outliers (reported only, not flagged):")
-        logger.debug(bad_fits[["name", "pol"]].to_string(index=False))
+        logger.debug(bad_fits[["name", COL_POL]].to_string(index=False))
 
     # make a new colormap for weighted data
     half_blues = LinearSegmentedColormap.from_list(
@@ -141,16 +152,16 @@ def plot_debug_phase_fits(
     # already merged in above), to avoid duplicate-column collisions
     # with that merge.
     plain_columns = [
-        "tile_id",
-        "soln_idx",
-        "pol",
+        COL_TILE_ID,
+        COL_SOLN_IDX,
+        COL_POL,
         "length",
         "intercept",
-        "sigma_resid",
-        "chi2dof",
+        COL_SIGMA_RESID,
+        COL_CHI2DOF,
         "quality",
         "stderr",
-        "outlier",
+        COL_OUTLIER,
     ]
     phase_fits_pivot = pivot_phase_fits(phase_fits[plain_columns], tiles)
     weights2 = weights**2
@@ -186,12 +197,12 @@ def plot_rx_lengths(flavor_fits, prefix, show, title):
     Returns:
         Series with mean cable lengths per receiver.
     """
-    good_fits = flavor_fits[~flavor_fits["outlier"]]
+    good_fits = flavor_fits[~flavor_fits[COL_OUTLIER]]
     rxs = sorted(good_fits["rx"].unique())
     means = good_fits.groupby(["rx"])["length"].mean()
 
     plt.clf()
-    box_plot = sns.boxplot(data=good_fits, y="rx", x="length", hue="pol", orient="h", fliersize=0.5)
+    box_plot = sns.boxplot(data=good_fits, y="rx", x="length", hue=COL_POL, orient="h", fliersize=0.5)
     box_plot.grid(axis="x")
     x_text = np.max(box_plot.get_xlim())
 
@@ -252,7 +263,7 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fi
         for ax in axs.flatten():
             ax.axis("off")
         for _, fit in phase_fits_pivot.iterrows():
-            signal = soln[fit["soln_idx"]]
+            signal = soln[fit[COL_SOLN_IDX]]
             if fit["flag"] or np.isnan(signal).all():
                 continue
             mask = np.where(np.logical_and(np.isfinite(signal), weights2 > 0))[0]
@@ -326,11 +337,11 @@ def plot_phase_intercepts(prefix, show, title, flavor_fits):
     plt.clf()
     g = sns.FacetGrid(
         flavor_fits,
-        row="flavor",
-        col="pol",
-        hue="flavor",
-        row_order=sorted(flavor_fits["flavor"].unique()),
-        col_order=["XX", "YY"],
+        row=COL_FLAVOR,
+        col=COL_POL,
+        hue=COL_FLAVOR,
+        row_order=sorted(flavor_fits[COL_FLAVOR].unique()),
+        col_order=[COL_XX, COL_YY],
         subplot_kws={"projection": "polar"},
         sharex=False,
         sharey=False,
@@ -340,7 +351,7 @@ def plot_phase_intercepts(prefix, show, title, flavor_fits):
         (lambda theta, r, size, **kwargs: plt.scatter(x=theta, y=r, s=10 / (0.1 + size), **kwargs)),
         "intercept",
         "length",
-        "sigma_resid",
+        COL_SIGMA_RESID,
     )
     fig = plt.gcf()
     if title:
@@ -394,11 +405,11 @@ def plot_phase_residual(
     plt.clf()
     g = sns.FacetGrid(
         flavor_fits,
-        row="flavor",
-        col="pol",
-        hue="flavor",
-        row_order=sorted(flavor_fits["flavor"].unique()),
-        col_order=["XX", "YY"],
+        row=COL_FLAVOR,
+        col=COL_POL,
+        hue=COL_FLAVOR,
+        row_order=sorted(flavor_fits[COL_FLAVOR].unique()),
+        col_order=[COL_XX, COL_YY],
         sharex=True,
         sharey="row",
     )
@@ -434,8 +445,8 @@ def plot_phase_residual(
     # shade an acceptance band (see plot_outlier_gains).
     mad_to_std = MAD_TO_STD_SCALE_FACTOR
     sigma_resid_bands: dict[tuple[str, str], float] = {}
-    for (flav, pol), grp in flavor_fits.groupby(["flavor", "pol"]):
-        good = grp.loc[~grp["outlier"], "sigma_resid"]
+    for (flav, pol), grp in flavor_fits.groupby([COL_FLAVOR, COL_POL]):
+        good = grp.loc[~grp[COL_OUTLIER], COL_SIGMA_RESID]
         if len(good) == 0:
             continue
         med = good.median()
@@ -460,9 +471,9 @@ def plot_phase_residual(
         intercepts_arr = intercepts.to_numpy()
         pol = pols.iloc[0]
         flav = flavs.iloc[0]
-        if pol == "XX":
+        if pol == COL_XX:
             solns = soln_xx[soln_idxs.values]
-        elif pol == "YY":
+        elif pol == COL_YY:
             solns = soln_yy[soln_idxs.values]
         else:
             raise RuntimeError(f"wut pol? {pol}")
@@ -544,7 +555,7 @@ def plot_phase_residual(
             ylim = float(residual_vmax)
             plt.ylim(-ylim, ylim)
 
-    g.map(plot_residual, "soln_idx", "pol", "flavor", "length", "intercept")
+    g.map(plot_residual, COL_SOLN_IDX, COL_POL, COL_FLAVOR, "length", "intercept")
     g.set_axis_labels("freq", "phase")
 
     fig = plt.gcf()

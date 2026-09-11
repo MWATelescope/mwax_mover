@@ -21,6 +21,7 @@ from enum import Enum
 
 import numpy as np
 
+from mwax_mover.calibration.df_columns import COL_POL, COL_TILE_ID, COL_XX, COL_YY
 from mwax_mover.calibration.fitting import pad_gain_fit_info
 from mwax_mover.calibration.models import GainFitInfo, Metafits, PhaseFitInfo
 from mwax_mover.calvin.hyperdrive import HyperfitsSolution, HyperfitsSolutionGroup, write_hyperdrive_stats
@@ -324,14 +325,14 @@ def process_solutions(
 
                 # Pre-index both DataFrames by (tile_id, pol) so each per-tile
                 # lookup is O(1) instead of O(n) boolean-mask scan.
-                gain_indexed = gain_fits.set_index(["tile_id", "pol"])
-                phase_indexed = phase_fits.set_index(["tile_id", "pol"])
+                gain_indexed = gain_fits.set_index([COL_TILE_ID, COL_POL])
+                phase_indexed = phase_fits.set_index([COL_TILE_ID, COL_POL])
 
                 for tile_id in soln_tile_ids:
                     some_fits = False
 
                     try:
-                        x_gains = gain_indexed.loc[(tile_id, "XX")]
+                        x_gains = gain_indexed.loc[(tile_id, COL_XX)]
                         if len(x_gains.gains) < n_metafits_coarse:
                             x_gains = pad_gain_fit_info(
                                 x_gains,
@@ -343,7 +344,7 @@ def process_solutions(
                         x_gains = GainFitInfo.nan(n_metafits_coarse)
 
                     try:
-                        y_gains = gain_indexed.loc[(tile_id, "YY")]
+                        y_gains = gain_indexed.loc[(tile_id, COL_YY)]
                         if len(y_gains.gains) < n_metafits_coarse:
                             y_gains = pad_gain_fit_info(
                                 y_gains,
@@ -355,13 +356,13 @@ def process_solutions(
                         y_gains = GainFitInfo.nan(n_metafits_coarse)
 
                     try:
-                        x_phase = phase_indexed.loc[(tile_id, "XX")]
+                        x_phase = phase_indexed.loc[(tile_id, COL_XX)]
                         some_fits = True
                     except KeyError:
                         x_phase = PhaseFitInfo.nan()
 
                     try:
-                        y_phase = phase_indexed.loc[(tile_id, "YY")]
+                        y_phase = phase_indexed.loc[(tile_id, COL_YY)]
                         some_fits = True
                     except KeyError:
                         y_phase = PhaseFitInfo.nan()

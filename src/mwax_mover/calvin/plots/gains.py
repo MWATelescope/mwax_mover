@@ -27,6 +27,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from numpy.typing import NDArray
 
+from mwax_mover.calibration.df_columns import COL_GX, COL_GY
 from mwax_mover.calvin.hyperdrive import ChannelFlagReason, HyperfitsSolutionGroup, TileFlagReason
 from mwax_mover.calvin.plots.layout import resolve_plot_dpi, scale_plot_figsize
 from mwax_mover.core.env import available_memory_bytes
@@ -413,12 +414,12 @@ def _extract_combined_gains_bundle(
         # Padded (NaN between files) -- for continuous series only.
         "gx_amp": _stitch_files([np.abs(j[:, :, 0, 0]) for j in gains_for_plot], True, chanblocks_per_file),
         "gy_amp": _stitch_files([np.abs(j[:, :, 1, 1]) for j in gains_for_plot], True, chanblocks_per_file),
-        "fit_gx": _stitch_files([f["gx"] for f in group.amplitude_fit], True, chanblocks_per_file),
-        "fit_gy": _stitch_files([f["gy"] for f in group.amplitude_fit], True, chanblocks_per_file),
-        "band_lower_gx": _stitch_files([b["gx"][0] for b in group.amplitude_band], True, chanblocks_per_file),
-        "band_upper_gx": _stitch_files([b["gx"][1] for b in group.amplitude_band], True, chanblocks_per_file),
-        "band_lower_gy": _stitch_files([b["gy"][0] for b in group.amplitude_band], True, chanblocks_per_file),
-        "band_upper_gy": _stitch_files([b["gy"][1] for b in group.amplitude_band], True, chanblocks_per_file),
+        "fit_gx": _stitch_files([f[COL_GX] for f in group.amplitude_fit], True, chanblocks_per_file),
+        "fit_gy": _stitch_files([f[COL_GY] for f in group.amplitude_fit], True, chanblocks_per_file),
+        "band_lower_gx": _stitch_files([b[COL_GX][0] for b in group.amplitude_band], True, chanblocks_per_file),
+        "band_upper_gx": _stitch_files([b[COL_GX][1] for b in group.amplitude_band], True, chanblocks_per_file),
+        "band_lower_gy": _stitch_files([b[COL_GY][0] for b in group.amplitude_band], True, chanblocks_per_file),
+        "band_upper_gy": _stitch_files([b[COL_GY][1] for b in group.amplitude_band], True, chanblocks_per_file),
         # Unpadded -- one column per real chanblock, aligned with axis["x_real"].
         "gx_amp_real": _stitch_files([np.abs(j[:, :, 0, 0]) for j in gains_for_plot], False, chanblocks_per_file),
         "gy_amp_real": _stitch_files([np.abs(j[:, :, 1, 1]) for j in gains_for_plot], False, chanblocks_per_file),
@@ -747,7 +748,7 @@ def _draw_tile_panel(
     # drawn across a frequency gap that contains no data.
     before_gx = bundle["gx_amp"]
     before_gy = bundle["gy_amp"]
-    fit = {"gx": bundle["fit_gx"], "gy": bundle["fit_gy"]}
+    fit = {COL_GX: bundle["fit_gx"], COL_GY: bundle["fit_gy"]}
     band_lower_gx, band_upper_gx = bundle["band_lower_gx"], bundle["band_upper_gx"]
     band_lower_gy, band_upper_gy = bundle["band_lower_gy"], bundle["band_upper_gy"]
 
@@ -853,11 +854,11 @@ def _draw_tile_panel(
         ax_gx,
         tile,
         tile_name,
-        "gx",
+        COL_GX,
         x_padded,
         x_real,
         before_gx,
-        fit["gx"],
+        fit[COL_GX],
         band_lower_gx,
         band_upper_gx,
         before_gx_real,
@@ -873,11 +874,11 @@ def _draw_tile_panel(
         ax_gy,
         tile,
         tile_name,
-        "gy",
+        COL_GY,
         x_padded,
         x_real,
         before_gy,
-        fit["gy"],
+        fit[COL_GY],
         band_lower_gy,
         band_upper_gy,
         before_gy_real,

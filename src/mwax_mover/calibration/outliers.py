@@ -13,6 +13,17 @@ iterative_poly_clip_batch() fits a robust, sigma-clipped polynomial
 import numpy as np
 import pandas as pd
 
+from mwax_mover.calibration.df_columns import (
+    COL_CHI2DOF,
+    COL_FLAVOR,
+    COL_OUTLIER,
+    COL_POL,
+    COL_SIGMA_RESID,
+    COL_SOLN_IDX,
+    COL_TILE_ID,
+    COL_XX,
+    COL_YY,
+)
 from mwax_mover.constants import MAD_TO_STD_SCALE_FACTOR
 
 
@@ -210,7 +221,7 @@ def iterative_poly_clip_batch(
     return valid, residual, fit, mad, med
 
 
-def reject_outliers(data, quality_key, group_cols=("pol",), nstd=3.0, max_iter=10):
+def reject_outliers(data, quality_key, group_cols=(COL_POL,), nstd=3.0, max_iter=10):
     """Mark outliers in a DataFrame based on a quality metric.
 
     Uses a robust, iteratively-refined threshold per group (see
@@ -271,8 +282,8 @@ def reject_outliers(data, quality_key, group_cols=("pol",), nstd=3.0, max_iter=1
     """
     if nstd == 0:
         return data
-    if "outlier" not in data.columns:
-        data["outlier"] = False
+    if COL_OUTLIER not in data.columns:
+        data[COL_OUTLIER] = False
 
     # Scales a normal-distribution MAD to be comparable to a standard
     # deviation, so nstd keeps roughly the same meaning as the previous
@@ -280,7 +291,7 @@ def reject_outliers(data, quality_key, group_cols=("pol",), nstd=3.0, max_iter=1
     mad_to_std = MAD_TO_STD_SCALE_FACTOR
 
     quality_values = data[quality_key].to_numpy()
-    outlier_values = data["outlier"].to_numpy().copy()
+    outlier_values = data[COL_OUTLIER].to_numpy().copy()
 
     # A single string key per row, combining every group_cols value --
     # lets the loop below treat any number of grouping columns the same
@@ -336,7 +347,7 @@ def reject_outliers(data, quality_key, group_cols=("pol",), nstd=3.0, max_iter=1
                 break
             outlier_values[newly_bad] = True
 
-    data["outlier"] = outlier_values
+    data[COL_OUTLIER] = outlier_values
     return data
 
 
@@ -378,9 +389,9 @@ def annotate_phase_outliers(
         phase_fits merged with tiles (on tile_id/id) and with an
         'outlier' column marking population-outlier rows.
     """
-    merged = phase_fits.merge(tiles, left_on="tile_id", right_on="id", how="left")
-    merged = reject_outliers(merged, "chi2dof", group_cols=("pol", "flavor"), nstd=nstd)
-    merged = reject_outliers(merged, "sigma_resid", group_cols=("pol", "flavor"), nstd=nstd)
+    merged = phase_fits.merge(tiles, left_on=COL_TILE_ID, right_on="id", how="left")
+    merged = reject_outliers(merged, COL_CHI2DOF, group_cols=(COL_POL, COL_FLAVOR), nstd=nstd)
+    merged = reject_outliers(merged, COL_SIGMA_RESID, group_cols=(COL_POL, COL_FLAVOR), nstd=nstd)
     return merged
 
 
@@ -398,14 +409,14 @@ def pivot_phase_fits(
         Pivoted DataFrame with fits separated into XX and YY columns.
     """
     phase_fits = pd.merge(
-        phase_fits[phase_fits["pol"] == "XX"].drop(columns=["pol"]),
-        phase_fits[phase_fits["pol"] == "YY"].drop(columns=["pol", "soln_idx"]),
-        on=["tile_id"],
+        phase_fits[phase_fits[COL_POL] == COL_XX].drop(columns=[COL_POL]),
+        phase_fits[phase_fits[COL_POL] == COL_YY].drop(columns=[COL_POL, COL_SOLN_IDX]),
+        on=[COL_TILE_ID],
         suffixes=["_xx", "_yy"],
     )
-    phase_fits = pd.merge(phase_fits, tiles, left_on="tile_id", right_on="id")
+    phase_fits = pd.merge(phase_fits, tiles, left_on=COL_TILE_ID, right_on="id")
     phase_fits.drop("id", axis=1, inplace=True)
-    tile_columns = ["soln_idx", "name", "tile_id", "rx", "slot", "flavor"]
+    tile_columns = [COL_SOLN_IDX, "name", COL_TILE_ID, "rx", "slot", COL_FLAVOR]
     tile_columns += [*(set(tiles.columns) - set(tile_columns) - {"id"})]
     fit_columns = [column for column in phase_fits.columns if column not in tile_columns]
     fit_columns.sort()

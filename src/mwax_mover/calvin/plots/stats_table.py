@@ -16,6 +16,16 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
+from mwax_mover.calibration.df_columns import (
+    COL_CHI2DOF,
+    COL_FLAVOR,
+    COL_OUTLIER,
+    COL_POL,
+    COL_SIGMA_RESID,
+    COL_TILE_ID,
+    COL_XX,
+    COL_YY,
+)
 from mwax_mover.calibration.outliers import annotate_phase_outliers
 from mwax_mover.calvin.hyperdrive import ChannelFlagReason, HyperfitsSolutionGroup, TileFlagReason
 from mwax_mover.calvin.plots.gains import _channel_reason_counts_text, _format_flavor, _tile_flag_reason_text
@@ -89,7 +99,7 @@ def build_tile_stats_rows(
     n_tiles = len(group.metafits_tiles_df)
     tile_names = group.metafits_tiles_df["name"].to_numpy()
     tile_ids = group.metafits_tiles_df["id"].to_numpy()
-    tile_flavors = group.metafits_tiles_df["flavor"].to_numpy()
+    tile_flavors = group.metafits_tiles_df[COL_FLAVOR].to_numpy()
 
     total_channels = np.zeros(n_tiles, dtype=int)
     bad_channels = np.zeros(n_tiles, dtype=int)
@@ -99,7 +109,7 @@ def build_tile_stats_rows(
             [np.sum([reason != ChannelFlagReason.NONE for reason in file_reasons[tile]]) for tile in range(n_tiles)]
         )
 
-    phase_indexed = phase_fits.set_index(["tile_id", "pol"]) if len(phase_fits) else None
+    phase_indexed = phase_fits.set_index([COL_TILE_ID, COL_POL]) if len(phase_fits) else None
 
     rows = []
     for tile in range(n_tiles):
@@ -119,7 +129,7 @@ def build_tile_stats_rows(
         row = {
             "tile": int(tile_ids[tile]),
             "name": tile_names[tile],
-            "flavor": _format_flavor(tile_flavors[tile]),
+            COL_FLAVOR: _format_flavor(tile_flavors[tile]),
             "fully_flagged": fully_flagged,
             "flagged_pct": flagged_pct,
             "n_bad_channels": n_bad,
@@ -166,17 +176,17 @@ def build_tile_stats_rows(
             tile_id = int(tile_ids[tile])
             outlier_pols = []
             try:
-                row["chi2dof_x"] = float(phase_indexed.loc[(tile_id, "XX"), "chi2dof"])
-                row["sigma_resid_x"] = float(phase_indexed.loc[(tile_id, "XX"), "sigma_resid"])
-                if bool(phase_indexed.loc[(tile_id, "XX"), "outlier"]):
-                    outlier_pols.append("XX")
+                row["chi2dof_x"] = float(phase_indexed.loc[(tile_id, COL_XX), COL_CHI2DOF])
+                row["sigma_resid_x"] = float(phase_indexed.loc[(tile_id, COL_XX), COL_SIGMA_RESID])
+                if bool(phase_indexed.loc[(tile_id, COL_XX), COL_OUTLIER]):
+                    outlier_pols.append(COL_XX)
             except KeyError:
                 pass
             try:
-                row["chi2dof_y"] = float(phase_indexed.loc[(tile_id, "YY"), "chi2dof"])
-                row["sigma_resid_y"] = float(phase_indexed.loc[(tile_id, "YY"), "sigma_resid"])
-                if bool(phase_indexed.loc[(tile_id, "YY"), "outlier"]):
-                    outlier_pols.append("YY")
+                row["chi2dof_y"] = float(phase_indexed.loc[(tile_id, COL_YY), COL_CHI2DOF])
+                row["sigma_resid_y"] = float(phase_indexed.loc[(tile_id, COL_YY), COL_SIGMA_RESID])
+                if bool(phase_indexed.loc[(tile_id, COL_YY), COL_OUTLIER]):
+                    outlier_pols.append(COL_YY)
             except KeyError:
                 pass
             # Advisory only -- reported here (and in the phase-fit debug
@@ -205,7 +215,7 @@ def write_tile_stats_table(title: str, rows: list[dict], stats_fd) -> None:
 
     id_w = 6
     name_w = max(10, max((len(r["name"]) for r in rows), default=10) + 2)
-    flavor_w = max(8, max((len(r["flavor"]) for r in rows), default=8) + 2)
+    flavor_w = max(8, max((len(r[COL_FLAVOR]) for r in rows), default=8) + 2)
     num_w = 8
     phout_w = 9
 

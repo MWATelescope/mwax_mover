@@ -32,6 +32,7 @@ from astropy.io import fits
 from numpy.typing import NDArray
 from pandas import DataFrame
 
+from mwax_mover.calibration.df_columns import COL_GX, COL_GY, COL_POL, COL_SOLN_IDX, COL_TILE_ID, COL_XX, COL_YY
 from mwax_mover.calibration.fitting import ensure_system_byte_order, fit_gain, fit_phase_line
 from mwax_mover.calibration.models import ChanInfo, GainFitInfo, Metafits, PhaseFitInfo
 from mwax_mover.calibration.outliers import annotate_phase_outliers, iterative_poly_clip_batch
@@ -1090,7 +1091,7 @@ class HyperfitsSolutionGroup:
         futures = {}
         with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
             for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, ref_xx, ref_yy, strict=True)):
-                for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
+                for pol, solns in [(COL_XX, xx_solns), (COL_YY, yy_solns)]:
                     future = executor.submit(
                         _phase_fit_one,
                         soln_idx,
@@ -1105,7 +1106,7 @@ class HyperfitsSolutionGroup:
                     futures[future] = (soln_idx, tile_id, pol)
 
         fits = [result for future in as_completed(futures) if (result := future.result()) is not None]
-        return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields])
+        return DataFrame(fits, columns=[COL_TILE_ID, COL_SOLN_IDX, COL_POL, *PhaseFitInfo._fields])
 
     def process_gain_fits_for_db(self, refant_name: str) -> DataFrame:
         """Fit gain solutions to each tile and polarization.
@@ -1127,7 +1128,7 @@ class HyperfitsSolutionGroup:
             for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(
                 zip(soln_tile_ids, noref_xx, noref_yy, strict=True)
             ):
-                for pol, solns in [("XX", xx_solns), ("YY", yy_solns)]:
+                for pol, solns in [(COL_XX, xx_solns), (COL_YY, yy_solns)]:
                     future = executor.submit(
                         _gain_fit_one,
                         soln_idx,
@@ -1142,7 +1143,7 @@ class HyperfitsSolutionGroup:
                     futures[future] = (soln_idx, tile_id, pol)
 
         fits = [result for future in as_completed(futures) if (result := future.result()) is not None]
-        return DataFrame(fits, columns=["tile_id", "soln_idx", "pol", *GainFitInfo._fields])
+        return DataFrame(fits, columns=[COL_TILE_ID, COL_SOLN_IDX, COL_POL, *GainFitInfo._fields])
 
     def flag_gain_max_cutoff(self, gain_max_cutoff: float | None) -> None:
         """Flag any (tile, chanblock) entry whose gx or gy amplitude
@@ -1281,8 +1282,8 @@ class HyperfitsSolutionGroup:
             band_lower_gy = fit_gy + med_gy[:, None] - mad_residual_threshold * mad_gy[:, None]
             band_upper_gy = fit_gy + med_gy[:, None] + mad_residual_threshold * mad_gy[:, None]
 
-            self.amplitude_fit.append({"gx": fit_gx, "gy": fit_gy})
-            self.amplitude_band.append({"gx": (band_lower_gx, band_upper_gx), "gy": (band_lower_gy, band_upper_gy)})
+            self.amplitude_fit.append({COL_GX: fit_gx, COL_GY: fit_gy})
+            self.amplitude_band.append({COL_GX: (band_lower_gx, band_upper_gx), COL_GY: (band_lower_gy, band_upper_gy)})
 
     def detect_phase_outliers(self, refant_name: str, phase_fit_niter: int, nstd: float = 3.0) -> None:
         """Detect tiles whose phase fit is a population outlier, for reporting only.
