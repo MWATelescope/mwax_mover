@@ -4,12 +4,13 @@ run_hyperdrive() shells out to the hyperdrive binary via a Popen handle and
 writes a readme (core.command.write_readme_file) recording the command and
 outcome, mirroring calvin.birli.run_birli(). write_hyperdrive_stats() writes
 get_convergence_summary()'s convergence summary for a just-produced solution
-file. estimate_di_calibrate_peak_ram_bytes() and _uvfits_num_coarse_chans()
-support parallelising run_hyperdrive() across picket-fence bands -- see
-docs/HYPERDRIVE_PARALLELISM.md Phases 2-4. See calvin.hyperfits_solution/
-calvin.hyperfits_solution_group for reading/flagging solutions (this module
-used to hold those two classes too -- see docs/HYPERDRIVE_PARALLELISM.md
-Phase 1 for the split) and calvin.plots for plotting.
+file. estimate_di_calibrate_peak_ram_bytes(), _uvfits_num_coarse_chans(),
+and _max_hyperdrive_workers() support parallelising run_hyperdrive() across
+picket-fence bands -- see docs/HYPERDRIVE_PARALLELISM.md Phases 2-4. See
+calvin.hyperfits_solution/calvin.hyperfits_solution_group for
+reading/flagging solutions (this module used to hold those two classes too
+-- see docs/HYPERDRIVE_PARALLELISM.md Phase 1 for the split) and calvin.plots
+for plotting.
 """
 
 import logging
@@ -22,8 +23,16 @@ import numpy as np
 from astropy.io import fits
 
 from mwax_mover.calvin.hyperfits_solution import HyperfitsSolution
-from mwax_mover.constants import EXT_UVFITS, F32_BYTES, JONES_F32_BYTES, JONES_F64_BYTES
+from mwax_mover.constants import (
+    EXT_UVFITS,
+    F32_BYTES,
+    HYPERDRIVE_FALLBACK_WORKERS,
+    HYPERDRIVE_MEMORY_HEADROOM_FRACTION,
+    JONES_F32_BYTES,
+    JONES_F64_BYTES,
+)
 from mwax_mover.core.command import check_popen_finished, start_command, write_readme_file
+from mwax_mover.core.env import available_memory_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +154,42 @@ def estimate_di_calibrate_peak_ram_bytes(
     solutions_array = n_unflagged_tiles * n_chanblocks * JONES_F64_BYTES
 
     return vis_arrays + sky_model_components + beam_response_cache + solutions_array
+
+
+def _max_hyperdrive_workers(per_run_bytes: list[int]) -> int:
+    """Decide how many hyperdrive di-calibrate runs may run concurrently.
+
+    Bounded by live available memory only (no CPU cap -- each hyperdrive
+    process may itself use several threads internally, so capping by CPU
+    count here could leave memory idle for no benefit). Mirrors
+    calvin.plots.gains._max_render_workers's shape, but sized against
+    available_memory_bytes() with a fixed headroom fraction rather than
+    that function's page-count/CPU-count/memory three-way min.
+
+    Args:
+        per_run_bytes: Estimated peak RAM for each picket's hyperdrive run
+            (see estimate_di_calibrate_peak_ram_bytes), one entry per
+            picket about to run.
+
+    Returns:
+        Worker count, always at least 1.
+    """
+    available = available_memory_bytes()
+
+    if available is None:
+        logger.debug(
+            f"Could not determine available memory; capping concurrent hyperdrive runs at "
+            f"{HYPERDRIVE_FALLBACK_WORKERS}."
+        )
+        memory_cap = HYPERDRIVE_FALLBACK_WORKERS
+    else:
+        budget = int(available * (1 - HYPERDRIVE_MEMORY_HEADROOM_FRACTION))
+        worst_case = max(per_run_bytes)
+        memory_cap = max(1, budget // worst_case)
+
+    workers = max(1, min(len(per_run_bytes), memory_cap))
+    logger.info(f"Running {len(per_run_bytes)} hyperdrive run(s) with {workers} concurrent worker(s).")
+    return workers
 
 
 def run_hyperdrive(

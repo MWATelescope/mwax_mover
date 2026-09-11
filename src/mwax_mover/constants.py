@@ -1,27 +1,39 @@
 """Module-level constants shared across the mwax_mover package.
 
-Defines the __FILE__ and __FILENOEXT__ substitution tokens used when building
-executable command strings; the three directory watch-mode string constants
-(MODE_WATCH_DIR_FOR_NEW, MODE_WATCH_DIR_FOR_RENAME, MODE_WATCH_DIR_FOR_RENAME_OR_NEW);
-the INI config section names used across the CLI daemons (SECTION_*, except
-the three metadata-database sections -- see the comment above SECTION_MWAX_MOVER);
-the MWA webservice hosts (MWA_WEBSERVICE_HOSTS); the SECONDS_PER_MINUTE/
-SECONDS_PER_HOUR time-unit conversions; EXIT_FAILURE, the single non-zero
-process exit code used for every abnormal CLI termination;
-MAD_TO_STD_SCALE_FACTOR, the MAD-to-standard-deviation conversion used by the
-calibration outlier-rejection code; LOG_FORMAT, the shared logging.Formatter
-format string for the CLI daemons/scripts; the MWA data file extensions
-(EXT_FITS, EXT_SUB, EXT_VDIF, EXT_FIL, EXT_HDR); the hyperdrive
-solution-file naming convention (SOLUTIONS_FITS_SUFFIX and friends);
-INDEX_JSON_FILENAME, the calibration-fit index manifest filename;
-HEALTH_THREAD_NAME, the health-reporting thread name shared by the four CLI
-daemons; DUMMY_CONFIG_VALUE, the "no real database configured" sentinel;
-DEFAULT_POSTGRES_PORT; METAFITS_KEY_EXPOSURE, the FITS/metafits
-exposure-duration header key; the CONFIG_KEY_* names for config keys
-read identically by two or more CLI daemons; COMMAND_DADA_DISKDB, the
-external binary name used to load a subfile into a PSRDADA ring buffer;
-the di-calibrate memory-estimate constants (JONES_F32_BYTES,
-JONES_F64_BYTES, F32_BYTES); and EXT_UVFITS.
+Command-string substitution tokens: __FILE__/__FILENOEXT__
+(FILE_REPLACEMENT_TOKEN/FILENOEXT_REPLACEMENT_TOKEN).
+
+Directory watch modes: MODE_WATCH_DIR_FOR_NEW/_FOR_RENAME/_FOR_RENAME_OR_NEW.
+
+INI config: the section names used across the CLI daemons (SECTION_*,
+except the three metadata-database sections -- see the comment above
+SECTION_MWAX_MOVER); the CONFIG_KEY_* names for config keys read
+identically by two or more CLI daemons.
+
+Time/size/exit-code basics: SECONDS_PER_MINUTE/SECONDS_PER_HOUR;
+EXIT_FAILURE, the single non-zero process exit code used for every
+abnormal CLI termination; DEFAULT_POSTGRES_PORT.
+
+Network: MWA_WEBSERVICE_HOSTS, the two MWA webservice hosts tried in
+order by every caller that queries the metadata webservice.
+
+File naming: the MWA data file extensions (EXT_FITS, EXT_SUB, EXT_VDIF,
+EXT_FIL, EXT_HDR, EXT_UVFITS); the hyperdrive solution-file naming
+convention (SOLUTIONS_FITS_SUFFIX and friends); INDEX_JSON_FILENAME, the
+calibration-fit index manifest filename; COMMAND_DADA_DISKDB, the
+external binary name used to load a subfile into a PSRDADA ring buffer.
+
+Shared daemon behaviour: LOG_FORMAT, the shared logging.Formatter format
+string for the CLI daemons/scripts; HEALTH_THREAD_NAME, the
+health-reporting thread name shared by the four CLI daemons;
+DUMMY_CONFIG_VALUE, the "no real database configured" sentinel;
+METAFITS_KEY_EXPOSURE, the FITS/metafits exposure-duration header key.
+
+Calibration numerics: MAD_TO_STD_SCALE_FACTOR, the MAD-to-standard-
+deviation conversion used by the outlier-rejection code; the di-calibrate
+memory-estimate constants (JONES_F32_BYTES, JONES_F64_BYTES, F32_BYTES);
+HYPERDRIVE_MEMORY_HEADROOM_FRACTION and HYPERDRIVE_FALLBACK_WORKERS, used
+to size concurrent hyperdrive runs across picket-fence bands.
 """
 
 # The full filename with path
@@ -138,3 +150,17 @@ F32_BYTES = 4
 
 # UVFITS output extension, produced by Birli and consumed by hyperdrive.
 EXT_UVFITS = ".uvfits"
+
+# Fraction of live-probed available memory reserved as headroom when
+# sizing concurrent hyperdrive runs -- leaves room for the parent process
+# and anything else sharing the allocation. Tune here if picket-fence
+# runs are still getting OOM-killed or are leaving memory idle. See
+# docs/HYPERDRIVE_PARALLELISM.md 3.1.
+HYPERDRIVE_MEMORY_HEADROOM_FRACTION = 0.15
+
+# Fallback worker count when available memory can't be determined at all.
+# Deliberately 1 (fully serial) -- unlike the plotting pool's fallback of
+# 4 (see calvin.plots.gains._PAGE_RENDER_FALLBACK_WORKERS), a failed
+# hyperdrive run is a failed calibration, not just a slow plot, so
+# guessing low here costs more to get wrong.
+HYPERDRIVE_FALLBACK_WORKERS = 1

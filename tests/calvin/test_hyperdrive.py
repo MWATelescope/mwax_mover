@@ -15,7 +15,11 @@ from astropy.io import fits
 
 from tests_common import obs_metafits_path
 
-from mwax_mover.calvin.hyperdrive import _uvfits_num_coarse_chans, estimate_di_calibrate_peak_ram_bytes
+from mwax_mover.calvin.hyperdrive import (
+    _max_hyperdrive_workers,
+    _uvfits_num_coarse_chans,
+    estimate_di_calibrate_peak_ram_bytes,
+)
 
 # Same fixture calvin/test_birli.py uses for its own memory-estimate test.
 TEST_METAFITS_PATH = obs_metafits_path(1244973688)
@@ -162,3 +166,66 @@ def test_uvfits_num_coarse_chans_no_freq_axis_raises(metafits_context):
     with patch("mwax_mover.calvin.hyperdrive.fits.getheader", return_value=header):
         with pytest.raises(StopIteration):
             _uvfits_num_coarse_chans("fake.uvfits", metafits_context)
+
+
+# ===========================================================================
+# _max_hyperdrive_workers
+# ===========================================================================
+
+
+def test_max_hyperdrive_workers_exact_fit():
+    """Available memory exactly n times the worst-case run allows n workers."""
+    with patch("mwax_mover.calvin.hyperdrive.available_memory_bytes", return_value=1000):
+        # Budget after 15% headroom: 850. 3 pickets at 850/3 rounds down to 283 each -- but
+        # worst_case here is fixed at 200, so budget // worst_case = 850 // 200 = 4, capped
+        # by len(per_run_bytes) = 3.
+        workers = _max_hyperdrive_workers([200, 200, 200])
+
+    assert workers == 3
+
+
+def test_max_hyperdrive_workers_rounds_down():
+    """Memory that doesn't divide evenly rounds down, never up."""
+    with patch("mwax_mover.calvin.hyperdrive.available_memory_bytes", return_value=1000):
+        # Budget: 850. worst_case: 300. 850 // 300 == 2, not 3, even though 3 pickets exist.
+        workers = _max_hyperdrive_workers([300, 300, 300])
+
+    assert workers == 2
+
+
+def test_max_hyperdrive_workers_single_picket():
+    """A single picket (non-picket-fence observation) always gets exactly 1 worker."""
+    with patch("mwax_mover.calvin.hyperdrive.available_memory_bytes", return_value=10**12):
+        workers = _max_hyperdrive_workers([1_000_000])
+
+    assert workers == 1
+
+
+def test_max_hyperdrive_workers_unknown_memory_falls_back():
+    """available_memory_bytes() returning None uses the fallback constant."""
+    with patch("mwax_mover.calvin.hyperdrive.available_memory_bytes", return_value=None):
+        workers = _max_hyperdrive_workers([1, 2, 3, 4, 5])
+
+    assert workers == 1  # HYPERDRIVE_FALLBACK_WORKERS
+
+
+def test_max_hyperdrive_workers_worst_case_dominates():
+    """One large picket among several small ones caps everything, per-run.
+
+    Sizing against the average or the smallest picket would overcommit --
+    every concurrent slot must be able to fit the largest picket, since any
+    of them could land in any slot.
+    """
+    with patch("mwax_mover.calvin.hyperdrive.available_memory_bytes", return_value=1000):
+        # Budget: 850. worst_case: 850 (one huge picket). 850 // 850 == 1.
+        workers = _max_hyperdrive_workers([10, 10, 10, 850])
+
+    assert workers == 1
+
+
+def test_max_hyperdrive_workers_never_exceeds_picket_count():
+    """Plenty of memory still caps workers at the number of pickets -- no idle workers."""
+    with patch("mwax_mover.calvin.hyperdrive.available_memory_bytes", return_value=10**15):
+        workers = _max_hyperdrive_workers([100, 100])
+
+    assert workers == 2
