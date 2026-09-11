@@ -24,7 +24,9 @@ import numpy as np
 from mwax_mover.calibration.df_columns import COL_POL, COL_TILE_ID, COL_XX, COL_YY
 from mwax_mover.calibration.fitting import pad_gain_fit_info
 from mwax_mover.calibration.models import GainFitInfo, Metafits, PhaseFitInfo
-from mwax_mover.calvin.hyperdrive import HyperfitsSolution, HyperfitsSolutionGroup, write_hyperdrive_stats
+from mwax_mover.calvin.hyperdrive import write_hyperdrive_stats
+from mwax_mover.calvin.hyperfits_solution import HyperfitsSolution
+from mwax_mover.calvin.hyperfits_solution_group import HyperfitsSolutionGroup
 from mwax_mover.calvin.plots import hyperdrive
 from mwax_mover.calvin.plots.gains import plot_outlier_gains
 from mwax_mover.calvin.plots.phases import write_debug_phase_fit_plots

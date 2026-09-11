@@ -47,7 +47,7 @@ from mwax_mover.calibration.df_columns import (
 )
 from mwax_mover.calibration.fitting import ensure_system_byte_order, poly_str, wrap_angle
 from mwax_mover.calibration.outliers import pivot_phase_fits
-from mwax_mover.calvin.hyperdrive import HyperfitsSolutionGroup
+from mwax_mover.calvin.hyperfits_solution_group import HyperfitsSolutionGroup
 from mwax_mover.calvin.plots.layout import resolve_plot_dpi, scale_plot_figsize
 from mwax_mover.constants import MAD_TO_STD_SCALE_FACTOR
 

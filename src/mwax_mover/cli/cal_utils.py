@@ -57,7 +57,9 @@ import sys
 from pathlib import Path
 
 from mwax_mover.calibration.models import Metafits
-from mwax_mover.calvin.hyperdrive import HyperfitsSolution, HyperfitsSolutionGroup, write_hyperdrive_stats
+from mwax_mover.calvin.hyperdrive import write_hyperdrive_stats
+from mwax_mover.calvin.hyperfits_solution import HyperfitsSolution
+from mwax_mover.calvin.hyperfits_solution_group import HyperfitsSolutionGroup
 from mwax_mover.calvin.plots import hyperdrive
 from mwax_mover.calvin.plots.gains import plot_outlier_gains
 from mwax_mover.calvin.plots.phases import write_debug_phase_fit_plots

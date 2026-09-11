@@ -28,7 +28,7 @@ from matplotlib import pyplot as plt
 from numpy.typing import NDArray
 
 from mwax_mover.calibration.df_columns import COL_GX, COL_GY
-from mwax_mover.calvin.hyperdrive import ChannelFlagReason, HyperfitsSolutionGroup, TileFlagReason
+from mwax_mover.calvin.hyperfits_solution_group import ChannelFlagReason, HyperfitsSolutionGroup, TileFlagReason
 from mwax_mover.calvin.plots.layout import resolve_plot_dpi, scale_plot_figsize
 from mwax_mover.core.env import available_memory_bytes
 

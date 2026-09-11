@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from mwax_mover.calibration.models import Metafits
-from mwax_mover.calvin.hyperdrive import ChannelFlagReason, HyperfitsSolutionGroup, TileFlagReason
+from mwax_mover.calvin.hyperfits_solution_group import ChannelFlagReason, HyperfitsSolutionGroup, TileFlagReason
 from mwax_mover.calvin.plots.gains import (
     SINGLE_FILE_SUBPLOT_WIDTH_IN,
     STITCHED_SUBPLOT_WIDTH_IN,

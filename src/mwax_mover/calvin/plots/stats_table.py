@@ -27,7 +27,7 @@ from mwax_mover.calibration.df_columns import (
     COL_YY,
 )
 from mwax_mover.calibration.outliers import annotate_phase_outliers
-from mwax_mover.calvin.hyperdrive import ChannelFlagReason, HyperfitsSolutionGroup, TileFlagReason
+from mwax_mover.calvin.hyperfits_solution_group import ChannelFlagReason, HyperfitsSolutionGroup, TileFlagReason
 from mwax_mover.calvin.plots.gains import _channel_reason_counts_text, _format_flavor, _tile_flag_reason_text
 
 logger = logging.getLogger(__name__)

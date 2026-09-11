@@ -10,7 +10,7 @@ import pytest
 import numpy as np
 import pandas as pd
 
-from mwax_mover.calvin.hyperdrive import ChannelFlagReason, HyperfitsSolutionGroup, TileFlagReason
+from mwax_mover.calvin.hyperfits_solution_group import ChannelFlagReason, HyperfitsSolutionGroup, TileFlagReason
 from mwax_mover.calvin.plots.stats_table import build_tile_stats_rows, write_tile_stats_table
 
 _N_TILES = 3
