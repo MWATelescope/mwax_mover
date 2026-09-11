@@ -102,9 +102,8 @@ initialise_from_command_line()
   └─ parse -c <config> --mode {C|B}
   └─ initialise(config)
        ├─ read config (mode, paths, DB, Redis, multicast, etc.)
-       ├─ connect to MRO metadata DB
-       ├─ set up Flask web server (health/control endpoints)
-       └─ create workers:
+       ├─ construct db_handler (connection pool not started yet)
+       └─ construct workers (not started yet):
             ├─ SubfileIncomingProcessor  (watches raw subfile incoming dir)
             ├─ ChecksumAndDBProcessor    (watches vis/volt/bf incoming dirs)
             ├─ BfStitchingProcessor      (watches bf incoming dir for stitching)
@@ -113,12 +112,16 @@ initialise_from_command_line()
             └─ OutgoingProcessor         (watches vis/volt/bf outgoing dirs)
 
 start()
-  ├─ start DB pool
-  ├─ start Flask web server thread
+  ├─ start Flask web server (registers health/control endpoints, begins serving)
+  ├─ start DB connection pool
   ├─ start health multicast thread (UDP, every 1s)
   ├─ start all workers
-  └─ main loop: monitor worker health, handle cal obs release requests
-        └─ release_cal_obs(): moves cal files from outgoing_cal → outgoing (archive) or dont_archive
+  └─ main loop: monitor worker health only -- if a worker thread has died,
+        request a fatal shutdown. (Web-service endpoints, including
+        /release_cal_obs, are handled independently by Flask's own request
+        thread(s), not by this loop.)
+
+release_cal_obs(): moves cal files from outgoing_cal → outgoing (archive) or dont_archive
 ```
 
 **Data flow — CORRELATOR mode:**
@@ -345,33 +348,33 @@ options:
 
 ### How it works
 
-`MWACacheArchiveProcessor` connects to both the MRO metadata database (read/write) and a remote metadata database (read-only, used to verify expected file sizes and checksums). It creates one `PawseyOutgoingProcessor` worker per configured watch directory.
+`MWACacheArchiveProcessor` connects to the MRO metadata database -- used both to verify a file's expected size/checksum before archiving it, and to record it as archived afterwards (this used to be two separate database connections; the "remote metadata database" was consolidated into the same `[mwa database]` config section as the main one -- see `CHANGELOG.md`). It creates one `PawseyOutgoingProcessor` worker per configured watch directory.
 
 ```
 initialise_from_command_line()
   └─ parse -c <config>
   └─ initialise(config)
        ├─ read config (archive_to_location: Acacia/Banksia, S3 profile, ceph endpoints, watch dirs)
-       ├─ connect to MRO metadata DB (read/write) and remote metadata DB (read-only)
-       ├─ clean up stale .part* temp files older than 1 hour
-       └─ create PawseyOutgoingProcessor per watch directory
+       ├─ construct db_handler (connection pool not started yet)
+       └─ construct one PawseyOutgoingProcessor per watch directory (not started yet)
 
 start()
-  ├─ start DB pools
+  ├─ start DB connection pool
   ├─ start health multicast thread
+  ├─ clean up stale .part* temp files older than 1 hour
   ├─ start all PawseyOutgoingProcessor workers
   └─ main loop: monitor worker health
 
 PawseyOutgoingProcessor.handler(file):
   ├─ validate filename
   ├─ stat file to get size on disk
-  ├─ query remote DB for expected size and checksum
+  ├─ query metadata DB for expected size and checksum
   ├─ if size 0 or mismatch → delete file and drop item
   ├─ compute MD5 and compare to DB value
   ├─ if mismatch → requeue
   ├─ determine S3 bucket name from obs_id
   ├─ rclone copyto → Acacia or Banksia (with rclone check verification, multiple endpoints)
-  ├─ update MRO metadata DB (mark archived with location + bucket)
+  ├─ update metadata DB (mark archived with location + bucket)
   └─ delete local file
 ```
 
@@ -452,19 +455,25 @@ options:
 
 ### How it works
 
-`MWAXCalvinController` polls the metadata database on a configurable interval, auto-creates calibration requests for unattempted calibrator observations, then dispatches SLURM jobs for both realtime and MWA ASVO calibration paths.
+`MWAXCalvinController` polls the metadata database on a configurable interval, auto-creates calibration requests for unattempted calibrator observations, then dispatches SLURM jobs for both realtime and MWA ASVO calibration paths. A separate background thread independently uploads each `mwax_calvin_processor` job's published plots/stats to S3.
 
 ```
 initialise_from_command_line()
   └─ parse -c <config>
   └─ initialise(config)
-       ├─ read config (check_interval, script_path, oldest_cal_obs_id, giant-squid settings)
-       ├─ connect to MRO metadata DB
+       ├─ read config (check_interval, script_path, oldest_cal_obs_id, giant-squid settings,
+       │    plot-upload paths/interval)
+       ├─ construct db_handler (connection pool not started yet)
        └─ initialise MWAASVOHelper (giant-squid binary path + timeouts)
 
 start()
-  ├─ start DB pool
+  ├─ start DB connection pool
   ├─ start health multicast thread
+  ├─ start plot_upload_thread (background, independent of the main loop below)
+  │    └─ every cfg_plots_upload_interval_secs: walk each configured plot-upload path,
+  │         upload the newest cfg_plots_upload_max_fits_per_pass published fit
+  │         directories to S3 (per-path exponential backoff on an empty pass),
+  │         then remove each directory once it is empty
   └─ main loop (every check_interval_seconds):
        ├─ realtime_create_requests_for_unattempted_cal_obs()
        │    └─ query DB for calibrator obs with no calibration request → insert request rows
@@ -543,33 +552,38 @@ options:
 initialise_from_command_line()
   └─ parse -c <config> --obs-id --job-type [--request-ids] [--mwa-asvo-download-url]
 
-start()
-  └─ for each request_id:
-       ├─ update DB: mark download started (assign hostname)
-       │
-       ├─ [if mwa_asvo]: download from MWA ASVO URL → local working dir (via Birli)
-       │
-       ├─ [if realtime]: rsync .fits files from all MWAX boxes → local working dir
-       │
-       ├─ update DB: mark download complete
-       ├─ update DB: mark calibration started
-       │
-       ├─ run Birli (preprocessing + flagging → uvfits)
-       ├─ run hyperdrive (calibration → solutions.fits)
-       │
-       ├─ process_solutions()
-       │    ├─ load HyperfitsSolution + Metafits
-       │    ├─ determine reference antenna
-       │    ├─ fit phases and gains per coarse channel
-       │    ├─ insert_calibration_fits_row() → DB
-       │    └─ insert_calibration_solutions_row() → DB
-       │
-       ├─ update DB: mark calibration complete
-       │
-       ├─ [if realtime]: call /release_cal_obs on each MWAX host's Flask endpoint
-       │    └─ MWAX moves cal .fits files to vis_outgoing (archive) or dont_archive
-       │
-       └─ clean up working directory
+start()  (runs once per SLURM job/obs_id -- request-ids is only ever used as
+          a single batch parameter when updating calibration_request rows,
+          never iterated over for the actual download/calibrate/upload work)
+  ├─ update DB: mark download started (assign hostname)
+  ├─ download metafits; get expected file list from web service (waits if
+  │    the observation is still in progress)
+  ├─ download visibility data, retrying up to a configured number of times:
+  │    ├─ [if realtime]: rsync .fits files from all MWAX boxes
+  │    └─ [if mwa_asvo]: download + extract a tarball from the MWA ASVO URL
+  ├─ [on repeated download failure]: update DB: mark download failed; stop
+  │
+  ├─ update DB: mark calibration started
+  │
+  ├─ run Birli (preprocessing + flagging → uvfits)
+  ├─ run hyperdrive (calibration → solutions.fits)
+  │
+  ├─ process_solutions()
+  │    ├─ load HyperfitsSolution + Metafits
+  │    ├─ select_refant() (reference tile -- see CALVIN.md's "Reference tile selection")
+  │    ├─ fit phases and gains per coarse channel
+  │    ├─ insert_calibration_fits_row() → DB
+  │    └─ insert_calibration_solutions_row() → DB
+  │
+  ├─ update DB: mark calibration complete (with fit_id) or failed
+  │
+  ├─ [if realtime]: call /release_cal_obs on each MWAX host's Flask endpoint
+  │    └─ MWAX moves cal .fits files to vis_outgoing (archive) or dont_archive
+  ├─ [if mwa_asvo and configured]: delete the source tarball from Acacia
+  ├─ [unless configured to keep them]: delete this job's visibility and uvfits
+  │    files (solutions, plots and stats are left in place -- they were
+  │    already uploaded in the step above)
+  └─ stop()
 ```
 
 ### mwax_calvin_processor Health Packet Format
