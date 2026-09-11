@@ -198,7 +198,7 @@ returns `405 Method Not Allowed`.
 ```json
 {
   "main": {
-    "unix_imestamp": 1773726592.618505,
+    "unix_timestamp": 1773726592.618505,
     "process": "MWAXSubfileDistributor",
     "version": "1.5.3",
     "host": "mwax99",
@@ -259,15 +259,15 @@ returns `405 Method Not Allowed`.
       }
     },
     {
-      "name": "VisStatsProcessing",
+      "name": "VisStatsProcessor",
       "watchers": [
         {
-          "name": "VisStatsProcessing_visdata_processing_stats",
+          "name": "VisStatsProcessor_visdata_processing_stats",
           "watch_path": "/visdata/processing_stats"
         }
       ],
       "queue_worker": {
-        "name": "VisStatsProcessing_worker",
+        "name": "VisStatsProcessor_worker",
         "current_item": null,
         "queue_size": 0
       }
@@ -287,15 +287,15 @@ returns `405 Method Not Allowed`.
       }
     },
     {
-      "name": "VisSCalOutgoingProcessor",
+      "name": "VisCalOutgoingProcessor",
       "watchers": [
         {
-          "name": "VisSCalOutgoingProcessor_visdata_cal_outgoing",
+          "name": "VisCalOutgoingProcessor_visdata_cal_outgoing",
           "watch_path": "/visdata/cal_outgoing"
         }
       ],
       "queue_worker": {
-        "name": "VisSCalOutgoingProcessor_worker",
+        "name": "VisCalOutgoingProcessor_worker",
         "current_item": null,
         "queue_size": 0
       }
@@ -389,43 +389,43 @@ PawseyOutgoingProcessor.handler(file):
   },
   "workers": [
     {
-      "name": "PawseyOutgoingProcessor1",
+      "name": "PawseyOutgoingProcessor0",
       "watchers": [
         {
-          "name": "PawseyOutgoingProcessor1_volume1_incoming",
+          "name": "PawseyOutgoingProcessor0_volume1_incoming",
           "watch_path": "/volume1/incoming"
         }
       ],
       "queue_worker": {
-        "name": "PawseyOutgoingProcessor1_worker",
+        "name": "PawseyOutgoingProcessor0_worker",
         "current_item": "/volume1/incoming/1234567890_20260317090000_109_000.fits",
         "queue_size": 11
+      }
+    },
+    {
+      "name": "PawseyOutgoingProcessor1",
+      "watchers": [
+        {
+          "name": "PawseyOutgoingProcessor1_volume2_incoming",
+          "watch_path": "/volume2/incoming"
+        }
+      ],
+      "queue_worker": {
+        "name": "PawseyOutgoingProcessor1_worker",
+        "current_item": "/volume2/incoming/1234567890_20260317090000_111_000.fits",
+        "queue_size": 9
       }
     },
     {
       "name": "PawseyOutgoingProcessor2",
       "watchers": [
         {
-          "name": "PawseyOutgoingProcessor2_volume2_incoming",
-          "watch_path": "/volume2/incoming"
-        }
-      ],
-      "queue_worker": {
-        "name": "PawseyOutgoingProcessor2_worker",
-        "current_item": "/volume2/incoming/1234567890_20260317090000_111_000.fits",
-        "queue_size": 9
-      }
-    },
-    {
-      "name": "PawseyOutgoingProcessor3",
-      "watchers": [
-        {
-          "name": "PawseyOutgoingProcessor3_volume3_incoming",
+          "name": "PawseyOutgoingProcessor2_volume3_incoming",
           "watch_path": "/volume3/incoming"
         }
       ],
       "queue_worker": {
-        "name": "PawseyOutgoingProcessor3_worker",
+        "name": "PawseyOutgoingProcessor2_worker",
         "current_item": "/volume3/incoming/1234567890_20260317090000_120_000.fits",
         "queue_size": 10
       }
