@@ -404,7 +404,7 @@ def fit_phase_line(
         if len(mask) < 2:
             break
         solution = solution[mask]
-        freqs_hz = freqs_hz[mask]
+        freqs_hz_qty = freqs_hz_qty[mask]
 
     period = ((params[0] * u.rad / u.Hz) / (2 * np.pi * u.rad)).to(u.s)
     quality = len(mask) / nfreqs

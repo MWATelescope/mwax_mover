@@ -241,6 +241,50 @@ def test_fit_phase_line_niter_stops_if_too_few_points():
     assert isinstance(result, PhaseFitInfo)
 
 
+def test_fit_phase_line_niter_greater_than_one_with_realistic_clipping():
+    """A modest, realistic level of contamination must not crash across iterations.
+
+    Regression test: freqs_hz_qty (the astropy-Quantity frequency array used
+    inside the niter loop) must be re-narrowed by the sigma-clip mask on
+    every iteration, exactly like solution is. It previously wasn't -- a
+    leftover, never-read `freqs_hz = freqs_hz[mask]` line updated the wrong
+    (pre-Quantity-conversion, dead) variable -- so as soon as any iteration
+    clipped even one channel, the next iteration's minimize()/model() calls
+    received mismatched-length frequency and solution arrays and raised
+    ValueError ("operands could not be broadcast together"). That exception
+    is caught by callers (see HyperfitsSolutionGroup._phase_fit_one) and
+    silently turns into a dropped phase fit for that tile/pol -- so this
+    isn't a hypothetical: with niter=3 (production's configured value) and
+    any realistic RFI-contaminated data, this fired for essentially every
+    tile that had so much as one bad channel, which is the normal case,
+    not an edge case.
+
+    A handful of outlier channels plus modest per-channel phase noise
+    (unlike the other two niter tests here, which use either zero noise --
+    nothing is ever clipped, so the bug can't surface -- or 95% outlier
+    contamination, which breaks out of the loop via the len(mask) < 2 exit
+    on the very first iteration, before a second iteration's mismatched
+    arrays would ever be reached) is exactly the gap those two didn't cover.
+    """
+    rng = np.random.default_rng(1)
+    target_length = 5.0
+    solns = _make_phase_ramp(_FREQS_HZ, length_m=target_length, intercept_rad=0.0)
+    noise = rng.normal(scale=0.05, size=len(_FREQS_HZ))
+    solns *= np.exp(1j * noise)
+    outlier_indices = rng.choice(len(_FREQS_HZ), size=5, replace=False)
+    solns[outlier_indices] = np.exp(1j * rng.uniform(-np.pi, np.pi, size=5))
+    weights = np.ones(len(_FREQS_HZ))
+
+    # Must not raise, and must still recover a sensible fit.
+    result = fit_phase_line(_FREQS_HZ, solns, weights, niter=3)
+    assert abs(result.length - target_length) < 0.5, (
+        f"Expected length ≈ {target_length}m with realistic clipping, got {result.length:.3f}m"
+    )
+    # The 5 injected outliers (at minimum) should have been clipped by the
+    # sigma-clip across the 3 iterations.
+    assert result.quality < 1.0
+
+
 def test_fit_gain_uniform_amps_inverted():
     """All amps=2.0 → inverted weighted mean = 0.5 for every coarse channel."""
     solns = np.full(_N_CHANBLOCKS, 2.0, dtype=np.complex128)
