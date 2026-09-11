@@ -58,7 +58,7 @@ def test_estimate_di_calibrate_peak_ram_bytes_matches_manual_calculation(metafit
     # 127 unflagged X-pol tiles).
     n_points = num_sources
     n_gaussians = num_sources // 4
-    n_shapelets = num_sources // 8
+    n_shapelets = 0  # no shapelets in the current skymodels -- matches the function's own hardcoded 0
     n_unflagged_tiles = 127
     n_cross_baselines = n_unflagged_tiles * (n_unflagged_tiles - 1) // 2
     n_coarse_channels = 1
@@ -74,7 +74,7 @@ def test_estimate_di_calibrate_peak_ram_bytes_matches_manual_calculation(metafit
     solutions_array = n_unflagged_tiles * n_chanblocks * 64
     expected = vis_arrays + sky_model_components + beam_response_cache + solutions_array
 
-    assert result == expected == 7_323_168_256
+    assert result == expected == 7_322_272_256
 
 
 def test_estimate_di_calibrate_peak_ram_bytes_scales_with_coarse_channels(metafits_context):

@@ -74,7 +74,7 @@ Every major processor in `mwax_mover` uses a common **Watch → Queue → Worker
 4. A **QueueWorker** thread dequeues items and calls a `handler()` function per file, with configurable backoff and retry behaviour on failure.
 5. The abstract `MWAXWatchQueueWorker` and `MWAXPriorityWatchQueueWorker` base classes compose watcher(s) and worker into a single manageable unit — concrete processor classes implement only the `handler()` method.
 
-All processors broadcast a JSON health status packet periodically via UDP multicast and handle `SIGINT`/`SIGTERM` for graceful shutdown.
+All processors broadcast a JSON health status packet periodically via UDP multicast and handle `SIGINT`/`SIGTERM` for graceful shutdown. For the four top-level daemons (as opposed to the WQW processor classes above), this and the rest of their common lifecycle (startup, config reading, health reporting, shutdown) comes from a shared `MWAXDaemon` base class — see [`processors/daemon.py`](#shared-daemon-lifecycle-processorsdaemonpy-mwaxdaemon) in the Module Reference below.
 
 ---
 
@@ -668,8 +668,13 @@ Generic file operations that aren't subfile-specific: `remove_file()`, `delete_f
 **`net/s3.py`**
 rclone wrappers for S3-compatible remotes (Acacia, Banksia): `rclone_move()`, `rclone_delete_file()`, `check_remote_file_exists()`.
 
-**`net/asvo.py`**
+### MWA ASVO (`mwa_asvo/`)
+
+**`mwa_asvo/giant_squid.py`**
 `run_giant_squid()` shells out to the `giant-squid` binary, retrying transient failures and raising a specific exception for a known ASVO outage or server-side error code. `extract_filename_from_mwa_asvo_signed_url()` pulls the filename out of an ASVO presigned download URL.
+
+**`mwa_asvo/jobs.py`** — `MWAASVOHelper`, `MWAASVOJob`, `MWAASVOJobState`
+Manages interaction with the MWA ASVO data download service via the `giant-squid` CLI (built on `mwa_asvo/giant_squid.py`'s lower-level wrapper). `MWAASVOJob` tracks a single download job including its state, request IDs, submission timestamp, and download URL. `MWAASVOHelper` maintains the list of in-flight jobs, calls `giant-squid submitvis` to submit new jobs, and calls `giant-squid list` to poll job states. Raises typed exceptions for outages (`GiantSquidMWAASVOOutageException`) and duplicate submissions (`GiantSquidJobAlreadyExistsException`).
 
 ### Archiving (`archive/`)
 
@@ -695,6 +700,10 @@ Identical logic to `QueueWorker` but operates on a `PriorityQueue`. When requeue
 
 **`queues/watch_queue_worker.py`** — `MWAXWatchQueueWorker`, `MWAXPriorityWatchQueueWorker`
 Abstract base classes that compose a watcher (or priority watcher) with a queue worker into a single manageable unit. On `start()`, all watcher threads are launched first and the queue worker thread is held until all watchers have completed their initial directory scan, ensuring prioritisation is applied across the full backlog before processing begins. Subclasses implement only the abstract `handler(item: str) -> bool` method.
+
+### Shared Daemon Lifecycle (`processors/daemon.py`) — `MWAXDaemon`
+
+A different kind of thing from the rest of `processors/` below: not a `MWAXWatchQueueWorker` subclass, but the shared lifecycle base class for the four top-level CLI daemons (`MWACacheArchiveProcessor`, `MWAXCalvinController`, `MWAXCalvinProcessor`, `MWAXSubfileDistributor`) — it lives under `processors/` rather than `cli/`/`core/` for historical reasons (see `docs/CLEANUP.md` 6.3). Provides `request_fatal_shutdown()`, the health-multicast `health_loop()`, an interruptible `sleep()`, `signal_handler()` (`SIGINT`/`SIGTERM`), `get_status()`, and `initialise_from_command_line()`. Concrete daemons implement the abstract `get_extra_status()`, `initialise()`, `start()`, `stop()`, and may override the optional hooks `before_health_send()`, `during_sleep_interval()`, `get_worker_status()`, `shutdown_log_detail()` where their behaviour genuinely differs.
 
 ### WQW Processor Implementations (`processors/`)
 
@@ -740,12 +749,12 @@ Raw hyperdrive solution-file HDU array readers: `read_solutions_hdu_complex()`, 
 **`calibration/outliers.py`**
 `reject_outliers()` is the core robust (MAD-based) threshold test. `annotate_phase_outliers()` is the single shared definition of "phase outlier" used everywhere in the Calvin pipeline. `iterative_poly_clip_batch()` fits a robust, sigma-clipped polynomial (batched across tiles) and flags outliers.
 
+**`calibration/df_columns.py`**
+Shared DataFrame column-name and dict-key string constants (`COL_TILE_ID`, `COL_POL`, `COL_XX`/`COL_YY`, `COL_LENGTH`, `COL_QUALITY`, `COL_CHI2DOF`, etc.), read and written identically across `calibration/outliers.py`, `calvin/hyperdrive.py`, `calvin/hyperfits_solution_group.py`, `calvin/pipeline.py`, and `calvin/plots/`. Centralised so a typo doesn't silently create a new column or fail with a `KeyError` far from the mistake.
+
 ### Calvin Calibration Pipeline (`calvin/`)
 
 See `CALVIN.md` for the full pipeline description.
-
-**`calvin/asvo.py`** — `MWAASVOHelper`, `MWAASVOJob`, `MWAASVOJobState`
-Manages interaction with the MWA ASVO data download service via the `giant-squid` CLI (built on `net/asvo.py`'s lower-level wrapper). `MWAASVOJob` tracks a single download job including its state, request IDs, submission timestamp, and download URL. `MWAASVOHelper` maintains the list of in-flight jobs, calls `giant-squid submitvis` to submit new jobs, and calls `giant-squid list` to poll job states. Raises typed exceptions for outages (`GiantSquidMWAASVOOutageException`) and duplicate submissions (`GiantSquidJobAlreadyExistsException`).
 
 **`calvin/pipeline.py`** — `CalvinJobType`, `process_solutions()`
 `CalvinJobType` distinguishes a realtime job from an MWA ASVO download job. `process_solutions()` loads the hyperfits solution files and metafits, determines a reference antenna, runs the full flagging pipeline, generates before/after plots and the per-tile stats file, commits the flagged solutions to disk, fits final phases and gains, and inserts the results into the calibration database.
@@ -756,16 +765,22 @@ Manages interaction with the MWA ASVO data download service via the `giant-squid
 **`calvin/birli.py`**
 `run_birli()` shells out to the Birli binary to preprocess visibility data. `estimate_birli_output_bytes()` is a pre-flight storage-size estimate.
 
-**`calvin/hyperdrive.py`** — `HyperfitsSolution`, `HyperfitsSolutionGroup`
-`run_hyperdrive()` shells out to the hyperdrive binary to produce calibration solutions; `write_hyperdrive_stats()` writes a convergence summary for a just-produced solution file. `HyperfitsSolution` reads a single hyperdrive FITS solutions file; `HyperfitsSolutionGroup` holds one solution file per contiguous coarse-channel band plus the observation's metafits, and owns the whole flagging pipeline via `run_flagging_pipeline()`: `apply_tile_flags()`, `enforce_whole_jones_nan()`, `flag_gain_max_cutoff()`, `flag_amplitude_outliers()`, `flag_mostly_bad_tiles()`, then report-only `detect_phase_outliers()`. `commit()` writes the result back to disk.
+**`calvin/hyperdrive.py`**
+`run_hyperdrive()` shells out to the hyperdrive binary to produce calibration solutions, running multiple contiguous bands of a picket-fence observation **concurrently** (bounded by available memory — see `_max_hyperdrive_workers()`, `estimate_di_calibrate_peak_ram_bytes()`, `_uvfits_num_coarse_chans()`). `write_hyperdrive_stats()`/`get_convergence_summary()` write/derive a per-channel convergence summary for a just-produced solution file. `HyperfitsSolution`/`HyperfitsSolutionGroup` used to live here too — see the next two entries.
+
+**`calvin/hyperfits_solution.py`** — `HyperfitsSolution`
+Reads a single hyperdrive FITS solutions file (one contiguous coarse-channel band).
+
+**`calvin/hyperfits_solution_group.py`** — `HyperfitsSolutionGroup`
+Holds one `HyperfitsSolution` per contiguous coarse-channel band plus the observation's metafits. `select_refant()` picks the reference tile calibration is fitted against (see `docs/REF_TILE_SELECTION.md` and `CALVIN.md`'s [Reference tile selection](CALVIN.md#reference-tile-selection)); `run_flagging_pipeline()` then runs the full flagging sequence — `apply_tile_flags()`, `enforce_whole_jones_nan()`, `flag_gain_max_cutoff()`, `flag_amplitude_outliers()`, `flag_mostly_bad_tiles()`, then report-only `detect_phase_outliers()`. `commit()` writes the result back to disk.
 
 **`calvin/solution_files.py`**
 Solution-file naming (`get_solution_fits_filename()`, `parse_solution_channels()`, `get_sorted_solution_files()`), export (`export_calibration_solutions()`), and staged/atomic publishing of a fit's plots and stats (`upload_plot_files()`, `get_staging_path()`, `reap_orphaned_staging_dirs()`).
 
 **`calvin/plots/`** — plotting and plot-adjacent reporting
 - `layout.py` — figure-sizing helpers (`resolve_plot_dpi()`, `scale_plot_figsize()`) shared by every plot here.
-- `phase_fits.py` — phase-fit diagnostic plots (intercepts, residuals, per-tile fits) and `write_debug_phase_fit_plots()`, the `HyperfitsSolutionGroup`-level entry point.
-- `hyperdrive.py` — `generate_plots(_for_files)`, which run hyperdrive's own `solutions-plot` subcommand.
+- `phases.py` — phase-fit diagnostic plots (intercepts, residuals, per-tile fits) and `write_debug_phase_fit_plots()`, the `HyperfitsSolutionGroup`-level entry point.
+- `hyperdrive.py` — `generate_plots(_for_files)`, which run hyperdrive's own `solutions-plot` subcommand with `--reftile` set to whatever tile `HyperfitsSolutionGroup.select_refant()` chose, so these plots use the same reference as Calvin's own.
 - `gains.py` — the paged, paginated amplitude-outlier plots (`plot_combined_gains()`, `plot_outlier_gains()`), stitching multiple picket-fence files onto one continuous x-axis and budgeting concurrent rendering workers against available memory.
 - `stats_table.py` — the before/after per-tile stats table (`build_tile_stats_rows()`, `write_tile_stats_table()`, `write_before_after_stats()`).
 - `index.py` — `index.json` manifest generation for a fit's uploaded files (`generate_plot_index_file()`, `populate_index_json_entry()`).

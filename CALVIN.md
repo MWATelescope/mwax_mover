@@ -9,16 +9,17 @@ Everything below applies per-observation. If an observation spans more than one 
 ## Contents
 
 1. [Inputs](#inputs)
-2. [Step 1: Structural tile flags](#step-1-structural-tile-flags)
-3. [Step 2: Enforce whole-Jones NaN](#step-2-enforce-whole-jones-nan)
-4. [Step 3: Gain-magnitude sanity cutoff](#step-3-gain-magnitude-sanity-cutoff)
-5. [Step 4: Amplitude-outlier flagging](#step-4-amplitude-outlier-flagging)
-6. [Step 5: Mostly-bad-tile promotion](#step-5-mostly-bad-tile-promotion)
-7. [Step 6: Phase-outlier detection](#step-6-phase-outlier-detection)
-8. [Step 7: Commit to disk](#step-7-commit-to-disk)
-9. [Step 8: Final reporting fits](#step-8-final-reporting-fits)
-10. [Output files](#output-files)
-11. [Statistical background](#statistical-background)
+2. [Reference tile selection](#reference-tile-selection)
+3. [Step 1: Structural tile flags](#step-1-structural-tile-flags)
+4. [Step 2: Enforce whole-Jones NaN](#step-2-enforce-whole-jones-nan)
+5. [Step 3: Gain-magnitude sanity cutoff](#step-3-gain-magnitude-sanity-cutoff)
+6. [Step 4: Amplitude-outlier flagging](#step-4-amplitude-outlier-flagging)
+7. [Step 5: Mostly-bad-tile promotion](#step-5-mostly-bad-tile-promotion)
+8. [Step 6: Phase-outlier detection](#step-6-phase-outlier-detection)
+9. [Step 7: Commit to disk](#step-7-commit-to-disk)
+10. [Step 8: Final reporting fits](#step-8-final-reporting-fits)
+11. [Output files](#output-files)
+12. [Statistical background](#statistical-background)
 
 ---
 
@@ -53,6 +54,29 @@ Each solutions file contains, per tile and per frequency channel ("chanblock"), 
 `gx`/`gy` are the dominant (co-polarised) gains for the X and Y dipoles; `Dx`/`Dy` are the (usually small) leakage terms. All of the flagging described below acts by setting some or all of a tile's Jones matrix entries to `NaN` — a NaN'd entry is excluded from calibration and imaging.
 
 `hyperdrive` also writes a per-channel **convergence/results** value indicating how well its internal fit converged for that channel; this is used to derive a per-channel weight (see [Weights](#weights)).
+
+---
+
+## Reference tile selection
+
+Before any of the numbered steps below run, Calvin picks a **reference tile**. Every phase-fit statistic in [Step 6](#step-6-phase-outlier-detection) and [Step 8](#step-8-final-reporting-fits) — and therefore the `x_delay_m`/`y_delay_m`, χ²/dof, σ residual and quality columns in the [`calibration_solutions` table](#the-calibration_solutions-table) — is fitted *relative to* this tile. It's also passed to `hyperdrive`'s own `solutions-plot` command as `--reftile`, so the `{obs_id}_*_solutions_amps.png`/`_solutions_phases.png` plots (see [Output files](#output-files)) use the same reference as Calvin's own phase-fit plots, rather than whichever tile `hyperdrive` would otherwise default to.
+
+**Why this needs its own selection step, rather than just picking a sensible-looking tile directly:** a tile's fitted phase-slope length is computed on solutions *normalised against the reference tile* — it's a difference from whichever tile was used as reference, not an absolute measurement. The reference tile's own row always fits to a length of exactly 0, by construction. Picking "the tile whose fitted length is closest to zero" without accounting for this would be circular — it would just re-select whatever tile happened to be used as reference to compute the lengths in the first place, regardless of whether it was actually a good tile.
+
+**How:** selection runs in two stages, before any of the flagging in [Step 1](#step-1-structural-tile-flags) onwards:
+
+1. **Bootstrap.** A cheap, purely structural pick — the lowest-ID tile not already flagged by any of the three [Step 1](#step-1-structural-tile-flags) sources — is used as a throwaway reference. A read-only phase and gain fit pass is run against it, purely to gather ranking data for every unflagged tile; nothing about this bootstrap tile's own suitability as a reference matters, since it is never actually used past this point unless it also happens to win the ranking below.
+2. **Rank.** Every unflagged tile is scored by:
+   - How many of three quality gates it fails, checked on the **worse** of its XX/YY fit (a tile is only as trustworthy as its worse polarisation):
+     - Phase-fit quality below **0.8**
+     - Phase-fit χ²/dof outside **[0.2, 3.0]**
+     - Gain-fit quality below **0.8**
+   - Among tiles with an equal number of failures, how far its fitted length deviates from the *population median* length — not from zero. This is deliberately reference-independent: changing which tile the bootstrap stage happened to use just shifts every tile's fitted length by the same constant amount, so measuring deviation from the population's own median cancels that shift out, unlike comparing the raw fitted value against zero.
+   - Tile ID breaks any remaining tie, for a deterministic result.
+
+   The tile with the fewest gate failures wins; ties are broken by smallest length deviation, then by lowest tile ID. This degrades gracefully if no tile passes every gate on a particularly noisy observation — the tile failing fewest still wins, rather than the pipeline needing a separate fallback case.
+
+Full design rationale — including why gate failures are counted rather than combined into a single weighted score — is in [`docs/REF_TILE_SELECTION.md`](docs/REF_TILE_SELECTION.md).
 
 ---
 
@@ -205,10 +229,12 @@ One row per Calvin run (per observation), keyed by `fitid` (a Unix-timestamp-der
 - num_sources: Number of sources from the skymodel for `hyperdrive` to use 
 - calibration_command: Dump of the command line args used in this `hyperdrive` run
 - (phase) fit_niter: Number of times the phase fit should be iterated
+- fit_limit: Currently always recorded as `NULL` -- not populated by the pipeline
 - gain_max_cutoff: Absolute gain-amplitude ceiling above which a (tile, chanblock) entry is flagged (see [Step 3](#step-3-gain-magnitude-sanity-cutoff)) -- unlike the other outlier-detection parameters below, this one does still control real flagging behaviour
 - phase_outlier_nstd_threshold: tiles more than this many standard-deviation-equivalents beyond their flavour/polarisation population's robust centre are reported as phase outliers (see [Step 6](#step-6-phase-outlier-detection)) -- report-only, does not affect flagging
 - gain_outlier_poly_degree: Nth order polynomial used for gain outlier detection
 - gain_outlier_mad_residual_threshold: Number of MADs +/- the fit considered ok for a tile
+- gain_outlier_modify_gains: Recorded for provenance only -- does not currently change any actual behaviour (the flagging pipeline always modifies solutions in memory and Step 7 always writes the result; there is no longer a toggle for whether outlier-flagged gains get written to disk)
 - tile_bad_channel_fraction: Fraction (0-1) of a tile's chanblocks that must already be flagged bad before the whole tile is promoted to fully flagged
 
 ### The `calibration_solutions` table
@@ -244,16 +270,16 @@ For each observation, Calvin (and the underlying `hyperdrive` plotting) writes o
 | File | Description |
 |---|---|
 | `{obs_id}_stats.txt` | **The main human-readable summary.** Before/after per-tile flagging statistics (see below), followed by `hyperdrive`'s own fine-channel convergence statistics. |
-| `{obs_id}_*_gain_outliers_tiles.png` | Plot of the amplitude-outlier gains that were detected and removed (Step 4) and any channels cut off by the Step 3 gain-magnitude sanity check, shown against the fitted curve and acceptance band, per tile. Colour tracks severity, not which check caught a channel: black text with no border colour change for a clean tile, orange for a partial (some-channels) flag, red reserved for a fully flagged tile -- so amplitude outliers and gain-cutoff divergences share the same orange shaded band and tile border, and are told apart only by marker shape (black 'x' for amplitude outliers, black '+' for gain-cutoff). The marker only ever appears on a channel with its own genuine per-channel reason -- a channel only NaN'd because Step 5 promoted the whole tile, without ever individually triggering a reason itself, is left unmarked. Every tile except one flagged before Calvin's own analysis ran (metafits/TILES-HDU/BASELINES-HDU) gets a top-centre summary in the same colour as its border: a "{pct}% Good (n_good/n_total)" line (the fraction of channels that were never individually flagged), then, if any were, a breakdown of every distinct per-channel reason present, e.g. "100 NaN, 200 above gain cutoff, 22 outside 10 MAD" -- a clean tile just shows "100% Good" with no second line. A structurally-flagged tile has no real data or per-channel breakdown to show, so it instead gets a red "gx/gy amplitude - FULLY FLAGGED" title and a simpler message ("flagged in metafits", etc.), top-centre, on an otherwise blank panel with a red border. A tile Calvin itself fully flagged (e.g. promoted via Step 5) still has real data, so it's plotted normally (band included, if the underlying fit had any valid channels left to compute one from) with the same "FULLY FLAGGED" title and the full red summary overlaid on top, rather than being hidden behind a placeholder. Y-axis tick labels switch to scientific notation automatically once a subplot's values are large enough to need it (e.g. a gain-cutoff divergence), rather than always spelling out the full number. |
+| `{obs_id}_gain_outliers_tiles_{first}-{last}.png` | Plot of the amplitude-outlier gains that were detected and removed (Step 4) and any channels cut off by the Step 3 gain-magnitude sanity check, shown against the fitted curve and acceptance band, per tile. One file per *page* of tiles (`{first}-{last}` is a tile-index range, not a receiver-channel suffix — every coarse-channel band is stitched onto one compressed x-axis per tile, so there's one paginated set for the whole observation rather than one set per band). Colour tracks severity, not which check caught a channel: black text with no border colour change for a clean tile, orange for a partial (some-channels) flag, red reserved for a fully flagged tile -- so amplitude outliers and gain-cutoff divergences share the same orange shaded band and tile border, and are told apart only by marker shape (black 'x' for amplitude outliers, black '+' for gain-cutoff). The marker only ever appears on a channel with its own genuine per-channel reason -- a channel only NaN'd because Step 5 promoted the whole tile, without ever individually triggering a reason itself, is left unmarked. Every tile except one flagged before Calvin's own analysis ran (metafits/TILES-HDU/BASELINES-HDU) gets a top-centre summary in the same colour as its border: a "{pct}% Good (n_good/n_total)" line (the fraction of channels that were never individually flagged), then, if any were, a breakdown of every distinct per-channel reason present, e.g. "100 NaN, 200 above gain cutoff, 22 outside 10 MAD" -- a clean tile just shows "100% Good" with no second line. A structurally-flagged tile has no real data or per-channel breakdown to show, so it instead gets a red "gx/gy amplitude - FULLY FLAGGED" title and a simpler message ("flagged in metafits", etc.), top-centre, on an otherwise blank panel with a red border. A tile Calvin itself fully flagged (e.g. promoted via Step 5) still has real data, so it's plotted normally (band included, if the underlying fit had any valid channels left to compute one from) with the same "FULLY FLAGGED" title and the full red summary overlaid on top, rather than being hidden behind a placeholder. Y-axis tick labels switch to scientific notation automatically once a subplot's values are large enough to need it (e.g. a gain-cutoff divergence), rather than always spelling out the full number. |
 | `{obs_id}_rx_lengths.png` | Cable length offsets in metres, per receiver — a sanity-check plot for the phase/delay fitting in Step 6. |
 | `{obs_id}_phase_fits_xx.png` / `_phase_fits_yy.png` | Per-tile phase-vs-frequency plots with the fitted delay line overlaid, for XX and YY respectively. |
 | `{obs_id}_intercepts.png` | Per receiver-type/polarisation plot of phase intercepts in polar coordinates vs. cable length — another view of the Step 6 delay fit. Rows ordered alphabetically by receiver flavour, columns XX then YY. |
 | `{obs_id}_residual.png` / `_residual.tsv` | Phase residuals vs. frequency, by receiver type and polarisation, with a shaded band showing that group's phase-outlier reporting range (plot and the underlying data as TSV). Same row/column ordering as `intercepts.png`; XX and YY additionally share the same y-axis scale (and tick decimal formatting) within each flavour row, so the two are directly comparable -- different flavour rows are not forced to share a scale with each other. |
 | `{obs_id}_phase_fits.tsv` | All phase-fit statistics (χ²/dof, σ residual, fitted delay, etc.) per tile, as TSV. |
-| `{obs_id}_*_solutions_amps.png` / `_solutions_phases.png` | `hyperdrive`'s own plots of calibration solution amplitude/phase vs. fine channel, per tile. |
+| `{obs_id}_*_solutions_amps.png` / `_solutions_phases.png` | `hyperdrive`'s own plots of calibration solution amplitude/phase vs. fine channel, per tile, using the same [reference tile](#reference-tile-selection) Calvin selected (`--reftile`), so they're directly comparable to Calvin's own phase-fit plots below. |
 | `{obs_id}_*_solutions.fits` | The final calibration solutions FITS file. If a matching `*_solutions.original.fits` also exists alongside it, this file has had outlier gains flagged (i.e. entire Jones matrices NaN'd per Steps 1–5). |
 | `{obs_id}_*_solutions.original.fits` | The untouched, original solutions straight out of `hyperdrive`, before any Calvin outlier flagging — kept as a backup/reference. |
-| `hyperdrive_readme.txt` / `birli_readme.txt` | Full log output of the `hyperdrive`/Birli run(s) that produced the inputs to this stage. |
+| `{obs_id}_*_hyperdrive_readme.txt` / `{obs_id}_birli_readme.txt` | Full log output of the `hyperdrive`/Birli run(s) that produced the inputs to this stage. The hyperdrive readme carries a per-band suffix like the solutions files (one `hyperdrive` run per band); Birli processes the whole observation in one run, so its readme doesn't. |
 
 ### The tile stats table (inside `{obs_id}_stats.txt`)
 
@@ -320,4 +346,4 @@ Per-channel weights, used throughout the fitting above, are derived from `hyperd
 
 ---
 
-*This document describes the pipeline as of the `gain_outliers` branch of `mwax_mover`. Default threshold values shown above (poly degree, MAD threshold, σ threshold, bad-channel fraction) are the current production defaults and may be tuned over time — check the live Calvin configuration if you need the values in use for a specific observation.*
+*This document describes the pipeline as implemented in `mwax_mover`'s source tree at the time of writing. Default threshold values shown above (poly degree, MAD threshold, σ threshold, bad-channel fraction) are the current production defaults and may be tuned over time — check the live Calvin configuration if you need the values in use for a specific observation.*
