@@ -41,6 +41,7 @@ from mwax_mover.calibration.solutions import (
     read_solutions_hdu_complex,
     read_tiles_hdu,
 )
+from mwax_mover.constants import EXT_FITS
 from mwax_mover.core.command import check_popen_finished, start_command, write_readme_file
 
 logger = logging.getLogger(__name__)
@@ -513,7 +514,7 @@ class HyperfitsSolution:
 
         backup_path: str | None = None
         if backup:
-            backup_path = self.filename.replace(".fits", ".original.fits")
+            backup_path = self.filename.replace(EXT_FITS, ".original" + EXT_FITS)
             if os.path.exists(backup_path):
                 logger.warning(f"Warning: backup {backup_path} already exists and will be overwritten.")
             shutil.copy2(self.filename, backup_path)

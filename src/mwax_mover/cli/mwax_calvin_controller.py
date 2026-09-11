@@ -35,7 +35,11 @@ from mwax_mover import version
 from mwax_mover.calvin.pipeline import CalvinJobType
 from mwax_mover.calvin.slurm import count_slurm_asvo_jobs, create_sbatch_script, submit_sbatch
 from mwax_mover.constants import (
+    CONFIG_KEY_GIANT_SQUID_BINARY_PATH,
+    CONFIG_KEY_LOG_LEVEL,
     EXIT_FAILURE,
+    HEALTH_THREAD_NAME,
+    LOG_FORMAT,
     SECONDS_PER_HOUR,
     SECTION_CALVIN,
     SECTION_GIANT_SQUID,
@@ -59,7 +63,7 @@ from mwax_mover.processors.daemon import MWAXDaemon
 
 # Setup root logger
 handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(message)s"))
+handler.setFormatter(logging.Formatter(LOG_FORMAT))
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
@@ -218,7 +222,7 @@ class MWAXCalvinController(MWAXDaemon):
 
         # create a health thread
         logger.info("Starting health_thread...")
-        health_thread = threading.Thread(name="health_thread", target=self.health_loop, daemon=True)
+        health_thread = threading.Thread(name=HEALTH_THREAD_NAME, target=self.health_loop, daemon=True)
         health_thread.start()
 
         # Start plot upload thread
@@ -1056,7 +1060,7 @@ class MWAXCalvinController(MWAXDaemon):
             sys.exit(EXIT_FAILURE)
 
         # Read log level
-        config_file_log_level: str | None = read_optional_config(config, SECTION_MWAX_MOVER, "log_level")
+        config_file_log_level: str | None = read_optional_config(config, SECTION_MWAX_MOVER, CONFIG_KEY_LOG_LEVEL)
         if config_file_log_level:
             logger.setLevel(config_file_log_level)
 
@@ -1116,7 +1120,7 @@ class MWAXCalvinController(MWAXDaemon):
         self.cfg_gs_binary_path = read_config(
             config,
             SECTION_GIANT_SQUID,
-            "giant_squid_binary_path",
+            CONFIG_KEY_GIANT_SQUID_BINARY_PATH,
         )
 
         if not os.path.exists(self.cfg_gs_binary_path):

@@ -17,6 +17,7 @@ from numpy.typing import NDArray
 from scipy.optimize import minimize
 
 from mwax_mover.calibration.models import GainFitInfo, PhaseFitInfo
+from mwax_mover.constants import MAD_TO_STD_SCALE_FACTOR
 
 
 def pad_gains_to_full_coarse(
@@ -398,7 +399,7 @@ def fit_phase_line(
         #    where the (biased) fit put them.
         resid_median = np.median(residuals)
         resid_mad = np.median(np.abs(residuals - resid_median))
-        clip_scale = max(1.4826 * resid_mad, _MIN_CLIP_THRESHOLD_RAD)
+        clip_scale = max(MAD_TO_STD_SCALE_FACTOR * resid_mad, _MIN_CLIP_THRESHOLD_RAD)
         mask = np.where(np.abs(residuals - resid_median) < 2 * clip_scale)[0]
         if len(mask) < 2:
             break

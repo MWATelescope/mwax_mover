@@ -13,12 +13,10 @@ import os
 import shutil
 
 from mwax_mover.beamformer import filterbank, vdif
-from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME
+from mwax_mover.constants import EXT_FIL, EXT_VDIF, METAFITS_KEY_EXPOSURE, MODE_WATCH_DIR_FOR_RENAME
 from mwax_mover.filesystem.files import remove_file
 from mwax_mover.fits.metafits import get_metafits_value
 from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
-
-METAFITS_EXPOSURE = "EXPOSURE"
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +89,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
 
         # get the obsid and subobs from the filename
         # obsid_subobsid_chXXX_beamXX.vdif / .fil
-        if ext == ".vdif" or ext == ".fil":
+        if ext == EXT_VDIF or ext == EXT_FIL:
             try:
                 try:
                     obs_id = int(filename[0:10])
@@ -114,16 +112,16 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
             metafits_filename = os.path.join(self.metafits_path, f"{obs_id}_metafits.fits")
 
             try:
-                duration_sec = int(get_metafits_value(metafits_filename, METAFITS_EXPOSURE))
+                duration_sec = int(get_metafits_value(metafits_filename, METAFITS_KEY_EXPOSURE))
             except Exception as exc:
                 # Chained deliberately: this one propagates out of the method, and
                 # the cause (missing metafits file vs missing key vs unparseable
                 # value) is what makes it actionable.
                 raise ValueError(
-                    f"{item}: Error reading {METAFITS_EXPOSURE} from metafits filename {metafits_filename}"
+                    f"{item}: Error reading {METAFITS_KEY_EXPOSURE} from metafits filename {metafits_filename}"
                 ) from exc
 
-            logger.debug(f"{item}: Read {METAFITS_EXPOSURE} of {duration_sec}s from {metafits_filename}")
+            logger.debug(f"{item}: Read {METAFITS_KEY_EXPOSURE} of {duration_sec}s from {metafits_filename}")
 
             # Now determine the last subobs we should see
             # we subtract 8 seconds because the subobsid is the START of the subobs. Examples:
@@ -138,7 +136,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
             if subobs_id >= expected_last_subobs_id:
                 # Time to stitch up the files
                 logger.debug(f"{item}: Observation complete. Stitching up beamformer {ext} files...")
-                if ext == ".vdif":
+                if ext == EXT_VDIF:
                     # determine the file_path, rec_chan and beam number
                     file_path, _, _, rec_chan, beam = vdif.get_vdif_filename_components(item)
 
@@ -176,7 +174,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
 
                     return True
 
-                elif ext == ".fil":
+                elif ext == EXT_FIL:
                     # determine file_path, rec_chan and beam number
                     file_path, _, _, rec_chan, beam = filterbank.get_filterbank_filename_components(item)
 

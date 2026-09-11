@@ -38,6 +38,7 @@ from mwax_mover.calibration.fitting import ensure_system_byte_order, poly_str, w
 from mwax_mover.calibration.outliers import pivot_phase_fits
 from mwax_mover.calvin.hyperdrive import HyperfitsSolutionGroup
 from mwax_mover.calvin.plots.layout import resolve_plot_dpi, scale_plot_figsize
+from mwax_mover.constants import MAD_TO_STD_SCALE_FACTOR
 
 logger = logging.getLogger(__name__)
 
@@ -431,7 +432,7 @@ def plot_phase_residual(
     # visually compared against the actual threshold that would mark it
     # a population outlier, the same way the amplitude/gain-outlier plots
     # shade an acceptance band (see plot_outlier_gains).
-    mad_to_std = 1.4826
+    mad_to_std = MAD_TO_STD_SCALE_FACTOR
     sigma_resid_bands: dict[tuple[str, str], float] = {}
     for (flav, pol), grp in flavor_fits.groupby(["flavor", "pol"]):
         good = grp.loc[~grp["outlier"], "sigma_resid"]

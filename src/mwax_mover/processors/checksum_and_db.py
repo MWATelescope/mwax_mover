@@ -10,7 +10,7 @@ import logging
 import os
 import shutil
 
-from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
+from mwax_mover.constants import EXT_FITS, EXT_SUB, MODE_WATCH_DIR_FOR_RENAME_OR_NEW
 from mwax_mover.db.data_files import insert_data_file_row
 from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.filesystem.files import do_checksum_md5
@@ -72,8 +72,8 @@ class ChecksumAndDBProcessor(MWAXPriorityWatchQueueWorker):
             "ChecksumAndDBProcessor",
             metafits_path,
             [
-                (visdata_incoming_path, ".fits"),
-                (voltdata_incoming_path, ".sub"),
+                (visdata_incoming_path, EXT_FITS),
+                (voltdata_incoming_path, EXT_SUB),
                 (bf_stitching_path, ".*"),
             ],
             mode=MODE_WATCH_DIR_FOR_RENAME_OR_NEW,

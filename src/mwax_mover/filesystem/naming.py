@@ -21,7 +21,7 @@ from enum import Enum, IntEnum
 
 import requests
 
-from mwax_mover.constants import MWA_WEBSERVICE_HOSTS
+from mwax_mover.constants import EXT_FIL, EXT_FITS, EXT_HDR, EXT_SUB, EXT_VDIF, MWA_WEBSERVICE_HOSTS
 from mwax_mover.fits.metafits import download_metafits_file, get_calibrator_info
 from mwax_mover.net.webservice import call_webservice
 
@@ -176,9 +176,9 @@ def validate_filename(
 
     # 3. Check extension
     if valid:
-        if file_ext_part.lower() == ".sub":
+        if file_ext_part.lower() == EXT_SUB:
             filetype_id = MWADataFileType.MWAX_VOLTAGES.value
-        elif file_ext_part.lower() == ".fits":
+        elif file_ext_part.lower() == EXT_FITS:
             # Could be metafits (e.g. 1316906688_metafits_ppds.fits) or
             # visibilities
             if file_name_part[10:] == "_metafits_ppds" or file_name_part[10:] == "_metafits":
@@ -194,11 +194,11 @@ def validate_filename(
             # flag file
             filetype_id = MWADataFileType.MWA_FLAG_FILE.value
 
-        elif file_ext_part.lower() == ".vdif" or file_ext_part.lower() == ".hdr":
+        elif file_ext_part.lower() == EXT_VDIF or file_ext_part.lower() == EXT_HDR:
             # vdif file
             filetype_id = MWADataFileType.VDIF.value
 
-        elif file_ext_part.lower() == ".fil":
+        elif file_ext_part.lower() == EXT_FIL:
             # filterbank file
             filetype_id = MWADataFileType.FILTERBANK.value
 

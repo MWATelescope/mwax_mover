@@ -8,7 +8,7 @@ then deletes the local copy on success.
 import logging
 
 from mwax_mover.archive.archiver import archive_file_xrootd
-from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME_OR_NEW
+from mwax_mover.constants import EXT_FITS, EXT_SUB, MODE_WATCH_DIR_FOR_RENAME_OR_NEW
 from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
 from mwax_mover.filesystem.files import remove_file
 
@@ -50,8 +50,8 @@ class OutgoingProcessor(MWAXPriorityWatchQueueWorker):
             "OutgoingProcessor",
             metafits_path,
             [
-                (visdata_outgoing_path, ".fits"),
-                (voltdata_outgoing_path, ".sub"),
+                (visdata_outgoing_path, EXT_FITS),
+                (voltdata_outgoing_path, EXT_SUB),
                 (bf_outgoing_path, ".*"),
             ],
             mode=MODE_WATCH_DIR_FOR_RENAME_OR_NEW,

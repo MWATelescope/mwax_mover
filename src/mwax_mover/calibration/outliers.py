@@ -13,6 +13,8 @@ iterative_poly_clip_batch() fits a robust, sigma-clipped polynomial
 import numpy as np
 import pandas as pd
 
+from mwax_mover.constants import MAD_TO_STD_SCALE_FACTOR
+
 
 def iterative_poly_clip_batch(
     x: np.ndarray,
@@ -275,7 +277,7 @@ def reject_outliers(data, quality_key, group_cols=("pol",), nstd=3.0, max_iter=1
     # Scales a normal-distribution MAD to be comparable to a standard
     # deviation, so nstd keeps roughly the same meaning as the previous
     # mean+nstd*std threshold for a population with few/no outliers.
-    mad_to_std = 1.4826
+    mad_to_std = MAD_TO_STD_SCALE_FACTOR
 
     quality_values = data[quality_key].to_numpy()
     outlier_values = data["outlier"].to_numpy().copy()

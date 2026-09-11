@@ -31,7 +31,16 @@ from mwax_mover import (
     version,
 )
 from mwax_mover.constants import (
+    CONFIG_KEY_ARCHIVE_COMMAND_TIMEOUT_SEC,
+    CONFIG_KEY_HIGH_PRIORITY_CORRELATOR_PROJECTIDS,
+    CONFIG_KEY_HIGH_PRIORITY_VCS_PROJECTIDS,
+    CONFIG_KEY_LOG_LEVEL,
+    DEFAULT_POSTGRES_PORT,
+    DUMMY_CONFIG_VALUE,
     EXIT_FAILURE,
+    EXT_SUB,
+    HEALTH_THREAD_NAME,
+    LOG_FORMAT,
     SECTION_BEAMFORMER,
     SECTION_CORRELATOR,
     SECTION_MWAX_MOVER,
@@ -64,7 +73,7 @@ from mwax_mover.queues.watch_queue_worker import (
 
 # Setup root logger
 handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(message)s"))
+handler.setFormatter(logging.Formatter(LOG_FORMAT))
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
@@ -159,7 +168,7 @@ class MWAXSubfileDistributor(MWAXDaemon):
         self.cfg_db_name: str = ""
         self.cfg_db_user: str = ""
         self.cfg_db_pass: str = ""
-        self.cfg_db_port: int = 5432
+        self.cfg_db_port: int = DEFAULT_POSTGRES_PORT
 
         # Archiving stuff
         self.archiving_paused: bool = False
@@ -195,7 +204,7 @@ class MWAXSubfileDistributor(MWAXDaemon):
         self.config.read_file(open(config_filename, "r", encoding="utf-8"))
 
         # Read log level
-        config_file_log_level: str | None = read_optional_config(self.config, SECTION_MWAX_MOVER, "log_level")
+        config_file_log_level: str | None = read_optional_config(self.config, SECTION_MWAX_MOVER, CONFIG_KEY_LOG_LEVEL)
 
         if config_file_log_level:
             logger.setLevel(config_file_log_level)
@@ -230,7 +239,7 @@ class MWAXSubfileDistributor(MWAXDaemon):
             read_config(
                 self.config,
                 SECTION_MWAX_MOVER,
-                "archive_command_timeout_sec",
+                CONFIG_KEY_ARCHIVE_COMMAND_TIMEOUT_SEC,
             )
         )
 
@@ -336,12 +345,12 @@ class MWAXSubfileDistributor(MWAXDaemon):
         self.cfg_corr_high_priority_correlator_projectids = read_config_list(
             self.config,
             SECTION_CORRELATOR,
-            "high_priority_correlator_projectids",
+            CONFIG_KEY_HIGH_PRIORITY_CORRELATOR_PROJECTIDS,
         )
         self.cfg_corr_high_priority_vcs_projectids = read_config_list(
             self.config,
             SECTION_CORRELATOR,
-            "high_priority_vcs_projectids",
+            CONFIG_KEY_HIGH_PRIORITY_VCS_PROJECTIDS,
         )
 
         # Project IDs whose data should not be archived. Defaults to C123
@@ -540,7 +549,7 @@ class MWAXSubfileDistributor(MWAXDaemon):
         self.subfile_incoming_processor = SubfileIncomingProcessor(
             self,
             self.cfg_subfile_incoming_path,
-            ".sub",
+            EXT_SUB,
             ".free",
             ".keep",
             self.cfg_voltdata_incoming_path,
@@ -838,7 +847,7 @@ class MWAXSubfileDistributor(MWAXDaemon):
                     raise ValueError(f"obs_id {obs_id} passed to release_cal_obs() is not an int")
 
         except Exception as ws_exception:
-            return f"ERROR: {ws_exception}".encode(), 500
+            return f"ERROR: {ws_exception}".encode(), http.HTTPStatus.INTERNAL_SERVER_ERROR
 
     def endpoint_dump_voltages(self) -> tuple[bytes, int]:
         """Web service endpoint to request voltage buffer dump.
@@ -899,19 +908,19 @@ class MWAXSubfileDistributor(MWAXDaemon):
                     if self.dump_voltages(starttime, endtime, trigger_id):
                         return b"OK", http.HTTPStatus.OK
                     else:
-                        return b"Failed to start Voltage Buffer Dump", 400
+                        return b"Failed to start Voltage Buffer Dump", http.HTTPStatus.BAD_REQUEST
                 else:
                     # Reject this request
                     return (
                         b"Voltage Buffer Dump already in progress. Request canceled.",
-                        400,
+                        http.HTTPStatus.BAD_REQUEST,
                     )
 
         except ValueError as parameters_exception:
-            return f"Value Error: {parameters_exception}".encode(), 400
+            return f"Value Error: {parameters_exception}".encode(), http.HTTPStatus.BAD_REQUEST
 
         except Exception as dump_voltages_exception:
-            return f"ERROR: {dump_voltages_exception}".encode(), 500
+            return f"ERROR: {dump_voltages_exception}".encode(), http.HTTPStatus.INTERNAL_SERVER_ERROR
 
     def dump_voltages(self, start_gps_time: int, end_gps_time: int, trigger_id: int) -> bool:
         """Dump voltage buffer subfiles from shared memory to disk.
@@ -1040,14 +1049,14 @@ class MWAXSubfileDistributor(MWAXDaemon):
         # creating database connection pool(s)
         logger.info("Starting database connection pool...")
 
-        if self.cfg_db_host != "dummy":
+        if self.cfg_db_host != DUMMY_CONFIG_VALUE:
             # Dont start it if we are "dummy"- we are probably doing
             # a unit test which does not need a db
             self.db_handler.start_database_pool()
 
         # create a health thread
         logger.info("Starting health_thread...")
-        health_thread = threading.Thread(name="health_thread", target=self.health_loop, daemon=True)
+        health_thread = threading.Thread(name=HEALTH_THREAD_NAME, target=self.health_loop, daemon=True)
         health_thread.start()
         logger.info("health_thread started.")
 

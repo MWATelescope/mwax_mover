@@ -17,6 +17,7 @@ import numpy as np
 from mwalib import MetafitsContext
 
 from mwax_mover.calibration.models import Metafits
+from mwax_mover.constants import SOLUTIONS_FITS_SUFFIX
 from mwax_mover.core.command import check_popen_finished, start_command, write_readme_file
 
 logger = logging.getLogger(__name__)
@@ -68,7 +69,7 @@ def run_birli(
 
         data_file_arg = ""
         for data_file in data_files:
-            if data_file.endswith("solutions.fits"):
+            if data_file.endswith(SOLUTIONS_FITS_SUFFIX):
                 continue
             if data_file.endswith("metafits_ppds.fits"):
                 continue

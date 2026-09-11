@@ -14,6 +14,7 @@ import mimetypes
 import os
 from pathlib import Path
 
+from mwax_mover.constants import EXT_FITS, INDEX_JSON_FILENAME, SOLUTIONS_FITS_SUFFIX, SOLUTIONS_ORIGINAL_FITS_SUFFIX
 from mwax_mover.filesystem.files import get_png_dimensions
 from mwax_mover.filesystem.naming import extract_channels_from_filename
 
@@ -116,7 +117,7 @@ def generate_plot_index_file(
         for filename in sorted(os.scandir(fit_dir), key=lambda e: e.name):
             if not filename.is_file():
                 continue
-            if filename.name == "index.json":
+            if filename.name == INDEX_JSON_FILENAME:
                 continue
 
             new_entry = populate_index_json_entry(Path(filename), fit_id, plot_front_end_url)
@@ -178,11 +179,13 @@ def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_
     path = Path(filename)
     _, ext = os.path.splitext(path.name)
 
-    if ext not in (".png", ".tsv", ".txt", ".fits"):
+    if ext not in (".png", ".tsv", ".txt", EXT_FITS):
         return None
 
     # Now check for other files which slip through
-    if ext == ".fits" and not (str(path).endswith("solutions.fits") or str(path).endswith("solutions.original.fits")):
+    if ext == EXT_FITS and not (
+        str(path).endswith(SOLUTIONS_FITS_SUFFIX) or str(path).endswith(SOLUTIONS_ORIGINAL_FITS_SUFFIX)
+    ):
         # Ignore the visibility FITS files and metafits files
         return None
 

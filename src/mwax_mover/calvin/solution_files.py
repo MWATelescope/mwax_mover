@@ -21,7 +21,7 @@ import shutil
 import time
 from pathlib import Path
 
-from mwax_mover.constants import SECONDS_PER_HOUR
+from mwax_mover.constants import SECONDS_PER_HOUR, SOLUTIONS_FITS_GLOB, SOLUTIONS_ORIGINAL_FITS_GLOB
 from mwax_mover.filesystem.files import delete_files_older_than
 
 logger = logging.getLogger(__name__)
@@ -314,8 +314,8 @@ def upload_plot_files(job_output_path: str, upload_path: str) -> bool:
             "*.txt",
             "*.tsv",
             "*.json",
-            "*_solutions.fits",
-            "*_solutions.original.fits",
+            SOLUTIONS_FITS_GLOB,
+            SOLUTIONS_ORIGINAL_FITS_GLOB,
         ]
         for ext in exts:
             plot_files = glob.glob(os.path.join(job_output_path, ext))
@@ -324,7 +324,7 @@ def upload_plot_files(job_output_path: str, upload_path: str) -> bool:
                     dest_filename = os.path.join(staging_path, os.path.basename(pfile))
 
                     # We want to keep the solutions on calvin servers so copy them, don't move them!
-                    if ext in ["*_solutions.fits", "*_solutions.original.fits"]:
+                    if ext in [SOLUTIONS_FITS_GLOB, SOLUTIONS_ORIGINAL_FITS_GLOB]:
                         logger.debug(f"Copying {pfile} to {dest_filename} [{file_no}/{len(plot_files)}]")
                         shutil.copy(pfile, dest_filename)
                     else:

@@ -11,7 +11,7 @@ import logging
 import os
 import shutil
 
-from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME
+from mwax_mover.constants import EXT_FITS, MODE_WATCH_DIR_FOR_RENAME
 from mwax_mover.filesystem.naming import ValidationData, should_project_be_archived, validate_filename
 from mwax_mover.fits.subfile import process_mwax_stats
 from mwax_mover.queues.watch_queue_worker import MWAXWatchQueueWorker
@@ -55,7 +55,7 @@ class VisStatsProcessor(MWAXWatchQueueWorker):
         """
         super().__init__(
             "VisStatsProcessor",
-            [(visdata_processing_stats_path, ".fits")],
+            [(visdata_processing_stats_path, EXT_FITS)],
             mode=MODE_WATCH_DIR_FOR_RENAME,
             requeue_to_eoq_on_failure=False,
         )

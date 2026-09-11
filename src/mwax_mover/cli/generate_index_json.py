@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from mwax_mover.calvin.plots.index import generate_plot_index_file
-from mwax_mover.constants import EXIT_FAILURE
+from mwax_mover.constants import EXIT_FAILURE, INDEX_JSON_FILENAME
 
 
 def main() -> None:
@@ -65,10 +65,10 @@ def main() -> None:
     else:
         if args.output is None:
             # Not specified? output to the fit dir
-            output_filename = os.path.join(args.directory, "index.json")
+            output_filename = os.path.join(args.directory, INDEX_JSON_FILENAME)
         else:
             # User specified it
-            output_filename = os.path.join(args.output, "index.json")
+            output_filename = os.path.join(args.output, INDEX_JSON_FILENAME)
 
     if args.fit_id is None:
         # get it from the directory

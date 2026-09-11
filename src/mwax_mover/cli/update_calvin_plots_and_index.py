@@ -13,7 +13,13 @@ import requests
 
 from mwax_mover.calvin.plots import hyperdrive
 from mwax_mover.calvin.plots.index import populate_index_json_entry
-from mwax_mover.constants import EXIT_FAILURE, SECTION_MWA_DATABASE
+from mwax_mover.constants import (
+    EXIT_FAILURE,
+    INDEX_JSON_FILENAME,
+    SECTION_MWA_DATABASE,
+    SOLUTIONS_FITS_GLOB,
+    SOLUTIONS_ORIGINAL_FITS_GLOB,
+)
 from mwax_mover.core.config import read_config
 from mwax_mover.db.calibration import get_fit_info_from_slurm_job_and_obsid
 from mwax_mover.db.handler import MWAXDBHandler
@@ -58,8 +64,8 @@ def download_plot_index_file(fit_id: int, solution_directory: str) -> Path:
         OSError: If the output file cannot be written (e.g. directory does not
             exist, or insufficient permissions).
     """
-    url = f"https://cal.mwatelescope.org/{fit_id}/index.json"
-    output_path = Path(solution_directory) / "index.json"
+    url = f"https://cal.mwatelescope.org/{fit_id}/{INDEX_JSON_FILENAME}"
+    output_path = Path(solution_directory) / INDEX_JSON_FILENAME
 
     response = requests.get(url, timeout=30)
     response.raise_for_status()
@@ -355,7 +361,7 @@ def main() -> None:
             sys.exit(EXIT_FAILURE)
 
         # Get all the solution files
-        solution_files = glob.glob(os.path.join(sol.dir_path, "*_solutions.fits"))
+        solution_files = glob.glob(os.path.join(sol.dir_path, SOLUTIONS_FITS_GLOB))
         sol.log(f"{len(solution_files)} solution files found.")
 
         files_to_upload = []
@@ -409,7 +415,7 @@ def main() -> None:
             )
             files_to_upload.append(sol_fits)
 
-        orig_solution_files = glob.glob(os.path.join(sol.dir_path, "*_solutions.original.fits"))
+        orig_solution_files = glob.glob(os.path.join(sol.dir_path, SOLUTIONS_ORIGINAL_FITS_GLOB))
         for orig_sol_fits in orig_solution_files:
             sol.log(f"Adding {orig_sol_fits} in index.json")
             update_plot_index_file_entry(
@@ -422,7 +428,7 @@ def main() -> None:
             json.dump(index_json, f, indent=2)
 
         # upload the index
-        files_to_upload.append(os.path.join(sol.dir_path, "index.json"))
+        files_to_upload.append(os.path.join(sol.dir_path, INDEX_JSON_FILENAME))
 
         if not args.dry_run:
             upload_dir = os.path.join(base_upload_dir, str(sol.fit_id))

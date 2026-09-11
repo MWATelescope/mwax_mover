@@ -9,7 +9,7 @@ pipeline.
 import logging
 import threading
 
-from mwax_mover.constants import MODE_WATCH_DIR_FOR_RENAME
+from mwax_mover.constants import EXT_FITS, MODE_WATCH_DIR_FOR_RENAME
 from mwax_mover.queues.watch_queue_worker import MWAXWatchQueueWorker
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ class VisCalOutgoingProcessor(MWAXWatchQueueWorker):
         """
         super().__init__(
             "VisCalOutgoingProcessor",
-            [(visdata_outgoing_cal_path, ".fits")],
+            [(visdata_outgoing_cal_path, EXT_FITS)],
             mode=MODE_WATCH_DIR_FOR_RENAME,
             requeue_to_eoq_on_failure=False,
         )

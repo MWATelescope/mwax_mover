@@ -40,7 +40,12 @@ from mwax_mover.calvin.solution_files import (
     upload_plot_files,
 )
 from mwax_mover.constants import (
+    CONFIG_KEY_GIANT_SQUID_BINARY_PATH,
+    CONFIG_KEY_LOG_LEVEL,
     EXIT_FAILURE,
+    HEALTH_THREAD_NAME,
+    INDEX_JSON_FILENAME,
+    LOG_FORMAT,
     SECONDS_PER_HOUR,
     SECTION_BIRLI,
     SECTION_DOWNLOADING,
@@ -48,6 +53,7 @@ from mwax_mover.constants import (
     SECTION_HYPERDRIVE,
     SECTION_MWAX_MOVER,
     SECTION_PROCESSING,
+    SOLUTIONS_FITS_GLOB,
 )
 from mwax_mover.core.config import read_config, read_config_bool, read_optional_config
 from mwax_mover.core.env import get_hostname
@@ -70,7 +76,7 @@ from mwax_mover.processors.daemon import MWAXDaemon
 
 # Setup root logger
 handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(message)s"))
+handler.setFormatter(logging.Formatter(LOG_FORMAT))
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
@@ -204,7 +210,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
         try:
             # create a health thread
             logger.info("Starting health_thread...")
-            health_thread = threading.Thread(name="health_thread", target=self.health_loop, daemon=True)
+            health_thread = threading.Thread(name=HEALTH_THREAD_NAME, target=self.health_loop, daemon=True)
             health_thread.start()
 
             # Cleaning up /tmp in case there is a left over failed job that wasn't cleaned up
@@ -397,7 +403,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 self.stop(exit_code=EXIT_FAILURE)
 
             # Get the solution files (still needed below for the export step)
-            solution_files = glob.glob(os.path.join(self.cfg_proc_job_output_path, "*_solutions.fits"))
+            solution_files = glob.glob(os.path.join(self.cfg_proc_job_output_path, SOLUTIONS_FITS_GLOB))
 
             # If that worked, process the solutions and insert into db
             self.current_task_name = "Processing"
@@ -444,7 +450,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
                         fit_id,
                         self.cfg_proc_plot_front_end_url,
                         self.cfg_proc_job_output_path,
-                        os.path.join(self.cfg_proc_job_output_path, "index.json"),
+                        os.path.join(self.cfg_proc_job_output_path, INDEX_JSON_FILENAME),
                     )
                     if index_success:
                         plot_upload_path = os.path.join(self.cfg_proc_plot_upload_path, str(fit_id))
@@ -1122,7 +1128,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
             sys.exit(EXIT_FAILURE)
 
         # Read log level
-        config_file_log_level: str | None = read_optional_config(config, SECTION_MWAX_MOVER, "log_level")
+        config_file_log_level: str | None = read_optional_config(config, SECTION_MWAX_MOVER, CONFIG_KEY_LOG_LEVEL)
         if config_file_log_level:
             logger.setLevel(config_file_log_level)
 
@@ -1178,7 +1184,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
             self.cfg_gs_binary_path = read_config(
                 config,
                 SECTION_GIANT_SQUID,
-                "giant_squid_binary_path",
+                CONFIG_KEY_GIANT_SQUID_BINARY_PATH,
             )
 
             if not os.path.exists(self.cfg_gs_binary_path):

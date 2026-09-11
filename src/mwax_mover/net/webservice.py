@@ -10,6 +10,7 @@ because they depend on MWADataFileType; keeping them here would create an
 import cycle (see filesystem.naming's docstring).
 """
 
+import http
 import logging
 
 import requests
@@ -86,8 +87,9 @@ def call_webservice(
                     logger.debug(f"{obs_id}: returned 200 (success)")
                     return response
 
-                elif response.status_code >= 400 and response.status_code <= 599:
-                    # 400 - 500 status code- try next url
+                elif response.status_code >= http.HTTPStatus.BAD_REQUEST and response.status_code <= 599:
+                    # 400 - 599 status code- try next url. 599 is left as a literal:
+                    # there's no single named constant for "highest possible HTTP status".
                     error_message = f"{obs_id}: returned {response.status_code} {response.text} (failure)"
                     logger.error(error_message)
 

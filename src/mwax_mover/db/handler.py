@@ -20,7 +20,7 @@ from tenacity import (
     wait_fixed,
 )
 
-from mwax_mover.constants import SECTION_MWA_DATABASE
+from mwax_mover.constants import DUMMY_CONFIG_VALUE, SECTION_MWA_DATABASE
 from mwax_mover.core.config import read_config
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class MWAXDBHandler:
         self.user = user
         self.password = password
         self.pool: ConnectionPool
-        if self.host != "dummy":
+        if self.host != DUMMY_CONFIG_VALUE:
             self.pool = ConnectionPool(
                 min_size=1,
                 max_size=3,
@@ -78,7 +78,7 @@ class MWAXDBHandler:
             port=int(read_config(config, SECTION_MWA_DATABASE, "port")),
             db_name=db_name,
             user=read_config(config, SECTION_MWA_DATABASE, "user"),
-            password=read_config(config, SECTION_MWA_DATABASE, "pass", db_name != "dummy"),
+            password=read_config(config, SECTION_MWA_DATABASE, "pass", db_name != DUMMY_CONFIG_VALUE),
         )
 
     def close(self):

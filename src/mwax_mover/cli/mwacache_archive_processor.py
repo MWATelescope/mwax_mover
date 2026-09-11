@@ -19,7 +19,19 @@ from glob import glob
 import astropy
 
 from mwax_mover import version
-from mwax_mover.constants import EXIT_FAILURE, SECONDS_PER_HOUR, SECTION_MWAX_MOVER
+from mwax_mover.constants import (
+    CONFIG_KEY_ARCHIVE_COMMAND_TIMEOUT_SEC,
+    CONFIG_KEY_HIGH_PRIORITY_CORRELATOR_PROJECTIDS,
+    CONFIG_KEY_HIGH_PRIORITY_VCS_PROJECTIDS,
+    CONFIG_KEY_LOG_LEVEL,
+    DEFAULT_POSTGRES_PORT,
+    DUMMY_CONFIG_VALUE,
+    EXIT_FAILURE,
+    HEALTH_THREAD_NAME,
+    LOG_FORMAT,
+    SECONDS_PER_HOUR,
+    SECTION_MWAX_MOVER,
+)
 from mwax_mover.core.config import read_config, read_config_bool, read_config_list, read_optional_config
 from mwax_mover.core.env import get_hostname, running_under_pytest
 from mwax_mover.db.handler import MWAXDBHandler
@@ -30,7 +42,7 @@ from mwax_mover.filesystem.naming import ArchiveLocation
 
 # Setup root logger
 handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(message)s"))
+handler.setFormatter(logging.Formatter(LOG_FORMAT))
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
@@ -76,7 +88,7 @@ class MWACacheArchiveProcessor(MWAXDaemon):
         self.cfg_db_name: str = ""
         self.cfg_db_user: str = ""
         self.cfg_db_pass: str = ""
-        self.cfg_db_port: int = 5432
+        self.cfg_db_port: int = DEFAULT_POSTGRES_PORT
 
         # s3 config
         self.s3_profile: str = ""
@@ -103,13 +115,13 @@ class MWACacheArchiveProcessor(MWAXDaemon):
         self.running = True
 
         # creating database connection pool
-        if self.cfg_db_host != "dummy":
+        if self.cfg_db_host != DUMMY_CONFIG_VALUE:
             logger.info("Starting database connection pool...")
             self.db_handler.start_database_pool()
 
         # create a health thread
         logger.info("Starting health_thread...")
-        health_thread = threading.Thread(name="health_thread", target=self.health_loop, daemon=True)
+        health_thread = threading.Thread(name=HEALTH_THREAD_NAME, target=self.health_loop, daemon=True)
         health_thread.start()
 
         logger.info("Cleaning up old temp files...")
@@ -224,7 +236,7 @@ class MWACacheArchiveProcessor(MWAXDaemon):
         config.read_file(open(config_filename, "r", encoding="utf-8"))
 
         # Read log level
-        config_file_log_level: str | None = read_optional_config(config, SECTION_MWAX_MOVER, "log_level")
+        config_file_log_level: str | None = read_optional_config(config, SECTION_MWAX_MOVER, CONFIG_KEY_LOG_LEVEL)
         if config_file_log_level:
             # It's now safe to start logging
             # start logging
@@ -258,7 +270,7 @@ class MWACacheArchiveProcessor(MWAXDaemon):
             read_config(
                 config,
                 SECTION_MWAX_MOVER,
-                "archive_command_timeout_sec",
+                CONFIG_KEY_ARCHIVE_COMMAND_TIMEOUT_SEC,
             )
         )
 
@@ -276,12 +288,12 @@ class MWACacheArchiveProcessor(MWAXDaemon):
         self.cfg_high_priority_correlator_projectids = read_config_list(
             config,
             SECTION_MWAX_MOVER,
-            "high_priority_correlator_projectids",
+            CONFIG_KEY_HIGH_PRIORITY_CORRELATOR_PROJECTIDS,
         )
         self.cfg_high_priority_vcs_projectids = read_config_list(
             config,
             SECTION_MWAX_MOVER,
-            "high_priority_vcs_projectids",
+            CONFIG_KEY_HIGH_PRIORITY_VCS_PROJECTIDS,
         )
 
         # health

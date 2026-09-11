@@ -14,7 +14,7 @@ import shutil
 import time
 
 from mwax_mover.calvin.solution_files import get_solution_fits_filename
-from mwax_mover.constants import EXIT_FAILURE, MODE_WATCH_DIR_FOR_RENAME
+from mwax_mover.constants import EXIT_FAILURE, EXT_SUB, MODE_WATCH_DIR_FOR_RENAME
 from mwax_mover.fits.metafits import get_metafits_value_from_hdu
 from mwax_mover.fits.subfile import (
     PSRDADA_COARSE_CHANNEL,
@@ -37,7 +37,6 @@ from mwax_mover.fits.subfile import (
 from mwax_mover.net.redis import push_message_to_redis
 from mwax_mover.queues.watch_queue_worker import MWAXWatchQueueWorker
 
-METAFITS_EXPOSURE = "EXPOSURE"
 COMMAND_DADA_DISKDB = "dada_diskdb"
 
 
@@ -98,7 +97,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
         super().__init__(
             "SubfileIncomingProcessor",
             [
-                (subfile_incoming_path, ".sub"),
+                (subfile_incoming_path, EXT_SUB),
             ],
             mode=MODE_WATCH_DIR_FOR_RENAME,
             requeue_to_eoq_on_failure=False,

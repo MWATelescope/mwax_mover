@@ -14,6 +14,8 @@ import shutil
 from mwalib import MetafitsContext
 
 import mwax_mover.version
+from mwax_mover.constants import EXT_HDR, EXT_VDIF
+from mwax_mover.fits.subfile import CorrelatorMode
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +33,7 @@ class VDIFHeader:
         self.MWA_CAPTURE_VERSION: str = mwax_mover.version.get_mwax_mover_version_string()
         self.MWA_SAMPLE_VERSION: str = "0.1"
         self.TELESCOPE: str = "MWA"
-        self.MODE: str = "MWAX_BEAMFORMER"
+        self.MODE: str = CorrelatorMode.MWAX_BEAMFORMER.value
         self.INSTRUMENT: str = "VDIF"
         self.NPOL: int = 2
         self.NBIT: int = 8
@@ -100,7 +102,7 @@ class VDIFHeader:
         Args:
             vdif_hdr_filename: Path where the header file will be written.
         """
-        self.datafile = os.path.basename(vdif_hdr_filename.replace(".hdr", ".vdif"))
+        self.datafile = os.path.basename(vdif_hdr_filename.replace(EXT_HDR, EXT_VDIF))
 
         lines = [
             f"HDR_VERSION {self.VDIF_HDR_VERSION}                   # Version of this ASCII header",
@@ -209,7 +211,7 @@ def stitch_vdif_files_and_write_hdr(metafits_filename: str, files: list[str], ou
 
     output_vdif_filename: str = get_stitched_filename(files[0])
     output_vdif_filename = os.path.join(output_dir, os.path.basename(output_vdif_filename))
-    output_hdr_filename: str = output_vdif_filename.replace(".vdif", ".hdr")
+    output_hdr_filename: str = output_vdif_filename.replace(EXT_VDIF, EXT_HDR)
 
     if len(files) == 1:
         # Nothing to stitch- but we still need the output_vdif_filename to be created, so copy the file
