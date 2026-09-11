@@ -15,7 +15,6 @@ from unittest.mock import MagicMock, patch
 import mwalib
 import pytest
 from astropy.io import fits
-
 from tests_common import obs_metafits_path
 
 from mwax_mover.calvin.hyperdrive import (
@@ -49,12 +48,9 @@ def test_estimate_di_calibrate_peak_ram_bytes_matches_manual_calculation(metafit
     """
     num_sources = 1000
     edge_width_hz = 80000
-    coarse_chan_start = 1
-    coarse_chan_end = 1
+    num_coarse_chan = 1
 
-    result = estimate_di_calibrate_peak_ram_bytes(
-        metafits_context, edge_width_hz, num_sources, coarse_chan_start, coarse_chan_end
-    )
+    result = estimate_di_calibrate_peak_ram_bytes(metafits_context, edge_width_hz, num_sources, num_coarse_chan)
 
     # Manual calculation mirroring the function's own formula, using this
     # fixture's real metafits values (num_corr_fine_chans_per_coarse=128,
@@ -90,8 +86,8 @@ def test_estimate_di_calibrate_peak_ram_bytes_scales_with_coarse_channels(metafi
     the sum of two single-channel estimates' chanblock-dependent terms
     scaling correctly. Kept simple: just assert strictly increasing.
     """
-    one_channel = estimate_di_calibrate_peak_ram_bytes(metafits_context, 80000, 1000, 1, 1)
-    four_channels = estimate_di_calibrate_peak_ram_bytes(metafits_context, 80000, 1000, 1, 4)
+    one_channel = estimate_di_calibrate_peak_ram_bytes(metafits_context, 80000, 1000, 1)
+    four_channels = estimate_di_calibrate_peak_ram_bytes(metafits_context, 80000, 1000, 4)
 
     assert four_channels > one_channel
 
@@ -102,7 +98,7 @@ def test_estimate_di_calibrate_peak_ram_bytes_zero_sources(metafits_context):
     The beam-response-cache and vis-array terms are independent of source
     count, so the estimate should not collapse to zero.
     """
-    result = estimate_di_calibrate_peak_ram_bytes(metafits_context, 80000, 0, 1, 1)
+    result = estimate_di_calibrate_peak_ram_bytes(metafits_context, 80000, 0, 1)
 
     assert result > 0
 

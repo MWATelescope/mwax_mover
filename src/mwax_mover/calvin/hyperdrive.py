@@ -75,8 +75,7 @@ def estimate_di_calibrate_peak_ram_bytes(
     metafits_context: mwalib.MetafitsContext,
     edge_width_hz: int,
     num_sources: int,
-    coarse_chan_start: int,
-    coarse_chan_end: int,
+    num_coarse_chan_in_contig_band: int,
 ) -> int:
     """Estimate mwa_hyperdrive di-calibrate's peak host RAM, derived almost
     entirely from an already-populated mwalib.MetafitsContext for a
@@ -118,25 +117,23 @@ def estimate_di_calibrate_peak_ram_bytes(
         edge_width_hz: The amount that each coarse channel edge is flagged (in Hz).
         num_sources: Fed from the config file, how many sources should Calvin tell
             Hyperdrive to use for the skymodel.
-        coarse_chan_start: Receiver channel number of first coarse channel in this contiguous band.
-        coarse_chan_end: Receiver channel number of last coarse channel in this contiguous band.
+        num_coarse_chan_in_contig_band: The number of coarse channels in the contiguous band.
 
     Returns:
         An int which is the max RAM consumption, in bytes, estimated based on the input
     """
     n_points: int = num_sources  # Most sources in the sky model are point sources anyway
     n_gaussians: int = num_sources // 4  # no good way to estimate this, so guess for now
-    n_shapelets: int = num_sources // 8  # no good way to estimate this, so guess for now
+    n_shapelets: int = 0  # no shapelets in the current skymodels, so assume 0 for now
 
     n_unflagged_tiles = sum(1 for rf in metafits_context.rf_inputs if rf.pol == mwalib.Pol.X and not rf.flagged)
     n_cross_baselines = n_unflagged_tiles * (n_unflagged_tiles - 1) // 2
 
-    n_coarse_channels = (coarse_chan_end - coarse_chan_start) + 1
     num_fine_chans_per_coarse = metafits_context.num_corr_fine_chans_per_coarse
 
     num_flagged_per_edge = edge_width_hz // metafits_context.corr_fine_chan_width_hz
     num_flagged_per_coarse = 2 * num_flagged_per_edge
-    n_chanblocks = n_coarse_channels * max(num_fine_chans_per_coarse - num_flagged_per_coarse, 0)
+    n_chanblocks = num_coarse_chan_in_contig_band * max(num_fine_chans_per_coarse - num_flagged_per_coarse, 0)
 
     n_timesteps = metafits_context.num_metafits_timesteps
 
@@ -144,7 +141,7 @@ def estimate_di_calibrate_peak_ram_bytes(
     # empirically, about 2 unique beam frequencies per coarse channel
     # (fine channels near a coarse-channel boundary often snap to the
     # neighbouring tabulated frequency rather than their own).
-    n_unique_beam_freqs = 2 * n_coarse_channels
+    n_unique_beam_freqs = 2 * num_coarse_chan_in_contig_band
 
     n_components_total = n_points + n_gaussians + n_shapelets
     n_components_max = max(n_points, n_gaussians, n_shapelets)
@@ -364,11 +361,7 @@ def run_hyperdrive(
     try:
         per_run_bytes = [
             estimate_di_calibrate_peak_ram_bytes(
-                metafits_context,
-                edge_width_hz,
-                num_sources,
-                0,
-                _uvfits_num_coarse_chans(uvfits_file, metafits_context) - 1,
+                metafits_context, edge_width_hz, num_sources, _uvfits_num_coarse_chans(uvfits_file, metafits_context)
             )
             for uvfits_file in input_uvfits_files
         ]

@@ -100,6 +100,14 @@ no_proxy=asvo.mwatelescope.org
 - Added shared config-reading helpers: health-config reading folded into `MWAXDaemon`; added an `MWAXDBHandler.from_config()` classmethod for reading the consolidated `[mwa database]` section.
 - Retry-strategy (`tenacity` vs hand-rolled loops) and clock consistency (`time.time()` vs `time.monotonic()`) audits noted as optional/lowest-priority — largely deferred beyond what Phase 4.8 already fixed.
 
+## Parallelise Hyperdrive
+
+* `calvin/hyperdrive.py` (1729 lines, three separate concerns) split into three files: `hyperfits_solution.py` (`HyperfitsSolution`), `hyperfits_solution_group.py` (`HyperfitsSolutionGroup` and everything only it used), and `hyperdrive.py` (just `run_hyperdrive`/`write_hyperdrive_stats`/`get_convergence_summary`). No logic change; all external imports and the test tree updated to match.
+* Hyperdrive di-calibrate runs across a picket-fence observation's contiguous bands are now run **concurrently** instead of serially, bounded by available memory. Each picket's peak RAM is estimated from its own uvfits header and the observation's metafits (`estimate_di_calibrate_peak_ram_bytes`, `_uvfits_num_coarse_chans`), and the worker count (`_max_hyperdrive_workers`) is capped so the worst-case picket always fits within live-probed available memory (`available_memory_bytes()`, 15% headroom). Falls back to serial if a picket's memory usage can't be estimated (e.g. malformed uvfits header) rather than raising.
+* **Behaviour change:** every picket now runs regardless of another picket's failure. Previously the first failure stopped all later pickets from running at all; now only the aggregate result determines whether the observation's files get moved to the error directory. If more than one picket fails, `readme_error.txt` still describes only the first (by input order) — a warning is logged pointing at the per-picket log lines for the rest.
+* Fixed a pre-existing `ty` type-checker finding in `calvin/plots/gains.py`'s `fill_between()` call (numpy bool array vs. the stub's `Sequence[bool]`) — no rendering change.
+* New constants: `EXT_UVFITS`, `JONES_F32_BYTES`/`JONES_F64_BYTES`/`F32_BYTES` (memory-estimate constants), `HYPERDRIVE_MEMORY_HEADROOM_FRACTION`, `HYPERDRIVE_FALLBACK_WORKERS`.
+
 # 1.10.2 26-Aug-2026
 
 * Clean up of ruff errors.
