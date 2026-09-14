@@ -226,7 +226,7 @@ def plot_rx_lengths(flavor_fits, prefix, show, title):
 
     fig = plt.gcf()
     if title:
-        fig.suptitle(title)
+        fig.suptitle(title, fontsize=10, y=1.01)
     if show:
         plt.show()
     if prefix:
@@ -317,8 +317,8 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fi
 
         fig.set_size_inches(*figsize)
         if title:
-            fig.suptitle(title)
-            fig.subplots_adjust(top=0.88)
+            fig.suptitle(title, fontsize=10, y=0.995)
+            fig.subplots_adjust(top=0.96)
         if show:
             plt.show()
         if prefix:
@@ -360,8 +360,7 @@ def plot_phase_intercepts(prefix, show, title, flavor_fits):
     )
     fig = plt.gcf()
     if title:
-        fig.suptitle(title)
-        fig.subplots_adjust(top=0.95)
+        fig.suptitle(title, fontsize=10, y=1.01)
     if show:
         plt.show()
     if prefix:
@@ -565,8 +564,7 @@ def plot_phase_residual(
 
     fig = plt.gcf()
     if title:
-        fig.suptitle(title)
-        fig.subplots_adjust(top=0.95)
+        fig.suptitle(title, fontsize=10, y=1.02)
     fig.savefig(f"{prefix}residual.png", dpi=resolve_plot_dpi(200), bbox_inches="tight")
     df.to_csv(f"{prefix}residual.tsv", sep="\t", index=False)
 
