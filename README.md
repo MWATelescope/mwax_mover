@@ -616,7 +616,7 @@ of how it got this shape).
 ### Constants and Version
 
 **`constants.py`**
-Module-level constants only. Defines the `__FILE__` and `__FILENOEXT__` token strings used for command substitution, and the three watch-mode string constants (`WATCH_DIR_FOR_NEW`, `WATCH_DIR_FOR_RENAME`, `WATCH_DIR_FOR_RENAME_OR_NEW`).
+Module-level constants only — see the module docstring for a full inventory. Includes command-substitution tokens (`__FILE__`/`__FILENOEXT__`), watch-mode strings, INI config section/key names, time/size/exit-code basics, MWA webservice hosts, file extensions and naming conventions, shared daemon behaviour (`LOG_FORMAT`, `HEALTH_THREAD_NAME`), and calibration numerics (`MAD_TO_STD_SCALE_FACTOR`, `REFTILE_*` quality gates, hyperdrive memory-estimation and worker-sizing constants).
 
 **`version.py`**
 Provides `get_mwax_mover_version_string()`, which reads the installed package version via the stdlib `importlib.metadata`.
@@ -794,7 +794,7 @@ Solution-file naming (`get_solution_fits_filename()`, `parse_solution_channels()
 **`calvin/plots/`** — plotting and plot-adjacent reporting
 - `layout.py` — figure-sizing helpers (`resolve_plot_dpi()`, `scale_plot_figsize()`) shared by every plot here.
 - `phases.py` — phase-fit diagnostic plots (intercepts, residuals, per-tile fits) and `write_debug_phase_fit_plots()`, the `HyperfitsSolutionGroup`-level entry point.
-- `hyperdrive.py` — `generate_plots(_for_files)`, which run hyperdrive's own `solutions-plot` subcommand with `--reftile` set to whatever tile `HyperfitsSolutionGroup.select_refant()` chose, so these plots use the same reference as Calvin's own.
+- `hyperdrive.py` — `generate_plots(_for_files)`, which run hyperdrive's own `solutions-plot` subcommand with `--ref-tile` set to whatever tile `HyperfitsSolutionGroup.select_refant()` chose, so these plots use the same reference as Calvin's own.
 - `gains.py` — the paged, paginated amplitude-outlier plots (`plot_combined_gains()`, `plot_outlier_gains()`), stitching multiple picket-fence files onto one continuous x-axis and budgeting concurrent rendering workers against available memory.
 - `stats_table.py` — the before/after per-tile stats table (`build_tile_stats_rows()`, `write_tile_stats_table()`, `write_before_after_stats()`).
 - `index.py` — `index.json` manifest generation for a fit's uploaded files (`generate_plot_index_file()`, `populate_index_json_entry()`).

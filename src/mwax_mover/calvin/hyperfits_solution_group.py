@@ -11,7 +11,7 @@ HyperfitsSolutionGroup's methods. See calvin.hyperfits_solution for
 HyperfitsSolution itself, and calvin.hyperdrive for running hyperdrive. See
 calibration/ for the shared data structures and pure numeric fitting/outlier
 functions these use, and calvin.plots for plotting. Split out of
-calvin.hyperdrive -- see docs/HYPERDRIVE_PARALLELISM.md Phase 1.
+calvin.hyperdrive during the source_code_restructure.
 """
 
 import itertools
@@ -29,9 +29,12 @@ from pandas import DataFrame, Series
 
 from mwax_mover.calibration.df_columns import (
     COL_CHI2DOF,
+    COL_FLAG,
     COL_GX,
     COL_GY,
+    COL_ID,
     COL_LENGTH,
+    COL_NAME,
     COL_POL,
     COL_QUALITY,
     COL_SOLN_IDX,
@@ -97,9 +100,8 @@ def _ref_normalise_xx_yy(
 ) -> tuple[NDArray[np.complex128], NDArray[np.complex128]]:
     """Reference-normalise a file's XX/YY (gx/gy) terms against one tile.
 
-    Replicates the same standard 2x2 Jones-matrix determinant-inverse
-    division that HyperfitsSolution.get_ref_solutions() performs on raw
-    FITS data, but operating on an already-in-memory jones array instead.
+    Standard 2x2 Jones-matrix determinant-inverse division, operating on
+    an already-in-memory jones array.
 
     Args:
         jones: Complex array, shape (n_tiles, n_chanblocks, 2, 2).
@@ -163,7 +165,7 @@ def _phase_fit_one(
     tile = id_matches.iloc[0]
     if tile.flag:
         return None
-    name = tile["name"]
+    name = tile[COL_NAME]
     try:
         fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)
     except Exception as exc:
@@ -208,7 +210,7 @@ def _gain_fit_one(
     tile = id_matches.iloc[0]
     if tile.flag:
         return None
-    name = tile["name"]
+    name = tile[COL_NAME]
     try:
         fit = fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse)
     except Exception as exc:
@@ -556,7 +558,7 @@ class HyperfitsSolutionGroup:
             by any of the three sources, in any of the group's solution
             files.
         """
-        combined_flag = self.metafits_tiles_df["flag"].to_numpy(dtype=bool).copy()
+        combined_flag = self.metafits_tiles_df[COL_FLAG].to_numpy(dtype=bool).copy()
         for soln in self.solns:
             combined_flag = np.logical_or(combined_flag, soln.tile_flags)
             combined_flag = np.logical_or(combined_flag, soln.baseline_tile_flags)
@@ -574,7 +576,7 @@ class HyperfitsSolutionGroup:
         assert self.jones is not None
         assert self.tile_flag_reasons is not None
 
-        metafits_flagged = self.metafits_tiles_df["flag"].to_numpy(dtype=bool)
+        metafits_flagged = self.metafits_tiles_df[COL_FLAG].to_numpy(dtype=bool)
         tiles_hdu_flagged = np.zeros(len(self.metafits_tiles_df), dtype=bool)
         baseline_flagged = np.zeros(len(self.metafits_tiles_df), dtype=bool)
         for soln in self.solns:
@@ -640,7 +642,7 @@ class HyperfitsSolutionGroup:
             raise ValueError("No unflagged tiles found")
 
         # Return the row with the lowest tile ID among unflagged tiles.
-        candidate_ids = self.metafits_tiles_df["id"].to_numpy()
+        candidate_ids = self.metafits_tiles_df[COL_ID].to_numpy()
         best_idx = np.where(unflagged_mask)[0][np.argmin(candidate_ids[unflagged_mask])]
         return self.metafits_tiles_df.iloc[best_idx]
 
@@ -690,8 +692,8 @@ class HyperfitsSolutionGroup:
             ValueError: If no unflagged tiles are found.
         """
         bootstrap = self._bootstrap_refant()
-        phase_fits = self.process_phase_fits(bootstrap["name"], phase_fit_niter)
-        gain_fits = self.process_gain_fits_for_db(bootstrap["name"])
+        phase_fits = self.process_phase_fits(bootstrap[COL_NAME], phase_fit_niter)
+        gain_fits = self.process_gain_fits_for_db(bootstrap[COL_NAME])
 
         phase_by_pol = {pol: phase_fits[phase_fits[COL_POL] == pol].set_index(COL_TILE_ID) for pol in (COL_XX, COL_YY)}
         gain_by_pol = {pol: gain_fits[gain_fits[COL_POL] == pol].set_index(COL_TILE_ID) for pol in (COL_XX, COL_YY)}
@@ -700,7 +702,7 @@ class HyperfitsSolutionGroup:
         # _bootstrap_refant() above already raised if there were no
         # unflagged tiles at all, so this mask is guaranteed non-empty here.
         unflagged_mask = ~self.combined_tile_flags
-        candidate_ids = self.metafits_tiles_df["id"].to_numpy()[unflagged_mask]
+        candidate_ids = self.metafits_tiles_df[COL_ID].to_numpy()[unflagged_mask]
 
         scored = []
         for tile_id in candidate_ids:
@@ -740,7 +742,7 @@ class HyperfitsSolutionGroup:
 
         scored.sort()
         best_tile_id = scored[0][2]
-        return self.metafits_tiles_df[self.metafits_tiles_df["id"] == best_tile_id].iloc[0]
+        return self.metafits_tiles_df[self.metafits_tiles_df[COL_ID] == best_tile_id].iloc[0]
 
     @property
     def calibrator(self) -> str | None:
@@ -815,7 +817,7 @@ class HyperfitsSolutionGroup:
             RuntimeError: If the name isn't found, matches more than one
                 tile, or that tile is flagged.
         """
-        tile_names = self.metafits_tiles_df["name"].to_numpy()
+        tile_names = self.metafits_tiles_df[COL_NAME].to_numpy()
         ref_mask = tile_names == refant_name
         if not ref_mask.any():
             raise RuntimeError(f"reference tile {refant_name} not found")
@@ -825,39 +827,6 @@ class HyperfitsSolutionGroup:
         if self.combined_tile_flags[ref_tile_idx]:
             raise RuntimeError(f"reference tile {refant_name} is flagged (index {ref_tile_idx})")
         return ref_tile_idx
-
-    def get_solns(self, refant_name=None) -> tuple[NDArray[np.int_], NDArray[np.complex128], NDArray[np.complex128]]:
-        """Get tile IDs and XX/YY solutions for the reference antenna, from
-        the in-memory Jones matrices (self.jones -- see load()).
-
-        Args:
-            refant_name: Name of the reference antenna. If None, no reference normalization is applied.
-
-        Returns:
-            A tuple of (tile_ids, xx_solutions, yy_solutions), each solution
-            array shape (n_tiles, n_chanblocks_total) -- concatenated across
-            all files in the group, no leading timeblock axis.
-
-        Raises:
-            RuntimeError: If load() hasn't been called, or the reference
-                antenna is not found or flagged.
-        """
-        self._ensure_loaded()
-        assert self.jones is not None
-        tile_ids = self.metafits_tiles_df["id"].to_numpy()
-
-        if refant_name is None:
-            all_xx = np.concatenate([file_jones[..., 0, 0] for file_jones in self.jones], axis=1)
-            all_yy = np.concatenate([file_jones[..., 1, 1] for file_jones in self.jones], axis=1)
-            return tile_ids, all_xx, all_yy
-
-        ref_tile_idx = self._find_ref_tile_idx(refant_name)
-        all_ref_xx, all_ref_yy = [], []
-        for file_jones in self.jones:
-            ref_xx, ref_yy = _ref_normalise_xx_yy(file_jones, ref_tile_idx)
-            all_ref_xx.append(ref_xx)
-            all_ref_yy.append(ref_yy)
-        return tile_ids, np.concatenate(all_ref_xx, axis=1), np.concatenate(all_ref_yy, axis=1)
 
     def get_solns_both(
         self, refant_name: str
@@ -891,7 +860,7 @@ class HyperfitsSolutionGroup:
         """
         self._ensure_loaded()
         assert self.jones is not None
-        tile_ids = self.metafits_tiles_df["id"].to_numpy()
+        tile_ids = self.metafits_tiles_df[COL_ID].to_numpy()
         ref_tile_idx = self._find_ref_tile_idx(refant_name)
 
         all_noref_xx, all_noref_yy = [], []

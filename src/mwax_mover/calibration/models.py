@@ -1,7 +1,7 @@
 """Calibration domain data structures: tiles, inputs, channel/time info,
 metafits, and per-tile/per-channel fit results.
 
-Metafits wraps mwalib.MetafitsContext and is the source of Tile/Input/
+Metafits wraps mwalib.MetafitsContext and is the source of Tile/
 ChanInfo/TimeInfo instances. PhaseFitInfo and GainFitInfo are the results
 of calibration.fitting's fit_phase_line()/fit_gain() respectively.
 """
@@ -27,20 +27,6 @@ class Tile(NamedTuple):
     ant: int
     rx: int
     slot: int
-    flavor: str = ""
-
-
-class Input(NamedTuple):
-    """Info about a single MWA rf_input (one polarisation's signal chain for a tile)."""
-
-    name: str
-    id: int
-    flag: bool
-    # index: int
-    pol: str
-    rx: int
-    slot: int
-    length: float
     flavor: str = ""
 
 
@@ -120,40 +106,9 @@ class Metafits:
         )
 
     @property
-    def inputs(self) -> list[Input]:
-        """Get input (rf_input) information from metafits, sorted by input index.
-
-        mwalib exposes one Rfinput per polarisation per tile, so no
-        set-based deduplication is needed.  The electrical length is already
-        a float (metres) — the ``"EL_"`` prefix stripping from the old FITS
-        read is not required.
-        """
-        return sorted(
-            [
-                Input(
-                    id=rfi.input,
-                    name=rfi.tile_name + str(rfi.pol),
-                    flag=bool(rfi.flagged),
-                    pol=str(rfi.pol),
-                    rx=rfi.rec_number,
-                    slot=rfi.rec_slot_number,
-                    length=rfi.electrical_length_m,
-                    flavor=str(rfi.rec_type),
-                )
-                for rfi in self._mc.rf_inputs
-            ],
-            key=lambda inp: inp.id,
-        )
-
-    @property
     def tiles_df(self) -> pd.DataFrame:
         """Get tiles as a pandas DataFrame."""
         return pd.DataFrame(self.tiles, columns=Tile._fields)
-
-    @property
-    def inputs_df(self) -> pd.DataFrame:
-        """Get inputs as a pandas DataFrame."""
-        return pd.DataFrame(self.inputs, columns=Input._fields)
 
     @property
     def chan_info(self) -> ChanInfo:
@@ -227,12 +182,6 @@ class PhaseFitInfo(NamedTuple):
     quality: float
     stderr: float
 
-    # median_thickness: float
-
-    # def get_length(self) -> float:
-    #     """The equivalent cable length of the phase ramp"""
-    #     return v_light_m_s / self.slope
-
     @staticmethod
     def nan():
         return PhaseFitInfo(
@@ -242,7 +191,6 @@ class PhaseFitInfo(NamedTuple):
             chi2dof=np.nan,
             quality=np.nan,
             stderr=np.nan,
-            # median_thickness=np.nan,
         )
 
 

@@ -20,7 +20,13 @@ COL_YY = "YY"
 COL_GX = "gx"
 COL_GY = "gy"
 
-# Tile metadata
+# Tile metadata (metafits_tiles_df columns, from Tile._fields)
+COL_NAME = "name"
+COL_ID = "id"
+COL_FLAG = "flag"
+COL_ANT = "ant"
+COL_RX = "rx"
+COL_SLOT = "slot"
 COL_FLAVOR = "flavor"
 
 # Outlier-rejection results

@@ -145,7 +145,7 @@ COMMAND_DADA_DISKDB = "dada_diskdb"
 # Bytes per Jones matrix element in di-calibrate's working arrays -- a
 # Jones<f32> is 4 complex numbers at 4 bytes each (real+imag), Jones<f64>
 # the same at 8 bytes each. Used by estimate_di_calibrate_peak_ram_bytes.
-# See docs/HYPERDRIVE_PARALLELISM.md 2.1.
+# See estimate_di_calibrate_peak_ram_bytes in calvin/hyperdrive.py.
 JONES_F32_BYTES = 32
 JONES_F64_BYTES = 64
 F32_BYTES = 4
@@ -157,7 +157,7 @@ EXT_UVFITS = ".uvfits"
 # sizing concurrent hyperdrive runs -- leaves room for the parent process
 # and anything else sharing the allocation. Tune here if picket-fence
 # runs are still getting OOM-killed or are leaving memory idle. See
-# docs/HYPERDRIVE_PARALLELISM.md 3.1.
+# See _max_hyperdrive_workers in calvin/hyperdrive.py.
 HYPERDRIVE_MEMORY_HEADROOM_FRACTION = 0.15
 
 # Fallback worker count when available memory can't be determined at all.

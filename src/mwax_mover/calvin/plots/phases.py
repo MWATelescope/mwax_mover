@@ -36,12 +36,15 @@ from numpy.typing import NDArray
 
 from mwax_mover.calibration.df_columns import (
     COL_CHI2DOF,
+    COL_FLAG,
     COL_FLAVOR,
     COL_LENGTH,
     COL_OUTLIER,
     COL_POL,
     COL_QUALITY,
+    COL_RX,
     COL_SIGMA_RESID,
+    COL_SLOT,
     COL_SOLN_IDX,
     COL_TILE_ID,
     COL_XX,
@@ -200,8 +203,8 @@ def plot_rx_lengths(flavor_fits, prefix, show, title):
         Series with mean cable lengths per receiver.
     """
     good_fits = flavor_fits[~flavor_fits[COL_OUTLIER]]
-    rxs = sorted(good_fits["rx"].unique())
-    means = good_fits.groupby(["rx"])[COL_LENGTH].mean()
+    rxs = sorted(good_fits[COL_RX].unique())
+    means = good_fits.groupby([COL_RX])[COL_LENGTH].mean()
 
     plt.clf()
     box_plot = sns.boxplot(data=good_fits, y="rx", x=COL_LENGTH, hue=COL_POL, orient="h", fliersize=0.5)
@@ -247,8 +250,8 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fi
         phase_fits_pivot: DataFrame with pivoted phase fit results.
         weights2: Squared weight values.
     """
-    rxs = np.sort(np.unique(phase_fits_pivot["rx"]))
-    slots = np.sort(np.unique(phase_fits_pivot["slot"]))
+    rxs = np.sort(np.unique(phase_fits_pivot[COL_RX]))
+    slots = np.sort(np.unique(phase_fits_pivot[COL_SLOT]))
     figsize = scale_plot_figsize(float(np.clip(len(slots) * 2.5, 5, 20)), float(np.clip(len(rxs) * 3, 5, 30)))
 
     for pol, soln in zip(["xx", "yy"], [soln_xx, soln_yy], strict=True):
@@ -266,14 +269,14 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fi
             ax.axis("off")
         for _, fit in phase_fits_pivot.iterrows():
             signal = soln[fit[COL_SOLN_IDX]]
-            if fit["flag"] or np.isnan(signal).all():
+            if fit[COL_FLAG] or np.isnan(signal).all():
                 continue
             mask = np.where(np.logical_and(np.isfinite(signal), weights2 > 0))[0]
             angle = np.angle(signal)
             mask_freq: np.ndarray = freqs[mask]
             model_freqs = np.linspace(mask_freq.min(), mask_freq.max(), len(freqs))
-            rx_idx = np.where(rxs == fit["rx"])[0][0]
-            slot_idx = np.where(slots == fit["slot"])[0][0]
+            rx_idx = np.where(rxs == fit[COL_RX])[0][0]
+            slot_idx = np.where(slots == fit[COL_SLOT])[0][0]
             ax = axs[rx_idx][slot_idx]
             ax.axis("on")
             gradient = (2 * np.pi * u.rad * (fit[f"length_{pol}"] * u.m) / c).to(u.rad / u.Hz).value

@@ -55,60 +55,6 @@ def get_filterbank_components(filename: str) -> tuple[bytearray, int]:
         return (header_bytes, header_end_index)
 
 
-def get_filterbank_key_value_int(header: bytearray, key: str) -> int:
-    """Retrieve an integer key-value pair from a filterbank file header.
-
-    Args:
-        header: The filterbank header as a bytearray.
-        key: The key name to look up.
-
-    Returns:
-        The integer value associated with the key.
-
-    Raises:
-        ValueError: If the key is not found in the header.
-    """
-    key_bytes = key.encode("utf-8")
-    cuml_bytes = bytearray()
-    for b in header:
-        cuml_bytes.append(b)
-
-        # The value we want will be the next 4 bytes
-        if key_bytes in cuml_bytes:
-            start_idx = len(cuml_bytes)
-            value_bytes = header[start_idx : start_idx + 4]
-            return int.from_bytes(value_bytes, "little", signed=False)
-    raise ValueError(f"Key {key} not found in filterbank file")
-
-
-def set_filterbank_key_value_int(header: bytearray, key: str, value: int) -> bytearray:
-    """Modify an integer key-value pair in a filterbank file header.
-
-    Args:
-        header: The filterbank header as a bytearray.
-        key: The key name to modify.
-        value: The new integer value to set.
-
-    Returns:
-        The modified header bytearray.
-
-    Raises:
-        ValueError: If the key is not found in the header.
-    """
-    key_bytes = key.encode("utf-8")
-    cuml_bytes = bytearray()
-    for b in header:
-        cuml_bytes.append(b)
-
-        # The value we want to replace will be the next 4 bytes
-        if key_bytes in cuml_bytes:
-            start_idx = len(cuml_bytes)
-            header[start_idx : start_idx + 4] = value.to_bytes(4, "little", signed=False)
-            return header
-
-    raise ValueError(f"Key {key} not found in filterbank file")
-
-
 def stitch_filterbank_files(files: list[str], output_dir: str) -> str:
     """Concatenate multiple filterbank files into a single observation output file.
 

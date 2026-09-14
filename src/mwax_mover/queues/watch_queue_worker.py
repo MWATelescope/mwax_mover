@@ -252,17 +252,6 @@ class MWAXWatchQueueWorker(ABC):
             status["watchers"].append(watcher.get_status())
         return status
 
-    def all_scans_completed(self) -> bool:
-        """Check if all watchers have completed their initial directory scan.
-
-        Returns:
-            True if all watchers have completed scanning, False otherwise.
-        """
-        for watcher in self.watchers:
-            if not watcher.scan_completed:
-                return False
-        return True
-
     @abstractmethod
     def handler(self, item: str) -> bool:
         """Handle a dequeued item.
@@ -445,17 +434,6 @@ class MWAXPriorityWatchQueueWorker(ABC):
         for watcher in self.watchers:
             status["watchers"].append(watcher.get_status())
         return status
-
-    def all_scans_completed(self) -> bool:
-        """Check if all priority watchers have completed their initial directory scan.
-
-        Returns:
-            True if all watchers have completed scanning, False otherwise.
-        """
-        for watcher in self.watchers:
-            if not watcher.scan_completed:
-                return False
-        return True
 
     def pause(self, pause: bool):
         """Pause or resume queue processing.

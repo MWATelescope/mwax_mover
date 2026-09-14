@@ -240,8 +240,6 @@ def fit_phase_line(
     solution /= np.abs(solution)
     solution *= weights
 
-    # print(f"{np.angle(solution)[:4]=}, ")
-
     # Now we want to "adjust" the solution data so that it
     # - is roughly centered on the DC bin
     # - has a large amount of zero padding on either side
@@ -279,12 +277,7 @@ def fit_phase_line(
     # Find max peak, and the equivalent slope
     imax = np.argmax(np.abs(isol0))
     dmax = d[imax]
-
-    # print(f"{dmax=:.02f}")
-
     slope = (2 * np.pi * u.rad * dmax / c).to(u.rad / u.Hz)
-
-    # print(f"{slope=:.10f}")
 
     # Now that we're near a local minimum, get a better one by doing a standard minimisation
     # To get the y-intercept, divide the original data by the constructed data
@@ -416,7 +409,6 @@ def fit_phase_line(
         chi2dof=chi2dof,
         quality=quality,
         stderr=stderr[0],
-        # median_thickness=median_thickness,
     )
 
 

@@ -3,8 +3,8 @@
 Covers: load / combined_tile_flags / apply_tile_flags / enforce_whole_jones_nan
 / weights / process_phase_fits / process_gain_fits_for_db. See
 tests/calvin/test_hyperfits_solution.py for HyperfitsSolution. Split out of
-this file's former single test_hyperdrive.py -- see
-docs/HYPERDRIVE_PARALLELISM.md Phase 1.
+this file's former single test_hyperdrive.py during the
+source_code_restructure.
 """
 
 import io

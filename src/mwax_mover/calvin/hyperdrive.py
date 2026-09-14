@@ -6,11 +6,10 @@ outcome, mirroring calvin.birli.run_birli(). write_hyperdrive_stats() writes
 get_convergence_summary()'s convergence summary for a just-produced solution
 file. estimate_di_calibrate_peak_ram_bytes(), _uvfits_num_coarse_chans(),
 and _max_hyperdrive_workers() support parallelising run_hyperdrive() across
-picket-fence bands -- see docs/HYPERDRIVE_PARALLELISM.md Phases 2-4. See
-calvin.hyperfits_solution/calvin.hyperfits_solution_group for
-reading/flagging solutions (this module used to hold those two classes too
--- see docs/HYPERDRIVE_PARALLELISM.md Phase 1 for the split) and calvin.plots
-for plotting.
+picket-fence bands. See calvin.hyperfits_solution/
+calvin.hyperfits_solution_group for reading/flagging solutions (split out
+of this module during the source_code_restructure) and calvin.plots for
+plotting.
 """
 
 import logging
@@ -317,7 +316,7 @@ def run_hyperdrive(
     previous serial implementation, which stopped at the first failure and
     left later pickets un-run. Only the aggregate result (did every picket
     succeed) determines the return value and the error-dir/readme_error.txt
-    path, same as before. See docs/HYPERDRIVE_PARALLELISM.md 4.2 for why.
+    path, same as before.
 
     Concurrency is memory-bounded (see _max_hyperdrive_workers): each
     picket's peak RAM is estimated from its own uvfits file

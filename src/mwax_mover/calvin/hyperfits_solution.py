@@ -6,8 +6,7 @@ for HyperfitsSolutionGroup (a set of these, one per contiguous coarse-channel
 band, combined with the observation's metafits) and calvin.hyperdrive for
 running hyperdrive itself. See calibration/ for the shared data structures
 and pure numeric fitting/outlier functions these use, and calvin.plots for
-plotting. Split out of calvin.hyperdrive -- see docs/HYPERDRIVE_PARALLELISM.md
-Phase 1.
+plotting. Split out of calvin.hyperdrive during the source_code_restructure.
 """
 
 import os
@@ -73,16 +72,6 @@ class HyperfitsSolution:
             _antennas, _tile_names, flags = read_tiles_hdu(hdus["TILES"].data)
             return flags
 
-    def get_average_times(self) -> list[float]:
-        """Get the average time for each timeblock.
-
-        Raises:
-            KeyError: If TIMEBLOCKS HDU is not present.
-        """
-        with fits.open(self.filename) as hdus:
-            time_data = hdus["TIMEBLOCKS"].data
-            return [time["Average"] for time in time_data]
-
     def get_solutions(self) -> list[NDArray[np.complex128]]:
         """Get solutions as complex arrays.
 
@@ -92,37 +81,6 @@ class HyperfitsSolution:
         with fits.open(self.filename) as hdus:
             complex_solutions = read_solutions_hdu_complex(hdus["SOLUTIONS"].data)
             return [complex_solutions[..., i] for i in range(4)]
-
-    def get_ref_solutions(self, ref_tile_idx=None) -> list[NDArray[np.complex128]]:
-        """Get solutions divided by reference tile.
-
-        Args:
-            ref_tile_idx: Index of the reference tile. If None, returns raw solutions.
-
-        Returns:
-            A list of four complex arrays (XX, XY, YX, YY) each with shape [time, tile, chan],
-            or raw solutions if ref_tile_idx is None.
-        """
-        solutions = self.get_solutions()
-
-        if ref_tile_idx is None:
-            return solutions
-
-        # divide solutions by reference
-        ref_solutions = [solution[:, ref_tile_idx, :] for solution in solutions]
-
-        # divide solutions jones matrix by reference jones matrix, via inverse determinant
-        ref_inv_det = np.divide(
-            1 + 0j,
-            ref_solutions[0] * ref_solutions[3] - ref_solutions[1] * ref_solutions[2],
-        )
-
-        return [
-            (solutions[0] * ref_solutions[3] - solutions[1] * ref_solutions[2]) * ref_inv_det,
-            (solutions[1] * ref_solutions[0] - solutions[0] * ref_solutions[1]) * ref_inv_det,
-            (solutions[2] * ref_solutions[3] - solutions[3] * ref_solutions[2]) * ref_inv_det,
-            (solutions[3] * ref_solutions[0] - solutions[2] * ref_solutions[1]) * ref_inv_det,
-        ]
 
     @property
     def results(self) -> NDArray[np.float64]:

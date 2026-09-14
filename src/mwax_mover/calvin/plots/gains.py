@@ -28,7 +28,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from numpy.typing import NDArray
 
-from mwax_mover.calibration.df_columns import COL_GX, COL_GY
+from mwax_mover.calibration.df_columns import COL_GX, COL_GY, COL_NAME
 from mwax_mover.calvin.hyperfits_solution_group import ChannelFlagReason, HyperfitsSolutionGroup, TileFlagReason
 from mwax_mover.calvin.plots.layout import resolve_plot_dpi, scale_plot_figsize
 from mwax_mover.core.env import available_memory_bytes
@@ -425,7 +425,7 @@ def _extract_combined_gains_bundle(
         "gx_amp_real": _stitch_files([np.abs(j[:, :, 0, 0]) for j in gains_for_plot], False, chanblocks_per_file),
         "gy_amp_real": _stitch_files([np.abs(j[:, :, 1, 1]) for j in gains_for_plot], False, chanblocks_per_file),
         "chan_reasons": _stitch_reasons(group.channel_flag_reasons),
-        "tile_names": group.metafits_tiles_df["name"].to_numpy(),
+        "tile_names": group.metafits_tiles_df[COL_NAME].to_numpy(),
         "tile_reasons": group.tile_flag_reasons,
         "obsid": group.metafits.obsid,
         "mad_residual_threshold": group.mad_residual_threshold,

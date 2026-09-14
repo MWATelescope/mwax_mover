@@ -1,13 +1,15 @@
-# mwax_mover reference-tile selection & --reftile plan
+# mwax_mover reference-tile selection & --ref-tile plan
 
-Status: **plan only — no code written yet.** All design questions from
-discussion are resolved below; ready to implement as written, pending your
-final look.
+Status: **implemented.** Phases 1-2 (quality-aware `select_refant`) and
+Phase 3 (`--ref-tile` on hyperdrive plots) are merged. Phase 3 was
+implemented with `ref_tile: int` (antenna index) rather than the
+`reftile: str` (tile name) originally planned below — hyperdrive's
+`--ref-tile` flag takes an antenna index, not a name.
 
 This does two related things: replaces `HyperfitsSolutionGroup.refant`'s
 "lowest unflagged ID" rule with a quality-aware selection (Phases 1-2), and
 threads the chosen tile through to hyperdrive's own `solutions-plot`
-`--reftile` argument so its plots match calvin's internal ones (Phase 3).
+`--ref-tile` argument so its plots match calvin's internal ones (Phase 3).
 Phase 3 depends on Phase 1/2 being in place first (it needs the final
 reference tile known before the "before" plots run).
 
@@ -194,71 +196,30 @@ on the reordering, not mixed with the selection-logic change.
 
 ---
 
-## Phase 3 — `--reftile` on hyperdrive's own plots
+## Phase 3 — `--ref-tile` on hyperdrive's own plots
+
+**Implemented.** The actual implementation differs from the plan below:
+`ref_tile: int` (antenna index via `Tile.ant` / `mwalib.Antenna.ant`)
+rather than `reftile: str` (tile name), since hyperdrive's `--ref-tile`
+flag takes an antenna index. See CHANGELOG.md and the code for the
+final implementation; the plan below is preserved for historical context.
 
 ### 3.1 `calvin/plots/hyperdrive.py`
 
-`generate_plots`/`generate_plots_for_files` gain a new parameter:
+`generate_plots`/`generate_plots_for_files` gained a `ref_tile: int | None
+= None` parameter, passed through as `--ref-tile {ref_tile}` on the
+command line when given. `None` (the default) omits the flag entirely,
+so any caller that doesn't pass it keeps the prior behaviour exactly
+(hyperdrive picks its own default).
 
-```python
-def generate_plots(
-    obs_id: int,
-    hyperdrive_solution_filename: str,
-    hyperdrive_binary_path: str,
-    metafits_filename: str,
-    output_dir: str,
-    before: bool,
-    max_amp: int | None = None,
-    reftile: str | None = None,
-) -> tuple[bool, str]:
-    ...
-    if reftile is not None:
-        hyp_soln_plot_args += f" --reftile {reftile}"
-```
+### 3.2 `calvin/pipeline.py` / `cli/cal_utils.py`
 
-`generate_plots_for_files` just forwards a `reftile: str | None = None`
-parameter through to each `generate_plots` call. `None` (the default)
-omits the flag entirely, so any caller that doesn't pass it keeps today's
-behaviour exactly (hyperdrive picks its own default).
-
-### 3.2 Reorder `calvin/pipeline.py` / `cli/cal_utils.py`
-
-Both currently do, in order: load → `refant` → "before" plots (no
-`--reftile`) → `run_flagging_pipeline` → ... → `commit()` → "after" plots
-(no `--reftile`).
-
-New order: load → `select_refant` (Phase 1) → "before" plots **with**
-`reftile=refant["name"]` → `run_flagging_pipeline` → ... → `commit()` →
-"after" plots **with** `reftile=refant["name"]`.
-
-This is a pure reordering plus threading one extra string through two
-existing calls — the on-disk files are still pristine when "before" plots
-run either way (nothing writes to disk before `commit()`), so moving
-`select_refant` earlier doesn't change what the "before" plots show, only
-what reference tile hyperdrive uses to show it.
+Both now pass `ref_tile=refant["ant"]` to both the "before" and "after"
+plot calls, so hyperdrive uses the same reference tile as calvin's own
+phase-fit plots.
 
 ### 3.3 Tests
 
-`calvin/plots/hyperdrive.py`'s `generate_plots`/`generate_plots_for_files`
-already have no test coverage (confirmed earlier in this engagement) —
-same situation `run_hyperdrive` was in before `HYPERDRIVE_PARALLELISM.md`.
-New tests here:
-
-- `reftile=None` produces the same command line as today (no `--reftile`
-  substring) — a regression guard for existing callers.
-- `reftile="Tile104"` appends `--reftile Tile104` to the command line
-  (mock `run_command`, assert on the constructed `cmd` string).
-- `generate_plots_for_files` forwards `reftile` to every file's call.
-
-No new test needed for the `pipeline.py`/`cal_utils.py` reordering itself
-beyond what already exists — those are integration-level flows without
-dedicated unit tests today (same situation noted for `run_hyperdrive`
-previously); the reordering's correctness rests on the "nothing writes to
-disk before `commit()`" invariant, which is already documented in the
-existing code comments at both call sites.
-
----
-
-## Open items
-
-None — every design question from discussion is resolved above.
+`tests/calvin/plots/test_hyperdrive.py` covers: `ref_tile=None` omits the
+flag, `ref_tile=42` appends `--ref-tile 42`, and `generate_plots_for_files`
+forwards `ref_tile` to every file's call.

@@ -2,8 +2,8 @@
 
 Covers: get_jones / chanblock_converged / baseline_tile_flags / write_jones.
 See tests/calvin/test_hyperfits_solution_group.py for HyperfitsSolutionGroup.
-Split out of this file's former single test_hyperdrive.py -- see
-docs/HYPERDRIVE_PARALLELISM.md Phase 1.
+Split out of this file's former single test_hyperdrive.py during the
+source_code_restructure.
 """
 
 import os

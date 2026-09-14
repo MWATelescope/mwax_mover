@@ -3,8 +3,7 @@
 Covers estimate_di_calibrate_peak_ram_bytes, _uvfits_num_coarse_chans, and
 _max_hyperdrive_workers -- the memory-estimation and concurrency-sizing
 support for parallelising run_hyperdrive across picket-fence bands -- plus
-run_hyperdrive itself now that it's wired up (see
-docs/HYPERDRIVE_PARALLELISM.md Phases 2-4). write_hyperdrive_stats/
+run_hyperdrive itself now that it's wired up. write_hyperdrive_stats/
 get_convergence_summary still have no test coverage.
 """
 

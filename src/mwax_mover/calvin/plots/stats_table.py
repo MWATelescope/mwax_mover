@@ -19,6 +19,8 @@ from numpy.typing import NDArray
 from mwax_mover.calibration.df_columns import (
     COL_CHI2DOF,
     COL_FLAVOR,
+    COL_ID,
+    COL_NAME,
     COL_OUTLIER,
     COL_POL,
     COL_SIGMA_RESID,
@@ -97,8 +99,8 @@ def build_tile_stats_rows(
         Matches the columns write_tile_stats_table expects.
     """
     n_tiles = len(group.metafits_tiles_df)
-    tile_names = group.metafits_tiles_df["name"].to_numpy()
-    tile_ids = group.metafits_tiles_df["id"].to_numpy()
+    tile_names = group.metafits_tiles_df[COL_NAME].to_numpy()
+    tile_ids = group.metafits_tiles_df[COL_ID].to_numpy()
     tile_flavors = group.metafits_tiles_df[COL_FLAVOR].to_numpy()
 
     total_channels = np.zeros(n_tiles, dtype=int)
@@ -128,7 +130,7 @@ def build_tile_stats_rows(
 
         row = {
             "tile": int(tile_ids[tile]),
-            "name": tile_names[tile],
+            COL_NAME: tile_names[tile],
             COL_FLAVOR: _format_flavor(tile_flavors[tile]),
             "fully_flagged": fully_flagged,
             "flagged_pct": flagged_pct,
@@ -214,7 +216,7 @@ def write_tile_stats_table(title: str, rows: list[dict], stats_fd) -> None:
         return "--" if value is None or (isinstance(value, float) and np.isnan(value)) else f"{value:{spec}}"
 
     id_w = 6
-    name_w = max(10, max((len(r["name"]) for r in rows), default=10) + 2)
+    name_w = max(10, max((len(r[COL_NAME]) for r in rows), default=10) + 2)
     flavor_w = max(8, max((len(r[COL_FLAVOR]) for r in rows), default=8) + 2)
     num_w = 8
     phout_w = 9

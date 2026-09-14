@@ -39,7 +39,7 @@ def read_results_hdu(results_data: NDArray[np.float64], timeblock: int = 0) -> N
     (n_timeblocks, n_chanblocks). This selects a single timeblock's row.
     Solution files with more than one timeblock are not currently supported
     by this pipeline (see the single-timeblock assumption enforced
-    elsewhere, e.g. HyperfitsSolutionGroup.get_solns); this helper always
+    elsewhere, e.g. HyperfitsSolutionGroup.get_solns_both); this helper always
     returns exactly one timeblock's row rather than merging several.
 
     Args:
