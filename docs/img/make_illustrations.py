@@ -2,14 +2,13 @@
 
 Uses synthetic, clearly-not-real data, but runs it through the actual
 pipeline functions (fit_phase_line, iterative_poly_clip_batch, reject_outliers)
-from mwax_calvin_utils so the plots reflect real algorithm behaviour, not
-just a hand-drawn approximation of it.
+from calibration.fitting/calibration.outliers so the plots reflect real
+algorithm behaviour, not just a hand-drawn approximation of it.
 
-NOTE: uses iterative_poly_clip_batch, not the per-tile iterative_poly_clip,
-because the batch version is the one the production pipeline actually calls
-(see HyperfitsSolutionGroup.flag_amplitude_outliers). The two differ slightly
-in their zero-MAD handling, so illustrating with the per-tile version could
-show behaviour the pipeline does not have.
+NOTE: uses iterative_poly_clip_batch because that is the version the
+production pipeline actually calls (see
+HyperfitsSolutionGroup.flag_amplitude_outliers) -- there is no separate
+per-tile equivalent to illustrate instead.
 
 Run from the repo root: python3 docs/img/make_illustrations.py
 """
@@ -25,11 +24,8 @@ import pandas as pd
 
 sys.path.insert(0, "src")
 
-from mwax_mover.mwax_calvin_utils import (
-    fit_phase_line,
-    iterative_poly_clip_batch,
-    reject_outliers,
-)
+from mwax_mover.calibration.fitting import fit_phase_line
+from mwax_mover.calibration.outliers import iterative_poly_clip_batch, reject_outliers
 
 rng = np.random.default_rng(42)
 

@@ -15,6 +15,8 @@ import numpy as np
 from astropy.io import fits
 from astropy.table import Table
 
+from mwax_mover.constants import EXIT_FAILURE
+
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments.
@@ -116,7 +118,7 @@ def main() -> None:
                 hdu = hdul[hdu_key]
             except (KeyError, IndexError) as exc:
                 print(f"Error: could not find HDU '{args.hdu}': {exc}", file=sys.stderr)
-                sys.exit(1)
+                sys.exit(EXIT_FAILURE)
 
             print(f"File: {args.filename}")
             print(f"HDU: {hdu.name!r} (index {hdul.index_of(hdu.name) if hdu.name else '?'})")
@@ -133,7 +135,7 @@ def main() -> None:
 
     except FileNotFoundError:
         print(f"Error: file not found: {args.filename}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EXIT_FAILURE)
 
 
 if __name__ == "__main__":

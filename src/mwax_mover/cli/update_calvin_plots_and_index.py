@@ -11,10 +11,17 @@ from pathlib import Path
 
 import requests
 
-from mwax_mover.mwax_calvin_plots import generate_hyperdrive_plots
-from mwax_mover.mwax_calvin_utils import populate_index_json_entry
-from mwax_mover.mwax_db import MWAXDBHandler, get_fit_info_from_slurm_job_and_obsid
-from mwax_mover.utils import download_metafits_file, read_config
+from mwax_mover.calvin.plots import hyperdrive
+from mwax_mover.calvin.plots.index import populate_index_json_entry
+from mwax_mover.constants import (
+    EXIT_FAILURE,
+    INDEX_JSON_FILENAME,
+    SOLUTIONS_FITS_GLOB,
+    SOLUTIONS_ORIGINAL_FITS_GLOB,
+)
+from mwax_mover.db.calibration import get_fit_info_from_slurm_job_and_obsid
+from mwax_mover.db.handler import MWAXDBHandler
+from mwax_mover.fits.metafits import download_metafits_file
 
 
 class SolutionDir:
@@ -55,8 +62,8 @@ def download_plot_index_file(fit_id: int, solution_directory: str) -> Path:
         OSError: If the output file cannot be written (e.g. directory does not
             exist, or insufficient permissions).
     """
-    url = f"https://cal.mwatelescope.org/{fit_id}/index.json"
-    output_path = Path(solution_directory) / "index.json"
+    url = f"https://cal.mwatelescope.org/{fit_id}/{INDEX_JSON_FILENAME}"
+    output_path = Path(solution_directory) / INDEX_JSON_FILENAME
 
     response = requests.get(url, timeout=30)
     response.raise_for_status()
@@ -75,7 +82,7 @@ def update_plot_index_file_entry(
     matching the given filename, then derives updated values for ``size_bytes`` and
     ``last_modified`` from the file on disk. For PNG files, ``image_width`` and
     ``image_height`` are also updated using
-    :func:`mwax_mover.utils.get_png_dimensions`. The modified index is written
+    :func:`mwax_mover.filesystem.files.get_png_dimensions`. The modified index is written
     back to index.json in place.
 
     Args:
@@ -147,7 +154,7 @@ def parse_job_dir(directory: str) -> tuple[int, int]:
 def main() -> None:
     """Entry point for the update_hyperdrive_plots_and_index command line tool.
 
-    Parses arguments and calls generate_hyperdrive_plots(), downloads the old index.json,
+    Parses arguments and calls hyperdrive.generate_plots(), downloads the old index.json,
     updates index.json then copies the files to the local upload directory for
     calvin controller to upload, printing a summary on success or an error
     message on failure.
@@ -155,7 +162,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Scans recursively for solution directories. For each solution directory,"
-            " calls generate_hyperdrive_plots(), downloads the old index.json, updates"
+            " calls hyperdrive.generate_plots(), downloads the old index.json, updates"
             " index.json then re-uploads it"
         ),
     )
@@ -219,46 +226,32 @@ def main() -> None:
 
     if not os.path.exists(solution_root):
         print(f"Solution_directory: {solution_root} does not exist. Exiting")
-        sys.exit(1)
+        sys.exit(EXIT_FAILURE)
 
     # Read database info from config file
     if not os.path.exists(args.cfg):
         print(f"Configuration file location {args.cfg} does not exist. Quitting.")
-        sys.exit(1)
+        sys.exit(EXIT_FAILURE)
 
     # Parse config file
     config = ConfigParser()
     config.read_file(open(args.cfg, "r", encoding="utf-8"))
-    mro_metadatadb_host = read_config(config, "mro metadata database", "host")
-    mro_metadatadb_db = read_config(config, "mro metadata database", "db")
-    mro_metadatadb_user = read_config(config, "mro metadata database", "user")
-    # Don't require base64 encoded password if running a pytest
-    mro_metadatadb_pass = read_config(config, "mro metadata database", "pass", True)
-    mro_metadatadb_port = int(read_config(config, "mro metadata database", "port"))
-
-    # Initiate database connection for mro metadata db
-    db_handler = MWAXDBHandler(
-        host=mro_metadatadb_host,
-        port=mro_metadatadb_port,
-        db_name=mro_metadatadb_db,
-        user=mro_metadatadb_user,
-        password=mro_metadatadb_pass,
-        ssl_mode="?sslmode=require",
-    )
+    # Initiate database connection
+    db_handler = MWAXDBHandler.from_config(config, ssl_mode="?sslmode=require")
 
     if dry_run:
         base_upload_dir = ""
     else:
         if args.base_upload_dir is not None:
-            base_upload_dir: str = args.base_upload_dir
+            base_upload_dir = args.base_upload_dir
         else:
             print("When --dry-run is not passed, you must provide a --base-upload-dir value.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
     hyperdrive_binary_path: str = args.hyperdrive_binary_path
     if not os.path.exists(hyperdrive_binary_path):
         print(f"hyperdrive binary path: {hyperdrive_binary_path} does not exist. Exiting")
-        sys.exit(1)
+        sys.exit(EXIT_FAILURE)
 
     # Start db pool
     db_handler.start_database_pool()
@@ -339,20 +332,20 @@ def main() -> None:
             if resp is not None:
                 if resp.status_code == 404:
                     print(f"Fit id {sol.fit_id} not found in S3")
-                    sys.exit(1)
+                    sys.exit(EXIT_FAILURE)
                 else:
                     print(f"HTTP error when downloading the index.json file: {resp.status_code}")
-                    sys.exit(1)
+                    sys.exit(EXIT_FAILURE)
             else:
                 print(f"HTTP error when downloading the index.json file: no response received {httpe!s}")
-                sys.exit(1)
+                sys.exit(EXIT_FAILURE)
 
         except Exception as e:
             print(f"Error downloading plot file: {e}")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         # Get all the solution files
-        solution_files = glob.glob(os.path.join(sol.dir_path, "*_solutions.fits"))
+        solution_files = glob.glob(os.path.join(sol.dir_path, SOLUTIONS_FITS_GLOB))
         sol.log(f"{len(solution_files)} solution files found.")
 
         files_to_upload = []
@@ -360,7 +353,7 @@ def main() -> None:
         # Regenerate the plots for each solutions file
         for file in solution_files:
             sol.log(f"Generating new plots for {file} in index.json...")
-            success, error_message = generate_hyperdrive_plots(
+            success, error_message = hyperdrive.generate_plots(
                 sol.obs_id,
                 file,
                 hyperdrive_binary_path,
@@ -373,7 +366,7 @@ def main() -> None:
             # Exit early on failure
             if not success:
                 sol.log(f"Error generating plots for {file}: {error_message}")
-                sys.exit(1)
+                sys.exit(EXIT_FAILURE)
 
         # Open and read the JSON
         with open(index_filename, "r") as f:
@@ -406,7 +399,7 @@ def main() -> None:
             )
             files_to_upload.append(sol_fits)
 
-        orig_solution_files = glob.glob(os.path.join(sol.dir_path, "*_solutions.original.fits"))
+        orig_solution_files = glob.glob(os.path.join(sol.dir_path, SOLUTIONS_ORIGINAL_FITS_GLOB))
         for orig_sol_fits in orig_solution_files:
             sol.log(f"Adding {orig_sol_fits} in index.json")
             update_plot_index_file_entry(
@@ -419,7 +412,7 @@ def main() -> None:
             json.dump(index_json, f, indent=2)
 
         # upload the index
-        files_to_upload.append(os.path.join(sol.dir_path, "index.json"))
+        files_to_upload.append(os.path.join(sol.dir_path, INDEX_JSON_FILENAME))
 
         if not args.dry_run:
             upload_dir = os.path.join(base_upload_dir, str(sol.fit_id))
@@ -432,20 +425,20 @@ def main() -> None:
                 pass
 
             try:
-                for f in files_to_upload:
-                    dest_filename = os.path.join(upload_dir, os.path.basename(f))
+                for upload_path in files_to_upload:
+                    dest_filename = os.path.join(upload_dir, os.path.basename(upload_path))
 
                     # copy the solutions files, move the rest
                     if "_solutions.fits" in dest_filename or "_solutions.original.fits" in dest_filename:
-                        shutil.copy(f, dest_filename)
-                        sol.log(f"Copied {f} to {dest_filename}")
+                        shutil.copy(upload_path, dest_filename)
+                        sol.log(f"Copied {upload_path} to {dest_filename}")
                     else:
-                        shutil.move(f, dest_filename)
-                        sol.log(f"Moved {f} to {dest_filename}")
+                        shutil.move(upload_path, dest_filename)
+                        sol.log(f"Moved {upload_path} to {dest_filename}")
 
             except Exception as e:
                 print(f"Error moving files to upload dir {upload_dir}: {e!s}")
-                sys.exit(1)
+                sys.exit(EXIT_FAILURE)
         else:
             print(f"Not uploading files: {files_to_upload} to S3 (bucket={sol.fit_id}) as dry-run = true.")
 

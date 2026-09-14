@@ -9,8 +9,8 @@ also exposes a Flask web service for health reporting, archiving pause/resume, a
 calibration observation release.
 """
 
-import argparse
 import glob
+import http
 import json
 import logging
 import os
@@ -28,33 +28,67 @@ from flask import Flask, request
 from werkzeug.serving import make_server
 
 from mwax_mover import (
-    mwax_db,
-    utils,
     version,
 )
-from mwax_mover.mwax_db import MWAXDBHandler
-from mwax_mover.mwax_watch_queue_worker import (
+from mwax_mover.constants import (
+    CONFIG_KEY_ARCHIVE_COMMAND_TIMEOUT_SEC,
+    CONFIG_KEY_HIGH_PRIORITY_CORRELATOR_PROJECTIDS,
+    CONFIG_KEY_HIGH_PRIORITY_VCS_PROJECTIDS,
+    CONFIG_KEY_LOG_LEVEL,
+    DEFAULT_POSTGRES_PORT,
+    DUMMY_CONFIG_VALUE,
+    EXIT_FAILURE,
+    EXT_SUB,
+    HEALTH_THREAD_NAME,
+    LOG_FORMAT,
+    SECTION_BEAMFORMER,
+    SECTION_CORRELATOR,
+    SECTION_MWAX_MOVER,
+)
+from mwax_mover.core.config import read_config, read_config_bool, read_config_list, read_optional_config
+from mwax_mover.core.env import get_hostname, running_under_pytest
+from mwax_mover.core.units import is_int
+from mwax_mover.db.handler import MWAXDBHandler
+from mwax_mover.filesystem.naming import ValidationData, should_project_be_archived, validate_filename
+from mwax_mover.fits.subfile import (
+    PSRDADA_MODE,
+    PSRDADA_TRIGGER_ID,
+    CorrelatorMode,
+    inject_subfile_header,
+    read_subfile_trigger_value,
+    read_subfile_value,
+)
+from mwax_mover.processors.bf_stitching import BfStitchingProcessor
+from mwax_mover.processors.checksum_and_db import ChecksumAndDBProcessor
+from mwax_mover.processors.daemon import MWAXDaemon
+from mwax_mover.processors.outgoing import OutgoingProcessor
+from mwax_mover.processors.packet_stats import PacketStatsProcessor
+from mwax_mover.processors.subfile_incoming import SubfileIncomingProcessor
+from mwax_mover.processors.vis_cal_outgoing import VisCalOutgoingProcessor
+from mwax_mover.processors.vis_stats import VisStatsProcessor
+from mwax_mover.queues.watch_queue_worker import (
     MWAXPriorityWatchQueueWorker,
     MWAXWatchQueueWorker,
 )
-from mwax_mover.mwax_wqw_bf_stitching_processor import BfStitchingProcessor
-from mwax_mover.mwax_wqw_checksum_and_db import ChecksumAndDBProcessor
-from mwax_mover.mwax_wqw_outgoing import OutgoingProcessor
-from mwax_mover.mwax_wqw_packet_stats_processor import PacketStatsProcessor
-from mwax_mover.mwax_wqw_subfile_incoming_processor import SubfileIncomingProcessor
-from mwax_mover.mwax_wqw_vis_cal_outgoing import VisCalOutgoingProcessor
-from mwax_mover.mwax_wqw_vis_stats import VisStatsProcessor
 
 # Setup root logger
 handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(message)s"))
+handler.setFormatter(logging.Formatter(LOG_FORMAT))
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
 
 
-class MWAXSubfileDistributor:
+class MWAXSubfileDistributor(MWAXDaemon):
     """Class for MWAXSubfileDistributor- the main engine of MWAX"""
+
+    DESCRIPTION = (
+        "mwax_subfile_distributor: a command line tool which is part of"
+        " the mwax suite for the MWA. It will perform different tasks"
+        " based on the configuration file. In addition, it will"
+        " automatically archive files in /voltdata and /visdata to the"
+        " mwacache servers at the Curtin Data Centre."
+    )
 
     def __init__(self):
         """Initialize MWAXSubfileDistributor with default values.
@@ -62,27 +96,17 @@ class MWAXSubfileDistributor:
         Sets up instance variables for configuration, workers, Flask web server,
         archiving, and database connections.
         """
+        super().__init__()
 
         # Config parser
         self.config: ConfigParser
 
         # init vars
-        if utils.running_under_pytest():
+        if running_under_pytest():
             # pretend I am mwax99
             self.hostname = "mwax99"
         else:
-            self.hostname: str = utils.get_hostname()
-        self.running: bool = False
-
-        # Set by request_fatal_shutdown() when a worker thread hits an
-        # unrecoverable error. Worker threads cannot terminate the process
-        # themselves (sys.exit() on a non-main thread only ends that thread and
-        # its exit code is discarded), so they record the intended exit code
-        # here and the main thread acts on it. Non-zero means "we did NOT
-        # complete successfully" and is what main() exits with, so that systemd
-        # / the alerting on top of it sees a failure rather than a clean stop.
-        self.fatal_exit_code: int = 0
-        self.fatal_reason: str = ""
+            self.hostname = get_hostname()
 
         # Web server
         self.flask_app = Flask(__name__)
@@ -107,10 +131,6 @@ class MWAXSubfileDistributor:
         self.cfg_psrdada_timeout_sec: int = 0
         self.cfg_copy_subfile_to_disk_timeout_sec: int = 0
         self.cfg_master_archiving_enabled: bool = False
-        self.cfg_health_multicast_interface_ip: str = ""
-        self.cfg_health_multicast_interface_name: str = ""
-        self.cfg_health_multicast_ip: str = ""
-        self.cfg_health_multicast_port: int = 0
         self.cfg_health_multicast_hops: int = 1
         self.cfg_packet_stats_dump_dir: str = ""
         self.cfg_packet_stats_destination_dir: str = ""
@@ -119,7 +139,7 @@ class MWAXSubfileDistributor:
         self.dump_start_gps = None
         self.dump_end_gps = None
         self.dump_trigger_id = None
-        self.dump_keep_file_queue = queue.Queue()
+        self.dump_keep_file_queue: queue.Queue[str] = queue.Queue()
 
         # Correlator
         self.cfg_corr_input_ringbuffer_key: str = ""
@@ -144,11 +164,11 @@ class MWAXSubfileDistributor:
         self.cfg_corr_metafits_path: str = ""
 
         # Connection info for metadata db
-        self.cfg_metadatadb_host: str = ""
-        self.cfg_metadatadb_db: str = ""
-        self.cfg_metadatadb_user: str = ""
-        self.cfg_metadatadb_pass: str = ""
-        self.cfg_metadatadb_port: int = 5432
+        self.cfg_db_host: str = ""
+        self.cfg_db_name: str = ""
+        self.cfg_db_user: str = ""
+        self.cfg_db_pass: str = ""
+        self.cfg_db_port: int = DEFAULT_POSTGRES_PORT
 
         # Archiving stuff
         self.archiving_paused: bool = False
@@ -160,33 +180,7 @@ class MWAXSubfileDistributor:
         self.outgoing_cal_list_lock: threading.Lock = threading.Lock()
 
         # Database handler for metadata db
-        self.db_handler: mwax_db.MWAXDBHandler
-
-    def initialise_from_command_line(self):
-        """Initialize the distributor from command-line arguments.
-
-        Parses command-line arguments (config file and mode) and calls initialise()
-        with the extracted parameters.
-        """
-
-        # Get command line args
-        parser = argparse.ArgumentParser()
-        parser.description = (
-            "mwax_subfile_distributor: a command line tool which is part of"
-            " the mwax suite for the MWA. It will perform different tasks"
-            " based on the configuration file. In addition, it will"
-            " automatically archive files in /voltdata and /visdata to the"
-            " mwacache servers at the Curtin Data Centre."
-        )
-
-        parser.add_argument("-c", "--cfg", required=True, help="Configuration file location.\n")
-
-        args = vars(parser.parse_args())
-
-        # Check that config file exists
-        config_filename = args["cfg"]
-
-        self.initialise(config_filename)
+        self.db_handler: MWAXDBHandler
 
     def initialise(
         self,
@@ -203,14 +197,14 @@ class MWAXSubfileDistributor:
         """
         if not os.path.exists(config_filename):
             logger.error(f"Configuration file location {config_filename} does not exist. Quitting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         # Parse config file
         self.config = ConfigParser()
         self.config.read_file(open(config_filename, "r", encoding="utf-8"))
 
         # Read log level
-        config_file_log_level: str | None = utils.read_optional_config(self.config, "mwax mover", "log_level")
+        config_file_log_level: str | None = read_optional_config(self.config, SECTION_MWAX_MOVER, CONFIG_KEY_LOG_LEVEL)
 
         if config_file_log_level:
             logger.setLevel(config_file_log_level)
@@ -221,66 +215,55 @@ class MWAXSubfileDistributor:
 
         logger.info(f"Reading config file: {config_filename}")
 
-        self.cfg_webserver_port = int(utils.read_config(self.config, "mwax mover", "webserver_port"))
-        self.cfg_voltdata_dont_archive_path = utils.read_config(
+        self.cfg_webserver_port = int(read_config(self.config, SECTION_MWAX_MOVER, "webserver_port"))
+        self.cfg_voltdata_dont_archive_path = read_config(
             self.config,
-            "mwax mover",
+            SECTION_MWAX_MOVER,
             "voltdata_dont_archive_path",
         )
-        self.cfg_subfile_incoming_path = utils.read_config(self.config, "mwax mover", "subfile_incoming_path")
-        self.cfg_voltdata_incoming_path = utils.read_config(self.config, "mwax mover", "voltdata_incoming_path")
-        self.cfg_voltdata_outgoing_path = utils.read_config(self.config, "mwax mover", "voltdata_outgoing_path")
-        self.cfg_health_multicast_interface_name = utils.read_config(
-            self.config,
-            "mwax mover",
-            "health_multicast_interface_name",
-        )
-        self.cfg_health_multicast_ip = utils.read_config(self.config, "mwax mover", "health_multicast_ip")
-        self.cfg_health_multicast_port = int(utils.read_config(self.config, "mwax mover", "health_multicast_port"))
-        self.cfg_health_multicast_hops = int(utils.read_config(self.config, "mwax mover", "health_multicast_hops"))
+        self.cfg_subfile_incoming_path = read_config(self.config, SECTION_MWAX_MOVER, "subfile_incoming_path")
+        self.cfg_voltdata_incoming_path = read_config(self.config, SECTION_MWAX_MOVER, "voltdata_incoming_path")
+        self.cfg_voltdata_outgoing_path = read_config(self.config, SECTION_MWAX_MOVER, "voltdata_outgoing_path")
+        self._read_health_config(self.config)
 
-        self.cfg_psrdada_timeout_sec = int(utils.read_config(self.config, "mwax mover", "psrdada_timeout_sec"))
+        self.cfg_psrdada_timeout_sec = int(read_config(self.config, SECTION_MWAX_MOVER, "psrdada_timeout_sec"))
         self.cfg_copy_subfile_to_disk_timeout_sec = int(
-            utils.read_config(
+            read_config(
                 self.config,
-                "mwax mover",
+                SECTION_MWAX_MOVER,
                 "copy_subfile_to_disk_timeout_sec",
             )
         )
 
         self.cfg_archive_command_timeout_sec = int(
-            utils.read_config(
+            read_config(
                 self.config,
-                "mwax mover",
-                "archive_command_timeout_sec",
+                SECTION_MWAX_MOVER,
+                CONFIG_KEY_ARCHIVE_COMMAND_TIMEOUT_SEC,
             )
         )
-
-        # get this hosts primary network interface ip
-        self.cfg_health_multicast_interface_ip = utils.get_ip_address(self.cfg_health_multicast_interface_name)
-        logger.info(f"IP for sending multicast: {self.cfg_health_multicast_interface_ip}")
 
         if not os.path.exists(self.cfg_voltdata_dont_archive_path):
             logger.error(
                 f"'Voltdata Dont Archive' location {self.cfg_voltdata_dont_archive_path} does not exist. Quitting."
             )
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         if not os.path.exists(self.cfg_subfile_incoming_path):
             logger.error(f"Subfile file location {self.cfg_subfile_incoming_path} does not exist. Quitting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         if not os.path.exists(self.cfg_voltdata_incoming_path):
             logger.error(f"Voltdata file location {self.cfg_voltdata_incoming_path} does not exist. Quitting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         if not os.path.exists(self.cfg_voltdata_outgoing_path):
             logger.error(f"Voltdata file location {self.cfg_voltdata_outgoing_path} does not exist. Quitting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         self.cfg_always_keep_subfiles = (
             int(
-                utils.read_config(
+                read_config(
                     self.config,
                     self.hostname,
                     "always_keep_subfiles",
@@ -297,16 +280,16 @@ class MWAXSubfileDistributor:
                 " up! **"
             )
 
-        self.cfg_packet_stats_dump_dir = utils.read_config(self.config, "mwax mover", "packet_stats_dump_dir")
+        self.cfg_packet_stats_dump_dir = read_config(self.config, SECTION_MWAX_MOVER, "packet_stats_dump_dir")
         if self.cfg_packet_stats_dump_dir == "":
             logger.warning("packet_stats_dump_dir is blank, so no packet stats will be written.")
         else:
             if not os.path.exists(self.cfg_packet_stats_dump_dir):
                 logger.error(f"packet_stats_dump_dir {self.cfg_packet_stats_dump_dir} does not exist. Quitting.")
-                sys.exit(1)
+                sys.exit(EXIT_FAILURE)
 
-        self.cfg_packet_stats_destination_dir = utils.read_config(
-            self.config, "mwax mover", "packet_stats_destination_dir"
+        self.cfg_packet_stats_destination_dir = read_config(
+            self.config, SECTION_MWAX_MOVER, "packet_stats_destination_dir"
         )
 
         if self.cfg_packet_stats_destination_dir == "" and self.cfg_packet_stats_dump_dir != "":
@@ -322,109 +305,116 @@ class MWAXSubfileDistributor:
                 logger.error(
                     f"packet_stats_destination_dir {self.cfg_packet_stats_destination_dir} does not exist. Quitting."
                 )
-                sys.exit(1)
+                sys.exit(EXIT_FAILURE)
 
         # read correlator config
-        self.cfg_corr_input_ringbuffer_key = utils.read_config(self.config, "correlator", "input_ringbuffer_key")
-        self.cfg_corr_visdata_incoming_path = utils.read_config(self.config, "correlator", "visdata_incoming_path")
-        self.cfg_corr_visdata_dont_archive_path = utils.read_config(
+        self.cfg_corr_input_ringbuffer_key = read_config(self.config, SECTION_CORRELATOR, "input_ringbuffer_key")
+        self.cfg_corr_visdata_incoming_path = read_config(self.config, SECTION_CORRELATOR, "visdata_incoming_path")
+        self.cfg_corr_visdata_dont_archive_path = read_config(
             self.config,
-            "correlator",
+            SECTION_CORRELATOR,
             "visdata_dont_archive_path",
         )
-        self.cfg_corr_visdata_processing_stats_path = utils.read_config(
+        self.cfg_corr_visdata_processing_stats_path = read_config(
             self.config,
-            "correlator",
+            SECTION_CORRELATOR,
             "visdata_processing_stats_path",
         )
-        self.cfg_corr_visdata_outgoing_path = utils.read_config(self.config, "correlator", "visdata_outgoing_path")
-        self.cfg_corr_mwax_stats_binary_dir = utils.read_config(self.config, "correlator", "mwax_stats_binary_dir")
-        self.cfg_corr_mwax_stats_dump_dir = utils.read_config(self.config, "correlator", "mwax_stats_dump_dir")
+        self.cfg_corr_visdata_outgoing_path = read_config(self.config, SECTION_CORRELATOR, "visdata_outgoing_path")
+        self.cfg_corr_mwax_stats_binary_dir = read_config(self.config, SECTION_CORRELATOR, "mwax_stats_binary_dir")
+        self.cfg_corr_mwax_stats_dump_dir = read_config(self.config, SECTION_CORRELATOR, "mwax_stats_dump_dir")
         self.cfg_corr_mwax_stats_timeout_sec = int(
-            utils.read_config(
+            read_config(
                 self.config,
-                "correlator",
+                SECTION_CORRELATOR,
                 "mwax_stats_timeout_sec",
             )
         )
 
         # calibration processing sections
-        self.cfg_corr_calibrator_outgoing_path = utils.read_config(
+        self.cfg_corr_calibrator_outgoing_path = read_config(
             self.config,
-            "correlator",
+            SECTION_CORRELATOR,
             "calibrator_outgoing_path",
         )
 
-        self.cfg_corr_metafits_path = utils.read_config(self.config, "correlator", "metafits_path")
+        self.cfg_corr_metafits_path = read_config(self.config, SECTION_CORRELATOR, "metafits_path")
 
         # Get list of projectids which are to be given
         # high priority when archiving
-        self.cfg_corr_high_priority_correlator_projectids = utils.read_config_list(
+        self.cfg_corr_high_priority_correlator_projectids = read_config_list(
             self.config,
-            "correlator",
-            "high_priority_correlator_projectids",
+            SECTION_CORRELATOR,
+            CONFIG_KEY_HIGH_PRIORITY_CORRELATOR_PROJECTIDS,
         )
-        self.cfg_corr_high_priority_vcs_projectids = utils.read_config_list(
+        self.cfg_corr_high_priority_vcs_projectids = read_config_list(
             self.config,
-            "correlator",
-            "high_priority_vcs_projectids",
+            SECTION_CORRELATOR,
+            CONFIG_KEY_HIGH_PRIORITY_VCS_PROJECTIDS,
         )
+
+        # Project IDs whose data should not be archived. Defaults to C123
+        # (a test/commissioning project) when the key is absent, preserving
+        # today's behaviour for any config that has not been updated yet.
+        if read_optional_config(self.config, SECTION_CORRELATOR, "do_not_archive_projectids") is None:
+            self.cfg_corr_do_not_archive_projectids = ["C123"]
+        else:
+            self.cfg_corr_do_not_archive_projectids = read_config_list(
+                self.config, SECTION_CORRELATOR, "do_not_archive_projectids"
+            )
 
         if not os.path.exists(self.cfg_corr_visdata_incoming_path):
             logger.error(f"Visdata file location {self.cfg_corr_visdata_incoming_path} does not exist. Quitting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         if not os.path.exists(self.cfg_corr_visdata_dont_archive_path):
             logger.error(
                 f"'Visdata Dont Archive' location {self.cfg_corr_visdata_dont_archive_path} does not exist. Quitting."
             )
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         if not os.path.exists(self.cfg_corr_visdata_processing_stats_path):
             logger.error(
                 f"Visdata file location {self.cfg_corr_visdata_processing_stats_path} does not exist. Quitting."
             )
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         if not os.path.exists(self.cfg_corr_visdata_outgoing_path):
             logger.error(f"Visdata file location {self.cfg_corr_visdata_outgoing_path} does not exist. Quitting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         if not os.path.exists(self.cfg_corr_mwax_stats_binary_dir):
             logger.error(f"mwax_stats binary dir {self.cfg_corr_mwax_stats_binary_dir} does not exist. Quitting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         if not os.path.exists(self.cfg_corr_calibrator_outgoing_path):
             logger.error(
                 f"calibrator outgoing location {self.cfg_corr_calibrator_outgoing_path} does not exist. Quitting."
             )
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         if not os.path.exists(self.cfg_corr_metafits_path):
             logger.error(f"metafits location {self.cfg_corr_metafits_path} does not exist. Quitting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
-        self.cfg_metadatadb_host = utils.read_config(self.config, "mwa metadata database", "host")
-        self.cfg_metadatadb_db = utils.read_config(self.config, "mwa metadata database", "db")
-        self.cfg_metadatadb_user = utils.read_config(self.config, "mwa metadata database", "user")
-        # Only read the password as base64 encoded if host is not dummy
-        self.cfg_metadatadb_pass = utils.read_config(
-            self.config,
-            "mwa metadata database",
-            "pass",
-            self.cfg_metadatadb_db != "dummy",
-        )
+        db_handler_from_config = MWAXDBHandler.from_config(self.config)
+        self.cfg_db_host = db_handler_from_config.host
+        self.cfg_db_name = db_handler_from_config.db_name
+        self.cfg_db_user = db_handler_from_config.user
+        self.cfg_db_pass = db_handler_from_config.password
+        self.cfg_db_port = db_handler_from_config.port
 
-        self.cfg_metadatadb_port = int(utils.read_config(self.config, "mwa metadata database", "port"))
+        # Initiate database connection pool for metadata db
+        self.db_handler = override_db_handler if override_db_handler else db_handler_from_config
 
         # Read config specific to this host
-        self.cfg_corr_archive_destination_host = utils.read_config(
+        self.cfg_corr_archive_destination_host = read_config(
             self.config,
             self.hostname,
             "mwax_destination_host",
         )
         self.cfg_corr_archive_destination_port = int(
-            utils.read_config(
+            read_config(
                 self.config,
                 self.hostname,
                 "mwax_destination_port",
@@ -432,7 +422,7 @@ class MWAXSubfileDistributor:
         )
         self.cfg_corr_archive_destination_enabled = (
             int(
-                utils.read_config(
+                read_config(
                     self.config,
                     self.hostname,
                     "mwax_destination_enabled",
@@ -441,14 +431,14 @@ class MWAXSubfileDistributor:
             == 1
         )
         self.cfg_corr_diskdb_numa_node = int(
-            utils.read_config(
+            read_config(
                 self.config,
                 self.hostname,
                 "dada_disk_db_numa_node",
             )
         )
         self.cfg_corr_archive_command_numa_node = int(
-            utils.read_config(
+            read_config(
                 self.config,
                 self.hostname,
                 "archive_command_numa_node",
@@ -456,89 +446,77 @@ class MWAXSubfileDistributor:
         )
 
         # beamformer options
-        self.cfg_bf_redis_host = utils.read_config(
+        self.cfg_bf_redis_host = read_config(
             self.config,
-            "beamformer",
+            SECTION_BEAMFORMER,
             "bf_redis_host",
         )
 
-        self.cfg_bf_redis_queue_key = utils.read_config(
+        self.cfg_bf_redis_queue_key = read_config(
             self.config,
-            "beamformer",
+            SECTION_BEAMFORMER,
             "bf_redis_queue_key",
         )
 
-        self.cfg_bf_cal_path = utils.read_config(
+        self.cfg_bf_cal_path = read_config(
             self.config,
-            "beamformer",
+            SECTION_BEAMFORMER,
             "bf_cal_path",
         )
 
         if not os.path.exists(self.cfg_bf_cal_path):
             logger.error(f"bf_cal_path location {self.cfg_bf_cal_path} does not exist. Quitting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
-        self.cfg_bf_incoming_path = utils.read_config(
+        self.cfg_bf_incoming_path = read_config(
             self.config,
-            "beamformer",
+            SECTION_BEAMFORMER,
             "bf_incoming_path",
         )
 
         if not os.path.exists(self.cfg_bf_incoming_path):
             logger.error(f"bf_incoming_path location {self.cfg_bf_incoming_path} does not exist. Quitting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
-        self.cfg_bf_stitching_path = utils.read_config(
+        self.cfg_bf_stitching_path = read_config(
             self.config,
-            "beamformer",
+            SECTION_BEAMFORMER,
             "bf_stitching_path",
         )
 
         if not os.path.exists(self.cfg_bf_stitching_path):
             logger.error(f"bf_stitching_path location {self.cfg_bf_stitching_path} does not exist. Quitting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
-        self.cfg_bf_outgoing_path = utils.read_config(
+        self.cfg_bf_outgoing_path = read_config(
             self.config,
-            "beamformer",
+            SECTION_BEAMFORMER,
             "bf_outgoing_path",
         )
 
         if not os.path.exists(self.cfg_bf_outgoing_path):
             logger.error(f"bf_outgoing_path location {self.cfg_bf_outgoing_path} does not exist. Quitting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
-        self.cfg_bf_dont_archive_path = utils.read_config(
+        self.cfg_bf_dont_archive_path = read_config(
             self.config,
-            "beamformer",
+            SECTION_BEAMFORMER,
             "bf_dont_archive_path",
         )
         if not os.path.exists(self.cfg_bf_dont_archive_path):
             logger.error(f"bf_dont_archive_path location {self.cfg_bf_dont_archive_path} does not exist. Quitting.")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
-        self.cfg_bf_keep_original_files_after_stitching = utils.read_config_bool(
-            self.config, "beamformer", "bf_keep_original_files_after_stitching"
+        self.cfg_bf_keep_original_files_after_stitching = read_config_bool(
+            self.config, SECTION_BEAMFORMER, "bf_keep_original_files_after_stitching"
         )
-
-        # Initiate database connection pool for metadata db
-        if override_db_handler:
-            self.db_handler = override_db_handler
-        else:
-            self.db_handler = mwax_db.MWAXDBHandler(
-                host=self.cfg_metadatadb_host,
-                port=self.cfg_metadatadb_port,
-                db_name=self.cfg_metadatadb_db,
-                user=self.cfg_metadatadb_user,
-                password=self.cfg_metadatadb_pass,
-            )
 
         # Read master archiving enabled option
         self.cfg_master_archiving_enabled = (
             int(
-                utils.read_config(
+                read_config(
                     self.config,
-                    "mwax mover",
+                    SECTION_MWAX_MOVER,
                     "archiving_enabled",
                 )
             )
@@ -571,7 +549,7 @@ class MWAXSubfileDistributor:
         self.subfile_incoming_processor = SubfileIncomingProcessor(
             self,
             self.cfg_subfile_incoming_path,
-            ".sub",
+            EXT_SUB,
             ".free",
             ".keep",
             self.cfg_voltdata_incoming_path,
@@ -627,6 +605,7 @@ class MWAXSubfileDistributor:
             self.cfg_corr_high_priority_vcs_projectids,
             self.db_handler,
             self.cfg_corr_archive_destination_enabled,
+            self.cfg_corr_do_not_archive_projectids,
         )
         self.workers.append(self.checksum_and_db_processor)
 
@@ -647,6 +626,7 @@ class MWAXSubfileDistributor:
             self.cfg_corr_visdata_outgoing_path,
             self.cfg_corr_calibrator_outgoing_path,
             self.cfg_corr_visdata_dont_archive_path,
+            self.cfg_corr_do_not_archive_projectids,
         )
         self.workers.append(self.vis_stats_processor)
 
@@ -736,10 +716,10 @@ class MWAXSubfileDistributor:
                     # Is this host doing archiving?
                     if self.cfg_corr_archive_destination_enabled:
                         # Validate and get info about the obs
-                        obs_info: utils.ValidationData = utils.validate_filename(item, self.cfg_corr_metafits_path)
+                        obs_info: ValidationData = validate_filename(item, self.cfg_corr_metafits_path)
 
                         # Should this project be archived?
-                        if utils.should_project_be_archived(obs_info.project_id):
+                        if should_project_be_archived(obs_info.project_id, self.cfg_corr_do_not_archive_projectids):
                             # Send to vis_outgoing
                             # Take the input filename - strip the path, then append the output path
                             outgoing_filename = os.path.join(
@@ -808,50 +788,77 @@ class MWAXSubfileDistributor:
             if self.outgoing_processor:
                 self.outgoing_processor.pause(paused)
 
-    def endpoint_shutdown(self):
-        """Web service endpoint to shutdown the processor."""
+    def endpoint_shutdown(self) -> tuple[bytes, int]:
+        """Web service endpoint to shutdown the processor.
+
+        Returns:
+            (b"OK", 200).
+        """
         self.stop()
-        return b"OK", 200
+        return b"OK", http.HTTPStatus.OK
 
-    def endpoint_status(self):
-        """Web service endpoint to retrieve processor status."""
+    def endpoint_status(self) -> tuple[bytes, int]:
+        """Web service endpoint to retrieve processor status.
+
+        Returns:
+            (the JSON-encoded status from get_status(), 200).
+        """
         data = json.dumps(self.get_status())
-        return data.encode("utf-8"), 200
+        return data.encode("utf-8"), http.HTTPStatus.OK
 
-    def endpoint_pause_archiving(self):
-        """Web service endpoint to pause archiving operations."""
+    def endpoint_pause_archiving(self) -> tuple[bytes, int]:
+        """Web service endpoint to pause archiving operations.
+
+        Returns:
+            (b"OK", 200).
+        """
         self.pause_archiving(paused=True)
-        return b"OK", 200
+        return b"OK", http.HTTPStatus.OK
 
-    def endpoint_resume_archiving(self):
-        """Web service endpoint to resume archiving operations."""
+    def endpoint_resume_archiving(self) -> tuple[bytes, int]:
+        """Web service endpoint to resume archiving operations.
+
+        Returns:
+            (b"OK", 200).
+        """
         self.pause_archiving(paused=False)
-        return b"OK", 200
+        return b"OK", http.HTTPStatus.OK
 
-    def endpoint_release_cal_obs(self):
-        """Web service endpoint to release calibration observation files."""
+    def endpoint_release_cal_obs(self) -> tuple[bytes, int]:
+        """Web service endpoint to release calibration observation files.
+
+        Returns:
+            (b"OK", 200) on success; an error message and 500 if obs_id is
+            missing, is not an integer, or release_cal_obs() raises.
+        """
         try:
-            logger.info("Recieved call to release_cal_obs()")
+            logger.info("Received call to release_cal_obs()")
 
             obs_id = request.args.get("obs_id")  # returns None if missing
 
             if obs_id is None:
                 raise ValueError("obs_id parameter missing from release_cal_obs() call")
             else:
-                if utils.is_int(obs_id):
+                if is_int(obs_id):
                     logger.info(f"{obs_id}: release_cal_obs(): calling archive_processor.release_cal_obs({obs_id})")
                     self.release_cal_obs(int(obs_id))
-                    return b"OK", 200
+                    return b"OK", http.HTTPStatus.OK
                 else:
                     raise ValueError(f"obs_id {obs_id} passed to release_cal_obs() is not an int")
 
         except Exception as ws_exception:
-            return f"ERROR: {ws_exception}".encode(), 500
+            return f"ERROR: {ws_exception}".encode(), http.HTTPStatus.INTERNAL_SERVER_ERROR
 
-    def endpoint_dump_voltages(self):
+    def endpoint_dump_voltages(self) -> tuple[bytes, int]:
         """Web service endpoint to request voltage buffer dump.
 
         Validates parameters and initiates a voltage buffer dump operation.
+
+        Returns:
+            (b"OK", 200) on success, including the start==end==0 test-mode
+            no-op; (message, 400) if a parameter is missing or invalid, a
+            dump is already in progress, or dump_voltages() itself fails to
+            start; (message, 500) on any other error.
         """
         # Check for correct params
         try:
@@ -859,8 +866,8 @@ class MWAXSubfileDistributor:
             if starttime is None:
                 raise ValueError("start parameter missing from dump_voltages() call")
             else:
-                if utils.is_int(starttime):
-                    starttime = int(starttime)
+                if is_int(starttime):
+                    starttime_int = int(starttime)
                 else:
                     raise ValueError("start parameter is not an integer")
 
@@ -868,8 +875,8 @@ class MWAXSubfileDistributor:
             if endtime is None:
                 raise ValueError("end parameter missing from dump_voltages() call")
             else:
-                if utils.is_int(endtime):
-                    endtime = int(endtime)
+                if is_int(endtime):
+                    endtime_int = int(endtime)
                 else:
                     raise ValueError("end parameter is not an integer")
 
@@ -877,43 +884,43 @@ class MWAXSubfileDistributor:
             if trigger_id is None:
                 raise ValueError("trigger_id parameter missing from dump_voltages() call")
             else:
-                if utils.is_int(trigger_id):
-                    trigger_id = int(trigger_id)
+                if is_int(trigger_id):
+                    trigger_id_int = int(trigger_id)
                 else:
                     raise ValueError("trigger_id parameter is not an integer")
 
             # Special test mode- if start and end == 0 just return 200
-            if starttime == endtime == 0:
-                return b"OK", 200
+            if starttime_int == endtime_int == 0:
+                return b"OK", http.HTTPStatus.OK
             else:
-                if len(str(starttime)) != 10 and starttime != 0:
+                if len(str(starttime_int)) != 10 and starttime_int != 0:
                     raise ValueError("start must be gps seconds and length 10 (or 0 for as early as possible)")
 
-                if len(str(endtime)) != 10:
+                if len(str(endtime_int)) != 10:
                     raise ValueError("end must be gps seconds and length 10")
 
-                if endtime - starttime <= 0:
+                if endtime_int - starttime_int <= 0:
                     raise ValueError("end must be after start")
 
                 # Check to see if we aren't already doing a dump
                 if self.dump_start_gps is None and self.dump_end_gps is None:
                     # Now call the method to dump the voltages
-                    if self.dump_voltages(starttime, endtime, trigger_id):
-                        return b"OK", 200
+                    if self.dump_voltages(starttime_int, endtime_int, trigger_id_int):
+                        return b"OK", http.HTTPStatus.OK
                     else:
-                        return b"Failed to start Voltage Buffer Dump", 400
+                        return b"Failed to start Voltage Buffer Dump", http.HTTPStatus.BAD_REQUEST
                 else:
                     # Reject this request
                     return (
                         b"Voltage Buffer Dump already in progress. Request canceled.",
-                        400,
+                        http.HTTPStatus.BAD_REQUEST,
                     )
 
-        except ValueError as parameters_exception:  # pylint: disable=broad-except
-            return f"Value Error: {parameters_exception}".encode(), 400
+        except ValueError as parameters_exception:
+            return f"Value Error: {parameters_exception}".encode(), http.HTTPStatus.BAD_REQUEST
 
-        except Exception as dump_voltages_exception:  # pylint: disable=broad-except
-            return f"ERROR: {dump_voltages_exception}".encode(), 500
+        except Exception as dump_voltages_exception:
+            return f"ERROR: {dump_voltages_exception}".encode(), http.HTTPStatus.INTERNAL_SERVER_ERROR
 
     def dump_voltages(self, start_gps_time: int, end_gps_time: int, trigger_id: int) -> bool:
         """Dump voltage buffer subfiles from shared memory to disk.
@@ -973,7 +980,7 @@ class MWAXSubfileDistributor:
                 # Now we need to check they are no VCS observations.
                 # If so, they are already archived so we don't bother
                 # archivng them again
-                if utils.read_subfile_value(free_filename, utils.PSRDADA_MODE) != utils.CorrelatorMode.MWAX_VCS.value:
+                if read_subfile_value(free_filename, PSRDADA_MODE) != CorrelatorMode.MWAX_VCS.value:
                     logger.info(
                         f"dump_voltages: keeping {free_filename}, and updating subfile header "
                         f"with 'TRIGGER_ID {trigger_id}'"
@@ -981,9 +988,9 @@ class MWAXSubfileDistributor:
 
                     # See if there already is a TRIGGER_ID keyword in the subfile- if so
                     # don't overwrite it. We must have overlapping triggers happening
-                    if not utils.read_subfile_trigger_value(free_filename):
+                    if not read_subfile_trigger_value(free_filename):
                         # No TRIGGER_ID yet, so add it
-                        utils.inject_subfile_header(free_filename, f"{utils.PSRDADA_TRIGGER_ID} {trigger_id}\n")
+                        inject_subfile_header(free_filename, f"{PSRDADA_TRIGGER_ID} {trigger_id}\n")
 
                     # For any that exist, rename them immediately to .keep
                     keep_filename = free_filename.replace(".free", ".keep")
@@ -997,69 +1004,32 @@ class MWAXSubfileDistributor:
         logger.info("dump_voltages: complete")
         return True
 
-    def health_handler(self):
-        """Periodically send health status via UDP multicast.
-
-        Runs in a separate thread and sends status information every second while
-        the distributor is running.
-        """
-        while self.running:
-            # Code to run by the health thread
-            status_dict = self.get_status()
-
-            # Convert the status to bytes
-            status_bytes = json.dumps(status_dict).encode("utf-8")
-
-            # Send the bytes
-            try:
-                utils.send_multicast(
-                    self.cfg_health_multicast_interface_ip,
-                    self.cfg_health_multicast_ip,
-                    self.cfg_health_multicast_port,
-                    status_bytes,
-                    self.cfg_health_multicast_hops,
-                )
-            except Exception as catch_all_exception:  # pylint: disable=broad-except
-                logger.warning(f"health_handler: Failed to send health information. {catch_all_exception}")
-
-            # Sleep for a second
-            time.sleep(1)
-
-    def get_status(self) -> dict:
-        """Return processor status and worker statuses as a dictionary.
+    def get_extra_status(self) -> dict:
+        """Daemon-specific status keys: the current subfile mode and archiving flag.
 
         Returns:
-            A dictionary containing main processor status and individual worker statuses.
+            A dict with "mode" and "archiving" keys.
         """
-        main_status = {
-            "unix_timestamp": time.time(),
-            "process": type(self).__name__,
-            "version": version.get_mwax_mover_version_string(),
-            "host": self.hostname,
-            "running": self.running,
+        return {
             "mode": self.subfile_incoming_processor.current_subfile_mode,
             "archiving": self.cfg_corr_archive_destination_enabled,
-            "cmdline": " ".join(sys.argv[1:]),
         }
 
-        worker_status_list = []
+    def get_worker_status(self) -> list[dict]:
+        """Per-worker status, for get_status()'s "workers" key.
 
-        for w in self.workers:
-            worker_status_list.append(w.get_status())
-
-        status = {"main": main_status, "workers": worker_status_list}
-
-        return status
-
-    def signal_handler(self, _signum, _frame):
-        """Handle SIGINT and SIGTERM signals for graceful shutdown.
-
-        Args:
-            _signum: Signal number (unused).
-            _frame: Stack frame (unused).
+        Returns:
+            A list of each worker's status dict.
         """
-        logger.warning(f"Interrupted. Shutting down {len(self.workers)} workers...")
-        self.stop()
+        return [w.get_status() for w in self.workers]
+
+    def shutdown_log_detail(self) -> str:
+        """Worker count, for the signal-handler shutdown message.
+
+        Returns:
+            " N workers", so the message reads "Shutting down N workers...".
+        """
+        return f" {len(self.workers)} workers"
 
     def start(self):
         """Start the distributor and begin monitoring with all workers.
@@ -1074,19 +1044,19 @@ class MWAXSubfileDistributor:
             self.start_flask_web_server()
         except Exception:
             logger.exception("Unable to start web server. Exiting")
-            sys.exit(1)
+            sys.exit(EXIT_FAILURE)
 
         # creating database connection pool(s)
         logger.info("Starting database connection pool...")
 
-        if self.cfg_metadatadb_host != "dummy":
+        if self.cfg_db_host != DUMMY_CONFIG_VALUE:
             # Dont start it if we are "dummy"- we are probably doing
             # a unit test which does not need a db
             self.db_handler.start_database_pool()
 
         # create a health thread
         logger.info("Starting health_thread...")
-        health_thread = threading.Thread(name="health_thread", target=self.health_handler, daemon=True)
+        health_thread = threading.Thread(name=HEALTH_THREAD_NAME, target=self.health_loop, daemon=True)
         health_thread.start()
         logger.info("health_thread started.")
 
@@ -1103,7 +1073,7 @@ class MWAXSubfileDistributor:
             for w in self.workers:
                 if self.running:
                     if not w.is_running():
-                        self.request_fatal_shutdown(4, f"Worker {w.name} has stopped unexpectedly.")
+                        self.request_fatal_shutdown(EXIT_FAILURE, f"Worker {w.name} has stopped unexpectedly.")
                         break
 
             time.sleep(0.1)
@@ -1116,34 +1086,6 @@ class MWAXSubfileDistributor:
             logger.error(f"Shutting down with exit code {self.fatal_exit_code}: {self.fatal_reason}")
         else:
             logger.info("Completed Successfully")
-
-    def request_fatal_shutdown(self, exit_code: int, reason: str) -> None:
-        """Ask the main thread to shut the whole processor down and exit non-zero.
-
-        Worker threads cannot terminate the process themselves: sys.exit() on a
-        non-main thread raises SystemExit in that thread only, which kills the
-        thread and discards the exit code, leaving the daemon running with one
-        fewer worker. Worker code that hits an unrecoverable error should call
-        this instead, then stop what it is doing.
-
-        The first caller wins, so the exit code reflects the original cause
-        rather than any knock-on failure. Safe to call more than once and from
-        any thread.
-
-        Args:
-            exit_code: Non-zero process exit code for main() to exit with.
-            reason: Human-readable description, logged and included in the
-                final shutdown message.
-        """
-        if self.fatal_exit_code:
-            # Already shutting down for an earlier (root cause) reason.
-            logger.warning(f"Additional fatal error while shutting down: {reason}")
-            return
-
-        logger.error(f"FATAL: {reason} Requesting shutdown with exit code {exit_code}.")
-        self.fatal_exit_code = exit_code
-        self.fatal_reason = reason
-        self.running = False
 
     def stop(self):
         """Stop the distributor and shutdown all workers and servers.
@@ -1174,7 +1116,7 @@ class MWAXSubfileDistributor:
         status, archiving control, and calibration operations.
         """
         # Create and start web server
-        if utils.running_under_pytest():
+        if running_under_pytest():
             # Randomise the port - ugly but pytest is too quick to reuse the port
             self.cfg_webserver_port = random.randint(10000, 60000)
 
@@ -1245,7 +1187,7 @@ def main():
         processor.start()
     except Exception:
         logger.exception("Exited with error")
-        sys.exit(1)
+        sys.exit(EXIT_FAILURE)
 
     # start() returns once the main loop has ended. If a worker thread hit an
     # unrecoverable error it recorded an exit code via request_fatal_shutdown();

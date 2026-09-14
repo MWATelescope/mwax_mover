@@ -1,0 +1,462 @@
+"""Helper classes for managing MWA ASVO download jobs via the giant-squid CLI.
+
+MWAASVOHelper maintains a list of in-flight MWA ASVO jobs, submitting new download
+requests via giant-squid submitvis and polling their status via giant-squid list.
+MWAASVOJob tracks a single job including its state, request IDs, submission
+timestamp, and download URL. MWAASVOJobState enumerates the possible ASVO job
+states. Typed exceptions are raised for outages and duplicate submissions.
+
+Moved here from calvin/asvo.py, alongside mwa_asvo/giant_squid.py (the
+lower-level run_giant_squid CLI wrapper and its exceptions this module
+builds on), consolidating all MWA-ASVO-related code into one package.
+"""
+
+import json
+import logging
+import re
+import threading
+from datetime import UTC, datetime
+from enum import Enum
+
+from mwax_mover.mwa_asvo.giant_squid import (
+    GiantSquidJobAlreadyExistsException,
+    GiantSquidMWAASVOOutageException,
+    run_giant_squid,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class MWAASVOJobState(Enum):
+    """The states an MWA ASVO job can be in, as reported by giant-squid."""
+
+    Queued = "Queued"
+    Waitcal = "WaitCal"
+    Staging = "Staging"
+    Staged = "Staged"
+    Preparing = "Preparing"
+    Downloading = "Downloading"
+    Preprocessing = "Preprocessing"
+    Imaging = "Imaging"
+    Delivering = "Delivering"
+    Ready = "Ready"
+    Error = "Error"
+    Expired = "Expired"
+    Cancelled = "Cancelled"
+    Unknown = "Unknown"  # not a real ASVO status but a good default
+
+
+class MWAASVOJob:
+    """
+    This class represents a single MWA ASVO job. We use this
+    to track its progress from submission to completion
+    """
+
+    def __init__(self, request_id: int, obs_id: int, job_id: int, bulk_request: bool):
+        """Initialize an MWA ASVO job instance.
+
+        Args:
+            request_id: The calibration solution request ID.
+            obs_id: The observation ID.
+            job_id: The MWA ASVO job ID.
+            bulk_request: Is this request an ASVO cal request (bulk_request=False)
+                or an MWA Ops Team bulk calibration (bulk_request=True)
+        """
+        self.request_ids: list[int] = []
+        self.request_ids.append(request_id)
+        self.bulk_request: bool = bulk_request
+
+        self.obs_id = obs_id
+        self.job_id = job_id
+        self.job_state = MWAASVOJobState.Unknown
+        self.submitted_datetime: datetime
+        self.download_error_datetime: datetime | None = None
+        self.download_error_message: str | None = None
+        self.last_seen_datetime: datetime | None = None
+        self.download_url: str | None = None
+        self.download_slurm_job_submitted: bool = False
+        self.download_slurm_job_id: int | None = None
+        self.download_slurm_job_submitted_datetime: datetime | None = None
+        # A flag used to build a new list without the ones needing to be removed.
+        # Bypasses the classic mutating-a-list-while-iterating issue! See
+        # https://rednafi.com/python/modify-iterables-while-iterating/
+        self.remove_from_list: bool = False
+
+    def __str__(self):
+        return f"JobID: {self.job_id}; ObsID: {self.obs_id}; RequestIDs: {self.request_ids}"
+
+    def __repr__(self):
+        return f"{self.get_status()}"
+
+    def elapsed_time_seconds(self) -> int:
+        """Get the number of seconds between now and the submission time.
+
+        Returns:
+            The elapsed time in seconds, or 0 if not yet submitted.
+        """
+        if self.submitted_datetime is not None:
+            return int((datetime.now(UTC) - self.submitted_datetime).total_seconds())
+        else:
+            return 0
+
+    def is_in_progress(self) -> bool:
+        """Determine if a tracked MWA ASVO job is still in progress
+
+        Returns:
+            A bool indicating if the job is in progress (i.e. not complete or failed)
+        """
+        return (
+            self.job_state != MWAASVOJobState.Cancelled
+            and self.job_state != MWAASVOJobState.Error
+            and self.job_state != MWAASVOJobState.Ready
+        )
+
+    def get_status(self) -> dict:
+        """Get the current status of the job as a dictionary.
+
+        Returns:
+            A dictionary containing job ID, observation ID, state, timestamps,
+            and error information.
+        """
+        return {
+            "job_id": str(self.job_id),
+            "obs_id": str(self.obs_id),
+            "state": str(self.job_state.value),
+            "bulk": str(self.bulk_request),
+            "MWA ASVO Job submitted": (
+                self.submitted_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.submitted_datetime else ""
+            ),
+            "last_seen": self.last_seen_datetime.strftime("%Y-%m-%d %H:%M:%S") if self.last_seen_datetime else "",
+            "download_slurm_job_submitted_datetime": (
+                self.download_slurm_job_submitted_datetime if self.download_slurm_job_submitted else ""
+            ),
+            "download_error_datetime": (self.download_error_datetime if self.download_error_datetime else ""),
+            "download_error_message": (self.download_error_message if self.download_error_message else ""),
+            "request_ids": " ,".join(str(r) for r in self.request_ids),
+        }
+
+
+class MWAASVOHelper:
+    """
+    This class is the main helper to allow the CalvinProcessor to interact with MWA ASVO
+    via the giant-squid CLI
+    """
+
+    def __init__(self):
+        """Initialize the MWA ASVO helper instance.
+
+        Sets up configuration variables for giant-squid execution and initializes
+        the job tracking list.
+        """
+        # Where is giant-squid binary?
+        self.path_to_giant_squid_binary: str = ""
+
+        # How many seconds do we wait when executing giant-squid list
+        self.giant_squid_list_timeout_seconds: int = 0
+
+        # How many seconds do we wait when executing giant-squid submit-vis
+        self.giant_squid_submitvis_timeout_seconds: int = 0
+
+        # List of Jobs and obs_ids the helper is keeping track of
+        self.current_asvo_jobs: list[MWAASVOJob] = []
+        self.current_asvo_jobs_lock = threading.Lock()
+
+        self.mwa_asvo_outage_datetime: datetime | None = None
+
+    def initialise(
+        self,
+        path_to_giant_squid_binary: str,
+        giant_squid_list_timeout_seconds: int,
+        giant_squid_submitvis_timeout_seconds: int,
+    ):
+        """Initialize the helper with configuration parameters.
+
+        Args:
+            path_to_giant_squid_binary: Path to the giant-squid executable.
+            giant_squid_list_timeout_seconds: Timeout for giant-squid list commands.
+            giant_squid_submitvis_timeout_seconds: Timeout for giant-squid submit-vis commands.
+        """
+        # Set class variables
+        self.path_to_giant_squid_binary = path_to_giant_squid_binary
+        self.giant_squid_list_timeout_seconds = giant_squid_list_timeout_seconds
+        self.giant_squid_submitvis_timeout_seconds = giant_squid_submitvis_timeout_seconds
+
+    def does_request_exist(self, request_id: int) -> bool:
+        """Check if a request ID is already being handled.
+
+        Args:
+            request_id: The request ID to search for.
+
+        Returns:
+            True if the request is being tracked, False otherwise.
+        """
+        with self.current_asvo_jobs_lock:
+            for job in self.current_asvo_jobs:
+                if request_id in job.request_ids:
+                    return True
+
+        # not found
+        return False
+
+    def get_in_progress_asvo_job_count(self) -> int:
+        """A helper function to get the count of in progress ASVO jobs
+
+        Returns:
+            the number of ASVO jobs which are in progress"""
+        try:
+            with self.current_asvo_jobs_lock:
+                return sum(1 for item in self.current_asvo_jobs if item.is_in_progress())
+        except Exception:
+            logger.exception("get_in_progress_asvo_job_count() failed")
+            return -1
+
+    def submit_download_job(self, request_id: int, obs_id: int, bulk_request: bool) -> MWAASVOJob:
+        """Submit an MWA ASVO download job and track it internally.
+
+        Args:
+            request_id: The calibration solution request ID.
+            obs_id: The observation ID for which to download files.
+            bulk_request: Is this an ASVO job (False) or a bulk request from Ops team (True)
+
+        Returns:
+            A new MWAASVOJob instance with submission details.
+
+        Raises:
+            GiantSquidMWAASVOOutageException: If MWA ASVO is in an outage.
+            GiantSquidException: If an error occurs during job submission.
+        """
+        logger.info(f"{obs_id}: Submitting MWA ASVO job to download for request {request_id}")
+
+        try:
+            stdout = run_giant_squid(
+                self.path_to_giant_squid_binary,
+                "submit-vis",
+                f"--delivery acacia {obs_id}",
+                self.giant_squid_submitvis_timeout_seconds,
+            )
+
+            # If submitted successfully, get the new job id from stdout
+            job_id: int = get_job_id_from_giant_squid_stdout(stdout)
+
+            logger.info(f"{obs_id}: MWA ASVO job {job_id} submitted successfully")
+
+        except GiantSquidJobAlreadyExistsException as already_exists_exception:
+            # Job already exists in queued, processing or ready state, get the job id
+            job_id = already_exists_exception.job_id
+
+            logger.info(f"{obs_id}: MWA ASVO job {job_id} already exists.")
+
+        except GiantSquidMWAASVOOutageException:
+            self.mwa_asvo_outage_datetime = datetime.now()
+            # Re-raise this error
+            raise
+
+        except Exception:
+            # Some other error happened- update database as an error
+            raise
+
+        # add a new job to be tracked
+        job = MWAASVOJob(
+            request_id=request_id,
+            obs_id=obs_id,
+            job_id=job_id,
+            bulk_request=bulk_request,
+        )
+        job.submitted_datetime = datetime.now(UTC)
+        with self.current_asvo_jobs_lock:
+            self.current_asvo_jobs.append(job)
+            logger.info(f"{obs_id}: Added JobID {job_id}. Now tracking {len(self.current_asvo_jobs)} MWA ASVO jobs")
+
+        return job
+
+    def update_all_job_status(self):
+        """Update the status of all tracked jobs using giant-squid list.
+
+        Queries the MWA ASVO service for current job statuses and updates
+        internal state accordingly. Removes jobs no longer reported by the service.
+
+        Raises:
+            GiantSquidMWAASVOOutageException: If MWA ASVO is in an outage.
+            GiantSquidException: If an error occurs during status update.
+        """
+        # Get list of jobs with status info
+        try:
+            stdout = run_giant_squid(
+                self.path_to_giant_squid_binary,
+                "list",
+                "--json",
+                self.giant_squid_list_timeout_seconds,
+            )
+        except GiantSquidMWAASVOOutageException:
+            self.mwa_asvo_outage_datetime = datetime.now()
+            # Re-raise this error
+            raise
+
+        # Convert stdout into json
+        json_stdout = json.loads(stdout)
+
+        logger.debug(f"giant-squid list returned {len(json_stdout)} jobs")
+
+        # We'll set all the jobs we see to this exact datetime so
+        # we can figure out if one of our in memory jobs is no longer
+        # reported by giant-squid
+        update_datetime = datetime.now().astimezone()
+
+        # Iterate through each job
+        for json_one_job in json_stdout:
+            # Extract the job_id, state and a download url (if status is Ready)
+            obs_id, job_id, job_state, download_url = get_job_info_from_giant_squid_json(json_stdout, json_one_job)
+
+            # Find the giant squid job in our in memory list
+            with self.current_asvo_jobs_lock:
+                for job in self.current_asvo_jobs:
+                    if job.job_id == job_id:
+                        changed: bool = False
+
+                        if job.job_state != job_state:
+                            job.job_state = job_state
+                            changed = True
+
+                        if download_url is not None and job.download_url != download_url:
+                            job.download_url = download_url
+                            changed = True
+
+                        job.last_seen_datetime = update_datetime
+
+                        if changed:
+                            logger.info(
+                                f"{job}: updated - {job.job_state.value}"
+                                f"{'' if job.download_url is None else ' ' + job.download_url}"
+                            )
+                        # break
+                        # Do not break here because in theory there could be >1 request for this asvo job.
+
+        # Finally, we need to check for any jobs in memory which were not seen anymore
+        # in giant squid
+        #
+        # TODO: hmm we may want to update the database to say it's failed?
+        #
+        with self.current_asvo_jobs_lock:
+            for job in self.current_asvo_jobs:
+                if job.last_seen_datetime != update_datetime:
+                    # We didn't see this job
+                    # We should log it and remove it
+                    job.remove_from_list = True
+                    logger.warning(
+                        f"{job}: removed - {job.job_state.value} {job.download_url} as it was no longer "
+                        f"seen by giant-squid-list. {update_datetime} vs {job.last_seen_datetime}"
+                    )
+
+            # This is the safest way to remove jobs from the list as it bypasses the classic python mutating
+            # a list while iterating problem
+            self.current_asvo_jobs = [j for j in self.current_asvo_jobs if not j.remove_from_list]
+
+
+def get_job_id_from_giant_squid_stdout(stdout: str) -> int:
+    """Extract the job ID from giant-squid submit-vis output.
+
+    Parses the stdout from a giant-squid submit-vis command to retrieve
+    the job ID, handling both new submissions and existing job scenarios.
+
+    Args:
+        stdout: The stdout output from giant-squid submit-vis.
+
+    Returns:
+        The newly created or existing job ID.
+
+    Raises:
+        Exception: If no job ID can be found in the output.
+    """
+
+    # Output of successful submission is:
+    # 17:19:03 [INFO] Submitted obs_id as MWA ASVO job ID job_id
+    # 17:19:03 [INFO] Submitted 1 obs_ids for visibility download.
+    lines = stdout.splitlines()
+    for line in lines:
+        regex_match = re.search(r"as MWA ASVO job ID (\d+)", line)
+
+        if regex_match:
+            job_id_str = regex_match.group(1)
+
+            return int(job_id_str)
+
+    # Output of successful, but already existing job id is:
+    # 14:24:17 [WARN] Job already queued, processing or complete. Job Id: 10001610
+    regex_match = re.search(
+        r"Job already queued, processing or complete. Job Id: (\d+)",
+        stdout,
+        re.MULTILINE,
+    )
+
+    if regex_match:
+        job_id_str = regex_match.group(1)
+
+        return int(job_id_str)
+
+    # Try this too
+    # 12:08:08 [WARN] Job already running or complete. Job Id: 878060 ObsID: 1427464352
+    regex_match = re.search(
+        r"Job already running or complete. Job Id: (\d+) ObsId: (\d+)",
+        stdout,
+        re.MULTILINE,
+    )
+
+    if regex_match:
+        job_id_str = regex_match.group(1)
+
+        return int(job_id_str)
+
+    # No job_id was found, raise exception
+    raise Exception(f"No Job Id could be found in the output from giant-squid: {stdout}")
+
+
+def get_job_info_from_giant_squid_json(stdout_json, json_for_one_job) -> tuple[int, int, MWAASVOJobState, str | None]:
+    """Extract job information from giant-squid list JSON output.
+
+    Parses a single job entry from the giant-squid list output. Note: MWA ASVO
+    returns inconsistent JSON formats where job state can be a string or dict.
+
+    Args:
+        stdout_json: The full JSON object output from giant-squid list.
+        json_for_one_job: The JSON object for the current job to parse.
+
+    Returns:
+        A tuple containing:
+        - obs_id (int): The observation ID.
+        - job_id (int): The job ID.
+        - job_state (MWAASVOJobState): The current job state.
+        - download_url (str|None): The download URL if state is Ready, None otherwise.
+
+    Raises:
+        Exception: If the job status code is unrecognized.
+    """
+
+    job_id: int = int(json_for_one_job)
+    obs_id: int = int(stdout_json[json_for_one_job]["obsid"])
+    job_state: str = "Unknown"
+    job_state_json = stdout_json[json_for_one_job]["jobState"]
+
+    # Some job_state_json values are just strings, others are dicts!
+    if isinstance(job_state_json, str):
+        job_state = job_state_json
+    else:
+        # If it is a dict, get the first key- that will be the state
+        for key in job_state_json:
+            job_state = key
+            break
+
+    # See if the job status returned matches our enum
+    for state in MWAASVOJobState:
+        if job_state == state.value:
+            # We have a match on state
+            url = None
+
+            # Now get the download url if Ready
+            if state == MWAASVOJobState.Ready:
+                files_json = stdout_json[json_for_one_job]["files"]
+                url = files_json[0]["fileUrl"]
+
+            return obs_id, job_id, state, url
+
+    # Nothing matched
+    raise Exception(f"{job_id}: giant-squid unknown job status code {job_state}.")

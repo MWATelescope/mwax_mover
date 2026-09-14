@@ -1,0 +1,272 @@
+"""Thin wrappers around subprocess for executing external commands.
+
+Provides run_command() for synchronous execution (with optional NUMA node
+pinning, timeout, and shell mode), start_command() for asynchronous execution
+returning a Popen handle, and check_popen_finished() to wait for a Popen process
+and retrieve its exit code and output. write_readme_file() is a generic
+command-log writer for callers of these (calvin.birli.run_birli(),
+calvin.hyperdrive.run_hyperdrive()) to record what was run, alongside its
+exit code and output, next to the job's output files -- moved here from
+calvin/pipeline.py (docs/RESTRUCTURE.md Phase 4) once merging
+mwax_hyperdrive_solutions.py into calvin.hyperdrive made keeping it there
+create a two-file import cycle (calvin.pipeline needs HyperfitsSolution
+from calvin.hyperdrive; calvin.hyperdrive needs write_readme_file from
+calvin.pipeline). It has no calvin-specific logic, so core.command --
+already the shared home for the run_command/start_command it logs
+the outcome of -- has no reason to ever import calvin, and the cycle can't
+recur.
+"""
+
+import datetime
+import logging
+import os
+import shlex
+import subprocess
+
+logger = logging.getLogger(__name__)
+
+
+def write_readme_file(filename, cmd, exit_code, output, error):
+    """Write a readme file documenting the result of a command or operation.
+
+    Used both for subprocess results (birli, hyperdrive) and for recording
+    Python exception details on failure.
+
+    Args:
+        filename: Path to write the readme file to.
+        cmd: The command or operation that was executed.
+        exit_code: The exit code or error code (0 = success).
+        output: Standard output from the command, or empty string.
+        error: Standard error from the command, or exception traceback text.
+    """
+    try:
+        with open(filename, "w", encoding="UTF-8") as readme:
+            if exit_code == 0:
+                readme.write(f"This run succeeded at: {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
+            else:
+                readme.write(f"This run failed at: {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
+            readme.write(f"Command: {cmd}\n")
+            readme.write(f"Exit code: {exit_code}\n")
+            readme.write(f"output: {output}\n")
+            readme.write(f"error: {error}\n")
+
+    except Exception:
+        logger.warning(
+            (f"Could not write text file {filename} describing the problem observation."),
+            exc_info=True,
+        )
+
+
+def _apply_numa_binding(command: str, numa_node: int | None) -> str:
+    """Prefix a command with numactl bindings, if a NUMA node was requested.
+
+    Args:
+        command: The command to execute.
+        numa_node: NUMA node to bind CPU and memory to. Use None, or any
+            negative value, to run without binding. Note that node 0 is a
+            valid node and IS bound.
+
+    Returns:
+        The command, prefixed with ``numactl --cpunodebind=N --membind=N`` if
+        *numa_node* is a valid node number, otherwise unchanged.
+    """
+    if numa_node is None or int(numa_node) < 0:
+        return command
+    return f"numactl --cpunodebind={numa_node!s} --membind={numa_node!s} {command}"
+
+
+def run_command(
+    command: str,
+    numa_node: int | None,
+    timeout: int = 60,
+    use_shell: bool = False,
+    copy_user_env: bool = False,
+    extra_env_vars: dict[str, str] | None = None,
+) -> tuple[bool, str]:
+    """Execute a command synchronously with optional NUMA pinning.
+
+    Runs a command via subprocess with optional NUMA node binding,
+    timeout enforcement, and shell mode support. Returns a success flag
+    (not the exit code) and the combined stdout/stderr output.
+
+    Args:
+        command: The command to execute as a string.
+        numa_node: NUMA node to bind CPU and memory to. Use None, or any
+            negative value, for no binding. Node 0 is a valid node.
+        timeout: Maximum time in seconds to wait for command. Defaults to 60.
+        use_shell: Whether to execute via shell. Defaults to False.
+        copy_user_env: Whether to copy user's environment variables. Defaults to False.
+        extra_env_vars: An optional dictionary of key/value pairs to be added to
+            the environment the command runs in. Works independently of
+            copy_user_env. Defaults to None.
+
+    Returns:
+        A tuple of (success: bool, output: str). Success is True if return code
+        is 0, False otherwise. Output is combined stdout and stderr.
+    """
+    myenv: dict[str, str] | None = None
+
+    if copy_user_env:
+        # Should we copy the user's environment for the subprocess? Default is no
+        myenv = os.environ.copy()
+
+    if extra_env_vars is not None:
+        if myenv is None:
+            myenv = {}
+        myenv.update(extra_env_vars)
+
+    # Example: ["dada_diskdb", "-k 1234", "-f 1216447872_02_256_201.sub -s"]
+    cmdline = _apply_numa_binding(command, numa_node)
+
+    try:
+        logger.debug(f"Executing {cmdline}...")
+
+        # Parse the command into executable and args
+        args: str | list[str]
+        if use_shell:
+            #
+            # NOTE: using shell=true in subprocess.run requires a string.
+            # Passing a list won't work!
+            #
+            args = cmdline
+        else:
+            args = shlex.split(cmdline)
+
+        # Execute the command
+        completed_process = subprocess.run(
+            args,
+            shell=use_shell,
+            check=False,
+            timeout=timeout,
+            capture_output=True,
+            text=True,
+            env=myenv,
+        )
+
+        return_code = completed_process.returncode
+        stdout = completed_process.stdout
+        stderror = completed_process.stderr
+
+        if return_code != 0:
+            # Remove \n from outputs to make the log message nicer
+            stderror_log = ""
+            if stderror:
+                stderror_log = stderror.replace("\n", " ")
+            else:
+                # if it is None, change it to empty string
+                stderror = ""
+
+            stdout_log = ""
+            if stdout:
+                stdout_log = stdout.replace("\n", " ")
+            else:
+                # if it is None, change it to empty string
+                stdout = ""
+
+            logger.error(
+                f"Error executing {cmdline}. Return code: {return_code} StdErr: {stderror_log} StdOut: {stdout_log}"
+            )
+            return False, f"{stdout} {stderror}"
+        else:
+            return True, f"{stdout} {stderror}"
+
+    except Exception as command_exception:
+        error = f"Exception executing {cmdline}: {command_exception!s}"
+        logger.exception(f"Exception executing {cmdline}:")
+        return False, error
+
+
+def start_command(
+    command: str,
+    numa_node: int | None,
+    use_shell: bool = False,
+    copy_user_env: bool = False,
+):
+    """Execute a command asynchronously with optional NUMA pinning.
+
+    Starts a command via subprocess.Popen with optional NUMA node binding
+    and shell mode support. Returns a Popen object for polling or waiting.
+
+    Args:
+        command: The command to execute as a string.
+        numa_node: NUMA node to bind CPU and memory to. Use None, or any
+            negative value, for no binding. Node 0 is a valid node.
+        use_shell: Whether to execute via shell. Defaults to False.
+        copy_user_env: Whether to copy user's environment variables. Defaults to False.
+
+    Returns:
+        A subprocess.Popen object that can be polled or waited on.
+    """
+    myenv: dict[str, str] | None = None
+
+    if copy_user_env:
+        # Should we copy the user's environment for the subprocess? Default is no
+        myenv = os.environ.copy()
+
+    # Example: ["dada_diskdb", "-k 1234", "-f 1216447872_02_256_201.sub -s"]
+    cmdline = _apply_numa_binding(command, numa_node)
+
+    logger.debug(f"Executing {cmdline}...")
+
+    # Parse the command into executable and args
+    args: str | list[str]
+    if use_shell:
+        #
+        # NOTE: using shell=true in subprocess.run requires a string.
+        # Passing a list won't work!
+        #
+        args = cmdline
+    else:
+        args = shlex.split(cmdline)
+
+    # Execute the command
+    popen_process = subprocess.Popen(
+        args,
+        shell=use_shell,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=myenv,
+    )
+    return popen_process
+
+
+def check_popen_finished(popen_process, timeout: int = 60) -> tuple[int, str, str]:
+    """Wait for a Popen process to finish and return its exit code and output.
+
+    Blocks until the process terminates or the timeout is exceeded. On timeout,
+    the process is killed and any partial output is captured. Handles exception
+    cases gracefully.
+
+    Args:
+        popen_process: A subprocess.Popen object to wait for.
+        timeout: Maximum time in seconds to wait. Defaults to 60.
+
+    Returns:
+        A tuple of (exit_code: int, stdout: str, stderr: str).
+    """
+    stdout = ""
+    stderr = ""
+    exit_code = -1
+
+    try:
+        stdout, stderr = popen_process.communicate(timeout=timeout)
+        exit_code = popen_process.returncode
+
+        if exit_code != 0:
+            logger.error(
+                f"Error executing {popen_process.args}. Return code: {exit_code} StdErr: {stderr} StdOut: {stdout}"
+            )
+
+    except subprocess.TimeoutExpired as timeout_expired:
+        popen_process.kill()
+        stdout, stderr = popen_process.communicate()
+        stderr = (stderr or "") + "\nTimeout expired"
+        logger.error(
+            f"Timeout expired executing {timeout_expired.cmd}. Partial stdout: {stdout} Partial stderr: {stderr}"
+        )
+
+    except Exception as command_exception:
+        logger.error(f"Exception executing {popen_process.args}: {command_exception!s}")
+
+    return (exit_code, stdout, stderr)

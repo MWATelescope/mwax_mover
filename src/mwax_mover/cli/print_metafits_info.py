@@ -10,6 +10,8 @@ import sys
 
 from mwalib import MetafitsContext
 
+from mwax_mover.constants import EXIT_FAILURE
+
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments.
@@ -84,7 +86,7 @@ def main() -> None:
         context = MetafitsContext(args.metafits_filename)
     except Exception as exc:
         print(f"Error opening metafits file: {exc}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EXIT_FAILURE)
 
     print(f"Metafits: {args.metafits_filename}")
 

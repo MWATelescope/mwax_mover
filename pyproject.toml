@@ -1,6 +1,10 @@
+[build-system]
+requires = ["uv_build>=0.12.11,<0.13.0"]
+build-backend = "uv_build"
+
 [project]
 name = "mwax_mover"
-version = "1.10.2"
+version = "2.0.0"
 description = "A module to manage input, archiving and calibration for the MWAX correlator"
 readme = "README.md"
 requires-python = ">=3.12, <3.15"
@@ -25,7 +29,8 @@ dependencies = [
     "flask",
     "inotify",
     "matplotlib",
-    "mwalib>=2.0.3",
+    "mwalib>=3.0.0",
+    "numpy",
     "pandas",
     "psycopg[binary]",
     "psycopg[pool]",
@@ -38,6 +43,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "mypy",
     "pre-commit",
     "pytest",
     "pytest-cov",
@@ -103,15 +109,48 @@ log_cli = true
 log_cli_level = "DEBUG"
 log_format = "%(asctime)s %(levelname)s %(name)s.%(funcName)s %(message)s"
 log_date_format = "%Y-%m-%d %H:%M:%S"
-# Our test modules are named testNNN_*.py, which does NOT match pytest's
-# default python_files patterns (test_*.py / *_test.py). Without this,
-# `pytest` collects zero tests and exits successfully.
-python_files = ["test*.py"]
 # Be more verbose and never truncate asserts. Deliberately no -x: a full run
 # should report every failure, not stop at the first. Pass -x on the command
 # line when iterating on a single failure.
 addopts = "-vv -m 'not integration'"
 testpaths = ["tests"]
+# Put tests/ on sys.path explicitly. Two reasons:
+#
+# 1. The test tree is a package (see tests/__init__.py), which is what allows
+#    two test modules in different subdirectories to share a basename -- e.g. a
+#    future tests/calibration/test_plots.py alongside tests/calvin/test_plots.py.
+#    Without the package, pytest's prepend import mode rejects the second one
+#    with "import file mismatch". But making it a package also stops the shared
+#    helpers being importable as top-level modules, because the repository root
+#    goes on sys.path instead of tests/. This restores that.
+# 2. It was previously implicit: tests/ landed on sys.path only as a side effect
+#    of pytest collecting tests/conftest.py. Stating it here means the helper
+#    imports do not silently depend on that file continuing to exist.
+pythonpath = ["tests"]
 markers = [
     "integration: requires network access or real external binaries (giant-squid, etc). Deselected by default; run with `pytest -m integration`.",
 ]
+
+[tool.ty.environment]
+# ty does not read pytest's `pythonpath`, so tests/ has to be declared here too
+# for the shared test helpers (tests_common, tests_fakedb) to resolve. Both
+# settings exist for the same reason: the test tree is a package, which puts the
+# repository root on the module search path instead of tests/. Keep the two in
+# step -- if one is changed, change the other.
+extra-paths = ["tests"]
+
+[tool.mypy]
+# Set this to your project's Python version (e.g., 3.10, 3.11, 3.12)
+python_version = "3.12"
+
+# Silences errors about external libraries that lack type hints
+ignore_missing_imports = true
+
+# Shows error codes in the output (e.g., [assignment]), making it easier to skip specific lines
+show_error_codes = true
+
+# Warns you if a configuration line isn't actually doing anything
+warn_unused_configs = true
+
+# Type-checks the body of functions even if they don't have return type hints
+check_untyped_defs = true

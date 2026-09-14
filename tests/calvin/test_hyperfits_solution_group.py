@@ -1,0 +1,1462 @@
+"""Tests for calvin.hyperfits_solution_group's HyperfitsSolutionGroup.
+
+Covers: load / combined_tile_flags / apply_tile_flags / enforce_whole_jones_nan
+/ weights / process_phase_fits / process_gain_fits_for_db. See
+tests/calvin/test_hyperfits_solution.py for HyperfitsSolution. Split out of
+this file's former single test_hyperdrive.py during the
+source_code_restructure.
+"""
+
+import io
+import os
+import shutil
+from typing import cast
+from unittest.mock import MagicMock, PropertyMock, patch
+
+import numpy as np
+import pandas as pd
+import pytest
+from astropy import units as u
+from astropy.io import fits
+from astropy.constants import c as speed_of_light  # ty: ignore[unresolved-import]
+
+from tests_common import data_path, obs_metafits_path
+
+from mwax_mover.calibration.df_columns import (
+    COL_CHI2DOF,
+    COL_LENGTH,
+    COL_POL,
+    COL_QUALITY,
+    COL_SIGMA_RESID,
+    COL_SOLN_IDX,
+    COL_TILE_ID,
+)
+from mwax_mover.calibration.models import Metafits
+from mwax_mover.calibration.outliers import reject_outliers
+from mwax_mover.calvin.hyperfits_solution import HyperfitsSolution
+from mwax_mover.calvin.hyperfits_solution_group import (
+    ChannelFlagReason,
+    HyperfitsSolutionGroup,
+    TileFlagReason,
+)
+
+# A real fixture whose filename parse_solution_channels() can parse -- same
+# file used by TestSharedHduHelpersAgreeAcrossCallers in test014.
+SOLUTIONS_PATH = data_path("1391522232", "1391522232_ch89_solutions.fits")
+METAFITS_PATH = obs_metafits_path(1391522232)
+
+
+# ===========================================================================
+# HyperfitsSolutionGroup.combined_tile_flags
+# ===========================================================================
+
+
+def test_bootstrap_refant_is_unflagged_lowest_id():
+    """_bootstrap_refant returns the lowest-ID tile not flagged by any of the three sources."""
+    metafits = Metafits(METAFITS_PATH)
+    group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+    refant = group._bootstrap_refant()
+    assert not group.combined_tile_flags[cast(int, refant.name)]  # .name is the DataFrame index here
+    candidate_ids = group.metafits_tiles_df["id"].to_numpy()
+    unflagged_ids = candidate_ids[~group.combined_tile_flags]
+    assert refant["id"] == unflagged_ids.min()
+
+
+def test_bootstrap_refant_excludes_baseline_only_flagged_tile():
+    """A tile flagged only via BASELINES inference (not metafits/TILES) is never chosen as refant."""
+    metafits = Metafits(METAFITS_PATH)
+    mock_soln = MagicMock(spec=HyperfitsSolution)
+    n_tiles = len(metafits.tiles_df)
+    type(mock_soln).tile_flags = PropertyMock(return_value=np.zeros(n_tiles, dtype=bool))
+    baseline_flags = np.zeros(n_tiles, dtype=bool)
+
+    real_group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+    lowest_unflagged_idx = np.where(~real_group.combined_tile_flags)[0][
+        np.argmin(real_group.metafits_tiles_df["id"].to_numpy()[~real_group.combined_tile_flags])
+    ]
+    baseline_flags[lowest_unflagged_idx] = True  # flag what would otherwise be chosen
+    type(mock_soln).baseline_tile_flags = PropertyMock(return_value=baseline_flags)
+
+    group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+    group.solns = [mock_soln]
+
+    assert group._bootstrap_refant().name != lowest_unflagged_idx
+
+
+def test_combined_tile_flags_matches_metafits_when_no_other_flags():
+    """With no TILES/BASELINES flags in this fixture, combined equals metafits alone."""
+    metafits = Metafits(METAFITS_PATH)
+    group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+
+    expected = metafits.tiles_df["flag"].to_numpy(dtype=bool)
+    assert np.array_equal(group.combined_tile_flags, expected)
+
+
+def test_combined_tile_flags_ors_in_tiles_hdu_flag():
+    """A TILES-HDU-only flag (not in metafits) is still caught by combined_tile_flags."""
+    metafits = Metafits(METAFITS_PATH)
+    mock_soln = MagicMock(spec=HyperfitsSolution)
+    n_tiles = len(metafits.tiles_df)
+    tiles_hdu_flags = np.zeros(n_tiles, dtype=bool)
+    tiles_hdu_flags[7] = True
+    type(mock_soln).tile_flags = PropertyMock(return_value=tiles_hdu_flags)
+    type(mock_soln).baseline_tile_flags = PropertyMock(return_value=np.zeros(n_tiles, dtype=bool))
+
+    group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+    group.solns = [mock_soln]
+
+    assert group.combined_tile_flags[7]
+
+
+def test_combined_tile_flags_ors_in_baseline_inferred_flag():
+    """A BASELINES-HDU-inferred-only flag is still caught by combined_tile_flags."""
+    metafits = Metafits(METAFITS_PATH)
+    mock_soln = MagicMock(spec=HyperfitsSolution)
+    n_tiles = len(metafits.tiles_df)
+    baseline_flags = np.zeros(n_tiles, dtype=bool)
+    baseline_flags[11] = True
+    type(mock_soln).tile_flags = PropertyMock(return_value=np.zeros(n_tiles, dtype=bool))
+    type(mock_soln).baseline_tile_flags = PropertyMock(return_value=baseline_flags)
+
+    group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+    group.solns = [mock_soln]
+
+    assert group.combined_tile_flags[11]
+
+
+# ===========================================================================
+# HyperfitsSolutionGroup.weights property
+# ===========================================================================
+
+
+def _make_mock_soln_group_with_results(results_array: np.ndarray):
+    """Build a minimal HyperfitsSolutionGroup-like object for weights tests.
+
+    Rather than constructing real FITS files we patch the results property
+    directly on a MagicMock that exposes only what weights() needs.
+    """
+    mock_group = MagicMock(spec=HyperfitsSolutionGroup)
+    # weights() accesses self.results and self.all_chanblocks_hz[0]
+    type(mock_group).results = PropertyMock(return_value=results_array.copy())
+    mock_group.all_chanblocks_hz = [np.linspace(138e6, 170e6, len(results_array))]
+    # Call the real weights property implementation bound to our mock
+    return HyperfitsSolutionGroup.weights.fget(mock_group)
+
+
+def test_weights_excludes_negative_results():
+    """Results < 0 should be treated as NaN and contribute zero weight."""
+    # Mix of good results and one negative (invalid) result
+    results = np.array([1e-5, 2e-5, 3e-5, -1.0, 5e-5])
+    weights = _make_mock_soln_group_with_results(results)
+    # The index corresponding to -1.0 (index 3) should be zero after nan_to_num
+    assert weights[3] == pytest.approx(0.0), f"Negative result should produce zero weight, got {weights[3]}"
+    # At least some other weights should be non-zero
+    assert np.any(weights > 0)
+
+
+def test_weights_excludes_large_results():
+    """Results > 1e-4 should be treated as NaN and contribute zero weight."""
+    results = np.array([1e-5, 2e-5, 3e-5, 1.0, 5e-5])  # index 3 is too large
+    weights = _make_mock_soln_group_with_results(results)
+    assert weights[3] == pytest.approx(0.0), f"Large result should produce zero weight, got {weights[3]}"
+    assert np.any(weights > 0)
+
+
+def test_weights_uniform_fallback():
+    """Missing RESULTS HDU (KeyError) should produce uniform weights of 1.0."""
+    mock_group = MagicMock(spec=HyperfitsSolutionGroup)
+    n_chans = 96
+    type(mock_group).results = PropertyMock(side_effect=KeyError("RESULTS"))
+    mock_group.all_chanblocks_hz = [np.linspace(138e6, 170e6, n_chans)]
+
+    weights = HyperfitsSolutionGroup.weights.fget(mock_group)
+
+    assert len(weights) == n_chans
+    assert np.all(weights == pytest.approx(1.0))
+
+
+def test_weights_uniform_fallback_spans_all_solution_files():
+    """Missing RESULTS HDU across a multi-file (picket fence) group.
+
+    Regression test: the fallback used to return an array sized from the FIRST
+    solution file's chanblocks only, so for a group of several files it was
+    silently shorter than the concatenated chanblock axis that callers index it
+    against.
+    """
+    mock_group = MagicMock(spec=HyperfitsSolutionGroup)
+    type(mock_group).results = PropertyMock(side_effect=KeyError("RESULTS"))
+    mock_group.all_chanblocks_hz = [
+        np.linspace(138e6, 140e6, 32),
+        np.linspace(150e6, 152e6, 32),
+        np.linspace(168e6, 170e6, 32),
+    ]
+
+    weights = HyperfitsSolutionGroup.weights.fget(mock_group)
+
+    assert len(weights) == 96, "weights must cover every file's chanblocks, not just the first"
+    assert np.all(weights == pytest.approx(1.0))
+
+
+# ===========================================================================
+# HyperfitsSolutionGroup.load
+# ===========================================================================
+
+
+def test_load_populates_jones_and_reason_arrays():
+    """load() populates jones (one array per file) and zeroed reason arrays."""
+    metafits = Metafits(METAFITS_PATH)
+    group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+    group.load()
+    assert group.jones is not None
+    assert group.tile_flag_reasons is not None
+    assert group.channel_flag_reasons is not None
+
+    assert len(group.jones) == 1
+    n_tiles, n_chanblocks = group.jones[0].shape[:2]
+    assert group.tile_flag_reasons.shape == (n_tiles,)
+    assert len(group.channel_flag_reasons) == 1
+    assert group.channel_flag_reasons[0].shape == (n_tiles, n_chanblocks)
+
+
+def test_load_marks_pre_existing_nan():
+    """A whole-Jones-NaN entry in the raw file is marked PRE_EXISTING_NAN at load time."""
+    metafits = Metafits(METAFITS_PATH)
+    hs = HyperfitsSolution(SOLUTIONS_PATH)
+    group = HyperfitsSolutionGroup(metafits, [hs])
+    group.load()
+    assert group.channel_flag_reasons is not None
+
+    raw_jones = hs.get_jones()
+    pre_existing = np.any(np.isnan(raw_jones), axis=(-2, -1))
+    if not pre_existing.any():
+        pytest.skip("fixture has no pre-existing NaN entries to check against")
+    assert np.all(group.channel_flag_reasons[0][pre_existing] & ChannelFlagReason.PRE_EXISTING_NAN)
+
+
+def test_methods_raise_before_load():
+    """Calling a jones-dependent method before load() raises a clear error."""
+    metafits = Metafits(METAFITS_PATH)
+    group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+    with pytest.raises(RuntimeError, match="load\\(\\)"):
+        group.apply_tile_flags()
+
+
+# ===========================================================================
+# HyperfitsSolutionGroup.apply_tile_flags / enforce_whole_jones_nan
+# ===========================================================================
+
+
+def test_apply_tile_flags_nans_out_flagged_tile_and_records_reason():
+    """A metafits-flagged tile gets fully NaN'd and tagged METAFITS."""
+    metafits = Metafits(METAFITS_PATH)
+    group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+    group.load()
+    assert group.jones is not None
+    assert group.tile_flag_reasons is not None
+
+    flagged_idx = np.where(group.metafits_tiles_df["flag"].to_numpy())[0]
+    if len(flagged_idx) == 0:
+        pytest.skip("fixture has no metafits-flagged tiles to check against")
+    idx = flagged_idx[0]
+
+    group.apply_tile_flags()
+
+    assert np.all(np.isnan(group.jones[0][idx]))
+    assert group.tile_flag_reasons[idx] & TileFlagReason.METAFITS
+
+
+def test_apply_tile_flags_leaves_unflagged_tile_untouched():
+    """A tile flagged nowhere keeps its original (non-NaN) data."""
+    metafits = Metafits(METAFITS_PATH)
+    group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+    group.load()
+    assert group.jones is not None
+    assert group.tile_flag_reasons is not None
+    unflagged_idx = np.where(~group.combined_tile_flags)[0]
+    assert len(unflagged_idx) > 0
+    idx = unflagged_idx[0]
+    original = group.jones[0][idx].copy()
+
+    group.apply_tile_flags()
+
+    assert np.array_equal(group.jones[0][idx], original, equal_nan=True)
+    assert group.tile_flag_reasons[idx] == TileFlagReason.NONE
+
+
+def test_enforce_whole_jones_nan_promotes_partial_entry():
+    """An entry with only one Jones term NaN gets promoted to fully NaN and tagged."""
+    metafits = Metafits(METAFITS_PATH)
+    group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+    group.load()
+    assert group.jones is not None
+    assert group.channel_flag_reasons is not None
+
+    # Pick an entry that starts fully finite, then corrupt just one term.
+    finite_mask = ~np.any(np.isnan(group.jones[0]), axis=(-2, -1))
+    finite_tiles, finite_chans = np.where(finite_mask)
+    tile_idx, chan_idx = int(finite_tiles[0]), int(finite_chans[0])
+    group.jones[0][tile_idx, chan_idx, 0, 1] = np.nan + 1j * np.nan  # Dx only
+
+    group.enforce_whole_jones_nan()
+
+    assert np.all(np.isnan(group.jones[0][tile_idx, chan_idx]))
+    assert group.channel_flag_reasons[0][tile_idx, chan_idx] & ChannelFlagReason.PARTIAL_JONES
+
+
+def test_enforce_whole_jones_nan_leaves_fully_finite_entry_untouched():
+    """An entry with no NaN terms at all is not marked or modified."""
+    metafits = Metafits(METAFITS_PATH)
+    group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+    group.load()
+    assert group.jones is not None
+    assert group.channel_flag_reasons is not None
+    finite_mask = ~np.any(np.isnan(group.jones[0]), axis=(-2, -1))
+    finite_tiles, finite_chans = np.where(finite_mask)
+    tile_idx, chan_idx = int(finite_tiles[0]), int(finite_chans[0])
+    original = group.jones[0][tile_idx, chan_idx].copy()
+
+    group.enforce_whole_jones_nan()
+
+    assert np.array_equal(group.jones[0][tile_idx, chan_idx], original)
+    assert group.channel_flag_reasons[0][tile_idx, chan_idx] == ChannelFlagReason.NONE
+
+
+# ===========================================================================
+# HyperfitsSolutionGroup.process_phase_fits / process_gain_fits_for_db
+# ===========================================================================
+
+_FIT_N_CHANBLOCKS = 96
+_FIT_CHANBLOCKS_PER_COARSE = 4
+
+_EXPECTED_PHASE_COLS = {
+    "tile_id",
+    "soln_idx",
+    "pol",
+    "length",
+    "intercept",
+    "sigma_resid",
+    "chi2dof",
+    "quality",
+    "stderr",
+}
+_EXPECTED_GAIN_COLS = {
+    "tile_id",
+    "soln_idx",
+    "pol",
+    "quality",
+    "gains",
+    "pol0",
+    "pol1",
+    "sigma_resid",
+}
+
+
+def _make_phase_ramp(freqs_hz: np.ndarray, length_m: float, intercept_rad: float) -> np.ndarray:
+    """Construct a complex array representing a pure phase ramp.
+
+    Duplicated from test014_calvin_utils.py's helper of the same name,
+    rather than imported across test files.
+    """
+    slope = (2 * np.pi * u.rad * (length_m * u.m) / speed_of_light).to(u.rad / u.Hz).value
+    phase = slope * freqs_hz + intercept_rad
+    return np.exp(1j * phase)
+
+
+def _make_fake_group(n_tiles, n_chanblocks, flagged_ids=None, xx_length_m=5.0, yy_length_m=7.0, flavors=None):
+    """Build a minimal HyperfitsSolutionGroup for process_phase_fits/process_gain_fits_for_db tests.
+
+    Bypasses __init__/load() (no real FITS files); sets exactly the
+    attributes those methods and their dependencies (get_solns_both,
+    combined_tile_flags, _find_ref_tile_idx) need.
+
+    Tile ID 1 (index 0) is always the reference tile and is given an
+    identity Jones matrix (gx=gy=1, Dx=Dy=0), so get_solns_both's
+    reference normalisation is a mathematical no-op and the synthetic
+    ramps given to other tiles pass through get_solns_both unchanged --
+    this is what lets these tests construct "already reference-normalised"
+    data directly, matching how the pre-refactor tests fed such arrays
+    straight into the (now-removed) free process_phase_fits/
+    process_gain_fits_for_db functions.
+
+    Args:
+        flavors: Optional per-tile receiver flavour, as a list of length
+            n_tiles (index 0 = tile ID 1). Defaults to "RRI" for every
+            tile, matching every test written before flavour-scoped
+            outlier rejection existed.
+    """
+    if flagged_ids is None:
+        flagged_ids = []
+    if flavors is None:
+        flavors = ["RRI"] * n_tiles
+    group = HyperfitsSolutionGroup.__new__(HyperfitsSolutionGroup)
+    tile_ids = np.arange(1, n_tiles + 1)
+    group.metafits_tiles_df = pd.DataFrame(
+        {
+            "name": [f"Tile{i:03d}" for i in tile_ids],
+            "id": tile_ids,
+            "flag": [i in flagged_ids for i in tile_ids],
+            "rx": [(i - 1) // 8 + 1 for i in tile_ids],
+            "slot": [(i - 1) % 8 + 1 for i in tile_ids],
+            "flavor": flavors,
+        }
+    )
+    group.solns = []  # combined_tile_flags then reduces to just the metafits flag column
+
+    freqs = np.linspace(140e6, 170e6, n_chanblocks).astype(np.int_)
+    xx_ramp = _make_phase_ramp(freqs, xx_length_m, intercept_rad=0.3)
+    yy_ramp = _make_phase_ramp(freqs, yy_length_m, intercept_rad=0.3)
+
+    jones = np.zeros((n_tiles, n_chanblocks, 2, 2), dtype=np.complex128)
+    jones[:, :, 0, 0] = xx_ramp
+    jones[:, :, 1, 1] = yy_ramp
+    jones[0, :, 0, 0] = 1.0 + 0j  # reference tile: identity Jones
+    jones[0, :, 1, 1] = 1.0 + 0j
+
+    group.jones = [jones]
+    group.all_chanblocks_hz = [freqs]
+    group.chanblocks_per_coarse = _FIT_CHANBLOCKS_PER_COARSE
+
+    return group
+
+
+def _patched_uniform_weights(n_chanblocks):
+    """Context manager patching HyperfitsSolutionGroup.weights to return all-1.0.
+
+    process_phase_fits/process_gain_fits_for_db read self.weights internally;
+    the fake group above has no real solns to derive it from, so this
+    patches the property directly for the duration of a test.
+    """
+    return patch.object(
+        HyperfitsSolutionGroup,
+        "weights",
+        new_callable=PropertyMock,
+        return_value=np.ones(n_chanblocks),
+    )
+
+
+def test_process_phase_fits_returns_dataframe_with_correct_columns():
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[3])
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        result = group.process_phase_fits(refant_name="Tile001", phase_fit_niter=1)
+    assert isinstance(result, pd.DataFrame)
+    assert _EXPECTED_PHASE_COLS.issubset(set(result.columns))
+
+
+def test_process_phase_fits_skips_flagged_tile():
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[3])
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        result = group.process_phase_fits(refant_name="Tile001", phase_fit_niter=1)
+    assert 3 not in result["tile_id"].values
+
+
+def test_process_phase_fits_has_xx_and_yy_rows():
+    """2 unflagged tiles (1 and 2) x 2 pols = 4 rows."""
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[3])
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        result = group.process_phase_fits(refant_name="Tile001", phase_fit_niter=1)
+    assert len(result) == 4
+    assert set(result["pol"].unique()) == {"XX", "YY"}
+
+
+def test_process_phase_fits_bad_solution_skipped_not_raised():
+    """A tile with all-NaN solutions should be skipped; others should still appear."""
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    # Corrupt tile ID 2 (index 1, not the reference tile) with NaN.
+    group.jones[0][1, :, :, :] = np.nan + 1j * np.nan
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        result = group.process_phase_fits(refant_name="Tile001", phase_fit_niter=1)
+    assert 2 not in result["tile_id"].values
+    assert 1 in result["tile_id"].values
+    assert 3 in result["tile_id"].values
+
+
+def test_process_phase_fits_bad_solution_warning_includes_tile_name(caplog):
+    """The skip warning for a failed fit must name the tile, not its DataFrame index label.
+
+    Regression test for the `name = tile.name` bug (pandas Series.name is the
+    index label, not the "name" column) -- see docs/CLEANUP.md 1.1. Tile ID 2
+    sits at DataFrame index label 1 here, deliberately different from its
+    "name" value "Tile002", so the test can't pass vacuously.
+    """
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    # Corrupt tile ID 2 (index label 1, not the reference tile) with NaN so
+    # fit_phase_line raises and the except-branch warning fires.
+    group.jones[0][1, :, :, :] = np.nan + 1j * np.nan
+
+    tile_row = group.metafits_tiles_df.loc[group.metafits_tiles_df["id"] == 2].iloc[0]
+    assert tile_row.name != tile_row["name"], (
+        "fixture invariant: the index label must differ from the tile name, "
+        "or this test would pass even with the bug present"
+    )
+
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        group.process_phase_fits(refant_name="Tile001", phase_fit_niter=1)
+
+    assert "Tile002" in caplog.text
+
+
+def test_process_gain_fits_for_db_returns_dataframe_with_correct_columns():
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[3])
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        result = group.process_gain_fits_for_db(refant_name="Tile001")
+    assert isinstance(result, pd.DataFrame)
+    assert _EXPECTED_GAIN_COLS.issubset(set(result.columns))
+
+
+def test_process_gain_fits_for_db_skips_flagged_tile():
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[3])
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        result = group.process_gain_fits_for_db(refant_name="Tile001")
+    assert 3 not in result["tile_id"].values
+
+
+def test_process_gain_fits_for_db_has_xx_and_yy_rows():
+    """2 unflagged tiles (1 and 2) x 2 pols = 4 rows."""
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[3])
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        result = group.process_gain_fits_for_db(refant_name="Tile001")
+    assert len(result) == 4
+    assert set(result["pol"].unique()) == {"XX", "YY"}
+
+
+def test_process_gain_fits_for_db_gains_list_length():
+    """Each row's gains list should have length == n_coarse."""
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[3])
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        result = group.process_gain_fits_for_db(refant_name="Tile001")
+    n_coarse = _FIT_N_CHANBLOCKS // _FIT_CHANBLOCKS_PER_COARSE
+    for gains in result["gains"]:
+        assert len(gains) == n_coarse
+
+
+# ===========================================================================
+# HyperfitsSolutionGroup.flag_gain_max_cutoff
+# ===========================================================================
+
+
+def test_flag_gain_max_cutoff_flags_whole_jones_when_gy_exceeds_cutoff():
+    """A channel whose gy amplitude exceeds the cutoff gets its whole
+    Jones (gx included, even though gx itself is fine) NaN'd and tagged.
+
+    Mirrors the real failure mode this was reinstated for: one
+    polarisation's calibration solve diverges to a spurious value while
+    the other stays sane -- both must be discarded together, matching
+    every other whole-Jones flag in this pipeline (a Jones matrix with
+    only one sane polarisation isn't meaningfully usable).
+    """
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.channel_flag_reasons = [np.full((3, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+
+    diverged_chan = 5
+    group.jones[0][1, diverged_chan, 1, 1] = 1e10 + 0j  # gy diverged; gx (index [...,0,0]) left alone
+
+    group.flag_gain_max_cutoff(gain_max_cutoff=100.0)
+
+    assert np.isnan(group.jones[0][1, diverged_chan, 0, 0])  # gx NaN'd too
+    assert np.isnan(group.jones[0][1, diverged_chan, 1, 1])
+    assert group.channel_flag_reasons[0][1, diverged_chan] & ChannelFlagReason.GAIN_MAX_CUTOFF
+    # An unaffected channel on the same tile is untouched.
+    assert not np.isnan(group.jones[0][1, 0, 0, 0])
+    assert group.channel_flag_reasons[0][1, 0] == ChannelFlagReason.NONE
+
+
+def test_flag_gain_max_cutoff_catches_uniformly_diverged_tile():
+    """A tile whose entire trace sits far above the cutoff gets every
+    channel flagged -- the exact scenario flag_amplitude_outliers cannot
+    catch (its per-tile fit would otherwise adapt to the enormous
+    baseline). Confirms the fix actually addresses that failure mode,
+    not just an isolated spike.
+    """
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.channel_flag_reasons = [np.full((3, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+
+    rng = np.random.default_rng(11)
+    diverged = 2e10 * (1.0 + rng.normal(scale=0.05, size=_FIT_N_CHANBLOCKS))
+    group.jones[0][1, :, 1, 1] = diverged
+
+    group.flag_gain_max_cutoff(gain_max_cutoff=100.0)
+
+    assert np.all(np.isnan(group.jones[0][1]))
+    assert np.all(group.channel_flag_reasons[0][1] & ChannelFlagReason.GAIN_MAX_CUTOFF)
+
+
+def test_flag_gain_max_cutoff_leaves_normal_tile_untouched():
+    """A tile with ordinary gain amplitudes is not modified or flagged."""
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.channel_flag_reasons = [np.full((3, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+    original = group.jones[0][1].copy()
+
+    group.flag_gain_max_cutoff(gain_max_cutoff=100.0)
+
+    assert np.array_equal(group.jones[0][1], original, equal_nan=True)
+    assert np.all(group.channel_flag_reasons[0][1] == ChannelFlagReason.NONE)
+
+
+def test_flag_gain_max_cutoff_none_disables_check():
+    """gain_max_cutoff=None skips the check entirely, matching the
+    historical 'gains cut off/clipping disabled' config behaviour."""
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.channel_flag_reasons = [np.full((3, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+    group.jones[0][1, 5, 1, 1] = 1e10 + 0j
+
+    group.flag_gain_max_cutoff(gain_max_cutoff=None)
+
+    assert not np.isnan(group.jones[0][1, 5, 1, 1])
+    assert group.channel_flag_reasons[0][1, 5] == ChannelFlagReason.NONE
+
+
+def test_flag_gain_max_cutoff_does_not_affect_already_nan_entries():
+    """A pre-existing NaN entry is left alone (NaN comparisons are always
+    False, so it can't spuriously be marked GAIN_MAX_CUTOFF too)."""
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    channel_reasons = np.full((3, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)
+    channel_reasons[1, 5] = ChannelFlagReason.PRE_EXISTING_NAN
+    group.channel_flag_reasons = [channel_reasons]
+    group.jones[0][1, 5, :, :] = np.nan + 1j * np.nan
+
+    group.flag_gain_max_cutoff(gain_max_cutoff=100.0)
+
+    assert group.channel_flag_reasons[0][1, 5] == ChannelFlagReason.PRE_EXISTING_NAN
+    assert not (group.channel_flag_reasons[0][1, 5] & ChannelFlagReason.GAIN_MAX_CUTOFF)
+
+
+# ===========================================================================
+# HyperfitsSolutionGroup.flag_amplitude_outliers
+# ===========================================================================
+
+
+def test_flag_amplitude_outliers_catches_injected_spike():
+    """A single-channel amplitude spike on one tile gets NaN'd and tagged."""
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.channel_flag_reasons = [np.full((3, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+
+    # _make_fake_group's ramp has unit amplitude everywhere (zero intrinsic
+    # scatter), which is unrealistically clean: it drives the MAD in
+    # iterative_poly_clip_batch to near-zero, amplifying ordinary
+    # floating-point noise into spurious "outliers" elsewhere. Real gain
+    # data always has some scatter, so add a small amount here to avoid
+    # that degenerate case.
+    rng = np.random.default_rng(7)
+    noise = 1.0 + rng.normal(scale=0.01, size=_FIT_N_CHANBLOCKS)
+    group.jones[0][1, :, 0, 0] *= noise
+    group.jones[0][1, :, 1, 1] *= noise
+
+    spike_chan = 10
+    group.jones[0][1, spike_chan, 0, 0] = 1000.0 + 0j  # huge gx spike, tile index 1
+
+    group.flag_amplitude_outliers(poly_degree=2, mad_residual_threshold=5.0)
+
+    assert np.isnan(group.jones[0][1, spike_chan, 0, 0])
+    assert group.channel_flag_reasons[0][1, spike_chan] & ChannelFlagReason.AMPLITUDE_OUTLIER
+    # An unaffected channel on the same tile is untouched.
+    assert not np.isnan(group.jones[0][1, 0, 0, 0])
+    assert group.channel_flag_reasons[0][1, 0] == ChannelFlagReason.NONE
+
+
+def test_flag_amplitude_outliers_leaves_clean_tile_untouched():
+    """A tile with no injected outlier is not modified or flagged."""
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.channel_flag_reasons = [np.full((3, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+    original = group.jones[0][2].copy()  # tile index 2, no corruption injected
+
+    group.flag_amplitude_outliers(poly_degree=2, mad_residual_threshold=5.0)
+
+    assert np.array_equal(group.jones[0][2], original, equal_nan=True)
+    assert np.all(group.channel_flag_reasons[0][2] == ChannelFlagReason.NONE)
+
+
+def test_flag_amplitude_outliers_stores_fit_and_band():
+    """amplitude_fit/amplitude_band are populated, one dict per file."""
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.channel_flag_reasons = [np.full((3, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+
+    group.flag_amplitude_outliers(poly_degree=2, mad_residual_threshold=5.0)
+
+    assert len(group.amplitude_fit) == 1
+    assert set(group.amplitude_fit[0].keys()) == {"gx", "gy"}
+    assert group.amplitude_fit[0]["gx"].shape == (3, _FIT_N_CHANBLOCKS)
+    assert len(group.amplitude_band) == 1
+    assert set(group.amplitude_band[0].keys()) == {"gx", "gy"}
+
+
+# ===========================================================================
+# HyperfitsSolutionGroup.detect_phase_outliers
+# ===========================================================================
+
+
+def test_detect_phase_outliers_catches_noisy_tile_but_does_not_flag_it():
+    """A tile with pure noise (no coherent phase ramp) is reported as a
+    population outlier, but is neither flagged nor NaN'd.
+
+    Regression test for the permanent policy change: detect_phase_outliers
+    (formerly flag_phase_outliers) now only reports population-outlier
+    phase fits -- it must never touch tile_flag_reasons or self.jones.
+    Researchers wanted this status visible in stats.txt/plots without the
+    underlying calibration solution being modified.
+
+    Uses 10 tiles rather than a handful: with too few "good" tiles, a
+    single severe outlier can inflate its own population mean/std enough
+    to dodge the threshold (self-referential inflation) -- confirmed this
+    is purely a small-N artifact of the test, not a real limitation for
+    actual observations (128-256 tiles), by checking empirically that the
+    same injected outlier is reliably caught at n_tiles=10 and n_tiles=20
+    but not at n_tiles=5.
+
+    Also adds small phase noise to the "good" tiles: _make_fake_group's
+    ramp fits almost perfectly (chi2dof ~1e-11), which is unrealistically
+    clean and lets population statistics be dominated by floating-point
+    noise rather than genuine quality differences -- confirmed empirically
+    that this let a good tile randomly cross the threshold before adding
+    this noise. Real gain/phase data always has some residual scatter.
+    """
+    n_tiles = 10
+    group = _make_fake_group(n_tiles=n_tiles, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.tile_flag_reasons = np.full(n_tiles, TileFlagReason.NONE, dtype=object)
+
+    rng = np.random.default_rng(1)
+    for i in range(1, n_tiles - 1):  # good tiles: everyone except the ref (0) and the noisy one (last)
+        phase_noise = rng.normal(scale=0.02, size=_FIT_N_CHANBLOCKS)
+        group.jones[0][i, :, 0, 0] *= np.exp(1j * phase_noise)
+        group.jones[0][i, :, 1, 1] *= np.exp(1j * phase_noise)
+
+    noisy = rng.normal(size=_FIT_N_CHANBLOCKS) + 1j * rng.normal(size=_FIT_N_CHANBLOCKS)
+    group.jones[0][-1, :, 0, 0] = noisy  # last tile: incoherent gx
+    group.jones[0][-1, :, 1, 1] = noisy  # incoherent gy too
+    before_jones = group.jones[0][-1].copy()
+
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        group.detect_phase_outliers(refant_name="Tile001", phase_fit_niter=1, nstd=2.0)
+
+    # Reported as an outlier in self.phase_fits (tile_id = index + 1)...
+    noisy_tile_id = n_tiles
+    outlier_rows = group.phase_fits.loc[group.phase_fits["tile_id"] == noisy_tile_id, "outlier"]
+    assert outlier_rows.any(), "expected the incoherent tile to be reported as a phase outlier"
+
+    # ...but NOT flagged or modified: no TileFlagReason bit set, no NaN'ing.
+    assert group.tile_flag_reasons[-1] == TileFlagReason.NONE
+    np.testing.assert_array_equal(group.jones[0][-1], before_jones)
+
+    # A tile with a clean ramp (index 1) is untouched either way.
+    assert group.tile_flag_reasons[1] == TileFlagReason.NONE
+    assert not np.any(np.isnan(group.jones[0][1]))
+
+
+def test_detect_phase_outliers_flavor_scoping_avoids_cross_flavor_false_positive():
+    """A tile that's normal for its own flavour isn't reported as an outlier
+    just because another flavour is tighter.
+
+    Regression/feature test for flavour-scoped outlier detection: builds a
+    group with a large, very tight-fitting "SHAO" population and a
+    smaller, moderately-noisier-but-internally-consistent "RRI"
+    population -- mirroring the real observation this was based on,
+    where SHAO's tight, numerically-dominant population would otherwise
+    set a pooled threshold too strict for RRI's naturally wider spread.
+
+    Confirms two things against the same data:
+      1. detect_phase_outliers (flavour-scoped) does NOT report the RRI
+         tiles as outliers -- they're unremarkable within their own
+         flavour's population -- and (per the permanent policy change)
+         never touches tile_flag_reasons/self.jones regardless.
+      2. The old pol-only pooled reject_outliers call (group_cols=("pol",),
+         the default) WOULD have flagged them -- confirming this is a
+         real behavioural difference, not a vacuous test.
+    """
+    n_tiles = 20
+    # Index 0 = reference tile (always). Indices 1-14 (14 tiles) = a
+    # tight-fitting "SHAO" population. Indices 15-19 (5 tiles) = a
+    # moderately-noisier-but-consistent "RRI" population -- normal for
+    # RRI, but well outside SHAO's tight spread.
+    flavors = ["SHAO"] * n_tiles
+    for i in range(15, n_tiles):
+        flavors[i] = "RRI"
+
+    group = _make_fake_group(n_tiles=n_tiles, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[], flavors=flavors)
+    group.tile_flag_reasons = np.full(n_tiles, TileFlagReason.NONE, dtype=object)
+
+    rng = np.random.default_rng(2)
+    for i in range(1, 15):  # SHAO: very tight
+        phase_noise = rng.normal(scale=0.005, size=_FIT_N_CHANBLOCKS)
+        group.jones[0][i, :, 0, 0] *= np.exp(1j * phase_noise)
+        group.jones[0][i, :, 1, 1] *= np.exp(1j * phase_noise)
+    for i in range(15, n_tiles):  # RRI: moderately noisier, but consistent amongst themselves
+        phase_noise = rng.normal(scale=0.05, size=_FIT_N_CHANBLOCKS)
+        group.jones[0][i, :, 0, 0] *= np.exp(1j * phase_noise)
+        group.jones[0][i, :, 1, 1] *= np.exp(1j * phase_noise)
+
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        # 1. Flavour-scoped (actual production behaviour): RRI tiles
+        # should not be reported as outliers.
+        group.detect_phase_outliers(refant_name="Tile001", phase_fit_niter=1, nstd=3.0)
+
+        # 2. For comparison, the old pol-only pooled call on a fresh
+        # (unflagged) copy of the same phase fits data.
+        pooled_phase_fits = group.process_phase_fits(refant_name="Tile001", phase_fit_niter=1)
+
+    pooled_phase_fits = reject_outliers(pooled_phase_fits, "chi2dof", nstd=3.0)
+    pooled_phase_fits = reject_outliers(pooled_phase_fits, "sigma_resid", nstd=3.0)
+    rri_tile_ids = {i + 1 for i in range(15, n_tiles)}
+    pooled_rri_outliers = set(
+        pooled_phase_fits.loc[pooled_phase_fits["outlier"] & pooled_phase_fits["tile_id"].isin(rri_tile_ids), "tile_id"]
+    )
+    assert pooled_rri_outliers, (
+        "expected the pol-only pooled threshold to flag at least one RRI tile "
+        "as a false positive -- if not, this test no longer demonstrates a "
+        "real behavioural difference and should be revisited"
+    )
+
+    flavor_scoped_rri_outliers = group.phase_fits.loc[
+        group.phase_fits["tile_id"].isin(rri_tile_ids) & group.phase_fits["outlier"]
+    ]
+    assert flavor_scoped_rri_outliers.empty, "flavour-scoped detection should not report any RRI tile as an outlier"
+
+    # detect_phase_outliers never flags or modifies anything, regardless
+    # of outlier status -- confirmed for these RRI tiles specifically,
+    # even though they're the ones a pooled threshold would have caught.
+    for i in range(15, n_tiles):
+        assert group.tile_flag_reasons[i] == TileFlagReason.NONE
+        assert not np.any(np.isnan(group.jones[0][i]))
+
+
+def test_detect_phase_outliers_never_flags_or_modifies_jones():
+    """detect_phase_outliers never sets a TileFlagReason bit or NaNs jones,
+    even for a tile whose phase fit is an extreme, unambiguous outlier.
+
+    Direct regression test for the permanent policy change (formerly
+    flag_phase_outliers's whole point was to do exactly this) -- kept as
+    its own minimal test, separate from the noisy-tile test above, so a
+    future change to that test's construction can't accidentally stop
+    covering this guarantee.
+    """
+    n_tiles = 10
+    group = _make_fake_group(n_tiles=n_tiles, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.tile_flag_reasons = np.full(n_tiles, TileFlagReason.NONE, dtype=object)
+
+    rng = np.random.default_rng(3)
+    for i in range(1, n_tiles - 1):
+        phase_noise = rng.normal(scale=0.02, size=_FIT_N_CHANBLOCKS)
+        group.jones[0][i, :, 0, 0] *= np.exp(1j * phase_noise)
+        group.jones[0][i, :, 1, 1] *= np.exp(1j * phase_noise)
+    noisy = rng.normal(size=_FIT_N_CHANBLOCKS) + 1j * rng.normal(size=_FIT_N_CHANBLOCKS)
+    group.jones[0][-1, :, 0, 0] = noisy
+    group.jones[0][-1, :, 1, 1] = noisy
+    before_all_jones = [j.copy() for j in group.jones]
+    before_tile_flag_reasons = group.tile_flag_reasons.copy()
+
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        group.detect_phase_outliers(refant_name="Tile001", phase_fit_niter=1, nstd=2.0)
+
+    np.testing.assert_array_equal(before_tile_flag_reasons, group.tile_flag_reasons)
+    for before_file_jones, after_file_jones in zip(before_all_jones, group.jones, strict=True):
+        assert np.array_equal(before_file_jones, after_file_jones, equal_nan=True)
+
+
+def test_detect_phase_outliers_stores_phase_fits():
+    """phase_fits is populated with an 'outlier' column after the call."""
+    group = _make_fake_group(n_tiles=3, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.tile_flag_reasons = np.full(3, TileFlagReason.NONE, dtype=object)
+
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        group.detect_phase_outliers(refant_name="Tile001", phase_fit_niter=1, nstd=3.0)
+
+    assert group.phase_fits is not None
+    assert "outlier" in group.phase_fits.columns
+
+
+# ===========================================================================
+# HyperfitsSolutionGroup.flag_mostly_bad_tiles
+# ===========================================================================
+
+
+def test_flag_mostly_bad_tiles_promotes_when_threshold_exceeded():
+    """A tile with >= threshold fraction of bad channels is promoted to fully flagged."""
+    group = _make_fake_group(n_tiles=3, n_chanblocks=10, flagged_ids=[])
+    group.tile_flag_reasons = np.full(3, TileFlagReason.NONE, dtype=object)
+    reasons = np.full((3, 10), ChannelFlagReason.NONE, dtype=object)
+    reasons[1, :6] = ChannelFlagReason.NON_CONVERGED  # 6/10 = 60%, tile index 1
+    group.channel_flag_reasons = [reasons]
+
+    group.flag_mostly_bad_tiles(threshold=0.5)
+
+    assert group.tile_flag_reasons[1] & TileFlagReason.MOSTLY_BAD_CHANNELS
+    assert np.all(np.isnan(group.jones[0][1]))
+    assert group.tile_flag_reasons[0] == TileFlagReason.NONE
+
+
+def test_flag_mostly_bad_tiles_leaves_below_threshold_tile_untouched():
+    """A tile below the threshold fraction is left as partially flagged."""
+    group = _make_fake_group(n_tiles=3, n_chanblocks=10, flagged_ids=[])
+    group.tile_flag_reasons = np.full(3, TileFlagReason.NONE, dtype=object)
+    reasons = np.full((3, 10), ChannelFlagReason.NONE, dtype=object)
+    reasons[1, :4] = ChannelFlagReason.NON_CONVERGED  # 4/10 = 40%, below threshold
+    group.channel_flag_reasons = [reasons]
+    original = group.jones[0][1].copy()
+
+    group.flag_mostly_bad_tiles(threshold=0.5)
+
+    assert group.tile_flag_reasons[1] == TileFlagReason.NONE
+    assert np.array_equal(group.jones[0][1], original, equal_nan=True)
+
+
+def test_flag_mostly_bad_tiles_skips_already_tile_flagged():
+    """A tile already tile-flagged for another reason is not double-processed."""
+    group = _make_fake_group(n_tiles=3, n_chanblocks=10, flagged_ids=[])
+    group.tile_flag_reasons = np.full(3, TileFlagReason.NONE, dtype=object)
+    group.tile_flag_reasons[1] = TileFlagReason.METAFITS
+    reasons = np.full((3, 10), ChannelFlagReason.NONE, dtype=object)
+    reasons[1, :6] = ChannelFlagReason.NON_CONVERGED
+    group.channel_flag_reasons = [reasons]
+
+    group.flag_mostly_bad_tiles(threshold=0.5)
+
+    # Still just METAFITS -- MOSTLY_BAD_CHANNELS was not additionally OR'd in.
+    assert group.tile_flag_reasons[1] == TileFlagReason.METAFITS
+
+
+# ===========================================================================
+# HyperfitsSolutionGroup.run_flagging_pipeline
+# ===========================================================================
+
+
+def test_run_flagging_pipeline_gain_max_cutoff_runs_before_other_stages():
+    """A uniformly-diverged tile (gain_max_cutoff's target failure mode)
+    is cut off early enough to be promoted to MOSTLY_BAD_CHANNELS by the
+    ordinary bad-channel-fraction mechanism, and is never marked a phase
+    outlier -- confirming flag_gain_max_cutoff really does run before
+    detect_phase_outliers and flag_amplitude_outliers, not just that it
+    works in isolation (see the dedicated flag_gain_max_cutoff tests for
+    that).
+    """
+    n_tiles = 10
+    group = _make_fake_group(n_tiles=n_tiles, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.tile_flag_reasons = np.full(n_tiles, TileFlagReason.NONE, dtype=object)
+    group.channel_flag_reasons = [np.full((n_tiles, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+
+    rng = np.random.default_rng(13)
+    for i in range(1, n_tiles - 1):  # ordinary tiles, small phase noise
+        phase_noise = rng.normal(scale=0.02, size=_FIT_N_CHANBLOCKS)
+        group.jones[0][i, :, 0, 0] *= np.exp(1j * phase_noise)
+        group.jones[0][i, :, 1, 1] *= np.exp(1j * phase_noise)
+
+    # Last tile: uniformly diverged gy, like the real observation this
+    # was reinstated for (gain amplitudes ~1e10, not just a few spikes).
+    diverged = 2e10 * (1.0 + rng.normal(scale=0.05, size=_FIT_N_CHANBLOCKS))
+    group.jones[0][-1, :, 1, 1] = diverged
+
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        group.run_flagging_pipeline(
+            refant_name="Tile001",
+            phase_fit_niter=1,
+            phase_outlier_nstd=2.0,
+            gain_max_cutoff=100.0,
+        )
+
+    assert group.tile_flag_reasons[-1] & TileFlagReason.MOSTLY_BAD_CHANNELS
+    assert not (group.tile_flag_reasons[-1] & TileFlagReason.PHASE_OUTLIER)
+    assert np.all(np.isnan(group.jones[0][-1]))
+    assert np.any(group.channel_flag_reasons[0][-1] & ChannelFlagReason.GAIN_MAX_CUTOFF)
+
+    # An ordinary tile is untouched.
+    assert group.tile_flag_reasons[1] == TileFlagReason.NONE
+    assert not np.any(np.isnan(group.jones[0][1]))
+
+
+def test_run_flagging_pipeline_gain_max_cutoff_none_preserves_prior_behaviour():
+    """Passing gain_max_cutoff=None to run_flagging_pipeline disables the
+    check, matching behaviour before it was reinstated."""
+    n_tiles = 5
+    group = _make_fake_group(n_tiles=n_tiles, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.tile_flag_reasons = np.full(n_tiles, TileFlagReason.NONE, dtype=object)
+    group.channel_flag_reasons = [np.full((n_tiles, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+    group.jones[0][1, 5, 1, 1] = 1e10 + 0j
+
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        group.run_flagging_pipeline(
+            refant_name="Tile001",
+            phase_fit_niter=1,
+            gain_max_cutoff=None,
+        )
+
+    assert not (group.tile_flag_reasons[1] & TileFlagReason.MOSTLY_BAD_CHANNELS)
+    assert not np.any([reasons[1, 5] & ChannelFlagReason.GAIN_MAX_CUTOFF for reasons in group.channel_flag_reasons])
+
+
+def test_run_flagging_pipeline_detect_phase_outliers_runs_last():
+    """detect_phase_outliers runs after flag_amplitude_outliers and
+    flag_mostly_bad_tiles, not third -- confirmed by call order, not just
+    by checking the end result (which can't distinguish the two orderings
+    on its own, since detect_phase_outliers never affects flagging either
+    way). This ordering is what lets group.phase_fits end up equal to the
+    truly final state, which write_before_after_stats/write_debug_phase_fit_plots
+    then reuse instead of recomputing (see the dedicated test for that).
+    """
+    n_tiles = 5
+    group = _make_fake_group(n_tiles=n_tiles, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.tile_flag_reasons = np.full(n_tiles, TileFlagReason.NONE, dtype=object)
+    group.channel_flag_reasons = [np.full((n_tiles, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+
+    call_order = []
+    method_names = ("flag_gain_max_cutoff", "flag_amplitude_outliers", "flag_mostly_bad_tiles", "detect_phase_outliers")
+    originals = {name: getattr(HyperfitsSolutionGroup, name) for name in method_names}
+
+    def make_recorder(name, fn):
+        def recorder(self, *args, **kwargs):
+            call_order.append(name)
+            return fn(self, *args, **kwargs)
+
+        return recorder
+
+    for name in method_names:
+        setattr(HyperfitsSolutionGroup, name, make_recorder(name, originals[name]))
+
+    try:
+        with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+            group.run_flagging_pipeline(refant_name="Tile001", phase_fit_niter=1)
+    finally:
+        # Restore the real methods -- setattr back to the saved originals,
+        # not delattr, which would leave the class permanently missing
+        # them and break every test that runs after this one.
+        for name in method_names:
+            setattr(HyperfitsSolutionGroup, name, originals[name])
+
+    assert call_order == [
+        "flag_gain_max_cutoff",
+        "flag_amplitude_outliers",
+        "flag_mostly_bad_tiles",
+        "detect_phase_outliers",
+    ]
+
+
+def test_write_before_after_stats_reuses_final_phase_fit_without_recomputing():
+    """write_before_after_stats/write_debug_phase_fit_plots (split from the
+    former combined write_stats_and_debug_plots) must not call
+    process_phase_fits again for the "after" state -- group.phase_fits
+    (populated by detect_phase_outliers, now running last in
+    run_flagging_pipeline) is already the final state and should be
+    reused directly, not recomputed. Regression test for the whole point
+    of the reordering: phase fitting is expensive (~2 minutes for a
+    256-tile real observation in testing), so silently recomputing it a
+    second time for reporting is a real cost, not just a theoretical one.
+    """
+    from mwax_mover.calvin.plots.phases import write_debug_phase_fit_plots
+    from mwax_mover.calvin.plots.stats_table import write_before_after_stats
+
+    n_tiles = 5
+    group = _make_fake_group(n_tiles=n_tiles, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.tile_flag_reasons = np.full(n_tiles, TileFlagReason.NONE, dtype=object)
+    group.channel_flag_reasons = [np.full((n_tiles, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        group.run_flagging_pipeline(refant_name="Tile001", phase_fit_niter=1)
+
+        original_process_phase_fits = HyperfitsSolutionGroup.process_phase_fits
+        call_count = 0
+
+        def counting_process_phase_fits(self, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return original_process_phase_fits(self, *args, **kwargs)
+
+        with (
+            patch.object(HyperfitsSolutionGroup, "process_phase_fits", counting_process_phase_fits),
+            patch("mwax_mover.calvin.plots.phases.plot_debug_phase_fits", return_value=None),
+        ):
+            final_phase_fits = write_before_after_stats(
+                group,
+                obs_id=1,
+                stats_fd=io.StringIO(),
+                phase_outlier_nstd=3.0,
+            )
+            write_debug_phase_fit_plots(
+                group,
+                "Tile001",
+                0,
+                final_phase_fits,
+                output_path="/tmp",
+                obs_id=1,
+                phase_outlier_nstd=3.0,
+            )
+
+    assert call_count == 0, (
+        "write_before_after_stats/write_debug_phase_fit_plots should reuse group.phase_fits, not recompute it"
+    )
+
+
+# ===========================================================================
+# HyperfitsSolutionGroup.commit
+# ===========================================================================
+
+
+def test_commit_writes_jones_and_digital_gains(tmp_path):
+    """commit() backs up, writes the final jones, and adds DigitalGains."""
+    import shutil
+
+    from astropy.io import fits as astropy_fits
+
+    metafits_path = str(tmp_path / "metafits.fits")
+    soln_path = str(tmp_path / "solutions.fits")
+    shutil.copy2(METAFITS_PATH, metafits_path)
+    shutil.copy2(SOLUTIONS_PATH, soln_path)
+
+    metafits = Metafits(metafits_path)
+    group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(soln_path)])
+    group.load()
+    group.apply_tile_flags()
+    group.enforce_whole_jones_nan()
+
+    backup_paths = group.commit(metafits.mwalib_context)
+    assert backup_paths[0] is not None
+    assert group.jones is not None
+
+    assert backup_paths == [soln_path.replace(".fits", ".original.fits")]
+    assert os.path.exists(backup_paths[0])
+
+    with astropy_fits.open(soln_path) as hdul:
+        assert "DigitalGains" in hdul["TILES"].columns.names
+
+    reread_jones = HyperfitsSolution(soln_path).get_jones()
+    assert np.allclose(reread_jones, group.jones[0], equal_nan=True)
+
+
+def test_commit_backup_preserves_pristine_original(tmp_path):
+    """The backup made by commit() reflects the pre-flagging state, not the final one."""
+    import shutil
+
+    metafits_path = str(tmp_path / "metafits.fits")
+    soln_path = str(tmp_path / "solutions.fits")
+    shutil.copy2(METAFITS_PATH, metafits_path)
+    shutil.copy2(SOLUTIONS_PATH, soln_path)
+
+    metafits = Metafits(metafits_path)
+    group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(soln_path)])
+    group.load()
+    assert group.jones is not None
+    pristine = group.jones[0].copy()
+    group.apply_tile_flags()  # this will NaN at least the metafits-flagged tiles
+
+    backup_paths = group.commit(metafits.mwalib_context)
+    assert backup_paths[0] is not None
+
+    backup_jones = HyperfitsSolution(backup_paths[0]).get_jones()
+    assert np.allclose(backup_jones, pristine, equal_nan=True)
+
+
+# ===========================================================================
+# HyperfitsSolution.results caching
+# ===========================================================================
+
+
+class TestResultsCaching:
+    """Tests that the RESULTS HDU is read from disk once per solution file.
+
+    The RESULTS HDU is immutable for the life of a HyperfitsSolution (nothing
+    writes it -- write_jones only touches SOLUTIONS), but it was re-read on
+    every access: HyperfitsSolutionGroup.results touched it twice per file, and
+    .weights goes through that on each of its several accesses per pipeline run.
+    On a 24-file picket fence that was 192 fits.open calls per run against 8 for
+    a contiguous observation, over a shared filesystem.
+    """
+
+    @staticmethod
+    def _counting_fits_open(counter):
+        """Wrap astropy's fits.open so opens of the solution file are counted."""
+        real_open = fits.open
+
+        def _open(name, *args, **kwargs):
+            counter.append(str(name))
+            return real_open(name, *args, **kwargs)
+
+        return _open
+
+    def test_repeated_access_reads_the_file_once(self):
+        """Every access after the first is served from the cache."""
+        hs = HyperfitsSolution(SOLUTIONS_PATH)
+        opens: list[str] = []
+
+        with patch("mwax_mover.calvin.hyperfits_solution.fits.open", side_effect=self._counting_fits_open(opens)):
+            first = hs.results
+            for _ in range(5):
+                _ = hs.results
+
+        assert len(opens) == 1
+        assert len(first) > 0
+
+    def test_cached_value_matches_an_uncached_read(self):
+        """Caching must not change the values returned."""
+        expected = HyperfitsSolution(SOLUTIONS_PATH).results
+
+        hs = HyperfitsSolution(SOLUTIONS_PATH)
+        _ = hs.results  # populate the cache
+        assert np.array_equal(hs.results, expected, equal_nan=True)
+
+    def test_group_results_reads_each_file_once(self):
+        """The group property no longer reads each file twice per access."""
+        metafits = Metafits(METAFITS_PATH)
+        group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+        opens: list[str] = []
+
+        with patch("mwax_mover.calvin.hyperfits_solution.fits.open", side_effect=self._counting_fits_open(opens)):
+            _ = group.results
+
+        # Previously two: one for the length-validation loop, one for the concat
+        assert sum(1 for name in opens if name == SOLUTIONS_PATH) == 1
+
+    def test_weights_accessed_repeatedly_does_not_reread(self):
+        """weights() is accessed several times per pipeline run."""
+        metafits = Metafits(METAFITS_PATH)
+        group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+        opens: list[str] = []
+
+        with patch("mwax_mover.calvin.hyperfits_solution.fits.open", side_effect=self._counting_fits_open(opens)):
+            for _ in range(4):
+                _ = group.weights
+
+        assert sum(1 for name in opens if name == SOLUTIONS_PATH) == 1
+
+    def test_missing_results_hdu_keeps_raising_without_rereading(self):
+        """A file with no RESULTS HDU must keep raising KeyError, from cache.
+
+        Callers (notably weights) rely on KeyError to fall back to uniform
+        weights, so a cached miss must not silently become a success -- and must
+        not re-open the file on every subsequent attempt either.
+        """
+        hs = HyperfitsSolution(SOLUTIONS_PATH)
+        opens: list[str] = []
+
+        def _open_without_results(name, *args, **kwargs):
+            opens.append(str(name))
+            raise KeyError("RESULTS")
+
+        with patch("mwax_mover.calvin.hyperfits_solution.fits.open", side_effect=_open_without_results):
+            for _ in range(3):
+                with pytest.raises(KeyError):
+                    _ = hs.results
+
+        assert len(opens) == 1
+
+    def test_weights_falls_back_to_uniform_when_results_missing(self):
+        """The cached-miss path still produces the uniform-weight fallback."""
+        metafits = Metafits(METAFITS_PATH)
+        group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+        n_chanblocks = len(group.all_chanblocks_hz_concat)
+
+        with patch.object(type(group.solns[0]), "results", new_callable=PropertyMock, side_effect=KeyError("RESULTS")):
+            weights = group.weights
+
+        assert weights.shape == (n_chanblocks,)
+        assert np.all(weights == 1.0)
+
+    def test_cache_is_still_valid_after_write_jones(self, tmp_path):
+        """commit() rewrites SOLUTIONS only, so a cached RESULTS stays correct.
+
+        This is what makes caching safe at all: if write_jones ever started
+        touching the RESULTS HDU, the cache would silently go stale for the rest
+        of the run and weights would be computed from pre-commit convergence
+        values.
+        """
+        soln_path = tmp_path / "solutions.fits"
+        shutil.copy(SOLUTIONS_PATH, soln_path)
+
+        hs = HyperfitsSolution(str(soln_path))
+        cached_before = hs.results.copy()
+
+        jones = hs.get_jones()
+        hs.write_jones(jones * 2.0, backup=False)
+
+        # The cached value must still match what a fresh reader sees on disk
+        fresh = HyperfitsSolution(str(soln_path)).results
+        assert np.array_equal(hs.results, cached_before, equal_nan=True)
+        assert np.array_equal(hs.results, fresh, equal_nan=True)
+
+
+# ===========================================================================
+# HyperfitsSolutionGroup.select_refant
+# ===========================================================================
+
+
+def _fake_phase_fits(rows: dict) -> pd.DataFrame:
+    """Build a synthetic process_phase_fits()-shaped DataFrame.
+
+    Args:
+        rows: {tile_id: {"XX": (quality, chi2dof, length), "YY": (...)}}.
+            A tile may omit a pol entirely, or omit itself completely, to
+            simulate _phase_fit_one returning None for that (tile, pol).
+    """
+    records = []
+    for tile_id, pols in rows.items():
+        for pol, (quality, chi2dof, length) in pols.items():
+            records.append(
+                {
+                    COL_TILE_ID: tile_id,
+                    COL_SOLN_IDX: tile_id,
+                    COL_POL: pol,
+                    COL_LENGTH: length,
+                    "intercept": 0.0,
+                    COL_SIGMA_RESID: 0.1,
+                    COL_CHI2DOF: chi2dof,
+                    COL_QUALITY: quality,
+                    "stderr": 0.0,
+                }
+            )
+    return pd.DataFrame(records)
+
+
+def _fake_gain_fits(rows: dict) -> pd.DataFrame:
+    """Build a synthetic process_gain_fits_for_db()-shaped DataFrame.
+
+    Args:
+        rows: {tile_id: {"XX": quality, "YY": quality}}. A tile may omit a
+            pol, or omit itself completely, to simulate _gain_fit_one
+            returning None for that (tile, pol).
+    """
+    records = []
+    for tile_id, pols in rows.items():
+        for pol, quality in pols.items():
+            records.append(
+                {
+                    COL_TILE_ID: tile_id,
+                    COL_SOLN_IDX: tile_id,
+                    COL_POL: pol,
+                    COL_QUALITY: quality,
+                    "gains": [],
+                    "pol0": [],
+                    "pol1": [],
+                    COL_SIGMA_RESID: [],
+                }
+            )
+    return pd.DataFrame(records)
+
+
+def _group_for_refant_tests() -> HyperfitsSolutionGroup:
+    """A real group (real metafits_tiles_df/combined_tile_flags), for
+    select_refant tests that then stub out process_phase_fits/
+    process_gain_fits_for_db with synthetic data. Tile IDs 11-14 are all
+    genuinely unflagged in this fixture.
+    """
+    metafits = Metafits(METAFITS_PATH)
+    return HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+
+
+def test_select_refant_prefers_clean_fit_over_smaller_length_deviation():
+    """A tile failing the chi2dof gate loses even if its length is closer to the median."""
+    group = _group_for_refant_tests()
+    # Tile 12's length (5.0) is exactly the median of {5.0, 15.0} -- the
+    # smallest possible deviation -- but its chi2dof is way outside the
+    # gate. Tile 11 has a larger deviation but passes every gate.
+    phase_fits = _fake_phase_fits(
+        {
+            11: {"XX": (1.0, 1.0, 10.0), "YY": (1.0, 1.0, 10.0)},
+            12: {"XX": (1.0, 50.0, 5.0), "YY": (1.0, 50.0, 5.0)},
+        }
+    )
+    gain_fits = _fake_gain_fits({11: {"XX": 1.0, "YY": 1.0}, 12: {"XX": 1.0, "YY": 1.0}})
+
+    with (
+        patch.object(group, "_bootstrap_refant", return_value=group.metafits_tiles_df.iloc[0]),
+        patch.object(group, "process_phase_fits", return_value=phase_fits),
+        patch.object(group, "process_gain_fits_for_db", return_value=gain_fits),
+    ):
+        chosen = group.select_refant(phase_fit_niter=10)
+
+    assert chosen["id"] == 11
+
+
+def test_select_refant_worst_of_xx_yy_pol():
+    """A tile good on XX but bad on YY still fails the gate -- worst-of-pol, not best-of."""
+    group = _group_for_refant_tests()
+    phase_fits = _fake_phase_fits(
+        {
+            11: {"XX": (1.0, 1.0, 10.0), "YY": (1.0, 1.0, 10.0)},
+            # Good XX, but YY quality fails the gate.
+            12: {"XX": (1.0, 1.0, 10.0), "YY": (0.1, 1.0, 10.0)},
+        }
+    )
+    gain_fits = _fake_gain_fits({11: {"XX": 1.0, "YY": 1.0}, 12: {"XX": 1.0, "YY": 1.0}})
+
+    with (
+        patch.object(group, "_bootstrap_refant", return_value=group.metafits_tiles_df.iloc[0]),
+        patch.object(group, "process_phase_fits", return_value=phase_fits),
+        patch.object(group, "process_gain_fits_for_db", return_value=gain_fits),
+    ):
+        chosen = group.select_refant(phase_fit_niter=10)
+
+    assert chosen["id"] == 11
+
+
+def test_select_refant_degrades_gracefully_when_none_pass_every_gate():
+    """When no tile passes every gate, the tile failing fewest still wins -- no exception."""
+    group = _group_for_refant_tests()
+    phase_fits = _fake_phase_fits(
+        {
+            # Fails only the chi2dof gate (1 failure).
+            11: {"XX": (1.0, 50.0, 10.0), "YY": (1.0, 50.0, 10.0)},
+            # Fails both the quality gate and the chi2dof gate (2 failures).
+            12: {"XX": (0.1, 50.0, 5.0), "YY": (0.1, 50.0, 5.0)},
+        }
+    )
+    gain_fits = _fake_gain_fits({11: {"XX": 1.0, "YY": 1.0}, 12: {"XX": 1.0, "YY": 1.0}})
+
+    with (
+        patch.object(group, "_bootstrap_refant", return_value=group.metafits_tiles_df.iloc[0]),
+        patch.object(group, "process_phase_fits", return_value=phase_fits),
+        patch.object(group, "process_gain_fits_for_db", return_value=gain_fits),
+    ):
+        chosen = group.select_refant(phase_fit_niter=10)
+
+    assert chosen["id"] == 11  # fewer failures, even though neither is clean
+
+
+def test_select_refant_missing_tile_data_sorts_last():
+    """A tile absent from the fit DataFrames (simulating a None fit result) loses to real data."""
+    group = _group_for_refant_tests()
+    # Tile 12 has no rows at all in either DataFrame.
+    phase_fits = _fake_phase_fits({11: {"XX": (0.85, 1.5, 10.0), "YY": (0.85, 1.5, 10.0)}})
+    gain_fits = _fake_gain_fits({11: {"XX": 0.85, "YY": 0.85}})
+
+    with (
+        patch.object(group, "_bootstrap_refant", return_value=group.metafits_tiles_df.iloc[0]),
+        patch.object(group, "process_phase_fits", return_value=phase_fits),
+        patch.object(group, "process_gain_fits_for_db", return_value=gain_fits),
+    ):
+        chosen = group.select_refant(phase_fit_niter=10)
+
+    assert chosen["id"] == 11
+
+
+def test_select_refant_tie_break_is_deterministic_by_tile_id():
+    """Two tiles with identical scores are broken by tile ID, not arbitrary/insertion order."""
+    group = _group_for_refant_tests()
+    # Identical quality/chi2dof/length for both -- a genuine tie on every
+    # scored dimension.
+    phase_fits = _fake_phase_fits(
+        {
+            14: {"XX": (1.0, 1.0, 10.0), "YY": (1.0, 1.0, 10.0)},
+            13: {"XX": (1.0, 1.0, 10.0), "YY": (1.0, 1.0, 10.0)},
+        }
+    )
+    gain_fits = _fake_gain_fits({14: {"XX": 1.0, "YY": 1.0}, 13: {"XX": 1.0, "YY": 1.0}})
+
+    with (
+        patch.object(group, "_bootstrap_refant", return_value=group.metafits_tiles_df.iloc[0]),
+        patch.object(group, "process_phase_fits", return_value=phase_fits),
+        patch.object(group, "process_gain_fits_for_db", return_value=gain_fits),
+    ):
+        chosen = group.select_refant(phase_fit_niter=10)
+
+    assert chosen["id"] == 13  # lower tile ID wins the tie
+
+
+def test_select_refant_all_tiles_clean_returns_valid_unflagged_tile():
+    """Sanity check: with every candidate equally clean, the result is still a real unflagged tile."""
+    group = _group_for_refant_tests()
+    unflagged_ids = group.metafits_tiles_df["id"].to_numpy()[~group.combined_tile_flags]
+    phase_fits = _fake_phase_fits({int(tid): {"XX": (1.0, 1.0, 10.0), "YY": (1.0, 1.0, 10.0)} for tid in unflagged_ids})
+    gain_fits = _fake_gain_fits({int(tid): {"XX": 1.0, "YY": 1.0} for tid in unflagged_ids})
+
+    with (
+        patch.object(group, "_bootstrap_refant", return_value=group.metafits_tiles_df.iloc[0]),
+        patch.object(group, "process_phase_fits", return_value=phase_fits),
+        patch.object(group, "process_gain_fits_for_db", return_value=gain_fits),
+    ):
+        chosen = group.select_refant(phase_fit_niter=10)
+
+    assert chosen["id"] in unflagged_ids

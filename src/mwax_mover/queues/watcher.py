@@ -1,0 +1,159 @@
+"""inotify-based directory watcher that enqueues detected file paths.
+
+The Watcher class monitors a directory (recursively or flat) for inotify events
+(IN_CLOSE_WRITE, IN_MOVED_TO, or both) and deposits matching file paths into a
+plain queue.Queue. On startup it performs a one-shot scan of pre-existing files
+before entering the live event loop.
+"""
+
+import logging
+import os
+import queue
+
+import inotify.adapters
+import inotify.constants
+
+from mwax_mover import constants
+from mwax_mover.filesystem.scan import scan_for_existing_files_and_add_to_queue
+
+logger = logging.getLogger(__name__)
+
+
+class Watcher:
+    """Class that watches a directory and adds files to a queue"""
+
+    def __init__(
+        self,
+        name: str,
+        path: str,
+        dest_queue: queue.Queue,
+        pattern: str,
+        mode,
+        recursive,
+        exclude_pattern=None,
+    ):
+        """Initialize a directory watcher.
+
+        Args:
+            name: A descriptive name for this watcher instance.
+            path: The directory path to monitor.
+            dest_queue: The queue to deposit detected file paths into.
+            pattern: File extension to match (e.g., ".ext" or ".*").
+            mode: The watch mode (NEW, RENAME, or RENAME_OR_NEW).
+            recursive: Whether to watch subdirectories recursively.
+            exclude_pattern: File extension to exclude from matching. Defaults to None.
+
+        Raises:
+            FileNotFoundError: If the specified path does not exist.
+        """
+        self.name = name
+        self.inotify_tree: inotify.adapters.Inotify | inotify.adapters.InotifyTree
+        self.recursive = recursive
+        self.mode = mode
+        self.path = path
+        self.watching = False
+        self.dest_queue = dest_queue
+        self.pattern = pattern  # must be ".ext" or ".*"
+        self.exclude_pattern = exclude_pattern  # Can be None or ".ext"
+        self.scan_completed = False
+
+        if self.mode == constants.MODE_WATCH_DIR_FOR_NEW:
+            self.mask = inotify.constants.IN_CLOSE_WRITE
+        elif self.mode == constants.MODE_WATCH_DIR_FOR_RENAME:
+            self.mask = inotify.constants.IN_MOVED_TO
+        elif self.mode == constants.MODE_WATCH_DIR_FOR_RENAME_OR_NEW:
+            self.mask = inotify.constants.IN_MOVED_TO | inotify.constants.IN_CLOSE_WRITE
+
+        # Check that the path to watch exists
+        if not os.path.exists(self.path):
+            raise FileNotFoundError(self.path)
+
+    def start(self):
+        """Start watching the directory for inotify events.
+
+        Sets up the inotify adapter based on the recursive setting and initiates
+        the watch loop to monitor for file events.
+        """
+        # supress all but most critical inotify logs
+        logging.getLogger("inotify.adapters").setLevel(logging.CRITICAL)
+
+        if self.recursive:
+            logger.info(f"Watcher starting on {self.path}/*{self.pattern} and all subdirectories...")
+            self.inotify_tree = inotify.adapters.InotifyTree(self.path, mask=self.mask)
+        else:
+            logger.info(f"Watcher starting on {self.path}/*{self.pattern}...")
+            self.inotify_tree = inotify.adapters.Inotify()
+            self.inotify_tree.add_watch(self.path, mask=self.mask)
+
+        if self.exclude_pattern:
+            logger.info(f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}")
+
+        self.watching = True
+        self.do_watch_loop()
+
+    def stop(self):
+        """Stop watching the directory and clean up inotify resources."""
+        logger.info(f"Watcher stopping on {self.path}/*{self.pattern}...")
+
+        self.watching = False
+
+        if self.recursive:
+            pass
+        else:
+            self.inotify_tree.remove_watch(self.path)  # ty: ignore[unresolved-attribute]
+
+        # Destroy the inotify adpater
+        try:
+            del self.inotify_tree
+        except Exception:
+            pass
+
+    def do_watch_loop(self):
+        """Perform initial scan and enter the inotify event monitoring loop.
+
+        Scans for pre-existing files first, then continuously monitors for inotify
+        events that match the configured pattern and mode, adding matching files
+        to the destination queue.
+        """
+        # If we're in NEW or RENAME mode, then scan the folder once we have
+        # enqueued any waiting items
+        if (
+            self.mode == constants.MODE_WATCH_DIR_FOR_NEW
+            or self.mode == constants.MODE_WATCH_DIR_FOR_RENAME
+            or self.mode == constants.MODE_WATCH_DIR_FOR_RENAME_OR_NEW
+        ):
+            scan_for_existing_files_and_add_to_queue(
+                self.path,
+                self.pattern,
+                self.recursive,
+                self.dest_queue,
+                self.exclude_pattern,
+            )
+        self.scan_completed = True
+
+        while self.watching:
+            for event in self.inotify_tree.event_gen(timeout_s=0.1, yield_nones=False):
+                # This if is redundant as we don't yield nones
+                if event:
+                    (header, _, path, filename) = event
+
+                    # check event is one we care about
+                    if header.mask & self.mask:
+                        # Check file extension is one we care about
+                        if (os.path.splitext(filename)[1] == self.pattern or self.pattern == ".*") and os.path.splitext(
+                            filename
+                        )[1] != self.exclude_pattern:
+                            dest_filename = os.path.join(path, filename)
+                            self.dest_queue.put(dest_filename)
+                            logger.info(f"{dest_filename} added to queue ({self.dest_queue.qsize()})")
+
+    def get_status(self) -> dict:
+        """Get the current status of the watcher.
+
+        Returns:
+            A dictionary containing the watcher name and watch path.
+        """
+        return {
+            "name": self.name,
+            "watch_path": self.path,
+        }

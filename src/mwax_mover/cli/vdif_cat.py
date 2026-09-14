@@ -9,7 +9,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from mwax_mover.mwax_bf_vdif_utils import stitch_vdif_files_and_write_hdr
+from mwax_mover.beamformer.vdif import stitch_vdif_files_and_write_hdr
 
 logger = logging.getLogger(__name__)
 

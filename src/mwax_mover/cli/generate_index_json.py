@@ -3,7 +3,7 @@
 Scans a fit directory and writes an index.json describing each file (size,
 modification time, MIME type, PNG dimensions and a description), suitable for
 upload to S3 alongside the files themselves. See
-mwax_calvin_utils.generate_plot_index_file.
+calvin.solution_files.generate_plot_index_file.
 """
 
 import argparse
@@ -12,13 +12,14 @@ import os
 import sys
 from pathlib import Path
 
-from mwax_mover.mwax_calvin_utils import generate_plot_index_file
+from mwax_mover.calvin.plots.index import generate_plot_index_file
+from mwax_mover.constants import EXIT_FAILURE, INDEX_JSON_FILENAME
 
 
 def main() -> None:
     """Entry point for the generate_index_json command line tool.
 
-    Parses arguments and calls mwax_calvin_utils.generate_plot_index_file(),
+    Parses arguments and calls calvin.solution_files.generate_plot_index_file(),
     printing a summary on success or an error message on failure.
     """
     parser = argparse.ArgumentParser(
@@ -64,10 +65,10 @@ def main() -> None:
     else:
         if args.output is None:
             # Not specified? output to the fit dir
-            output_filename = os.path.join(args.directory, "index.json")
+            output_filename = os.path.join(args.directory, INDEX_JSON_FILENAME)
         else:
             # User specified it
-            output_filename = os.path.join(args.output, "index.json")
+            output_filename = os.path.join(args.output, INDEX_JSON_FILENAME)
 
     if args.fit_id is None:
         # get it from the directory
@@ -76,7 +77,7 @@ def main() -> None:
             fit_id = int(p.name)
         except Exception:
             print(f"Could not infer FitID from {args.directory}- please specify fit-id instead.")
-            sys.exit(-3)
+            sys.exit(EXIT_FAILURE)
     else:
         fit_id = int(args.fit_id)
 
@@ -96,10 +97,10 @@ def main() -> None:
                 print(f"Written {output_filename}")
     except NotADirectoryError as e:
         print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EXIT_FAILURE)
     except OSError as e:
         print(f"Error writing index file: {e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EXIT_FAILURE)
 
 
 if __name__ == "__main__":

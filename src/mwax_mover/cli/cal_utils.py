@@ -56,21 +56,19 @@ import pstats
 import sys
 from pathlib import Path
 
-from mwax_mover.mwax_calvin_plots import (
-    generate_hyperdrive_plots_for_files,
-    plot_outlier_gains,
-    write_hyperdrive_stats,
-    write_stats_and_debug_plots,
-)
-from mwax_mover.mwax_calvin_utils import Metafits
-from mwax_mover.mwax_hyperdrive_solutions import (
-    HyperfitsSolution,
-    HyperfitsSolutionGroup,
-)
-from mwax_mover.utils import download_metafits_file
+from mwax_mover.calibration.models import Metafits
+from mwax_mover.calvin.hyperdrive import write_hyperdrive_stats
+from mwax_mover.calvin.hyperfits_solution import HyperfitsSolution
+from mwax_mover.calvin.hyperfits_solution_group import HyperfitsSolutionGroup
+from mwax_mover.calvin.plots import hyperdrive
+from mwax_mover.calvin.plots.gains import plot_outlier_gains
+from mwax_mover.calvin.plots.phases import write_debug_phase_fit_plots
+from mwax_mover.calvin.plots.stats_table import write_before_after_stats
+from mwax_mover.constants import EXIT_FAILURE, LOG_FORMAT
+from mwax_mover.fits.metafits import download_metafits_file
 
 handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter("%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(message)s"))
+handler.setFormatter(logging.Formatter(LOG_FORMAT))
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
@@ -106,19 +104,25 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
     assert soln_group.jones is not None
     pristine_jones = [file_jones.copy() for file_jones in soln_group.jones]
 
-    refant = soln_group.refant
+    refant = soln_group.select_refant(args.phase_fit_niter)
 
     # "Before" plots: hyperdrive's own binary-generated amp/phase plots,
     # against the still-pristine on-disk files -- nothing has been
     # touched yet. Written with "_original" filenames (see
-    # generate_hyperdrive_plots) so the "after" run below (same
+    # hyperdrive.generate_plots) so the "after" run below (same
     # filenames, since hyperdrive derives them from the input file)
     # doesn't overwrite these. (This only touches the on-disk files via
     # a read-only hyperdrive invocation; it's independent of the
     # in-memory run_flagging_pipeline() below regardless of ordering,
     # since nothing gets written to disk until commit().)
-    for failed_file, plots_error in generate_hyperdrive_plots_for_files(
-        obs_id, args.solution_filenames, args.hyperdrive_binary_path, metafits_filename, args.output_path, before=True
+    for failed_file, plots_error in hyperdrive.generate_plots_for_files(
+        obs_id,
+        args.solution_filenames,
+        args.hyperdrive_binary_path,
+        metafits_filename,
+        args.output_path,
+        before=True,
+        ref_tile=refant["ant"],
     ):
         print(f"Warning: 'before' hyperdrive plots failed for {failed_file}: {plots_error}")
 
@@ -153,24 +157,37 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
     # hyperdrive's own plots/stats run regardless of --modify-solutions,
     # matching this tool's historical behaviour (that flag only ever
     # controlled whether outlier-flagged gains were written to disk).
-    for failed_file, plots_error in generate_hyperdrive_plots_for_files(
-        obs_id, args.solution_filenames, args.hyperdrive_binary_path, metafits_filename, args.output_path, before=False
+    for failed_file, plots_error in hyperdrive.generate_plots_for_files(
+        obs_id,
+        args.solution_filenames,
+        args.hyperdrive_binary_path,
+        metafits_filename,
+        args.output_path,
+        before=False,
+        ref_tile=refant["ant"],
     ):
         print(f"Warning: hyperdrive plots failed for {failed_file}: {plots_error}")
 
     # Single combined stats file: before/after per-tile stats first, then
-    # hyperdrive convergence stats below -- write_stats_and_debug_plots()
-    # (shared with mwax_calvin_processor) also generates the phase-fit
-    # debug plots (rx_lengths/phase_fits_xx/yy/intercepts/residual).
+    # hyperdrive convergence stats below -- write_before_after_stats()
+    # (shared with calvin.pipeline.process_solutions) also generates the
+    # phase-fit debug plots via write_debug_phase_fit_plots()
+    # (rx_lengths/phase_fits_xx/yy/intercepts/residual).
     stats_path = os.path.join(args.output_path, f"{obs_id}_stats.txt")
     with open(stats_path, "w", encoding="utf-8") as stats_fd:
-        write_stats_and_debug_plots(
+        phase_fits = write_before_after_stats(
             soln_group,
-            refant["name"],
-            args.phase_fit_niter,
-            args.output_path,
             obs_id,
             stats_fd,
+            phase_outlier_nstd=args.phase_outlier_nstd,
+        )
+        write_debug_phase_fit_plots(
+            soln_group,
+            refant["name"],
+            refant["ant"],
+            phase_fits,
+            args.output_path,
+            obs_id,
             phase_outlier_nstd=args.phase_outlier_nstd,
         )
 
@@ -328,11 +345,11 @@ def main() -> None:
     #
     if not os.path.exists(args.output_path):
         print(f"Error --output-path not found: {args.output_path}")
-        sys.exit(-1)
+        sys.exit(EXIT_FAILURE)
 
     if not os.path.exists(args.hyperdrive_binary_path):
         print(f"Error --hyperdrive-binary-path not found: {args.hyperdrive_binary_path}")
-        sys.exit(-1)
+        sys.exit(EXIT_FAILURE)
 
     # argparse nargs="+" guarantees at least one filename, so there is no
     # empty case to handle here (the previous code had one, and it referenced
@@ -346,14 +363,14 @@ def main() -> None:
     obs_id_str = os.path.basename(args.solution_filenames[0])[0:10]
     if not obs_id_str.isdigit():
         print(f"Error: Could not parse a 10 digit obs_id from: {args.solution_filenames[0]}")
-        sys.exit(-1)
+        sys.exit(EXIT_FAILURE)
     obs_id: int = int(obs_id_str)
 
     for f in args.solution_filenames:
         print(f)
         if os.path.basename(f)[0:10] != obs_id_str:
             print(f"Error: The solution files passed all must be for the same obsid '{obs_id}'. Got: {f}")
-            sys.exit(-1)
+            sys.exit(EXIT_FAILURE)
 
     if args.metafits_filename is None:
         # user did not pass a metafits filename
@@ -372,7 +389,7 @@ def main() -> None:
         if not os.path.exists(args.metafits_filename):
             # But it didn't exist
             print(f"Error: The metafits file provided '{metafits_filename}' does not exist")
-            sys.exit(-1)
+            sys.exit(EXIT_FAILURE)
 
     if args.profile:
         profiler = cProfile.Profile()

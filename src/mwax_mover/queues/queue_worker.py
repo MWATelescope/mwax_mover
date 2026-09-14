@@ -1,0 +1,276 @@
+"""Queue worker that processes file paths from a plain FIFO queue.
+
+QueueWorker dequeues file paths and calls either a provided event_handler callable
+or runs a shell command with __FILE__ / __FILENOEXT__ token substitution. Supports
+three failure strategies: requeue to the end of the queue, keep retrying the same
+item, or drop the item entirely. Implements configurable exponential backoff
+(see calculate_backoff_seconds).
+"""
+
+import logging
+import os
+import queue
+import threading
+import time
+
+from mwax_mover import constants
+from mwax_mover.core.command import run_command
+
+logger = logging.getLogger(__name__)
+
+
+def calculate_backoff_seconds(
+    consecutive_error_count: int,
+    backoff_initial_seconds: int,
+    backoff_factor: int,
+    backoff_limit_seconds: int,
+) -> float:
+    """Calculate the exponential backoff delay after a run of failures.
+
+    NOTE: this used to grow *linearly* -- 2, 4, 6, 8, ... -- despite
+    everything describing it as exponential. It is now genuinely
+    exponential: 1, 2, 4, 8, 16, ...
+
+    Args:
+        consecutive_error_count: Number of consecutive failures so far. The
+            first failure is 1.
+        backoff_initial_seconds: Delay after the first failure.
+        backoff_factor: Multiplier applied per additional consecutive failure.
+        backoff_limit_seconds: Upper bound on the returned delay.
+
+    Returns:
+        The number of seconds to wait, capped at *backoff_limit_seconds*. Zero
+        or negative *consecutive_error_count* returns 0.
+    """
+    if consecutive_error_count < 1:
+        return 0
+
+    delay = backoff_initial_seconds * (backoff_factor ** (consecutive_error_count - 1))
+    return min(delay, backoff_limit_seconds)
+
+
+class QueueWorker:
+    """This class represents a worker process, processing items off a queue"""
+
+    def __init__(
+        self,
+        name: str,
+        source_queue: queue.Queue,
+        executable_path,
+        event_handler,
+        exit_once_queue_empty,
+        requeue_to_eoq_on_failure: bool = True,
+        backoff_initial_seconds: int = 1,
+        backoff_factor: int = 2,
+        backoff_limit_seconds: int = 60,
+        requeue_on_error: bool = True,
+    ):
+        """Initialize a queue worker to process items from a queue.
+
+        Args:
+            name: A descriptive name for this worker instance.
+            source_queue: The queue to dequeue items from.
+            executable_path: Path to an executable to run on each item. Required if
+                event_handler is None. Supports __FILE__ and __FILENOEXT__ tokens.
+            event_handler: A callable to process each item. Required if executable_path
+                is None.
+            exit_once_queue_empty: Whether to exit after the queue becomes empty.
+            requeue_to_eoq_on_failure: On failure, True requeues the item to the
+                back of the queue and moves on to the next item (item order does
+                not matter); False keeps retrying this same item instead (item
+                order matters). Defaults to True.
+            backoff_initial_seconds: Initial backoff time in seconds. Defaults to 1.
+            backoff_factor: Multiplier applied per additional consecutive failure,
+                giving initial * factor**(n-1). Defaults to 2.
+            backoff_limit_seconds: Maximum backoff time in seconds. Defaults to 60.
+            requeue_on_error: If True, requeue_to_eoq_on_failure governs retry
+                behaviour as described above. If False, a failed item is neither
+                retried nor requeued -- it is up to event_handler to decide what
+                to do (log and ignore it, move it to a "failed" directory, etc).
+                Defaults to True. PriorityQueueWorker deliberately has no
+                equivalent parameter -- see docs/CLEANUP.md, "Deliberately out
+                of scope"; it was never needed for that use case, so do not add
+                it there on the strength of this docstring.
+
+        Raises:
+            Exception: If both or neither of executable_path and event_handler are provided.
+        """
+        self.name = name
+        self.source_queue = source_queue
+
+        if (event_handler is None and executable_path is None) or (
+            event_handler is not None and executable_path is not None
+        ):
+            raise Exception("QueueWorker requires event_handler OR executable_path not both and not neither!")
+
+        self._executable_path = executable_path
+        self._event_handler = event_handler
+        self._running = False
+        self._paused = False
+        self.exit_once_queue_empty = exit_once_queue_empty
+        self.requeue_to_eoq_on_failure = requeue_to_eoq_on_failure
+        self.current_item: str | None = None
+        self.consecutive_error_count = 0
+        self.backoff_initial_seconds = backoff_initial_seconds
+        self.backoff_factor = backoff_factor
+        self.backoff_limit_seconds = backoff_limit_seconds
+        self.requeue_on_error = requeue_on_error
+        # Use threading event instead of time.sleep to backoff
+        self.event = threading.Event()
+
+    def start(self):
+        """Start dequeuing and processing items from the queue.
+
+        Continuously dequeues items and processes them using the configured handler
+        or executable. Implements configurable backoff and failure handling strategies.
+        Exits when the exit_once_queue_empty flag is set and the queue is empty.
+        """
+        logger.info(f"QueueWorker {self.name} starting...")
+        self._running = True
+        self.current_item = None
+        self.consecutive_error_count = 0
+        # stop() sets this event to interrupt an in-flight backoff wait. Nothing
+        # ever cleared it, so once stop() had been called every subsequent
+        # event.wait(backoff) returned instantly and backoff was silently
+        # disabled for the rest of the process's life. Clear it on start so a
+        # restarted worker backs off properly again.
+        self.event.clear()
+        backoff: float = 0
+
+        while self._running:
+            if self._paused:
+                # if paused, put in a sleep to slow the wheel spinning
+                time.sleep(0.1)
+            else:
+                try:
+                    success = False
+
+                    if self.current_item is None:
+                        self.current_item = self.source_queue.get(block=True, timeout=0.5)
+
+                    # Because we block in the above get, we should always have a value for current_item
+                    # but this gate ensure the type checker is satisfied that current_item is not None.
+                    if self.current_item is None:
+                        continue
+
+                    logger.info(f"Processing {self.current_item}...")
+
+                    start_time = time.monotonic()
+
+                    # Check file exists (maybe someone deleted it?)
+                    if os.path.exists(self.current_item):
+                        if self._executable_path:
+                            success = self.run_command(self.current_item)
+                        else:
+                            success = self._event_handler(self.current_item)
+
+                        if success:
+                            # Dequeue the item, but requeue if it was not
+                            # successful
+                            self.source_queue.task_done()
+                            self.current_item = None
+                    else:
+                        # Dequeue the item
+                        logger.warning(
+                            f"Processing {self.current_item} Complete... file"
+                            " was moved or deleted. Queue size:"
+                            f" {self.source_queue.qsize()}"
+                        )
+                        self.current_item = None
+                        self.source_queue.task_done()
+                        continue
+
+                    elapsed = time.monotonic() - start_time
+                    logger.info(f"Complete. Queue size: {self.source_queue.qsize()} Elapsed: {elapsed:.2f} sec")
+
+                    if success:
+                        # reset our error count and backoffs
+                        self.consecutive_error_count = 0
+                    else:
+                        if self.requeue_on_error:
+                            self.consecutive_error_count += 1
+                            backoff = calculate_backoff_seconds(
+                                self.consecutive_error_count,
+                                self.backoff_initial_seconds,
+                                self.backoff_factor,
+                                self.backoff_limit_seconds,
+                            )
+
+                            logger.info(
+                                f"{self.consecutive_error_count} consecutive"
+                                " failures. Backing off for"
+                                f" {backoff} seconds."
+                            )
+                            self.event.wait(backoff)
+
+                            # If this option is set, add item back to the end of
+                            # the queue
+                            # If not set, just keep retrying the operation
+                            if self.requeue_to_eoq_on_failure:
+                                self.source_queue.task_done()
+                                self.source_queue.put(self.current_item)
+                                self.current_item = None
+                        else:
+                            # We are not requeuing after the error
+                            # so tell the queue we are done with this item
+                            self.source_queue.task_done()
+                            self.current_item = None
+
+                except queue.Empty:
+                    if self.exit_once_queue_empty:
+                        # Queue is complete. Stop now
+                        logger.info("Finished processing queue.")
+                        self.stop()
+                        return
+
+    def pause(self, paused: bool):
+        """Pause or resume queue processing.
+
+        Args:
+            paused: True to pause processing, False to resume.
+        """
+        self._paused = paused
+
+    def stop(self):
+        """Stop the queue worker and cancel any backoff wait."""
+        self._running = False
+        # cancel a wait if we are in one
+        self.event.set()
+
+    def run_command(self, filename: str) -> bool:
+        """Execute the configured command with file token substitution.
+
+        Replaces __FILE__ with the filename and __FILENOEXT__ with the filename
+        without extension in the command string before execution.
+
+        Args:
+            filename: The file path to substitute into the command.
+
+        Returns:
+            True if the command succeeds, False otherwise.
+        """
+        command = f"{self._executable_path}"
+
+        # Substitute the filename into the command
+        command = command.replace(constants.FILE_REPLACEMENT_TOKEN, filename)
+
+        filename_no_ext = os.path.splitext(filename)[0]
+        command = command.replace(constants.FILENOEXT_REPLACEMENT_TOKEN, filename_no_ext)
+
+        return_value, _ = run_command(command, -1, 60, True)
+
+        return return_value
+
+    def get_status(self) -> dict:
+        """Get the current status of the queue worker.
+
+        Returns:
+            A dictionary containing the worker name, current item, and queue size.
+        """
+        # We add 1 to the count if we have a current item, because the queue size does not include the item
+        # currently being processed.
+        return {
+            "name": self.name,
+            "current_item": self.current_item,
+            "queue_size": self.source_queue.qsize() + (0 if self.current_item is None else 1),
+        }
