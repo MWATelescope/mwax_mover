@@ -292,6 +292,7 @@ def process_solutions(
                 write_debug_phase_fit_plots(
                     soln_group,
                     refant["name"],
+                    refant["ant"],
                     phase_fits,
                     output_data_path,
                     obs_id,

@@ -184,6 +184,7 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
         write_debug_phase_fit_plots(
             soln_group,
             refant["name"],
+            refant["ant"],
             phase_fits,
             args.output_path,
             obs_id,

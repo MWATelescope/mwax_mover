@@ -571,6 +571,7 @@ def plot_phase_residual(
 def write_debug_phase_fit_plots(
     group: HyperfitsSolutionGroup,
     refant_name: str,
+    refant_ant: int,
     final_phase_fits: pd.DataFrame,
     output_path: str,
     obs_id: int,
@@ -589,6 +590,10 @@ def write_debug_phase_fit_plots(
         group: The solution group, after run_flagging_pipeline() (and
             typically commit()) have run.
         refant_name: Name of the reference antenna.
+        refant_ant: Antenna index (mwalib Antenna.ant, 0-based) of the
+            reference antenna. Shown alongside refant_name in each plot's
+            title so the plots record which tile they were normalised
+            against.
         final_phase_fits: group.phase_fits (the final, annotated phase fit
             DataFrame) -- the return value of
             calvin.plots.stats_table.write_before_after_stats().
@@ -609,6 +614,7 @@ def write_debug_phase_fit_plots(
     all_chanblocks_hz = group.all_chanblocks_hz_concat
     _, _noref_xx, _noref_yy, ref_xx, ref_yy = group.get_solns_both(refant_name)
     weights = group.weights
+    title = f"Ref tile: {refant_name} (ant {refant_ant})"
     plot_debug_phase_fits(
         final_phase_fits,
         tiles,
@@ -617,6 +623,7 @@ def write_debug_phase_fit_plots(
         ref_yy,
         weights,
         prefix=os.path.join(output_path, f"{obs_id}_"),
+        title=title,
         plot_residual=True,
         phase_outlier_nstd=phase_outlier_nstd,
     )

@@ -1069,6 +1069,7 @@ def test_write_before_after_stats_reuses_final_phase_fit_without_recomputing():
             write_debug_phase_fit_plots(
                 group,
                 "Tile001",
+                0,
                 final_phase_fits,
                 output_path="/tmp",
                 obs_id=1,
