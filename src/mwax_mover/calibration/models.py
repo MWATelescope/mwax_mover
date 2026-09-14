@@ -24,7 +24,7 @@ class Tile(NamedTuple):
     name: str
     id: int
     flag: bool
-    # index: int
+    ant: int
     rx: int
     slot: int
     flavor: str = ""
@@ -109,6 +109,7 @@ class Metafits:
                     name=ant.tile_name,
                     id=ant.tile_id,
                     flag=bool(ant.rfinput_x.flagged),
+                    ant=ant.ant,
                     rx=ant.rfinput_x.rec_number,
                     slot=ant.rfinput_x.rec_slot_number,
                     flavor=str(ant.rfinput_x.rec_type),

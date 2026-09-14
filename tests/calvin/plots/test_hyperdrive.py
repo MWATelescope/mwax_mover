@@ -145,14 +145,14 @@ class TestGeneratePlotsRename:
         assert "produced no plots matching" in caplog.text
 
 
-class TestGeneratePlotsReftile:
-    """Tests for --reftile, threaded through so hyperdrive's own plots use
+class TestGeneratePlotsRefTile:
+    """Tests for --ref-tile, threaded through so hyperdrive's own plots use
     the same reference tile as calvin's internal calculations (see
     HyperfitsSolutionGroup.select_refant and docs/REF_TILE_SELECTION.md).
     """
 
-    def test_reftile_omitted_by_default(self, tmp_path):
-        """reftile=None (the default) produces no --reftile on the command line -- existing callers unaffected."""
+    def test_ref_tile_omitted_by_default(self, tmp_path):
+        """ref_tile=None (the default) produces no --ref-tile on the command line -- existing callers unaffected."""
         stem = "1391522232_ch62_solutions"
         captured_cmd = {}
 
@@ -170,10 +170,10 @@ class TestGeneratePlotsReftile:
                 before=True,
             )
 
-        assert "--reftile" not in captured_cmd["cmd"]
+        assert "--ref-tile" not in captured_cmd["cmd"]
 
-    def test_reftile_appended_when_given(self, tmp_path):
-        """reftile='Tile104' appends --reftile Tile104 to the command line."""
+    def test_ref_tile_appended_when_given(self, tmp_path):
+        """ref_tile=42 appends --ref-tile 42 to the command line."""
         stem = "1391522232_ch62_solutions"
         captured_cmd = {}
 
@@ -189,10 +189,10 @@ class TestGeneratePlotsReftile:
                 "/fake/metafits.fits",
                 str(tmp_path),
                 before=True,
-                reftile="Tile104",
+                ref_tile=42,
             )
 
-        assert "--reftile Tile104" in captured_cmd["cmd"]
+        assert "--ref-tile 42" in captured_cmd["cmd"]
 
 
 class TestGeneratePlotsForFiles:
@@ -267,8 +267,8 @@ class TestGeneratePlotsForFiles:
         # (obs_id, filename, binary, metafits, output_dir, before, max_amp)
         assert mock_gen.call_args_list[0].args[5] is False
 
-    def test_reftile_is_passed_through(self):
-        """reftile is forwarded to every file's generate_plots call, unchanged."""
+    def test_ref_tile_is_passed_through(self):
+        """ref_tile is forwarded to every file's generate_plots call, unchanged."""
         files = [f"/data/obs_ch{c}_solutions.fits" for c in (62, 67)]
         patch_target = "mwax_mover.calvin.plots.hyperdrive.generate_plots"
         with patch(patch_target, return_value=(True, "")) as mock_gen:
@@ -279,9 +279,9 @@ class TestGeneratePlotsForFiles:
                 "/fake/metafits.fits",
                 "/out",
                 before=True,
-                reftile="Tile104",
+                ref_tile=42,
             )
 
         assert mock_gen.call_count == 2
-        # (obs_id, filename, binary, metafits, output_dir, before, max_amp, reftile)
-        assert all(call.args[7] == "Tile104" for call in mock_gen.call_args_list)
+        # (obs_id, filename, binary, metafits, output_dir, before, max_amp, ref_tile)
+        assert all(call.args[7] == 42 for call in mock_gen.call_args_list)

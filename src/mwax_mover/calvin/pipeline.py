@@ -200,7 +200,7 @@ def process_solutions(
             metafits_file,
             output_data_path,
             before=True,
-            reftile=refant["name"],
+            ref_tile=refant["ant"],
         ):
             logger.warning(f"{obs_id}: 'before' hyperdrive plots failed for {failed_file}: {plots_error}")
 
@@ -263,7 +263,7 @@ def process_solutions(
             metafits_file,
             output_data_path,
             before=False,
-            reftile=refant["name"],
+            ref_tile=refant["ant"],
         ):
             logger.warning(f"{obs_id}: hyperdrive plots failed for {failed_file}: {plots_error}")
 

@@ -122,7 +122,7 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
         metafits_filename,
         args.output_path,
         before=True,
-        reftile=refant["name"],
+        ref_tile=refant["ant"],
     ):
         print(f"Warning: 'before' hyperdrive plots failed for {failed_file}: {plots_error}")
 
@@ -164,7 +164,7 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
         metafits_filename,
         args.output_path,
         before=False,
-        reftile=refant["name"],
+        ref_tile=refant["ant"],
     ):
         print(f"Warning: hyperdrive plots failed for {failed_file}: {plots_error}")
 
