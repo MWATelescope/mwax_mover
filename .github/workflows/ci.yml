@@ -81,7 +81,7 @@ jobs:
         # pyproject requires >=3.12,<3.15. 3.12 is what runs in production at
         # the MRO; 3.13 is here to catch breakage before we upgrade. Add "3.14"
         # once mwalib and the scientific stack publish wheels for it.
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.13"]
     steps:
       - uses: actions/checkout@v4
 

@@ -1,8 +1,10 @@
 # Changelog
 
-# 3.0.0 XX-Sep-2026
+# 2.0.0 14-Sep-2026
 
 ## Breaking Configuration changes
+### 0. Bump Python to 3.13
+
 ### 1. Database section consolidation
 
 * All four daemons' production configs need their database section(s) replaced with a single `[mwa database]` section, keys `host`, `db`, `user`, `pass`, `port`:

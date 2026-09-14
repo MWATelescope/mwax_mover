@@ -7,7 +7,7 @@ name = "mwax_mover"
 version = "2.0.0"
 description = "A module to manage input, archiving and calibration for the MWAX correlator"
 readme = "README.md"
-requires-python = ">=3.12, <3.15"
+requires-python = ">=3.13, <3.15"
 keywords = ["MWA", "MWAX", "radioastronomy", "radiotelescope"]
 authors = [
     { email = "greg.sleap@curtin.edu.au" },
@@ -21,7 +21,7 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Astronomy",
     "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 
 dependencies = [
@@ -71,7 +71,7 @@ print_metafits_info = "mwax_mover.cli.print_metafits_info:main"
 
 [tool.ruff]
 line-length = 120
-target-version = "py312"
+target-version = "py313"
 
 [tool.ruff.lint]
 # Starting set. E/F are pycodestyle+pyflakes (the ruff default) and B is
@@ -141,7 +141,7 @@ extra-paths = ["tests"]
 
 [tool.mypy]
 # Set this to your project's Python version (e.g., 3.10, 3.11, 3.12)
-python_version = "3.12"
+python_version = "3.13"
 
 # Silences errors about external libraries that lack type hints
 ignore_missing_imports = true
