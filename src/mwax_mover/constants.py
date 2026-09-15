@@ -31,11 +31,16 @@ METAFITS_KEY_EXPOSURE, the FITS/metafits exposure-duration header key.
 
 Calibration numerics: MAD_TO_STD_SCALE_FACTOR, the MAD-to-standard-
 deviation conversion used by the outlier-rejection code; the di-calibrate
-memory-estimate constants (JONES_F32_BYTES, JONES_F64_BYTES, F32_BYTES);
-HYPERDRIVE_MEMORY_HEADROOM_FRACTION and HYPERDRIVE_FALLBACK_WORKERS, used
-to size concurrent hyperdrive runs across picket-fence bands; and the
-REFTILE_* gates used by select_refant to choose a calibration-quality-
-aware reference tile.
+memory-estimate constants (JONES_F32_BYTES, JONES_F64_BYTES, F32_BYTES,
+F64_BYTES); HYPERDRIVE_MEMORY_HEADROOM_FRACTION and
+HYPERDRIVE_FALLBACK_WORKERS, used to size concurrent hyperdrive runs
+across picket-fence bands against host RAM; the equivalent GPU-side
+constants (NVIDIA_A40_VRAM_BYTES, HYPERDRIVE_GPU_RESIDENT_FIXED_BYTES,
+HYPERDRIVE_MAX_CONCURRENT_GPU_WORKERS, HYPERDRIVE_GPU_LMN_BYTES,
+HYPERDRIVE_GPU_GAUSSIAN_PARAMS_BYTES), used to additionally cap that same
+sizing against the shared GPU's memory and measured compute-contention
+ceiling; and the REFTILE_* gates used by select_refant to choose a
+calibration-quality-aware reference tile.
 """
 
 # The full filename with path
@@ -149,6 +154,7 @@ COMMAND_DADA_DISKDB = "dada_diskdb"
 JONES_F32_BYTES = 32
 JONES_F64_BYTES = 64
 F32_BYTES = 4
+F64_BYTES = 8
 
 # UVFITS output extension, produced by Birli and consumed by hyperdrive.
 EXT_UVFITS = ".uvfits"
@@ -166,6 +172,39 @@ HYPERDRIVE_MEMORY_HEADROOM_FRACTION = 0.15
 # hyperdrive run is a failed calibration, not just a slow plot, so
 # guessing low here costs more to get wrong.
 HYPERDRIVE_FALLBACK_WORKERS = 1
+
+# NVIDIA A40 GPU memory -- Calvin's hardware, confirmed via NVIDIA's own
+# product spec (48 GB GDDR6 with ECC). Used by _max_hyperdrive_workers to
+# cap concurrent hyperdrive runs against the single GPU all pickets within
+# one SLURM job share (see calvin/slurm.py's --gpus-per-task=1).
+NVIDIA_A40_VRAM_BYTES = 48 * 1024**3
+
+# Empirically measured (nvidia-smi) on Calvin hardware, for a cuda-only
+# (double precision, no gpu-single) hyperdrive build: CUDA context overhead
+# (~271 MiB) plus mwa_hyperbeam's FEE beam-coefficient upload (~2634 MiB).
+# Measured flat across 1 vs 24 coarse channels and at --num-sources 200, so
+# treated as a fixed constant rather than a function of band width or sky
+# model size. See estimate_di_calibrate_peak_gpu_bytes in
+# calvin/hyperdrive.py.
+HYPERDRIVE_GPU_RESIDENT_FIXED_BYTES = 2905 * 1024**2
+
+# Fixed ceiling on concurrent GPU-bound hyperdrive workers, independent of
+# whatever the GPU-memory cap alone would allow. Empirically measured on
+# Calvin hardware: one hyperdrive process already saturates the shared
+# GPU's compute, so additional concurrent workers add queueing overhead
+# rather than real parallelism. Batch throughput was still improving at 6
+# concurrent workers (the highest tested), but sustained CPU saturation
+# grew from ~2 minutes at 4 workers to ~3 minutes at 6 -- capped here to
+# keep some CPU headroom rather than chase the last bit of throughput. See
+# _max_hyperdrive_workers in calvin/hyperdrive.py.
+HYPERDRIVE_MAX_CONCURRENT_GPU_WORKERS = 6
+
+# Per-component GPU byte costs for power-law sky-model components, double
+# precision -- see the bindgen-generated size_of assertions for
+# LmnRime/GaussianParams in mwa_hyperdrive: src/gpu/types_double.rs. Used
+# by estimate_di_calibrate_peak_gpu_bytes.
+HYPERDRIVE_GPU_LMN_BYTES = 24  # 3 x f64
+HYPERDRIVE_GPU_GAUSSIAN_PARAMS_BYTES = 24  # 3 x f64
 
 # Reference-tile selection gates (calvin/hyperfits_solution_group.py
 # select_refant). A tile below phase/gain fit quality, or with too extreme

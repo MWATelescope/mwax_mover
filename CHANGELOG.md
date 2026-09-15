@@ -4,6 +4,7 @@
 
 * Bump Python to 3.14.
 * Fixed lots of minor ruff check errors.
+* Bug fix: Hyperdrive runs now capped at 6 after extensive real world testing on calvin hardware. But in case we change hardware we also check available GPU RAM now too.
 
 # 2.0.0 14-Sep-2026
 

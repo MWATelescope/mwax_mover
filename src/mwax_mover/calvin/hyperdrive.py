@@ -4,12 +4,14 @@ run_hyperdrive() shells out to the hyperdrive binary via a Popen handle and
 writes a readme (core.command.write_readme_file) recording the command and
 outcome, mirroring calvin.birli.run_birli(). write_hyperdrive_stats() writes
 get_convergence_summary()'s convergence summary for a just-produced solution
-file. estimate_di_calibrate_peak_ram_bytes(), _uvfits_num_coarse_chans(),
-and _max_hyperdrive_workers() support parallelising run_hyperdrive() across
-picket-fence bands. See calvin.hyperfits_solution/
-calvin.hyperfits_solution_group for reading/flagging solutions (split out
-of this module during the source_code_restructure) and calvin.plots for
-plotting.
+file. estimate_di_calibrate_peak_ram_bytes(), estimate_di_calibrate_peak_gpu_bytes(),
+_uvfits_num_coarse_chans(), and _max_hyperdrive_workers() support parallelising
+run_hyperdrive() across picket-fence bands -- the host-RAM and GPU-memory
+estimates share two small helpers (_estimate_component_counts(),
+_estimate_chanblocks_and_baselines()) so the two stay in sync. See
+calvin.hyperfits_solution/calvin.hyperfits_solution_group for reading/flagging
+solutions (split out of this module during the source_code_restructure) and
+calvin.plots for plotting.
 """
 
 import logging
@@ -27,10 +29,16 @@ from mwax_mover.calvin.hyperfits_solution import HyperfitsSolution
 from mwax_mover.constants import (
     EXT_UVFITS,
     F32_BYTES,
+    F64_BYTES,
     HYPERDRIVE_FALLBACK_WORKERS,
+    HYPERDRIVE_GPU_GAUSSIAN_PARAMS_BYTES,
+    HYPERDRIVE_GPU_LMN_BYTES,
+    HYPERDRIVE_GPU_RESIDENT_FIXED_BYTES,
+    HYPERDRIVE_MAX_CONCURRENT_GPU_WORKERS,
     HYPERDRIVE_MEMORY_HEADROOM_FRACTION,
     JONES_F32_BYTES,
     JONES_F64_BYTES,
+    NVIDIA_A40_VRAM_BYTES,
 )
 from mwax_mover.core.command import check_popen_finished, start_command, write_readme_file
 from mwax_mover.core.env import available_memory_bytes
@@ -71,6 +79,59 @@ def _uvfits_num_coarse_chans(uvfits_filename: str, metafits_context: mwalib.Meta
     return max(1, round(bandwidth_hz / metafits_context.coarse_chan_width_hz))
 
 
+def _estimate_component_counts(num_sources: int) -> tuple[int, int, int]:
+    """Estimate sky-model component counts from num_sources.
+
+    Shared by estimate_di_calibrate_peak_ram_bytes and
+    estimate_di_calibrate_peak_gpu_bytes, so the two stay in sync. See
+    estimate_di_calibrate_peak_ram_bytes's docstring for the caveats --
+    n_gaussians is a guess (not read from the sky model), and no shapelets
+    in the current skymodels.
+
+    Args:
+        num_sources: Fed from the config file, how many sources should
+            Calvin tell Hyperdrive to use for the skymodel.
+
+    Returns:
+        (n_points, n_gaussians, n_shapelets).
+    """
+    n_points: int = num_sources  # Most sources in the sky model are point sources anyway
+    n_gaussians: int = num_sources // 4  # no good way to estimate this, so guess for now
+    n_shapelets: int = 0  # no shapelets in the current skymodels, so assume 0 for now
+    return n_points, n_gaussians, n_shapelets
+
+
+def _estimate_chanblocks_and_baselines(
+    metafits_context: mwalib.MetafitsContext,
+    edge_width_hz: int,
+    num_coarse_chan_in_contig_band: int,
+) -> tuple[int, int, int]:
+    """Estimate tile/baseline/chanblock counts for a contiguous band.
+
+    Shared by estimate_di_calibrate_peak_ram_bytes and
+    estimate_di_calibrate_peak_gpu_bytes, so the two stay in sync. See
+    estimate_di_calibrate_peak_ram_bytes's docstring for the fine-channel
+    and tile-flagging assumptions this replicates.
+
+    Args:
+        metafits_context: Metafits context to get metafits values.
+        edge_width_hz: The amount that each coarse channel edge is flagged (in Hz).
+        num_coarse_chan_in_contig_band: The number of coarse channels in the contiguous band.
+
+    Returns:
+        (n_unflagged_tiles, n_cross_baselines, n_chanblocks).
+    """
+    n_unflagged_tiles = sum(1 for rf in metafits_context.rf_inputs if rf.pol == mwalib.Pol.X and not rf.flagged)
+    n_cross_baselines = n_unflagged_tiles * (n_unflagged_tiles - 1) // 2
+
+    num_fine_chans_per_coarse = metafits_context.num_corr_fine_chans_per_coarse
+    num_flagged_per_edge = edge_width_hz // metafits_context.corr_fine_chan_width_hz
+    num_flagged_per_coarse = 2 * num_flagged_per_edge
+    n_chanblocks = num_coarse_chan_in_contig_band * max(num_fine_chans_per_coarse - num_flagged_per_coarse, 0)
+
+    return n_unflagged_tiles, n_cross_baselines, n_chanblocks
+
+
 def estimate_di_calibrate_peak_ram_bytes(
     metafits_context: mwalib.MetafitsContext,
     edge_width_hz: int,
@@ -87,6 +148,9 @@ def estimate_di_calibrate_peak_ram_bytes(
     1. The three big visibility arrays (vis_data, vis_model, vis_weights),
        shaped (n_timesteps, n_chanblocks, n_cross_baselines) -- see
        `DiCalParams::get_cal_vis()` in mwa_hyperdrive: src/params/di_calibration.rs.
+       Always host-side and always f32, regardless of whether di-calibrate
+       is built/run with CUDA -- see estimate_di_calibrate_peak_gpu_bytes
+       for what additionally runs on the GPU device on Calvin's hardware.
     2. The sky-model component flux-density arrays, shaped
        (n_chanblocks, n_components) per component type (points/gaussians/
        shapelets) -- see `ComponentList::new()` in
@@ -122,18 +186,10 @@ def estimate_di_calibrate_peak_ram_bytes(
     Returns:
         An int which is the max RAM consumption, in bytes, estimated based on the input
     """
-    n_points: int = num_sources  # Most sources in the sky model are point sources anyway
-    n_gaussians: int = num_sources // 4  # no good way to estimate this, so guess for now
-    n_shapelets: int = 0  # no shapelets in the current skymodels, so assume 0 for now
-
-    n_unflagged_tiles = sum(1 for rf in metafits_context.rf_inputs if rf.pol == mwalib.Pol.X and not rf.flagged)
-    n_cross_baselines = n_unflagged_tiles * (n_unflagged_tiles - 1) // 2
-
-    num_fine_chans_per_coarse = metafits_context.num_corr_fine_chans_per_coarse
-
-    num_flagged_per_edge = edge_width_hz // metafits_context.corr_fine_chan_width_hz
-    num_flagged_per_coarse = 2 * num_flagged_per_edge
-    n_chanblocks = num_coarse_chan_in_contig_band * max(num_fine_chans_per_coarse - num_flagged_per_coarse, 0)
+    n_points, n_gaussians, n_shapelets = _estimate_component_counts(num_sources)
+    n_unflagged_tiles, n_cross_baselines, n_chanblocks = _estimate_chanblocks_and_baselines(
+        metafits_context, edge_width_hz, num_coarse_chan_in_contig_band
+    )
 
     n_timesteps = metafits_context.num_metafits_timesteps
 
@@ -154,20 +210,125 @@ def estimate_di_calibrate_peak_ram_bytes(
     return vis_arrays + sky_model_components + beam_response_cache + solutions_array
 
 
-def _max_hyperdrive_workers(per_run_bytes: list[int]) -> int:
-    """Decide how many hyperdrive di-calibrate runs may run concurrently.
+def estimate_di_calibrate_peak_gpu_bytes(
+    metafits_context: mwalib.MetafitsContext,
+    edge_width_hz: int,
+    num_sources: int,
+    num_coarse_chan_in_contig_band: int,
+) -> int:
+    """Estimate mwa_hyperdrive di-calibrate's peak GPU (device) memory, for
+    Calvin's actual hyperdrive build: `cuda` only, i.e. double precision --
+    no `gpu-single` (confirmed via the build command: `cargo build
+    --features=cuda --release`; `gpu-single` is a separate, additive
+    feature that forwards to mwa_hyperbeam/gpu-single and isn't implied by
+    `cuda` alone or by hyperdrive's `default` feature set).
 
-    Bounded by live available memory only (no CPU cap -- each hyperdrive
-    process may itself use several threads internally, so capping by CPU
-    count here could leave memory idle for no benefit). Mirrors
-    calvin.plots.gains._max_render_workers's shape, but sized against
-    available_memory_bytes() with a fixed headroom fraction rather than
-    that function's page-count/CPU-count/memory three-way min.
+    Unlike estimate_di_calibrate_peak_ram_bytes (the *host* memory
+    di-calibrate always needs, independent of CPU vs GPU modelling), this
+    estimates what's additionally needed on the GPU device when Calvin
+    runs hyperdrive's CUDA code path (mwa_hyperdrive: src/model/gpu.rs).
+    Based on reading that source plus mwa_hyperbeam's, and on empirical
+    measurement (nvidia-smi) on Calvin hardware, peak GPU memory is:
+
+    1. A large, essentially fixed baseline (HYPERDRIVE_GPU_RESIDENT_FIXED_BYTES)
+       covering the CUDA context and mwa_hyperbeam's FEE beam-coefficient
+       upload (`FEEBeamGpu::new()`, via `prepare_gpu_beam()` in
+       mwa_hyperdrive: src/model/gpu.rs). Measured empirically rather than
+       computed -- hyperbeam's coefficient-array length depends on the FEE
+       HDF5 file's contents, not just this function's inputs -- and found
+       to be flat across 1 vs 24 coarse channels and at --num-sources 200,
+       so treated as independent of band width and sky-model size rather
+       than modelled as a formula.
+    2. The GPU-resident sky-model component arrays, uploaded once in
+       `SkyModellerGpu::new()` and held for the whole run. For power-law
+       components -- Calvin's source list (GGSM_updated.fits) is confirmed
+       100% power-law, 0 curved power law, 0 list via `hyperdrive
+       srclist-verify` -- only one reference value per *component* is
+       stored on the GPU; extrapolation to each frequency happens
+       on-the-fly in the CUDA kernel, unlike the host-side estimate above
+       which needs a value per (chanblock, component) pair. Byte sizes are
+       from the bindgen-generated size_of assertions for the Points/
+       Gaussians FFI structs in mwa_hyperdrive: src/gpu/types_double.rs.
+       Shapelets aren't modelled here, matching
+       estimate_di_calibrate_peak_ram_bytes's own n_shapelets=0 assumption.
+    3. The small per-timestep transient GPU buffers (visibility model,
+       UVW, beam-Jones cache) -- freed/reused every timestep in
+       `model_timestep_with` (mwa_hyperdrive: src/model/gpu.rs), so they
+       contribute one timestep's worth to peak, not num_timesteps's worth.
+       Dominated by the visibility-model buffer, shaped
+       (n_chanblocks, n_cross_baselines) and always Jones<f32> regardless
+       of build precision.
+
+    Confirmed empirically (nvidia-smi, staggered and simultaneous launches)
+    to be fully additive across concurrently-running hyperdrive processes:
+    each gets its own independent CUDA context and its own copy of
+    everything above, with no sharing -- see
+    HYPERDRIVE_MAX_CONCURRENT_GPU_WORKERS for the separate, empirically-
+    measured concurrency ceiling this estimate feeds into.
 
     Args:
-        per_run_bytes: Estimated peak RAM for each picket's hyperdrive run
-            (see estimate_di_calibrate_peak_ram_bytes), one entry per
-            picket about to run.
+        metafits_context: Metafits context to get metafits values.
+        edge_width_hz: The amount that each coarse channel edge is flagged (in Hz).
+        num_sources: Fed from the config file, how many sources should Calvin tell
+            Hyperdrive to use for the skymodel.
+        num_coarse_chan_in_contig_band: The number of coarse channels in the contiguous band.
+
+    Returns:
+        An int which is the max GPU memory consumption, in bytes, estimated based on the input.
+    """
+    n_points, n_gaussians, _n_shapelets = _estimate_component_counts(num_sources)
+    _n_unflagged_tiles, n_cross_baselines, n_chanblocks = _estimate_chanblocks_and_baselines(
+        metafits_context, edge_width_hz, num_coarse_chan_in_contig_band
+    )
+
+    point_bytes_per_component = HYPERDRIVE_GPU_LMN_BYTES + JONES_F64_BYTES + F64_BYTES
+    gaussian_bytes_per_component = point_bytes_per_component + HYPERDRIVE_GPU_GAUSSIAN_PARAMS_BYTES
+    sky_model_gpu_bytes = n_points * point_bytes_per_component + n_gaussians * gaussian_bytes_per_component
+
+    transient_gpu_bytes = n_chanblocks * n_cross_baselines * JONES_F32_BYTES
+
+    return HYPERDRIVE_GPU_RESIDENT_FIXED_BYTES + sky_model_gpu_bytes + transient_gpu_bytes
+
+
+def _max_hyperdrive_workers(per_run_host_bytes: list[int], per_run_gpu_bytes: list[int]) -> int:
+    """Decide how many hyperdrive di-calibrate runs may run concurrently.
+
+    Bounded by three independent caps -- takes the minimum:
+
+    1. Live available host RAM, with a fixed headroom fraction (as
+       before this function also considered the GPU).
+    2. The single NVIDIA A40 GPU that all concurrent workers share within
+       this SLURM job's one-GPU allocation (see calvin/slurm.py's
+       --gpus-per-task=1), also with a headroom fraction. Reuses
+       HYPERDRIVE_MEMORY_HEADROOM_FRACTION rather than a separate GPU-only
+       constant -- in practice this cap essentially never binds first: six
+       workers' worth of GPU memory is only ~17GB against a 48GB budget,
+       nowhere near tight, since cap 3 below is reached first.
+    3. HYPERDRIVE_MAX_CONCURRENT_GPU_WORKERS, a fixed ceiling from
+       empirical testing (nvidia-smi + CPU sampling) on Calvin hardware:
+       a single hyperdrive process already saturates the shared GPU's
+       compute, so additional concurrent workers add queueing overhead
+       rather than real parallelism. Total batch throughput was still
+       improving at 6 concurrent workers (the highest tested), but
+       sustained CPU saturation grew from ~2 minutes at 4 workers to ~3
+       minutes at 6 -- capped here to keep some CPU headroom rather than
+       chase the last bit of throughput.
+
+    No CPU-count cap on its own (mirrors the pre-existing host-RAM-only
+    reasoning: each hyperdrive process may itself use several threads
+    internally, so capping by CPU count here could leave memory/GPU
+    capacity idle for no benefit) -- CPU pressure is addressed via cap 3
+    above instead, since it was measured jointly with GPU contention.
+
+    Mirrors calvin.plots.gains._max_render_workers's shape.
+
+    Args:
+        per_run_host_bytes: Estimated peak host RAM for each picket's
+            hyperdrive run (see estimate_di_calibrate_peak_ram_bytes), one
+            entry per picket about to run.
+        per_run_gpu_bytes: Estimated peak GPU memory for each picket's
+            hyperdrive run (see estimate_di_calibrate_peak_gpu_bytes), one
+            entry per picket about to run, same order as per_run_host_bytes.
 
     Returns:
         Worker count, always at least 1.
@@ -179,14 +340,18 @@ def _max_hyperdrive_workers(per_run_bytes: list[int]) -> int:
             f"Could not determine available memory; capping concurrent hyperdrive runs at "
             f"{HYPERDRIVE_FALLBACK_WORKERS}."
         )
-        memory_cap = HYPERDRIVE_FALLBACK_WORKERS
+        host_cap = HYPERDRIVE_FALLBACK_WORKERS
     else:
-        budget = int(available * (1 - HYPERDRIVE_MEMORY_HEADROOM_FRACTION))
-        worst_case = max(per_run_bytes)
-        memory_cap = max(1, budget // worst_case)
+        host_budget = int(available * (1 - HYPERDRIVE_MEMORY_HEADROOM_FRACTION))
+        host_worst_case = max(per_run_host_bytes)
+        host_cap = max(1, host_budget // host_worst_case)
 
-    workers = max(1, min(len(per_run_bytes), memory_cap))
-    logger.info(f"Running {len(per_run_bytes)} hyperdrive run(s) with {workers} concurrent worker(s).")
+    gpu_budget = int(NVIDIA_A40_VRAM_BYTES * (1 - HYPERDRIVE_MEMORY_HEADROOM_FRACTION))
+    gpu_worst_case = max(per_run_gpu_bytes)
+    gpu_cap = max(1, gpu_budget // gpu_worst_case)
+
+    workers = max(1, min(len(per_run_host_bytes), host_cap, gpu_cap, HYPERDRIVE_MAX_CONCURRENT_GPU_WORKERS))
+    logger.info(f"Running {len(per_run_host_bytes)} hyperdrive run(s) with {workers} concurrent worker(s).")
     return workers
 
 
@@ -318,16 +483,19 @@ def run_hyperdrive(
     succeed) determines the return value and the error-dir/readme_error.txt
     path, same as before.
 
-    Concurrency is memory-bounded (see _max_hyperdrive_workers): each
-    picket's peak RAM is estimated from its own uvfits file
-    (_uvfits_num_coarse_chans) and the observation's metafits
-    (estimate_di_calibrate_peak_ram_bytes), and the worker count is capped
+    Concurrency is bounded by both host RAM and GPU memory/compute (see
+    _max_hyperdrive_workers): each picket's peak host RAM and peak GPU
+    memory are estimated from its own uvfits file (_uvfits_num_coarse_chans)
+    and the observation's metafits (estimate_di_calibrate_peak_ram_bytes,
+    estimate_di_calibrate_peak_gpu_bytes), and the worker count is capped
     so the worst-case picket always fits within the live-probed available
-    memory. If any picket's estimate can't be computed (e.g. a malformed
-    uvfits header), concurrency is disabled for this call (falls back to
-    fully serial) rather than raising -- a file hyperdrive itself can't
-    parse either should still get its own clean per-picket failure and
-    readme, not an unhandled exception before any run even starts.
+    host memory, the shared GPU's memory budget, and a fixed empirically-
+    measured GPU-compute-contention ceiling. If any picket's estimate
+    can't be computed (e.g. a malformed uvfits header), concurrency is
+    disabled for this call (falls back to fully serial) rather than
+    raising -- a file hyperdrive itself can't parse either should still
+    get its own clean per-picket failure and readme, not an unhandled
+    exception before any run even starts.
 
     Args:
         input_uvfits_files: List of input UV FITS files, one per contiguous
@@ -359,13 +527,18 @@ def run_hyperdrive(
     logger.info(f"{obs_id}: {total_runs} contiguous band(s) detected. Running hyperdrive {total_runs} time(s)....")
 
     try:
-        per_run_bytes = [
-            estimate_di_calibrate_peak_ram_bytes(
-                metafits_context, edge_width_hz, num_sources, _uvfits_num_coarse_chans(uvfits_file, metafits_context)
-            )
-            for uvfits_file in input_uvfits_files
+        num_coarse_chans_per_picket = [
+            _uvfits_num_coarse_chans(uvfits_file, metafits_context) for uvfits_file in input_uvfits_files
         ]
-        workers = _max_hyperdrive_workers(per_run_bytes)
+        per_run_host_bytes = [
+            estimate_di_calibrate_peak_ram_bytes(metafits_context, edge_width_hz, num_sources, n)
+            for n in num_coarse_chans_per_picket
+        ]
+        per_run_gpu_bytes = [
+            estimate_di_calibrate_peak_gpu_bytes(metafits_context, edge_width_hz, num_sources, n)
+            for n in num_coarse_chans_per_picket
+        ]
+        workers = _max_hyperdrive_workers(per_run_host_bytes, per_run_gpu_bytes)
     except Exception as estimate_exception:  # noqa: BLE001 - best-effort memory estimate; any failure just falls back to serial
         logger.warning(
             f"{obs_id}: could not estimate per-picket hyperdrive memory usage ({estimate_exception}); running serially."

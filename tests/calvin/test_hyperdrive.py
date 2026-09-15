@@ -1,10 +1,10 @@
 """Tests for calvin.hyperdrive's run/stats functions.
 
-Covers estimate_di_calibrate_peak_ram_bytes, _uvfits_num_coarse_chans, and
-_max_hyperdrive_workers -- the memory-estimation and concurrency-sizing
-support for parallelising run_hyperdrive across picket-fence bands -- plus
-run_hyperdrive itself now that it's wired up. write_hyperdrive_stats/
-get_convergence_summary still have no test coverage.
+Covers estimate_di_calibrate_peak_ram_bytes, estimate_di_calibrate_peak_gpu_bytes,
+_uvfits_num_coarse_chans, and _max_hyperdrive_workers -- the memory-estimation
+and concurrency-sizing support for parallelising run_hyperdrive across
+picket-fence bands -- plus run_hyperdrive itself now that it's wired up.
+write_hyperdrive_stats/get_convergence_summary still have no test coverage.
 """
 
 from concurrent.futures import ThreadPoolExecutor
@@ -19,6 +19,7 @@ from tests_common import obs_metafits_path
 from mwax_mover.calvin.hyperdrive import (
     _max_hyperdrive_workers,
     _uvfits_num_coarse_chans,
+    estimate_di_calibrate_peak_gpu_bytes,
     estimate_di_calibrate_peak_ram_bytes,
     run_hyperdrive,
 )
@@ -103,6 +104,78 @@ def test_estimate_di_calibrate_peak_ram_bytes_zero_sources(metafits_context):
 
 
 # ===========================================================================
+# estimate_di_calibrate_peak_gpu_bytes
+# ===========================================================================
+
+
+def test_estimate_di_calibrate_peak_gpu_bytes_matches_manual_calculation(metafits_context):
+    """Regression test for the GPU estimate, mirroring the host-RAM one above.
+
+    Uses this fixture's real metafits values (same fixture/values as
+    test_estimate_di_calibrate_peak_ram_bytes_matches_manual_calculation).
+    """
+    num_sources = 1000
+    edge_width_hz = 80000
+    num_coarse_chan = 1
+
+    result = estimate_di_calibrate_peak_gpu_bytes(metafits_context, edge_width_hz, num_sources, num_coarse_chan)
+
+    n_points = num_sources
+    n_gaussians = num_sources // 4
+    n_unflagged_tiles = 127
+    n_cross_baselines = n_unflagged_tiles * (n_unflagged_tiles - 1) // 2
+    n_coarse_channels = 1
+    n_chanblocks = n_coarse_channels * (128 - 2 * (80000 // 10000))
+
+    point_bytes_per_component = 24 + 64 + 8  # LMN + JonesF64 flux + f64 spectral index
+    gaussian_bytes_per_component = point_bytes_per_component + 24  # + GaussianParams
+    sky_model_gpu_bytes = n_points * point_bytes_per_component + n_gaussians * gaussian_bytes_per_component
+    transient_gpu_bytes = n_chanblocks * n_cross_baselines * 32  # Jones<f32>, always, regardless of gpu-single
+    expected = (2905 * 1024**2) + sky_model_gpu_bytes + transient_gpu_bytes
+
+    assert result == expected
+
+
+def test_estimate_di_calibrate_peak_gpu_bytes_scales_with_coarse_channels(metafits_context):
+    """Doubling the coarse-channel count increases the GPU estimate (transient term).
+
+    Unlike the host RAM estimate, the resident fixed baseline dominates and
+    doesn't scale with coarse-channel count at all -- only the small
+    transient per-timestep buffer term does -- but the total must still
+    strictly increase.
+    """
+    one_channel = estimate_di_calibrate_peak_gpu_bytes(metafits_context, 80000, 1000, 1)
+    four_channels = estimate_di_calibrate_peak_gpu_bytes(metafits_context, 80000, 1000, 4)
+
+    assert four_channels > one_channel
+
+
+def test_estimate_di_calibrate_peak_gpu_bytes_zero_sources(metafits_context):
+    """num_sources=0 still returns a sane, non-zero estimate.
+
+    The resident fixed baseline (CUDA context + hyperbeam upload) is
+    independent of source count, so the estimate should not collapse to
+    zero even with an empty sky model.
+    """
+    result = estimate_di_calibrate_peak_gpu_bytes(metafits_context, 80000, 0, 1)
+
+    assert result > 0
+
+
+def test_estimate_di_calibrate_peak_gpu_bytes_dominated_by_resident_baseline(metafits_context):
+    """The empirically-measured resident baseline dwarfs the sky-model term.
+
+    At a realistic --num-sources (a few hundred to a few thousand), the
+    sky-model contribution is at most a few MB -- nowhere near the ~2.8GB
+    resident baseline. Guards against a units/scaling mistake that would
+    make the sky-model term unrealistically large.
+    """
+    result = estimate_di_calibrate_peak_gpu_bytes(metafits_context, 80000, 2000, 1)
+
+    assert result < 2 * (2905 * 1024**2)
+
+
+# ===========================================================================
 # _uvfits_num_coarse_chans
 # ===========================================================================
 
@@ -170,14 +243,21 @@ def test_uvfits_num_coarse_chans_no_freq_axis_raises(metafits_context):
 # _max_hyperdrive_workers
 # ===========================================================================
 
+# Deliberately tiny/huge placeholder GPU-bytes lists in the host-memory-only
+# tests below (well under any real per-run estimate) so the new GPU-memory
+# and fixed-ceiling caps never bind -- these tests are unchanged in intent
+# from before this function also considered the GPU, just satisfying the
+# now-required second argument.
+_TRIVIAL_GPU_BYTES = [1] * 10
+
 
 def test_max_hyperdrive_workers_exact_fit():
     """Available memory exactly n times the worst-case run allows n workers."""
     with patch("mwax_mover.calvin.hyperdrive.available_memory_bytes", return_value=1000):
         # Budget after 15% headroom: 850. 3 pickets at 850/3 rounds down to 283 each -- but
         # worst_case here is fixed at 200, so budget // worst_case = 850 // 200 = 4, capped
-        # by len(per_run_bytes) = 3.
-        workers = _max_hyperdrive_workers([200, 200, 200])
+        # by len(per_run_host_bytes) = 3.
+        workers = _max_hyperdrive_workers([200, 200, 200], _TRIVIAL_GPU_BYTES[:3])
 
     assert workers == 3
 
@@ -186,7 +266,7 @@ def test_max_hyperdrive_workers_rounds_down():
     """Memory that doesn't divide evenly rounds down, never up."""
     with patch("mwax_mover.calvin.hyperdrive.available_memory_bytes", return_value=1000):
         # Budget: 850. worst_case: 300. 850 // 300 == 2, not 3, even though 3 pickets exist.
-        workers = _max_hyperdrive_workers([300, 300, 300])
+        workers = _max_hyperdrive_workers([300, 300, 300], _TRIVIAL_GPU_BYTES[:3])
 
     assert workers == 2
 
@@ -194,7 +274,7 @@ def test_max_hyperdrive_workers_rounds_down():
 def test_max_hyperdrive_workers_single_picket():
     """A single picket (non-picket-fence observation) always gets exactly 1 worker."""
     with patch("mwax_mover.calvin.hyperdrive.available_memory_bytes", return_value=10**12):
-        workers = _max_hyperdrive_workers([1_000_000])
+        workers = _max_hyperdrive_workers([1_000_000], _TRIVIAL_GPU_BYTES[:1])
 
     assert workers == 1
 
@@ -202,7 +282,7 @@ def test_max_hyperdrive_workers_single_picket():
 def test_max_hyperdrive_workers_unknown_memory_falls_back():
     """available_memory_bytes() returning None uses the fallback constant."""
     with patch("mwax_mover.calvin.hyperdrive.available_memory_bytes", return_value=None):
-        workers = _max_hyperdrive_workers([1, 2, 3, 4, 5])
+        workers = _max_hyperdrive_workers([1, 2, 3, 4, 5], _TRIVIAL_GPU_BYTES[:5])
 
     assert workers == 1  # HYPERDRIVE_FALLBACK_WORKERS
 
@@ -216,7 +296,7 @@ def test_max_hyperdrive_workers_worst_case_dominates():
     """
     with patch("mwax_mover.calvin.hyperdrive.available_memory_bytes", return_value=1000):
         # Budget: 850. worst_case: 850 (one huge picket). 850 // 850 == 1.
-        workers = _max_hyperdrive_workers([10, 10, 10, 850])
+        workers = _max_hyperdrive_workers([10, 10, 10, 850], _TRIVIAL_GPU_BYTES[:4])
 
     assert workers == 1
 
@@ -224,9 +304,36 @@ def test_max_hyperdrive_workers_worst_case_dominates():
 def test_max_hyperdrive_workers_never_exceeds_picket_count():
     """Plenty of memory still caps workers at the number of pickets -- no idle workers."""
     with patch("mwax_mover.calvin.hyperdrive.available_memory_bytes", return_value=10**15):
-        workers = _max_hyperdrive_workers([100, 100])
+        workers = _max_hyperdrive_workers([100, 100], _TRIVIAL_GPU_BYTES[:2])
 
     assert workers == 2
+
+
+def test_max_hyperdrive_workers_gpu_memory_dominates():
+    """Generous host RAM doesn't help if the shared GPU's memory is the tight one.
+
+    Host budget is effectively unlimited; each picket's GPU estimate (20GB)
+    means only 2 fit in the A40's ~40.8GB post-headroom budget
+    (48GB * 0.85 // 20GB == 2), even though 3 pickets exist and host memory
+    would allow all 3.
+    """
+    with patch("mwax_mover.calvin.hyperdrive.available_memory_bytes", return_value=10**15):
+        workers = _max_hyperdrive_workers([10, 10, 10], [20_000_000_000, 20_000_000_000, 20_000_000_000])
+
+    assert workers == 2
+
+
+def test_max_hyperdrive_workers_fixed_ceiling_dominates():
+    """HYPERDRIVE_MAX_CONCURRENT_GPU_WORKERS caps concurrency even when memory allows more.
+
+    Empirically-measured GPU-compute contention, not memory, is the binding
+    constraint here: both host RAM and GPU memory are generous enough to fit
+    every one of 8 pickets, but the fixed ceiling still caps it at 6.
+    """
+    with patch("mwax_mover.calvin.hyperdrive.available_memory_bytes", return_value=10**15):
+        workers = _max_hyperdrive_workers([1] * 8, [1] * 8)
+
+    assert workers == 6  # HYPERDRIVE_MAX_CONCURRENT_GPU_WORKERS
 
 
 # ===========================================================================
@@ -379,6 +486,7 @@ def test_run_hyperdrive_worker_count_comes_from_max_hyperdrive_workers(tmp_path)
     with (
         patch("mwax_mover.calvin.hyperdrive._uvfits_num_coarse_chans", return_value=1),
         patch("mwax_mover.calvin.hyperdrive.estimate_di_calibrate_peak_ram_bytes", return_value=1000),
+        patch("mwax_mover.calvin.hyperdrive.estimate_di_calibrate_peak_gpu_bytes", return_value=2000),
         patch("mwax_mover.calvin.hyperdrive._max_hyperdrive_workers", return_value=3) as mock_max_workers,
         patch("mwax_mover.calvin.hyperdrive.ThreadPoolExecutor", wraps=ThreadPoolExecutor) as mock_executor,
         patch("mwax_mover.calvin.hyperdrive.start_command", return_value="popen"),
@@ -399,5 +507,5 @@ def test_run_hyperdrive_worker_count_comes_from_max_hyperdrive_workers(tmp_path)
             80000,
         )
 
-    mock_max_workers.assert_called_once_with([1000, 1000, 1000])
+    mock_max_workers.assert_called_once_with([1000, 1000, 1000], [2000, 2000, 2000])
     mock_executor.assert_called_once_with(max_workers=3)
