@@ -5,7 +5,6 @@ test-tree reorg).
 """
 
 import mwalib
-
 from tests_common import obs_metafits_path
 
 from mwax_mover.calvin.birli import estimate_birli_output_bytes

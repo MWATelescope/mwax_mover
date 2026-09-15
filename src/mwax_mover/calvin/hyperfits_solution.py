@@ -9,9 +9,9 @@ and pure numeric fitting/outlier functions these use, and calvin.plots for
 plotting. Split out of calvin.hyperdrive during the source_code_restructure.
 """
 
+import logging
 import os
 import shutil
-import logging
 
 import numpy as np
 from astropy.io import fits

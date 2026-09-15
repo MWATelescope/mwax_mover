@@ -7,7 +7,7 @@ test-tree reorg).
 import numpy as np
 import pytest
 
-from mwax_mover.calibration.models import GainFitInfo, MWA_NUM_COARSE_CHANS, PhaseFitInfo
+from mwax_mover.calibration.models import MWA_NUM_COARSE_CHANS, GainFitInfo, PhaseFitInfo
 
 
 def test_phase_fit_info_nan():

@@ -25,7 +25,6 @@ from mwax_mover.calibration.fitting import (
 )
 from mwax_mover.calibration.models import GainFitInfo, PhaseFitInfo
 
-
 # Realistic MWA-like frequency array: 100 chanblocks from 140 to 170 MHz
 _FREQS_HZ = np.linspace(140e6, 170e6, 100)
 

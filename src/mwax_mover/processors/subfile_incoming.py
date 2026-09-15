@@ -37,7 +37,6 @@ from mwax_mover.fits.subfile import (
 from mwax_mover.net.redis import push_message_to_redis
 from mwax_mover.queues.watch_queue_worker import MWAXWatchQueueWorker
 
-
 logger = logging.getLogger(__name__)
 
 

@@ -162,9 +162,8 @@ def test_uvfits_num_coarse_chans_no_freq_axis_raises(metafits_context):
     header["CTYPE2"] = "COMPLEX"
     header["CTYPE3"] = "STOKES"
 
-    with patch("mwax_mover.calvin.hyperdrive.fits.getheader", return_value=header):
-        with pytest.raises(StopIteration):
-            _uvfits_num_coarse_chans("fake.uvfits", metafits_context)
+    with patch("mwax_mover.calvin.hyperdrive.fits.getheader", return_value=header), pytest.raises(StopIteration):
+        _uvfits_num_coarse_chans("fake.uvfits", metafits_context)
 
 
 # ===========================================================================

@@ -35,10 +35,10 @@ from mwax_mover.constants import (
 from mwax_mover.core.config import read_config, read_config_bool, read_config_list, read_optional_config
 from mwax_mover.core.env import get_hostname, running_under_pytest
 from mwax_mover.db.handler import MWAXDBHandler
+from mwax_mover.filesystem.naming import ArchiveLocation
 from mwax_mover.processors.daemon import MWAXDaemon
 from mwax_mover.processors.pawsey_outgoing import PawseyOutgoingProcessor
 from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
-from mwax_mover.filesystem.naming import ArchiveLocation
 
 # Setup root logger
 handler = logging.StreamHandler()

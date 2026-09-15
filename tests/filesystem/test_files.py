@@ -11,7 +11,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 from tests_common import data_path
 
 from mwax_mover.filesystem.files import delete_files_older_than, do_checksum_md5, extract_tar

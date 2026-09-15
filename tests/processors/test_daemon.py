@@ -6,8 +6,8 @@ start, stop), rather than through any of the four real daemons that now
 inherit from it.
 """
 
-from configparser import ConfigParser
 import sys
+from configparser import ConfigParser
 from unittest.mock import MagicMock, patch
 
 import pytest

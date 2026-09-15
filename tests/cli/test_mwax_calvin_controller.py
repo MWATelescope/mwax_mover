@@ -226,12 +226,14 @@ class TestUploadPublishedFitDirs:
 
         mcal = self.make_controller()
 
-        with patch(
-            "mwax_mover.cli.mwax_calvin_controller.rclone_move",
-            side_effect=subprocess.CalledProcessError(1, "rclone", stderr="s3 down"),
+        with (
+            patch(
+                "mwax_mover.cli.mwax_calvin_controller.rclone_move",
+                side_effect=subprocess.CalledProcessError(1, "rclone", stderr="s3 down"),
+            ),
+            pytest.raises(subprocess.CalledProcessError),
         ):
-            with pytest.raises(subprocess.CalledProcessError):
-                mcal.upload_published_fit_dirs(str(base))
+            mcal.upload_published_fit_dirs(str(base))
 
         # Nothing was removed, so everything is retried next pass
         assert sorted(d.name for d in base.iterdir()) == [

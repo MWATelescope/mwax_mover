@@ -226,11 +226,11 @@ class MWAXDaemon(ABC):
 
     def before_health_send(self) -> None:
         """Called once per health iteration before the status is built."""
-        return None
+        return
 
     def during_sleep_interval(self) -> None:
         """Called once per SECS_PER_INTERVAL-second interval by sleep()."""
-        return None
+        return
 
     def get_worker_status(self) -> list[dict] | None:
         """Per-worker status for get_status()'s "workers" key.

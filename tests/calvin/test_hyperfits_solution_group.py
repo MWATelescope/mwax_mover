@@ -17,9 +17,8 @@ import numpy as np
 import pandas as pd
 import pytest
 from astropy import units as u
-from astropy.io import fits
 from astropy.constants import c as speed_of_light  # ty: ignore[unresolved-import]
-
+from astropy.io import fits
 from tests_common import data_path, obs_metafits_path
 
 from mwax_mover.calibration.df_columns import (

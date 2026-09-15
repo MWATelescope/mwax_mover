@@ -10,7 +10,6 @@ import os
 
 import numpy as np
 import pytest
-
 from tests_common import data_path
 
 from mwax_mover.calvin.hyperfits_solution import HyperfitsSolution

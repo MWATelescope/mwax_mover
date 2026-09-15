@@ -67,9 +67,9 @@ class TestCallWebservice:
         with (
             patch("mwax_mover.net.webservice.requests.request", return_value=bad),
             patch("time.sleep"),
+            pytest.raises(requests.RequestException),
         ):
-            with pytest.raises(requests.RequestException):
-                call_webservice(123, ["http://a"], None, max_retries=2)
+            call_webservice(123, ["http://a"], None, max_retries=2)
 
     def test_waits_the_fixed_30_seconds_between_every_retry(self):
         """Each retry is preceded by exactly a 30-second wait, regardless of attempt number."""
@@ -77,17 +77,16 @@ class TestCallWebservice:
         with (
             patch("mwax_mover.net.webservice.requests.request", return_value=bad),
             patch("time.sleep") as mock_sleep,
+            pytest.raises(requests.RequestException),
         ):
-            with pytest.raises(requests.RequestException):
-                call_webservice(123, ["http://a"], None, max_retries=3)
+            call_webservice(123, ["http://a"], None, max_retries=3)
 
         assert mock_sleep.call_args_list == [((30,),), ((30,),)]
 
     def test_max_retries_must_be_at_least_one(self):
         """max_retries=0 is rejected before any HTTP call is attempted."""
-        with patch("mwax_mover.net.webservice.requests.request") as mock_request:
-            with pytest.raises(ValueError):
-                call_webservice(123, ["http://a"], None, max_retries=0)
+        with patch("mwax_mover.net.webservice.requests.request") as mock_request, pytest.raises(ValueError):
+            call_webservice(123, ["http://a"], None, max_retries=0)
 
         mock_request.assert_not_called()
 
@@ -105,9 +104,9 @@ class TestCallWebservice:
         with (
             patch("mwax_mover.net.webservice.requests.request", return_value=bad) as mock_request,
             patch("time.sleep") as mock_sleep,
+            pytest.raises(requests.RequestException),
         ):
-            with pytest.raises(requests.RequestException):
-                call_webservice(123, ["http://a"], None, max_retries=1)
+            call_webservice(123, ["http://a"], None, max_retries=1)
 
         mock_request.assert_called_once()
         mock_sleep.assert_not_called()

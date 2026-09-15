@@ -58,7 +58,7 @@ class MWAXDBHandler:
             )
 
     @classmethod
-    def from_config(cls, config: ConfigParser, ssl_mode: str | None = None) -> "MWAXDBHandler":
+    def from_config(cls, config: ConfigParser, ssl_mode: str | None = None) -> MWAXDBHandler:
         """Build an MWAXDBHandler from the [mwa database] config section.
 
         Reads host, db, user, pass, and port from SECTION_MWA_DATABASE,

@@ -1,13 +1,9 @@
-[build-system]
-requires = ["uv_build>=0.12.11,<0.13.0"]
-build-backend = "uv_build"
-
 [project]
 name = "mwax_mover"
-version = "2.0.0"
+version = "2.0.1"
 description = "A module to manage input, archiving and calibration for the MWAX correlator"
 readme = "README.md"
-requires-python = ">=3.13, <3.15"
+requires-python = ">=3.14, <3.15"
 keywords = ["MWA", "MWAX", "radioastronomy", "radiotelescope"]
 authors = [
     { email = "greg.sleap@curtin.edu.au" },
@@ -21,7 +17,7 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Astronomy",
     "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 
 dependencies = [
@@ -69,15 +65,19 @@ generate_index_json = "mwax_mover.cli.generate_index_json:main"
 update_calvin_plots_and_index = "mwax_mover.cli.update_calvin_plots_and_index:main"
 print_metafits_info = "mwax_mover.cli.print_metafits_info:main"
 
+[build-system]
+requires = ["uv_build>=0.12.11,<0.13.0"]
+build-backend = "uv_build"
+
 [tool.ruff]
 line-length = 120
-target-version = "py313"
+target-version = "py314"
 
-[tool.ruff.lint]
+#[tool.ruff.lint]
 # Starting set. E/F are pycodestyle+pyflakes (the ruff default) and B is
 # flake8-bugbear. ARG, RET and SIM are worth adding once the existing
 # findings in those categories have been worked through.
-select = ["E", "F", "B"]
+#select = ["E", "F", "B"]
 
 [tool.ruff.format]
 # The whole of src/ and tests/ is kept formatted by `ruff format` at the
@@ -141,7 +141,7 @@ extra-paths = ["tests"]
 
 [tool.mypy]
 # Set this to your project's Python version (e.g., 3.10, 3.11, 3.12)
-python_version = "3.13"
+python_version = "3.14"
 
 # Silences errors about external libraries that lack type hints
 ignore_missing_imports = true

@@ -7,7 +7,6 @@ reorg).
 from configparser import ConfigParser
 
 import pytest
-
 from tests_common import render_test_config
 
 from mwax_mover.core.config import read_config_bool, read_config_list, read_optional_config

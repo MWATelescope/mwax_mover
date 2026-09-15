@@ -9,8 +9,8 @@ import logging
 
 from mwax_mover.archive.archiver import archive_file_xrootd
 from mwax_mover.constants import EXT_FITS, EXT_SUB, MODE_WATCH_DIR_FOR_RENAME_OR_NEW
-from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
 from mwax_mover.filesystem.files import remove_file
+from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
 
 logger = logging.getLogger(__name__)
 

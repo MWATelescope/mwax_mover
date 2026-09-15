@@ -7,7 +7,6 @@ reorg).
 import os
 
 import pytest
-
 from tests_common import obs_metafits_path
 
 from mwax_mover.fits.metafits import download_metafits_file, get_calibrator_info

@@ -15,7 +15,6 @@ import queue
 
 import pytest
 import requests
-
 from tests_common import data_path, obs_data_dir
 
 from mwax_mover.filesystem.naming import (

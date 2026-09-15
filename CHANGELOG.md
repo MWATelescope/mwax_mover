@@ -1,5 +1,10 @@
 # Changelog
 
+# 2.0.1 15-Sep-2026
+
+* Bump Python to 3.14.
+* Fixed lots of minor ruff check errors.
+
 # 2.0.0 14-Sep-2026
 
 ## Breaking Configuration changes

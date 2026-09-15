@@ -7,9 +7,9 @@ reorg).
 import os
 
 from mwax_mover.fits.subfile import (
-    CorrelatorMode,
     PSRDADA_HEADER_BYTES,
     PSRDADA_MODE,
+    CorrelatorMode,
     inject_beamformer_headers,
     read_subfile_value,
     read_subfile_values,

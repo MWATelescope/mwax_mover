@@ -6,20 +6,20 @@ test-tree reorg).
 """
 
 import pickle
-import pytest
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from mwax_mover.calibration.models import Metafits
 from mwax_mover.calvin.hyperfits_solution_group import ChannelFlagReason, HyperfitsSolutionGroup, TileFlagReason
 from mwax_mover.calvin.plots.gains import (
+    _PAGE_RENDER_FALLBACK_WORKERS,
     SINGLE_FILE_SUBPLOT_WIDTH_IN,
+    STITCH_GAP_CHANBLOCKS,
     STITCHED_SUBPLOT_WIDTH_IN,
     STITCHED_TILE_COLS,
-    STITCH_GAP_CHANBLOCKS,
-    _PAGE_RENDER_FALLBACK_WORKERS,
     _build_stitched_axis,
     _channel_reason_counts_text,
     _channel_summary_text,

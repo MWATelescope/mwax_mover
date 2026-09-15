@@ -16,8 +16,8 @@ import pytest
 from tests_common import setup_test_directories
 
 from mwax_mover.db.handler import MWAXDBHandler
-from mwax_mover.processors.checksum_and_db import ChecksumAndDBProcessor
 from mwax_mover.filesystem.naming import MWADataFileType, ValidationData
+from mwax_mover.processors.checksum_and_db import ChecksumAndDBProcessor
 
 # Setup root logger so processor log output is visible when running with -s
 handler = logging.StreamHandler()

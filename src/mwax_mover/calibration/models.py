@@ -13,7 +13,6 @@ import pandas as pd
 from mwalib import MetafitsContext
 from numpy.typing import NDArray
 
-
 # Standard number of MWA coarse channels.
 MWA_NUM_COARSE_CHANS = 24
 
@@ -229,7 +228,7 @@ class GainFitInfo(NamedTuple):
     sigma_resid: list[float]
 
     @staticmethod
-    def default(n_coarse: int = MWA_NUM_COARSE_CHANS) -> "GainFitInfo":
+    def default(n_coarse: int = MWA_NUM_COARSE_CHANS) -> GainFitInfo:
         """Return a GainFitInfo with unit gains and zero offsets.
 
         Args:
@@ -244,7 +243,7 @@ class GainFitInfo(NamedTuple):
         )
 
     @staticmethod
-    def nan(n_coarse: int = MWA_NUM_COARSE_CHANS) -> "GainFitInfo":
+    def nan(n_coarse: int = MWA_NUM_COARSE_CHANS) -> GainFitInfo:
         """Return a GainFitInfo with all-NaN values.
 
         Args:

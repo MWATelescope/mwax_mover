@@ -52,8 +52,8 @@ from mwax_mover.db.calibration import (
     get_unattempted_calibration_requests,
     get_unattempted_unrequested_cal_obsids,
     insert_calibration_request_row,
-    update_calibration_request_slurm_status,
     update_calibration_request_mwa_asvo_job_status,
+    update_calibration_request_slurm_status,
 )
 from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.mwa_asvo.giant_squid import GiantSquidMWAASVOOutageException
