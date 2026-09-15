@@ -29,7 +29,6 @@ def test_config_get_list_valid():
 
 
 def test_config_get_bool_true():
-
     config_filename = render_test_config("config")
     config = ConfigParser()
     config.read(config_filename, encoding="utf-8")
@@ -40,7 +39,6 @@ def test_config_get_bool_true():
 
 
 def test_config_get_bool_false():
-
     config_filename = render_test_config("config")
     config = ConfigParser()
     config.read(config_filename, encoding="utf-8")

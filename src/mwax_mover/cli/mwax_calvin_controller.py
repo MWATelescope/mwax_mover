@@ -375,7 +375,7 @@ class MWAXCalvinController(MWAXDaemon):
                         f"(failure #{tracker.consecutive_failures}, retrying in {delay:.0f}s): "
                         f"{e.stderr.strip() if e.stderr else str(e)}"
                     )
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 - fallback after the known CalledProcessError case above; keeps the upload retry loop alive
                     tracker.consecutive_failures += 1
                     delay = tracker.get_backoff_delay()
                     tracker.next_attempt_time = time.monotonic() + delay
@@ -509,7 +509,7 @@ class MWAXCalvinController(MWAXDaemon):
                     self.cfg_plots_s3_bucket,
                     dest_subpath=fit_dir.name,
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - keep the first error but carry on; the next dir may still succeed (see comment below)
                 # Keep the first error so the caller can still see a real
                 # failure, but carry on: the next dir may well succeed.
                 if first_error is None:
@@ -588,7 +588,7 @@ class MWAXCalvinController(MWAXDaemon):
         if self.mwa_asvo_helper.mwa_asvo_outage_datetime is not None:
             # There was an outage at some point.
             # If it's been long enough reset the outage and retry
-            elapsed: timedelta = datetime.now() - self.mwa_asvo_helper.mwa_asvo_outage_datetime
+            elapsed: timedelta = datetime.now().astimezone() - self.mwa_asvo_helper.mwa_asvo_outage_datetime
             if elapsed.total_seconds() >= self.cfg_gs_mwa_asvo_outage_check_seconds:
                 # Reset the MWA ASVO outage so we retry
                 self.mwa_asvo_helper.mwa_asvo_outage_datetime = None
@@ -1050,7 +1050,8 @@ class MWAXCalvinController(MWAXDaemon):
 
         # Parse config file
         config = ConfigParser()
-        config.read_file(open(config_filename, "r", encoding="utf-8"))
+        with open(config_filename, "r", encoding="utf-8") as config_file:
+            config.read_file(config_file)
 
         # read from config file
         self.cfg_log_path = config.get(SECTION_MWAX_MOVER, "log_path")

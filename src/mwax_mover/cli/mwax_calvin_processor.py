@@ -70,7 +70,11 @@ from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.filesystem.files import extract_tar, remove_file
 from mwax_mover.filesystem.naming import get_data_files_with_hostname_for_obsid_from_webservice
 from mwax_mover.fits.metafits import download_metafits_file
-from mwax_mover.mwa_asvo.giant_squid import extract_filename_from_mwa_asvo_signed_url, run_giant_squid
+from mwax_mover.mwa_asvo.giant_squid import (
+    GiantSquidOutputParseError,
+    extract_filename_from_mwa_asvo_signed_url,
+    run_giant_squid,
+)
 from mwax_mover.net.s3 import check_remote_file_exists, rclone_delete_file
 from mwax_mover.net.webservice import call_webservice
 from mwax_mover.processors.daemon import MWAXDaemon
@@ -518,12 +522,12 @@ class MWAXCalvinProcessor(MWAXDaemon):
                                 f"CalledProcessError deleting {acacia_filename} from"
                                 f" {self.acacia_projects_profile}:{self.acacia_projects_bucket}. Ignoring."
                             )
-                    except Exception:
+                    except Exception:  # noqa: BLE001 - best-effort Acacia cleanup; ignored either way
                         logger.warning(
                             f"Error deleting {acacia_filename} from"
                             f" {self.acacia_projects_profile}:{self.acacia_projects_bucket}. Ignoring."
                         )
-                except Exception:
+                except Exception:  # noqa: BLE001 - best-effort URL parse for cleanup; ignored either way
                     logger.warning(
                         f"Could not parse MWA ASVO presigned url {self.mwa_asvo_download_url}"
                         f" to get the filename to delete from {self.acacia_projects_profile}. Ignoring."
@@ -545,7 +549,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
             self.current_task_name = "Complete"
             self.stop(exit_code=0)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - top-level SLURM job boundary; must not crash uncaught
             # Something really bad went wrong!
             error_message = f"Unhandled Exception: {e!s}"
             if self.data_downloaded:
@@ -570,10 +574,13 @@ class MWAXCalvinProcessor(MWAXDaemon):
             hostnames.add(hostname)
 
         MAX_WAIT_FOR_MWAX_SECONDS = SECONDS_PER_HOUR
-        start_time = datetime.datetime.now()
+        start_time = datetime.datetime.now().astimezone()
 
         # Do this while there are hosts to release and we have not exceeded our MAX_WAIT_FOR_MWAX_SECONDS
-        while len(hostnames) > 0 and (datetime.datetime.now() - start_time).seconds < MAX_WAIT_FOR_MWAX_SECONDS:
+        while (
+            len(hostnames) > 0
+            and (datetime.datetime.now().astimezone() - start_time).seconds < MAX_WAIT_FOR_MWAX_SECONDS
+        ):
             logger.info(f"Attempting to release {len(hostnames)} files from MWAX boxes...")
             successful_hosts = set()
 
@@ -597,9 +604,9 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 except ValueError:
                     # This is a 400<->500 error - so maybe just try again
                     pass
-                except Exception:
+                except Exception as e:  # noqa: BLE001 - release_cal_obs retry loop; any failure just retries next pass
                     # A much worse error occurred- definitely try again
-                    pass
+                    logger.debug(f"{hostname}: unexpected error calling release_cal_obs, will retry: {e}")
 
             # All remaining hosts have been tried- remove the successful ones from the set
             for hostname in successful_hosts:
@@ -624,7 +631,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 error_datetime,
                 error_message,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - best-effort DB status update; failure is only logged
             if logger:
                 logger.info(
                     "Failed to update_calibration_request_download_complete_status. "
@@ -652,7 +659,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 error_datetime,
                 error_message,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - best-effort DB status update; failure is only logged
             if logger:
                 logger.info(
                     "Failed to update_calibration_request_calibration_complete_status. "
@@ -717,7 +724,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 ws_filenames_and_hosts: list[tuple[str, str]] = get_data_files_with_hostname_for_obsid_from_webservice(
                     self.obs_id
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 - webservice call already retries/logs internally
                 # The previous call would have already logged tonnes of errors so no need to log anything specific here
                 error_message = f"{self.obs_id} No webservice was able to provide list of data files."
                 logger.error(error_message)
@@ -815,13 +822,13 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 )
             elif f"Obsid {self.obs_id} wasn't found in your list of jobs" in stdout:
                 retry_this_download = False
-                raise Exception(
+                raise GiantSquidOutputParseError(
                     "The MWA ASVO job download has expired. This calibration request"
                     " will be readded to the table and retried"
                 )
             else:
                 # We didn't get that message, so something went wrong
-                raise Exception("giant-squid returned success but file was not downloaded")
+                raise GiantSquidOutputParseError("giant-squid returned success but file was not downloaded")
 
         except Exception:
             error_message = (
@@ -887,7 +894,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 return False, error_message
 
             return True, ""
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - top-level file-download boundary; reported via return value
             error_message = f"Exception downloading files: {e!s}"
             logger.error(error_message)
             return False, error_message
@@ -924,7 +931,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
 
             return return_value, message
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - top-level readiness-check boundary; reported via return value
             return False, f"Exception in check_obs_is_ready_to_process: {e!s}"
 
     def run_birli(self) -> tuple[bool, str]:
@@ -1121,7 +1128,8 @@ class MWAXCalvinProcessor(MWAXDaemon):
 
         # Parse config file
         config = ConfigParser()
-        config.read_file(open(config_filename, "r", encoding="utf-8"))
+        with open(config_filename, "r", encoding="utf-8") as config_file:
+            config.read_file(config_file)
 
         # read from config file
         self.cfg_log_path = config.get(SECTION_MWAX_MOVER, "log_path")
@@ -1469,7 +1477,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 )
             )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - top-level config-init boundary; must not crash uncaught
             error_message = str(e)
             self.fail_job_downloading(error_message)
             sys.exit(EXIT_FAILURE)

@@ -18,7 +18,7 @@ from mwax_mover import constants
 from mwax_mover.core.command import run_command
 from mwax_mover.filesystem.naming import ArchivePriority
 from mwax_mover.queues.priority_queue_data import MWAXPriorityQueueData
-from mwax_mover.queues.queue_worker import calculate_backoff_seconds
+from mwax_mover.queues.queue_worker import QueueWorkerConfigError, calculate_backoff_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ class PriorityQueueWorker:
             backoff_limit_seconds: Maximum backoff time in seconds. Defaults to 60.
 
         Raises:
-            Exception: If both or neither of executable_path and event_handler are provided.
+            QueueWorkerConfigError: If both or neither of executable_path and event_handler are provided.
         """
         self.name = name
         self.source_queue: queue.PriorityQueue = source_queue
@@ -81,7 +81,9 @@ class PriorityQueueWorker:
         if (event_handler is None and executable_path is None) or (
             event_handler is not None and executable_path is not None
         ):
-            raise Exception("QueueWorker requires event_handler OR executable_path not both and not neither!")
+            raise QueueWorkerConfigError(
+                "QueueWorker requires event_handler OR executable_path not both and not neither!"
+            )
 
         self._executable_path = executable_path
         self._event_handler = event_handler
@@ -258,9 +260,8 @@ class PriorityQueueWorker:
         """
         current: str | None = None
 
-        if self.current_item:
-            if self.current_item[1]:
-                current = str(self.current_item[1])
+        if self.current_item and self.current_item[1]:
+            current = str(self.current_item[1])
 
         # We add 1 to the count if we have a current item, because the queue size does not include the item
         # currently being processed.

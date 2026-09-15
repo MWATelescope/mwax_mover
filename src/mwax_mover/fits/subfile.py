@@ -23,6 +23,10 @@ from mwax_mover.core.units import bytes_to_gigabytes
 logger = logging.getLogger(__name__)
 
 
+class SubfileHeaderError(Exception):
+    """Raised when a rewritten PSRDADA header does not come out to the expected byte length."""
+
+
 # number of lines of the PSRDADA header to read looking for keywords
 PSRDADA_HEADER_BYTES = 4096
 
@@ -352,7 +356,7 @@ def inject_subfile_header(subfile_filename: str, key_value_pairs: str):
     Raises:
         ValueError: If ``key_value_pairs`` is longer than the available space
             in the last line of the header.
-        Exception: If the resulting header byte array is not exactly
+        SubfileHeaderError: If the resulting header byte array is not exactly
             ``PSRDADA_HEADER_BYTES`` bytes long.
     """
     data = []
@@ -381,7 +385,7 @@ def inject_subfile_header(subfile_filename: str, key_value_pairs: str):
 
     new_bytes = bytes(new_string, "UTF-8")
     if len(new_bytes) != PSRDADA_HEADER_BYTES:
-        raise Exception(
+        raise SubfileHeaderError(
             "inject_subfile_header(): new_bytes length is not"
             f" {PSRDADA_HEADER_BYTES} as expected it is {len(new_bytes)}."
             f" Newbytes = [{new_string}]"

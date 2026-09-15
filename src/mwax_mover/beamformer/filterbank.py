@@ -13,6 +13,11 @@ import shutil
 
 logger = logging.getLogger(__name__)
 
+
+class NoFilterbankFilesError(Exception):
+    """Raised when stitch_filterbank_files() is given an empty file list."""
+
+
 HEADER_END = "HEADER_END"
 HEADER_END_BYTES = b"HEADER_END"
 KEY_DATALEN = "datalen"
@@ -70,10 +75,10 @@ def stitch_filterbank_files(files: list[str], output_dir: str) -> str:
         Path to the output stitched filterbank file.
 
     Raises:
-        Exception: If the files list is empty.
+        NoFilterbankFilesError: If the files list is empty.
     """
     if len(files) == 0:
-        raise Exception("No filterbank files to stitch")
+        raise NoFilterbankFilesError("No filterbank files to stitch")
 
     output_filename: str = get_stitched_filename(files[0])
     output_filename = os.path.join(output_dir, os.path.basename(output_filename))

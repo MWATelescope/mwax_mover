@@ -186,9 +186,8 @@ def _layer_of(module: str) -> int | None:
 
     for layer, prefixes in LAYERS.items():
         for prefix in prefixes:
-            if module == prefix or module.startswith(f"{prefix}."):
-                if len(prefix) > best_length:
-                    best_layer, best_length = layer, len(prefix)
+            if (module == prefix or module.startswith(f"{prefix}.")) and len(prefix) > best_length:
+                best_layer, best_length = layer, len(prefix)
 
     return best_layer
 

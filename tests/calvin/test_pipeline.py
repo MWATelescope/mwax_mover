@@ -431,7 +431,7 @@ def test_process_solutions_readme_written_on_any_exception(real_data_paths, tmp_
         ),
         patch("mwax_mover.calvin.pipeline.write_debug_phase_fit_plots", return_value=None),
     ):
-        success, error_msg, fit_id = process_solutions(
+        success, _error_msg, fit_id = process_solutions(
             db_handler_object=mock_db,
             obs_id=OBS_ID,
             input_data_path=input_path,
@@ -453,7 +453,8 @@ def test_process_solutions_readme_written_on_any_exception(real_data_paths, tmp_
     assert fit_id is None
     readme_path = os.path.join(output_path, "readme_error.txt")
     assert os.path.exists(readme_path), "readme_error.txt must be written on any exception"
-    content = open(readme_path).read()
+    with open(readme_path) as f:
+        content = f.read()
     # The error text appears under the "error:" label (renamed from "stderr:")
     assert "injected test error" in content or "error:" in content
 
@@ -466,7 +467,7 @@ def test_process_solutions_no_solution_files_in_output(real_data_paths, tmp_path
 
     mock_db = MagicMock()
 
-    success, error_msg, fit_id = process_solutions(
+    success, _error_msg, fit_id = process_solutions(
         db_handler_object=mock_db,
         obs_id=OBS_ID,
         input_data_path=input_path,

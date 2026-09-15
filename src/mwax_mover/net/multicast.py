@@ -11,6 +11,10 @@ import socket
 import struct
 
 
+class MulticastSendError(Exception):
+    """Raised when a multicast sendto() call transmits zero bytes."""
+
+
 def send_multicast(
     multicast_interface_ip: str,
     dest_multicast_ip: str,
@@ -37,8 +41,8 @@ def send_multicast(
             the datagram may traverse.
 
     Raises:
-        Exception: If ``sendto`` sends zero bytes, or if any socket operation
-            raises an unexpected error.
+        MulticastSendError: If ``sendto`` sends zero bytes.
+        OSError: If any socket operation raises an unexpected error.
     """
 
     # Create the datagram socket
@@ -66,7 +70,7 @@ def send_multicast(
     try:
         # Send data to the multicast group
         if sock.sendto(message, (dest_multicast_ip, dest_multicast_port)) == 0:
-            raise Exception("Error sock.sendto() sent 0 bytes")
+            raise MulticastSendError("Error sock.sendto() sent 0 bytes")
     finally:
         sock.close()
 

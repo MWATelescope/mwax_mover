@@ -19,15 +19,20 @@
 #
 #     git commit --no-verify
 #
-# NOTE: `rev` is pinned deliberately. Both `ruff format` output and the set of
+# NOTE: `rev` is pinned deliberately. 
+#
+# Both `ruff format` output and the set of
 # lint rules can change between releases, so an unpinned hook would silently
 # reformat the codebase, or start failing commits on new findings, whenever a
 # contributor happened to have a newer ruff. Bump this and the `ruff` dev
 # dependency in pyproject.toml together, and run
 # `uv run pre-commit run --all-files` in the same commit as the bump.
+# In addition, v15+ includes a regression documented here: 
+#   https://github.com/astral-sh/ruff/issues/23090
+# Check it's resolved before bumping up the ruff version.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.4
+    rev: v0.14.14
     hooks:
       # Lint before formatting, matching ruff's own documented ordering.
       #

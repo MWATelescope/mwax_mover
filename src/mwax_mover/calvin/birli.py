@@ -137,7 +137,7 @@ def run_birli(
             )
         else:
             logger.error(f"{obs_id}: Birli run FAILED: Exit code of {exit_code} in {elapsed:.3f} seconds: {stderr}")
-    except Exception as birli_run_exception:
+    except Exception as birli_run_exception:  # noqa: BLE001 - one bad Birli run must not crash the calibration job
         elapsed = time.monotonic() - start_time
         logger.error(
             f"{obs_id}: birli run FAILED: Unhandled exception {birli_run_exception} in {elapsed:.3f} seconds: {stderr}"

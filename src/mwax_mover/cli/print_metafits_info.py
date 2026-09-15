@@ -84,7 +84,7 @@ def main() -> None:
 
     try:
         context = MetafitsContext(args.metafits_filename)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - top-level CLI entry point; report and exit rather than a raw traceback
         print(f"Error opening metafits file: {exc}", file=sys.stderr)
         sys.exit(EXIT_FAILURE)
 

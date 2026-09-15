@@ -21,6 +21,12 @@ from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
 logger = logging.getLogger(__name__)
 
 
+class UnsupportedSubobsFileExtensionError(Exception):
+    """Raised if a subobs file reaches the stitch step with an extension
+    other than EXT_VDIF/EXT_FIL (should be unreachable given the ext check
+    earlier in subfile_handler())."""
+
+
 class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
     """Stitches beamformer subobservation files into a complete observation file.
 
@@ -99,7 +105,8 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
                     subobs_id = int(filename[11:21])
                 except Exception as exc:
                     raise ValueError(f"{item}: Error getting subobs_id from filename {filename}") from exc
-            except Exception:
+            except ValueError:
+                # Both inner branches above only ever raise ValueError.
                 logger.warning(
                     f"{item}: filename not in correct format. Should be"
                     " obsid_subobsid_chXXX_beamXX.vdif or .fil. It's probably a failed"
@@ -208,7 +215,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
 
                     return True
                 else:
-                    raise Exception(f"{item}: Extension {ext} is not supported")
+                    raise UnsupportedSubobsFileExtensionError(f"{item}: Extension {ext} is not supported")
             else:
                 # Nothing to do
                 logger.debug(

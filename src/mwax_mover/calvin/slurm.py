@@ -121,7 +121,11 @@ def submit_sbatch(script_path: str, script: str, obs_id: int, request_ids: list[
     try:
         script_filename: str = os.path.join(
             script_path,
-            datetime.datetime.now().strftime(f"%Y%m%d-%H%M%S-{obs_id}-{'-'.join(str(i) for i in request_ids)}.sh"),
+            (
+                datetime.datetime.now()
+                .astimezone()
+                .strftime(f"%Y%m%d-%H%M%S-{obs_id}-{'-'.join(str(i) for i in request_ids)}.sh")
+            ),
         )
         cmdline = f"sbatch {script_filename}"
 

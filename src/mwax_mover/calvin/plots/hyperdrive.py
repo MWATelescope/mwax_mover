@@ -117,7 +117,7 @@ def generate_plots(
                 )
 
         logger.info(f"{obs_id} Finished running hyperdrive plots on {hyperdrive_solution_filename}.")
-    except Exception as catch_all_exception:
+    except Exception as catch_all_exception:  # noqa: BLE001 - one bad plot run must not crash the pipeline
         return False, str(catch_all_exception)
 
     return True, ""
@@ -196,7 +196,7 @@ def generate_plots_for_files(
             filename = futures[future]
             try:
                 success, error = future.result()
-            except Exception as exc:  # reported, not raised
+            except Exception as exc:  # noqa: BLE001 - reported, not raised
                 failures.append((filename, str(exc)))
                 continue
             if not success:

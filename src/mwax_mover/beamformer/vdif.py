@@ -19,6 +19,11 @@ from mwax_mover.fits.subfile import CorrelatorMode
 
 logger = logging.getLogger(__name__)
 
+
+class NoVdifFilesError(Exception):
+    """Raised when stitching functions are given an empty VDIF file list."""
+
+
 # Streaming read buffer size for stitch_vdif_files_and_write_hdr. See
 # docs/CONSTANTS_CLEANUP.md 3.2 -- named to match the concept (a streaming
 # read chunk) shared with beamformer.filterbank.CHUNK_SIZE, but not
@@ -211,10 +216,10 @@ def stitch_vdif_files_and_write_hdr(metafits_filename: str, files: list[str], ou
         A tuple of (output_vdif_filename: str, output_hdr_filename: str).
 
     Raises:
-        Exception: If the files list is empty.
+        NoVdifFilesError: If the files list is empty.
     """
     if len(files) == 0:
-        raise Exception("No VDIF files to stitch")
+        raise NoVdifFilesError("No VDIF files to stitch")
 
     output_vdif_filename: str = get_stitched_filename(files[0])
     output_vdif_filename = os.path.join(output_dir, os.path.basename(output_vdif_filename))

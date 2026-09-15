@@ -65,7 +65,7 @@ def get_watcher_name(wqw_name: str, watch_path: str, pattern: str) -> str:
     """
     try:
         return f"{wqw_name}_{watch_path.replace('/', '_')}".replace("__", "_")
-    except Exception:
+    except AttributeError:
         return "unknown_watcher"
 
 
@@ -82,7 +82,9 @@ def get_watcher_thread_name(watch_path: str, pattern: str) -> str:
     """
     try:
         return f"watch_{get_last_two_dirs(watch_path).replace('/', '_')}_{pattern.replace('.', '')}_thread"
-    except Exception:
+    except (TypeError, AttributeError):
+        # TypeError: Path(watch_path) if watch_path isn't a path-like type.
+        # AttributeError: .replace() called on a non-str pattern.
         return "unknown_watcher_thread"
 
 

@@ -285,7 +285,7 @@ def _run_hyperdrive_one(
         )
         return False, calibration_command, cmdline, exit_code, stdout, stderr
 
-    except Exception as hyperdrive_run_exception:
+    except Exception as hyperdrive_run_exception:  # noqa: BLE001 - one bad hyperdrive run must not crash the calibration job
         elapsed = time.monotonic() - start_time
         logger.error(
             f"{obs_id}: hyperdrive run {run_index + 1}/{total_runs} FAILED:"
@@ -366,7 +366,7 @@ def run_hyperdrive(
             for uvfits_file in input_uvfits_files
         ]
         workers = _max_hyperdrive_workers(per_run_bytes)
-    except Exception as estimate_exception:
+    except Exception as estimate_exception:  # noqa: BLE001 - best-effort memory estimate; any failure just falls back to serial
         logger.warning(
             f"{obs_id}: could not estimate per-picket hyperdrive memory usage ({estimate_exception}); running serially."
         )
@@ -461,7 +461,7 @@ def write_hyperdrive_stats(
         stats_fd.write("\n")
 
         logger.info(f"{obs_id} Finished running convergence stats for {hyperdrive_solution_filename}.")
-    except Exception as catch_all_exception:
+    except Exception as catch_all_exception:  # noqa: BLE001 - stats are best-effort; failure is reported, not fatal
         return False, str(catch_all_exception)
 
     return True, ""

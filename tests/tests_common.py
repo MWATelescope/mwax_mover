@@ -237,9 +237,7 @@ def setup_test_directories(test_code: str, base_dir: str | None = None) -> str:
         if s == "/":
             return True
         # Guardrail: require deeper-than /data/mwax_mover_testing
-        if len(p.resolve().parts) < 4:
-            return True
-        return False
+        return len(p.resolve().parts) < 4
 
     def _clear_directory(dir_path: Path) -> None:
         for entry in dir_path.iterdir():

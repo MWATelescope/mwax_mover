@@ -41,9 +41,10 @@ def _fs_type(path: str) -> str:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         return result.stdout.strip()
-    except Exception:
+    except Exception:  # noqa: BLE001 - test helper; falls back to 'unknown' on any stat() failure
         return "unknown"
 
 

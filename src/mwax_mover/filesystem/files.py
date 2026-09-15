@@ -21,6 +21,10 @@ from mwax_mover.core.command import run_command
 logger = logging.getLogger(__name__)
 
 
+class ChecksumError(Exception):
+    """Raised when do_checksum_md5() cannot produce a valid MD5 checksum."""
+
+
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
 def remove_file(filename: str, raise_error: bool) -> bool:
     """
@@ -157,7 +161,7 @@ def do_checksum_md5(full_filename: str, numa_node: int | None, timeout: int) -> 
         The 32-character lowercase hexadecimal MD5 digest string.
 
     Raises:
-        Exception: If ``md5sum`` returns a non-zero exit code, or if the parsed
+        ChecksumError: If ``md5sum`` returns a non-zero exit code, or if the parsed
             checksum is not exactly 32 characters.
     """
 
@@ -195,9 +199,9 @@ def do_checksum_md5(full_filename: str, numa_node: int | None, timeout: int) -> 
             )
             return checksum
         else:
-            raise Exception(f"Calculated MD5 checksum is not valid: md5 output {md5output}")
+            raise ChecksumError(f"Calculated MD5 checksum is not valid: md5 output {md5output}")
     else:
-        raise Exception(f"md5sum returned an unexpected return code {return_value}")
+        raise ChecksumError(f"md5sum returned an unexpected return code {return_value}")
 
 
 def extract_tar(tar_filename: str, dest_path: str) -> None:

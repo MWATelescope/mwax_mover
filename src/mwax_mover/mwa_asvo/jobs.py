@@ -21,6 +21,7 @@ from enum import Enum
 from mwax_mover.mwa_asvo.giant_squid import (
     GiantSquidJobAlreadyExistsException,
     GiantSquidMWAASVOOutageException,
+    GiantSquidOutputParseError,
     run_giant_squid,
 )
 
@@ -247,7 +248,7 @@ class MWAASVOHelper:
             logger.info(f"{obs_id}: MWA ASVO job {job_id} already exists.")
 
         except GiantSquidMWAASVOOutageException:
-            self.mwa_asvo_outage_datetime = datetime.now()
+            self.mwa_asvo_outage_datetime = datetime.now().astimezone()
             # Re-raise this error
             raise
 
@@ -288,7 +289,7 @@ class MWAASVOHelper:
                 self.giant_squid_list_timeout_seconds,
             )
         except GiantSquidMWAASVOOutageException:
-            self.mwa_asvo_outage_datetime = datetime.now()
+            self.mwa_asvo_outage_datetime = datetime.now().astimezone()
             # Re-raise this error
             raise
 
@@ -305,7 +306,7 @@ class MWAASVOHelper:
         # Iterate through each job
         for json_one_job in json_stdout:
             # Extract the job_id, state and a download url (if status is Ready)
-            obs_id, job_id, job_state, download_url = get_job_info_from_giant_squid_json(json_stdout, json_one_job)
+            _obs_id, job_id, job_state, download_url = get_job_info_from_giant_squid_json(json_stdout, json_one_job)
 
             # Find the giant squid job in our in memory list
             with self.current_asvo_jobs_lock:
@@ -365,7 +366,7 @@ def get_job_id_from_giant_squid_stdout(stdout: str) -> int:
         The newly created or existing job ID.
 
     Raises:
-        Exception: If no job ID can be found in the output.
+        GiantSquidOutputParseError: If no job ID can be found in the output.
     """
 
     # Output of successful submission is:
@@ -407,7 +408,7 @@ def get_job_id_from_giant_squid_stdout(stdout: str) -> int:
         return int(job_id_str)
 
     # No job_id was found, raise exception
-    raise Exception(f"No Job Id could be found in the output from giant-squid: {stdout}")
+    raise GiantSquidOutputParseError(f"No Job Id could be found in the output from giant-squid: {stdout}")
 
 
 def get_job_info_from_giant_squid_json(stdout_json, json_for_one_job) -> tuple[int, int, MWAASVOJobState, str | None]:
@@ -428,7 +429,7 @@ def get_job_info_from_giant_squid_json(stdout_json, json_for_one_job) -> tuple[i
         - download_url (str|None): The download URL if state is Ready, None otherwise.
 
     Raises:
-        Exception: If the job status code is unrecognized.
+        GiantSquidOutputParseError: If the job status code is unrecognized.
     """
 
     job_id: int = int(json_for_one_job)
@@ -459,4 +460,4 @@ def get_job_info_from_giant_squid_json(stdout_json, json_for_one_job) -> tuple[i
             return obs_id, job_id, state, url
 
     # Nothing matched
-    raise Exception(f"{job_id}: giant-squid unknown job status code {job_state}.")
+    raise GiantSquidOutputParseError(f"{job_id}: giant-squid unknown job status code {job_state}.")

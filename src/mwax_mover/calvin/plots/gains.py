@@ -1107,7 +1107,7 @@ def _render_and_save_combined_gains_page(
         fig.savefig(page_path, dpi=resolve_plot_dpi(150), bbox_inches="tight")
         plt.close(fig)
         return True, ""
-    except Exception as exc:  # reported to the caller, not raised in the worker
+    except Exception as exc:  # noqa: BLE001 - reported to the caller, not raised in the worker
         return False, str(exc)
 
 

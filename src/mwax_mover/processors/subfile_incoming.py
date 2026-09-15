@@ -15,7 +15,7 @@ import time
 
 from mwax_mover.calvin.solution_files import get_solution_fits_filename
 from mwax_mover.constants import EXIT_FAILURE, EXT_SUB, MODE_WATCH_DIR_FOR_RENAME
-from mwax_mover.fits.metafits import get_metafits_value_from_hdu
+from mwax_mover.fits.metafits import MetafitsReadError, get_metafits_value_from_hdu
 from mwax_mover.fits.subfile import (
     PSRDADA_COARSE_CHANNEL,
     PSRDADA_HEADER_BYTES,
@@ -310,7 +310,9 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                             METAFITS_CALIBDATA_HDU,
                             METAFITS_CALOBSID,
                         )
-                    except Exception:
+                    except MetafitsReadError:
+                        # get_metafits_value_from_hdu() wraps every failure mode
+                        # (missing file, missing HDU, missing key) in this one type.
                         logger.warning(
                             f"{item}: key {METAFITS_CALOBSID} not found in metafits"
                             f" file {metafits_filename} hdu {METAFITS_CALIBDATA_HDU}"
@@ -319,7 +321,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
 
                     try:
                         cal_obs_id: int = int(cal_obs_id_str)
-                    except Exception:
+                    except (ValueError, TypeError):
                         logger.warning(
                             f"{item}: value {cal_obs_id_str} for key"
                             f" {METAFITS_CALOBSID} in {metafits_filename} hdu"
@@ -380,14 +382,13 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                 #    self.dump_keep_file_queue.put(keep_filename)
 
             # Check if we need to clear the dump info
-            if self.sd_ctx.dump_end_gps is not None:
-                if subobs_id >= self.sd_ctx.dump_end_gps:
-                    # Reset the dump start and end
-                    self.sd_ctx.dump_start_gps = None
-                    self.sd_ctx.dump_end_gps = None
-                    self.sd_ctx.dump_trigger_id = None
+            if self.sd_ctx.dump_end_gps is not None and subobs_id >= self.sd_ctx.dump_end_gps:
+                # Reset the dump start and end
+                self.sd_ctx.dump_start_gps = None
+                self.sd_ctx.dump_end_gps = None
+                self.sd_ctx.dump_trigger_id = None
 
-        except Exception as handler_exception:
+        except Exception as handler_exception:  # noqa: BLE001 - one bad subfile must not kill the worker thread
             logger.error(f"{item}: {handler_exception}")
             success = False
 
@@ -424,7 +425,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
                         except FileNotFoundError:
                             pass
 
-                    except Exception as move_exception:
+                    except Exception as move_exception:  # noqa: BLE001 - already logged via request_fatal_shutdown(); shutdown is in progress either way
                         # NOTE: this used to be sys.exit(2), which on a worker
                         # thread only kills the thread and discards the code.
                         self.sd_ctx.request_fatal_shutdown(
@@ -536,7 +537,7 @@ class SubfileIncomingProcessor(MWAXWatchQueueWorker):
 
             try:
                 shutil.move(keep_filename, free_filename)
-            except Exception as move_exception:
+            except Exception as move_exception:  # noqa: BLE001 - already logged via request_fatal_shutdown(); shutdown is in progress either way
                 # NOTE: this used to be sys.exit(2), which on a worker thread
                 # only kills the thread and discards the code.
                 self.sd_ctx.request_fatal_shutdown(

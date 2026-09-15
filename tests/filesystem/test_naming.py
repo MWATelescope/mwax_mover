@@ -404,7 +404,6 @@ def test_should_project_be_archived_custom_list():
 
 @pytest.mark.integration
 def test_get_data_files_for_obsid_from_webservice_404():
-
     # Unknown obsid- call_webservice raises once every url/retry is exhausted
     with pytest.raises(requests.RequestException):
         get_data_files_for_obsid_from_webservice(1234567890)
@@ -412,7 +411,6 @@ def test_get_data_files_for_obsid_from_webservice_404():
 
 @pytest.mark.integration
 def test_get_data_files_for_obsid_from_webservice_200():
-
     # Good obsid with 24 gpubox files and 1 flags and 1 metafits. Only return the 24 gpubox files
     file_list = get_data_files_for_obsid_from_webservice(1157306584)
     assert len(file_list) == 24

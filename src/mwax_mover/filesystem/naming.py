@@ -27,6 +27,11 @@ from mwax_mover.net.webservice import call_webservice
 
 logger = logging.getLogger(__name__)
 
+
+class InvalidFilenameError(Exception):
+    """Raised by get_priority() when validate_filename() reports the file as invalid."""
+
+
 # This is global mutex so we don't try to create the same metafits
 # file with multiple threads
 metafits_file_lock = threading.Lock()
@@ -265,19 +270,20 @@ def validate_filename(
                     " Format should be obsid_subobsid_chXXX_beamXX.vdif or "
                     "obsid_chXXX_beamXX.vdif)- ignoring"
                 )
-        elif filetype_id == MWADataFileType.FILTERBANK.value:
+        elif (
+            filetype_id == MWADataFileType.FILTERBANK.value and len(file_name_part) != 23 and len(file_name_part) != 34
+        ):
             # filename format should be:
             #   obsid_subobsid_chNNN_beamNN.fil
             # or if stitched:
             #   obsid_chNNN_beamNN.fil
-            if len(file_name_part) != 23 and len(file_name_part) != 34:
-                valid = False
-                validation_error = (
-                    "Filename (excluding extension) is not in the correct"
-                    f" format (incorrect length ({len(file_name_part)})."
-                    " Format should be obsid_subobsid_chXXX_beamXX.fil or "
-                    "obsid_chXXX_beamXX.fil)- ignoring"
-                )
+            valid = False
+            validation_error = (
+                "Filename (excluding extension) is not in the correct"
+                f" format (incorrect length ({len(file_name_part)})."
+                " Format should be obsid_subobsid_chXXX_beamXX.fil or "
+                "obsid_chXXX_beamXX.fil)- ignoring"
+            )
     # 5. Get project id and calibrator info
     if valid:
         # Now check that the observation is a calibrator by
@@ -422,7 +428,7 @@ def get_priority(
         An integer priority value. Lower values are higher priority.
 
     Raises:
-        Exception: If ``validate_filename`` reports the file as invalid.
+        InvalidFilenameError: If ``validate_filename`` reports the file as invalid.
     """
     return_priority = ArchivePriority.DEFAULT  # default if we don't do anything else
 
@@ -452,7 +458,7 @@ def get_priority(
             else:
                 return_priority = ArchivePriority.NORMAL_VCS_BEAMFORMED
     else:
-        raise Exception(f"File {filename} is not valid! Reason: {val.validation_message}")
+        raise InvalidFilenameError(f"File {filename} is not valid! Reason: {val.validation_message}")
 
     return return_priority
 

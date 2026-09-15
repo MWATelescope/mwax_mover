@@ -104,7 +104,7 @@ class MWACacheArchiveProcessor(MWAXDaemon):
         self.recursive: bool = False
 
         # This list helps us keep track of all the workers
-        self.workers: list[MWAXPriorityWatchQueueWorker] = list()
+        self.workers: list[MWAXPriorityWatchQueueWorker] = []
 
     def start(self):
         """Start the processor and begin monitoring for archive operations.
@@ -166,10 +166,9 @@ class MWACacheArchiveProcessor(MWAXDaemon):
 
         while self.running:
             for w in self.workers:
-                if self.running:
-                    if not w.is_running():
-                        self.request_fatal_shutdown(EXIT_FAILURE, f"Worker {w.name} has stopped unexpectedly.")
-                        break
+                if self.running and not w.is_running():
+                    self.request_fatal_shutdown(EXIT_FAILURE, f"Worker {w.name} has stopped unexpectedly.")
+                    break
 
             time.sleep(0.1)
 
@@ -233,7 +232,8 @@ class MWACacheArchiveProcessor(MWAXDaemon):
 
         # Parse config file
         config = ConfigParser()
-        config.read_file(open(config_filename, "r", encoding="utf-8"))
+        with open(config_filename, "r", encoding="utf-8") as config_file:
+            config.read_file(config_file)
 
         # Read log level
         config_file_log_level: str | None = read_optional_config(config, SECTION_MWAX_MOVER, CONFIG_KEY_LOG_LEVEL)

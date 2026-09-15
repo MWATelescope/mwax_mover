@@ -19,6 +19,11 @@ from mwax_mover.core.command import run_command
 logger = logging.getLogger(__name__)
 
 
+class QueueWorkerConfigError(Exception):
+    """Raised when a QueueWorker/PriorityQueueWorker is constructed with
+    both or neither of executable_path and event_handler."""
+
+
 def calculate_backoff_seconds(
     consecutive_error_count: int,
     backoff_initial_seconds: int,
@@ -93,7 +98,7 @@ class QueueWorker:
                 it there on the strength of this docstring.
 
         Raises:
-            Exception: If both or neither of executable_path and event_handler are provided.
+            QueueWorkerConfigError: If both or neither of executable_path and event_handler are provided.
         """
         self.name = name
         self.source_queue = source_queue
@@ -101,7 +106,9 @@ class QueueWorker:
         if (event_handler is None and executable_path is None) or (
             event_handler is not None and executable_path is not None
         ):
-            raise Exception("QueueWorker requires event_handler OR executable_path not both and not neither!")
+            raise QueueWorkerConfigError(
+                "QueueWorker requires event_handler OR executable_path not both and not neither!"
+            )
 
         self._executable_path = executable_path
         self._event_handler = event_handler

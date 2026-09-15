@@ -14,6 +14,10 @@ from mwax_mover.constants import MWA_WEBSERVICE_HOSTS
 from mwax_mover.net.webservice import call_webservice
 
 
+class MetafitsReadError(Exception):
+    """Raised when a metafits file cannot be opened, or an expected HDU/keyword is missing."""
+
+
 def download_metafits_file(obs_id: int, metafits_path: str) -> str:
     """
     Download a metafits FITS file for the given observation ID from MWA web services
@@ -61,7 +65,7 @@ def get_metafits_value(metafits_filename: str, key: str):
         matches whatever astropy returns for the keyword (str, int, float, bool, etc.).
 
     Raises:
-        Exception: If the file cannot be opened or the keyword is not found,
+        MetafitsReadError: If the file cannot be opened or the keyword is not found,
             wrapping the underlying error with a descriptive message.
     """
     try:
@@ -70,7 +74,7 @@ def get_metafits_value(metafits_filename: str, key: str):
             return hdul[0].header[key]
 
     except Exception as catch_all_exception:
-        raise Exception(
+        raise MetafitsReadError(
             f"Error reading metafits file: {metafits_filename}: {catch_all_exception}"
         ) from catch_all_exception
 
@@ -89,7 +93,7 @@ def get_metafits_value_from_hdu(metafits_filename: str, hdu_name: str, key: str)
         matches whatever astropy returns for the keyword (str, int, float, bool, etc.).
 
     Raises:
-        Exception: If the file cannot be opened, the HDU is not found, or the
+        MetafitsReadError: If the file cannot be opened, the HDU is not found, or the
             keyword is missing, wrapping the underlying error with a descriptive message.
     """
     try:
@@ -98,7 +102,7 @@ def get_metafits_value_from_hdu(metafits_filename: str, hdu_name: str, key: str)
             return hdul[hdu_name].header[key]
 
     except Exception as catch_all_exception:
-        raise Exception(
+        raise MetafitsReadError(
             f"Error reading metafits file: {metafits_filename}: {catch_all_exception}"
         ) from catch_all_exception
 
@@ -120,7 +124,7 @@ def get_calibrator_info(metafits_filename: str) -> tuple[bool, str, str]:
           ``is_calibrator`` is True, otherwise an empty string.
 
     Raises:
-        Exception: If the file cannot be opened or any expected keyword is missing,
+        MetafitsReadError: If the file cannot be opened or any expected keyword is missing,
             wrapping the underlying error with a descriptive message.
     """
     try:
@@ -134,6 +138,6 @@ def get_calibrator_info(metafits_filename: str) -> tuple[bool, str, str]:
             project_id = hdul[0].header["PROJECT"]
             return is_calibrator, project_id, calib_source
     except Exception as catch_all_exception:
-        raise Exception(
+        raise MetafitsReadError(
             f"Error reading metafits file: {metafits_filename}: {catch_all_exception}"
         ) from catch_all_exception

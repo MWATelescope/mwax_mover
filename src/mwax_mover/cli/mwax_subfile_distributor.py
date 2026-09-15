@@ -114,7 +114,7 @@ class MWAXSubfileDistributor(MWAXDaemon):
         self.flask_server = None
 
         # This list helps us keep track of all the workers
-        self.workers: list[MWAXWatchQueueWorker | MWAXPriorityWatchQueueWorker] = list()
+        self.workers: list[MWAXWatchQueueWorker | MWAXPriorityWatchQueueWorker] = []
 
         #
         # Config file vars
@@ -176,7 +176,7 @@ class MWAXSubfileDistributor(MWAXDaemon):
         # Since our watcher needs a queue, we'll just get the queue to dump the filenames
         # into this list so we can easily remove them when release_cal_obs is called
         # by a calvin
-        self.outgoing_cal_list: list[str] = list()
+        self.outgoing_cal_list: list[str] = []
         self.outgoing_cal_list_lock: threading.Lock = threading.Lock()
 
         # Database handler for metadata db
@@ -201,7 +201,8 @@ class MWAXSubfileDistributor(MWAXDaemon):
 
         # Parse config file
         self.config = ConfigParser()
-        self.config.read_file(open(config_filename, "r", encoding="utf-8"))
+        with open(config_filename, "r", encoding="utf-8") as config_file:
+            self.config.read_file(config_file)
 
         # Read log level
         config_file_log_level: str | None = read_optional_config(self.config, SECTION_MWAX_MOVER, CONFIG_KEY_LOG_LEVEL)
@@ -752,9 +753,9 @@ class MWAXSubfileDistributor(MWAXDaemon):
                     with self.outgoing_cal_list_lock:
                         self.outgoing_cal_list.remove(item)
 
-                except Exception:
+                except Exception as e:  # noqa: BLE001 - best-effort list cleanup; item may already be gone
                     # Don't want an exception if file is already gone from list
-                    pass
+                    logger.debug(f"{obs_id}: {item} already removed from outgoing_cal_list: {e}")
         except Exception:
             logger.exception(f"{obs_id}: something went wrong when releasing this obs_id")
 
@@ -846,7 +847,7 @@ class MWAXSubfileDistributor(MWAXDaemon):
                 else:
                     raise ValueError(f"obs_id {obs_id} passed to release_cal_obs() is not an int")
 
-        except Exception as ws_exception:
+        except Exception as ws_exception:  # noqa: BLE001 - Flask endpoint boundary; must return an HTTP response, not crash
             return f"ERROR: {ws_exception}".encode(), http.HTTPStatus.INTERNAL_SERVER_ERROR
 
     def endpoint_dump_voltages(self) -> tuple[bytes, int]:
@@ -919,7 +920,7 @@ class MWAXSubfileDistributor(MWAXDaemon):
         except ValueError as parameters_exception:
             return f"Value Error: {parameters_exception}".encode(), http.HTTPStatus.BAD_REQUEST
 
-        except Exception as dump_voltages_exception:
+        except Exception as dump_voltages_exception:  # noqa: BLE001 - Flask endpoint boundary; must return an HTTP response, not crash
             return f"ERROR: {dump_voltages_exception}".encode(), http.HTTPStatus.INTERNAL_SERVER_ERROR
 
     def dump_voltages(self, start_gps_time: int, end_gps_time: int, trigger_id: int) -> bool:
@@ -1071,10 +1072,9 @@ class MWAXSubfileDistributor(MWAXDaemon):
 
         while self.running:
             for w in self.workers:
-                if self.running:
-                    if not w.is_running():
-                        self.request_fatal_shutdown(EXIT_FAILURE, f"Worker {w.name} has stopped unexpectedly.")
-                        break
+                if self.running and not w.is_running():
+                    self.request_fatal_shutdown(EXIT_FAILURE, f"Worker {w.name} has stopped unexpectedly.")
+                    break
 
             time.sleep(0.1)
 
@@ -1165,11 +1165,10 @@ class MWAXSubfileDistributor(MWAXDaemon):
 
     def stop_flask_web_server(self):
         """Stop the Flask web server and wait for the thread to finish."""
-        if self.flask_server:
-            if self.flask_thread:
-                self.flask_server.shutdown()  # stops serve_forever()
-                self.flask_thread.join(timeout=5)
-                self.flask_thread = None
+        if self.flask_server and self.flask_thread:
+            self.flask_server.shutdown()  # stops serve_forever()
+            self.flask_thread.join(timeout=5)
+            self.flask_thread = None
 
         self.flask_server = None
 

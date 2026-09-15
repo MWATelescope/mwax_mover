@@ -41,6 +41,11 @@ from mwax_mover.version import get_mwax_mover_version_string
 logger = logging.getLogger(__name__)
 
 
+class CalibrationInsertError(Exception):
+    """Raised when a calibration_fit or calibration_solutions DB insert fails,
+    to trigger a rollback of the row(s) written so far for this fit."""
+
+
 class CalvinJobType(Enum):
     """Calvin Job Type"""
 
@@ -307,122 +312,120 @@ def process_solutions(
 
         soln_tile_ids = tiles["id"].to_numpy()
 
-        # get a database connection, unless we are using dummy connection (for testing)
-        with db_handler_object.pool.connection() as conn:
-            # Start a transaction
-            with conn.transaction():
-                # Create a cursor
-                transaction_cursor = conn.cursor()
+        # get a database connection and start a transaction, unless we are using dummy connection (for testing)
+        with db_handler_object.pool.connection() as conn, conn.transaction():
+            # Create a cursor
+            transaction_cursor = conn.cursor()
 
-                (success, fit_id) = insert_calibration_fits_row(
-                    db_handler_object,
-                    transaction_cursor,
-                    obs_id=obs_id,
-                    code_version=get_mwax_mover_version_string(),
-                    creator="calvin",
-                    fit_niter=phase_fit_niter,
-                    fit_limit=None,
-                    source_list=source_list,
-                    num_sources=num_sources,
-                    calibration_command=calibration_command,
-                    gain_max_cutoff=gain_max_cutoff,
-                    gain_outlier_poly_degree=gain_outlier_poly_degree,
-                    gain_outlier_mad_residual_threshold=gain_outlier_mad_residual_threshold,
-                    gain_outlier_modify_gains=gain_outlier_modify_gains,
-                    tile_bad_channel_fraction=tile_bad_channel_fraction,
-                    phase_outlier_nstd_threshold=phase_outlier_nstd,
-                )
+            (success, fit_id) = insert_calibration_fits_row(
+                db_handler_object,
+                transaction_cursor,
+                obs_id=obs_id,
+                code_version=get_mwax_mover_version_string(),
+                creator="calvin",
+                fit_niter=phase_fit_niter,
+                fit_limit=None,
+                source_list=source_list,
+                num_sources=num_sources,
+                calibration_command=calibration_command,
+                gain_max_cutoff=gain_max_cutoff,
+                gain_outlier_poly_degree=gain_outlier_poly_degree,
+                gain_outlier_mad_residual_threshold=gain_outlier_mad_residual_threshold,
+                gain_outlier_modify_gains=gain_outlier_modify_gains,
+                tile_bad_channel_fraction=tile_bad_channel_fraction,
+                phase_outlier_nstd_threshold=phase_outlier_nstd,
+            )
 
-                if fit_id is None or not success:
-                    logger.error("failed to insert calibration fit")
-                    # This will trigger a rollback of the calibration_fit row
-                    raise Exception("failed to insert calibration fit")
+            if fit_id is None or not success:
+                logger.error("failed to insert calibration fit")
+                # This will trigger a rollback of the calibration_fit row
+                raise CalibrationInsertError("failed to insert calibration fit")
 
-                # Pre-index both DataFrames by (tile_id, pol) so each per-tile
-                # lookup is O(1) instead of O(n) boolean-mask scan.
-                gain_indexed = gain_fits.set_index([COL_TILE_ID, COL_POL])
-                phase_indexed = phase_fits.set_index([COL_TILE_ID, COL_POL])
+            # Pre-index both DataFrames by (tile_id, pol) so each per-tile
+            # lookup is O(1) instead of O(n) boolean-mask scan.
+            gain_indexed = gain_fits.set_index([COL_TILE_ID, COL_POL])
+            phase_indexed = phase_fits.set_index([COL_TILE_ID, COL_POL])
 
-                for tile_id in soln_tile_ids:
-                    some_fits = False
+            for tile_id in soln_tile_ids:
+                some_fits = False
 
-                    try:
-                        x_gains = gain_indexed.loc[(tile_id, COL_XX)]
-                        if len(x_gains.gains) < n_metafits_coarse:
-                            x_gains = pad_gain_fit_info(
-                                x_gains,
-                                solution_coarse_chans,
-                                all_metafits_coarse_chans,
-                            )
-                        some_fits = True
-                    except KeyError:
-                        x_gains = GainFitInfo.nan(n_metafits_coarse)
-
-                    try:
-                        y_gains = gain_indexed.loc[(tile_id, COL_YY)]
-                        if len(y_gains.gains) < n_metafits_coarse:
-                            y_gains = pad_gain_fit_info(
-                                y_gains,
-                                solution_coarse_chans,
-                                all_metafits_coarse_chans,
-                            )
-                        some_fits = True
-                    except KeyError:
-                        y_gains = GainFitInfo.nan(n_metafits_coarse)
-
-                    try:
-                        x_phase = phase_indexed.loc[(tile_id, COL_XX)]
-                        some_fits = True
-                    except KeyError:
-                        x_phase = PhaseFitInfo.nan()
-
-                    try:
-                        y_phase = phase_indexed.loc[(tile_id, COL_YY)]
-                        some_fits = True
-                    except KeyError:
-                        y_phase = PhaseFitInfo.nan()
-
-                    if not some_fits:
-                        # We could `continue` here to avoid inserting an all-NaN row, but
-                        # we preserve the existing behaviour of inserting it for now.
-                        logger.warning(
-                            f"No phase or gain fits found for tile_id={tile_id} in obs_id={obs_id}. "
-                            "Inserting all-NaN calibration solution row."
+                try:
+                    x_gains = gain_indexed.loc[(tile_id, COL_XX)]
+                    if len(x_gains.gains) < n_metafits_coarse:
+                        x_gains = pad_gain_fit_info(
+                            x_gains,
+                            solution_coarse_chans,
+                            all_metafits_coarse_chans,
                         )
+                    some_fits = True
+                except KeyError:
+                    x_gains = GainFitInfo.nan(n_metafits_coarse)
 
-                    success = insert_calibration_solutions_row(
-                        db_handler_object,
-                        transaction_cursor,
-                        int(fit_id),
-                        int(obs_id),
-                        int(tile_id),
-                        -1 * x_phase.length,  # legacy calibration pipeline used inverse convention
-                        x_phase.intercept,
-                        x_gains.gains,
-                        -1 * y_phase.length,  # legacy calibration pipeline used inverse convention
-                        y_phase.intercept,
-                        y_gains.gains,
-                        x_gains.pol1,
-                        y_gains.pol1,
-                        x_phase.sigma_resid,
-                        x_phase.chi2dof,
-                        x_phase.quality,
-                        y_phase.sigma_resid,
-                        y_phase.chi2dof,
-                        y_phase.quality,
-                        x_gains.quality,
-                        y_gains.quality,
-                        x_gains.sigma_resid,
-                        y_gains.sigma_resid,
-                        x_gains.pol0,
-                        y_gains.pol0,
+                try:
+                    y_gains = gain_indexed.loc[(tile_id, COL_YY)]
+                    if len(y_gains.gains) < n_metafits_coarse:
+                        y_gains = pad_gain_fit_info(
+                            y_gains,
+                            solution_coarse_chans,
+                            all_metafits_coarse_chans,
+                        )
+                    some_fits = True
+                except KeyError:
+                    y_gains = GainFitInfo.nan(n_metafits_coarse)
+
+                try:
+                    x_phase = phase_indexed.loc[(tile_id, COL_XX)]
+                    some_fits = True
+                except KeyError:
+                    x_phase = PhaseFitInfo.nan()
+
+                try:
+                    y_phase = phase_indexed.loc[(tile_id, COL_YY)]
+                    some_fits = True
+                except KeyError:
+                    y_phase = PhaseFitInfo.nan()
+
+                if not some_fits:
+                    # We could `continue` here to avoid inserting an all-NaN row, but
+                    # we preserve the existing behaviour of inserting it for now.
+                    logger.warning(
+                        f"No phase or gain fits found for tile_id={tile_id} in obs_id={obs_id}. "
+                        "Inserting all-NaN calibration solution row."
                     )
 
-                    if not success:
-                        logger.error(f"failed to insert calibration solution for tile {tile_id}")
-                        # This will trigger a rollback of the calibration_fit row and any
-                        # calibration_solutions child rows
-                        raise Exception(f"failed to insert calibration solution for tile {tile_id}")
+                success = insert_calibration_solutions_row(
+                    db_handler_object,
+                    transaction_cursor,
+                    int(fit_id),
+                    int(obs_id),
+                    int(tile_id),
+                    -1 * x_phase.length,  # legacy calibration pipeline used inverse convention
+                    x_phase.intercept,
+                    x_gains.gains,
+                    -1 * y_phase.length,  # legacy calibration pipeline used inverse convention
+                    y_phase.intercept,
+                    y_gains.gains,
+                    x_gains.pol1,
+                    y_gains.pol1,
+                    x_phase.sigma_resid,
+                    x_phase.chi2dof,
+                    x_phase.quality,
+                    y_phase.sigma_resid,
+                    y_phase.chi2dof,
+                    y_phase.quality,
+                    x_gains.quality,
+                    y_gains.quality,
+                    x_gains.sigma_resid,
+                    y_gains.sigma_resid,
+                    x_gains.pol0,
+                    y_gains.pol0,
+                )
+
+                if not success:
+                    logger.error(f"failed to insert calibration solution for tile {tile_id}")
+                    # This will trigger a rollback of the calibration_fit row and any
+                    # calibration_solutions child rows
+                    raise CalibrationInsertError(f"failed to insert calibration solution for tile {tile_id}")
 
         return True, "", int(fit_id)
 

@@ -235,7 +235,8 @@ def main() -> None:
 
     # Parse config file
     config = ConfigParser()
-    config.read_file(open(args.cfg, "r", encoding="utf-8"))
+    with open(args.cfg, "r", encoding="utf-8") as config_file:
+        config.read_file(config_file)
     # Initiate database connection
     db_handler = MWAXDBHandler.from_config(config, ssl_mode="?sslmode=require")
 
@@ -340,7 +341,7 @@ def main() -> None:
                 print(f"HTTP error when downloading the index.json file: no response received {httpe!s}")
                 sys.exit(EXIT_FAILURE)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - top-level CLI entry point; report and exit rather than a raw traceback
             print(f"Error downloading plot file: {e}")
             sys.exit(EXIT_FAILURE)
 
@@ -436,7 +437,7 @@ def main() -> None:
                         shutil.move(upload_path, dest_filename)
                         sol.log(f"Moved {upload_path} to {dest_filename}")
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - top-level CLI entry point; report and exit rather than a raw traceback
                 print(f"Error moving files to upload dir {upload_dir}: {e!s}")
                 sys.exit(EXIT_FAILURE)
         else:

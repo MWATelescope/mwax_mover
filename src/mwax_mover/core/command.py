@@ -41,10 +41,11 @@ def write_readme_file(filename, cmd, exit_code, output, error):
     """
     try:
         with open(filename, "w", encoding="UTF-8") as readme:
+            now_str = datetime.datetime.now().astimezone().strftime("%d-%m-%Y %H:%M:%S")
             if exit_code == 0:
-                readme.write(f"This run succeeded at: {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
+                readme.write(f"This run succeeded at: {now_str}\n")
             else:
-                readme.write(f"This run failed at: {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n")
+                readme.write(f"This run failed at: {now_str}\n")
             readme.write(f"Command: {cmd}\n")
             readme.write(f"Exit code: {exit_code}\n")
             readme.write(f"output: {output}\n")
@@ -266,7 +267,7 @@ def check_popen_finished(popen_process, timeout: int = 60) -> tuple[int, str, st
             f"Timeout expired executing {timeout_expired.cmd}. Partial stdout: {stdout} Partial stderr: {stderr}"
         )
 
-    except Exception as command_exception:
+    except Exception as command_exception:  # noqa: BLE001 - fallback after the known TimeoutExpired case above; keeps the worker thread alive
         logger.error(f"Exception executing {popen_process.args}: {command_exception!s}")
 
     return (exit_code, stdout, stderr)

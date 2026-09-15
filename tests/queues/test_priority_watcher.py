@@ -48,9 +48,10 @@ def _fs_type(path: str) -> str:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         return result.stdout.strip()
-    except Exception:
+    except Exception:  # noqa: BLE001 - test helper; falls back to 'unknown' on any stat() failure
         return "unknown"
 
 
@@ -163,7 +164,7 @@ class TestMWAXPriorityQueueDataComparisons:
         assert self.A_PATH1 != self.B
 
     def test_ne_same_filename_different_dirs_is_false(self):
-        assert not (self.A_PATH1 != self.A_PATH2)
+        assert self.A_PATH1 == self.A_PATH2
 
     def test_lt_earlier_filename(self):
         assert self.A_PATH1 < self.B
@@ -201,7 +202,7 @@ class TestMWAXPriorityQueueDataComparisons:
             MWAXPriorityQueueData(f"/some/path/{obsid}_file.fits")
             for obsid in ["1234567892", "1234567890", "1234567891"]
         ]
-        assert sorted(items)[0] == MWAXPriorityQueueData("/x/1234567890_file.fits")
+        assert min(items) == MWAXPriorityQueueData("/x/1234567890_file.fits")
         assert sorted(items)[2] == MWAXPriorityQueueData("/x/1234567892_file.fits")
 
 
@@ -379,7 +380,7 @@ class TestPriorityWatcherDoWatchLoopFiltering:
         )
         _run_priority_watcher_with_events(w, [event])
         assert dest_queue.qsize() == 1
-        priority, item = dest_queue.get()
+        _priority, item = dest_queue.get()
         assert item.value == os.path.join(str(tmp_path), "1234567890_file.fits")
 
     def test_enqueued_item_carries_correct_priority(self, make_watcher, dest_queue):

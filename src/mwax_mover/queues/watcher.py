@@ -105,7 +105,7 @@ class Watcher:
         # Destroy the inotify adpater
         try:
             del self.inotify_tree
-        except Exception:
+        except AttributeError:
             pass
 
     def do_watch_loop(self):
@@ -137,15 +137,15 @@ class Watcher:
                 if event:
                     (header, _, path, filename) = event
 
-                    # check event is one we care about
-                    if header.mask & self.mask:
-                        # Check file extension is one we care about
-                        if (os.path.splitext(filename)[1] == self.pattern or self.pattern == ".*") and os.path.splitext(
-                            filename
-                        )[1] != self.exclude_pattern:
-                            dest_filename = os.path.join(path, filename)
-                            self.dest_queue.put(dest_filename)
-                            logger.info(f"{dest_filename} added to queue ({self.dest_queue.qsize()})")
+                    # check event is one we care about, and that its extension is one we care about
+                    if (
+                        (header.mask & self.mask)
+                        and (os.path.splitext(filename)[1] == self.pattern or self.pattern == ".*")
+                        and os.path.splitext(filename)[1] != self.exclude_pattern
+                    ):
+                        dest_filename = os.path.join(path, filename)
+                        self.dest_queue.put(dest_filename)
+                        logger.info(f"{dest_filename} added to queue ({self.dest_queue.qsize()})")
 
     def get_status(self) -> dict:
         """Get the current status of the watcher.

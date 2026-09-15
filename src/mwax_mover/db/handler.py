@@ -26,6 +26,10 @@ from mwax_mover.core.config import read_config
 logger = logging.getLogger(__name__)
 
 
+class UnexpectedRowCountError(Exception):
+    """Raised when a query affects/returns a different row count than expected."""
+
+
 class MWAXDBHandler:
     """Class which takes care of the primitive database functions"""
 
@@ -183,7 +187,7 @@ class MWAXDBHandler:
                     else:
                         # Something went wrong
                         logger.error(f"Error- queried {rows_affected} rows, expected 1. SQL={sql}")
-                        raise Exception(f"Error- queried {rows_affected} rows, expected 1. SQL={sql}")
+                        raise UnexpectedRowCountError(f"Error- queried {rows_affected} rows, expected 1. SQL={sql}")
                 else:
                     # We don't know how many rows, so cool, return them
                     return rows
@@ -256,14 +260,13 @@ class MWAXDBHandler:
                 # Check how many rows we affected
                 rows_affected = cursor.rowcount
 
-                if expected_rows:
-                    if rows_affected != expected_rows:
-                        # An exception in here will trigger a rollback
-                        # which is good
-                        logger.error(f"Error- query affected {rows_affected} rows, expected {expected_rows}. SQL={sql}")
-                        raise Exception(
-                            f"Error- query affected {rows_affected} rows, expected {expected_rows}. SQL={sql}"
-                        )
+                if expected_rows and rows_affected != expected_rows:
+                    # An exception in here will trigger a rollback
+                    # which is good
+                    logger.error(f"Error- query affected {rows_affected} rows, expected {expected_rows}. SQL={sql}")
+                    raise UnexpectedRowCountError(
+                        f"Error- query affected {rows_affected} rows, expected {expected_rows}. SQL={sql}"
+                    )
 
         except psycopg.errors.ForeignKeyViolation:
             # Trying to insert or update but a value of a field violates the FK constraint-
@@ -309,7 +312,7 @@ class MWAXDBHandler:
                 # An exception in here will trigger a rollback
                 # which is good
                 logger.error(f"Error- query affected {rows_affected} rows, expected 1. SQL={sql}")
-                raise Exception(f"Error- query affected {rows_affected} rows, expected 1. SQL={sql}")
+                raise UnexpectedRowCountError(f"Error- query affected {rows_affected} rows, expected 1. SQL={sql}")
 
         except Exception:
             logger.exception("postgres Exception")

@@ -15,6 +15,10 @@ from mwax_mover.filesystem.naming import ArchiveLocation
 logger = logging.getLogger(__name__)
 
 
+class DataFileQueryError(Exception):
+    """Raised when selecting a data_files row fails."""
+
+
 class DataFileRow:
     """A class that abstracts the key fields of a MWA data_files row"""
 
@@ -71,7 +75,7 @@ def get_data_file_row(db_handler_object: MWAXDBHandler, full_filename: str, obs_
         logger.error(
             f"{full_filename} error selecting data_files record in data_files table: {select_exception}. SQL was {sql}"
         )
-        raise Exception from select_exception
+        raise DataFileQueryError from select_exception
 
 
 def insert_data_file_row(
@@ -163,9 +167,8 @@ def insert_data_file_row(
         # but we need the caller to check if the file still exists- otherwise we may archive it!
         return True
 
-    except Exception as upsert_exception:
+    except Exception:
         logger.exception(
-            upsert_exception,
             f"{filename} error inserting data_files record in data_files table. SQL was {sql}",
         )
         return False

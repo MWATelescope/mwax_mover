@@ -75,7 +75,7 @@ def main() -> None:
         p = Path(args.directory)
         try:
             fit_id = int(p.name)
-        except Exception:
+        except ValueError:
             print(f"Could not infer FitID from {args.directory}- please specify fit-id instead.")
             sys.exit(EXIT_FAILURE)
     else:

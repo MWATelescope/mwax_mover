@@ -129,7 +129,7 @@ class PriorityWatcher:
         # Destroy the inotify adpater
         try:
             del self.inotify_tree
-        except Exception:
+        except AttributeError:
             pass
 
     def do_watch_loop(self):
@@ -168,32 +168,31 @@ class PriorityWatcher:
                         # debug (uncomment if needed)
                         # logger.debug(f"Event {path} {filename}")
 
-                        # check event is one we care about
-                        if header.mask & self.mask:
-                            # Check file extension is one we care about
-                            if (
-                                os.path.splitext(filename)[1] == self.pattern or self.pattern == ".*"
-                            ) and os.path.splitext(filename)[1] != self.exclude_pattern:
-                                dest_filename = os.path.join(path, filename)
+                        # check event is one we care about, and that its extension is one we care about
+                        if (
+                            (header.mask & self.mask)
+                            and (os.path.splitext(filename)[1] == self.pattern or self.pattern == ".*")
+                            and os.path.splitext(filename)[1] != self.exclude_pattern
+                        ):
+                            dest_filename = os.path.join(path, filename)
 
-                                # We need to determine the priority
-                                priority = get_priority(
-                                    dest_filename,
-                                    self.metafits_path,
-                                    self.high_priority_correlator_projects,
-                                    self.high_priority_vcs_projects,
-                                )
+                            # We need to determine the priority
+                            priority = get_priority(
+                                dest_filename,
+                                self.metafits_path,
+                                self.high_priority_correlator_projects,
+                                self.high_priority_vcs_projects,
+                            )
 
-                                new_queue_item = (
-                                    priority,
-                                    MWAXPriorityQueueData(dest_filename),
-                                )
+                            new_queue_item = (
+                                priority,
+                                MWAXPriorityQueueData(dest_filename),
+                            )
 
-                                self.dest_queue.put(new_queue_item)
-                                logger.info(
-                                    f"{dest_filename} added to queue with priority"
-                                    f" {priority} ({self.dest_queue.qsize()})"
-                                )
+                            self.dest_queue.put(new_queue_item)
+                            logger.info(
+                                f"{dest_filename} added to queue with priority {priority} ({self.dest_queue.qsize()})"
+                            )
 
     def get_status(self) -> dict:
         """Get the current status of the watcher.

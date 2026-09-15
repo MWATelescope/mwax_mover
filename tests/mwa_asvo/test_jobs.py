@@ -112,7 +112,7 @@ def test_get_status_from_giant_squid_stdout_invalid():
 
     for json_one_job in json_stdout:
         with pytest.raises(Exception) as excinfo:
-            obs_id, job_id, job_state, url = get_job_info_from_giant_squid_json(json_stdout, json_one_job)
+            _obs_id, _job_id, _job_state, _url = get_job_info_from_giant_squid_json(json_stdout, json_one_job)
 
             assert str(excinfo.value) == ("766227: giant-squid unknown job status code UnhandledErrorCode.")
 

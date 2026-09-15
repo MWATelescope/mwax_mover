@@ -32,6 +32,11 @@ class GiantSquidMWAASVOOutageException(Exception):
     """Raised when giant-squid reports that MWA ASVO is in an outage"""
 
 
+class GiantSquidOutputParseError(Exception):
+    """Raised when a giant-squid command succeeds but its stdout does not
+    contain the job ID / status fields callers expect to find in it."""
+
+
 class GiantSquidJobAlreadyExistsException(Exception):
     """Raised when giant-squid reports that an obs_id already exists in
     the MWA ASVO queue in queued, processing or ready state"""

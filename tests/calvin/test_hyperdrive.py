@@ -322,7 +322,7 @@ def test_run_hyperdrive_all_succeed_no_error_dir(tmp_path):
         patch("mwax_mover.calvin.hyperdrive.start_command", return_value="popen"),
         patch("mwax_mover.calvin.hyperdrive.check_popen_finished", return_value=(0, "stdout", "stderr")),
     ):
-        success, calibration_command = run_hyperdrive(
+        success, _calibration_command = run_hyperdrive(
             uvfits_files,
             "fake_metafits.fits",
             MagicMock(),

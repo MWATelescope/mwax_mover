@@ -331,7 +331,7 @@ def upload_plot_files(job_output_path: str, upload_path: str) -> bool:
                         logger.debug(f"Moving {pfile} to {dest_filename} [{file_no}/{len(plot_files)}]")
                         shutil.move(pfile, dest_filename)
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 - keep going and try the next file (see comment below)
                     logger.warning(f"Failed to move {pfile} to the {staging_path}. Error: {e!s}. Ignoring")
                     # keep going and try the next file
 
@@ -342,7 +342,7 @@ def upload_plot_files(job_output_path: str, upload_path: str) -> bool:
         logger.info(f"upload_plot_files: published {upload_path} for upload.")
         return True
 
-    except Exception as ee:
+    except Exception as ee:  # noqa: BLE001 - log and keep going; staging dir deliberately left for inspection (see comment below)
         # Something went wrong- log it and keep going. Deliberately leave the
         # staging dir in place for inspection; reap_orphaned_staging_dirs will
         # remove it on a later processor startup if it is genuinely abandoned.

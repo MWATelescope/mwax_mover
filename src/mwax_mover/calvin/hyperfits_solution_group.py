@@ -168,7 +168,7 @@ def _phase_fit_one(
     name = tile[COL_NAME]
     try:
         fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - one bad tile's phase fit must not abort the whole fit
         logger.warning(f"Skipping phase fit for {tile_id=:4} {pol} ({name}): {exc}")
         return None
     return [tile_id, soln_idx, pol, *fit]
@@ -213,7 +213,7 @@ def _gain_fit_one(
     name = tile[COL_NAME]
     try:
         fit = fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - one bad tile's gain fit must not abort the whole fit
         logger.warning(f"Skipping gain fit for {tile_id=:4} {pol} ({name}): {exc}")
         return None
     return [tile_id, soln_idx, pol, *fit]
