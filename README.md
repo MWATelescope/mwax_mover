@@ -571,6 +571,12 @@ start()  (runs once per SLURM job/obs_id -- request-ids is only ever used as
   ├─ process_solutions()
   │    ├─ load HyperfitsSolution + Metafits
   │    ├─ select_refant() (reference tile -- see CALVIN.md's "Reference tile selection")
+  │    ├─ run_flagging_pipeline() (see CALVIN.md Steps 1–6)
+  │    │    ├─ apply_tile_flags, enforce_whole_jones_nan
+  │    │    ├─ flag_gain_max_cutoff, flag_amplitude_outliers, flag_mostly_bad_tiles
+  │    │    ├─ [if refant invalidated]: re-select from surviving tiles
+  │    │    └─ detect_phase_outliers (report-only)
+  │    ├─ commit() (write flagged solutions to disk)
   │    ├─ fit phases and gains per coarse channel
   │    ├─ insert_calibration_fits_row() → DB
   │    └─ insert_calibration_solutions_row() → DB

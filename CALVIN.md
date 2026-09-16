@@ -78,6 +78,8 @@ Before any of the numbered steps below run, Calvin picks a **reference tile**. E
 
 Full design rationale — including why gate failures are counted rather than combined into a single weighted score — is in [`docs/REF_TILE_SELECTION.md`](docs/REF_TILE_SELECTION.md).
 
+**Mid-pipeline re-selection:** because reference tile selection runs *before* the flagging pipeline, the selected tile can be invalidated by a later stage — for example, [Step 3](#step-3-gain-magnitude-sanity-cutoff) NaN'ing every channel of a diverged tile, followed by [Step 5](#step-5-mostly-bad-tile-promotion) promoting it to fully flagged. If this happens, the pipeline automatically re-selects a replacement (the lowest-ID tile surviving both structural and Calvin flags) and logs a warning. The replacement is used for [Step 6](#step-6-phase-outlier-detection)'s phase fits, the "after" `hyperdrive` plots, the final gain/phase fits written to the database, and the debug phase-fit plots. The "before" phase fits (captured before the flagging stages ran) still use the original tile, since they were computed when it was still valid. The re-selected tile is not quality-ranked — the full ranking needs a working reference to bootstrap against, creating a chicken-and-egg — but the lowest-ID survivor is sufficient for the reporting-only outputs that depend on it.
+
 ---
 
 ## Step 1: Structural tile flags
