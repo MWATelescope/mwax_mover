@@ -959,6 +959,53 @@ def test_run_flagging_pipeline_gain_max_cutoff_runs_before_other_stages():
     assert not np.any(np.isnan(group.jones[0][1]))
 
 
+def test_run_flagging_pipeline_reselects_refant_when_invalidated():
+    """If the chosen refant is NaN'd by flag_gain_max_cutoff and promoted
+    to MOSTLY_BAD_CHANNELS, run_flagging_pipeline re-selects a surviving
+    tile and returns its name (instead of silently producing all-NaN phase
+    fits).
+
+    Regression test for the Tile088 / obsid 1473544320 bug: select_refant
+    picked a tile whose gains diverged (amplitude >> gain_max_cutoff),
+    which the flagging pipeline then NaN'd, making _ref_normalise_xx_yy
+    produce all-NaN output and every tile's phase fit fail with "Not
+    enough valid phases to fit (0)".
+    """
+    n_tiles = 10
+    group = _make_fake_group(n_tiles=n_tiles, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.tile_flag_reasons = np.full(n_tiles, TileFlagReason.NONE, dtype=object)
+    group.channel_flag_reasons = [np.full((n_tiles, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+
+    rng = np.random.default_rng(42)
+    for i in range(1, n_tiles):
+        phase_noise = rng.normal(scale=0.02, size=_FIT_N_CHANBLOCKS)
+        group.jones[0][i, :, 0, 0] *= np.exp(1j * phase_noise)
+        group.jones[0][i, :, 1, 1] *= np.exp(1j * phase_noise)
+
+    # Tile001 (index 0, the refant): uniformly diverged, like the real bug.
+    # All gains >> gain_max_cutoff, so flag_gain_max_cutoff NaN's everything
+    # and flag_mostly_bad_tiles promotes to FULLY_FLAGGED.
+    group.jones[0][0, :, 0, 0] = 1e10 + 0j
+    group.jones[0][0, :, 1, 1] = 1e10 + 0j
+
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS):
+        final_refant = group.run_flagging_pipeline(
+            refant_name="Tile001",
+            phase_fit_niter=1,
+            gain_max_cutoff=100.0,
+        )
+
+    # The original refant was invalidated:
+    assert group.tile_flag_reasons[0] & TileFlagReason.MOSTLY_BAD_CHANNELS
+
+    # A different tile was selected:
+    assert final_refant != "Tile001"
+
+    # The AFTER phase fits are not empty (the replacement refant works):
+    assert group.phase_fits is not None
+    assert len(group.phase_fits) > 0
+
+
 def test_run_flagging_pipeline_gain_max_cutoff_none_preserves_prior_behaviour():
     """Passing gain_max_cutoff=None to run_flagging_pipeline disables the
     check, matching behaviour before it was reinstated."""

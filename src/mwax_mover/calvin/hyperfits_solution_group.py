@@ -646,6 +646,43 @@ class HyperfitsSolutionGroup:
         best_idx = np.where(unflagged_mask)[0][np.argmin(candidate_ids[unflagged_mask])]
         return self.metafits_tiles_df.iloc[best_idx]
 
+    def _reselect_refant(self) -> Series:
+        """Pick a replacement reference tile after the original was
+        invalidated by a flagging stage.
+
+        Like _bootstrap_refant but also excludes tiles flagged by the
+        Calvin pipeline (tile_flag_reasons != NONE).  Used by
+        run_flagging_pipeline when the caller's original refant is NaN'd
+        by flag_gain_max_cutoff / promoted by flag_mostly_bad_tiles.
+
+        Not quality-ranked (the full select_refant ranking needs a
+        working refant to bootstrap against, creating a chicken-and-egg
+        problem); the lowest-ID surviving tile is sufficient for the
+        post-flagging phase-outlier detection pass, which is
+        reporting-only.
+
+        Returns:
+            A pandas Series representing the replacement tile row.
+
+        Raises:
+            ValueError: If no tiles survive both structural and Calvin
+                flags.
+        """
+        structural_ok = ~self.combined_tile_flags
+        calvin_ok = (
+            self.tile_flag_reasons == TileFlagReason.NONE
+            if self.tile_flag_reasons is not None
+            else np.ones(len(self.metafits_tiles_df), dtype=bool)
+        )
+        unflagged = structural_ok & calvin_ok
+        if not unflagged.any():
+            raise ValueError(
+                "No unflagged tiles remaining after the flagging pipeline -- cannot re-select a reference tile."
+            )
+        candidate_ids = self.metafits_tiles_df[COL_ID].to_numpy()
+        best_idx = np.where(unflagged)[0][np.argmin(candidate_ids[unflagged])]
+        return self.metafits_tiles_df.iloc[best_idx]
+
     def select_refant(self, phase_fit_niter: int) -> Series:
         """Choose the reference tile for calibration.
 
@@ -815,7 +852,11 @@ class HyperfitsSolutionGroup:
 
         Raises:
             RuntimeError: If the name isn't found, matches more than one
-                tile, or that tile is flagged.
+                tile, or that tile is flagged -- by any of the three
+                structural sources (metafits, TILES HDU, BASELINES HDU)
+                OR by the Calvin flagging pipeline (tile_flag_reasons,
+                e.g. MOSTLY_BAD_CHANNELS after flag_gain_max_cutoff /
+                flag_mostly_bad_tiles).
         """
         tile_names = self.metafits_tiles_df[COL_NAME].to_numpy()
         ref_mask = tile_names == refant_name
@@ -826,6 +867,12 @@ class HyperfitsSolutionGroup:
         ref_tile_idx = int(np.where(ref_mask)[0][0])
         if self.combined_tile_flags[ref_tile_idx]:
             raise RuntimeError(f"reference tile {refant_name} is flagged (index {ref_tile_idx})")
+        tile_flag_reasons = getattr(self, "tile_flag_reasons", None)
+        if tile_flag_reasons is not None and tile_flag_reasons[ref_tile_idx] != TileFlagReason.NONE:
+            raise RuntimeError(
+                f"reference tile {refant_name} was flagged by the Calvin pipeline"
+                f" (index {ref_tile_idx}, reason: {tile_flag_reasons[ref_tile_idx]!r})"
+            )
         return ref_tile_idx
 
     def get_solns_both(
@@ -1205,7 +1252,7 @@ class HyperfitsSolutionGroup:
         phase_outlier_nstd: float = 3.0,
         tile_bad_channel_fraction: float = 0.5,
         gain_max_cutoff: float | None = 100.0,
-    ) -> None:
+    ) -> str:
         """Run the full flagging pipeline in the standard order, capturing a
         "before" snapshot along the way.
 
@@ -1282,6 +1329,14 @@ class HyperfitsSolutionGroup:
                 flag_mostly_bad_tiles).
             gain_max_cutoff: Absolute gain-amplitude ceiling (see
                 flag_gain_max_cutoff). None disables this check.
+
+        Returns:
+            The reference antenna name used for the final
+            detect_phase_outliers pass.  Normally identical to the input
+            refant_name; differs only when an earlier flagging stage
+            (flag_gain_max_cutoff / flag_mostly_bad_tiles) invalidated
+            the original choice, in which case a replacement is selected
+            via _reselect_refant and a warning is logged.
         """
         self._ensure_loaded()
         self.apply_tile_flags()
@@ -1298,7 +1353,28 @@ class HyperfitsSolutionGroup:
         self.flag_gain_max_cutoff(gain_max_cutoff)
         self.flag_amplitude_outliers(poly_degree, mad_residual_threshold)
         self.flag_mostly_bad_tiles(tile_bad_channel_fraction)
-        self.detect_phase_outliers(refant_name, phase_fit_niter, nstd=phase_outlier_nstd)
+
+        # The original refant may have been invalidated by the stages
+        # above (e.g. a diverged tile NaN'd by flag_gain_max_cutoff and
+        # then promoted by flag_mostly_bad_tiles).  Detect this and
+        # re-select before detect_phase_outliers tries to reference-
+        # normalise against an all-NaN tile.
+        final_refant_name = refant_name
+        tile_names = self.metafits_tiles_df[COL_NAME].to_numpy()
+        ref_idx = int(np.where(tile_names == refant_name)[0][0])
+        if self.tile_flag_reasons[ref_idx] != TileFlagReason.NONE:
+            replacement = self._reselect_refant()
+            logger.warning(
+                f"Reference tile {refant_name} was invalidated by the flagging pipeline "
+                f"(reason: {self.tile_flag_reasons[ref_idx]!r}). "
+                f"Re-selected {replacement[COL_NAME]} ({replacement[COL_ID]}) for "
+                f"post-flagging phase-outlier detection."
+            )
+            final_refant_name = replacement[COL_NAME]
+
+        self.detect_phase_outliers(final_refant_name, phase_fit_niter, nstd=phase_outlier_nstd)
+
+        return final_refant_name
 
     def commit(self, metafits_context: mwalib.MetafitsContext) -> list[str | None]:
         """Write all in-memory changes to disk: one backup + one write per file.

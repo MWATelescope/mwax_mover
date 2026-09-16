@@ -1,5 +1,9 @@
 # Changelog
 
+# 2.0.2 16-Sep-2026
+
+* Bug fix: Calvin flagging pipeline now re-selects the reference tile when the original is invalidated mid-pipeline (e.g. a diverged tile NaN'd by `flag_gain_max_cutoff` then promoted by `flag_mostly_bad_tiles`). Previously, `detect_phase_outliers` would reference-normalise every tile against the now-all-NaN refant, producing empty phase fits and a blank phase plot. `_find_ref_tile_idx` also now checks `tile_flag_reasons` as a safety net. Observed on obsid 1473544320 where `select_refant` picked Tile088 (diverged gx ~800–15k).
+
 # 2.0.1 15-Sep-2026
 
 * Bump Python to 3.14.

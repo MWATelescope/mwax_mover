@@ -225,7 +225,7 @@ def process_solutions(
         # along the way -- shared with cal_utils via
         # HyperfitsSolutionGroup.run_flagging_pipeline() rather than each
         # duplicating the call sequence.
-        soln_group.run_flagging_pipeline(
+        final_refant_name = soln_group.run_flagging_pipeline(
             refant["name"],
             phase_fit_niter,
             poly_degree=gain_outlier_poly_degree,
@@ -235,6 +235,15 @@ def process_solutions(
             gain_max_cutoff=gain_max_cutoff,
         )
         assert soln_group.before_jones is not None
+
+        # If the flagging pipeline invalidated the original refant (e.g.
+        # a diverged tile NaN'd by flag_gain_max_cutoff) and re-selected,
+        # update for all downstream uses (plots, gain fits, DB inserts).
+        if final_refant_name != refant["name"]:
+            refant = tiles[tiles["name"] == final_refant_name].iloc[0]
+            logger.info(
+                f"Using re-selected reference tile {refant['name']} (ant={refant['ant']}) for post-flagging outputs."
+            )
 
         # "After" plots: calvin's own outlier plots, from soln_group's
         # final in-memory state -- no staleness, since nothing downstream

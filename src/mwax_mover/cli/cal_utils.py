@@ -130,7 +130,7 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
     # process_solutions() -- both now share the same
     # HyperfitsSolutionGroup.run_flagging_pipeline() implementation rather
     # than each duplicating the call sequence.
-    soln_group.run_flagging_pipeline(
+    final_refant_name = soln_group.run_flagging_pipeline(
         refant["name"],
         args.phase_fit_niter,
         poly_degree=args.poly_degree,
@@ -139,6 +139,13 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
         tile_bad_channel_fraction=args.tile_bad_channel_fraction,
         gain_max_cutoff=args.gain_max_cutoff,
     )
+
+    if final_refant_name != refant["name"]:
+        refant = soln_group.metafits_tiles_df[soln_group.metafits_tiles_df["name"] == final_refant_name].iloc[0]
+        print(
+            f"Reference tile re-selected to {refant['name']}"
+            f" (ant={refant['ant']}) after flagging invalidated the original."
+        )
 
     # One stitched, paginated set for the whole observation (every coarse
     # channel on one compressed x-axis), not one set per solution file --
