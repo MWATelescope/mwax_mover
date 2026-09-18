@@ -10,6 +10,8 @@ Everything below applies per-observation. If an observation spans more than one 
 
 1. [Inputs](#inputs)
 2. [Reference tile selection](#reference-tile-selection)
+   - [Dipole completeness](#dipole-completeness)
+   - [Selection diagnostics](#selection-diagnostics)
 3. [Step 1: Structural tile flags](#step-1-structural-tile-flags)
 4. [Step 2: Enforce whole-Jones NaN](#step-2-enforce-whole-jones-nan)
 5. [Step 3: Gain-magnitude sanity cutoff](#step-3-gain-magnitude-sanity-cutoff)
@@ -66,19 +68,39 @@ Before any of the numbered steps below run, Calvin picks a **reference tile**. E
 **How:** selection runs in two stages, before any of the flagging in [Step 1](#step-1-structural-tile-flags) onwards:
 
 1. **Bootstrap.** A cheap, purely structural pick — the lowest-ID tile not already flagged by any of the three [Step 1](#step-1-structural-tile-flags) sources — is used as a throwaway reference. A read-only phase and gain fit pass is run against it, purely to gather ranking data for every unflagged tile; nothing about this bootstrap tile's own suitability as a reference matters, since it is never actually used past this point unless it also happens to win the ranking below.
-2. **Rank.** Every unflagged tile is scored by:
-   - How many of three quality gates it fails, checked on the **worse** of its XX/YY fit (a tile is only as trustworthy as its worse polarisation):
-     - Phase-fit quality below **0.8**
-     - Phase-fit χ²/dof outside **[0.2, 3.0]**
-     - Gain-fit quality below **0.8**
-   - Among tiles with an equal number of failures, how far its fitted length deviates from the *population median* length — not from zero. This is deliberately reference-independent: changing which tile the bootstrap stage happened to use just shifts every tile's fitted length by the same constant amount, so measuring deviation from the population's own median cancels that shift out, unlike comparing the raw fitted value against zero.
-   - Tile ID breaks any remaining tie, for a deterministic result.
+2. **Rank.** Every unflagged tile is scored by a composite sort key, in this priority order:
+   - **Gate failures** — how many of four quality gates it fails, checked on the **worse** of its XX/YY fit (a tile is only as trustworthy as its worse polarisation):
+     - Phase-fit quality below **0.8** (`REFTILE_PHASE_QUALITY_MIN`)
+     - Phase-fit χ²/dof outside **[0.2, 3.0]** (`REFTILE_PHASE_CHI2DOF_MIN`, `_MAX`)
+     - Gain-fit quality below **0.8** (`REFTILE_GAIN_QUALITY_MIN`)
+     - Dipole completeness: fewer than **30** of 32 dipole gains equal to 1.0 (`REFTILE_DIPOLE_GOOD_MIN`) — see [Dipole completeness](#dipole-completeness) below
+   - **Dead dipole count** — among tiles with an equal number of gate failures, those with fewer dead dipoles sort first. So a 32/32 tile always beats a 31/32 tile when their gate failure counts are equal, even though both pass the ≥30 gate.
+   - **Length deviation** — among tiles with equal failures and equal dead dipoles, how far its fitted length deviates from the *population median* length — not from zero. This is deliberately reference-independent: changing which tile the bootstrap stage happened to use just shifts every tile's fitted length by the same constant amount, so measuring deviation from the population's own median cancels that shift out, unlike comparing the raw fitted value against zero.
+   - **Tile ID** breaks any remaining tie, for a deterministic result.
 
-   The tile with the fewest gate failures wins; ties are broken by smallest length deviation, then by lowest tile ID. This degrades gracefully if no tile passes every gate on a particularly noisy observation — the tile failing fewest still wins, rather than the pipeline needing a separate fallback case.
+   Expressed as a sort tuple: `(gate_failures, n_dead_dipoles, length_deviation, tile_id)` — the tile with the smallest tuple wins. This degrades gracefully if no tile passes every gate on a particularly noisy observation — the tile failing fewest still wins, rather than the pipeline needing a separate fallback case.
 
-Full design rationale — including why gate failures are counted rather than combined into a single weighted score — is in [`docs/REF_TILE_SELECTION.md`](docs/REF_TILE_SELECTION.md).
+Full design rationale — including why gate failures are counted rather than combined into a single weighted score — is in [`docs/REF_TILE_SELECTION.md`](docs/REF_TILE_SELECTION.md). The dipole-awareness enhancement is documented in [`docs/DIPOLE_GAINS_REFTILE.md`](docs/DIPOLE_GAINS_REFTILE.md).
 
-**Mid-pipeline re-selection:** because reference tile selection runs *before* the flagging pipeline, the selected tile can be invalidated by a later stage — for example, [Step 3](#step-3-gain-magnitude-sanity-cutoff) NaN'ing every channel of a diverged tile, followed by [Step 5](#step-5-mostly-bad-tile-promotion) promoting it to fully flagged. If this happens, the pipeline automatically re-selects a replacement (the lowest-ID tile surviving both structural and Calvin flags) and logs a warning. The replacement is used for [Step 6](#step-6-phase-outlier-detection)'s phase fits, the "after" `hyperdrive` plots, the final gain/phase fits written to the database, and the debug phase-fit plots. The "before" phase fits (captured before the flagging stages ran) still use the original tile, since they were computed when it was still valid. The re-selected tile is not quality-ranked — the full ranking needs a working reference to bootstrap against, creating a chicken-and-egg — but the lowest-ID survivor is sufficient for the reporting-only outputs that depend on it.
+### Dipole completeness
+
+The hyperdrive solution FITS file's TILES HDU has an optional `DipoleGains` column: 32 float64 values per tile (first 16 for X dipoles, second 16 for Y dipoles). Each value is 0.0 (dead dipole) or 1.0 (alive). A "good" dipole is one whose value is exactly 1.0.
+
+The **dipole gate** requires at least 30 of the 32 values to be 1.0 — tiles with up to 2 dead dipoles still pass. But `n_dead_dipoles` (32 minus the count of 1.0 values) also serves as a **continuous ranking dimension** between `gate_failures` and `length_deviation` in the sort key, so the dipole count discriminates even among tiles that pass the gate.
+
+When the `DipoleGains` column is absent (older hyperdrive solution files), the gate is skipped and `n_dead_dipoles` defaults to 0 for all tiles, preserving pre-enhancement behaviour exactly.
+
+### Selection diagnostics
+
+After scoring, `select_refant()` generates a human-readable ranking report (via `calvin/refant_report.py`) showing each candidate tile's gate results, dipole health, length deviation, actual quality metric values, and rank. This report is:
+
+- Stored on `self.refant_selection_report` for later use.
+- Logged at INFO level (visible in SLURM job logs).
+- Written as the first section of `{obs_id}_stats.txt`, before the BEFORE/AFTER tables.
+
+**Mid-pipeline re-selection:** because reference tile selection runs *before* the flagging pipeline, the selected tile can be invalidated by a later stage — for example, [Step 3](#step-3-gain-magnitude-sanity-cutoff) NaN'ing every channel of a diverged tile, followed by [Step 5](#step-5-mostly-bad-tile-promotion) promoting it to fully flagged. If this happens, the pipeline automatically re-selects a replacement (the lowest-ID tile surviving both structural and Calvin flags) and logs a warning. The replacement is used for [Step 6](#step-6-phase-outlier-detection)'s phase fits, all `hyperdrive` plots (both "before" and "after"), the final gain/phase fits written to the database, and the debug phase-fit plots. The "before" phase fits (captured before the flagging stages ran) still use the original tile, since they were computed when it was still valid. The re-selected tile is not quality-ranked — the full ranking needs a working reference to bootstrap against, creating a chicken-and-egg — but the lowest-ID survivor is sufficient for the reporting-only outputs that depend on it.
+
+**Plot ordering:** the "before" `hyperdrive solutions-plot` invocations run *after* the flagging pipeline completes (but before [Step 7: Commit to disk](#step-7-commit-to-disk)), so that both "before" and "after" plots use the same final reference tile. This is safe because the flagging pipeline only mutates the Jones matrices in memory — the on-disk solution files remain pristine until `commit()` writes them.
 
 ---
 
@@ -271,7 +293,7 @@ For each observation, Calvin (and the underlying `hyperdrive` plotting) writes o
 
 | File | Description |
 |---|---|
-| `{obs_id}_stats.txt` | **The main human-readable summary.** Before/after per-tile flagging statistics (see below), followed by `hyperdrive`'s own fine-channel convergence statistics. |
+| `{obs_id}_stats.txt` | **The main human-readable summary.** Reference tile selection report (which tile was chosen and why), followed by before/after per-tile flagging statistics (see below), followed by `hyperdrive`'s own fine-channel convergence statistics. |
 | `{obs_id}_gain_outliers_tiles_{first}-{last}.png` | Plot of the amplitude-outlier gains that were detected and removed (Step 4) and any channels cut off by the Step 3 gain-magnitude sanity check, shown against the fitted curve and acceptance band, per tile. One file per *page* of tiles (`{first}-{last}` is a tile-index range, not a receiver-channel suffix — every coarse-channel band is stitched onto one compressed x-axis per tile, so there's one paginated set for the whole observation rather than one set per band). Colour tracks severity, not which check caught a channel: black text with no border colour change for a clean tile, orange for a partial (some-channels) flag, red reserved for a fully flagged tile -- so amplitude outliers and gain-cutoff divergences share the same orange shaded band and tile border, and are told apart only by marker shape (black 'x' for amplitude outliers, black '+' for gain-cutoff). The marker only ever appears on a channel with its own genuine per-channel reason -- a channel only NaN'd because Step 5 promoted the whole tile, without ever individually triggering a reason itself, is left unmarked. Every tile except one flagged before Calvin's own analysis ran (metafits/TILES-HDU/BASELINES-HDU) gets a top-centre summary in the same colour as its border: a "{pct}% Good (n_good/n_total)" line (the fraction of channels that were never individually flagged), then, if any were, a breakdown of every distinct per-channel reason present, e.g. "100 NaN, 200 above gain cutoff, 22 outside 10 MAD" -- a clean tile just shows "100% Good" with no second line. A structurally-flagged tile has no real data or per-channel breakdown to show, so it instead gets a red "gx/gy amplitude - FULLY FLAGGED" title and a simpler message ("flagged in metafits", etc.), top-centre, on an otherwise blank panel with a red border. A tile Calvin itself fully flagged (e.g. promoted via Step 5) still has real data, so it's plotted normally (band included, if the underlying fit had any valid channels left to compute one from) with the same "FULLY FLAGGED" title and the full red summary overlaid on top, rather than being hidden behind a placeholder. Y-axis tick labels switch to scientific notation automatically once a subplot's values are large enough to need it (e.g. a gain-cutoff divergence), rather than always spelling out the full number. |
 | `{obs_id}_rx_lengths.png` | Cable length offsets in metres, per receiver — a sanity-check plot for the phase/delay fitting in Step 6. |
 | `{obs_id}_phase_fits_xx.png` / `_phase_fits_yy.png` | Per-tile phase-vs-frequency plots with the fitted delay line overlaid, for XX and YY respectively. |
@@ -285,7 +307,7 @@ For each observation, Calvin (and the underlying `hyperdrive` plotting) writes o
 
 ### The tile stats table (inside `{obs_id}_stats.txt`)
 
-The first part of `{obs_id}_stats.txt` is a per-tile table, printed twice — once for the "**BEFORE**" snapshot (Step 1 only) and once for "**AFTER**" (the fully-flagged final state) — so you can see exactly what changed. Each row covers one tile:
+The first part of `{obs_id}_stats.txt` is the [reference tile selection](#selection-diagnostics) report — a ranked table showing each candidate tile's gate pass/fail status, dipole health, length deviation, and the winning tile. After that comes a per-tile table, printed twice — once for the "**BEFORE**" snapshot (Step 1 only) and once for "**AFTER**" (the fully-flagged final state) — so you can see exactly what changed. Each row covers one tile:
 
 | Column | Meaning |
 |---|---|

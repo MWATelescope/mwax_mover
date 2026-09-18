@@ -1,5 +1,12 @@
 # Changelog
 
+# 2.0.3 18-Sep-2026
+
+* Enhancement: `select_refant()` now considers dipole health when choosing the reference tile. Reads the optional `DipoleGains` column from the hyperdrive solution FITS TILES HDU (32 values per tile: 16 X + 16 Y dipoles, typically 0.0 or 1.0). Tiles with fewer than 30 good dipoles fail the new dipole gate; among tiles with equal gate failures, fewer dead dipoles ranks higher. When the column is absent (older solution files), behaviour is unchanged. New constants: `REFTILE_DIPOLE_GAINS_EXPECTED`, `REFTILE_DIPOLE_GOOD_MIN`. New reader: `calibration.solutions.read_dipole_gains()`, `HyperfitsSolution.dipole_gains`, `HyperfitsSolutionGroup.dipole_gains`.
+* Enhancement: Reference tile selection diagnostics. `select_refant()` now generates a detailed human-readable ranking report showing each candidate tile's gate pass/fail status, dipole health, length deviation, and rank. Written as the first section of `{obs_id}_stats.txt` and logged at INFO level (visible in SLURM job logs). New module: `calvin/refant_report.py`.
+* Enhancement: "Before" hyperdrive plots (`solutions-plot`) now run after `run_flagging_pipeline()` instead of before it, so that both "before" and "after" plots use the same final reference tile. Previously, if the flagging pipeline re-selected the refant (e.g. after invalidating a diverged tile), the before and after plots would use different reference tiles, making visual comparison misleading. The on-disk files are still pristine at that point (only in-memory Jones matrices are modified until `commit()`).
+* Update `CALVIN.md` and moved it to `docs/CALVIN.md`: comprehensive documentation of the Calvin calibration pipeline, including the full reference tile selection algorithm, all flagging stages, and output file descriptions.
+
 # 2.0.2 16-Sep-2026
 
 * Bug fix: Calvin flagging pipeline now re-selects the reference tile when the original is invalidated mid-pipeline (e.g. a diverged tile NaN'd by `flag_gain_max_cutoff` then promoted by `flag_mostly_bad_tiles`). Previously, `detect_phase_outliers` would reference-normalise every tile against the now-all-NaN refant, producing empty phase fits and a blank phase plot. `_find_ref_tile_idx` also now checks `tile_flag_reasons` as a safety net. Observed on obsid 1473544320 where `select_refant` picked Tile088 (diverged gx ~800–15k).
