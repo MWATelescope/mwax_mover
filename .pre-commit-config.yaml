@@ -56,3 +56,17 @@ repos:
       # [tool.ruff.format] sections of pyproject.toml, so this hook and a manual
       # `ruff format .` always agree.
       - id: ruff-format
+
+  - repo: https://github.com/astral-sh/ty-pre-commit
+    rev: v0.0.82
+    hooks:
+      # Type checking. Configuration lives in [tool.ty] in pyproject.toml.
+      # ty checks the full project on every commit (not just staged files),
+      # because a change to one file can introduce type errors in another
+      # that imports it. This matches the blocking `ty check src/` step in
+      # .github/workflows/ci.yml.
+      #
+      # NOTE: `rev` is pinned deliberately, same as ruff above. Bump this
+      # and the `ty` dev dependency in pyproject.toml together, and run
+      # `uv run pre-commit run --all-files` in the same commit as the bump.
+      - id: ty

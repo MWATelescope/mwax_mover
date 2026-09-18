@@ -1,5 +1,9 @@
 # Changelog
 
+# 2.0.4 18-Sep-2026
+
+* Fixed ty lints, added ty to the precommit hooks.
+
 # 2.0.3 18-Sep-2026
 
 * Enhancement: `select_refant()` now considers dipole health when choosing the reference tile. Reads the optional `DipoleGains` column from the hyperdrive solution FITS TILES HDU (32 values per tile: 16 X + 16 Y dipoles, typically 0.0 or 1.0). Tiles with fewer than 30 good dipoles fail the new dipole gate; among tiles with equal gate failures, fewer dead dipoles ranks higher. When the column is absent (older solution files), behaviour is unchanged. New constants: `REFTILE_DIPOLE_GAINS_EXPECTED`, `REFTILE_DIPOLE_GOOD_MIN`. New reader: `calibration.solutions.read_dipole_gains()`, `HyperfitsSolution.dipole_gains`, `HyperfitsSolutionGroup.dipole_gains`.

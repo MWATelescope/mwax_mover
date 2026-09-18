@@ -1054,12 +1054,13 @@ class HyperfitsSolutionGroup:
         with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
             for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, ref_xx, ref_yy, strict=True)):
                 for pol, solns in [(COL_XX, xx_solns), (COL_YY, yy_solns)]:
+                    solns_array: NDArray[np.complex128] = np.asarray(solns, dtype=np.complex128)  # type: narrowing for ty
                     future = executor.submit(
                         _phase_fit_one,
                         soln_idx,
-                        tile_id,
+                        int(tile_id),
                         pol,
-                        solns,
+                        solns_array,
                         chanblocks_hz,
                         weights,
                         phase_fit_niter,
@@ -1091,12 +1092,13 @@ class HyperfitsSolutionGroup:
                 zip(soln_tile_ids, noref_xx, noref_yy, strict=True)
             ):
                 for pol, solns in [(COL_XX, xx_solns), (COL_YY, yy_solns)]:
+                    solns_array: NDArray[np.complex128] = np.asarray(solns, dtype=np.complex128)  # type: narrowing for ty
                     future = executor.submit(
                         _gain_fit_one,
                         soln_idx,
-                        tile_id,
+                        int(tile_id),
                         pol,
-                        solns,
+                        solns_array,
                         chanblocks_hz,
                         weights,
                         self.chanblocks_per_coarse,

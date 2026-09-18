@@ -47,7 +47,7 @@ class _FakeDaemon(MWAXDaemon):
 def test_cannot_instantiate_mwaxdaemon_directly():
     """MWAXDaemon is an ABC with abstract methods; direct instantiation must fail."""
     with pytest.raises(TypeError):
-        MWAXDaemon()
+        MWAXDaemon()  # ty: ignore[call-non-callable]  # deliberate: testing that ABC rejects instantiation
 
 
 def test_concrete_subclass_shares_base_attributes():
