@@ -51,6 +51,7 @@ from mwax_mover.constants import (
     REFTILE_DIPOLE_GAINS_EXPECTED,
     REFTILE_DIPOLE_GOOD_MIN,
     REFTILE_GAIN_QUALITY_MIN,
+    REFTILE_NAN_CHANNEL_FRACTION_MAX,
     REFTILE_PHASE_CHI2DOF_MAX,
     REFTILE_PHASE_CHI2DOF_MIN,
     REFTILE_PHASE_QUALITY_MIN,
@@ -790,6 +791,21 @@ class HyperfitsSolutionGroup:
             for idx, tile_id in enumerate(all_tile_ids):
                 dipole_n_good[tile_id] = int(np.sum(group_dipole_gains[idx] == 1.0))
 
+        # NaN channel counts: per-tile count of chanblocks where any Jones
+        # element is NaN, summed across all solution files. At this point
+        # the only NaN channels are from hyperdrive's own solve failures
+        # (PRE_EXISTING_NAN, NON_CONVERGED) — Calvin's flagging stages
+        # haven't run yet.
+        assert self.jones is not None
+        tile_nan_counts: dict[int, int] = {}
+        total_chanblocks = sum(fj.shape[1] for fj in self.jones)
+        all_tile_ids_for_nan = self.metafits_tiles_df[COL_ID].to_numpy()
+        for file_jones in self.jones:
+            any_nan = np.any(np.isnan(file_jones), axis=(-2, -1))  # (n_tiles, n_chanblocks)
+            nan_per_tile = np.sum(any_nan, axis=1)  # (n_tiles,)
+            for idx, tid in enumerate(all_tile_ids_for_nan):
+                tile_nan_counts[int(tid)] = tile_nan_counts.get(int(tid), 0) + int(nan_per_tile[idx])
+
         # _bootstrap_refant() above already raised if there were no
         # unflagged tiles at all, so this mask is guaranteed non-empty here.
         unflagged_mask = ~self.combined_tile_flags
@@ -863,11 +879,26 @@ class HyperfitsSolutionGroup:
             details["dipole_ok"] = dipole_ok
             details["n_good_dipoles"] = n_good
 
+            # NaN channel gate + continuous ranking dimension.
+            # Non-oversampled calibrators already have ~12.5% NaN channels
+            # from 80 kHz edge flagging (24 coarse × 4 channels at 40 kHz),
+            # so the 30% gate leaves headroom for the normal baseline while
+            # catching tiles with significant hyperdrive solve failures.
+            n_nan = tile_nan_counts.get(tile_id, 0)
+            nan_fraction = n_nan / total_chanblocks if total_chanblocks > 0 else 0.0
+            nan_ok = nan_fraction <= REFTILE_NAN_CHANNEL_FRACTION_MAX
+            if not nan_ok:
+                failures += 1
+            details["nan_ok"] = nan_ok
+            details["n_nan_channels"] = n_nan
+            details["nan_fraction"] = nan_fraction
+            details["total_chanblocks"] = total_chanblocks
+
             gate_details[tile_id] = details
-            scored.append((failures, n_dead, length_deviation, tile_id))
+            scored.append((failures, n_dead, n_nan, length_deviation, tile_id))
 
         scored.sort()
-        best_tile_id = scored[0][3]
+        best_tile_id = scored[0][4]
 
         # Generate and store the selection report for stats file / logging.
         tile_names = self.metafits_tiles_df[COL_NAME].to_numpy()
@@ -883,6 +914,7 @@ class HyperfitsSolutionGroup:
             bootstrap_name=bootstrap[COL_NAME],
             bootstrap_ant=int(bootstrap["ant"]),
             dipole_gains_available=group_dipole_gains is not None,
+            total_chanblocks=total_chanblocks,
         )
         logger.info("Reference tile selection:\n%s", self.refant_selection_report)
 

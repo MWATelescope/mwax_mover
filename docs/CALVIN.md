@@ -11,6 +11,7 @@ Everything below applies per-observation. If an observation spans more than one 
 1. [Inputs](#inputs)
 2. [Reference tile selection](#reference-tile-selection)
    - [Dipole completeness](#dipole-completeness)
+   - [NaN channel completeness](#nan-channel-completeness)
    - [Selection diagnostics](#selection-diagnostics)
 3. [Step 1: Structural tile flags](#step-1-structural-tile-flags)
 4. [Step 2: Enforce whole-Jones NaN](#step-2-enforce-whole-jones-nan)
@@ -69,16 +70,18 @@ Before any of the numbered steps below run, Calvin picks a **reference tile**. E
 
 1. **Bootstrap.** A cheap, purely structural pick — the lowest-ID tile not already flagged by any of the three [Step 1](#step-1-structural-tile-flags) sources — is used as a throwaway reference. A read-only phase and gain fit pass is run against it, purely to gather ranking data for every unflagged tile; nothing about this bootstrap tile's own suitability as a reference matters, since it is never actually used past this point unless it also happens to win the ranking below.
 2. **Rank.** Every unflagged tile is scored by a composite sort key, in this priority order:
-   - **Gate failures** — how many of four quality gates it fails, checked on the **worse** of its XX/YY fit (a tile is only as trustworthy as its worse polarisation):
+   - **Gate failures** — how many of five quality gates it fails, checked on the **worse** of its XX/YY fit (a tile is only as trustworthy as its worse polarisation):
      - Phase-fit quality below **0.8** (`REFTILE_PHASE_QUALITY_MIN`)
      - Phase-fit χ²/dof outside **[0.2, 3.0]** (`REFTILE_PHASE_CHI2DOF_MIN`, `_MAX`)
      - Gain-fit quality below **0.8** (`REFTILE_GAIN_QUALITY_MIN`)
      - Dipole completeness: fewer than **30** of 32 dipole gains equal to 1.0 (`REFTILE_DIPOLE_GOOD_MIN`) — see [Dipole completeness](#dipole-completeness) below
+     - NaN channel fraction above **30%** (`REFTILE_NAN_CHANNEL_FRACTION_MAX`) — see [NaN channel completeness](#nan-channel-completeness) below
    - **Dead dipole count** — among tiles with an equal number of gate failures, those with fewer dead dipoles sort first. So a 32/32 tile always beats a 31/32 tile when their gate failure counts are equal, even though both pass the ≥30 gate.
-   - **Length deviation** — among tiles with equal failures and equal dead dipoles, how far its fitted length deviates from the *population median* length — not from zero. This is deliberately reference-independent: changing which tile the bootstrap stage happened to use just shifts every tile's fitted length by the same constant amount, so measuring deviation from the population's own median cancels that shift out, unlike comparing the raw fitted value against zero.
+   - **NaN channel count** — among tiles with equal failures and equal dead dipoles, those with fewer NaN chanblocks sort first.
+   - **Length deviation** — among tiles with equal failures, equal dead dipoles, and equal NaN counts, how far its fitted length deviates from the *population median* length — not from zero. This is deliberately reference-independent: changing which tile the bootstrap stage happened to use just shifts every tile's fitted length by the same constant amount, so measuring deviation from the population's own median cancels that shift out, unlike comparing the raw fitted value against zero.
    - **Tile ID** breaks any remaining tie, for a deterministic result.
 
-   Expressed as a sort tuple: `(gate_failures, n_dead_dipoles, length_deviation, tile_id)` — the tile with the smallest tuple wins. This degrades gracefully if no tile passes every gate on a particularly noisy observation — the tile failing fewest still wins, rather than the pipeline needing a separate fallback case.
+   Expressed as a sort tuple: `(gate_failures, n_dead_dipoles, n_nan_channels, length_deviation, tile_id)` — the tile with the smallest tuple wins. This degrades gracefully if no tile passes every gate on a particularly noisy observation — the tile failing fewest still wins, rather than the pipeline needing a separate fallback case.
 
 Full design rationale — including why gate failures are counted rather than combined into a single weighted score — is in [`docs/REF_TILE_SELECTION.md`](docs/REF_TILE_SELECTION.md). The dipole-awareness enhancement is documented in [`docs/DIPOLE_GAINS_REFTILE.md`](docs/DIPOLE_GAINS_REFTILE.md).
 
@@ -89,6 +92,16 @@ The hyperdrive solution FITS file's TILES HDU has an optional `DipoleGains` colu
 The **dipole gate** requires at least 30 of the 32 values to be 1.0 — tiles with up to 2 dead dipoles still pass. But `n_dead_dipoles` (32 minus the count of 1.0 values) also serves as a **continuous ranking dimension** between `gate_failures` and `length_deviation` in the sort key, so the dipole count discriminates even among tiles that pass the gate.
 
 When the `DipoleGains` column is absent (older hyperdrive solution files), the gate is skipped and `n_dead_dipoles` defaults to 0 for all tiles, preserving pre-enhancement behaviour exactly.
+
+### NaN channel completeness
+
+At `select_refant` time, `self.jones` has been loaded but no Calvin flagging stages have run. The only NaN channels at this point are from hyperdrive's own solve — channels where the solve did not converge or the data was already NaN in the input visibilities. These are a direct signal about how well the tile calibrated, independent of the phase/gain quality metrics (which are computed only on the surviving non-NaN channels).
+
+For each tile, the NaN count is the number of chanblocks with any NaN Jones element, summed across all solution files in the group. The NaN fraction is this count divided by the total number of chanblocks across all files.
+
+The **NaN channel gate** requires the NaN fraction to be at most **30%** (`REFTILE_NAN_CHANNEL_FRACTION_MAX`). Non-oversampled calibrators already have approximately 12.5% NaN channels from 80 kHz edge flagging per coarse channel (24 coarse channels × 4 edge channels at 40 kHz fine-channel width), so the 30% threshold leaves headroom for this normal baseline while catching tiles with significant solve failures.
+
+`n_nan_channels` also serves as a **continuous ranking dimension** between `n_dead_dipoles` and `length_deviation` in the sort key — among tiles with equal gate failures and equal dead dipoles, fewer NaN channels ranks higher.
 
 ### Selection diagnostics
 

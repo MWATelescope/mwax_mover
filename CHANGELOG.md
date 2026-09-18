@@ -1,5 +1,10 @@
 # Changelog
 
+# 2.0.5 18-Sep-2026
+
+* Enhancement: `select_refant()` now considers NaN channel completeness when choosing the reference tile. Counts per-tile NaN chanblocks across all solution files (from hyperdrive's own solve failures — before any Calvin flagging). Tiles with more than 30% NaN channels fail the new channel gate; among tiles with equal gate failures, fewer NaN channels ranks higher. Non-oversampled calibrators typically have ~12.5% NaN from edge flagging, so the 30% threshold accommodates the normal baseline. New constant: `REFTILE_NAN_CHANNEL_FRACTION_MAX`. Sort tuple is now `(gate_failures, n_dead_dipoles, n_nan_channels, length_deviation, tile_id)`.
+* Updated `docs/CALVIN.md` with NaN channel completeness gate documentation.
+
 # 2.0.4 18-Sep-2026
 
 * Fixed ty lints, added ty to the precommit hooks.
