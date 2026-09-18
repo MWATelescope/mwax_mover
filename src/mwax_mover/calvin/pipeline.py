@@ -295,6 +295,13 @@ def process_solutions(
         # shared with cal_utils rather than each duplicating this reporting.
         stats_path = os.path.join(output_data_path, f"{obs_id}_stats.txt")
         with open(stats_path, "w", encoding="utf-8") as stats_fd:
+            # Reference tile selection report: written first, before the
+            # BEFORE/AFTER tables, so the reader sees *why* this tile was
+            # chosen before seeing what happened to the solutions.
+            if soln_group.refant_selection_report is not None:
+                stats_fd.write(soln_group.refant_selection_report)
+                stats_fd.write("\n")
+
             with ThreadPoolExecutor(max_workers=1) as fitting_executor:
                 gain_future = fitting_executor.submit(soln_group.process_gain_fits_for_db, refant["name"])
                 phase_fits = write_before_after_stats(

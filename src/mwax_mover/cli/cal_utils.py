@@ -182,6 +182,13 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
     # (rx_lengths/phase_fits_xx/yy/intercepts/residual).
     stats_path = os.path.join(args.output_path, f"{obs_id}_stats.txt")
     with open(stats_path, "w", encoding="utf-8") as stats_fd:
+        # Reference tile selection report: written first, before the
+        # BEFORE/AFTER tables, so the reader sees *why* this tile was
+        # chosen before seeing what happened to the solutions.
+        if soln_group.refant_selection_report is not None:
+            stats_fd.write(soln_group.refant_selection_report)
+            stats_fd.write("\n")
+
         phase_fits = write_before_after_stats(
             soln_group,
             obs_id,

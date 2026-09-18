@@ -46,6 +46,7 @@ from mwax_mover.calibration.fitting import fit_gain, fit_phase_line
 from mwax_mover.calibration.models import ChanInfo, GainFitInfo, Metafits, PhaseFitInfo
 from mwax_mover.calibration.outliers import annotate_phase_outliers, iterative_poly_clip_batch
 from mwax_mover.calvin.hyperfits_solution import HyperfitsSolution
+from mwax_mover.calvin.refant_report import format_refant_selection_report
 from mwax_mover.constants import (
     REFTILE_DIPOLE_GAINS_EXPECTED,
     REFTILE_DIPOLE_GOOD_MIN,
@@ -352,6 +353,11 @@ class HyperfitsSolutionGroup:
         self.before_tile_flag_reasons: NDArray[np.object_] | None = None
         self.before_channel_flag_reasons: list[NDArray[np.object_]] | None = None
         self.before_phase_fits: DataFrame | None = None
+
+        # Populated by select_refant(): human-readable report of the
+        # selection ranking, for writing into {obs_id}_stats.txt and
+        # INFO-level logging. See calvin.refant_report.
+        self.refant_selection_report: str | None = None
 
     def _ensure_loaded(self) -> None:
         """Raise a clear error if load() hasn't been called yet.
@@ -790,51 +796,96 @@ class HyperfitsSolutionGroup:
         candidate_ids = self.metafits_tiles_df[COL_ID].to_numpy()[unflagged_mask]
 
         scored = []
+        gate_details: dict[int, dict] = {}
         for tile_id in candidate_ids:
             failures = 0
             length_deviation = float("inf")
+            details: dict = {}
 
             if tile_id in phase_by_pol[COL_XX].index and tile_id in phase_by_pol[COL_YY].index:
                 phase_xx = phase_by_pol[COL_XX].loc[tile_id]
                 phase_yy = phase_by_pol[COL_YY].loc[tile_id]
 
-                if min(phase_xx[COL_QUALITY], phase_yy[COL_QUALITY]) < REFTILE_PHASE_QUALITY_MIN:
+                phase_quality_ok = min(phase_xx[COL_QUALITY], phase_yy[COL_QUALITY]) >= REFTILE_PHASE_QUALITY_MIN
+                if not phase_quality_ok:
                     failures += 1
 
-                chi2dof_in_range = all(
+                chi2dof_ok = all(
                     REFTILE_PHASE_CHI2DOF_MIN <= fit[COL_CHI2DOF] <= REFTILE_PHASE_CHI2DOF_MAX
                     for fit in (phase_xx, phase_yy)
                 )
-                if not chi2dof_in_range:
+                if not chi2dof_ok:
                     failures += 1
 
                 length_deviation = max(
                     abs(phase_xx[COL_LENGTH] - median_length[COL_XX]),
                     abs(phase_yy[COL_LENGTH] - median_length[COL_YY]),
                 )
+
+                details["phase_quality_ok"] = phase_quality_ok
+                details["phase_chi2dof_ok"] = chi2dof_ok
+                details["phase_quality_xx"] = float(phase_xx[COL_QUALITY])
+                details["phase_quality_yy"] = float(phase_yy[COL_QUALITY])
+                details["phase_chi2dof_xx"] = float(phase_xx[COL_CHI2DOF])
+                details["phase_chi2dof_yy"] = float(phase_yy[COL_CHI2DOF])
             else:
                 failures += 2
+                details["phase_quality_ok"] = None
+                details["phase_chi2dof_ok"] = None
+                details["phase_quality_xx"] = None
+                details["phase_quality_yy"] = None
+                details["phase_chi2dof_xx"] = None
+                details["phase_chi2dof_yy"] = None
 
             if tile_id in gain_by_pol[COL_XX].index and tile_id in gain_by_pol[COL_YY].index:
                 gain_xx = gain_by_pol[COL_XX].loc[tile_id]
                 gain_yy = gain_by_pol[COL_YY].loc[tile_id]
-                if min(gain_xx[COL_QUALITY], gain_yy[COL_QUALITY]) < REFTILE_GAIN_QUALITY_MIN:
+                gain_quality_ok = min(gain_xx[COL_QUALITY], gain_yy[COL_QUALITY]) >= REFTILE_GAIN_QUALITY_MIN
+                if not gain_quality_ok:
                     failures += 1
+                details["gain_quality_ok"] = gain_quality_ok
+                details["gain_quality_xx"] = float(gain_xx[COL_QUALITY])
+                details["gain_quality_yy"] = float(gain_yy[COL_QUALITY])
             else:
                 failures += 1
+                details["gain_quality_ok"] = None
+                details["gain_quality_xx"] = None
+                details["gain_quality_yy"] = None
 
             # Dipole completeness gate + continuous ranking dimension.
             # When DipoleGains is absent, n_good defaults to the expected
             # count (no gate failure, no ranking penalty).
             n_good = dipole_n_good.get(tile_id, REFTILE_DIPOLE_GAINS_EXPECTED)
             n_dead = REFTILE_DIPOLE_GAINS_EXPECTED - n_good
-            if n_good < REFTILE_DIPOLE_GOOD_MIN:
+            dipole_ok = n_good >= REFTILE_DIPOLE_GOOD_MIN
+            if not dipole_ok:
                 failures += 1
+            details["dipole_ok"] = dipole_ok
+            details["n_good_dipoles"] = n_good
 
+            gate_details[tile_id] = details
             scored.append((failures, n_dead, length_deviation, tile_id))
 
         scored.sort()
         best_tile_id = scored[0][3]
+
+        # Generate and store the selection report for stats file / logging.
+        tile_names = self.metafits_tiles_df[COL_NAME].to_numpy()
+        all_tile_ids = self.metafits_tiles_df[COL_ID].to_numpy()
+        tile_ants = self.metafits_tiles_df["ant"].to_numpy()
+        self.refant_selection_report = format_refant_selection_report(
+            scored=scored,
+            tile_names=tile_names,
+            tile_ids=all_tile_ids,
+            tile_ants=tile_ants,
+            gate_details=gate_details,
+            median_length=median_length,
+            bootstrap_name=bootstrap[COL_NAME],
+            bootstrap_ant=int(bootstrap["ant"]),
+            dipole_gains_available=group_dipole_gains is not None,
+        )
+        logger.info("Reference tile selection:\n%s", self.refant_selection_report)
+
         return self.metafits_tiles_df[self.metafits_tiles_df[COL_ID] == best_tile_id].iloc[0]
 
     @property
