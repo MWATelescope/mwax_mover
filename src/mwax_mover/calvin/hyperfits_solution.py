@@ -20,6 +20,7 @@ from numpy.typing import NDArray
 from mwax_mover.calibration.fitting import ensure_system_byte_order
 from mwax_mover.calibration.solutions import (
     read_baseline_tile_flags,
+    read_dipole_gains,
     read_results_hdu,
     read_solutions_hdu_complex,
     read_tiles_hdu,
@@ -71,6 +72,22 @@ class HyperfitsSolution:
         with fits.open(self.filename) as hdus:
             _antennas, _tile_names, flags = read_tiles_hdu(hdus["TILES"].data)
             return flags
+
+    @property
+    def dipole_gains(self) -> NDArray[np.float64] | None:
+        """Get per-tile dipole gains from the TILES HDU, if present.
+
+        The DipoleGains column is optional (older hyperdrive versions may
+        not write it). When present, contains 32 float64 values per tile:
+        the first 16 for X dipoles and the second 16 for Y dipoles.
+        Typically 0.0 (dead) or 1.0 (alive).
+
+        Returns:
+            float64 array, shape (n_tiles, 32), ordered by ascending
+            antenna index, or None if the DipoleGains column is absent.
+        """
+        with fits.open(self.filename) as hdus:
+            return read_dipole_gains(hdus["TILES"].data)
 
     def get_solutions(self) -> list[NDArray[np.complex128]]:
         """Get solutions as complex arrays.

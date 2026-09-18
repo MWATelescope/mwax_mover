@@ -79,6 +79,33 @@ def read_tiles_hdu(tiles_data) -> tuple[NDArray[np.int_], list[str], NDArray[np.
     return antennas[order], tile_names, flags
 
 
+def read_dipole_gains(tiles_data) -> NDArray[np.float64] | None:
+    """Read per-tile dipole gains from a TILES HDU, if present.
+
+    The DipoleGains column is optional in the hyperdrive solution format
+    (older hyperdrive versions may not write it). When present, it
+    contains 32 float64 values per tile: the first 16 are for the X
+    dipoles and the second 16 are for the Y dipoles. Typically each
+    value is 0.0 (dead dipole) or 1.0 (alive).
+
+    Rows are sorted by ascending antenna index, matching
+    read_tiles_hdu's ordering, so the row indices align.
+
+    Args:
+        tiles_data: Raw TILES HDU data (a FITS binary table).
+
+    Returns:
+        float64 array, shape (n_tiles, 32), ordered by ascending
+        antenna index, or None if the DipoleGains column is not present
+        in the HDU.
+    """
+    if "DipoleGains" not in tiles_data.names:
+        return None
+    antennas = np.asarray(tiles_data["Antenna"])
+    order = np.argsort(antennas)
+    return np.asarray(tiles_data["DipoleGains"], dtype=np.float64)[order]
+
+
 def read_baseline_tile_flags(baseline_weights: NDArray[np.float64], n_tiles: int) -> NDArray[np.bool_]:
     """Infer per-tile flagging from a BASELINES HDU's NaN pattern.
 

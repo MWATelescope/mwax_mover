@@ -47,6 +47,8 @@ from mwax_mover.calibration.models import ChanInfo, GainFitInfo, Metafits, Phase
 from mwax_mover.calibration.outliers import annotate_phase_outliers, iterative_poly_clip_batch
 from mwax_mover.calvin.hyperfits_solution import HyperfitsSolution
 from mwax_mover.constants import (
+    REFTILE_DIPOLE_GAINS_EXPECTED,
+    REFTILE_DIPOLE_GOOD_MIN,
     REFTILE_GAIN_QUALITY_MIN,
     REFTILE_PHASE_CHI2DOF_MAX,
     REFTILE_PHASE_CHI2DOF_MIN,
@@ -564,6 +566,34 @@ class HyperfitsSolutionGroup:
             combined_flag = np.logical_or(combined_flag, soln.baseline_tile_flags)
         return combined_flag
 
+    @property
+    def dipole_gains(self) -> NDArray[np.float64] | None:
+        """Get per-tile dipole gains, consistent across all solution files.
+
+        DipoleGains is per-tile metadata (not per-channel), so it should
+        be identical in every solution file for one observation. This reads
+        from the first file that has the column. Logs a warning if any
+        other file disagrees.
+
+        Returns:
+            float64 array, shape (n_tiles, 32), or None if no solution
+            file in the group has the DipoleGains column.
+        """
+        result: NDArray[np.float64] | None = None
+        result_source: str | None = None
+        for soln in self.solns:
+            gains = soln.dipole_gains
+            if gains is None:
+                continue
+            if result is None:
+                result = gains
+                result_source = soln.filename
+            elif not np.array_equal(result, gains):
+                logger.warning(
+                    f"DipoleGains in {soln.filename} differs from {result_source} -- using the first file's values."
+                )
+        return result
+
     def apply_tile_flags(self) -> None:
         """NaN out every chanblock of every tile flagged by any of the
         three tile-flag sources, and record why in tile_flag_reasons.
@@ -700,17 +730,26 @@ class HyperfitsSolutionGroup:
         to gather ranking data for every unflagged tile.
 
         Stage 2 (rank): each unflagged tile is scored by how many quality
-        gates it fails (phase quality, phase chi2dof range, gain quality --
-        each checked on the worse of XX/YY, so a tile is only as
-        trustworthy as its worse polarisation) and, among tiles with equal
-        failure counts, by how far its fitted length deviates from the
-        *population median* length (not from zero -- median-relative
-        deviation is invariant to which tile the bootstrap stage happened
-        to use, unlike the raw fitted value). Tile ID breaks any remaining
-        tie, for a deterministic result. This degrades gracefully when no
-        tile passes every gate: the tile failing fewest still wins, with no
-        separate "nothing qualified" case needed. See
-        docs/REF_TILE_SELECTION.md for the full design discussion.
+        gates it fails (phase quality, phase chi2dof range, gain quality,
+        dipole completeness -- each checked on the worse of XX/YY where
+        applicable, so a tile is only as trustworthy as its worse
+        polarisation) and, among tiles with equal failure counts, by the
+        number of dead dipoles (fewer is better), then by how far its
+        fitted length deviates from the *population median* length (not
+        from zero -- median-relative deviation is invariant to which tile
+        the bootstrap stage happened to use, unlike the raw fitted value).
+        Tile ID breaks any remaining tie, for a deterministic result. This
+        degrades gracefully when no tile passes every gate: the tile
+        failing fewest still wins, with no separate "nothing qualified"
+        case needed. See docs/REF_TILE_SELECTION.md and
+        docs/DIPOLE_GAINS_REFTILE.md for the full design discussion.
+
+        The dipole gate uses the TILES HDU's optional DipoleGains column
+        (32 float64 values per tile: 16 X + 16 Y, typically 0.0 or 1.0).
+        A tile passes the gate if at least REFTILE_DIPOLE_GOOD_MIN of its
+        32 values are exactly 1.0. When the column is absent (older
+        solution files), the gate is skipped and n_dead_dipoles defaults
+        to 0 for all tiles, preserving existing behaviour exactly.
 
         A tile missing from either fit DataFrame entirely (e.g.
         _phase_fit_one/_gain_fit_one returned None for it) is treated as
@@ -735,6 +774,15 @@ class HyperfitsSolutionGroup:
         phase_by_pol = {pol: phase_fits[phase_fits[COL_POL] == pol].set_index(COL_TILE_ID) for pol in (COL_XX, COL_YY)}
         gain_by_pol = {pol: gain_fits[gain_fits[COL_POL] == pol].set_index(COL_TILE_ID) for pol in (COL_XX, COL_YY)}
         median_length = {pol: phase_by_pol[pol][COL_LENGTH].median() for pol in (COL_XX, COL_YY)}
+
+        # DipoleGains: read once for the group, build a tile_id -> n_good
+        # lookup. None means the column is absent (older files).
+        group_dipole_gains = self.dipole_gains
+        dipole_n_good: dict[int, int] = {}
+        if group_dipole_gains is not None:
+            all_tile_ids = self.metafits_tiles_df[COL_ID].to_numpy()
+            for idx, tile_id in enumerate(all_tile_ids):
+                dipole_n_good[tile_id] = int(np.sum(group_dipole_gains[idx] == 1.0))
 
         # _bootstrap_refant() above already raised if there were no
         # unflagged tiles at all, so this mask is guaranteed non-empty here.
@@ -775,10 +823,18 @@ class HyperfitsSolutionGroup:
             else:
                 failures += 1
 
-            scored.append((failures, length_deviation, tile_id))
+            # Dipole completeness gate + continuous ranking dimension.
+            # When DipoleGains is absent, n_good defaults to the expected
+            # count (no gate failure, no ranking penalty).
+            n_good = dipole_n_good.get(tile_id, REFTILE_DIPOLE_GAINS_EXPECTED)
+            n_dead = REFTILE_DIPOLE_GAINS_EXPECTED - n_good
+            if n_good < REFTILE_DIPOLE_GOOD_MIN:
+                failures += 1
+
+            scored.append((failures, n_dead, length_deviation, tile_id))
 
         scored.sort()
-        best_tile_id = scored[0][2]
+        best_tile_id = scored[0][3]
         return self.metafits_tiles_df[self.metafits_tiles_df[COL_ID] == best_tile_id].iloc[0]
 
     @property
