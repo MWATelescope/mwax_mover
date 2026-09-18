@@ -106,26 +106,6 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
 
     refant = soln_group.select_refant(args.phase_fit_niter)
 
-    # "Before" plots: hyperdrive's own binary-generated amp/phase plots,
-    # against the still-pristine on-disk files -- nothing has been
-    # touched yet. Written with "_original" filenames (see
-    # hyperdrive.generate_plots) so the "after" run below (same
-    # filenames, since hyperdrive derives them from the input file)
-    # doesn't overwrite these. (This only touches the on-disk files via
-    # a read-only hyperdrive invocation; it's independent of the
-    # in-memory run_flagging_pipeline() below regardless of ordering,
-    # since nothing gets written to disk until commit().)
-    for failed_file, plots_error in hyperdrive.generate_plots_for_files(
-        obs_id,
-        args.solution_filenames,
-        args.hyperdrive_binary_path,
-        metafits_filename,
-        args.output_path,
-        before=True,
-        ref_tile=refant["ant"],
-    ):
-        print(f"Warning: 'before' hyperdrive plots failed for {failed_file}: {plots_error}")
-
     # Full flagging pipeline, matching mwax_calvin_processor's
     # process_solutions() -- both now share the same
     # HyperfitsSolutionGroup.run_flagging_pipeline() implementation rather
@@ -146,6 +126,26 @@ def run_pipeline(args: argparse.Namespace, obs_id: int, metafits_filename: str |
             f"Reference tile re-selected to {refant['name']}"
             f" (ant={refant['ant']}) after flagging invalidated the original."
         )
+
+    # "Before" plots: hyperdrive's own binary-generated amp/phase
+    # plots, against the still-pristine on-disk files. Run AFTER
+    # run_flagging_pipeline() so that both the "before" and "after"
+    # plots use the same final reference tile (the flagging pipeline
+    # may re-select the refant if the original is invalidated). This
+    # is safe because run_flagging_pipeline() only mutates self.jones
+    # in memory -- the on-disk files remain untouched until commit().
+    # Written with "_original" filenames so the "after" run below
+    # doesn't overwrite these.
+    for failed_file, plots_error in hyperdrive.generate_plots_for_files(
+        obs_id,
+        args.solution_filenames,
+        args.hyperdrive_binary_path,
+        metafits_filename,
+        args.output_path,
+        before=True,
+        ref_tile=refant["ant"],
+    ):
+        print(f"Warning: 'before' hyperdrive plots failed for {failed_file}: {plots_error}")
 
     # One stitched, paginated set for the whole observation (every coarse
     # channel on one compressed x-axis), not one set per solution file --

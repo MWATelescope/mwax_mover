@@ -187,35 +187,6 @@ def process_solutions(
 
         logger.debug(f"{chanblocks_per_coarse=} fine channels per coarse channel")
 
-        # "Before" plots: hyperdrive's own binary-generated amp/phase plots,
-        # against the still-pristine on-disk files -- nothing has been
-        # touched yet. Written to separate "before" filenames so the
-        # "after" run below (same filenames, since hyperdrive derives them
-        # from the input file) doesn't overwrite these. (This only touches
-        # the on-disk files via a read-only hyperdrive invocation; it's
-        # independent of the in-memory apply_tile_flags() below regardless
-        # of ordering, since nothing gets written to disk until commit().)
-        # Run concurrently: each is an external hyperdrive process, and a
-        # picket fence has one solution file per coarse channel (24 serial
-        # launches here and another 24 below, versus 2 for a contiguous obs).
-        for failed_file, plots_error in hyperdrive.generate_plots_for_files(
-            obs_id,
-            fits_solution_files,
-            hyperdrive_binary_path,
-            metafits_file,
-            output_data_path,
-            before=True,
-            ref_tile=refant["ant"],
-        ):
-            logger.warning(f"{obs_id}: 'before' hyperdrive plots failed for {failed_file}: {plots_error}")
-
-        # apply_tile_flags() runs first (cheap, structural) so the "before"
-        # snapshot captured right after it reflects the pre-existing
-        # metafits/TILES-HDU/BASELINES-HDU flags -- i.e. "before OUR OWN
-        # outlier detection", not literally "before anything at all"
-        # (a metafits-flagged tile isn't meaningfully "pristine" anyway,
-        # since its data was never trustworthy in the first place).
-        #
         # Runs the full flagging pipeline (apply_tile_flags ->
         # enforce_whole_jones_nan -> flag_gain_max_cutoff ->
         # flag_amplitude_outliers -> flag_mostly_bad_tiles ->
@@ -244,6 +215,26 @@ def process_solutions(
             logger.info(
                 f"Using re-selected reference tile {refant['name']} (ant={refant['ant']}) for post-flagging outputs."
             )
+
+        # "Before" plots: hyperdrive's own binary-generated amp/phase
+        # plots, against the still-pristine on-disk files. Run AFTER
+        # run_flagging_pipeline() so that both the "before" and "after"
+        # plots use the same final reference tile (the flagging pipeline
+        # may re-select the refant if the original is invalidated). This
+        # is safe because run_flagging_pipeline() only mutates self.jones
+        # in memory -- the on-disk files remain untouched until commit().
+        # Written to separate "before" filenames so the "after" run below
+        # doesn't overwrite these.
+        for failed_file, plots_error in hyperdrive.generate_plots_for_files(
+            obs_id,
+            fits_solution_files,
+            hyperdrive_binary_path,
+            metafits_file,
+            output_data_path,
+            before=True,
+            ref_tile=refant["ant"],
+        ):
+            logger.warning(f"{obs_id}: 'before' hyperdrive plots failed for {failed_file}: {plots_error}")
 
         # "After" plots: calvin's own outlier plots, from soln_group's
         # final in-memory state -- no staleness, since nothing downstream
