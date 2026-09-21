@@ -847,6 +847,21 @@ class HyperfitsSolutionGroup:
         unflagged_mask = ~self.combined_tile_flags
         candidate_ids = self.metafits_tiles_df[COL_ID].to_numpy()[unflagged_mask]
 
+        # Exclude the bootstrap tile from the ranking. Every other tile's
+        # phase/gain fit is measured relative to the bootstrap, but the
+        # bootstrap's own fit is against itself -- trivially flat, so it
+        # scores perfect phase quality/sres and passes the phase gates for
+        # free. Left in, it can win circularly (as the only apparent Fail=0
+        # tile on a heavily-RFI observation) despite an arbitrary, often
+        # large, length deviation -- the exact degenerate self-reference the
+        # median-relative length metric was designed to avoid. Only the
+        # bootstrap has this degeneracy, so excluding just it suffices. Keep
+        # it only in the pathological case where it is the sole candidate.
+        bootstrap_id = int(bootstrap[COL_ID])
+        non_bootstrap_ids = candidate_ids[candidate_ids != bootstrap_id]
+        if len(non_bootstrap_ids) > 0:
+            candidate_ids = non_bootstrap_ids
+
         scored = []
         gate_details: dict[int, dict] = {}
         for tile_id in candidate_ids:

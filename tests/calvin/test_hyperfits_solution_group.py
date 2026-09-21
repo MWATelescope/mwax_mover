@@ -1436,6 +1436,36 @@ def _group_for_refant_tests() -> HyperfitsSolutionGroup:
     return group
 
 
+def test_select_refant_excludes_bootstrap_from_ranking():
+    """The bootstrap tile is never chosen, even when it is the only apparent
+    Fail=0 tile. Its fit is measured against itself (trivially perfect
+    quality/sres), so it would otherwise win circularly -- the heavily-RFI
+    observation failure mode where no real tile clears the phase gate."""
+    group = _group_for_refant_tests()
+    boot_row = group.metafits_tiles_df[group.metafits_tiles_df["id"] == 13].iloc[0]
+
+    # Bootstrap tile 13 looks perfect (quality 1.0 / sres 0.0, like a
+    # self-reference) => Fail=0; real tile 12 fails the quality gate => Fail=1.
+    # Without the exclusion the bootstrap wins outright; with it, tile 12 is
+    # chosen (every other tile lacks fits, so scores more failures).
+    phase_fits = _fake_phase_fits(
+        {
+            13: {"XX": (1.0, 0.0, 10.0), "YY": (1.0, 0.0, 10.0)},
+            12: {"XX": (0.5, 0.05, 10.0), "YY": (0.5, 0.05, 10.0)},
+        }
+    )
+    gain_fits = _fake_gain_fits({13: {"XX": 1.0, "YY": 1.0}, 12: {"XX": 1.0, "YY": 1.0}})
+
+    with (
+        patch.object(group, "_bootstrap_refant", return_value=boot_row),
+        patch.object(group, "process_phase_fits", return_value=phase_fits),
+        patch.object(group, "process_gain_fits_for_db", return_value=gain_fits),
+    ):
+        chosen = group.select_refant(phase_fit_niter=10)
+
+    assert chosen["id"] == 12  # tile 13 (the bootstrap) is excluded despite looking best
+
+
 def test_select_refant_prefers_clean_fit_over_smaller_length_deviation():
     """A tile failing the sigma_resid gate loses even if its length is closer to the median."""
     group = _group_for_refant_tests()
@@ -1514,9 +1544,10 @@ def test_select_refant_degrades_gracefully_when_none_pass_every_gate():
 def test_select_refant_missing_tile_data_sorts_last():
     """A tile absent from the fit DataFrames (simulating a None fit result) loses to real data."""
     group = _group_for_refant_tests()
-    # Tile 12 has no rows at all in either DataFrame.
-    phase_fits = _fake_phase_fits({11: {"XX": (0.85, 0.1, 10.0), "YY": (0.85, 0.1, 10.0)}})
-    gain_fits = _fake_gain_fits({11: {"XX": 0.85, "YY": 0.85}})
+    # Only tile 13 has fit data; every other unflagged tile (incl. tile 12,
+    # and the bootstrap) is absent from both DataFrames and must sort below it.
+    phase_fits = _fake_phase_fits({13: {"XX": (0.85, 0.1, 10.0), "YY": (0.85, 0.1, 10.0)}})
+    gain_fits = _fake_gain_fits({13: {"XX": 0.85, "YY": 0.85}})
 
     with (
         patch.object(group, "_bootstrap_refant", return_value=group.metafits_tiles_df.iloc[0]),
@@ -1525,7 +1556,7 @@ def test_select_refant_missing_tile_data_sorts_last():
     ):
         chosen = group.select_refant(phase_fit_niter=10)
 
-    assert chosen["id"] == 11
+    assert chosen["id"] == 13
 
 
 def test_select_refant_tie_break_is_deterministic_by_tile_id():
