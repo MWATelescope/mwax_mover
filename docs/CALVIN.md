@@ -319,6 +319,25 @@ For each observation, Calvin (and the underlying `hyperdrive` plotting) writes o
 | `{obs_id}_*_solutions.original.fits` | The untouched, original solutions straight out of `hyperdrive`, before any Calvin outlier flagging — kept as a backup/reference. |
 | `{obs_id}_*_hyperdrive_readme.txt` / `{obs_id}_birli_readme.txt` | Full log output of the `hyperdrive`/Birli run(s) that produced the inputs to this stage. The hyperdrive readme carries a per-band suffix like the solutions files (one `hyperdrive` run per band); Birli processes the whole observation in one run, so its readme doesn't. |
 
+### What each plot shows: fitted vs. raw, and the reference tile
+
+The plots above divide along two axes worth making explicit: whether they show **fitted** quantities or the **raw** `hyperdrive` solution values, and whether they depend on the selected [reference tile](#reference-tile-selection).
+
+| Plot | Fitted or raw | Uses the reference tile? |
+|---|---|---|
+| `_solutions_amps.png` / `_solutions_phases.png` (`hyperdrive`'s own) | **Raw** — `hyperdrive`'s `solutions-plot` reads the solution FITS and plots amplitude/phase vs. fine channel directly | **Yes** — passed as `--ref-tile` |
+| `_phase_fits_xx/yy.png`, `_rx_lengths.png`, `_intercepts.png`, `_residual.png` | **Both** — the fitted delay length, intercept and ramp line, overlaid on (or derived from) the raw reference-normalised phase points | **Yes** — solutions are reference-normalised before fitting/plotting |
+| `_gain_outliers_tiles_*.png` | **Raw** amplitude (\|gx\|/\|gy\| from the Jones diagonal), with the amplitude-outlier polynomial fit and acceptance band overlaid for context | **No** |
+| tile stats table (in `_stats.txt`) | **Mixed** — `gx`/`gy` min/median/max are raw; `chi2`/`sres`/`PhOutlier` are fitted | **Partly** — the phase-fit columns yes, the raw gain columns no |
+
+Two principles explain the pattern:
+
+**Fitted vs. raw follows who does the plotting.** `hyperdrive`'s own amplitude/phase plots are pure raw solution values — Calvin only hands `hyperdrive` the file and the reference tile. Everything Calvin plots itself either *is* a fitted quantity (delay length, intercept, χ²/dof, σ residual) or overlays a fit on the raw data (the delay ramp on the phase points; the per-coarse-channel amplitude polynomial and acceptance band on the gain trace). The one place raw and fitted sit side by side is the stats table, where the raw `gx`/`gy` amplitude statistics catch amplitude anomalies (which need no fit) alongside the fitted phase-quality metrics.
+
+**Reference-tile dependence follows phase vs. amplitude.** The reference tile only matters for *phase*. It is used two ways: passed to `hyperdrive` as `--ref-tile` so its phase plots normalise against it, and used by Calvin to reference-normalise its own solutions before fitting and plotting the delay. Amplitude/gain magnitude is invariant to the phase reference, so the gain-outlier plot and the `gx`/`gy` columns of the stats table depend only on which channels survived flagging, not on the reference tile at all.
+
+The two `hyperdrive` plot sets differ only in timing: the "before" set is generated from the pristine on-disk solutions and the "after" set from the post-flagging state, but both are passed the same final reference tile, so they are directly comparable.
+
 ### The tile stats table (inside `{obs_id}_stats.txt`)
 
 The first part of `{obs_id}_stats.txt` is the [reference tile selection](#selection-diagnostics) report — a ranked table showing each candidate tile's gate pass/fail status, dipole health, length deviation, and the winning tile. After that comes a per-tile table, printed twice — once for the "**BEFORE**" snapshot (Step 1 only) and once for "**AFTER**" (the fully-flagged final state) — so you can see exactly what changed. Each row covers one tile:
