@@ -2,9 +2,11 @@
 
 # 2.0.6 21-Sep-2026
 
-* Calvin: Change reftile good dipole gate to be 32/32 instead of 30/32.
-* Calvin: Reference-tile selection now gates on phase-fit sigma_resid (≤0.15 rad) instead of the mis-scaled chi2dof range, which rejected every good tile. Phase and gain fits now downweight poorly-converged chanblocks, using an absolute exp(−precision/threshold) weight (no per-observation min-max). Fixed a sigma-clip weight-slicing bug and stale ref-tile tests/docs.
-* Calvin: new constants- REFTILE_REPORT_TILES_TO_DISPLAY and PHASE_FIT_CLIP_SIGMA = 2.0 and GAIN_QUALITY_SIGMA = 2.0 instead of hardcoded values.
+* Calvin:
+  * Change reftile good dipole gate to be 32/32 instead of 30/32.
+  * Reference-tile selection now gates on phase-fit sigma_resid (≤0.15 rad) instead of the mis-scaled chi2dof range, which rejected every good tile. Phase and gain fits now downweight poorly-converged chanblocks, using an absolute exp(−precision/threshold) weight (no per-observation min-max). Fixed a sigma-clip weight-slicing bug and stale ref-tile tests/docs.
+  * New constants- REFTILE_REPORT_TILES_TO_DISPLAY and PHASE_FIT_CLIP_SIGMA = 2.0 and GAIN_QUALITY_SIGMA = 2.0 instead of hardcoded values.
+  * _bootstrap_refant now picks the reference-scaffold tile by fewest dead dipoles, then fewest NaN channels, then lowest ID (reusing the gate's metrics), instead of lowest unflagged ID — avoiding an ineligible or degenerate self-reference bootstrap.
 
 # 2.0.5 18-Sep-2026
 

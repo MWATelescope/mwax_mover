@@ -51,10 +51,10 @@ METAFITS_PATH = obs_metafits_path(1391522232)
 
 
 def test_bootstrap_refant_is_unflagged_lowest_id():
-    """_bootstrap_refant returns the lowest-ID tile not flagged by any of the three sources."""
+    """With no fit-independent metrics to separate tiles, _bootstrap_refant falls back to lowest unflagged ID."""
     metafits = Metafits(METAFITS_PATH)
     group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
-    refant = group._bootstrap_refant()
+    refant = group._bootstrap_refant({}, {})
     assert not group.combined_tile_flags[cast(int, refant.name)]  # .name is the DataFrame index here
     candidate_ids = group.metafits_tiles_df["id"].to_numpy()
     unflagged_ids = candidate_ids[~group.combined_tile_flags]
@@ -79,7 +79,26 @@ def test_bootstrap_refant_excludes_baseline_only_flagged_tile():
     group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
     group.solns = [mock_soln]
 
-    assert group._bootstrap_refant().name != lowest_unflagged_idx
+    assert group._bootstrap_refant({}, {}).name != lowest_unflagged_idx
+
+
+def test_bootstrap_refant_ranks_by_dipoles_then_nan_then_id():
+    """_bootstrap_refant prefers fewest dead dipoles, then fewest NaN chanblocks, then lowest ID."""
+    metafits = Metafits(METAFITS_PATH)
+    group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+    unflagged_ids = sorted(int(t) for t in group.metafits_tiles_df["id"].to_numpy()[~group.combined_tile_flags])
+    lowest, second = unflagged_ids[0], unflagged_ids[1]
+
+    # Dead dipoles dominate: the lowest-ID tile is dipole-ineligible (30/32),
+    # every other tile defaults to a full 32/32, so the next tile is chosen.
+    assert group._bootstrap_refant({lowest: 30}, {})["id"] == second
+
+    # Dipoles equal (all default to 32/32) -> NaN count decides: the
+    # lowest-ID tile has more NaN chanblocks, so it loses to the next tile.
+    assert group._bootstrap_refant({}, {lowest: 50})["id"] == second
+
+    # Everything equal -> lowest ID wins.
+    assert group._bootstrap_refant({}, {})["id"] == lowest
 
 
 def test_combined_tile_flags_matches_metafits_when_no_other_flags():

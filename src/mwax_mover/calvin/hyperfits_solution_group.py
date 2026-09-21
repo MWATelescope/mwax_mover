@@ -659,14 +659,32 @@ class HyperfitsSolutionGroup:
         """
         return np.concatenate(self.all_chanblocks_hz).astype(np.float64)
 
-    def _bootstrap_refant(self) -> Series:
-        """Cheap structural pick: unflagged tile with lowest ID.
+    def _bootstrap_refant(self, dipole_n_good: dict[int, int], tile_nan_counts: dict[int, int]) -> Series:
+        """Pick the bootstrap reference using the fit-independent metrics.
 
-        Used only as a throwaway reference for select_refant's ranking
-        pass -- see that method's docstring for why a single pass can't
-        rank tiles by their own fitted phase-slope length directly. Not
-        itself quality-aware; nothing about this pick's own suitability as
-        a reference matters, since select_refant never has to accept it.
+        Ranks unflagged tiles by (fewest dead dipoles, then fewest NaN
+        chanblocks, then lowest tile ID) -- the same reference-free signals
+        the selection gate uses -- so the ranking pass is scaffolded off a
+        tile that is itself eligible to be the final choice, rather than an
+        arbitrary lowest-ID tile that might be dipole-ineligible (and would
+        then be a degenerate self-reference, since a tile's phase fit
+        against itself is trivially perfect).
+
+        The phase/gain fit-quality metrics can't inform this pick: they need
+        a reference to fit against, which is exactly what is being chosen
+        here (chicken-and-egg), so only the reference-free metrics are used.
+
+        Note that the length-deviation ranking in select_refant is invariant
+        to this choice (a different reference shifts every tile's fitted
+        length by the same constant, which the population-median subtraction
+        cancels); the bootstrap matters for the reference-relative quality/
+        sres metrics and for keeping the pick self-consistent.
+
+        Args:
+            dipole_n_good: tile_id -> count of good dipoles. Empty when the
+                solution files carry no DipoleGains column, in which case
+                dead-dipole count is treated as 0 for every tile.
+            tile_nan_counts: tile_id -> count of NaN chanblocks.
 
         Returns:
             A pandas Series representing the bootstrap tile row.
@@ -678,9 +696,17 @@ class HyperfitsSolutionGroup:
         if not unflagged_mask.any():
             raise ValueError("No unflagged tiles found")
 
-        # Return the row with the lowest tile ID among unflagged tiles.
-        candidate_ids = self.metafits_tiles_df[COL_ID].to_numpy()
-        best_idx = np.where(unflagged_mask)[0][np.argmin(candidate_ids[unflagged_mask])]
+        tile_ids = self.metafits_tiles_df[COL_ID].to_numpy()
+
+        def _key(idx: int) -> tuple[int, int, int]:
+            tid = int(tile_ids[idx])
+            n_dead = REFTILE_DIPOLE_GAINS_EXPECTED - dipole_n_good.get(tid, REFTILE_DIPOLE_GAINS_EXPECTED)
+            return (n_dead, tile_nan_counts.get(tid, 0), tid)
+
+        # Lowest (n_dead_dipoles, n_nan_channels, tile_id) wins; lowest ID
+        # breaks ties so the pick is deterministic. Absent DipoleGains =>
+        # n_dead 0 for all, so only NaN then ID discriminate.
+        best_idx = min(np.where(unflagged_mask)[0], key=_key)
         return self.metafits_tiles_df.iloc[best_idx]
 
     def _reselect_refant(self) -> Series:
@@ -731,10 +757,14 @@ class HyperfitsSolutionGroup:
         "smallest |length|" without accounting for this would just
         re-select whatever reference was already used to compute it.
 
-        Stage 1 (bootstrap): _bootstrap_refant()'s cheap structural pick is
-        used to run a throwaway, read-only process_phase_fits/
-        process_gain_fits_for_db pass (neither mutates self.jones) purely
-        to gather ranking data for every unflagged tile.
+        Stage 1 (bootstrap): _bootstrap_refant() picks the best tile on the
+        fit-independent metrics (fewest dead dipoles, then fewest NaN
+        chanblocks, then lowest ID) and uses it to run a throwaway,
+        read-only process_phase_fits/process_gain_fits_for_db pass (neither
+        mutates self.jones) purely to gather ranking data for every
+        unflagged tile. Bootstrapping off a metric-eligible tile keeps the
+        scaffold consistent with what can actually win and avoids a
+        degenerate self-reference.
 
         Stage 2 (rank): each unflagged tile is scored by how many quality
         gates it fails (phase quality, phase residual scatter, gain quality,
@@ -774,14 +804,9 @@ class HyperfitsSolutionGroup:
         Raises:
             ValueError: If no unflagged tiles are found.
         """
-        bootstrap = self._bootstrap_refant()
-        phase_fits = self.process_phase_fits(bootstrap[COL_NAME], phase_fit_niter)
-        gain_fits = self.process_gain_fits_for_db(bootstrap[COL_NAME])
-
-        phase_by_pol = {pol: phase_fits[phase_fits[COL_POL] == pol].set_index(COL_TILE_ID) for pol in (COL_XX, COL_YY)}
-        gain_by_pol = {pol: gain_fits[gain_fits[COL_POL] == pol].set_index(COL_TILE_ID) for pol in (COL_XX, COL_YY)}
-        median_length = {pol: phase_by_pol[pol][COL_LENGTH].median() for pol in (COL_XX, COL_YY)}
-
+        # Fit-independent per-tile metrics, computed once and used both to
+        # pick the bootstrap reference and, below, to gate/rank candidates.
+        #
         # DipoleGains: read once for the group, build a tile_id -> n_good
         # lookup. None means the column is absent (older files).
         group_dipole_gains = self.dipole_gains
@@ -805,6 +830,17 @@ class HyperfitsSolutionGroup:
             nan_per_tile = np.sum(any_nan, axis=1)  # (n_tiles,)
             for idx, tid in enumerate(all_tile_ids_for_nan):
                 tile_nan_counts[int(tid)] = tile_nan_counts.get(int(tid), 0) + int(nan_per_tile[idx])
+
+        # Bootstrap off the best tile on those same fit-independent metrics,
+        # so the ranking is scaffolded against a tile that is itself eligible
+        # to be the final choice (and not a degenerate self-reference).
+        bootstrap = self._bootstrap_refant(dipole_n_good, tile_nan_counts)
+        phase_fits = self.process_phase_fits(bootstrap[COL_NAME], phase_fit_niter)
+        gain_fits = self.process_gain_fits_for_db(bootstrap[COL_NAME])
+
+        phase_by_pol = {pol: phase_fits[phase_fits[COL_POL] == pol].set_index(COL_TILE_ID) for pol in (COL_XX, COL_YY)}
+        gain_by_pol = {pol: gain_fits[gain_fits[COL_POL] == pol].set_index(COL_TILE_ID) for pol in (COL_XX, COL_YY)}
+        median_length = {pol: phase_by_pol[pol][COL_LENGTH].median() for pol in (COL_XX, COL_YY)}
 
         # _bootstrap_refant() above already raised if there were no
         # unflagged tiles at all, so this mask is guaranteed non-empty here.
