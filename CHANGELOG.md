@@ -3,6 +3,7 @@
 # 2.0.6 21-Sep-2026
 
 * Calvin: Change reftile good dipole gate to be 32/32 instead of 30/32.
+* Calvin: Reference-tile selection now gates on phase-fit sigma_resid (≤0.15 rad) instead of the mis-scaled chi2dof range, which rejected every good tile. Phase and gain fits now downweight poorly-converged chanblocks, using an absolute exp(−precision/threshold) weight (no per-observation min-max). Fixed a sigma-clip weight-slicing bug and stale ref-tile tests/docs.
 
 # 2.0.5 18-Sep-2026
 

@@ -206,13 +206,24 @@ HYPERDRIVE_MAX_CONCURRENT_GPU_WORKERS = 6
 HYPERDRIVE_GPU_LMN_BYTES = 24  # 3 x f64
 HYPERDRIVE_GPU_GAUSSIAN_PARAMS_BYTES = 24  # 3 x f64
 
+# hyperdrive DI-calibrate convergence "precision" (RESULTS HDU /
+# CalibrationResult.max_precision: the largest change in any antenna's Jones
+# solution on the final iteration; smaller == better converged). This equals
+# hyperdrive's default min_threshold, so it serves two roles in
+# HyperfitsSolutionGroup.weights: chanblocks worse than this are dropped, and
+# it is the e-folding scale for the exp(-precision/scale) fit-weighting, so a
+# chanblock right at the threshold keeps weight ~1/e instead of zero.
+HYPERDRIVE_CONVERGENCE_PRECISION_MAX = 1e-4
+
 # Reference-tile selection gates (calvin/hyperfits_solution_group.py
-# select_refant). A tile below phase/gain fit quality, or with too extreme
-# a chi2dof, in EITHER polarisation, fails that gate -- see
-# docs/REF_TILE_SELECTION.md.
+# select_refant). A tile below phase/gain fit quality, or whose phase-fit
+# residual scatter exceeds the max, in EITHER polarisation, fails that gate
+# -- see docs/REF_TILE_SELECTION.md.
 REFTILE_PHASE_QUALITY_MIN = 0.8
-REFTILE_PHASE_CHI2DOF_MIN = 0.2
-REFTILE_PHASE_CHI2DOF_MAX = 3.0
+# Max phase-fit residual std (radians, unweighted) to pass the phase-scatter
+# gate. ~0.15 rad (~8.6 deg) is roughly 2-3x the scatter of a clean tile
+# (~0.05-0.07 rad), so it passes good tiles while rejecting scattered fits.
+REFTILE_PHASE_SIGMA_RESID_MAX = 0.15
 REFTILE_GAIN_QUALITY_MIN = 0.8
 REFTILE_DIPOLE_GAINS_EXPECTED = 32  # Total dipole gains per tile (16 X + 16 Y)
 REFTILE_DIPOLE_GOOD_MIN = 32  # Min good dipoles (== 1.0) to pass the dipole gate

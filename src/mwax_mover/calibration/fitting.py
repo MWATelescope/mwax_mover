@@ -134,15 +134,17 @@ def wrap_angle(angle):
 _MIN_CLIP_THRESHOLD_RAD = 1e-6
 
 
-def _phase_fit_hess_inv(freqs_hz: NDArray[np.float64]) -> NDArray[np.floating]:
+def _phase_fit_hess_inv(freqs_hz: NDArray[np.float64], weights: NDArray[np.float64]) -> NDArray[np.floating]:
     """Exact inverse Hessian of the phase-ramp fit objective w.r.t. (m, c).
 
     residual_i(m, c) = wrap(θ_i - m·ν_i - c) is piecewise-linear in (m, c)
     almost everywhere (wrap's derivative is exactly 1 a.e.; see
-    wrap_angle), so for cost = Σ residual_i², the Gauss-Newton Hessian
-    approximation (2·JᵗJ, where J is the residual Jacobian) is not an
-    approximation here -- it's the exact Hessian, independent of (m, c)
-    and of how many optimizer iterations were taken to get there.
+    wrap_angle), so for the weighted cost = Σ wᵢ·residual_iᵢ², the
+    Gauss-Newton Hessian approximation (2·JᵗWJ, where J is the residual
+    Jacobian and W = diag(weights)) is not an approximation here -- it's
+    the exact Hessian, independent of (m, c) and of how many optimizer
+    iterations were taken to get there. With uniform weights this reduces
+    to the unweighted 2·JᵗJ form.
 
     This replaces relying on scipy.optimize.minimize's own internal BFGS
     hess_inv, which is only a running approximation built up from
@@ -153,14 +155,15 @@ def _phase_fit_hess_inv(freqs_hz: NDArray[np.float64]) -> NDArray[np.floating]:
 
     Args:
         freqs_hz: Frequencies (Hz) of the currently-valid points.
+        weights: Per-point fit weights aligned with freqs_hz.
 
     Returns:
         The 2x2 inverse Hessian, ordered (m, c) to match `params`.
     """
-    n = len(freqs_hz)
-    sum_freqs = np.sum(freqs_hz)
-    sum_freqs_sq = np.sum(freqs_hz**2)
-    hessian = 2.0 * np.array([[sum_freqs_sq, sum_freqs], [sum_freqs, n]])
+    sum_w = np.sum(weights)
+    sum_w_freqs = np.sum(weights * freqs_hz)
+    sum_w_freqs_sq = np.sum(weights * freqs_hz**2)
+    hessian = 2.0 * np.array([[sum_w_freqs_sq, sum_w_freqs], [sum_w_freqs, sum_w]])
     return np.linalg.inv(hessian)
 
 
@@ -195,9 +198,14 @@ def fit_phase_line(
     # sigma_resid: Standard deviation of phase residuals (radians) after subtracting
     #              the best-fit model. Lower is better.
     #
-    # chi2dof:     Chi-squared per degree of freedom = sum(residuals²) / (N - 2).
-    #              Values near 1.0 indicate a good fit; much larger suggests poor fit
-    #              or RFI; much smaller suggests over-fitting or too few points.
+    # chi2dof:     sum(residuals²) / (N - 2), residuals in radians and
+    #              UNWEIGHTED. Despite the name this is NOT a noise-
+    #              normalised reduced chi-square (there is no per-channel
+    #              variance to divide by) -- it is the mean-square phase
+    #              residual in rad², so for a good fit it sits at
+    #              ~(phase scatter)² (a few ×10⁻³), not ~1. Kept for the
+    #              DB/plots/outlier-rejection that already consume it;
+    #              ref-tile selection gates on sigma_resid instead.
     #
     # stderr:      Standard error of the fitted slope m (rad/Hz), from the
     #              objective's exact analytic Hessian (see
@@ -236,9 +244,12 @@ def fit_phase_line(
     freqs_hz = freqs_hz[mask]
     weights = weights[mask]
 
-    # normalise
+    # Normalise to unit magnitude. The fit works purely on phase
+    # (np.angle), so magnitude carries no information for the ramp fit;
+    # the convergence weights are applied explicitly in the weighted
+    # objective/gradient/Hessian below rather than baked into the
+    # magnitude here (where np.angle would silently discard them).
     solution /= np.abs(solution)
-    solution *= weights
 
     # Now we want to "adjust" the solution data so that it
     # - is roughly centered on the DC bin
@@ -266,7 +277,9 @@ def fit_phase_line(
     # This makes the peak in delay space broad, and lets us hone in near the optimal solution by
     # finding the peak in delay space
     sol0 = np.zeros((N,)).astype(complex)
-    sol0[shifted_bins] = solution
+    # Weight the delay-space transform so poorly-converged chanblocks
+    # contribute less to the peak that seeds the slope guess.
+    sol0[shifted_bins] = solution * weights
 
     # IFFT of sol0 to get the approximate solution as the peak in delay space
     isol0 = np.fft.ifft(sol0)
@@ -286,27 +299,29 @@ def fit_phase_line(
     def model(freqs_hz, m, c):
         return np.exp(1j * (m * freqs_hz + c))
 
-    y_int = np.angle(np.mean(solution / model(freqs_hz_qty.to(u.Hz).value, slope.value, 0)))
+    y_int = np.angle(np.sum(weights * solution / model(freqs_hz_qty.to(u.Hz).value, slope.value, 0)) / np.sum(weights))
     params = (slope.value, y_int)
 
-    def objective_and_grad(params, freqs_hz, data):
+    def objective_and_grad(params, freqs_hz, data, weights):
         # Combines cost and its exact gradient into one call (jac=True
         # below) so minimize() never falls back to finite-difference
         # gradient estimation -- which was re-evaluating this same
         # objective ~500+ times per fit (once per finite-difference step,
         # repeated by BFGS's line search) and dominating overall runtime.
         #
+        # Weighted least squares: cost = sum(w_i * residual_i^2), so
+        # poorly-converged chanblocks (small w_i) pull the ramp less.
         # wrap_angle(x) = mod(x + pi, 2*pi) - pi has derivative exactly 1
         # almost everywhere (it's flat with slope 1 between discontinuous
         # -2*pi jumps at the wrap points, a measure-zero set the
         # optimizer won't land on), so d(residual_i)/dm = -ν_i and
         # d(residual_i)/dc = -1, giving:
-        #   d(cost)/dm = -2 * sum(residual_i * ν_i)
-        #   d(cost)/dc = -2 * sum(residual_i)
+        #   d(cost)/dm = -2 * sum(w_i * residual_i * ν_i)
+        #   d(cost)/dc = -2 * sum(w_i * residual_i)
         constructed = model(freqs_hz, *params)
         residuals = wrap_angle(np.angle(data) - np.angle(constructed))
-        cost = np.sum(np.abs(residuals) ** 2)
-        grad = np.array([-2.0 * np.sum(residuals * freqs_hz), -2.0 * np.sum(residuals)])
+        cost = np.sum(weights * np.abs(residuals) ** 2)
+        grad = np.array([-2.0 * np.sum(weights * residuals * freqs_hz), -2.0 * np.sum(weights * residuals)])
         return cost, grad
 
     if niter < 1:
@@ -330,15 +345,28 @@ def fit_phase_line(
             warnings.filterwarnings(
                 "ignore", message="The line search algorithm did not converge", category=RuntimeWarning
             )
-            res = minimize(objective_and_grad, params, args=(freqs_hz_qty.to(u.Hz).value, solution), jac=True)
+            res = minimize(
+                objective_and_grad,
+                params,
+                args=(freqs_hz_qty.to(u.Hz).value, solution, weights),
+                jac=True,
+            )
         params = res.x
 
         constructed = model(freqs_hz_qty.to(u.Hz).value, *params)
         residuals = wrap_angle(np.angle(solution) - np.angle(constructed))
+        # chi2dof and resid_std are reported UNWEIGHTED on purpose: they
+        # describe the tile's actual phase scatter (the honest quality
+        # signal the ref-tile gate reads via sigma_resid), whereas the
+        # weights only steer WHERE the ramp is fitted. A weighted scatter
+        # would hide the very poorly-converged chanblocks it downweighted.
         chi2dof = np.sum(np.abs(residuals) ** 2) / (len(residuals) - len(params))
         resid_std = residuals.std()
-        resid_var = residuals.var(ddof=len(params))
-        stderr = np.sqrt(np.diag(_phase_fit_hess_inv(freqs_hz_qty.to(u.Hz).value)) * resid_var)
+        # stderr, by contrast, is the uncertainty of the weighted-fit
+        # slope, so it uses the weighted residual variance and weighted
+        # Hessian to stay internally consistent with the fit performed.
+        weighted_resid_var = np.sum(weights * residuals**2) / (len(residuals) - len(params))
+        stderr = np.sqrt(np.diag(_phase_fit_hess_inv(freqs_hz_qty.to(u.Hz).value, weights)) * weighted_resid_var)
 
         # Sigma-clip using a robust median+MAD scale of residuals
         # (radians), not stderr[0] (rad/Hz). stderr[0] is the standard
@@ -398,6 +426,7 @@ def fit_phase_line(
             break
         solution = solution[mask]
         freqs_hz_qty = freqs_hz_qty[mask]
+        weights = weights[mask]
 
     period = ((params[0] * u.rad / u.Hz) / (2 * np.pi * u.rad)).to(u.s)
     quality = len(mask) / nfreqs

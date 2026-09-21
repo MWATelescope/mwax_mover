@@ -57,9 +57,22 @@ tests.
   every gate (the tile failing the *fewest* gates wins) rather than needing
   a separate "nothing qualified" branch.
 - **Gates** (worst-of-XX/YY, i.e. a tile only as trustworthy as its worse
-  polarisation): phase `quality` ≥ 0.8, phase `chi2dof` in `[0.2, 3.0]`,
-  gain `quality` ≥ 0.8. `sigma_resid` deliberately left out as a gate — it's
-  largely redundant with `chi2dof` (both measure fit-residual size).
+  polarisation): phase `quality` ≥ 0.8, phase `sigma_resid` ≤ 0.15 rad,
+  gain `quality` ≥ 0.8.
+
+  > **Update (supersedes the original design below).** The phase gate was
+  > originally `chi2dof` in `[0.2, 3.0]`. That was wrong: `PhaseFitInfo.chi2dof`
+  > is `Σresidual²/(N−2)` with residuals in radians and no per-channel noise
+  > normalisation, so it is the mean-square phase residual (~a few ×10⁻³ rad²
+  > for a good fit), not a reduced chi-square near 1 — the `[0.2, 3.0]` range
+  > rejected essentially every good tile. It is now an upper-bound gate on
+  > `sigma_resid` (the residual RMS in radians, unweighted), which is the same
+  > information in interpretable units. `chi2dof` is retained as a stored/
+  > displayed field (DB, stats table, plots, outlier rejection) but no longer
+  > gates. Two further gates were added in a later round (see
+  > `docs/DIPOLE_GAINS_REFTILE.md`): good dipoles ≥ 32/32 and NaN channel
+  > fraction ≤ 30%. The authoritative summary of the *current* gate set and
+  > sorting lives in `docs/CALVIN.md`.
 - **Ranking metric**: `max(|length_xx − median(length_xx)|, |length_yy −
   median(length_yy)|)` among unflagged candidates.
 
@@ -71,12 +84,11 @@ tests.
 
 ```python
 # Reference-tile selection gates (calvin/hyperfits_solution_group.py
-# select_refant). A tile below phase/gain fit quality, or with too extreme
-# a chi2dof, in EITHER polarisation, fails that gate -- see
-# docs/REFTILE_SELECTION.md.
+# select_refant). A tile below phase/gain fit quality, or whose phase-fit
+# residual scatter exceeds the max, in EITHER polarisation, fails that
+# gate -- see docs/REF_TILE_SELECTION.md.
 REFTILE_PHASE_QUALITY_MIN = 0.8
-REFTILE_PHASE_CHI2DOF_MIN = 0.2
-REFTILE_PHASE_CHI2DOF_MAX = 3.0
+REFTILE_PHASE_SIGMA_RESID_MAX = 0.15  # radians (was: REFTILE_PHASE_CHI2DOF_MIN/MAX = 0.2/3.0)
 REFTILE_GAIN_QUALITY_MIN = 0.8
 ```
 
@@ -168,7 +180,7 @@ ordering change at both sites, on top of this.)
 New `tests/calvin/test_hyperfits_solution_group.py` cases (that file
 already covers `HyperfitsSolutionGroup`):
 
-- A tile with visibly worse `chi2dof`/`quality` than the rest loses to a
+- A tile with visibly worse `sigma_resid`/`quality` than the rest loses to a
   clean tile, even if its length deviation is small.
 - A tile with the smallest length deviation but failing a gate loses to a
   tile with a larger deviation but passing every gate.

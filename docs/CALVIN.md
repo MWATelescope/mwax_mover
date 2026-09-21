@@ -72,11 +72,11 @@ Before any of the numbered steps below run, Calvin picks a **reference tile**. E
 2. **Rank.** Every unflagged tile is scored by a composite sort key, in this priority order:
    - **Gate failures** — how many of five quality gates it fails, checked on the **worse** of its XX/YY fit (a tile is only as trustworthy as its worse polarisation):
      - Phase-fit quality below **0.8** (`REFTILE_PHASE_QUALITY_MIN`)
-     - Phase-fit χ²/dof outside **[0.2, 3.0]** (`REFTILE_PHASE_CHI2DOF_MIN`, `_MAX`)
+     - Phase-fit residual scatter `sigma_resid` above **0.15 rad** (`REFTILE_PHASE_SIGMA_RESID_MAX`) — the unweighted RMS of the phase residuals; see [Phase (delay) fitting](#phase-delay-fitting). (Previously a `chi2dof in [0.2, 3.0]` gate, which mis-scaled a residual-variance quantity as a reduced chi-square; `sigma_resid` is the same information in interpretable radians.)
      - Gain-fit quality below **0.8** (`REFTILE_GAIN_QUALITY_MIN`)
-     - Dipole completeness: fewer than **30** of 32 dipole gains equal to 1.0 (`REFTILE_DIPOLE_GOOD_MIN`) — see [Dipole completeness](#dipole-completeness) below
+     - Dipole completeness: fewer than **32** of 32 dipole gains equal to 1.0 (`REFTILE_DIPOLE_GOOD_MIN`) — see [Dipole completeness](#dipole-completeness) below
      - NaN channel fraction above **30%** (`REFTILE_NAN_CHANNEL_FRACTION_MAX`) — see [NaN channel completeness](#nan-channel-completeness) below
-   - **Dead dipole count** — among tiles with an equal number of gate failures, those with fewer dead dipoles sort first. So a 32/32 tile always beats a 31/32 tile when their gate failure counts are equal, even though both pass the ≥30 gate.
+   - **Dead dipole count** — among tiles with an equal number of gate failures, those with fewer dead dipoles sort first. It remains a continuous tiebreak below the gate even now the gate demands a perfect 32/32, so it still discriminates if the threshold is ever relaxed.
    - **NaN channel count** — among tiles with equal failures and equal dead dipoles, those with fewer NaN chanblocks sort first.
    - **Length deviation** — among tiles with equal failures, equal dead dipoles, and equal NaN counts, how far its fitted length deviates from the *population median* length — not from zero. This is deliberately reference-independent: changing which tile the bootstrap stage happened to use just shifts every tile's fitted length by the same constant amount, so measuring deviation from the population's own median cancels that shift out, unlike comparing the raw fitted value against zero.
    - **Tile ID** breaks any remaining tie, for a deterministic result.
@@ -203,7 +203,7 @@ After the previous steps, a tile might have most — but not literally all — o
 
 **How:** For each tile and polarisation (XX and YY), Calvin fits a linear phase ramp — physically, a **group delay** — to that tile's calibration solution across the whole observation (across all frequency bands in the group, not just one file). Two quality metrics come out of that fit:
 
-- **χ²/dof (chi-squared per degree of freedom)** — how well the data actually follows a straight line in phase. Close to 1.0 means a good fit; much larger suggests the tile is noisy or RFI-affected; much smaller suggests too few points or over-fitting.
+- **χ²/dof** — named for a reduced chi-square, but computed as `Σresidual²/(N−2)` with residuals in radians and no per-channel noise normalisation, so it is really the **mean-square phase residual** in rad² (≈ `σ residual²`, typically a few ×10⁻³ for a good fit — *not* a value near 1.0). Lower is better; a larger value flags a noisy or RFI-affected tile. Used (relative to the population) in the Step 6 outlier test.
 - **σ residual** — the scatter (standard deviation) of the residuals left over after subtracting the fitted line, in radians. Lower is better.
 
 Every tile's χ²/dof and σ residual (separately for XX and YY) is then compared against the population of all *other* tiles in the same observation **and of the same receiver flavour** (rx_type, e.g. RRI/SHAO/NI), using a robust outlier test (see [Median/MAD outlier rejection](#medianmad-outlier-rejection) below). A tile whose XX **or** YY fit is a population outlier on **either** metric is reported as a phase outlier — but, as above, nothing is flagged or changed as a result.
@@ -288,7 +288,7 @@ One row per tile per fit (`fitid` foreign-keys back to `calibration_fits`; `obsi
 | `x_gains_sigma_resid` / `y_gains_sigma_resid` | `x_gains.sigma_resid` / `y_gains.sigma_resid` | Per-coarse-channel array: residual standard deviation of the within-coarse-channel linear fit, for XX/YY. |
 | `x_gains_fit_quality` / `y_gains_fit_quality` | `x_gains.quality` / `y_gains.quality` | Fraction (0-1) of all chanblocks (including already-flagged ones) within 2×sigma_resid of their coarse channel's linear fit, for XX/YY. Higher is better. |
 | `x_phase_sigma_resid` / `y_phase_sigma_resid` | `x_phase.sigma_resid` / `y_phase.sigma_resid` | Standard deviation of phase residuals (radians) after subtracting the fitted delay line, for XX/YY. Lower is better. |
-| `x_phase_chi2dof` / `y_phase_chi2dof` | `x_phase.chi2dof` / `y_phase.chi2dof` | Reduced chi-squared (χ²/dof) of the phase fit, for XX/YY -- close to 1.0 is a good fit (see [Phase (delay) fitting](#phase-delay-fitting) below). |
+| `x_phase_chi2dof` / `y_phase_chi2dof` | `x_phase.chi2dof` / `y_phase.chi2dof` | Despite the name, `Σresidual²/(N−2)` with residuals in radians and no per-channel noise normalisation — i.e. the **mean-square phase residual** in rad² (≈ `sigma_resid²`), not a reduced chi-square near 1.0. Retained for continuity; ref-tile selection gates on `sigma_resid` instead. Lower is better. |
 | `x_phase_fit_quality` / `y_phase_fit_quality` | `x_phase.quality` / `y_phase.quality` | Fraction (0-1) of frequency channels that survived the phase fit's own internal sigma-clip, for XX/YY. 1.0 means every channel used was kept. |
 
 Notes:
@@ -375,7 +375,7 @@ The phase-vs-frequency fit in Step 6 is fundamentally a search for the best-fit 
 1. Transforms the frequency-domain calibration solution into "delay space" via an inverse FFT, where the true delay shows up as a clear peak — this gives a robust, wrap-immune starting estimate.
 2. Refines that estimate with a standard least-squares minimisation to get the final slope and intercept.
 
-Two goodness-of-fit metrics are reported for every tile/polarisation: χ²/dof (a standard [reduced chi-squared statistic](https://en.wikipedia.org/wiki/Goodness_of_fit#Pearson's_chi-squared_test)) and the residual standard deviation, both of which feed into the Step 6 outlier test described above.
+Two goodness-of-fit metrics are reported for every tile/polarisation: χ²/dof (named for a reduced chi-square, but actually the mean-square phase residual in rad² — see [Phase (delay) fitting](#phase-delay-fitting)) and the residual standard deviation, both of which feed into the Step 6 outlier test described above.
 
 ### Weights
 

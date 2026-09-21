@@ -161,6 +161,31 @@ def test_weights_excludes_large_results():
     assert np.any(weights > 0)
 
 
+def test_weights_absolute_exp_values():
+    """Valid results map through w = exp(-result / 1e-4), not a per-obs min-max."""
+    results = np.array([0.0, 1e-5, 5e-5, 1e-4])
+    weights = _make_mock_soln_group_with_results(results)
+    expected = np.exp(-results / 1e-4)  # HYPERDRIVE_CONVERGENCE_PRECISION_MAX
+    np.testing.assert_allclose(weights, expected, rtol=1e-12)
+
+
+def test_weights_monotonically_decreasing_with_precision():
+    """Worse convergence (larger result) must yield a smaller weight."""
+    results = np.array([1e-8, 1e-6, 1e-5, 5e-5, 9e-5])
+    weights = _make_mock_soln_group_with_results(results)
+    assert np.all(np.diff(weights) < 0), f"weights should strictly decrease, got {weights}"
+
+
+def test_weights_no_forced_zero_for_worst_valid():
+    """Unlike the old min-max transform, the worst *valid* chanblock keeps a
+    non-zero weight (~1/e at the threshold) rather than being forced to 0."""
+    # Worst valid result sits right at the threshold; used to normalise to 0.
+    results = np.array([1e-8, 5e-5, 1e-4])
+    weights = _make_mock_soln_group_with_results(results)
+    assert weights[-1] == pytest.approx(np.exp(-1.0), rel=1e-9)
+    assert weights[-1] > 0.0
+
+
 def test_weights_uniform_fallback():
     """Missing RESULTS HDU (KeyError) should produce uniform weights of 1.0."""
     mock_group = MagicMock(spec=HyperfitsSolutionGroup)
@@ -1323,13 +1348,16 @@ def _fake_phase_fits(rows: dict) -> pd.DataFrame:
     """Build a synthetic process_phase_fits()-shaped DataFrame.
 
     Args:
-        rows: {tile_id: {"XX": (quality, chi2dof, length), "YY": (...)}}.
+        rows: {tile_id: {"XX": (quality, sigma_resid, length), "YY": (...)}}.
             A tile may omit a pol entirely, or omit itself completely, to
             simulate _phase_fit_one returning None for that (tile, pol).
+            sigma_resid is the field the ref-tile phase-scatter gate reads;
+            chi2dof is held at a fixed passing-irrelevant value since the
+            gate no longer looks at it.
     """
     records = []
     for tile_id, pols in rows.items():
-        for pol, (quality, chi2dof, length) in pols.items():
+        for pol, (quality, sigma_resid, length) in pols.items():
             records.append(
                 {
                     COL_TILE_ID: tile_id,
@@ -1337,8 +1365,8 @@ def _fake_phase_fits(rows: dict) -> pd.DataFrame:
                     COL_POL: pol,
                     COL_LENGTH: length,
                     "intercept": 0.0,
-                    COL_SIGMA_RESID: 0.1,
-                    COL_CHI2DOF: chi2dof,
+                    COL_SIGMA_RESID: sigma_resid,
+                    COL_CHI2DOF: 1.0,
                     COL_QUALITY: quality,
                     "stderr": 0.0,
                 }
@@ -1377,24 +1405,33 @@ def _group_for_refant_tests() -> HyperfitsSolutionGroup:
     select_refant tests that then stub out process_phase_fits/
     process_gain_fits_for_db with synthetic data. Tile IDs 11-14 are all
     genuinely unflagged in this fixture.
+
+    load() is required: select_refant's NaN-completeness gate reads
+    self.jones (per-tile NaN chanblock counts), which is only populated by
+    load(). Tests that isolate the phase/gain gates additionally patch out
+    dipole_gains -- see the note in those tests.
     """
     metafits = Metafits(METAFITS_PATH)
-    return HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+    group = HyperfitsSolutionGroup(metafits, [HyperfitsSolution(SOLUTIONS_PATH)])
+    group.load()
+    return group
 
 
 def test_select_refant_prefers_clean_fit_over_smaller_length_deviation():
-    """A tile failing the chi2dof gate loses even if its length is closer to the median."""
+    """A tile failing the sigma_resid gate loses even if its length is closer to the median."""
     group = _group_for_refant_tests()
-    # Tile 12's length (5.0) is exactly the median of {5.0, 15.0} -- the
-    # smallest possible deviation -- but its chi2dof is way outside the
-    # gate. Tile 11 has a larger deviation but passes every gate.
+    # Tiles 12 and 13 both have 32/32 good dipoles in this fixture, so the
+    # dipole gate passes for both and this isolates the sigma_resid gate.
+    # Tile 12's length (5.0) is closer to the population median, but its
+    # phase-fit scatter (sigma_resid 0.5 rad) is well past the 0.15 gate.
+    # Tile 13 has a larger length deviation but passes every gate.
     phase_fits = _fake_phase_fits(
         {
-            11: {"XX": (1.0, 1.0, 10.0), "YY": (1.0, 1.0, 10.0)},
-            12: {"XX": (1.0, 50.0, 5.0), "YY": (1.0, 50.0, 5.0)},
+            13: {"XX": (1.0, 0.05, 10.0), "YY": (1.0, 0.05, 10.0)},
+            12: {"XX": (1.0, 0.5, 5.0), "YY": (1.0, 0.5, 5.0)},
         }
     )
-    gain_fits = _fake_gain_fits({11: {"XX": 1.0, "YY": 1.0}, 12: {"XX": 1.0, "YY": 1.0}})
+    gain_fits = _fake_gain_fits({13: {"XX": 1.0, "YY": 1.0}, 12: {"XX": 1.0, "YY": 1.0}})
 
     with (
         patch.object(group, "_bootstrap_refant", return_value=group.metafits_tiles_df.iloc[0]),
@@ -1403,20 +1440,22 @@ def test_select_refant_prefers_clean_fit_over_smaller_length_deviation():
     ):
         chosen = group.select_refant(phase_fit_niter=10)
 
-    assert chosen["id"] == 11
+    assert chosen["id"] == 13
 
 
 def test_select_refant_worst_of_xx_yy_pol():
     """A tile good on XX but bad on YY still fails the gate -- worst-of-pol, not best-of."""
     group = _group_for_refant_tests()
+    # Tiles 12 and 13 both have 32/32 good dipoles here, so the dipole gate
+    # passes for both and the outcome turns on phase quality alone.
     phase_fits = _fake_phase_fits(
         {
-            11: {"XX": (1.0, 1.0, 10.0), "YY": (1.0, 1.0, 10.0)},
+            13: {"XX": (1.0, 0.05, 10.0), "YY": (1.0, 0.05, 10.0)},
             # Good XX, but YY quality fails the gate.
-            12: {"XX": (1.0, 1.0, 10.0), "YY": (0.1, 1.0, 10.0)},
+            12: {"XX": (1.0, 0.05, 10.0), "YY": (0.1, 0.05, 10.0)},
         }
     )
-    gain_fits = _fake_gain_fits({11: {"XX": 1.0, "YY": 1.0}, 12: {"XX": 1.0, "YY": 1.0}})
+    gain_fits = _fake_gain_fits({13: {"XX": 1.0, "YY": 1.0}, 12: {"XX": 1.0, "YY": 1.0}})
 
     with (
         patch.object(group, "_bootstrap_refant", return_value=group.metafits_tiles_df.iloc[0]),
@@ -1425,21 +1464,23 @@ def test_select_refant_worst_of_xx_yy_pol():
     ):
         chosen = group.select_refant(phase_fit_niter=10)
 
-    assert chosen["id"] == 11
+    assert chosen["id"] == 13
 
 
 def test_select_refant_degrades_gracefully_when_none_pass_every_gate():
     """When no tile passes every gate, the tile failing fewest still wins -- no exception."""
     group = _group_for_refant_tests()
+    # Tiles 12 and 13 both have 32/32 good dipoles here, so the dipole gate
+    # passes for both and only the phase gates below differ.
     phase_fits = _fake_phase_fits(
         {
-            # Fails only the chi2dof gate (1 failure).
-            11: {"XX": (1.0, 50.0, 10.0), "YY": (1.0, 50.0, 10.0)},
-            # Fails both the quality gate and the chi2dof gate (2 failures).
-            12: {"XX": (0.1, 50.0, 5.0), "YY": (0.1, 50.0, 5.0)},
+            # Fails only the sigma_resid gate (1 failure).
+            13: {"XX": (1.0, 0.5, 10.0), "YY": (1.0, 0.5, 10.0)},
+            # Fails both the quality gate and the sigma_resid gate (2 failures).
+            12: {"XX": (0.1, 0.5, 5.0), "YY": (0.1, 0.5, 5.0)},
         }
     )
-    gain_fits = _fake_gain_fits({11: {"XX": 1.0, "YY": 1.0}, 12: {"XX": 1.0, "YY": 1.0}})
+    gain_fits = _fake_gain_fits({13: {"XX": 1.0, "YY": 1.0}, 12: {"XX": 1.0, "YY": 1.0}})
 
     with (
         patch.object(group, "_bootstrap_refant", return_value=group.metafits_tiles_df.iloc[0]),
@@ -1448,14 +1489,14 @@ def test_select_refant_degrades_gracefully_when_none_pass_every_gate():
     ):
         chosen = group.select_refant(phase_fit_niter=10)
 
-    assert chosen["id"] == 11  # fewer failures, even though neither is clean
+    assert chosen["id"] == 13  # fewer failures, even though neither is clean
 
 
 def test_select_refant_missing_tile_data_sorts_last():
     """A tile absent from the fit DataFrames (simulating a None fit result) loses to real data."""
     group = _group_for_refant_tests()
     # Tile 12 has no rows at all in either DataFrame.
-    phase_fits = _fake_phase_fits({11: {"XX": (0.85, 1.5, 10.0), "YY": (0.85, 1.5, 10.0)}})
+    phase_fits = _fake_phase_fits({11: {"XX": (0.85, 0.1, 10.0), "YY": (0.85, 0.1, 10.0)}})
     gain_fits = _fake_gain_fits({11: {"XX": 0.85, "YY": 0.85}})
 
     with (
@@ -1471,12 +1512,12 @@ def test_select_refant_missing_tile_data_sorts_last():
 def test_select_refant_tie_break_is_deterministic_by_tile_id():
     """Two tiles with identical scores are broken by tile ID, not arbitrary/insertion order."""
     group = _group_for_refant_tests()
-    # Identical quality/chi2dof/length for both -- a genuine tie on every
-    # scored dimension.
+    # Identical quality/sigma_resid/length for both -- a genuine tie on
+    # every scored dimension.
     phase_fits = _fake_phase_fits(
         {
-            14: {"XX": (1.0, 1.0, 10.0), "YY": (1.0, 1.0, 10.0)},
-            13: {"XX": (1.0, 1.0, 10.0), "YY": (1.0, 1.0, 10.0)},
+            14: {"XX": (1.0, 0.05, 10.0), "YY": (1.0, 0.05, 10.0)},
+            13: {"XX": (1.0, 0.05, 10.0), "YY": (1.0, 0.05, 10.0)},
         }
     )
     gain_fits = _fake_gain_fits({14: {"XX": 1.0, "YY": 1.0}, 13: {"XX": 1.0, "YY": 1.0}})
@@ -1495,7 +1536,9 @@ def test_select_refant_all_tiles_clean_returns_valid_unflagged_tile():
     """Sanity check: with every candidate equally clean, the result is still a real unflagged tile."""
     group = _group_for_refant_tests()
     unflagged_ids = group.metafits_tiles_df["id"].to_numpy()[~group.combined_tile_flags]
-    phase_fits = _fake_phase_fits({int(tid): {"XX": (1.0, 1.0, 10.0), "YY": (1.0, 1.0, 10.0)} for tid in unflagged_ids})
+    phase_fits = _fake_phase_fits(
+        {int(tid): {"XX": (1.0, 0.05, 10.0), "YY": (1.0, 0.05, 10.0)} for tid in unflagged_ids}
+    )
     gain_fits = _fake_gain_fits({int(tid): {"XX": 1.0, "YY": 1.0} for tid in unflagged_ids})
 
     with (

@@ -28,7 +28,6 @@ from numpy.typing import NDArray
 from pandas import DataFrame, Series
 
 from mwax_mover.calibration.df_columns import (
-    COL_CHI2DOF,
     COL_FLAG,
     COL_GX,
     COL_GY,
@@ -37,6 +36,7 @@ from mwax_mover.calibration.df_columns import (
     COL_NAME,
     COL_POL,
     COL_QUALITY,
+    COL_SIGMA_RESID,
     COL_SOLN_IDX,
     COL_TILE_ID,
     COL_XX,
@@ -48,13 +48,13 @@ from mwax_mover.calibration.outliers import annotate_phase_outliers, iterative_p
 from mwax_mover.calvin.hyperfits_solution import HyperfitsSolution
 from mwax_mover.calvin.refant_report import format_refant_selection_report
 from mwax_mover.constants import (
+    HYPERDRIVE_CONVERGENCE_PRECISION_MAX,
     REFTILE_DIPOLE_GAINS_EXPECTED,
     REFTILE_DIPOLE_GOOD_MIN,
     REFTILE_GAIN_QUALITY_MIN,
     REFTILE_NAN_CHANNEL_FRACTION_MAX,
-    REFTILE_PHASE_CHI2DOF_MAX,
-    REFTILE_PHASE_CHI2DOF_MIN,
     REFTILE_PHASE_QUALITY_MIN,
+    REFTILE_PHASE_SIGMA_RESID_MAX,
 )
 
 logger = logging.getLogger(__name__)
@@ -737,7 +737,7 @@ class HyperfitsSolutionGroup:
         to gather ranking data for every unflagged tile.
 
         Stage 2 (rank): each unflagged tile is scored by how many quality
-        gates it fails (phase quality, phase chi2dof range, gain quality,
+        gates it fails (phase quality, phase residual scatter, gain quality,
         dipole completeness -- each checked on the worse of XX/YY where
         applicable, so a tile is only as trustworthy as its worse
         polarisation) and, among tiles with equal failure counts, by the
@@ -826,11 +826,17 @@ class HyperfitsSolutionGroup:
                 if not phase_quality_ok:
                     failures += 1
 
-                chi2dof_ok = all(
-                    REFTILE_PHASE_CHI2DOF_MIN <= fit[COL_CHI2DOF] <= REFTILE_PHASE_CHI2DOF_MAX
-                    for fit in (phase_xx, phase_yy)
+                # Phase-fit scatter gate: sigma_resid is the (unweighted)
+                # RMS of the phase residuals in radians, so a small value
+                # means the tile's phase tracks a clean cable-length ramp.
+                # Worst-of-XX/YY, upper bound only (tighter is always
+                # better). Replaces the old chi2dof range gate, whose
+                # thresholds assumed a noise-normalised reduced chi-square
+                # that fit_phase_line never actually produced.
+                sigma_resid_ok = all(
+                    fit[COL_SIGMA_RESID] <= REFTILE_PHASE_SIGMA_RESID_MAX for fit in (phase_xx, phase_yy)
                 )
-                if not chi2dof_ok:
+                if not sigma_resid_ok:
                     failures += 1
 
                 length_deviation = max(
@@ -839,19 +845,19 @@ class HyperfitsSolutionGroup:
                 )
 
                 details["phase_quality_ok"] = phase_quality_ok
-                details["phase_chi2dof_ok"] = chi2dof_ok
+                details["phase_sigma_resid_ok"] = sigma_resid_ok
                 details["phase_quality_xx"] = float(phase_xx[COL_QUALITY])
                 details["phase_quality_yy"] = float(phase_yy[COL_QUALITY])
-                details["phase_chi2dof_xx"] = float(phase_xx[COL_CHI2DOF])
-                details["phase_chi2dof_yy"] = float(phase_yy[COL_CHI2DOF])
+                details["phase_sigma_resid_xx"] = float(phase_xx[COL_SIGMA_RESID])
+                details["phase_sigma_resid_yy"] = float(phase_yy[COL_SIGMA_RESID])
             else:
                 failures += 2
                 details["phase_quality_ok"] = None
-                details["phase_chi2dof_ok"] = None
+                details["phase_sigma_resid_ok"] = None
                 details["phase_quality_xx"] = None
                 details["phase_quality_yy"] = None
-                details["phase_chi2dof_xx"] = None
-                details["phase_chi2dof_yy"] = None
+                details["phase_sigma_resid_xx"] = None
+                details["phase_sigma_resid_yy"] = None
 
             if tile_id in gain_by_pol[COL_XX].index and tile_id in gain_by_pol[COL_YY].index:
                 gain_xx = gain_by_pol[COL_XX].loc[tile_id]
@@ -949,14 +955,26 @@ class HyperfitsSolutionGroup:
 
     @property
     def weights(self) -> NDArray[np.float64]:
-        """Generate per-channel weights from hyperdrive convergence results.
+        """Generate per-channel fit weights from hyperdrive convergence results.
 
-        Convergence values < 0 or > 1e-4 are treated as invalid (set to NaN)
-        and excluded from normalisation. The remaining values are transformed
-        via exp(-result) and normalised to [0, 1].
+        The RESULTS HDU holds hyperdrive's per-chanblock convergence
+        "precision" (max_precision: the largest change in any antenna's
+        Jones solution on the final DI-calibrate iteration -- smaller means
+        more tightly converged). It is a solver-convergence diagnostic, not
+        a measurement variance, so these weights express relative
+        trust-worthiness, not inverse noise.
+
+        Values < 0, or worse than HYPERDRIVE_CONVERGENCE_PRECISION_MAX
+        (hyperdrive's default min_threshold), are treated as invalid (NaN ->
+        0.0 weight, so the fits drop them via their weights > 0 mask). The
+        rest map through an absolute w = exp(-precision / scale) with
+        scale = HYPERDRIVE_CONVERGENCE_PRECISION_MAX: a chanblock right at
+        the threshold keeps weight ~1/e rather than being forced to zero,
+        the mapping is comparable across observations (no per-observation
+        min-max rescaling), and it degrades smoothly as convergence worsens.
 
         Returns:
-            Float64 array of weights in [0, 1], one per chanblock. Invalid
+            Float64 array of weights in (0, 1], one per chanblock. Invalid
             or NaN entries become 0.0 via np.nan_to_num.
 
         Note:
@@ -966,11 +984,8 @@ class HyperfitsSolutionGroup:
         try:
             results = self.results.copy()  # copy so we can mutate safely
             results[results < 0] = np.nan
-            results[results > 1e-4] = np.nan
-            exp_results = np.exp(-results)
-            return np.nan_to_num(
-                (exp_results - np.nanmin(exp_results)) / (np.nanmax(exp_results) - np.nanmin(exp_results))
-            )
+            results[results > HYPERDRIVE_CONVERGENCE_PRECISION_MAX] = np.nan
+            return np.nan_to_num(np.exp(-results / HYPERDRIVE_CONVERGENCE_PRECISION_MAX))
         except KeyError:
             # No RESULTS HDU (older hyperdrive files): fall back to uniform
             # weights. Must cover EVERY file's chanblocks, not just the first

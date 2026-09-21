@@ -171,6 +171,40 @@ def test_fit_phase_line_negative_length():
     assert abs(result.length - target_length) < 0.5
 
 
+def test_fit_phase_line_downweights_corrupted_channels():
+    """Poorly-converged (corrupted) channels given low weights must be
+    pulled out of the ramp fit, so the recovered length tracks the clean
+    channels rather than the garbage.
+
+    niter=1 (no sigma-clip refit) isolates the weighting effect from
+    outlier clipping: the corrupted channels survive into the fit and can
+    only be neutralised by their weights.
+    """
+    target_length = 10.0
+    solns = _make_phase_ramp(_FREQS_HZ, target_length, intercept_rad=0.0)
+
+    # Corrupt the last 30% of channels with random phase garbage.
+    rng = np.random.default_rng(1473940160)
+    n_bad = 30
+    solns = solns.copy()
+    solns[-n_bad:] = np.exp(1j * rng.uniform(-np.pi, np.pi, size=n_bad))
+
+    uniform = fit_phase_line(_FREQS_HZ, solns, np.ones(len(_FREQS_HZ)), niter=1)
+
+    # Small (non-zero) weights on the corrupted tail exercise the weighted
+    # objective itself, not merely the weights > 0 drop-mask.
+    weights = np.ones(len(_FREQS_HZ))
+    weights[-n_bad:] = 1e-3
+    weighted = fit_phase_line(_FREQS_HZ, solns, weights, niter=1)
+
+    assert abs(weighted.length - target_length) < abs(uniform.length - target_length), (
+        f"weighted fit ({weighted.length:.3f}m) should beat uniform ({uniform.length:.3f}m)"
+    )
+    assert abs(weighted.length - target_length) < 0.5, (
+        f"weighted fit should recover ~{target_length}m, got {weighted.length:.3f}m"
+    )
+
+
 def test_fit_phase_line_quality_is_one_all_valid():
     """With all weights=1 and no NaNs, quality should equal 1.0."""
     solns = _make_phase_ramp(_FREQS_HZ, length_m=5.0, intercept_rad=0.0)
