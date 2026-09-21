@@ -89,7 +89,7 @@ Full design rationale — including why gate failures are counted rather than co
 
 The hyperdrive solution FITS file's TILES HDU has an optional `DipoleGains` column: 32 float64 values per tile (first 16 for X dipoles, second 16 for Y dipoles). Each value is 0.0 (dead dipole) or 1.0 (alive). A "good" dipole is one whose value is exactly 1.0.
 
-The **dipole gate** requires at least 30 of the 32 values to be 1.0 — tiles with up to 2 dead dipoles still pass. But `n_dead_dipoles` (32 minus the count of 1.0 values) also serves as a **continuous ranking dimension** between `gate_failures` and `length_deviation` in the sort key, so the dipole count discriminates even among tiles that pass the gate.
+The **dipole gate** requires 32 of the 32 values to be 1.0 — we don't want any dead dipoles on the reference tile. But `n_dead_dipoles` (32 minus the count of 1.0 values) also serves as a **continuous ranking dimension** between `gate_failures` and `length_deviation` in the sort key, so the dipole count discriminates even among tiles that pass the gate (if we ever lower the threshold <32).
 
 When the `DipoleGains` column is absent (older hyperdrive solution files), the gate is skipped and `n_dead_dipoles` defaults to 0 for all tiles, preserving pre-enhancement behaviour exactly.
 

@@ -215,5 +215,5 @@ REFTILE_PHASE_CHI2DOF_MIN = 0.2
 REFTILE_PHASE_CHI2DOF_MAX = 3.0
 REFTILE_GAIN_QUALITY_MIN = 0.8
 REFTILE_DIPOLE_GAINS_EXPECTED = 32  # Total dipole gains per tile (16 X + 16 Y)
-REFTILE_DIPOLE_GOOD_MIN = 30  # Min good dipoles (== 1.0) to pass the dipole gate
+REFTILE_DIPOLE_GOOD_MIN = 32  # Min good dipoles (== 1.0) to pass the dipole gate
 REFTILE_NAN_CHANNEL_FRACTION_MAX = 0.30  # Max NaN channel fraction to pass the channel gate
