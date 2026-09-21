@@ -18,6 +18,7 @@ from mwax_mover.constants import (
     REFTILE_NAN_CHANNEL_FRACTION_MAX,
     REFTILE_PHASE_QUALITY_MIN,
     REFTILE_PHASE_SIGMA_RESID_MAX,
+    REFTILE_REPORT_TILES_TO_DISPLAY,
 )
 
 
@@ -103,7 +104,7 @@ def format_refant_selection_report(
     lines.append(f"  {'-' * (len(hdr) - 2)}")
 
     # Limit to top 20 for readability; show total count if truncated.
-    display_count = min(len(scored), 20)
+    display_count = min(len(scored), REFTILE_REPORT_TILES_TO_DISPLAY)
 
     for rank, entry in enumerate(scored[:display_count], start=1):
         failures, n_dead, _n_nan, length_deviation, tile_id = entry
