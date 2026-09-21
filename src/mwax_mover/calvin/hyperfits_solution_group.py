@@ -771,10 +771,14 @@ class HyperfitsSolutionGroup:
         dipole completeness -- each checked on the worse of XX/YY where
         applicable, so a tile is only as trustworthy as its worse
         polarisation) and, among tiles with equal failure counts, by the
-        number of dead dipoles (fewer is better), then by how far its
-        fitted length deviates from the *population median* length (not
-        from zero -- median-relative deviation is invariant to which tile
-        the bootstrap stage happened to use, unlike the raw fitted value).
+        number of dead dipoles (fewer is better), then by how far the worse
+        polarisation falls short of the phase-quality gate (the quality
+        deficit, 0 for any tile that passes it -- this is what separates the
+        least-bad tiles when a whole field fails the gate, e.g. under heavy
+        RFI), then by how far its fitted length deviates from the
+        *population median* length (not from zero -- median-relative
+        deviation is invariant to which tile the bootstrap stage happened to
+        use, unlike the raw fitted value).
         Tile ID breaks any remaining tie, for a deterministic result. This
         degrades gracefully when no tile passes every gate: the tile
         failing fewest still wins, with no separate "nothing qualified"
@@ -867,13 +871,22 @@ class HyperfitsSolutionGroup:
         for tile_id in candidate_ids:
             failures = 0
             length_deviation = float("inf")
+            # Continuous refinement of the phase-quality gate: how far the
+            # worse polarisation falls short of the gate (0 for any tile that
+            # passes it). Ranks the *least-bad* tile first when a whole field
+            # fails the quality gate (e.g. a heavily-RFI observation), while
+            # doing nothing among gate-passers. Missing-phase tiles keep the
+            # inf sentinel so they sort last (they already fail on count).
+            quality_deficit = float("inf")
             details: dict = {}
 
             if tile_id in phase_by_pol[COL_XX].index and tile_id in phase_by_pol[COL_YY].index:
                 phase_xx = phase_by_pol[COL_XX].loc[tile_id]
                 phase_yy = phase_by_pol[COL_YY].loc[tile_id]
 
-                phase_quality_ok = min(phase_xx[COL_QUALITY], phase_yy[COL_QUALITY]) >= REFTILE_PHASE_QUALITY_MIN
+                worst_phase_quality = min(phase_xx[COL_QUALITY], phase_yy[COL_QUALITY])
+                phase_quality_ok = worst_phase_quality >= REFTILE_PHASE_QUALITY_MIN
+                quality_deficit = max(0.0, REFTILE_PHASE_QUALITY_MIN - worst_phase_quality)
                 if not phase_quality_ok:
                     failures += 1
 
@@ -952,10 +965,10 @@ class HyperfitsSolutionGroup:
             details["total_chanblocks"] = total_chanblocks
 
             gate_details[tile_id] = details
-            scored.append((failures, n_dead, n_nan, length_deviation, tile_id))
+            scored.append((failures, n_dead, quality_deficit, n_nan, length_deviation, tile_id))
 
         scored.sort()
-        best_tile_id = scored[0][4]
+        best_tile_id = scored[0][5]
 
         # Generate and store the selection report for stats file / logging.
         tile_names = self.metafits_tiles_df[COL_NAME].to_numpy()

@@ -1466,6 +1466,34 @@ def test_select_refant_excludes_bootstrap_from_ranking():
     assert chosen["id"] == 12  # tile 13 (the bootstrap) is excluded despite looking best
 
 
+def test_select_refant_quality_deficit_breaks_tie_ahead_of_length():
+    """Among tiles tied on failures/dipoles, the one closer to the phase-quality
+    gate wins over one with a smaller length deviation -- the RFI-obs case where
+    every candidate fails the quality gate but some are far cleaner than others."""
+    group = _group_for_refant_tests()
+    # Three 32/32 tiles, all failing ONLY the phase-quality gate (Fail=1).
+    # Lengths [0, 10, 100] put the population median at 10, so tile 12 (len 10)
+    # has the SMALLEST length deviation -- yet tile 13 wins on a smaller quality
+    # deficit (0.10 vs 0.40) despite its larger length deviation.
+    phase_fits = _fake_phase_fits(
+        {
+            13: {"XX": (0.7, 0.05, 0.0), "YY": (0.7, 0.05, 0.0)},  # deficit 0.10, lendev 10
+            12: {"XX": (0.4, 0.05, 10.0), "YY": (0.4, 0.05, 10.0)},  # deficit 0.40, lendev 0
+            14: {"XX": (0.4, 0.05, 100.0), "YY": (0.4, 0.05, 100.0)},  # deficit 0.40, lendev 90
+        }
+    )
+    gain_fits = _fake_gain_fits({13: {"XX": 1.0, "YY": 1.0}, 12: {"XX": 1.0, "YY": 1.0}, 14: {"XX": 1.0, "YY": 1.0}})
+
+    with (
+        patch.object(group, "_bootstrap_refant", return_value=group.metafits_tiles_df.iloc[0]),
+        patch.object(group, "process_phase_fits", return_value=phase_fits),
+        patch.object(group, "process_gain_fits_for_db", return_value=gain_fits),
+    ):
+        chosen = group.select_refant(phase_fit_niter=10)
+
+    assert chosen["id"] == 13  # smaller quality deficit beats smaller length deviation
+
+
 def test_select_refant_prefers_clean_fit_over_smaller_length_deviation():
     """A tile failing the sigma_resid gate loses even if its length is closer to the median."""
     group = _group_for_refant_tests()

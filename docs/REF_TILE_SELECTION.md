@@ -71,8 +71,15 @@ tests.
   > displayed field (DB, stats table, plots, outlier rejection) but no longer
   > gates. Two further gates were added in a later round (see
   > `docs/DIPOLE_GAINS_REFTILE.md`): good dipoles ≥ 32/32 and NaN channel
-  > fraction ≤ 30%. The authoritative summary of the *current* gate set and
-  > sorting lives in `docs/CALVIN.md`.
+  > fraction ≤ 30%. The bootstrap reference is likewise no longer the plain
+  > "lowest unflagged ID" described below: it is now chosen by the
+  > fit-independent metrics (fewest dead dipoles, then fewest NaN channels,
+  > then lowest ID) and is *excluded* from the ranking, because its own fit
+  > is against itself and would win circularly. A phase-quality **deficit**
+  > (`max(0, 0.8 − worst-pol quality)`) was also added to the sort, between
+  > dead-dipole count and NaN count, to prefer the least-bad tile when a
+  > whole field fails the quality gate. The authoritative summary of the
+  > *current* gate set, bootstrap, and sorting lives in `docs/CALVIN.md`.
 - **Ranking metric**: `max(|length_xx − median(length_xx)|, |length_yy −
   median(length_yy)|)` among unflagged candidates.
 

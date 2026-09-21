@@ -68,7 +68,7 @@ Before any of the numbered steps below run, Calvin picks a **reference tile**. E
 
 **How:** selection runs in two stages, before any of the flagging in [Step 1](#step-1-structural-tile-flags) onwards:
 
-1. **Bootstrap.** A cheap, purely structural pick — the lowest-ID tile not already flagged by any of the three [Step 1](#step-1-structural-tile-flags) sources — is used as a throwaway reference. A read-only phase and gain fit pass is run against it, purely to gather ranking data for every unflagged tile; nothing about this bootstrap tile's own suitability as a reference matters, since it is never actually used past this point unless it also happens to win the ranking below.
+1. **Bootstrap.** A throwaway reference is chosen from the fit-independent metrics — the unflagged tile with the fewest dead dipoles, then the fewest NaN channels, then the lowest ID (the same reference-free signals the gate uses, so the scaffold is a tile that could itself be a valid reference rather than an arbitrary lowest-ID one). A read-only phase and gain fit pass is run against it, purely to gather ranking data for every unflagged tile. The bootstrap is then **excluded** from the ranking below: because every other tile's phase/gain fit is measured relative to it, the bootstrap's own fit is against itself and is trivially perfect (zero residual, top quality), so it would pass the phase gates for free and could win circularly — the degenerate self-reference the ranking is designed to avoid. (It is kept only in the pathological case where it is the sole unflagged tile.)
 2. **Rank.** Every unflagged tile is scored by a composite sort key, in this priority order:
    - **Gate failures** — how many of five quality gates it fails, checked on the **worse** of its XX/YY fit (a tile is only as trustworthy as its worse polarisation):
      - Phase-fit quality below **0.8** (`REFTILE_PHASE_QUALITY_MIN`)
@@ -77,11 +77,12 @@ Before any of the numbered steps below run, Calvin picks a **reference tile**. E
      - Dipole completeness: fewer than **32** of 32 dipole gains equal to 1.0 (`REFTILE_DIPOLE_GOOD_MIN`) — see [Dipole completeness](#dipole-completeness) below
      - NaN channel fraction above **30%** (`REFTILE_NAN_CHANNEL_FRACTION_MAX`) — see [NaN channel completeness](#nan-channel-completeness) below
    - **Dead dipole count** — among tiles with an equal number of gate failures, those with fewer dead dipoles sort first. It remains a continuous tiebreak below the gate even now the gate demands a perfect 32/32, so it still discriminates if the threshold is ever relaxed.
-   - **NaN channel count** — among tiles with equal failures and equal dead dipoles, those with fewer NaN chanblocks sort first.
-   - **Length deviation** — among tiles with equal failures, equal dead dipoles, and equal NaN counts, how far its fitted length deviates from the *population median* length — not from zero. This is deliberately reference-independent: changing which tile the bootstrap stage happened to use just shifts every tile's fitted length by the same constant amount, so measuring deviation from the population's own median cancels that shift out, unlike comparing the raw fitted value against zero.
+   - **Phase-quality deficit** — among tiles with equal failures and equal dead dipoles, how far the worse polarisation falls short of the phase-quality gate: `max(0, 0.8 − min(quality_XX, quality_YY))`, and exactly 0 for any tile that passes the gate. This does nothing among gate-passers (so it never disturbs a clean observation, where length deviation still decides), but when a whole field fails the quality gate — e.g. a heavily-RFI observation where no tile reaches 0.8 — it ranks the *least-bad* tile first, preferring one whose phase genuinely tracks a delay over one that is badly scattered but happens to be delay-central.
+   - **NaN channel count** — among tiles with equal failures, equal dead dipoles, and equal quality deficit, those with fewer NaN chanblocks sort first.
+   - **Length deviation** — among tiles otherwise tied, how far its fitted length deviates from the *population median* length — not from zero. This is deliberately reference-independent: changing which tile the bootstrap stage happened to use just shifts every tile's fitted length by the same constant amount, so measuring deviation from the population's own median cancels that shift out, unlike comparing the raw fitted value against zero.
    - **Tile ID** breaks any remaining tie, for a deterministic result.
 
-   Expressed as a sort tuple: `(gate_failures, n_dead_dipoles, n_nan_channels, length_deviation, tile_id)` — the tile with the smallest tuple wins. This degrades gracefully if no tile passes every gate on a particularly noisy observation — the tile failing fewest still wins, rather than the pipeline needing a separate fallback case.
+   Expressed as a sort tuple: `(gate_failures, n_dead_dipoles, quality_deficit, n_nan_channels, length_deviation, tile_id)` — the tile with the smallest tuple wins. This degrades gracefully if no tile passes every gate on a particularly noisy observation — the tile failing fewest still wins, rather than the pipeline needing a separate fallback case.
 
 Full design rationale — including why gate failures are counted rather than combined into a single weighted score — is in [`docs/REF_TILE_SELECTION.md`](docs/REF_TILE_SELECTION.md). The dipole-awareness enhancement is documented in [`docs/DIPOLE_GAINS_REFTILE.md`](docs/DIPOLE_GAINS_REFTILE.md).
 
@@ -89,7 +90,7 @@ Full design rationale — including why gate failures are counted rather than co
 
 The hyperdrive solution FITS file's TILES HDU has an optional `DipoleGains` column: 32 float64 values per tile (first 16 for X dipoles, second 16 for Y dipoles). Each value is 0.0 (dead dipole) or 1.0 (alive). A "good" dipole is one whose value is exactly 1.0.
 
-The **dipole gate** requires 32 of the 32 values to be 1.0 — we don't want any dead dipoles on the reference tile. But `n_dead_dipoles` (32 minus the count of 1.0 values) also serves as a **continuous ranking dimension** between `gate_failures` and `length_deviation` in the sort key, so the dipole count discriminates even among tiles that pass the gate (if we ever lower the threshold <32).
+The **dipole gate** requires 32 of the 32 values to be 1.0 — we don't want any dead dipoles on the reference tile. But `n_dead_dipoles` (32 minus the count of 1.0 values) also serves as a **continuous ranking dimension** between `gate_failures` and the phase-quality deficit in the sort key, so the dipole count discriminates even among tiles that pass the gate (if we ever lower the threshold <32).
 
 When the `DipoleGains` column is absent (older hyperdrive solution files), the gate is skipped and `n_dead_dipoles` defaults to 0 for all tiles, preserving pre-enhancement behaviour exactly.
 
@@ -101,7 +102,7 @@ For each tile, the NaN count is the number of chanblocks with any NaN Jones elem
 
 The **NaN channel gate** requires the NaN fraction to be at most **30%** (`REFTILE_NAN_CHANNEL_FRACTION_MAX`). Non-oversampled calibrators already have approximately 12.5% NaN channels from 80 kHz edge flagging per coarse channel (24 coarse channels × 4 edge channels at 40 kHz fine-channel width), so the 30% threshold leaves headroom for this normal baseline while catching tiles with significant solve failures.
 
-`n_nan_channels` also serves as a **continuous ranking dimension** between `n_dead_dipoles` and `length_deviation` in the sort key — among tiles with equal gate failures and equal dead dipoles, fewer NaN channels ranks higher.
+`n_nan_channels` also serves as a **continuous ranking dimension** between the phase-quality deficit and `length_deviation` in the sort key — among tiles with equal gate failures, equal dead dipoles, and equal quality deficit, fewer NaN channels ranks higher.
 
 ### Selection diagnostics
 

@@ -23,7 +23,7 @@ from mwax_mover.constants import (
 
 
 def format_refant_selection_report(
-    scored: list[tuple[int, int, int, float, int]],
+    scored: list[tuple[int, int, float, int, float, int]],
     tile_names: NDArray,
     tile_ids: NDArray,
     tile_ants: NDArray,
@@ -42,7 +42,7 @@ def format_refant_selection_report(
 
     Args:
         scored: The sorted ranking list from select_refant. Each entry
-            is (failures, n_dead_dipoles, n_nan_channels,
+            is (failures, n_dead_dipoles, quality_deficit, n_nan_channels,
             length_deviation, tile_id).
         tile_names: Array of tile names, indexed by tile position.
         tile_ids: Array of tile IDs, indexed by tile position.
@@ -90,7 +90,7 @@ def format_refant_selection_report(
     id_to_ant = dict(zip(tile_ids, tile_ants, strict=True))
 
     # Column widths.
-    name_w = max(10, max((len(str(id_to_name.get(s[4], ""))) for s in scored), default=10) + 2)
+    name_w = max(10, max((len(str(id_to_name.get(s[5], ""))) for s in scored), default=10) + 2)
 
     # Header.
     hdr = (
@@ -107,7 +107,7 @@ def format_refant_selection_report(
     display_count = min(len(scored), REFTILE_REPORT_TILES_TO_DISPLAY)
 
     for rank, entry in enumerate(scored[:display_count], start=1):
-        failures, n_dead, _n_nan, length_deviation, tile_id = entry
+        failures, n_dead, _quality_deficit, _n_nan, length_deviation, tile_id = entry
         name = str(id_to_name.get(tile_id, "?"))
         ant = id_to_ant.get(tile_id, -1)
         details = gate_details.get(tile_id, {})
@@ -159,7 +159,7 @@ def format_refant_selection_report(
 
     # Winner summary.
     w_entry = scored[0]
-    w_failures, w_dead, w_nan, w_lendev, w_tile_id = w_entry
+    w_failures, w_dead, _w_quality_deficit, w_nan, w_lendev, w_tile_id = w_entry
     w_name = str(id_to_name.get(w_tile_id, "?"))
     w_ant = id_to_ant.get(w_tile_id, -1)
     n_good = REFTILE_DIPOLE_GAINS_EXPECTED - w_dead
