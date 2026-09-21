@@ -17,7 +17,7 @@ from numpy.typing import NDArray
 from scipy.optimize import minimize
 
 from mwax_mover.calibration.models import GainFitInfo, PhaseFitInfo
-from mwax_mover.constants import MAD_TO_STD_SCALE_FACTOR
+from mwax_mover.constants import GAIN_QUALITY_SIGMA, MAD_TO_STD_SCALE_FACTOR, PHASE_FIT_CLIP_SIGMA
 
 
 def pad_gains_to_full_coarse(
@@ -129,8 +129,8 @@ def wrap_angle(angle):
 
 
 # Floor for fit_phase_line's sigma-clip scale: the threshold is
-# 2 * max(1.4826 * MAD, this), in radians. See its use in fit_phase_line for
-# why the floor is needed.
+# PHASE_FIT_CLIP_SIGMA * max(MAD_TO_STD_SCALE_FACTOR * MAD, this), in radians.
+# See its use in fit_phase_line for why the floor is needed.
 _MIN_CLIP_THRESHOLD_RAD = 1e-6
 
 
@@ -213,7 +213,8 @@ def fit_phase_line(
     #              used elsewhere in the pipeline -- purely informational.
     #
     # quality:     Fraction of original frequency channels surviving the
-    #              sigma-clip (|residual - median| < 2 * 1.4826 * MAD; see the
+    #              sigma-clip (|residual - median| < PHASE_FIT_CLIP_SIGMA *
+    #              MAD_TO_STD_SCALE_FACTOR * MAD; see the
     #              detailed comment at the clip itself) (len(mask) / nfreqs).
     #              Ranges 0-1; 1.0 means all channels were used.
 
@@ -421,7 +422,7 @@ def fit_phase_line(
         resid_median = np.median(residuals)
         resid_mad = np.median(np.abs(residuals - resid_median))
         clip_scale = max(MAD_TO_STD_SCALE_FACTOR * resid_mad, _MIN_CLIP_THRESHOLD_RAD)
-        mask = np.where(np.abs(residuals - resid_median) < 2 * clip_scale)[0]
+        mask = np.where(np.abs(residuals - resid_median) < PHASE_FIT_CLIP_SIGMA * clip_scale)[0]
         if len(mask) < 2:
             break
         solution = solution[mask]
@@ -515,13 +516,13 @@ def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse: int) -> GainF
         sigma_resid[coarse_idx] = residuals.std()
 
         if sigma_resid[coarse_idx] < 1e-10:
-            # If sigma_resid is very small then we can say all are within 2 sigma
+            # If sigma_resid is very small then we can say all are within N sigma
             n_within += len(residuals)
         else:
-            # Accumulate chanblocks within 2*sigma_resid of the fit for quality
-            n_within += int(np.sum(np.abs(residuals) < 2 * sigma_resid[coarse_idx]))
+            # Accumulate chanblocks within GAIN_QUALITY_SIGMA*sigma_resid of the fit for quality
+            n_within += int(np.sum(np.abs(residuals) < GAIN_QUALITY_SIGMA * sigma_resid[coarse_idx]))
 
-    # Quality is the fraction of all chanblocks (including flagged) within 2*sigma_resid
+    # Quality is the fraction of all chanblocks (including flagged) within GAIN_QUALITY_SIGMA*sigma_resid
     quality = n_within / n_freqs
 
     return GainFitInfo(

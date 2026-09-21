@@ -91,6 +91,23 @@ EXIT_FAILURE = 1
 # mean+nstd*std threshold. See docs/CONSTANTS_CLEANUP.md 1.1.
 MAD_TO_STD_SCALE_FACTOR = 1.4826
 
+# Sigma multipliers defining a "good" channel in the calibration fits: the
+# fraction of channels within this many (robust) standard deviations of the
+# fitted line is the reported fit quality. Both are 2.0 today.
+#
+# PHASE_FIT_CLIP_SIGMA does double duty in fit_phase_line: it is the iterative
+# sigma-clip threshold used *during* the fit (how aggressively outliers are
+# rejected each pass), and because phase quality is the fraction of channels
+# surviving that clip, it also defines phase quality. GAIN_QUALITY_SIGMA, by
+# contrast, is a post-fit ratio only (fraction within N-sigma of the gain fit),
+# with no effect on the fit itself -- hence two separate constants.
+#
+# NOTE: the MWA ASVO calibration-database pipeline (Sokolowski et al. 2020)
+# defines its good-channel quality ratio at 5 sigma, not 2. These are the knobs
+# to revisit if aligning Calvin's quality metric with that convention.
+PHASE_FIT_CLIP_SIGMA = 2.0
+GAIN_QUALITY_SIGMA = 2.0
+
 # Shared logging.Formatter format string for the CLI daemons/scripts. See
 # docs/CONSTANTS_CLEANUP.md 1.2.
 LOG_FORMAT = "%(asctime)s, %(levelname)s, %(name)s.%(funcName)s, %(message)s"
