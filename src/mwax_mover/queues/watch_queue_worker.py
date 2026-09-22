@@ -10,7 +10,6 @@ processing starts. Concrete subclasses implement only the handler() method.
 """
 
 import logging
-import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from queue import PriorityQueue, Queue
@@ -18,6 +17,7 @@ from threading import Thread
 from typing import Any
 
 from mwax_mover.core.env import get_hostname
+from mwax_mover.core.timing import sleep
 from mwax_mover.queues.priority_queue_worker import PriorityQueueWorker
 from mwax_mover.queues.priority_watcher import PriorityWatcher
 from mwax_mover.queues.queue_worker import QueueWorker
@@ -185,7 +185,7 @@ class MWAXWatchQueueWorker(ABC):
                 if not watcher.scan_completed:
                     logger.debug(f"{watcher.name} still scanning!")
                     count_of_watchers_still_scanning += 1
-            time.sleep(1)  # hold off for another second
+            sleep(1)  # hold off for another second
         logger.info(f"{self.name}: Watchers are finished scanning.")
 
         self.queue_worker_thread.start()
@@ -387,7 +387,7 @@ class MWAXPriorityWatchQueueWorker(ABC):
                 if not watcher.scan_completed:
                     logger.debug(f"{watcher.name}: still scanning!")
                     count_of_watchers_still_scanning += 1
-            time.sleep(1)  # hold off for another second
+            sleep(1)  # hold off for another second
         logger.info(f"{self.name}: Watchers are finished scanning.")
 
         self.queue_worker_thread.start()

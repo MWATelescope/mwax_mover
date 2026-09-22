@@ -1,12 +1,12 @@
 #
 # Tests for the watch_queue_worker abstract base class (ABC)
 #
-
 import logging
 import os
 import queue
 import shutil
 import time
+from unittest.mock import patch
 
 from tests_common import obs_metafits_path, setup_test_directories
 
@@ -123,11 +123,11 @@ def test_calculate_backoff_seconds_respects_limit_and_zero():
 
 
 def test_queue_worker_start_clears_backoff_event(tmp_path):
-    """start() must reset the event stop() sets.
+    """start() must reset the event set by stop().
 
-    Regression test: nothing ever cleared this event, so after the first stop()
-    every subsequent event.wait(backoff) returned immediately and backoff was
-    silently disabled for the rest of the process's life.
+    The same event both interrupts an active retry backoff and signals worker
+    shutdown. If start() does not clear it, every later interruptible backoff
+    returns immediately and the restarted worker remains effectively stopped.
     """
     tmp_file = tmp_path / "item.dat"
     tmp_file.write_text("x")
@@ -143,9 +143,8 @@ def test_queue_worker_start_clears_backoff_event(tmp_path):
     worker.stop()
     assert worker.event.is_set(), "stop() should set the event to break an in-flight wait"
 
-    # Observe the event's state from inside the processing loop, which is where
-    # a backoff wait would actually happen. Without the clear() in start(), the
-    # event is still set here and event.wait(backoff) would return instantly.
+    # an interruptible backoff would actually happen. Without clear() in
+    # start(), the event is still set here and that backoff returns immediately.
     observed = []
 
     def handler(_item):
@@ -194,3 +193,42 @@ def test_request_fatal_shutdown_keeps_the_root_cause():
 
     assert sd.fatal_exit_code == 3, "first caller wins"
     assert sd.fatal_reason == "root cause"
+
+
+def test_queue_worker_failure_uses_interruptible_sleep(tmp_path):
+    """A failed item must use the worker event for interruptible backoff."""
+    tmp_file = tmp_path / "item.dat"
+    tmp_file.write_text("x")
+
+    attempts = 0
+
+    def handler(_item):
+        nonlocal attempts
+        attempts += 1
+
+        # Fail once to exercise the retry backoff, then succeed so start()
+        # can finish without leaving a worker thread running.
+        return attempts > 1
+
+    worker = QueueWorker(
+        name="test_interruptible_backoff",
+        source_queue=queue.Queue(),
+        executable_path=None,
+        event_handler=handler,
+        exit_once_queue_empty=True,
+        requeue_on_error=True,
+        backoff_initial_seconds=7,
+        backoff_factor=1,
+        backoff_limit_seconds=7,
+    )
+    worker.source_queue.put(str(tmp_file))
+
+    with patch(
+        "mwax_mover.queues.queue_worker.interruptible_sleep",
+        return_value=False,
+    ) as mock_sleep:
+        worker.start()
+
+    mock_sleep.assert_called_once_with(worker.event, 7)
+    assert attempts == 2
+    assert worker.source_queue.empty()

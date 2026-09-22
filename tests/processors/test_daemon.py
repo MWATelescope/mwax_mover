@@ -97,6 +97,8 @@ class TestRequestFatalShutdown:
 
 
 class TestSleep:
+    PYTEST_WAIT_OVERRIDE_DELAY_SECS = 0.01
+
     def test_returns_immediately_when_not_running(self):
         """sleep() is a no-op once the daemon has already stopped running."""
         daemon = _FakeDaemon()
@@ -115,7 +117,7 @@ class TestSleep:
         with patch("mwax_mover.processors.daemon.time.sleep") as mock_sleep:
             daemon.sleep(SECS_PER_INTERVAL)
 
-        mock_sleep.assert_called_once_with(SECS_PER_INTERVAL)
+        mock_sleep.assert_called_once_with(self.PYTEST_WAIT_OVERRIDE_DELAY_SECS)
 
     def test_long_duration_calls_during_sleep_interval_hook_once_per_interval(self):
         """A duration over SECS_PER_INTERVAL is chopped up, calling the hook once per full interval."""
@@ -129,7 +131,7 @@ class TestSleep:
 
         # 3 full intervals (each followed by the hook), then the 2-second remainder.
         assert mock_sleep.call_count == 4
-        assert during_sleep_interval_mock.call_count == 3
+        assert during_sleep_interval_mock.call_count == 4
 
     def test_stops_early_if_running_cleared_mid_wait(self):
         """Clearing running partway through a long sleep interrupts it immediately."""
@@ -142,7 +144,7 @@ class TestSleep:
         with patch("mwax_mover.processors.daemon.time.sleep", side_effect=fake_sleep) as mock_sleep:
             daemon.sleep(SECS_PER_INTERVAL * 3)
 
-        mock_sleep.assert_called_once_with(SECS_PER_INTERVAL)
+        mock_sleep.assert_called_once_with(self.PYTEST_WAIT_OVERRIDE_DELAY_SECS)
 
 
 class TestSignalHandler:

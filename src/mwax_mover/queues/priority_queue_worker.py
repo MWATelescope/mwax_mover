@@ -16,6 +16,7 @@ import time
 
 from mwax_mover import constants
 from mwax_mover.core.command import run_command
+from mwax_mover.core.timing import interruptible_sleep, sleep
 from mwax_mover.filesystem.naming import ArchivePriority
 from mwax_mover.queues.priority_queue_data import MWAXPriorityQueueData
 from mwax_mover.queues.queue_worker import QueueWorkerConfigError, calculate_backoff_seconds
@@ -122,7 +123,7 @@ class PriorityQueueWorker:
         while self._running:
             if self._paused:
                 # if paused, put in a sleep to slow the wheel spinning
-                time.sleep(0.1)
+                sleep(0.1)
             else:
                 try:
                     success = False
@@ -187,7 +188,7 @@ class PriorityQueueWorker:
                         logger.info(
                             f"{self.consecutive_error_count} consecutive failures. Backing off for {backoff} seconds."
                         )
-                        self.event.wait(backoff)
+                        interruptible_sleep(self.event, backoff)
 
                         # If this option is set, add item back to the end of
                         # the queue by making the priority larger

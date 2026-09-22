@@ -6,9 +6,10 @@ Redis list, with a small retry loop on RedisError.
 
 import json
 import logging
-import time
 
 import redis
+
+from mwax_mover.core.timing import sleep
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ def push_message_to_redis(redis_host: str, redis_queue_key: str, message_data):
 
         except redis.RedisError as e:
             # wait 1 second between retries
-            time.sleep(1)
+            sleep(1)
 
             if attempt >= MAX_RETRIES:
                 raise redis.RedisError(

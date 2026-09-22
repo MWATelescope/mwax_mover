@@ -8,6 +8,7 @@ start()/stop() lifecycle.
 """
 
 import queue
+from unittest.mock import patch
 
 import pytest
 
@@ -201,13 +202,12 @@ def test_none_priority_falls_back_to_archive_priority_default(tmp_path):
 
 
 def test_start_clears_backoff_event(tmp_path):
-    """start() must reset the event stop() sets.
+    """start() must reset the event set by stop().
 
-    Regression test, mirroring test_queue_worker_start_clears_backoff_event in
-    tests/queues/test_watch_queue_worker.py: nothing ever cleared this event,
-    so after the first stop() every subsequent event.wait(backoff) returned
-    immediately and backoff was silently disabled for the rest of the
-    process's life.
+    This mirrors test_queue_worker_start_clears_backoff_event in
+    tests/queues/test_watch_queue_worker.py. The event interrupts retry
+    backoff and signals shutdown, so a restarted worker must clear the old
+    shutdown state before processing.
     """
     tmp_file = tmp_path / "item.dat"
     tmp_file.write_text("x")
@@ -255,3 +255,42 @@ def test_get_status_reports_name_current_item_and_queue_size(tmp_path):
 
     status_after = worker.get_status()
     assert status_after == {"name": "status_test", "current_item": None, "queue_size": 0}
+
+
+def test_failure_uses_interruptible_sleep(tmp_path):
+    """A failed priority item must use the worker event for backoff."""
+    tmp_file = tmp_path / "item.dat"
+    tmp_file.write_text("x")
+
+    attempts = 0
+
+    def handler(_item):
+        nonlocal attempts
+        attempts += 1
+
+        # Fail once to trigger the retry path, then succeed so the worker
+        # exits cleanly.
+        return attempts > 1
+
+    worker = _make_worker(
+        handler,
+        requeue_to_eoq_on_failure=False,
+    )
+
+    # Override the zero-delay defaults used by _make_worker so that this
+    # test can verify the calculated timeout passed to the timing helper.
+    worker.backoff_initial_seconds = 9
+    worker.backoff_factor = 1
+    worker.backoff_limit_seconds = 9
+
+    worker.source_queue.put((5, MWAXPriorityQueueData(str(tmp_file))))
+
+    with patch(
+        "mwax_mover.queues.priority_queue_worker.interruptible_sleep",
+        return_value=False,
+    ) as mock_sleep:
+        worker.start()
+
+    mock_sleep.assert_called_once_with(worker.event, 9)
+    assert attempts == 2
+    assert worker.source_queue.empty()

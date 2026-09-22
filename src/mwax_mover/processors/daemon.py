@@ -21,6 +21,7 @@ from configparser import ConfigParser
 from mwax_mover import version
 from mwax_mover.constants import SECTION_MWAX_MOVER
 from mwax_mover.core.config import read_config
+from mwax_mover.core.timing import sleep as controlled_sleep
 from mwax_mover.net.multicast import get_ip_address, send_multicast
 
 logger = logging.getLogger(__name__)
@@ -145,30 +146,25 @@ class MWAXDaemon(ABC):
             self.sleep(1)
 
     def sleep(self, seconds: float) -> None:
-        """Sleep for a specified duration while remaining responsive to shutdown.
+        """Sleep while remaining responsive to shutdown.
 
-        Breaks long sleeps into intervals to remain responsive to the running
-        flag and shutdown directives.
-
-        Args:
-            seconds: Duration to sleep in seconds.
+        Long waits are split into intervals so production daemons continue to run
+        periodic work and observe self.running. The underlying delay is capped
+        automatically under pytest.
         """
-        if not self.running:
-            return
+        if seconds < 0:
+            raise ValueError(f"seconds must be >= 0, got {seconds}")
 
-        if seconds <= SECS_PER_INTERVAL:
-            time.sleep(seconds)
-            return
+        remaining = seconds
 
-        integer_intervals, remainder_secs = divmod(seconds, SECS_PER_INTERVAL)
+        while self.running and remaining > 0:
+            interval = min(remaining, SECS_PER_INTERVAL)
+            controlled_sleep(interval)
 
-        while self.running and integer_intervals > 0:
-            time.sleep(SECS_PER_INTERVAL)
-            integer_intervals -= 1
+            # Preserve the existing per-interval behaviour.
             self.during_sleep_interval()
 
-        if self.running and remainder_secs > 0:
-            time.sleep(remainder_secs)
+            remaining -= interval
 
     def signal_handler(self, _signum, _frame) -> None:
         """Handle SIGINT and SIGTERM signals for graceful shutdown.

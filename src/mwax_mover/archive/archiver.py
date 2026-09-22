@@ -16,6 +16,7 @@ import uuid
 from mwax_mover.constants import SECONDS_PER_MINUTE
 from mwax_mover.core.command import run_command
 from mwax_mover.core.env import running_under_pytest
+from mwax_mover.core.timing import sleep
 from mwax_mover.core.units import bytes_to_gigabytes, get_gbps
 
 logger = logging.getLogger(__name__)
@@ -384,7 +385,7 @@ def archive_file_rclone_haproxy(
                         f" of {_RCLONE_CHECK_RETRIES} failed, retrying in"
                         f" {backoff_secs} seconds. Output: {stdout}"
                     )
-                    time.sleep(backoff_secs)
+                    sleep(backoff_secs)
                     backoff_secs = min(backoff_secs * 2, rclone_check_wait_secs)
 
             if return_val:

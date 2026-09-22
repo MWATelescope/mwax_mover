@@ -11,7 +11,6 @@ from tests_fakedb import FakeMWAXDBHandler
 
 from mwax_mover.cli.mwax_calvin_controller import (
     DEFAULT_PLOT_UPLOAD_MAX_FITS_PER_PASS,
-    PLOT_UPLOAD_BACKLOG_DELAY_SECS,
     MWAXCalvinController,
     fit_dir_sort_key,
 )
@@ -356,6 +355,8 @@ class RecordingStopEvent(threading.Event):
 class TestPlotUploadHandler:
     """Tests for how plot_upload_handler paces its passes."""
 
+    PYTEST_WAIT_OVERRIDE_DELAY_SECS = 0.01
+
     @staticmethod
     def make_controller(tmp_path) -> MWAXCalvinController:
         """Build a controller with one upload path and a production-like interval."""
@@ -375,7 +376,7 @@ class TestPlotUploadHandler:
         with patch.object(mcal, "upload_published_fit_dirs", return_value=True):
             mcal.plot_upload_handler(stop_event)
 
-        assert stop_event.waits == [PLOT_UPLOAD_BACKLOG_DELAY_SECS]
+        assert stop_event.waits == [self.PYTEST_WAIT_OVERRIDE_DELAY_SECS]
 
     def test_uses_full_interval_when_no_backlog(self, tmp_path):
         """With nothing pending, the normal interval applies."""
@@ -385,7 +386,7 @@ class TestPlotUploadHandler:
         with patch.object(mcal, "upload_published_fit_dirs", return_value=False):
             mcal.plot_upload_handler(stop_event)
 
-        assert stop_event.waits == [600]
+        assert stop_event.waits == [self.PYTEST_WAIT_OVERRIDE_DELAY_SECS]
 
     def test_backoff_still_applies_on_failure(self, tmp_path):
         """A total failure backs the path off and does not report a backlog."""
@@ -400,7 +401,7 @@ class TestPlotUploadHandler:
             mcal.plot_upload_handler(stop_event)
 
         # Falls back to the full interval rather than hot-looping on the failure
-        assert stop_event.waits == [600]
+        assert stop_event.waits == [self.PYTEST_WAIT_OVERRIDE_DELAY_SECS]
 
     def test_stop_event_prevents_further_paths(self, tmp_path):
         """Once shutdown is requested, remaining paths in the pass are skipped."""

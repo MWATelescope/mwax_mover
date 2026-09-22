@@ -48,6 +48,7 @@ from mwax_mover.constants import (
 )
 from mwax_mover.core.config import read_config, read_config_list, read_optional_config
 from mwax_mover.core.env import get_hostname
+from mwax_mover.core.timing import interruptible_sleep
 from mwax_mover.db.calibration import (
     get_unattempted_calibration_requests,
     get_unattempted_unrequested_cal_obsids,
@@ -393,9 +394,18 @@ class MWAXCalvinController(MWAXDaemon):
                     f"Backlog remains, next pass in {PLOT_UPLOAD_BACKLOG_DELAY_SECS}s"
                     f" instead of {self.cfg_plots_upload_interval_secs}s."
                 )
-                stop_event.wait(timeout=PLOT_UPLOAD_BACKLOG_DELAY_SECS)
+
+                if interruptible_sleep(
+                    stop_event,
+                    PLOT_UPLOAD_BACKLOG_DELAY_SECS,
+                ):
+                    break
             else:
-                stop_event.wait(timeout=self.cfg_plots_upload_interval_secs)
+                if interruptible_sleep(
+                    stop_event,
+                    self.cfg_plots_upload_interval_secs,
+                ):
+                    break
 
         logger.debug("Plot upload thread completed successfully.")
 

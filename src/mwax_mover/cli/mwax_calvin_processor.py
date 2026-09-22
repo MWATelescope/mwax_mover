@@ -59,6 +59,7 @@ from mwax_mover.constants import (
 from mwax_mover.core.config import read_config, read_config_bool, read_optional_config
 from mwax_mover.core.env import get_hostname
 from mwax_mover.core.gpstime import get_gpstime_of_now
+from mwax_mover.core.timing import sleep
 from mwax_mover.core.units import bytes_to_gigabytes, get_gbps, gigabyte_to_gibibyte, is_int
 from mwax_mover.db.calibration import (
     update_calibration_request_assign_hostname_start_download,
@@ -573,13 +574,14 @@ class MWAXCalvinProcessor(MWAXDaemon):
             hostname = mwax_host_and_filename[at_pos:colon_pos]
             hostnames.add(hostname)
 
+        RETRY_WAIT_SECONDS = 10
         MAX_WAIT_FOR_MWAX_SECONDS = SECONDS_PER_HOUR
         start_time = datetime.datetime.now().astimezone()
 
         # Do this while there are hosts to release and we have not exceeded our MAX_WAIT_FOR_MWAX_SECONDS
         while (
             len(hostnames) > 0
-            and (datetime.datetime.now().astimezone() - start_time).seconds < MAX_WAIT_FOR_MWAX_SECONDS
+            and (datetime.datetime.now().astimezone() - start_time).total_seconds() < MAX_WAIT_FOR_MWAX_SECONDS
         ):
             logger.info(f"Attempting to release {len(hostnames)} files from MWAX boxes...")
             successful_hosts = set()
@@ -601,16 +603,25 @@ class MWAXCalvinProcessor(MWAXDaemon):
                     # success
                     successful_hosts.add(hostname)
 
-                except ValueError:
+                except ValueError as e:
                     # This is a 400<->500 error - so maybe just try again
-                    pass
+                    logger.error(
+                        f"{hostname}: ValueError calling release_cal_obs, will retry in {RETRY_WAIT_SECONDS} secs: {e}"
+                    )
+
                 except Exception as e:  # noqa: BLE001 - release_cal_obs retry loop; any failure just retries next pass
                     # A much worse error occurred- definitely try again
-                    logger.debug(f"{hostname}: unexpected error calling release_cal_obs, will retry: {e}")
+                    logger.error(
+                        f"{hostname}: unexpected error calling release_cal_obs, will retry in {RETRY_WAIT_SECONDS} secs: {e}"
+                    )
 
             # All remaining hosts have been tried- remove the successful ones from the set
             for hostname in successful_hosts:
                 hostnames.remove(hostname)
+
+            if len(hostnames) > 0:
+                # We still have some hosts remaining, wait before trying again
+                sleep(RETRY_WAIT_SECONDS)
 
     def fail_job_downloading(self, error_message: str):
         """Mark a job as failed during the download phase.

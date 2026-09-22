@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 
 from mwax_mover.core.command import run_command
 from mwax_mover.core.env import running_under_pytest
+from mwax_mover.core.timing import sleep
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +103,7 @@ def run_giant_squid(
             logger.warning(
                 f"run_giant_squid: retry {attempt}/{max_retries} after {delay:.1f}s (last error: {last_exception})"
             )
-            time.sleep(delay)
+            sleep(delay)
 
         start_time = time.monotonic()
 

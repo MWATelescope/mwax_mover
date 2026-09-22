@@ -1,11 +1,18 @@
 # Changelog
 
+# 2.0.8 22-Sep-2026
+
+* Replaced time.sleep() with a custom function in core/timing.py that allows interruption and also decreases sleep time when running under pytest.
+* net.webservice.py now fails for non-transient webservice errors and retries on transient ones.
+
 # 2.0.7 22-Sep-2026
 
 * Calvin:
   * Fixed many out of docstrings and descriptions in CALVIN.md.
   * Fixed confusion with rx_type, rec_type, flavour, falvor usage. `rx_type` is now the receiver type (SHAO,RRI,NI,CIRA,etc) and `flavour` refers to the cable flavour. This brings it inline with other MWA terminology.
   * Refactored calibration fitting: merged the near-identical phase/gain fit paths into shared _process_fits/_fit_one helpers, added a ScoredTile NamedTuple for ref-tile ranking, and unified whole-Jones NaN-flagging via a NAN_JONES constant and _flag_channels helper.
+  * Minor fix when calculating elapsed seconds when waiting on release_cal_obs web service call.
+  * Also added a small wait between retries in release_mwax_files().
 
 # 2.0.6 21-Sep-2026
 

@@ -28,6 +28,8 @@ def _make_response(status_code: int, text: str = "") -> MagicMock:
 
 
 class TestCallWebservice:
+    PYTEST_WAIT_OVERRIDE_DELAY_SECS = 0.01
+
     def test_succeeds_on_first_url_first_attempt(self):
         """A 200 on the first URL returns immediately, with no retry at all."""
         response = _make_response(200)
@@ -59,7 +61,7 @@ class TestCallWebservice:
 
         assert result is good
         assert mock_request.call_count == 3
-        mock_sleep.assert_called_once_with(30)
+        mock_sleep.assert_called_once_with(self.PYTEST_WAIT_OVERRIDE_DELAY_SECS)
 
     def test_raises_the_original_exception_type_after_exhausting_all_retries(self):
         """Final failure re-raises requests.RequestException, not tenacity's RetryError."""
@@ -81,7 +83,10 @@ class TestCallWebservice:
         ):
             call_webservice(123, ["http://a"], None, max_retries=3)
 
-        assert mock_sleep.call_args_list == [((30,),), ((30,),)]
+        assert mock_sleep.call_args_list == [
+            ((self.PYTEST_WAIT_OVERRIDE_DELAY_SECS,),),
+            ((self.PYTEST_WAIT_OVERRIDE_DELAY_SECS,),),
+        ]
 
     def test_max_retries_must_be_at_least_one(self):
         """max_retries=0 is rejected before any HTTP call is attempted."""

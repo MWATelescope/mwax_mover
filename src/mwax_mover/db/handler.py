@@ -17,11 +17,11 @@ from tenacity import (
     retry,
     retry_if_exception_type,
     stop_after_attempt,
-    wait_fixed,
 )
 
 from mwax_mover.constants import DUMMY_CONFIG_VALUE, SECTION_MWA_DATABASE
 from mwax_mover.core.config import read_config
+from mwax_mover.core.timing import retry_wait_fixed
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ class MWAXDBHandler:
 
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_fixed(60),
+        wait=retry_wait_fixed(60),
         retry=retry_if_exception_type(
             (
                 psycopg.errors.ConnectionFailure,
@@ -222,7 +222,7 @@ class MWAXDBHandler:
 
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_fixed(30),
+        wait=retry_wait_fixed(30),
         retry=retry_if_exception_type(
             (
                 psycopg.errors.ConnectionFailure,

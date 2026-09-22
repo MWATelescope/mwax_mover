@@ -14,9 +14,10 @@ import tarfile
 import time
 from pathlib import Path
 
-from tenacity import retry, stop_after_attempt, wait_fixed
+from tenacity import retry, stop_after_attempt
 
 from mwax_mover.core.command import run_command
+from mwax_mover.core.timing import retry_wait_fixed
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ class ChecksumError(Exception):
     """Raised when do_checksum_md5() cannot produce a valid MD5 checksum."""
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
+@retry(stop=stop_after_attempt(3), wait=retry_wait_fixed(10))
 def remove_file(filename: str, raise_error: bool) -> bool:
     """
     Delete a file from the filesystem, with up to 3 automatic attempts.

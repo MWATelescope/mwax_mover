@@ -34,6 +34,7 @@ from mwax_mover.constants import (
 )
 from mwax_mover.core.config import read_config, read_config_bool, read_config_list, read_optional_config
 from mwax_mover.core.env import get_hostname, running_under_pytest
+from mwax_mover.core.timing import sleep
 from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.filesystem.naming import ArchiveLocation
 from mwax_mover.processors.daemon import MWAXDaemon
@@ -160,7 +161,7 @@ class MWACacheArchiveProcessor(MWAXDaemon):
 
         logger.info("Started...")
 
-        time.sleep(1)  # give things time to start!
+        sleep(1)  # give things time to start!
 
         logger.info("Entering main loop...")
 
@@ -170,7 +171,7 @@ class MWACacheArchiveProcessor(MWAXDaemon):
                     self.request_fatal_shutdown(EXIT_FAILURE, f"Worker {w.name} has stopped unexpectedly.")
                     break
 
-            time.sleep(0.1)
+            sleep(0.1)
 
         # Final log message. NOTE: this used to unconditionally log "Completed
         # Successfully" even when we got here because a worker died, which

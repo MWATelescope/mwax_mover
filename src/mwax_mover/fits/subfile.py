@@ -18,6 +18,7 @@ from enum import Enum
 from mwax_mover.constants import COMMAND_DADA_DISKDB
 from mwax_mover.core.command import run_command
 from mwax_mover.core.env import running_under_pytest
+from mwax_mover.core.timing import sleep
 from mwax_mover.core.units import bytes_to_gigabytes
 
 logger = logging.getLogger(__name__)
@@ -214,7 +215,7 @@ def load_psrdada_ringbuffer(full_filename: str, ringbuffer_key: str, numa_node, 
         logger.debug(
             f"{full_filename}- attempting load_psrdada_ringbuffer {ringbuffer_key} (mocked as running in pytest)"
         )
-        time.sleep(2)
+        sleep(2)
         return_value = True
         stdout = ""
     else:

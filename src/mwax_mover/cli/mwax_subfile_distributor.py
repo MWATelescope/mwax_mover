@@ -21,7 +21,6 @@ import signal
 import socket
 import sys
 import threading
-import time
 from configparser import ConfigParser
 
 from flask import Flask, request
@@ -47,6 +46,7 @@ from mwax_mover.constants import (
 )
 from mwax_mover.core.config import read_config, read_config_bool, read_config_list, read_optional_config
 from mwax_mover.core.env import get_hostname, running_under_pytest
+from mwax_mover.core.timing import sleep
 from mwax_mover.core.units import is_int
 from mwax_mover.db.handler import MWAXDBHandler
 from mwax_mover.filesystem.naming import ValidationData, should_project_be_archived, validate_filename
@@ -1066,7 +1066,7 @@ class MWAXSubfileDistributor(MWAXDaemon):
         for w in self.workers:
             w.start()
 
-        time.sleep(1)  # give things time to start!
+        sleep(1)  # give things time to start!
 
         logger.info("Entering main loop...")
 
@@ -1076,7 +1076,7 @@ class MWAXSubfileDistributor(MWAXDaemon):
                     self.request_fatal_shutdown(EXIT_FAILURE, f"Worker {w.name} has stopped unexpectedly.")
                     break
 
-            time.sleep(0.1)
+            sleep(0.1)
 
         # Final log message. NOTE: this used to unconditionally log "Completed
         # Successfully", even when we got here because a worker died. Combined
