@@ -6,7 +6,7 @@ chi2dof range gate to an upper-bound sigma_resid gate.
 
 import numpy as np
 
-from mwax_mover.calvin.refant_report import format_refant_selection_report
+from mwax_mover.calvin.refant_report import ScoredTile, format_refant_selection_report
 from mwax_mover.constants import REFTILE_PHASE_SIGMA_RESID_MAX
 
 
@@ -47,7 +47,7 @@ def _render(scored, gate_details):
 
 def test_report_uses_sigma_resid_column_and_label():
     """The table should advertise the sigma_resid gate and SRes columns, not Chi2."""
-    scored = [(0, 0, 0.0, 0, 0.03, 2044)]
+    scored = [ScoredTile(0, 0, 0.0, 0, 0.03, 2044)]
     report = _render(scored, {2044: _details(0.05, 0.06, True)})
 
     assert f"phase_sigma_resid<={REFTILE_PHASE_SIGMA_RESID_MAX}" in report
@@ -59,7 +59,7 @@ def test_report_uses_sigma_resid_column_and_label():
 
 def test_report_flags_sigma_resid_failure():
     """A tile failing only the sigma_resid gate shows '.' in the 2nd gate slot."""
-    scored = [(1, 0, 0.44, 0, 0.03, 2044)]
+    scored = [ScoredTile(1, 0, 0.44, 0, 0.03, 2044)]
     # XX scatter past the gate; gate marked failed.
     report = _render(scored, {2044: _details(0.42, 0.05, False)})
 

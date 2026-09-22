@@ -285,7 +285,7 @@ def test_fit_phase_line_niter_greater_than_one_with_realistic_clipping():
     clipped even one channel, the next iteration's minimize()/model() calls
     received mismatched-length frequency and solution arrays and raised
     ValueError ("operands could not be broadcast together"). That exception
-    is caught by callers (see HyperfitsSolutionGroup._phase_fit_one) and
+    is caught by callers (see HyperfitsSolutionGroup._fit_one) and
     silently turns into a dropped phase fit for that tile/pol -- so this
     isn't a hypothetical: with niter=3 (production's configured value) and
     any realistic RFI-contaminated data, this fired for essentially every

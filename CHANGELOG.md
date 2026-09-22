@@ -5,6 +5,7 @@
 * Calvin:
   * Fixed many out of docstrings and descriptions in CALVIN.md.
   * Fixed confusion with rx_type, rec_type, flavour, falvor usage. `rx_type` is now the receiver type (SHAO,RRI,NI,CIRA,etc) and `flavour` refers to the cable flavour. This brings it inline with other MWA terminology.
+  * Refactored calibration fitting: merged the near-identical phase/gain fit paths into shared _process_fits/_fit_one helpers, added a ScoredTile NamedTuple for ref-tile ranking, and unified whole-Jones NaN-flagging via a NAN_JONES constant and _flag_channels helper.
 
 # 2.0.6 21-Sep-2026
 

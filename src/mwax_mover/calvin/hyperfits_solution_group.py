@@ -5,8 +5,8 @@ contiguous coarse-channel band, covering anywhere from 1 to 24 bands for MWA
 "picket fence" calibrators -- combined with the observation's metafits): the
 single source of truth for flagging and (eventually) writing hyperdrive
 solutions across a whole observation. TileFlagReason/ChannelFlagReason and
-the four private helpers below (_ref_normalise_xx_yy, _phase_fit_one,
-_gain_fit_one, add_digital_gains_column) are used only by
+the private helpers below (_ref_normalise_xx_yy, _fit_one, _flag_channels,
+add_digital_gains_column) are used only by
 HyperfitsSolutionGroup's methods. See calvin.hyperfits_solution for
 HyperfitsSolution itself, and calvin.hyperdrive for running hyperdrive. See
 calibration/ for the shared data structures and pure numeric fitting/outlier
@@ -18,6 +18,7 @@ import itertools
 import logging
 import os
 import warnings
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import IntFlag, auto
 
@@ -46,7 +47,7 @@ from mwax_mover.calibration.fitting import fit_gain, fit_phase_line
 from mwax_mover.calibration.models import ChanInfo, GainFitInfo, Metafits, PhaseFitInfo
 from mwax_mover.calibration.outliers import annotate_phase_outliers, iterative_poly_clip_batch
 from mwax_mover.calvin.hyperfits_solution import HyperfitsSolution
-from mwax_mover.calvin.refant_report import format_refant_selection_report
+from mwax_mover.calvin.refant_report import ScoredTile, format_refant_selection_report
 from mwax_mover.constants import (
     HYPERDRIVE_CONVERGENCE_PRECISION_MAX,
     REFTILE_DIPOLE_GAINS_EXPECTED,
@@ -99,6 +100,29 @@ class ChannelFlagReason(IntFlag):
     AMPLITUDE_OUTLIER = auto()
 
 
+# Sentinel written into every fully-flagged (tile, chanblock) Jones entry.
+# A NaN entry is excluded from calibration and imaging downstream.
+NAN_JONES = np.nan + 1j * np.nan
+
+
+def _flag_channels(
+    file_jones: NDArray[np.complex128],
+    file_reasons: NDArray[np.object_],
+    mask: NDArray[np.bool_],
+    reason: ChannelFlagReason,
+) -> None:
+    """NaN out the masked (tile, chanblock) Jones entries and record why.
+
+    The two updates always belong together -- a channel flagged bad in
+    file_reasons must also be NaN'd in file_jones -- so this keeps them in
+    lockstep for every per-channel flagging stage (enforce_whole_jones_nan,
+    flag_gain_max_cutoff, flag_amplitude_outliers). An all-False mask is a
+    no-op. mask is shape (n_tiles, n_chanblocks), matching file_reasons.
+    """
+    file_jones[mask] = NAN_JONES
+    file_reasons[mask] |= reason
+
+
 def _ref_normalise_xx_yy(
     jones: NDArray[np.complex128], ref_tile_idx: int
 ) -> tuple[NDArray[np.complex128], NDArray[np.complex128]]:
@@ -133,21 +157,25 @@ def _ref_normalise_xx_yy(
     return ref_xx, ref_yy
 
 
-def _phase_fit_one(
+def _fit_one(
     soln_idx: int,
     tile_id: int,
     pol: str,
     solns: NDArray[np.complex128],
     chanblocks_hz: NDArray[np.float64],
     weights: NDArray[np.float64],
-    phase_fit_niter: int,
     tiles: DataFrame,
+    fit_label: str,
+    fit_fn: Callable[[NDArray[np.complex128], NDArray[np.float64], NDArray[np.float64]], PhaseFitInfo | GainFitInfo],
 ) -> list | None:
-    """Fit a phase ramp for a single tile and polarization.
+    """Fit one tile/polarisation via fit_fn, shared by phase and gain fitting.
 
-    Looks up the tile in the tiles DataFrame, skips flagged or missing tiles,
-    and calls fit_phase_line to perform the fit. Intended to be called
-    concurrently via ThreadPoolExecutor.
+    Looks up the tile in the tiles DataFrame, skips flagged or missing
+    tiles, then runs fit_fn(solns, chanblocks_hz, weights) -- the only part
+    that differs between a phase-ramp fit (fit_phase_line) and a gain fit
+    (fit_gain). Intended to be called concurrently via ThreadPoolExecutor.
+    Replaces the former near-identical _phase_fit_one/_gain_fit_one, which
+    differed only in that call and the log label.
 
     Args:
         soln_idx: Index of this tile in the solutions array.
@@ -156,11 +184,15 @@ def _phase_fit_one(
         solns: Complex calibration solutions for this tile and polarization.
         chanblocks_hz: Array of channel block frequencies in Hz.
         weights: Weight values for each solution.
-        phase_fit_niter: Number of iterations for phase fitting.
         tiles: DataFrame containing tile metadata including flags and names.
+        fit_label: Short label ("phase"/"gain") used only in the skip warning.
+        fit_fn: Callable performing the actual fit, taking
+            (solns, chanblocks_hz, weights) and returning a PhaseFitInfo or
+            GainFitInfo. Any fit-specific parameters (niter,
+            chanblocks_per_coarse) are already bound by the caller.
 
     Returns:
-        A list of [tile_id, soln_idx, pol, *PhaseFitInfo fields] if the fit
+        A list of [tile_id, soln_idx, pol, *fit fields] if the fit
         succeeded, or None if the tile was skipped or the fit failed.
     """
     id_matches = tiles[tiles.id == tile_id]
@@ -171,54 +203,9 @@ def _phase_fit_one(
         return None
     name = tile[COL_NAME]
     try:
-        fit = fit_phase_line(chanblocks_hz, solns, weights, niter=phase_fit_niter)
-    except Exception as exc:  # noqa: BLE001 - one bad tile's phase fit must not abort the whole fit
-        logger.warning(f"Skipping phase fit for {tile_id=:4} {pol} ({name}): {exc}")
-        return None
-    return [tile_id, soln_idx, pol, *fit]
-
-
-def _gain_fit_one(
-    soln_idx: int,
-    tile_id: int,
-    pol: str,
-    solns: NDArray[np.complex128],
-    chanblocks_hz: NDArray[np.float64],
-    weights: NDArray[np.float64],
-    chanblocks_per_coarse: int,
-    tiles: DataFrame,
-) -> list | None:
-    """Fit gain solutions for a single tile and polarization.
-
-    Looks up the tile in the tiles DataFrame, skips flagged or missing tiles,
-    and calls fit_gain to perform the fit. Intended to be called
-    concurrently via ThreadPoolExecutor.
-
-    Args:
-        soln_idx: Index of this tile in the solutions array.
-        tile_id: The tile ID to look up in the tiles DataFrame.
-        pol: Polarization label, either "XX" or "YY".
-        solns: Complex calibration solutions for this tile and polarization.
-        chanblocks_hz: Array of channel block frequencies in Hz.
-        weights: Weight values for each solution.
-        chanblocks_per_coarse: Number of channel blocks per coarse channel.
-        tiles: DataFrame containing tile metadata including flags and names.
-
-    Returns:
-        A list of [tile_id, soln_idx, pol, *GainFitInfo fields] if the fit
-        succeeded, or None if the tile was skipped or the fit failed.
-    """
-    id_matches = tiles[tiles.id == tile_id]
-    if len(id_matches) != 1:
-        return None
-    tile = id_matches.iloc[0]
-    if tile.flag:
-        return None
-    name = tile[COL_NAME]
-    try:
-        fit = fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse)
-    except Exception as exc:  # noqa: BLE001 - one bad tile's gain fit must not abort the whole fit
-        logger.warning(f"Skipping gain fit for {tile_id=:4} {pol} ({name}): {exc}")
+        fit = fit_fn(solns, chanblocks_hz, weights)
+    except Exception as exc:  # noqa: BLE001 - one bad tile's fit must not abort the whole fit
+        logger.warning(f"Skipping {fit_label} fit for {tile_id=:4} {pol} ({name}): {exc}")
         return None
     return [tile_id, soln_idx, pol, *fit]
 
@@ -625,7 +612,7 @@ class HyperfitsSolutionGroup:
 
         bad_tile_mask = metafits_flagged | tiles_hdu_flagged | baseline_flagged
         for file_jones in self.jones:
-            file_jones[bad_tile_mask, :, :, :] = np.nan + 1j * np.nan
+            file_jones[bad_tile_mask, :, :, :] = NAN_JONES
 
     def enforce_whole_jones_nan(self) -> None:
         """Promote any partially-NaN Jones matrix to fully NaN.
@@ -644,8 +631,7 @@ class HyperfitsSolutionGroup:
             any_nan = np.any(np.isnan(file_jones), axis=(-2, -1))
             all_nan = np.all(np.isnan(file_jones), axis=(-2, -1))
             partial = any_nan & ~all_nan
-            file_jones[partial] = np.nan + 1j * np.nan
-            file_reasons[partial] |= ChannelFlagReason.PARTIAL_JONES
+            _flag_channels(file_jones, file_reasons, partial, ChannelFlagReason.PARTIAL_JONES)
 
     @property
     def all_chanblocks_hz_concat(self) -> NDArray[np.float64]:
@@ -793,7 +779,7 @@ class HyperfitsSolutionGroup:
         to 0 for all tiles, preserving existing behaviour exactly.
 
         A tile missing from either fit DataFrame entirely (e.g.
-        _phase_fit_one/_gain_fit_one returned None for it) is treated as
+        _fit_one returned None for it) is treated as
         failing every gate that row would have covered, and sorts behind
         any tile with real data, rather than raising.
 
@@ -965,10 +951,10 @@ class HyperfitsSolutionGroup:
             details["total_chanblocks"] = total_chanblocks
 
             gate_details[tile_id] = details
-            scored.append((failures, n_dead, quality_deficit, n_nan, length_deviation, tile_id))
+            scored.append(ScoredTile(failures, n_dead, quality_deficit, n_nan, length_deviation, tile_id))
 
         scored.sort()
-        best_tile_id = scored[0][5]
+        best_tile_id = scored[0].tile_id
 
         # Generate and store the selection report for stats file / logging.
         tile_names = self.metafits_tiles_df[COL_NAME].to_numpy()
@@ -1145,6 +1131,63 @@ class HyperfitsSolutionGroup:
             np.concatenate(all_ref_yy, axis=1),
         )
 
+    def _process_fits(
+        self,
+        refant_name: str,
+        *,
+        use_ref: bool,
+        fit_label: str,
+        fit_fn: Callable[..., PhaseFitInfo | GainFitInfo],
+        info_fields: tuple[str, ...],
+    ) -> DataFrame:
+        """Fit every tile/polarisation concurrently and collect the results.
+
+        Shared engine for process_phase_fits and process_gain_fits_for_db,
+        which differ only in whether they fit the reference-normalised
+        solutions (phase) or the raw un-normalised ones (gain), the per-tile
+        fit callable, and the result columns.
+
+        Args:
+            refant_name: Name of the reference antenna.
+            use_ref: Fit the reference-normalised XX/YY (True, for phase) or
+                the raw un-normalised XX/YY (False, for gain).
+            fit_label: "phase"/"gain", for _fit_one's skip warning.
+            fit_fn: Per-tile fit callable (see _fit_one).
+            info_fields: The fit result's field names, appended after
+                tile_id/soln_idx/pol as the DataFrame columns.
+
+        Returns:
+            DataFrame with columns [tile_id, soln_idx, pol, *info_fields],
+            one row per successfully-fit tile/polarisation.
+        """
+        self._ensure_loaded()
+        soln_tile_ids, noref_xx, noref_yy, ref_xx, ref_yy = self.get_solns_both(refant_name)
+        xx_all, yy_all = (ref_xx, ref_yy) if use_ref else (noref_xx, noref_yy)
+        chanblocks_hz = self.all_chanblocks_hz_concat
+        weights = self.weights
+
+        futures = {}
+        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+            for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, xx_all, yy_all, strict=True)):
+                for pol, solns in [(COL_XX, xx_solns), (COL_YY, yy_solns)]:
+                    solns_array: NDArray[np.complex128] = np.asarray(solns, dtype=np.complex128)  # type: narrowing for ty
+                    future = executor.submit(
+                        _fit_one,
+                        soln_idx,
+                        int(tile_id),
+                        pol,
+                        solns_array,
+                        chanblocks_hz,
+                        weights,
+                        self.metafits_tiles_df,
+                        fit_label,
+                        fit_fn,
+                    )
+                    futures[future] = (soln_idx, tile_id, pol)
+
+        fits = [result for future in as_completed(futures) if (result := future.result()) is not None]
+        return DataFrame(fits, columns=[COL_TILE_ID, COL_SOLN_IDX, COL_POL, *info_fields])
+
     def process_phase_fits(self, refant_name: str, phase_fit_niter: int) -> DataFrame:
         """Fit linear phase ramps to each tile and polarization.
 
@@ -1156,31 +1199,15 @@ class HyperfitsSolutionGroup:
             DataFrame with phase fit parameters for each tile and polarization,
             columns ["tile_id", "soln_idx", "pol", *PhaseFitInfo._fields].
         """
-        self._ensure_loaded()
-        soln_tile_ids, _noref_xx, _noref_yy, ref_xx, ref_yy = self.get_solns_both(refant_name)
-        chanblocks_hz = self.all_chanblocks_hz_concat
-        weights = self.weights
-
-        futures = {}
-        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-            for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(zip(soln_tile_ids, ref_xx, ref_yy, strict=True)):
-                for pol, solns in [(COL_XX, xx_solns), (COL_YY, yy_solns)]:
-                    solns_array: NDArray[np.complex128] = np.asarray(solns, dtype=np.complex128)  # type: narrowing for ty
-                    future = executor.submit(
-                        _phase_fit_one,
-                        soln_idx,
-                        int(tile_id),
-                        pol,
-                        solns_array,
-                        chanblocks_hz,
-                        weights,
-                        phase_fit_niter,
-                        self.metafits_tiles_df,
-                    )
-                    futures[future] = (soln_idx, tile_id, pol)
-
-        fits = [result for future in as_completed(futures) if (result := future.result()) is not None]
-        return DataFrame(fits, columns=[COL_TILE_ID, COL_SOLN_IDX, COL_POL, *PhaseFitInfo._fields])
+        return self._process_fits(
+            refant_name,
+            use_ref=True,
+            fit_label="phase",
+            fit_fn=lambda solns, chanblocks_hz, weights: fit_phase_line(
+                chanblocks_hz, solns, weights, niter=phase_fit_niter
+            ),
+            info_fields=PhaseFitInfo._fields,
+        )
 
     def process_gain_fits_for_db(self, refant_name: str) -> DataFrame:
         """Fit gain solutions to each tile and polarization.
@@ -1192,33 +1219,15 @@ class HyperfitsSolutionGroup:
             DataFrame with gain fit parameters for each tile and polarization,
             columns ["tile_id", "soln_idx", "pol", *GainFitInfo._fields].
         """
-        self._ensure_loaded()
-        soln_tile_ids, noref_xx, noref_yy, _ref_xx, _ref_yy = self.get_solns_both(refant_name)
-        chanblocks_hz = self.all_chanblocks_hz_concat
-        weights = self.weights
-
-        futures = {}
-        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-            for soln_idx, (tile_id, xx_solns, yy_solns) in enumerate(
-                zip(soln_tile_ids, noref_xx, noref_yy, strict=True)
-            ):
-                for pol, solns in [(COL_XX, xx_solns), (COL_YY, yy_solns)]:
-                    solns_array: NDArray[np.complex128] = np.asarray(solns, dtype=np.complex128)  # type: narrowing for ty
-                    future = executor.submit(
-                        _gain_fit_one,
-                        soln_idx,
-                        int(tile_id),
-                        pol,
-                        solns_array,
-                        chanblocks_hz,
-                        weights,
-                        self.chanblocks_per_coarse,
-                        self.metafits_tiles_df,
-                    )
-                    futures[future] = (soln_idx, tile_id, pol)
-
-        fits = [result for future in as_completed(futures) if (result := future.result()) is not None]
-        return DataFrame(fits, columns=[COL_TILE_ID, COL_SOLN_IDX, COL_POL, *GainFitInfo._fields])
+        return self._process_fits(
+            refant_name,
+            use_ref=False,
+            fit_label="gain",
+            fit_fn=lambda solns, chanblocks_hz, weights: fit_gain(
+                chanblocks_hz, solns, weights, self.chanblocks_per_coarse
+            ),
+            info_fields=GainFitInfo._fields,
+        )
 
     def flag_gain_max_cutoff(self, gain_max_cutoff: float | None) -> None:
         """Flag any (tile, chanblock) entry whose gx or gy amplitude
@@ -1276,9 +1285,7 @@ class HyperfitsSolutionGroup:
             # NaN comparisons are always False, so already-NaN (already
             # bad) entries are naturally excluded without an explicit check.
             exceeds_cutoff = (gx_amp > gain_max_cutoff) | (gy_amp > gain_max_cutoff)
-            if exceeds_cutoff.any():
-                file_jones[exceeds_cutoff, :, :] = np.nan + 1j * np.nan
-                file_reasons[exceeds_cutoff] |= ChannelFlagReason.GAIN_MAX_CUTOFF
+            _flag_channels(file_jones, file_reasons, exceeds_cutoff, ChannelFlagReason.GAIN_MAX_CUTOFF)
 
     def flag_amplitude_outliers(self, poly_degree: int = 2, mad_residual_threshold: float = 10.0) -> None:
         """Flag per-channel gain-amplitude outliers, one contiguous file at a time.
@@ -1348,9 +1355,7 @@ class HyperfitsSolutionGroup:
             )
 
             poly_bad = initial_valid & (~valid_gx | ~valid_gy)
-            if poly_bad.any():
-                file_jones[poly_bad, :, :] = np.nan + 1j * np.nan
-                file_reasons[poly_bad] |= ChannelFlagReason.AMPLITUDE_OUTLIER
+            _flag_channels(file_jones, file_reasons, poly_bad, ChannelFlagReason.AMPLITUDE_OUTLIER)
 
             band_lower_gx = fit_gx + med_gx[:, None] - mad_residual_threshold * mad_gx[:, None]
             band_upper_gx = fit_gx + med_gx[:, None] + mad_residual_threshold * mad_gx[:, None]
@@ -1463,7 +1468,7 @@ class HyperfitsSolutionGroup:
 
         self.tile_flag_reasons[to_promote] |= TileFlagReason.MOSTLY_BAD_CHANNELS
         for file_jones in self.jones:
-            file_jones[to_promote, :, :, :] = np.nan + 1j * np.nan
+            file_jones[to_promote, :, :, :] = NAN_JONES
 
     def run_flagging_pipeline(
         self,

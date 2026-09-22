@@ -8,6 +8,8 @@ calvin.hyperfits_solution_group to keep that class's file manageable
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -22,8 +24,26 @@ from mwax_mover.constants import (
 )
 
 
+class ScoredTile(NamedTuple):
+    """One tile's reference-selection ranking key (sorts ascending, best first).
+
+    Field order IS the tie-break order select_refant relies on when it
+    sorts the list: fewest gate failures, then fewest dead dipoles, then
+    smallest phase-quality deficit, then fewest NaN chanblocks, then
+    smallest fitted-length deviation from the population median, then
+    lowest tile ID.
+    """
+
+    failures: int
+    n_dead: int
+    quality_deficit: float
+    n_nan: int
+    length_deviation: float
+    tile_id: int
+
+
 def format_refant_selection_report(
-    scored: list[tuple[int, int, float, int, float, int]],
+    scored: list[ScoredTile],
     tile_names: NDArray,
     tile_ids: NDArray,
     tile_ants: NDArray,
@@ -41,8 +61,8 @@ def format_refant_selection_report(
     overall rank, with the chosen tile highlighted.
 
     Args:
-        scored: The sorted ranking list from select_refant. Each entry
-            is (failures, n_dead_dipoles, quality_deficit, n_nan_channels,
+        scored: The sorted ranking list from select_refant -- a list of
+            ScoredTile (failures, n_dead, quality_deficit, n_nan,
             length_deviation, tile_id).
         tile_names: Array of tile names, indexed by tile position.
         tile_ids: Array of tile IDs, indexed by tile position.
@@ -90,7 +110,7 @@ def format_refant_selection_report(
     id_to_ant = dict(zip(tile_ids, tile_ants, strict=True))
 
     # Column widths.
-    name_w = max(10, max((len(str(id_to_name.get(s[5], ""))) for s in scored), default=10) + 2)
+    name_w = max(10, max((len(str(id_to_name.get(s.tile_id, ""))) for s in scored), default=10) + 2)
 
     # Header.
     hdr = (

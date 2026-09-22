@@ -1369,7 +1369,7 @@ def _fake_phase_fits(rows: dict) -> pd.DataFrame:
     Args:
         rows: {tile_id: {"XX": (quality, sigma_resid, length), "YY": (...)}}.
             A tile may omit a pol entirely, or omit itself completely, to
-            simulate _phase_fit_one returning None for that (tile, pol).
+            simulate _fit_one returning None for that (tile, pol).
             sigma_resid is the field the ref-tile phase-scatter gate reads;
             chi2dof is held at a fixed passing-irrelevant value since the
             gate no longer looks at it.
@@ -1398,7 +1398,7 @@ def _fake_gain_fits(rows: dict) -> pd.DataFrame:
 
     Args:
         rows: {tile_id: {"XX": quality, "YY": quality}}. A tile may omit a
-            pol, or omit itself completely, to simulate _gain_fit_one
+            pol, or omit itself completely, to simulate _fit_one
             returning None for that (tile, pol).
     """
     records = []
