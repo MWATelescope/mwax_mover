@@ -41,7 +41,7 @@ def test_plot_debug_phase_fits_handles_byteswapped_input():
             "name": [f"Tile{i:03d}" for i in tile_ids],
             "rx": [1, 1],
             "slot": [1, 2],
-            "flavor": ["RRI", "RRI"],
+            "rx_type": ["RRI", "RRI"],
             "flag": [False, False],
         }
     )
@@ -56,7 +56,7 @@ def test_plot_debug_phase_fits_handles_byteswapped_input():
                     "pol": pol,
                     "name": f"Tile{tile_id:03d}",
                     "id": tile_id,
-                    "flavor": "RRI",
+                    "rx_type": "RRI",
                     "rx": 1,
                     "length": 1.0,
                     "intercept": 0.0,

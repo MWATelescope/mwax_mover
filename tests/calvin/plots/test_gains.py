@@ -197,7 +197,7 @@ class TestExtractCombinedGainsBundle:
                 "flag": [False] * n_tiles,
                 "rx": [1] * n_tiles,
                 "slot": [1] * n_tiles,
-                "flavor": "RRI",
+                "rx_type": "RRI",
             }
         )
         # Only .obsid is read by the bundle. Spec'd to Metafits rather than a

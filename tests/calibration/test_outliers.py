@@ -9,13 +9,13 @@ import pandas as pd
 from mwax_mover.calibration.outliers import reject_outliers
 
 
-def _make_phase_fits_df(lengths: list[float], pol: str = "XX", flavor: str = "RRI") -> pd.DataFrame:
+def _make_phase_fits_df(lengths: list[float], pol: str = "XX", rx_type: str = "RRI") -> pd.DataFrame:
     """Minimal phase fits DataFrame for reject_outliers tests."""
     rows = [
         {
             "tile_id": i + 1,
             "pol": pol,
-            "flavor": flavor,
+            "rx_type": rx_type,
             "length": length_val,
             "chi2dof": length_val,  # reuse length as chi2dof for convenience
             "sigma_resid": 0.1,
@@ -128,7 +128,7 @@ def test_reject_outliers_does_not_leak_threshold_across_pols():
 
 
 def test_reject_outliers_default_group_cols_matches_pol_only_behaviour():
-    """group_cols defaults to ("pol",), preserving pre-flavour-scoping behaviour.
+    """group_cols defaults to ("pol",), preserving pre-rx_type-scoping behaviour.
 
     Regression test for the group_cols parameter's default: an explicit
     group_cols=("pol",) call must produce an identical result to omitting
@@ -143,44 +143,44 @@ def test_reject_outliers_default_group_cols_matches_pol_only_behaviour():
     assert result_default["outlier"].to_list() == result_explicit["outlier"].to_list()
 
 
-def test_reject_outliers_flavor_scoping_does_not_leak_threshold_across_flavors():
-    """A threshold computed from one flavour's population must not flag another.
+def test_reject_outliers_rx_type_scoping_does_not_leak_threshold_across_rx_types():
+    """A threshold computed from one rx_type's population must not flag another.
 
     Same shape as test_reject_outliers_does_not_leak_threshold_across_pols,
-    but for group_cols=("pol", "flavor") -- confirms flavour-scoping is a
+    but for group_cols=("pol", "rx_type") -- confirms rx_type-scoping is a
     real, independent grouping axis rather than just a relabelling of pol.
     """
     # RRI: tight population around 1.0 (low threshold).
-    rri_rows = _make_phase_fits_df([1.0, 0.95, 1.05, 0.9, 1.1], flavor="RRI")
+    rri_rows = _make_phase_fits_df([1.0, 0.95, 1.05, 0.9, 1.1], rx_type="RRI")
     # SHAO: a much larger but internally-consistent population around 15.0
     # -- none of these are outliers within SHAO's own population, but they
     # would all exceed a threshold derived from RRI's tight spread.
-    shao_rows = _make_phase_fits_df([15.0, 14.0, 16.0, 13.0, 17.0], flavor="SHAO")
+    shao_rows = _make_phase_fits_df([15.0, 14.0, 16.0, 13.0, 17.0], rx_type="SHAO")
     df = pd.concat([rri_rows, shao_rows], ignore_index=True)
-    result = reject_outliers(df, "chi2dof", group_cols=("pol", "flavor"), nstd=3.0)
+    result = reject_outliers(df, "chi2dof", group_cols=("pol", "rx_type"), nstd=3.0)
     assert not result["outlier"].any()
 
 
-def test_reject_outliers_flavor_scoping_catches_outlier_within_its_own_flavor():
-    """An outlier that's only extreme relative to its own flavour is still caught.
+def test_reject_outliers_rx_type_scoping_catches_outlier_within_its_own_rx_type():
+    """An outlier that's only extreme relative to its own rx_type is still caught.
 
     Mirrors test_reject_outliers_marks_high_value but at group_cols=("pol",
-    "flavor") -- confirms flavour-scoping doesn't just loosen detection,
-    it also catches tiles that a flavour-blind pooled threshold would miss
-    because a larger, noisier flavour's spread dominates the pooled MAD.
+    "rx_type") -- confirms rx_type-scoping doesn't just loosen detection,
+    it also catches tiles that a rx_type-blind pooled threshold would miss
+    because a larger, noisier rx_type's spread dominates the pooled MAD.
     """
-    good_rri = _make_phase_fits_df([1.0] * 9, flavor="RRI")
-    bad_rri = _make_phase_fits_df([1000.0], flavor="RRI")
+    good_rri = _make_phase_fits_df([1.0] * 9, rx_type="RRI")
+    bad_rri = _make_phase_fits_df([1000.0], rx_type="RRI")
     bad_rri["tile_id"] += 100  # avoid colliding tile_id with good_rri
-    # A much noisier flavour with many more tiles, which would otherwise
-    # dominate a flavour-blind pooled median/MAD and mask the RRI outlier.
-    noisy_shao = _make_phase_fits_df([50.0 + i for i in range(30)], flavor="SHAO")
+    # A much noisier rx_type with many more tiles, which would otherwise
+    # dominate a rx_type-blind pooled median/MAD and mask the RRI outlier.
+    noisy_shao = _make_phase_fits_df([50.0 + i for i in range(30)], rx_type="SHAO")
     noisy_shao["tile_id"] += 200
     df = pd.concat([good_rri, bad_rri, noisy_shao], ignore_index=True)
     # nstd=1.0 to match test_reject_outliers_marks_high_value's precedent for
     # this exact 9x1.0+1x1000.0 shape: the single outlier collapses RRI's own
     # MAD to zero (9 of 10 residuals are identical), falling back to a
     # mean+nstd*std threshold, which nstd=3.0 would not cross for this shape.
-    result = reject_outliers(df, "chi2dof", group_cols=("pol", "flavor"), nstd=1.0)
+    result = reject_outliers(df, "chi2dof", group_cols=("pol", "rx_type"), nstd=1.0)
     assert result.loc[result["chi2dof"] == 1000.0, "outlier"].all()
-    assert not result.loc[(result["flavor"] == "RRI") & (result["chi2dof"] != 1000.0), "outlier"].any()
+    assert not result.loc[(result["rx_type"] == "RRI") & (result["chi2dof"] != 1000.0), "outlier"].any()

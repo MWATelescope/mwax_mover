@@ -27,7 +27,7 @@ COL_FLAG = "flag"
 COL_ANT = "ant"
 COL_RX = "rx"
 COL_SLOT = "slot"
-COL_FLAVOR = "flavor"
+COL_RX_TYPE = "rx_type"
 
 # Outlier-rejection results
 COL_OUTLIER = "outlier"

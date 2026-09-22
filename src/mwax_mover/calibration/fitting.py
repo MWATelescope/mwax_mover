@@ -182,9 +182,9 @@ def fit_phase_line(
         solution: Complex array of calibration solutions.
         weights: Array of weights for each solution.
         niter: Number of fitting iterations. Each iteration refits after
-            rejecting outliers more than 2 robust scale units (median + MAD, see
-            the sigma-clip comment in the loop below) from the median residual.
-            Must be >= 1.
+            rejecting outliers more than PHASE_FIT_CLIP_SIGMA robust scale
+            units (median + MAD, see the sigma-clip comment in the loop
+            below) from the median residual. Must be >= 1.
 
     Returns:
         PhaseFitInfo object containing fitted parameters and quality metrics.
@@ -445,15 +445,24 @@ def fit_phase_line(
 def fit_gain(chanblocks_hz, solns, weights, chanblocks_per_coarse: int) -> GainFitInfo:
     """Fit gain solutions across frequency channels.
 
+    Splits the chanblocks into coarse channels (chanblocks_per_coarse each)
+    and, per coarse channel, works on the inverse amplitude (1/|soln|) of the
+    valid, non-zero-weight chanblocks: the per-coarse gain is their weighted
+    mean, and a weighted degree-1 polynomial of inverse amplitude vs.
+    frequency (Hz) supplies pol0/pol1 (intercept/slope) and the residual
+    scatter sigma_resid. quality is the fraction of all chanblocks whose
+    residual falls within GAIN_QUALITY_SIGMA*sigma_resid of that fit.
+
     Args:
         chanblocks_hz: Frequency of each channel block in Hz.
-        solns: Gain solutions (amplitudes).
-        weights: Weights for each solution.
+        solns: Complex gain solutions (amplitude is taken via np.abs).
+        weights: Weights for each solution; zero-weight or non-finite
+            chanblocks are dropped from each coarse channel's fit.
         chanblocks_per_coarse: Number of channel blocks per coarse channel.
 
     Returns:
-        GainFitInfo object containing fitted gains and quality metrics.
-        See GainFitInfo's docstring -- in particular, its pol0/pol1
+        GainFitInfo object with per-coarse-channel fitted gains and quality
+        metrics. See GainFitInfo's docstring -- in particular, its pol0/pol1
         fields are polynomial-fit coefficients, not polarisation labels.
     """
     # length check- should be the number of fine channels
@@ -553,7 +562,4 @@ def poly_str(coeffs, independent_var="x"):
         else:
             return f"×{independent_var}" + "⁰¹²³⁴⁵⁶⁷⁸⁹"[i]
 
-    return " ".join(
-        filter(None, [f"{coeff:+.3}{xpow(i)}" for i, coeff in enumerate(coeffs[::-1])])
-        # if abs(coeff) > 1e-20 else ""
-    )
+    return " ".join(filter(None, [f"{coeff:+.3}{xpow(i)}" for i, coeff in enumerate(coeffs[::-1])]))

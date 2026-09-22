@@ -37,7 +37,7 @@ from numpy.typing import NDArray
 from mwax_mover.calibration.df_columns import (
     COL_CHI2DOF,
     COL_FLAG,
-    COL_FLAVOR,
+    COL_RX_TYPE,
     COL_LENGTH,
     COL_OUTLIER,
     COL_POL,
@@ -79,10 +79,10 @@ def plot_debug_phase_fits(
     and returns a pivoted dataframe with per-antenna fit information.
 
     Args:
-        phase_fits: Already flavour-merged and outlier-annotated phase
+        phase_fits: Already receiver-type-merged and outlier-annotated phase
             fits -- i.e. the output of
             calibration.outliers.annotate_phase_outliers, not a bare
-            process_phase_fits() result. Must include 'flavor' and
+            process_phase_fits() result. Must include 'rx_type' and
             'outlier' columns (a bare process_phase_fits() result will
             raise a KeyError). Callers needing "the" outlier verdict
             should compute it once via annotate_phase_outliers and reuse
@@ -112,13 +112,13 @@ def plot_debug_phase_fits(
     if n_total == 0:
         return None
 
-    flavor_fits = phase_fits
+    rx_type_fits = phase_fits
 
-    n_good = len(flavor_fits[~flavor_fits[COL_OUTLIER]])
+    n_good = len(rx_type_fits[~rx_type_fits[COL_OUTLIER]])
     if n_good == 0:
         return None
 
-    bad_fits = flavor_fits[flavor_fits[COL_OUTLIER]]
+    bad_fits = rx_type_fits[rx_type_fits[COL_OUTLIER]]
     if len(bad_fits) > 0:
         logger.debug(f"{len(bad_fits)} of {n_total} fits are phase-outliers (reported only, not flagged):")
         logger.debug(bad_fits[["name", COL_POL]].to_string(index=False))
@@ -129,8 +129,8 @@ def plot_debug_phase_fits(
         name="HalfBlues",
     )
 
-    if len(flavor_fits):
-        _rx_means = plot_rx_lengths(flavor_fits, prefix, show, title)
+    if len(rx_type_fits):
+        _rx_means = plot_rx_lengths(rx_type_fits, prefix, show, title)
 
     freqs = ensure_system_byte_order(freqs)
     weights = ensure_system_byte_order(weights)
@@ -146,11 +146,11 @@ def plot_debug_phase_fits(
             prefix,
             title,
             residual_vmax,
-            flavor_fits,
+            rx_type_fits,
             nstd=phase_outlier_nstd,
         )
-    if len(flavor_fits):
-        plot_phase_intercepts(prefix, show, title, flavor_fits)
+    if len(rx_type_fits):
+        plot_phase_intercepts(prefix, show, title, rx_type_fits)
 
     # pivot_phase_fits() does its own tiles merge -- pass it only the
     # plain phase-fit columns (not the tile-metadata/outlier columns
@@ -190,11 +190,11 @@ def plot_debug_phase_fits(
     return phase_fits_pivot
 
 
-def plot_rx_lengths(flavor_fits, prefix, show, title):
+def plot_rx_lengths(rx_type_fits, prefix, show, title):
     """Plot and save cable length distribution by receiver.
 
     Args:
-        flavor_fits: DataFrame with fit results per receiver.
+        rx_type_fits: DataFrame with fit results per receiver.
         prefix: Output directory prefix for saving plot.
         show: Whether to display the plot.
         title: Title for the plot.
@@ -202,7 +202,7 @@ def plot_rx_lengths(flavor_fits, prefix, show, title):
     Returns:
         Series with mean cable lengths per receiver.
     """
-    good_fits = flavor_fits[~flavor_fits[COL_OUTLIER]]
+    good_fits = rx_type_fits[~rx_type_fits[COL_OUTLIER]]
     rxs = sorted(good_fits[COL_RX].unique())
     means = good_fits.groupby([COL_RX])[COL_LENGTH].mean()
 
@@ -326,26 +326,26 @@ def plot_phase_fits(freqs, soln_xx, soln_yy, prefix, show, title, cmap, phase_fi
             fig.savefig(f"{prefix}phase_fits_{pol}.png", dpi=resolve_plot_dpi(300), bbox_inches="tight")
 
 
-def plot_phase_intercepts(prefix, show, title, flavor_fits):
+def plot_phase_intercepts(prefix, show, title, rx_type_fits):
     """Plot phase intercepts in polar coordinates.
 
-    Rows are ordered alphabetically by receiver flavour, columns as XX
-    then YY, regardless of the order flavours/pols happen to appear in
-    flavor_fits.
+    Rows are ordered alphabetically by receiver type, columns as XX
+    then YY, regardless of the order receiver types/pols happen to appear in
+    rx_type_fits.
 
     Args:
         prefix: Output directory prefix for saving plot.
         show: Whether to display the plot.
         title: Title for the plot.
-        flavor_fits: DataFrame with phase fit results.
+        rx_type_fits: DataFrame with phase fit results.
     """
     plt.clf()
     g = sns.FacetGrid(
-        flavor_fits,
-        row=COL_FLAVOR,
+        rx_type_fits,
+        row=COL_RX_TYPE,
         col=COL_POL,
-        hue=COL_FLAVOR,
-        row_order=sorted(flavor_fits[COL_FLAVOR].unique()),
+        hue=COL_RX_TYPE,
+        row_order=sorted(rx_type_fits[COL_RX_TYPE].unique()),
         col_order=[COL_XX, COL_YY],
         subplot_kws={"projection": "polar"},
         sharex=False,
@@ -376,7 +376,7 @@ def plot_phase_residual(
     prefix,
     title,
     residual_vmax,
-    flavor_fits,
+    rx_type_fits,
     nstd=3.0,
 ):
     """Plot and analyze phase residuals across frequencies.
@@ -389,36 +389,36 @@ def plot_phase_residual(
         prefix: Output directory prefix for saving plots and data.
         title: Title for plots.
         residual_vmax: Maximum value for residual plot y-axis.
-        flavor_fits: DataFrame with phase fit results per receiver
-            flavor, already annotated with an 'outlier' column (see
+        rx_type_fits: DataFrame with phase fit results per receiver
+            type, already annotated with an 'outlier' column (see
             calibration.outliers.annotate_phase_outliers).
         nstd: Number of (MAD-derived) standard deviations used for the
             shaded outlier-range band on each facet -- must match the
-            nstd that produced flavor_fits's 'outlier' column, or the
+            nstd that produced rx_type_fits's 'outlier' column, or the
             band drawn here won't reflect the actual reporting threshold
             (default: 3.0, matching reject_outliers's own default).
 
-    Rows are ordered alphabetically by receiver flavour, columns as XX
+    Rows are ordered alphabetically by receiver type, columns as XX
     then YY, matching plot_phase_intercepts. XX and YY share the same
     y-axis scale (and therefore the same tick decimal formatting) within
-    each flavour row, so the two columns are directly comparable -- but
-    different flavour rows are not forced to share a scale with each
+    each receiver-type row, so the two columns are directly comparable -- but
+    different receiver-type rows are not forced to share a scale with each
     other, since their typical residual magnitudes can genuinely differ
     (see Step 6's rationale in CALVIN.md).
     """
     plt.clf()
     g = sns.FacetGrid(
-        flavor_fits,
-        row=COL_FLAVOR,
+        rx_type_fits,
+        row=COL_RX_TYPE,
         col=COL_POL,
-        hue=COL_FLAVOR,
-        row_order=sorted(flavor_fits[COL_FLAVOR].unique()),
+        hue=COL_RX_TYPE,
+        row_order=sorted(rx_type_fits[COL_RX_TYPE].unique()),
         col_order=[COL_XX, COL_YY],
         sharex=True,
         sharey="row",
     )
     # sharey="row" ties XX/YY's y-limits (and therefore tick values/decimal
-    # formatting) together within each flavour row, but seaborn also hides
+    # formatting) together within each receiver-type row, but seaborn also hides
     # the y-tick labels on the second (YY) column by default (via
     # FacetGrid.__init__'s own `if sharey in [True, 'row']: ... label.set_
     # visible(False)` for every non-leftmost axis) -- appropriate when a
@@ -440,7 +440,7 @@ def plot_phase_residual(
         }
     )
 
-    # Per-(flavor, pol) sigma_resid outlier-range band, mirroring
+    # Per-(rx_type, pol) sigma_resid outlier-range band, mirroring
     # reject_outliers's own median + nstd*1.4826*MAD formula computed
     # over that group's surviving (non-outlier) population -- shown as a
     # shaded band on each facet so a tile's residual scatter can be
@@ -449,7 +449,7 @@ def plot_phase_residual(
     # shade an acceptance band (see plot_outlier_gains).
     mad_to_std = MAD_TO_STD_SCALE_FACTOR
     sigma_resid_bands: dict[tuple[str, str], float] = {}
-    for (flav, pol), grp in flavor_fits.groupby([COL_FLAVOR, COL_POL]):
+    for (flav, pol), grp in rx_type_fits.groupby([COL_RX_TYPE, COL_POL]):
         good = grp.loc[~grp[COL_OUTLIER], COL_SIGMA_RESID]
         if len(good) == 0:
             continue
@@ -484,7 +484,7 @@ def plot_phase_residual(
         models = gradients[:, np.newaxis] * freqs[np.newaxis, :] + intercepts_arr[:, np.newaxis]
         resids = wrap_angle(np.angle(solns) - models)
         # A whole frequency bin can legitimately be all-NaN here (e.g. every
-        # tile in this flavor/pol group is flagged at that chanblock) --
+        # tile in this rx_type/pol group is flagged at that chanblock) --
         # already handled below via the isfinite `mask`, so the resulting
         # "All-NaN slice encountered" RuntimeWarning is expected noise, not
         # a sign of a problem.
@@ -559,7 +559,7 @@ def plot_phase_residual(
             ylim = float(residual_vmax)
             plt.ylim(-ylim, ylim)
 
-    g.map(plot_residual, COL_SOLN_IDX, COL_POL, COL_FLAVOR, COL_LENGTH, "intercept")
+    g.map(plot_residual, COL_SOLN_IDX, COL_POL, COL_RX_TYPE, COL_LENGTH, "intercept")
     g.set_axis_labels("freq", "phase")
 
     fig = plt.gcf()

@@ -68,7 +68,7 @@ class TileFlagReason(IntFlag):
 
     PHASE_OUTLIER is defined but never set by the automatic pipeline:
     HyperfitsSolutionGroup.detect_phase_outliers reports population-outlier
-    phase fits (stats.txt's Flavor/PhOutlier columns, the phase-fit debug
+    phase fits (stats.txt's RxType/PhOutlier columns, the phase-fit debug
     plots) without flagging or modifying the tile -- a deliberate,
     permanent policy decision, not a config toggle. The bit is kept
     defined (rather than removed) since removing an IntFlag member would
@@ -462,7 +462,6 @@ class HyperfitsSolutionGroup:
         metafits_coarse_bandwidth_hz = metafits_fine_chan_width_hz * metafits_fine_chans_per_coarse
 
         for soln in solns:
-            # coarse_chans = chaninfo.coarse_chan_ranges[coarse_chan_range_idx]
             chanblocks_hz = soln.chanblocks_hz
 
             if len(chanblocks_hz) < 2:
@@ -775,7 +774,8 @@ class HyperfitsSolutionGroup:
         polarisation falls short of the phase-quality gate (the quality
         deficit, 0 for any tile that passes it -- this is what separates the
         least-bad tiles when a whole field fails the gate, e.g. under heavy
-        RFI), then by how far its fitted length deviates from the
+        RFI), then by the number of NaN chanblocks (fewer is better), then
+        by how far its fitted length deviates from the
         *population median* length (not from zero -- median-relative
         deviation is invariant to which tile the bootstrap stage happened to
         use, unlike the raw fitted value).
@@ -1369,19 +1369,21 @@ class HyperfitsSolutionGroup:
         (median + nstd*MAD, robust and iteratively refined -- see
         reject_outliers) on either chi2dof or sigma_resid, relative to
         other tiles sharing both its polarisation *and* its receiver
-        flavour (rx_type, e.g. RRI/SHAO/NI). Mirrors
-        calibration.outliers.reject_outliers's existing use in
-        debug_phase_fits (chi2dof then sigma_resid, sequentially).
+        type (rx_type, e.g. RRI/SHAO/NI). Mirrors
+        calibration.outliers.reject_outliers's use in
+        annotate_phase_outliers (chi2dof then sigma_resid, sequentially),
+        the shared routing both this method and the phase-fit debug plots
+        go through.
 
-        Grouping by flavour in addition to polarisation matters because
-        different receiver flavours have measurably different natural
+        Grouping by receiver type in addition to polarisation matters because
+        different receiver types have measurably different natural
         chi2dof/sigma_resid distributions even after each tile's own
         cable delay is fit out -- confirmed on a real MWA observation,
-        where one flavour's population was visibly tighter than another's
-        even excluding genuine outliers. Pooling every flavour into one
-        population before thresholding lets whichever flavour has the
+        where one receiver type's population was visibly tighter than another's
+        even excluding genuine outliers. Pooling every receiver type into one
+        population before thresholding lets whichever receiver type has the
         most tiles set a threshold that's too strict for a
-        naturally-noisier minority flavour (over-flagging it) and too
+        naturally-noisier minority receiver type (over-flagging it) and too
         lenient for a naturally-tighter one (under-flagging it). See
         CALVIN.md's "Phase-outlier detection" section for the worked
         example this was based on.
@@ -1391,7 +1393,7 @@ class HyperfitsSolutionGroup:
         self.tile_flag_reasons, and a tile found to be a phase outlier is
         never NaN'd or excluded. This was a permanent policy decision
         (not a config toggle): researchers wanted phase-outlier status
-        reported (stats.txt's Flavor/PhOutlier columns, and the
+        reported (stats.txt's RxType/PhOutlier columns, and the
         phase-fit debug plots) without the underlying calibration
         solution being touched.
 
@@ -1414,7 +1416,7 @@ class HyperfitsSolutionGroup:
             phase_fit_niter: Number of iterations for the phase ramp fit.
             nstd: Number of (MAD-derived) standard-deviation-equivalents
                 beyond the population's robust median (per metric, per
-                polarisation, per receiver flavour) before a tile is an
+                polarisation, per receiver type) before a tile is an
                 outlier.
         """
         logger.info("detect_phase_outliers")

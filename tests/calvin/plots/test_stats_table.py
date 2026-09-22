@@ -102,11 +102,11 @@ def test_good_tile_reports_amplitude_and_phase_stats():
     assert rows[0]["flagged_pct"] == pytest.approx(0.0)
 
 
-def test_flavor_field_comes_from_metafits_tiles_df():
-    """Every row's flavor matches the tile's flavor in metafits_tiles_df,
+def test_rx_type_field_comes_from_metafits_tiles_df():
+    """Every row's rx_type matches the tile's rx_type in metafits_tiles_df,
     formatted without the ReceiverType. enum-class prefix."""
     group = _make_stats_group()
-    group.metafits_tiles_df["flavor"] = ["SHAO", "RRI", "NI"]
+    group.metafits_tiles_df["rx_type"] = ["SHAO", "RRI", "NI"]
     jones = [_make_jones()]
     channel_reasons = [np.full((_N_TILES, _N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
     tile_reasons = np.full(_N_TILES, TileFlagReason.NONE, dtype=object)
@@ -115,14 +115,14 @@ def test_flavor_field_comes_from_metafits_tiles_df():
 
     rows = build_tile_stats_rows(group, jones, tile_bad_mask, tile_reasons, channel_reasons, phase_fits)
 
-    assert [r["flavor"] for r in rows] == ["SHAO", "RRI", "NI"]
+    assert [r["rx_type"] for r in rows] == ["SHAO", "RRI", "NI"]
 
 
-def test_flavor_field_strips_receiver_type_enum_prefix():
-    """A flavor value stringified as "ReceiverType.SHAO" (mwalib's actual
+def test_rx_type_field_strips_receiver_type_enum_prefix():
+    """A rx_type value stringified as "ReceiverType.SHAO" (mwalib's actual
     enum repr) displays as just "SHAO"."""
     group = _make_stats_group()
-    group.metafits_tiles_df["flavor"] = "ReceiverType.SHAO"
+    group.metafits_tiles_df["rx_type"] = "ReceiverType.SHAO"
     jones = [_make_jones()]
     channel_reasons = [np.full((_N_TILES, _N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
     tile_reasons = np.full(_N_TILES, TileFlagReason.NONE, dtype=object)
@@ -131,7 +131,7 @@ def test_flavor_field_strips_receiver_type_enum_prefix():
 
     rows = build_tile_stats_rows(group, jones, tile_bad_mask, tile_reasons, channel_reasons, phase_fits)
 
-    assert rows[0]["flavor"] == "SHAO"
+    assert rows[0]["rx_type"] == "SHAO"
 
 
 def test_phase_outlier_field_blank_when_neither_pol_is_an_outlier():
@@ -222,10 +222,10 @@ def test_write_tile_stats_table_produces_readable_output():
     assert "Flagged" in output  # footer summary line
 
 
-def test_write_tile_stats_table_includes_flavor_column():
-    """The Flavor header and each tile's flavor value both appear in the output."""
+def test_write_tile_stats_table_includes_rx_type_column():
+    """The RxType header and each tile's rx_type value both appear in the output."""
     group = _make_stats_group()
-    group.metafits_tiles_df["flavor"] = ["SHAO", "RRI", "NI"]
+    group.metafits_tiles_df["rx_type"] = ["SHAO", "RRI", "NI"]
     jones = [_make_jones()]
     channel_reasons = [np.full((_N_TILES, _N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
     tile_reasons = np.full(_N_TILES, TileFlagReason.NONE, dtype=object)
@@ -238,7 +238,7 @@ def test_write_tile_stats_table_includes_flavor_column():
     write_tile_stats_table("TEST TABLE", rows, buf)
     output = buf.getvalue()
 
-    assert "Flavor" in output
+    assert "RxType" in output
     assert "SHAO" in output
     assert "RRI" in output
     assert "NI" in output
@@ -284,7 +284,7 @@ def _make_stats_group(tile_flag_reasons=None):
             "flag": [False] * _N_TILES,
             "rx": [1] * _N_TILES,
             "slot": [1] * _N_TILES,
-            "flavor": "RRI",
+            "rx_type": "RRI",
         }
     )
     return group

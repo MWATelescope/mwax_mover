@@ -3,9 +3,11 @@
 reject_outliers() is the core robust (MAD-based), iteratively-refined
 per-group threshold test. annotate_phase_outliers() is the single shared
 definition of "phase outlier" used everywhere in the Calvin pipeline
-(both calvin.hyperdrive's reporting-only detection and
-calvin.plots.stats_table/phase_fits's stats/debug plots route through it,
-so the threshold can never silently disagree between the two).
+(both calvin.hyperfits_solution_group.detect_phase_outliers's reporting-only
+detection and calvin.plots.stats_table/calvin.plots.phases's stats/debug
+plots route through it, so the threshold can never silently disagree
+between the two). pivot_phase_fits() reshapes a per-polarisation phase-fits
+DataFrame into per-tile XX/YY columns for those plots.
 iterative_poly_clip_batch() fits a robust, sigma-clipped polynomial
 (batched across tiles) and flags outliers.
 """
@@ -15,7 +17,7 @@ import pandas as pd
 
 from mwax_mover.calibration.df_columns import (
     COL_CHI2DOF,
-    COL_FLAVOR,
+    COL_RX_TYPE,
     COL_OUTLIER,
     COL_POL,
     COL_SIGMA_RESID,
@@ -249,16 +251,16 @@ def reject_outliers(data, quality_key, group_cols=(COL_POL,), nstd=3.0, max_iter
     Flagging is now scoped to the current group throughout.
 
     Grouping only by `pol` (the default, and the only behaviour before
-    group_cols was added) pools every tile of every receiver flavour into
+    group_cols was added) pools every tile of every receiver type into
     one population per polarisation before thresholding. On real MWA
-    observations, different receiver flavours (e.g. RRI/SHAO/NI) have
+    observations, different receiver types (e.g. RRI/SHAO/NI) have
     measurably different natural chi2dof/sigma_resid distributions even
     after each tile's own cable delay is fit out -- so pooling them
-    together lets whichever flavour has the most tiles set a threshold
-    that's too strict for a naturally-noisier minority flavour
+    together lets whichever receiver type has the most tiles set a threshold
+    that's too strict for a naturally-noisier minority receiver type
     (over-flagging it) and too lenient for a naturally-tighter one
-    (under-flagging it). Passing group_cols=("pol", "flavor") scopes the
-    threshold to each flavour's own population instead. See CALVIN.md's
+    (under-flagging it). Passing group_cols=("pol", "rx_type") scopes the
+    threshold to each receiver type's own population instead. See CALVIN.md's
     "Phase-outlier detection" section for a worked example on a real
     observation.
 
@@ -359,9 +361,9 @@ def annotate_phase_outliers(
     """Merge tile metadata into a phase-fits DataFrame and mark population outliers.
 
     Merges tiles (e.g. HyperfitsSolutionGroup.metafits_tiles_df or
-    Metafits.tiles_df -- anything with 'id' and 'flavor' columns) into
+    Metafits.tiles_df -- anything with 'id' and 'rx_type' columns) into
     phase_fits on tile_id/id, then scopes reject_outliers's
-    population-outlier test to (pol, flavor) groups, on chi2dof then
+    population-outlier test to (pol, rx_type) groups, on chi2dof then
     sigma_resid, sequentially.
 
     This is the single, shared definition of "phase outlier" used
@@ -369,7 +371,7 @@ def annotate_phase_outliers(
     detect_phase_outliers (which only reports the result -- see its
     docstring for why phase outliers are no longer flagged or modified),
     and calvin.plots.stats_table.write_before_after_stats (which feeds the
-    same annotated DataFrame to both the stats.txt Flavor/PhOutlier
+    same annotated DataFrame to both the stats.txt RxType/PhOutlier
     columns and, via calvin.plots.phases.write_debug_phase_fit_plots,
     the phase-fit debug plots). Routing every caller through
     one function keeps that definition consistent -- previously the
@@ -379,9 +381,9 @@ def annotate_phase_outliers(
     Args:
         phase_fits: DataFrame from process_phase_fits (or a snapshot of
             it), with columns tile_id/soln_idx/pol/chi2dof/sigma_resid/etc.
-        tiles: DataFrame with tile metadata, including 'id' and 'flavor'.
+        tiles: DataFrame with tile metadata, including 'id' and 'rx_type'.
         nstd: Number of (MAD-derived) standard deviations beyond each
-            (pol, flavor) population's robust centre before a tile's fit
+            (pol, rx_type) population's robust centre before a tile's fit
             is an outlier on that metric (default: 3.0). See
             reject_outliers.
 
@@ -390,8 +392,8 @@ def annotate_phase_outliers(
         'outlier' column marking population-outlier rows.
     """
     merged = phase_fits.merge(tiles, left_on=COL_TILE_ID, right_on="id", how="left")
-    merged = reject_outliers(merged, COL_CHI2DOF, group_cols=(COL_POL, COL_FLAVOR), nstd=nstd)
-    merged = reject_outliers(merged, COL_SIGMA_RESID, group_cols=(COL_POL, COL_FLAVOR), nstd=nstd)
+    merged = reject_outliers(merged, COL_CHI2DOF, group_cols=(COL_POL, COL_RX_TYPE), nstd=nstd)
+    merged = reject_outliers(merged, COL_SIGMA_RESID, group_cols=(COL_POL, COL_RX_TYPE), nstd=nstd)
     return merged
 
 
@@ -416,7 +418,7 @@ def pivot_phase_fits(
     )
     phase_fits = pd.merge(phase_fits, tiles, left_on=COL_TILE_ID, right_on="id")
     phase_fits.drop("id", axis=1, inplace=True)
-    tile_columns = [COL_SOLN_IDX, "name", COL_TILE_ID, "rx", "slot", COL_FLAVOR]
+    tile_columns = [COL_SOLN_IDX, "name", COL_TILE_ID, "rx", "slot", COL_RX_TYPE]
     tile_columns += [*(set(tiles.columns) - set(tile_columns) - {"id"})]
     fit_columns = [column for column in phase_fits.columns if column not in tile_columns]
     fit_columns.sort()

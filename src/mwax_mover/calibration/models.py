@@ -13,8 +13,7 @@ import pandas as pd
 from mwalib import MetafitsContext
 from numpy.typing import NDArray
 
-# Standard number of MWA coarse channels.
-MWA_NUM_COARSE_CHANS = 24
+from mwax_mover.constants import MWA_NUM_COARSE_CHANS
 
 
 class Tile(NamedTuple):
@@ -26,7 +25,7 @@ class Tile(NamedTuple):
     ant: int
     rx: int
     slot: int
-    flavor: str = ""
+    rx_type: str = ""
 
 
 class ChanInfo(NamedTuple):
@@ -97,7 +96,7 @@ class Metafits:
                     ant=ant.ant,
                     rx=ant.rfinput_x.rec_number,
                     slot=ant.rfinput_x.rec_slot_number,
-                    flavor=str(ant.rfinput_x.rec_type),
+                    rx_type=str(ant.rfinput_x.rec_type),
                 )
                 for ant in self._mc.antennas
             ],
@@ -203,20 +202,24 @@ class GainFitInfo(NamedTuple):
     polarisation (XX/YY) -- a separate GainFitInfo is already computed per
     polarisation (see e.g. x_gains/y_gains in calvin.pipeline.process_solutions).
     Within a single GainFitInfo, `pol0`/`pol1` are the order-0 (intercept)
-    and order-1 (slope) coefficients of a small linear polynomial fit to
-    gain amplitude vs. chanblock index, done *within* each coarse channel
-    solely to compute `sigma_resid`.
+    and order-1 (slope) coefficients of a small degree-1 polynomial fit of
+    inverse gain amplitude (1/amp) vs. frequency (Hz), done *within* each
+    coarse channel (see fit_gain). The fit's residual scatter gives
+    `sigma_resid`; pol0/pol1 themselves are also persisted to the
+    calibration_solutions DB table (see calvin.pipeline.process_solutions ->
+    db.calibration.insert_calibration_solutions_row).
 
     Fields:
         quality: Fraction of all chanblocks (including flagged ones)
-            within 2*sigma_resid of their coarse channel's linear fit,
-            across all coarse channels. Range [0, 1]; higher is better.
+            within GAIN_QUALITY_SIGMA*sigma_resid of their coarse channel's
+            linear fit, across all coarse channels. Range [0, 1]; higher is
+            better.
         gains: Per-coarse-channel weighted-mean inverse amplitude
             (1/amp), i.e. the actual gain value used downstream.
         pol0: Per-coarse-channel intercept of the within-coarse-channel
-            linear amplitude fit (see note above). Diagnostic only.
+            inverse-amplitude vs. frequency fit (see note above).
         pol1: Per-coarse-channel slope of the within-coarse-channel
-            linear amplitude fit (see note above). Diagnostic only.
+            inverse-amplitude vs. frequency fit (see note above).
         sigma_resid: Per-coarse-channel residual standard deviation of
             that linear fit.
     """

@@ -72,8 +72,8 @@ def _paged_output_path(output_path: str, first_tile_index: int, last_tile_index:
     return f"{base}_{first_tile_index}-{last_tile_index}{ext}"
 
 
-def _format_flavor(flavor: str) -> str:
-    """Format a receiver flavour for display in the stats table.
+def _format_rx_type(rx_type: str) -> str:
+    """Format a receiver type for display in the stats table.
 
     mwalib's ReceiverType enum stringifies as e.g. "ReceiverType.SHAO" --
     strip the class-name prefix so the stats table just shows "SHAO",
@@ -82,12 +82,12 @@ def _format_flavor(flavor: str) -> str:
     (e.g. an empty string, or a plain str already).
 
     Args:
-        flavor: A tile's flavor value, e.g. from metafits_tiles_df.
+        rx_type: A tile's rx_type value, e.g. from metafits_tiles_df.
 
     Returns:
-        Display-formatted flavour string.
+        Display-formatted receiver-type string.
     """
-    text = str(flavor)
+    text = str(rx_type)
     return text.rsplit(".", 1)[-1] if "." in text else text
 
 

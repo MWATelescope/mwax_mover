@@ -23,7 +23,7 @@ file itself:
    trend is a cleaner signal than comparing it against other tiles.
 5. A whole-observation phase-fit outlier check: a tile's cable-delay phase
    ramp fit (chi2dof, sigma_resid) is compared against the population of
-   other tiles sharing its polarisation and receiver flavour. This is
+   other tiles sharing its polarisation and receiver type. This is
    REPORT-ONLY -- an outlier here is never flagged or modified. See
    HyperfitsSolutionGroup.detect_phase_outliers.
 6. Promotion of a partially-flagged tile to fully flagged, if too large a

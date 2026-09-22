@@ -18,7 +18,7 @@ from numpy.typing import NDArray
 
 from mwax_mover.calibration.df_columns import (
     COL_CHI2DOF,
-    COL_FLAVOR,
+    COL_RX_TYPE,
     COL_ID,
     COL_NAME,
     COL_OUTLIER,
@@ -30,7 +30,7 @@ from mwax_mover.calibration.df_columns import (
 )
 from mwax_mover.calibration.outliers import annotate_phase_outliers
 from mwax_mover.calvin.hyperfits_solution_group import ChannelFlagReason, HyperfitsSolutionGroup, TileFlagReason
-from mwax_mover.calvin.plots.gains import _channel_reason_counts_text, _format_flavor, _tile_flag_reason_text
+from mwax_mover.calvin.plots.gains import _channel_reason_counts_text, _format_rx_type, _tile_flag_reason_text
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ def build_tile_stats_rows(
     jones_snapshot/tile_bad_mask/tile_reasons/channel_reasons/phase_fits.
 
     Args:
-        group: The solution group (used for tile names/IDs/flavours).
+        group: The solution group (used for tile names/IDs/receiver types).
         jones_snapshot: One complex array per file, shape (n_tiles,
             n_chanblocks, 2, 2) -- e.g. group.jones itself (current state)
             or a copy taken at an earlier point.
@@ -64,7 +64,7 @@ def build_tile_stats_rows(
             if this isn't the group's current/final state).
         channel_reasons: One array per file, shape (n_tiles, n_chanblocks) --
             e.g. group.channel_flag_reasons at the point of this snapshot.
-        phase_fits: Ideally already flavour-merged and outlier-annotated
+        phase_fits: Ideally already receiver-type-merged and outlier-annotated
             phase fits -- i.e. the output of
             calibration.outliers.annotate_phase_outliers, computed against
             the same snapshot (pristine data for "before", final data
@@ -78,7 +78,7 @@ def build_tile_stats_rows(
         List of one dict per tile, each with keys:
             tile (int): Tile ID.
             name (str): Tile name.
-            flavor (str): Formatted receiver flavour (see _format_flavor).
+            rx_type (str): Formatted receiver type (see _format_rx_type).
             fully_flagged (bool): Whether the whole tile is flagged.
             flagged_pct (float): Percentage of this tile's channels flagged.
             n_bad_channels (int): Count of flagged channels, across all files.
@@ -101,7 +101,7 @@ def build_tile_stats_rows(
     n_tiles = len(group.metafits_tiles_df)
     tile_names = group.metafits_tiles_df[COL_NAME].to_numpy()
     tile_ids = group.metafits_tiles_df[COL_ID].to_numpy()
-    tile_flavors = group.metafits_tiles_df[COL_FLAVOR].to_numpy()
+    tile_rx_types = group.metafits_tiles_df[COL_RX_TYPE].to_numpy()
 
     total_channels = np.zeros(n_tiles, dtype=int)
     bad_channels = np.zeros(n_tiles, dtype=int)
@@ -131,7 +131,7 @@ def build_tile_stats_rows(
         row = {
             "tile": int(tile_ids[tile]),
             COL_NAME: tile_names[tile],
-            COL_FLAVOR: _format_flavor(tile_flavors[tile]),
+            COL_RX_TYPE: _format_rx_type(tile_rx_types[tile]),
             "fully_flagged": fully_flagged,
             "flagged_pct": flagged_pct,
             "n_bad_channels": n_bad,
@@ -217,13 +217,13 @@ def write_tile_stats_table(title: str, rows: list[dict], stats_fd) -> None:
 
     id_w = 6
     name_w = max(10, max((len(r[COL_NAME]) for r in rows), default=10) + 2)
-    flavor_w = max(8, max((len(r[COL_FLAVOR]) for r in rows), default=8) + 2)
+    rx_type_w = max(8, max((len(r[COL_RX_TYPE]) for r in rows), default=8) + 2)
     num_w = 8
     phout_w = 9
 
     header = (
         f"{title}:\n"
-        f"{'Tile':<{id_w}} {'Name':<{name_w}} {'Flavor':<{flavor_w}} {'Status':<14} {'Flagged%':>9} "
+        f"{'Tile':<{id_w}} {'Name':<{name_w}} {'RxType':<{rx_type_w}} {'Status':<14} {'Flagged%':>9} "
         f"{'gx_med':>{num_w}} {'gx_min':>{num_w}} {'gx_max':>{num_w}} "
         f"{'gy_med':>{num_w}} {'gy_min':>{num_w}} {'gy_max':>{num_w}} "
         f"{'chi2_x':>{num_w}} {'chi2_y':>{num_w}} {'sres_x':>{num_w}} {'sres_y':>{num_w}} "
@@ -242,7 +242,7 @@ def write_tile_stats_table(title: str, rows: list[dict], stats_fd) -> None:
         reason = r["tile_reason"] if r["fully_flagged"] else r["channel_reasons"]
 
         line = (
-            f"{r['tile']:<{id_w}} {r['name']:<{name_w}} {r['flavor']:<{flavor_w}} {status:<14} "
+            f"{r['tile']:<{id_w}} {r['name']:<{name_w}} {r[COL_RX_TYPE]:<{rx_type_w}} {status:<14} "
             f"{r['flagged_pct']:>8.1f}% "
             f"{fmt(r['gx_median'], f'{num_w}.2f')} {fmt(r['gx_min'], f'{num_w}.2f')} {fmt(r['gx_max'], f'{num_w}.2f')} "
             f"{fmt(r['gy_median'], f'{num_w}.2f')} {fmt(r['gy_min'], f'{num_w}.2f')} {fmt(r['gy_max'], f'{num_w}.2f')} "
@@ -277,11 +277,11 @@ def write_before_after_stats(
     before_phase_fits/phase_fits attributes are all required here.
 
     The "after" phase fit is not recomputed here: group.phase_fits is
-    already the final, fully-cleaned, flavour/outlier-annotated state,
+    already the final, fully-cleaned, receiver-type/outlier-annotated state,
     because run_flagging_pipeline() runs detect_phase_outliers() last for
     exactly this reason (see its docstring). This function reuses it
     directly for build_tile_stats_rows's AFTER row (the stats.txt AFTER
-    row's Flavor/PhOutlier columns) -- and since phase fitting costs real
+    row's RxType/PhOutlier columns) -- and since phase fitting costs real
     time (roughly 2 minutes for a 256-tile observation in testing),
     doesn't pay for a second fit of the same data. Only the "before" phase
     fit is annotated here, since it's a genuinely different (deliberately

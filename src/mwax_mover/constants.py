@@ -39,8 +39,9 @@ constants (NVIDIA_A40_VRAM_BYTES, HYPERDRIVE_GPU_RESIDENT_FIXED_BYTES,
 HYPERDRIVE_MAX_CONCURRENT_GPU_WORKERS, HYPERDRIVE_GPU_LMN_BYTES,
 HYPERDRIVE_GPU_GAUSSIAN_PARAMS_BYTES), used to additionally cap that same
 sizing against the shared GPU's memory and measured compute-contention
-ceiling; and the REFTILE_* gates used by select_refant to choose a
-calibration-quality-aware reference tile.
+ceiling; the REFTILE_* gates used by select_refant to choose a
+calibration-quality-aware reference tile; and MWA_NUM_COARSE_CHANS, the
+standard MWA coarse-channel count.
 """
 
 # The full filename with path
@@ -107,6 +108,9 @@ MAD_TO_STD_SCALE_FACTOR = 1.4826
 # to revisit if aligning Calvin's quality metric with that convention.
 PHASE_FIT_CLIP_SIGMA = 2.0
 GAIN_QUALITY_SIGMA = 2.0
+
+# Standard number of MWA coarse channels.
+MWA_NUM_COARSE_CHANS = 24
 
 # Shared logging.Formatter format string for the CLI daemons/scripts. See
 # docs/CONSTANTS_CLEANUP.md 1.2.

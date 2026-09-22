@@ -1,5 +1,11 @@
 # Changelog
 
+# 2.0.7 22-Sep-2026
+
+* Calvin:
+  * Fixed many out of docstrings and descriptions in CALVIN.md.
+  * Fixed confusion with rx_type, rec_type, flavour, falvor usage. `rx_type` is now the receiver type (SHAO,RRI,NI,CIRA,etc) and `flavour` refers to the cable flavour. This brings it inline with other MWA terminology.
+
 # 2.0.6 21-Sep-2026
 
 * Calvin:
