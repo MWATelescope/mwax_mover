@@ -18,24 +18,19 @@ logger = logging.getLogger(__name__)
 
 
 def run_wsclean(
-    metafits_filename: str,
-    ms_filename: str,
+    ms_filenames: list[str],
     job_output_path: str,
     obs_id: int,
     wsclean_binary_path: str,
-    wsclean_max_mem_gib: int,
     wsclean_timeout: int,
 ) -> bool:
     """Execute wsclean to process visibility data.
 
     Args:
-        input_data_path: Path to input visibility FITS files.
-        metafits_filename: Path to the metafits file.
-        ms_filename: Input path for the CASA measurement set file.
+        ms_filenames: List of CASA measurement set dirs.
         job_output_path: Output directory for wsclean.
         obs_id: Observation ID.
         wsclean_binary_path: Path to the wsclean executable.
-        wsclean_max_mem_gib: Maximum memory in GiB for wsclean.
         wsclean_timeout: Timeout in seconds for wsclean execution.
 
     Returns:
@@ -50,7 +45,9 @@ def run_wsclean(
     stdout = None
     try:
         # Run wsclean
-        cmdline = f"{wsclean_binary_path} --max-memory={wsclean_max_mem_gib} {ms_filename}"
+        ms = ",".join(ms_filenames)
+
+        cmdline = f"{wsclean_binary_path} {ms}"
 
         wsclean_popen_process = start_command(cmdline, -1, False, False)
 
@@ -92,7 +89,8 @@ def run_wsclean(
         )
 
         # Move the processing dir
-        shutil.move(ms_filename, job_output_path)
+        for ms in ms_filenames:
+            shutil.move(ms, job_output_path)
 
         # Write out a useful file of error and command line info
         readme_filename = os.path.join(job_output_path, "readme_error.txt")
