@@ -1,6 +1,6 @@
 [project]
 name = "mwax_mover"
-version = "2.0.8"
+version = "2.1.0"
 description = "A module to manage input, archiving and calibration for the MWAX correlator"
 readme = "README.md"
 requires-python = ">=3.14, <3.15"
@@ -66,7 +66,7 @@ update_calvin_plots_and_index = "mwax_mover.cli.update_calvin_plots_and_index:ma
 print_metafits_info = "mwax_mover.cli.print_metafits_info:main"
 
 [build-system]
-requires = ["uv_build>=0.12.11,<0.13.0"]
+requires = ["uv_build>=0.12.11"]
 build-backend = "uv_build"
 
 [tool.ruff]

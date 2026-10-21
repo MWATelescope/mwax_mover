@@ -1,6 +1,7 @@
 # mwax_mover calvin imaging plan
 
-Status: **planned.** No phase is implemented yet.
+Status: **in progress.** Phase 1 is implemented (see its notes below). It
+still needs the calvin host checks. Phases 2-6 are planned.
 
 Add a WSClean imaging step to `mwax_calvin_processor`. To do this, Birli
 and hyperdrive change from UVFITS to CASA measurement sets (MS), and
@@ -132,6 +133,9 @@ do not image a partial band set.) If WSClean fails, there is no stage 2.
 
 ## Phase 1: change UVFITS to MS
 
+Status: **implemented**, applied by Greg. Calvin host checks are still
+to do (see the end of this phase).
+
 - `constants.py`: add `EXT_MS = ".ms"`. Remove `EXT_UVFITS` if no code
   uses it after this phase.
 - `calvin/birli.py`: change `uvfits_filename` to `ms_filename`, and
@@ -156,9 +160,27 @@ do not image a partial band set.) If WSClean fails, there is no stage 2.
   - Update the docstrings that refer to UVFITS.
 - Tests: replace the 3 `_uvfits_num_coarse_chans` tests (D2). Add tests
   for `extract_channels_from_ms_filename()`.
+- Implementation notes:
+  - `EXT_UVFITS` is removed. Nothing else used it.
+  - `_run_hyperdrive_one()` gets the band name with
+    `os.path.splitext()` of the basename, not with `EXT_MS`. This keeps
+    the 3 other existing `run_hyperdrive` tests, which use `.uvfits`
+    placeholder names, unchanged.
+  - Test edits (approved): the 3 `_uvfits_num_coarse_chans` tests were
+    replaced (D2). The patch target in
+    `test_run_hyperdrive_worker_count_comes_from_max_hyperdrive_workers`
+    changed to `_ms_num_coarse_chans`, with one docstring line.
+  - New tests: `_ms_num_coarse_chans`, `run_hyperdrive` band names, MS
+    moved whole on failure, MS already in `job_output_path`, and
+    `extract_channels_from_ms_filename()`.
+  - The slow tests (`test_pipeline.py`, `test_hyperfits_solution*.py`,
+    `calvin/plots`) were not run to the end in the sandbox. They do not
+    import any changed module. Run the full suite before the commit.
 - Check on a calvin host (Greg): Birli MS size against
   `estimate_birli_output_bytes()` (`bytes_per_r_and_i=13` was for
   UVFITS). Hyperdrive solutions from MS are the same as from UVFITS.
+  A picket-fence run gives `OBSID_chN-M.ms` names, and hyperdrive
+  accepts them.
 
 ## Phase 2: calibrated MS
 
@@ -176,6 +198,11 @@ do not image a partial band set.) If WSClean fails, there is no stage 2.
   - Return `(success, list of calibrated MS)`. Run the bands one after
     the other (D11).
 - Constants: `CALIBRATED_MS_SUFFIX = "_cal.ms"`.
+- Note: `extract_channels_from_ms_filename()` returns `None` for
+  `*_cal.ms`, because the channel suffix is not directly before `.ms`.
+  Do not use it on the calibrated sets. If WSClean needs the channel
+  range of a calibrated set, take it from the Birli MS name before the
+  rename, or extend the function then.
 - Config `[hyperdrive] apply_timeout` (seconds).
 - D9: after a successful apply, remove the Birli MS dirs unless
   `keep_completed_visibility_files=1`.
