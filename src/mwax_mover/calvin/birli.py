@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 def run_birli(
     input_data_path: str,
     metafits_filename: str,
-    uvfits_filename: str,
+    ms_filename: str,
     job_output_path: str,
     obs_id: int,
     oversampled: bool,
@@ -42,7 +42,10 @@ def run_birli(
     Args:
         input_data_path: Path to input visibility FITS files.
         metafits_filename: Path to the metafits file.
-        uvfits_filename: Output path for UV FITS file.
+        ms_filename: Output path for the CASA measurement set. Birli adds a
+            ``_chN`` or ``_chN-M`` suffix to each band's name for picket fence
+            observations, so one measurement set (a directory) is written
+            per contiguous coarse channel band.
         job_output_path: Output directory for Birli.
         obs_id: Observation ID.
         oversampled: Whether the observation is oversampled.
@@ -105,7 +108,7 @@ def run_birli(
             f"{birli_binary_path}"
             f" --metafits {metafits_filename}"
             " --no-draw-progress"
-            f" --uvfits-out={uvfits_filename}"
+            f" --ms-out={ms_filename}"
             f" --flag-edge-width={int(edge_width_hz / 1e3)}"
             f" --max-memory={birli_max_mem_gib}"
             f" {avg_arg} {data_file_arg}"

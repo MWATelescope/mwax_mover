@@ -1,7 +1,7 @@
 """Tests for calvin.hyperdrive's run/stats functions.
 
 Covers estimate_di_calibrate_peak_ram_bytes, estimate_di_calibrate_peak_gpu_bytes,
-_uvfits_num_coarse_chans, and _max_hyperdrive_workers -- the memory-estimation
+_ms_num_coarse_chans, and _max_hyperdrive_workers -- the memory-estimation
 and concurrency-sizing support for parallelising run_hyperdrive across
 picket-fence bands -- plus run_hyperdrive itself now that it's wired up.
 write_hyperdrive_stats/get_convergence_summary still have no test coverage.
@@ -13,12 +13,11 @@ from unittest.mock import MagicMock, patch
 
 import mwalib
 import pytest
-from astropy.io import fits
 from tests_common import obs_metafits_path
 
 from mwax_mover.calvin.hyperdrive import (
     _max_hyperdrive_workers,
-    _uvfits_num_coarse_chans,
+    _ms_num_coarse_chans,
     estimate_di_calibrate_peak_gpu_bytes,
     estimate_di_calibrate_peak_ram_bytes,
     run_hyperdrive,
@@ -176,67 +175,26 @@ def test_estimate_di_calibrate_peak_gpu_bytes_dominated_by_resident_baseline(met
 
 
 # ===========================================================================
-# _uvfits_num_coarse_chans
+# _ms_num_coarse_chans
 # ===========================================================================
 
 
-def _header_with_freq_axis(freq_axis: int, naxis_freq: int, cdelt_freq: float, total_naxis: int) -> fits.Header:
-    """Build a minimal synthetic uvfits-style primary HDU header.
-
-    Only the keys _uvfits_num_coarse_chans actually reads: NAXIS, the FREQ
-    axis's own CTYPE/NAXIS/CDELT, and enough other CTYPEn placeholders that
-    the FREQ-axis scan has non-FREQ axes to skip past (matching a real
-    uvfits file's COMPLEX/STOKES/FREQ/RA/DEC axis layout).
-    """
-    header = fits.Header()
-    header["NAXIS"] = total_naxis
-    for i in range(2, total_naxis + 1):
-        if i == freq_axis:
-            header[f"CTYPE{i}"] = "FREQ"
-            header[f"NAXIS{i}"] = naxis_freq
-            header[f"CDELT{i}"] = cdelt_freq
-        else:
-            header[f"CTYPE{i}"] = "STOKES" if i == 3 else "COMPLEX"
-            header[f"NAXIS{i}"] = 1
-            header[f"CDELT{i}"] = 1.0
-    return header
+def test_ms_num_coarse_chans_single_channel_suffix(metafits_context):
+    """Birli names a one coarse channel band _chN.ms."""
+    assert _ms_num_coarse_chans("/data/jobs/1244973688_ch75.ms", metafits_context) == 1
 
 
-def test_uvfits_num_coarse_chans_matches_real_header(metafits_context):
-    """Verified against a real Birli-produced uvfits header (1061316544.uvfits).
-
-    NAXIS4=32, CDELT4=40000 Hz -> 1.28 MHz bandwidth == exactly one MWA
-    coarse channel. This fixture's own metafits has coarse_chan_width_hz
-    of 1,280,000 (the fixed MWA value), matching the real file's band.
-    """
-    header = _header_with_freq_axis(freq_axis=4, naxis_freq=32, cdelt_freq=40000.0, total_naxis=6)
-
-    with patch("mwax_mover.calvin.hyperdrive.fits.getheader", return_value=header):
-        result = _uvfits_num_coarse_chans("fake.uvfits", metafits_context)
-
-    assert result == 1
+def test_ms_num_coarse_chans_channel_range_suffix_is_inclusive(metafits_context):
+    """_chN-M covers receiver channels N to M inclusive."""
+    assert _ms_num_coarse_chans("/data/jobs/1244973688_ch75-76.ms", metafits_context) == 2
+    assert _ms_num_coarse_chans("/data/jobs/1244973688_ch110-121.ms", metafits_context) == 12
 
 
-def test_uvfits_num_coarse_chans_freq_axis_not_hardcoded(metafits_context):
-    """The FREQ axis can be at a different index -- must not assume CTYPE4."""
-    header = _header_with_freq_axis(freq_axis=3, naxis_freq=64, cdelt_freq=40000.0, total_naxis=5)
+def test_ms_num_coarse_chans_no_suffix_uses_metafits_count(metafits_context):
+    """No suffix means the whole observation, i.e. every coarse channel in the metafits."""
+    assert metafits_context.num_metafits_coarse_chans == 24  # guards the fixture, so this test stays meaningful
 
-    with patch("mwax_mover.calvin.hyperdrive.fits.getheader", return_value=header):
-        result = _uvfits_num_coarse_chans("fake.uvfits", metafits_context)
-
-    # 64 * 40000 = 2,560,000 Hz = 2 coarse channels.
-    assert result == 2
-
-
-def test_uvfits_num_coarse_chans_no_freq_axis_raises(metafits_context):
-    """A malformed header with no FREQ axis raises rather than guessing."""
-    header = fits.Header()
-    header["NAXIS"] = 3
-    header["CTYPE2"] = "COMPLEX"
-    header["CTYPE3"] = "STOKES"
-
-    with patch("mwax_mover.calvin.hyperdrive.fits.getheader", return_value=header), pytest.raises(StopIteration):
-        _uvfits_num_coarse_chans("fake.uvfits", metafits_context)
+    assert _ms_num_coarse_chans("/data/jobs/1244973688.ms", metafits_context) == 24
 
 
 # ===========================================================================
@@ -475,7 +433,7 @@ def test_run_hyperdrive_worker_count_comes_from_max_hyperdrive_workers(tmp_path)
     """The ThreadPoolExecutor is actually sized by _max_hyperdrive_workers's decision.
 
     Mocks the whole memory-estimate chain so the wiring can be checked
-    directly, without depending on real uvfits/metafits fixtures.
+    directly, without depending on real measurement set/metafits fixtures.
     """
     job_output_path = tmp_path / "output"
     job_output_path.mkdir()
@@ -484,7 +442,7 @@ def test_run_hyperdrive_worker_count_comes_from_max_hyperdrive_workers(tmp_path)
         Path(f).write_text("not a real fits file")
 
     with (
-        patch("mwax_mover.calvin.hyperdrive._uvfits_num_coarse_chans", return_value=1),
+        patch("mwax_mover.calvin.hyperdrive._ms_num_coarse_chans", return_value=1),
         patch("mwax_mover.calvin.hyperdrive.estimate_di_calibrate_peak_ram_bytes", return_value=1000),
         patch("mwax_mover.calvin.hyperdrive.estimate_di_calibrate_peak_gpu_bytes", return_value=2000),
         patch("mwax_mover.calvin.hyperdrive._max_hyperdrive_workers", return_value=3) as mock_max_workers,
@@ -509,3 +467,121 @@ def test_run_hyperdrive_worker_count_comes_from_max_hyperdrive_workers(tmp_path)
 
     mock_max_workers.assert_called_once_with([1000, 1000, 1000], [2000, 2000, 2000])
     mock_executor.assert_called_once_with(max_workers=3)
+
+
+def _make_ms_dirs(parent: Path, names: list[str]) -> list[str]:
+    """Create placeholder CASA measurement set directories (a dir with a file inside)."""
+    ms_dirs = []
+    for name in names:
+        ms_dir = parent / name
+        ms_dir.mkdir()
+        (ms_dir / "table.dat").write_text("placeholder")
+        ms_dirs.append(str(ms_dir))
+    return ms_dirs
+
+
+def test_run_hyperdrive_names_outputs_after_the_ms_band(tmp_path):
+    """Solutions and readme are named from the .ms name, and hyperdrive is given the .ms directory."""
+    job_output_path = tmp_path / "output"
+    job_output_path.mkdir()
+    ms_dirs = _make_ms_dirs(tmp_path, ["1234567890_ch75-76.ms", "1234567890_ch159.ms"])
+    cmdlines = []
+
+    def fake_start_command(cmdline, *args, **kwargs):
+        cmdlines.append(cmdline)
+        return "popen"
+
+    with (
+        patch("mwax_mover.calvin.hyperdrive.start_command", side_effect=fake_start_command),
+        patch("mwax_mover.calvin.hyperdrive.check_popen_finished", return_value=(0, "stdout", "stderr")),
+    ):
+        success, _calibration_command = run_hyperdrive(
+            ms_dirs,
+            "fake_metafits.fits",
+            MagicMock(),  # memory estimate fails on this, so it runs serially
+            str(job_output_path),
+            1234567890,
+            "/bin/hyperdrive",
+            "srclist.txt",
+            "gleam",
+            500,
+            60,
+            "",
+            80000,
+        )
+
+    assert success is True
+    assert (job_output_path / "1234567890_ch75-76_hyperdrive_readme.txt").exists()
+    assert (job_output_path / "1234567890_ch159_hyperdrive_readme.txt").exists()
+    assert any(f"--data {ms_dirs[0]} " in c and "1234567890_ch75-76_solutions.fits" in c for c in cmdlines)
+    assert any(f"--data {ms_dirs[1]} " in c and "1234567890_ch159_solutions.fits" in c for c in cmdlines)
+
+
+def test_run_hyperdrive_failure_moves_ms_directories_with_their_contents(tmp_path):
+    """On failure the measurement set directories are moved whole into the job output dir."""
+    job_output_path = tmp_path / "output"
+    job_output_path.mkdir()
+    working_path = tmp_path / "working"
+    working_path.mkdir()
+    ms_dirs = _make_ms_dirs(working_path, ["1234567890_ch75-76.ms", "1234567890_ch159.ms"])
+
+    with (
+        patch("mwax_mover.calvin.hyperdrive.start_command", return_value="popen"),
+        patch("mwax_mover.calvin.hyperdrive.check_popen_finished", return_value=(1, "stdout", "stderr")),
+    ):
+        success, _calibration_command = run_hyperdrive(
+            ms_dirs,
+            "fake_metafits.fits",
+            MagicMock(),
+            str(job_output_path),
+            1234567890,
+            "/bin/hyperdrive",
+            "srclist.txt",
+            "gleam",
+            500,
+            60,
+            "",
+            80000,
+        )
+
+    assert success is False
+    for name in ("1234567890_ch75-76.ms", "1234567890_ch159.ms"):
+        assert (job_output_path / name / "table.dat").read_text() == "placeholder"
+        assert not (working_path / name).exists()
+    assert (job_output_path / "readme_error.txt").exists()
+
+
+def test_run_hyperdrive_failure_leaves_ms_already_in_job_output_path(tmp_path):
+    """Large observations have Birli write straight into the job output dir.
+
+    On failure those measurement sets are already where they would be moved
+    to, and shutil.move() raises when the destination exists. The failure
+    path must not raise, and must not lose the data.
+    """
+    job_output_path = tmp_path / "output"
+    job_output_path.mkdir()
+    ms_dirs = _make_ms_dirs(job_output_path, ["1234567890_ch75-76.ms", "1234567890_ch159.ms"])
+
+    with (
+        patch("mwax_mover.calvin.hyperdrive.start_command", return_value="popen"),
+        patch("mwax_mover.calvin.hyperdrive.check_popen_finished", return_value=(1, "stdout", "stderr")),
+    ):
+        success, _calibration_command = run_hyperdrive(
+            ms_dirs,
+            "fake_metafits.fits",
+            MagicMock(),
+            str(job_output_path),
+            1234567890,
+            "/bin/hyperdrive",
+            "srclist.txt",
+            "gleam",
+            500,
+            60,
+            "",
+            80000,
+        )
+
+    assert success is False
+    for ms_dir in ms_dirs:
+        assert (Path(ms_dir) / "table.dat").read_text() == "placeholder"
+    assert (job_output_path / "readme_error.txt").exists()

@@ -21,7 +21,7 @@ from enum import Enum, IntEnum
 
 import requests
 
-from mwax_mover.constants import EXT_FIL, EXT_FITS, EXT_HDR, EXT_SUB, EXT_VDIF, MWA_WEBSERVICE_HOSTS
+from mwax_mover.constants import EXT_FIL, EXT_FITS, EXT_HDR, EXT_MS, EXT_SUB, EXT_VDIF, MWA_WEBSERVICE_HOSTS
 from mwax_mover.fits.metafits import download_metafits_file, get_calibrator_info
 from mwax_mover.net.webservice import call_webservice
 
@@ -496,6 +496,36 @@ def extract_channels_from_filename(filename: str) -> dict | None:
         is found, or None if no channel pattern is present.
     """
     match = re.search(r"_ch(\d{1,3})(?:-(\d{1,3}))?_", filename)
+    if not match:
+        return None
+    result = {"start": int(match.group(1))}
+    if match.group(2) is not None:
+        result["end"] = int(match.group(2))
+    return result
+
+
+def extract_channels_from_ms_filename(filename: str) -> dict | None:
+    """Extracts receiver channel information from a Birli measurement set name.
+
+    Birli names the measurement set of each contiguous coarse channel band by
+    adding a suffix to the requested output name. Unlike the plot and
+    solution files handled by extract_channels_from_filename(), the channel
+    suffix is directly followed by the ``.ms`` extension, not by another
+    ``_``.
+
+    - Single channel: e.g. "1445856416_ch96.ms"
+    - Channel range:  e.g. "1424383568_ch110-121.ms"
+    - No suffix (not a picket fence observation): e.g. "1424383568.ms"
+
+    Args:
+        filename: The measurement set name. A leading directory path is
+            ignored.
+
+    Returns:
+        A dict with a "start" key and optional "end" key if a channel suffix
+        is found, or None if there is none.
+    """
+    match = re.search(rf"_ch(\d{{1,3}})(?:-(\d{{1,3}}))?{re.escape(EXT_MS)}/?$", filename)
     if not match:
         return None
     result = {"start": int(match.group(1))}

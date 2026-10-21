@@ -5,7 +5,7 @@ writes a readme (core.command.write_readme_file) recording the command and
 outcome, mirroring calvin.birli.run_birli(). write_hyperdrive_stats() writes
 get_convergence_summary()'s convergence summary for a just-produced solution
 file. estimate_di_calibrate_peak_ram_bytes(), estimate_di_calibrate_peak_gpu_bytes(),
-_uvfits_num_coarse_chans(), and _max_hyperdrive_workers() support parallelising
+_ms_num_coarse_chans(), and _max_hyperdrive_workers() support parallelising
 run_hyperdrive() across picket-fence bands -- the host-RAM and GPU-memory
 estimates share two small helpers (_estimate_component_counts(),
 _estimate_chanblocks_and_baselines()) so the two stay in sync. See
@@ -23,11 +23,9 @@ from typing import Any
 
 import mwalib
 import numpy as np
-from astropy.io import fits
 
 from mwax_mover.calvin.hyperfits_solution import HyperfitsSolution
 from mwax_mover.constants import (
-    EXT_UVFITS,
     F32_BYTES,
     F64_BYTES,
     HYPERDRIVE_FALLBACK_WORKERS,
@@ -42,41 +40,34 @@ from mwax_mover.constants import (
 )
 from mwax_mover.core.command import check_popen_finished, start_command, write_readme_file
 from mwax_mover.core.env import available_memory_bytes
+from mwax_mover.filesystem.naming import extract_channels_from_ms_filename
 
 logger = logging.getLogger(__name__)
 
 
-def _uvfits_num_coarse_chans(uvfits_filename: str, metafits_context: mwalib.MetafitsContext) -> int:
-    """Determine how many MWA coarse channels a uvfits file covers.
+def _ms_num_coarse_chans(ms_filename: str, metafits_context: mwalib.MetafitsContext) -> int:
+    """Determine how many MWA coarse channels a measurement set covers.
 
-    Reads only the primary HDU's header (no data): scans CTYPE2..CTYPEn for
-    the FREQ axis (its index isn't fixed -- it depends on how many random-
-    group parameter axes precede it, e.g. it's CTYPE4 for a typical
-    Birli-produced file) and computes that axis's total bandwidth from
-    NAXIS * |CDELT|. Divides by the coarse-channel width (a fixed ~1.28 MHz
-    for MWA, from metafits_context.coarse_chan_width_hz) rather than the
-    metafits' raw fine-channel count, since Birli's own --avg-freq-res can
-    coarsen the fine-channel resolution independently of the metafits --
-    dividing by fine-channel *count* would silently give the wrong answer
-    whenever Birli's averaging differs from the metafits' native
-    resolution; dividing actual bandwidth by the coarse-channel width
-    (which averaging never changes) doesn't have that failure mode.
+    Birli names the measurement set of each contiguous band of a picket fence
+    observation with a ``_chN`` (one coarse channel) or ``_chN-M`` (receiver
+    channels N to M inclusive) suffix, so the count comes from the filename
+    and no measurement set table needs to be read. A measurement set with no
+    suffix holds the whole observation, so it covers every coarse channel in
+    the metafits.
 
     Args:
-        uvfits_filename: Path to a single uvfits file (one picket).
-        metafits_context: Metafits context for the observation.
+        ms_filename: Path to a single measurement set directory (one band).
+        metafits_context: The observation's metafits context, used when the
+            name has no channel suffix.
 
     Returns:
-        Number of coarse channels this uvfits file covers, at least 1.
-
-    Raises:
-        StopIteration: If no axis has CTYPE == 'FREQ' (malformed uvfits).
+        Number of coarse channels this measurement set covers, at least 1.
     """
-    header = fits.getheader(uvfits_filename)
-    naxis = header["NAXIS"]
-    freq_axis = next(i for i in range(2, naxis + 1) if header.get(f"CTYPE{i}") == "FREQ")
-    bandwidth_hz = header[f"NAXIS{freq_axis}"] * abs(header[f"CDELT{freq_axis}"])
-    return max(1, round(bandwidth_hz / metafits_context.coarse_chan_width_hz))
+    chans = extract_channels_from_ms_filename(ms_filename)
+    if chans is None:
+        return max(1, metafits_context.num_metafits_coarse_chans)
+
+    return max(1, chans.get("end", chans["start"]) - chans["start"] + 1)
 
 
 def _estimate_component_counts(num_sources: int) -> tuple[int, int, int]:
@@ -356,7 +347,7 @@ def _max_hyperdrive_workers(per_run_host_bytes: list[int], per_run_gpu_bytes: li
 
 
 def _run_hyperdrive_one(
-    uvfits_file: str,
+    ms_file: str,
     metafits_filename: str,
     job_output_path: str,
     obs_id: int,
@@ -369,10 +360,10 @@ def _run_hyperdrive_one(
     run_index: int,
     total_runs: int,
 ) -> tuple[bool, str, str, int, str, str]:
-    """Run hyperdrive di-calibrate on a single uvfits file (one picket).
+    """Run hyperdrive di-calibrate on a single measurement set (one picket).
 
     Args:
-        uvfits_file: Path to this picket's input UV FITS file.
+        ms_file: Path to this picket's input CASA measurement set (a directory).
         metafits_filename: Path to the metafits file.
         job_output_path: Output directory for hyperdrive.
         obs_id: Observation ID.
@@ -392,7 +383,9 @@ def _run_hyperdrive_one(
         cmdline/exit_code/stdout/stderr describe this picket's own attempt,
         for the caller to report if this run failed.
     """
-    obsid_and_band = os.path.basename(uvfits_file.replace(EXT_UVFITS, ""))
+    # Strip any trailing slash, the directory's extension and its parent path,
+    # leaving e.g. 1234567890_ch75-76 (or just 1234567890 if not a picket fence).
+    obsid_and_band = os.path.splitext(os.path.basename(ms_file.rstrip("/")))[0]
     start_time = time.monotonic()
     stdout = ""
     stderr = ""
@@ -414,11 +407,11 @@ def _run_hyperdrive_one(
         cmdline = (
             f"{hyperdrive_binary_path} di-calibrate"
             f" --no-progress-bars {calibration_command}"
-            f" --data {uvfits_file} {metafits_filename} "
+            f" --data {ms_file} {metafits_filename} "
             f" --outputs {hyperdrive_solution_full_filename} {bin_solution_full_filename}"
         )
 
-        logger.info(f"{obs_id}: Running hyperdrive on {uvfits_file}...")
+        logger.info(f"{obs_id}: Running hyperdrive on {ms_file}...")
         hyperdrive_popen_process = start_command(cmdline, -1, False, False)
 
         exit_code, stdout, stderr = check_popen_finished(
@@ -462,7 +455,7 @@ def _run_hyperdrive_one(
 
 
 def run_hyperdrive(
-    input_uvfits_files: list[str],
+    input_ms_files: list[str],
     metafits_filename: str,
     metafits_context: mwalib.MetafitsContext,
     job_output_path: str,
@@ -475,7 +468,7 @@ def run_hyperdrive(
     hyperdrive_extra_args: str,
     edge_width_hz: int,
 ) -> tuple[bool, str]:
-    """Run hyperdrive calibration on UV FITS files, concurrently across picket-fence bands.
+    """Run hyperdrive calibration on measurement sets, concurrently across picket-fence bands.
 
     Every picket runs regardless of whether another one fails -- unlike the
     previous serial implementation, which stopped at the first failure and
@@ -485,22 +478,22 @@ def run_hyperdrive(
 
     Concurrency is bounded by both host RAM and GPU memory/compute (see
     _max_hyperdrive_workers): each picket's peak host RAM and peak GPU
-    memory are estimated from its own uvfits file (_uvfits_num_coarse_chans)
+    memory are estimated from its own measurement set (_ms_num_coarse_chans)
     and the observation's metafits (estimate_di_calibrate_peak_ram_bytes,
     estimate_di_calibrate_peak_gpu_bytes), and the worker count is capped
     so the worst-case picket always fits within the live-probed available
     host memory, the shared GPU's memory budget, and a fixed empirically-
     measured GPU-compute-contention ceiling. If any picket's estimate
-    can't be computed (e.g. a malformed uvfits header), concurrency is
+    can't be computed (e.g. an unexpected measurement set name), concurrency is
     disabled for this call (falls back to fully serial) rather than
     raising -- a file hyperdrive itself can't parse either should still
     get its own clean per-picket failure and readme, not an unhandled
     exception before any run even starts.
 
     Args:
-        input_uvfits_files: List of input UV FITS files, one per contiguous
-            coarse-channel band (so 1 for a normal observation, up to 24 for a
-            picket fence).
+        input_ms_files: List of input CASA measurement set directories, one per
+            contiguous coarse-channel band (so 1 for a normal observation, up
+            to 24 for a picket fence).
         metafits_filename: Path to the metafits file.
         metafits_context: Metafits context for the observation, used to
             estimate each picket's peak RAM.
@@ -517,7 +510,7 @@ def run_hyperdrive(
     Returns:
         tuple[True, calibration_command] if all runs succeeded, [False, calibration_command] if any failed.
     """
-    total_runs = len(input_uvfits_files)
+    total_runs = len(input_ms_files)
     if total_runs == 0:
         # Vacuously successful -- matches the previous implementation's
         # behaviour (an empty list never took the "not all succeeded" path
@@ -527,9 +520,7 @@ def run_hyperdrive(
     logger.info(f"{obs_id}: {total_runs} contiguous band(s) detected. Running hyperdrive {total_runs} time(s)....")
 
     try:
-        num_coarse_chans_per_picket = [
-            _uvfits_num_coarse_chans(uvfits_file, metafits_context) for uvfits_file in input_uvfits_files
-        ]
+        num_coarse_chans_per_picket = [_ms_num_coarse_chans(ms_file, metafits_context) for ms_file in input_ms_files]
         per_run_host_bytes = [
             estimate_di_calibrate_peak_ram_bytes(metafits_context, edge_width_hz, num_sources, n)
             for n in num_coarse_chans_per_picket
@@ -551,7 +542,7 @@ def run_hyperdrive(
         future_to_index = {
             executor.submit(
                 _run_hyperdrive_one,
-                uvfits_file,
+                ms_file,
                 metafits_filename,
                 job_output_path,
                 obs_id,
@@ -564,7 +555,7 @@ def run_hyperdrive(
                 i,
                 total_runs,
             ): i
-            for i, uvfits_file in enumerate(input_uvfits_files)
+            for i, ms_file in enumerate(input_ms_files)
         }
         for future in as_completed(future_to_index):
             results[future_to_index[future]] = future.result()
@@ -595,8 +586,14 @@ def run_hyperdrive(
             f"{obs_id}: moving failed files to {job_output_path} for manual analysis and writing readme_error.txt"
         )
 
-        for uvfits_file in input_uvfits_files:
-            shutil.move(uvfits_file, job_output_path)
+        # Measurement sets are directories. When Birli wrote them straight into
+        # the job output dir (large observations) they are already there, and
+        # shutil.move() would fail because the destination exists.
+        job_output_abspath = os.path.abspath(job_output_path)
+        for ms_file in input_ms_files:
+            if os.path.dirname(os.path.abspath(ms_file.rstrip("/"))) == job_output_abspath:
+                continue
+            shutil.move(ms_file, job_output_path)
 
         readme_filename = os.path.join(job_output_path, "readme_error.txt")
         write_readme_file(

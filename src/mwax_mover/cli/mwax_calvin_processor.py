@@ -43,7 +43,7 @@ from mwax_mover.constants import (
     CONFIG_KEY_GIANT_SQUID_BINARY_PATH,
     CONFIG_KEY_LOG_LEVEL,
     EXIT_FAILURE,
-    EXT_UVFITS,
+    EXT_MS,
     HEALTH_THREAD_NAME,
     INDEX_JSON_FILENAME,
     LOG_FORMAT,
@@ -147,7 +147,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
         self.request_id_list: list[int] = []
         self.metafits_name: str = ""
         self.metafits_filename: str = ""
-        self.uvfits_filename: str = ""
+        self.ms_filename: str = ""
         self.ws_filenames: list[str] = []
         self.mwax_download_filenames: list[str] = []  # Only applicable for realtime
         self.data_downloaded: bool = False
@@ -197,7 +197,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
         self.cfg_birli_max_mem_gib: int = 0
         self.cfg_birli_freq_res_khz: int = 0
         self.cfg_birli_int_time_res_sec: float = 0.0
-        self.estimated_uvfits_GB: int = 0
+        self.estimated_vis_GB: int = 0
 
         # hyperdrive
         self.cfg_hyperdrive_timeout: int = 0
@@ -336,9 +336,9 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 )
                 self.stop(exit_code=EXIT_FAILURE)
 
-            # Working path for Birli / uvfits output is determined by calculating the size of the output visibilites:
+            # Working path for Birli / measurement set output is determined by calculating the size of the output visibilites:
             logger.info("Calculating observation output size...")
-            self.estimated_uvfits_GB = int(
+            self.estimated_vis_GB = int(
                 estimate_birli_output_bytes(
                     self.metafits_context,
                     self.cfg_birli_freq_res_khz,
@@ -347,14 +347,14 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 / (1000**3)
             )
             # Round up
-            self.estimated_uvfits_GB = max(self.estimated_uvfits_GB, 1)
+            self.estimated_vis_GB = max(self.estimated_vis_GB, 1)
 
             logger.info(
-                f"Observation UVFITS output is estimated to be : {self.estimated_uvfits_GB} GB "
-                f"({int(gigabyte_to_gibibyte(self.estimated_uvfits_GB))} GiB)"
+                f"Observation measurement set output is estimated to be : {self.estimated_vis_GB} GB "
+                f"({int(gigabyte_to_gibibyte(self.estimated_vis_GB))} GiB)"
             )
 
-            if self.estimated_uvfits_GB < 500:
+            if self.estimated_vis_GB < 500:
                 # Use temp_working_dir
                 self.working_path = os.path.join(
                     self.cfg_proc_temp_working_path, f"{self.slurm_job_id!s}_{self.obs_id!s}"
@@ -363,7 +363,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 os.makedirs(name=self.working_path, exist_ok=True)
 
                 # Override the birli allowed memory
-                self.cfg_birli_max_mem_gib -= int(gigabyte_to_gibibyte(self.estimated_uvfits_GB))
+                self.cfg_birli_max_mem_gib -= int(gigabyte_to_gibibyte(self.estimated_vis_GB))
                 logger.info(
                     f"Using temporary work dir {self.cfg_proc_temp_working_path} for Birli output. Reduced "
                     f"allowed Birli memory to: {self.cfg_birli_max_mem_gib} GiB"
@@ -373,9 +373,10 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 self.working_path = self.cfg_proc_job_output_path
                 logger.info(f"Using work dir {self.working_path} for Birli output.")
 
-            # Set uvfits filename
-            self.uvfits_filename = os.path.join(self.working_path, f"{self.obs_id}{EXT_UVFITS}")
-            logger.info(f"Job Output UVFITS file(s) will be created as: {self.uvfits_filename}")
+            # Set measurement set name. For a picket fence observation Birli adds
+            # a _chN or _chN-M suffix, creating one measurement set per band.
+            self.ms_filename = os.path.join(self.working_path, f"{self.obs_id}{EXT_MS}")
+            logger.info(f"Job Output measurement set(s) will be created as: {self.ms_filename}")
 
             # All files we could get are now in the processing_path
             logger.info("Ensuring all data is ready for processing...")
@@ -541,10 +542,13 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 for file_to_delete in visibility_files:
                     remove_file(file_to_delete, False)
 
-                # Now remove uvfits too
-                uvfits_files = glob.glob(os.path.join(self.cfg_proc_job_input_path, f"*{EXT_UVFITS}"))
-                for file_to_delete in uvfits_files:
-                    remove_file(file_to_delete, False)
+                # Now remove the measurement sets too. Birli wrote them to
+                # working_path (not job_input_path). Each one is a directory.
+                for ms_dir_to_delete in glob.glob(os.path.join(self.working_path, f"*{EXT_MS}")):
+                    try:
+                        shutil.rmtree(ms_dir_to_delete)
+                    except OSError:
+                        logger.warning(f"{self.obs_id}: could not remove measurement set {ms_dir_to_delete}. Ignoring.")
 
             # Final log message
             self.current_task_name = "Complete"
@@ -946,10 +950,10 @@ class MWAXCalvinProcessor(MWAXDaemon):
             return False, f"Exception in check_obs_is_ready_to_process: {e!s}"
 
     def run_birli(self) -> tuple[bool, str]:
-        """Execute Birli preprocessing to produce UVFITS file(s).
+        """Execute Birli preprocessing to produce CASA measurement set(s).
 
         Runs Birli with appropriate parameters to preprocess visibility data
-        and create UVFITS output files.
+        and create measurement set output (one per contiguous coarse channel band).
 
         Returns:
             A tuple of (success, error_message). If successful, error_message is empty.
@@ -964,7 +968,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
         birli_success = run_birli(
             self.cfg_proc_job_input_path,
             self.metafits_filename,
-            self.uvfits_filename,
+            self.ms_filename,
             self.cfg_proc_job_output_path,
             self.obs_id,
             oversampled,
@@ -984,7 +988,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
     def run_hyperdrive(self, metafits_context: mwalib.MetafitsContext) -> tuple[bool, str, str]:
         """Execute Hyperdrive calibration to produce calibration solutions.
 
-        Runs Hyperdrive calibration on preprocessed UVFITS files, generates
+        Runs Hyperdrive calibration on preprocessed measurement sets, generates
         statistics and plots, and exports solutions to configured directories.
 
         Args:
@@ -995,16 +999,16 @@ class MWAXCalvinProcessor(MWAXDaemon):
         """
         hyperdrive_success = False
 
-        # If all good run hyperdrive- once per uvfits file created
-        # N (where N>1) uvfits are generated if Birli sees the obs is picket fence
+        # If all good run hyperdrive- once per measurement set created
+        # N (where N>1) measurement sets are generated if Birli sees the obs is picket fence
         # Therefore we need to run hyperdrive N times too
         #
-        # get a list of the uvfits files
-        uvfits_files = glob.glob(os.path.join(self.working_path, f"*{EXT_UVFITS}"))
+        # get a list of the measurement sets (directories)
+        ms_files = sorted(glob.glob(os.path.join(self.working_path, f"*{EXT_MS}")))
 
         # Run hyperdrive (might be multiple times if picket fence)
         hyperdrive_success, calibration_command = run_hyperdrive(
-            uvfits_files,
+            ms_files,
             self.metafits_filename,
             metafits_context,
             self.cfg_proc_job_output_path,

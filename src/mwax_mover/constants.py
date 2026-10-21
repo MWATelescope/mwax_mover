@@ -18,7 +18,7 @@ Network: MWA_WEBSERVICE_HOSTS, the two MWA webservice hosts tried in
 order by every caller that queries the metadata webservice.
 
 File naming: the MWA data file extensions (EXT_FITS, EXT_SUB, EXT_VDIF,
-EXT_FIL, EXT_HDR, EXT_UVFITS); the hyperdrive solution-file naming
+EXT_FIL, EXT_HDR, EXT_MS); the hyperdrive solution-file naming
 convention (SOLUTIONS_FITS_SUFFIX and friends); INDEX_JSON_FILENAME, the
 calibration-fit index manifest filename; COMMAND_DADA_DISKDB, the
 external binary name used to load a subfile into a PSRDADA ring buffer.
@@ -177,8 +177,10 @@ JONES_F64_BYTES = 64
 F32_BYTES = 4
 F64_BYTES = 8
 
-# UVFITS output extension, produced by Birli and consumed by hyperdrive.
-EXT_UVFITS = ".uvfits"
+# CASA measurement set extension. A measurement set is a directory, not a
+# file. Produced by Birli (one per contiguous coarse channel band) and
+# consumed by hyperdrive and WSClean.
+EXT_MS = ".ms"
 
 # Fraction of live-probed available memory reserved as headroom when
 # sizing concurrent hyperdrive runs -- leaves room for the parent process
