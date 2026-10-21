@@ -180,7 +180,7 @@ class MWAXDBHandler:
                 # Check how many rows we affected
                 rows_affected = len(rows)
 
-                if expected_rows:
+                if expected_rows is not None:
                     # if we passed in how many rows we were expecting, check it!
                     if expected_rows == rows_affected:
                         return rows

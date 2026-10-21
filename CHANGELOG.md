@@ -1,5 +1,9 @@
 # Changelog
 
+# 2.1.0 20-Oct-2026
+
+* Added imaging to calvin_processor.
+
 # 2.0.8 22-Sep-2026
 
 * Replaced time.sleep() with a custom function in core/timing.py that allows interruption and also decreases sleep time when running under pytest.
