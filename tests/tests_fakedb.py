@@ -81,7 +81,7 @@ class FakeMWAXDBHandler(MWAXDBHandler):
         """Overrides the close method- nothing to do here since we don't have
         connections or a pool"""
 
-    def select_postgres(self, sql: str, parm_list, expected_rows):
+    def select_postgres(self, sql: str, parm_list, expected_rows):  # ty: ignore[invalid-attribute-override]
         """Return the next pre-loaded result set without hitting the database.
 
         Pops and returns the first item from ``select_results``. Tests must
@@ -105,7 +105,7 @@ class FakeMWAXDBHandler(MWAXDBHandler):
         """
         return self.select_results.pop(0)
 
-    def execute_dml(self, sql: str, parm_list, expected_rows):
+    def execute_dml(self, sql: str, parm_list, expected_rows):  # ty: ignore[invalid-attribute-override]
         """Record a DML call without executing it against the database.
 
         Appends a dict containing the SQL and parameters to ``dml_calls`` so
