@@ -19,7 +19,7 @@ from mwax_mover.constants import (
     SECTION_WSCLEAN,
     WSCLEAN_GRIDDER,
     WSCLEAN_IDG_MODE,
-    WSCLEAN_POLARIZATIONS,
+    WSCLEAN_LINK_POLARIZATIONS,
     WSCLEAN_README_SUFFIX,
 )
 from mwax_mover.core.command import check_popen_finished, start_command, write_readme_file
@@ -53,10 +53,9 @@ class WSCleanArgs:
         channels_out: Number of output channels (-channels-out).
         gridder: Gridder (-gridder).
         idg_mode: IDG mode (-idg-mode).
-        polarizations: Comma separated polarisations to image (-pol).
+        link_polarizations: Polarizations to clean on, the rest are cleaned from them (-link-polarizations).
         multiscale: Use multiscale cleaning (-multiscale).
         join_channels: Clean the output channels together (-join-channels).
-        join_polarizations: Clean the polarisations together (-join-polarizations).
         log_time: Put the date and time on each line of output (-log-time).
         verbose: Show more output (-verbose).
     """
@@ -75,10 +74,9 @@ class WSCleanArgs:
     channels_out: int | None = None
     gridder: str | None = None
     idg_mode: str | None = None
-    polarizations: str | None = None
+    link_polarizations: str | None = None
     multiscale: bool = False
     join_channels: bool = False
-    join_polarizations: bool = False
     log_time: bool = False
     verbose: bool = False
 
@@ -86,7 +84,7 @@ class WSCleanArgs:
         """Check that the options can be used together.
 
         Raises:
-            ValueError: If an option is out of range, or if a join option has nothing to join.
+            ValueError: If an option is out of range, or if join_channels has nothing to join.
         """
         if self.size is not None and min(self.size) < 1:
             raise ValueError(f"size must be positive, got {self.size[0]} {self.size[1]}.")
@@ -96,9 +94,6 @@ class WSCleanArgs:
 
         if self.join_channels and (self.channels_out is None or self.channels_out < 2):
             raise ValueError("join_channels needs channels_out to be 2 or more.")
-
-        if self.join_polarizations and (self.polarizations is None or len(self.polarizations.split(",")) < 2):
-            raise ValueError("join_polarizations needs two or more polarizations.")
 
     def to_cmdline_args(self) -> list[str]:
         """Build the WSClean command line options (without the binary or the measurement sets).
@@ -130,13 +125,12 @@ class WSCleanArgs:
             args += ["-gridder", self.gridder]
         if self.idg_mode is not None:
             args += ["-idg-mode", self.idg_mode]
-        if self.polarizations is not None:
-            args += ["-pol", self.polarizations]
+        if self.link_polarizations is not None:
+            args += ["-link-polarizations", self.link_polarizations]
 
         flags = [
             (self.multiscale, "-multiscale"),
             (self.join_channels, "-join-channels"),
-            (self.join_polarizations, "-join-polarizations"),
             (self.log_time, "-log-time"),
             (self.verbose, "-verbose"),
             (self.no_update_model_required, "-no-update-model-required"),
@@ -149,9 +143,10 @@ class WSCleanArgs:
 def wsclean_args_from_config(config: ConfigParser) -> WSCleanArgs:
     """Read the WSClean options from the [wsclean] config section.
 
-    Every option calvin sets is a required key. The gridder (IDG, hybrid mode) and the
-    polarisations (xx,yy) are always used, so they are not in the config. WSClean uses all
-    CPU cores unless told otherwise, and calvin does not tell it.
+    Every option calvin sets is a required key. The gridder (IDG, hybrid mode) and
+    -link-polarizations i are always used, so they are not in the config. -pol is not set, so
+    WSClean makes a Stokes I image. WSClean uses all CPU cores unless told otherwise, and
+    calvin does not tell it.
 
     The returned args have no name, temp_dir or memory limit: those are set per job.
 
@@ -186,10 +181,9 @@ def wsclean_args_from_config(config: ConfigParser) -> WSCleanArgs:
         channels_out=int(read_config(config, SECTION_WSCLEAN, "channels_out")),
         gridder=WSCLEAN_GRIDDER,
         idg_mode=WSCLEAN_IDG_MODE,
-        polarizations=WSCLEAN_POLARIZATIONS,
+        link_polarizations=WSCLEAN_LINK_POLARIZATIONS,
         multiscale=read_config_bool(config, SECTION_WSCLEAN, "multiscale"),
         join_channels=read_config_bool(config, SECTION_WSCLEAN, "join_channels"),
-        join_polarizations=read_config_bool(config, SECTION_WSCLEAN, "join_polarizations"),
         log_time=read_config_bool(config, SECTION_WSCLEAN, "log_time"),
         verbose=read_config_bool(config, SECTION_WSCLEAN, "verbose"),
     )

@@ -19,7 +19,6 @@ CALVIN_WSCLEAN_CONFIG = {
     "channels_out": "4",
     "multiscale": "1",
     "join_channels": "1",
-    "join_polarizations": "1",
     "log_time": "1",
     "verbose": "1",
 }
@@ -66,11 +65,10 @@ def test_to_cmdline_args_with_all_the_calvin_options():
         "idg",
         "-idg-mode",
         "hybrid",
-        "-pol",
-        "xx,yy",
+        "-link-polarizations",
+        "i",
         "-multiscale",
         "-join-channels",
-        "-join-polarizations",
         "-log-time",
         "-verbose",
         "-no-update-model-required",
@@ -94,7 +92,15 @@ def test_to_cmdline_args_does_not_set_the_thread_count():
     assert "-j" not in wsclean_args_from_config(_config()).to_cmdline_args()
 
 
-def test_wsclean_args_from_config_reads_the_values_and_fixes_gridder_and_pol():
+def test_to_cmdline_args_does_not_set_pol_so_wsclean_images_stokes_i():
+    args = wsclean_args_from_config(_config())
+
+    assert "-pol" not in args.to_cmdline_args()
+    assert "-join-polarizations" not in args.to_cmdline_args()
+    assert args.to_cmdline_args()[args.to_cmdline_args().index("-link-polarizations") + 1] == "i"
+
+
+def test_wsclean_args_from_config_reads_the_values_and_fixes_gridder_and_link_polarizations():
     args = wsclean_args_from_config(_config(size="1024,2048", briggs_robust="0.5", multiscale="0", verbose="no"))
 
     assert args.size == (1024, 2048)
@@ -103,7 +109,7 @@ def test_wsclean_args_from_config_reads_the_values_and_fixes_gridder_and_pol():
     assert args.verbose is False
     assert args.gridder == "idg"
     assert args.idg_mode == "hybrid"
-    assert args.polarizations == "xx,yy"
+    assert args.link_polarizations == "i"
     assert args.name == ""
     assert args.abs_mem_gib is None
 
@@ -129,13 +135,6 @@ def test_join_channels_needs_more_than_one_output_channel():
 
     # Fine if the channels are not joined
     assert wsclean_args_from_config(_config(channels_out="1", join_channels="0")).channels_out == 1
-
-
-def test_join_polarizations_needs_two_polarizations():
-    args = WSCleanArgs(name="", temp_dir="", join_polarizations=True, polarizations="xx")
-
-    with pytest.raises(ValueError, match="join_polarizations"):
-        args.validate()
 
 
 def test_channels_out_must_be_at_least_one():

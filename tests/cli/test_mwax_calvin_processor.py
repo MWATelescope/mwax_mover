@@ -1,9 +1,11 @@
+import base64
 import json
 import logging
 import os
 import signal
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 import tests_common
 from tests_fakedb import FakeMWAXDBHandler
@@ -475,3 +477,71 @@ def test_run_imaging_is_skipped_if_the_measurement_sets_leave_no_memory_for_wscl
 
     mock_apply.assert_not_called()
     mock_wsclean.assert_not_called()
+
+
+def _write_small_wsclean_fits(path: str) -> None:
+    from astropy.io import fits
+
+    hdu = fits.PrimaryHDU(np.random.default_rng(1).normal(0.0, 0.01, (1, 1, 32, 32)).astype(np.float32))
+    hdu.header["BUNIT"] = "JY/BEAM"
+    hdu.writeto(path)
+
+
+def test_run_imaging_makes_the_preview_png_after_wsclean_works(tmp_path):
+    mcal = _processor_with_ms_dirs(tmp_path, ["1234567890_ch75.ms"])
+    os.makedirs(mcal.cfg_proc_job_output_path)
+    _write_small_wsclean_fits(os.path.join(mcal.cfg_proc_job_output_path, "1234567890_wsclean-MFS-image.fits"))
+    cal_ms = [str(tmp_path / "1234567890_ch75_cal.ms")]
+
+    with (
+        patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", return_value=(True, cal_ms)),
+        patch("mwax_mover.cli.mwax_calvin_processor.run_wsclean", return_value=True),
+    ):
+        assert mcal.run_imaging() is True
+
+    assert os.path.exists(os.path.join(mcal.cfg_proc_job_output_path, "1234567890_wsclean-MFS-image.png"))
+
+
+def test_run_imaging_still_works_if_the_preview_png_cannot_be_made(tmp_path):
+    mcal = _processor_with_ms_dirs(tmp_path, ["1234567890_ch75.ms"])
+    cal_ms = [str(tmp_path / "1234567890_ch75_cal.ms")]
+
+    with (
+        patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", return_value=(True, cal_ms)),
+        patch("mwax_mover.cli.mwax_calvin_processor.run_wsclean", return_value=True),
+    ):
+        # There is no image in the output dir, so there is nothing to draw
+        assert mcal.run_imaging() is True
+
+
+def test_run_imaging_does_not_make_a_preview_png_if_wsclean_fails(tmp_path):
+    mcal = _processor_with_ms_dirs(tmp_path, ["1234567890_ch75.ms"])
+    cal_ms = [str(tmp_path / "1234567890_ch75_cal.ms")]
+
+    with (
+        patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", return_value=(True, cal_ms)),
+        patch("mwax_mover.cli.mwax_calvin_processor.run_wsclean", return_value=False),
+        patch("mwax_mover.cli.mwax_calvin_processor.make_wsclean_preview") as mock_preview,
+    ):
+        assert mcal.run_imaging() is False
+
+    mock_preview.assert_not_called()
+
+
+def test_publish_images_includes_the_preview_png(tmp_path):
+    mcal = _processor_ready_to_publish_images(tmp_path)
+    png = os.path.join(mcal.cfg_proc_job_output_path, "1234567890_wsclean-MFS-image.png")
+    with open(png, "wb") as f:
+        f.write(
+            base64.b64decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+            )
+        )
+
+    mcal.publish_images(1768401673707300)
+
+    images_dir = tmp_path / "plots" / "1768401673707300_images"
+    assert (images_dir / "1234567890_wsclean-MFS-image.png").exists()
+    with open(images_dir / "index.json", encoding="UTF-8") as f:
+        index = json.load(f)
+    assert "1234567890_wsclean-MFS-image.png" in [e["filename"] for e in index["files"]]

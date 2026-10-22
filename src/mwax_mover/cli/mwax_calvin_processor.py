@@ -36,6 +36,7 @@ from mwax_mover.calvin.hyperdrive import run_hyperdrive
 from mwax_mover.calvin.hyperdrive_apply import run_solutions_apply
 from mwax_mover.calvin.pipeline import CalvinJobType, process_solutions
 from mwax_mover.calvin.plots.index import extend_plot_index, generate_plot_index_file
+from mwax_mover.calvin.plots.wsclean_preview import make_wsclean_preview
 from mwax_mover.calvin.wsclean import (
     WSCleanArgs,
     calculate_abs_mem_gib,
@@ -1191,6 +1192,10 @@ class MWAXCalvinProcessor(MWAXDaemon):
             ):
                 logger.warning(f"{self.obs_id}: WSClean failed. Calibration itself succeeded.")
                 return False
+
+            # A PNG of the main image, published with the FITS files. If it fails the images are still published.
+            self.current_task_name = "Preview PNG"
+            make_wsclean_preview(self.cfg_proc_job_output_path, self.obs_id)
         except Exception:  # noqa: BLE001 - imaging is optional; it must not fail a job that already succeeded
             logger.exception(f"{self.obs_id}: unhandled exception while imaging. Calibration itself succeeded.")
             return False

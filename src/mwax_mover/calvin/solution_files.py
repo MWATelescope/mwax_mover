@@ -31,6 +31,7 @@ from mwax_mover.constants import (
     SOLUTIONS_FITS_GLOB,
     SOLUTIONS_ORIGINAL_FITS_GLOB,
     WSCLEAN_FITS_GLOB,
+    WSCLEAN_PNG_GLOB,
     WSCLEAN_README_SUFFIX,
 )
 from mwax_mover.filesystem.files import delete_files_older_than
@@ -367,8 +368,8 @@ def upload_plot_files(job_output_path: str, upload_path: str) -> bool:
 def find_image_files(job_output_path: str) -> list[str]:
     """List the imaging outputs in a job's output directory.
 
-    These are the WSClean FITS outputs, the WSClean readme and the
-    solutions-apply readmes.
+    These are the WSClean FITS outputs, the preview PNG of the main image, the
+    WSClean readme and the solutions-apply readmes.
 
     Args:
         job_output_path: The job's output directory.
@@ -376,7 +377,12 @@ def find_image_files(job_output_path: str) -> list[str]:
     Returns:
         The full paths of the files, sorted by name.
     """
-    patterns = [WSCLEAN_FITS_GLOB, f"*{WSCLEAN_README_SUFFIX}", f"*{SOLUTIONS_APPLY_README_SUFFIX}"]
+    patterns = [
+        WSCLEAN_FITS_GLOB,
+        WSCLEAN_PNG_GLOB,
+        f"*{WSCLEAN_README_SUFFIX}",
+        f"*{SOLUTIONS_APPLY_README_SUFFIX}",
+    ]
     files: list[str] = []
     for pattern in patterns:
         files.extend(glob.glob(os.path.join(job_output_path, pattern)))
@@ -394,7 +400,7 @@ def upload_image_files(job_output_path: str, upload_path: str, index: dict) -> b
     never sees a partly written directory.
 
     The WSClean FITS files are copied, so the originals stay in the job folder.
-    The readmes are moved. ``index.json`` is written into the directory, and it
+    The preview PNG and the readmes are moved. ``index.json`` is written into the directory, and it
     replaces the first publish's index.json when uploaded.
 
     Failures are logged and reported via the return value rather than raised:

@@ -23,6 +23,7 @@ from mwax_mover.constants import (
     SOLUTIONS_FITS_SUFFIX,
     SOLUTIONS_ORIGINAL_FITS_SUFFIX,
     WSCLEAN_FITS_GLOB,
+    WSCLEAN_PNG_GLOB,
     WSCLEAN_README_SUFFIX,
 )
 from mwax_mover.filesystem.files import get_png_dimensions
@@ -73,6 +74,8 @@ def get_file_description(filename: str) -> str:
         desc = "Full log output of the WSClean run"
     elif filename.endswith(SOLUTIONS_APPLY_README_SUFFIX):
         desc = "Full log output of the Hyperdrive solutions-apply run"
+    elif fnmatch.fnmatch(os.path.basename(filename), WSCLEAN_PNG_GLOB):
+        desc = "PNG preview of the main WSClean image"
     elif fnmatch.fnmatch(os.path.basename(filename), WSCLEAN_FITS_GLOB):
         suffix = next((end for end in WSCLEAN_OUTPUT_DESCRIPTIONS if filename.endswith(end)), None)
         desc = WSCLEAN_OUTPUT_DESCRIPTIONS[suffix] if suffix else WSCLEAN_OTHER_OUTPUT_DESCRIPTION

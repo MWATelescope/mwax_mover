@@ -213,15 +213,24 @@ WSCLEAN_NAME_SUFFIX = "_wsclean"
 WSCLEAN_FITS_GLOB = "*" + WSCLEAN_NAME_SUFFIX + "-*.fits"
 
 # WSClean options that calvin always uses (see calvin.wsclean.WSCleanArgs).
-# The gridder is IDG, in hybrid mode (CPU and GPU). Both polarisations are imaged.
+# The gridder is IDG, in hybrid mode (CPU and GPU). IDG grids all four instrumental
+# polarizations together, and the WSClean IDG documentation says to clean Stokes I
+# with -link-polarizations i. -pol is not set, so WSClean makes the default Stokes I image.
 WSCLEAN_GRIDDER = "idg"
 WSCLEAN_IDG_MODE = "hybrid"
-WSCLEAN_POLARIZATIONS = "xx,yy"
+WSCLEAN_LINK_POLARIZATIONS = "i"
 
 # WSClean is not run with a memory limit (-abs-mem) below this many GiB. The limit is
 # the configured maximum minus the RAM that the measurement sets use in the RAM-backed
 # temp working path, so a very large observation can leave nothing for WSClean.
 WSCLEAN_MIN_ABS_MEM_GIB = 1
+
+# The WSClean image that the preview PNG is made from: the multi-frequency synthesis
+# (MFS) image if WSClean made several output channels, otherwise the single image.
+# Both are Stokes I (calvin does not set -pol). The PNG has the same name as the FITS file.
+WSCLEAN_MFS_IMAGE_SUFFIX = "-MFS-image.fits"
+WSCLEAN_IMAGE_SUFFIX = "-image.fits"
+WSCLEAN_PNG_GLOB = "*" + WSCLEAN_NAME_SUFFIX + "-*.png"
 
 # Readme written by calvin.wsclean.run_wsclean (prefixed with the obs ID).
 WSCLEAN_README_SUFFIX = "_wsclean_readme.txt"

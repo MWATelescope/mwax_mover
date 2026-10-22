@@ -1,6 +1,6 @@
 # mwax_mover calvin imaging plan
 
-Status: **implemented, phases 1 to 6.** The calvin host checks (see the
+Status: **implemented, phases 1 to 7.** The calvin host checks (see the
 notes of each phase) are still to do before `[wsclean] enabled=1` is used.
 
 Add a WSClean imaging step to `mwax_calvin_processor`. To do this, Birli
@@ -411,11 +411,16 @@ Status: **implemented**.
     `max_mem_gib=830`, `size=3072 3072`, `scale=0.75amin`,
     `briggs_robust=-1.0`, `niter=100000`, `mgain=0.95`, `auto_threshold=1`,
     `auto_mask=5`, `channels_out=4`, and the flags `multiscale`,
-    `join_channels`, `join_polarizations`, `log_time`, `verbose` (all 1).
-  - Fixed in code: `-gridder idg`, `-idg-mode hybrid`, `-pol xx,yy` (constants
-    `WSCLEAN_GRIDDER`, `WSCLEAN_IDG_MODE`, `WSCLEAN_POLARIZATIONS`) and
-    `-no-update-model-required`. `-j` is not passed, so WSClean uses all
-    CPU cores.
+    `join_channels`, `log_time`, `verbose` (all 1).
+  - Fixed in code: `-gridder idg`, `-idg-mode hybrid`,
+    `-link-polarizations i` (constants `WSCLEAN_GRIDDER`,
+    `WSCLEAN_IDG_MODE`, `WSCLEAN_LINK_POLARIZATIONS`) and
+    `-no-update-model-required`. `-pol` is not passed, so WSClean makes a
+    Stokes I image (its default). This follows the WSClean IDG page: IDG
+    grids all four instrumental polarizations together, and Stokes I is
+    cleaned with `-link-polarizations i`. (Changed after Phase 6 was first
+    delivered: it was `-pol xx,yy -join-polarizations`, which gives separate
+    XX and YY images.) `-j` is not passed, so WSClean uses all CPU cores.
   - `WSCleanArgs` leaves out any option that is None or False. So the
     Phase 3 tests, which only set `name` and `temp_dir`, are unchanged.
     `wsclean_args_from_config()` fills the options. The processor keeps them
@@ -432,18 +437,44 @@ Status: **implemented**.
     before solutions-apply and the job stays successful.
     `start()` sets `wsclean_abs_mem_gib`. If it is None (only in unit tests),
     `-abs-mem` is not passed.
-  - File names: with `-channels-out 4` and `-pol xx,yy`, WSClean writes names
-    such as `<obs>_wsclean-MFS-XX-image.fits` and
-    `<obs>_wsclean-0003-YY-dirty.fits`. They match `WSCLEAN_FITS_GLOB` and
+  - File names: with `-channels-out 4` and Stokes I, WSClean writes names
+    such as `<obs>_wsclean-MFS-image.fits` and
+    `<obs>_wsclean-0003-dirty.fits`. They match `WSCLEAN_FITS_GLOB` and
     the index descriptions. This is tested.
   - Not covered by a unit test: the code in `start()` that calls
     `calculate_abs_mem_gib()`. The function itself is tested.
   - Check on a calvin host (Greg): `wsclean -help` for the installed version
-    lists `-abs-mem`, `-gridder`, `-idg-mode`, `-temp-dir`, `-auto-mask`,
-    `-join-polarizations`, `-log-time` and `-verbose`. Then run one
+    lists `-abs-mem`, `-gridder`, `-idg-mode`, `-link-polarizations` (or
+    `-link-polarization`), `-temp-dir`, `-auto-mask`, `-log-time` and
+    `-verbose`. Check with a short run that no `-pol` plus
+    `-link-polarizations i` gives one Stokes I image set. Then run one
     observation with `enabled=1` and measure: WSClean run time (for the
     deferred separate-job decision, D14), peak RAM, and the wall times from
     Phase 5.
+
+---
+
+## Phase 7: preview PNG of the main WSClean image
+
+Status: **implemented**.
+
+- After a successful WSClean run, `run_imaging()` makes a PNG of the main
+  image (`calvin/plots/wsclean_preview.py`). The main image is
+  `<obs_id>_wsclean-MFS-image.fits`, or `<obs_id>_wsclean-image.fits` if
+  WSClean made one output channel. Both are Stokes I (see Phase 6). The PNG
+  has the same name with `.png`, in the job output dir.
+- The PNG is part of the second publish (`find_image_files()` takes
+  `WSCLEAN_PNG_GLOB`). It is moved into `<fit_id>_images` (the FITS files
+  are copied). It is in the extended `index.json` with its width, height and
+  a description. The first publish moves `*.png` too, but it runs before
+  WSClean, so it never takes this file.
+- It uses matplotlib (`Figure` and the Agg canvas, no pyplot) and astropy,
+  which are already dependencies. The plot has sky axes (from the FITS
+  WCS), a colour bar in the FITS `BUNIT`, an asinh stretch, and a colour
+  scale from the lowest value to the 99.5th percentile. The look is set by
+  constants at the top of the module.
+- A failure to make the PNG is logged only. The images are still published.
+  No PNG is made if WSClean failed.
 
 ---
 
@@ -458,8 +489,6 @@ Status: **implemented**.
     `/shared/data/calvinNN` over NFS, with `-temp-dir` on a local disk.
   - A new CLI entry point or job type, how the job is submitted, and a
     reaper for MS dirs that are left behind.
-
----
 
 ## Test impact
 
