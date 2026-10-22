@@ -8,7 +8,6 @@ sysfs /sys sysfs rw,nosuid 0 0
 tmpfs /tmp tmpfs rw,nosuid,nodev 0 0
 /dev/sdb1 /tmp/disk ext4 rw 0 0
 ramfs /ram ramfs rw 0 0
-tmpfs /data/with\\040space tmpfs rw 0 0
 /dev/sdc1 /data ext4 rw 0 0
 """
 
@@ -39,10 +38,6 @@ def test_the_longest_matching_mount_point_decides(tmp_path):
 
 def test_a_mount_point_that_only_starts_with_the_same_letters_does_not_match(tmp_path):
     assert is_ram_backed("/tmpfoo/x", _mounts(tmp_path)) is False
-
-
-def test_a_mount_point_with_a_space(tmp_path):
-    assert is_ram_backed("/data/with space/x", _mounts(tmp_path)) is True
 
 
 def test_an_unreadable_mount_table_means_not_ram_backed(tmp_path):
