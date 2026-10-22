@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import signal
@@ -329,3 +330,68 @@ def test_signal_handler_after_success_keeps_the_job_successful_and_removes_ms(tm
     mock_fail_dl.assert_not_called()
     mock_stop.assert_called_once_with(exit_code=0)
     assert list(tmp_path.glob("*.ms")) == []
+
+
+def _processor_ready_to_publish_images(tmp_path):
+    mcal = MWAXCalvinProcessor()
+    mcal.obs_id = 1234567890
+    mcal.cfg_proc_job_output_path = str(tmp_path / "out")
+    mcal.cfg_proc_plot_upload_path = str(tmp_path / "plots")
+    mcal.cfg_proc_plot_front_end_url = "https://somes3url"
+    os.makedirs(mcal.cfg_proc_job_output_path)
+    os.makedirs(mcal.cfg_proc_plot_upload_path)
+    for name in ["1234567890_wsclean-image.fits", "1234567890_wsclean_readme.txt"]:
+        with open(os.path.join(mcal.cfg_proc_job_output_path, name), "w", encoding="UTF-8") as f:
+            f.write(name)
+    mcal.published_index = {"version": 2, "generated_at": "", "files": [{"filename": "phase_fits.png"}]}
+    return mcal
+
+
+def test_publish_images_publishes_the_extended_index_to_the_images_dir(tmp_path):
+    mcal = _processor_ready_to_publish_images(tmp_path)
+
+    mcal.publish_images(1768401673707300)
+
+    images_dir = tmp_path / "plots" / "1768401673707300_images"
+    assert sorted(p.name for p in images_dir.iterdir()) == [
+        "1234567890_wsclean-image.fits",
+        "1234567890_wsclean_readme.txt",
+        "index.json",
+    ]
+    with open(images_dir / "index.json", encoding="UTF-8") as f:
+        index = json.load(f)
+    assert [e["filename"] for e in index["files"]] == [
+        "phase_fits.png",
+        "1234567890_wsclean-image.fits",
+        "1234567890_wsclean_readme.txt",
+    ]
+
+
+def test_publish_images_does_nothing_if_the_first_publish_did_not_work(tmp_path):
+    mcal = _processor_ready_to_publish_images(tmp_path)
+    mcal.published_index = None
+
+    mcal.publish_images(1768401673707300)
+
+    assert os.listdir(tmp_path / "plots") == []
+
+
+def test_publish_images_swallows_unexpected_exceptions(tmp_path):
+    mcal = _processor_ready_to_publish_images(tmp_path)
+
+    with patch("mwax_mover.cli.mwax_calvin_processor.upload_image_files", side_effect=RuntimeError("boom")):
+        mcal.publish_images(1768401673707300)  # must not raise
+
+
+def test_run_imaging_returns_whether_wsclean_worked(tmp_path):
+    mcal = _processor_with_ms_dirs(tmp_path, ["1234567890_ch75.ms"])
+    cal_ms = [str(tmp_path / "1234567890_ch75_cal.ms")]
+
+    with patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", return_value=(True, cal_ms)):
+        with patch("mwax_mover.cli.mwax_calvin_processor.run_wsclean", return_value=True):
+            assert mcal.run_imaging() is True
+        with patch("mwax_mover.cli.mwax_calvin_processor.run_wsclean", return_value=False):
+            assert mcal.run_imaging() is False
+
+    with patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", return_value=(False, [])):
+        assert mcal.run_imaging() is False

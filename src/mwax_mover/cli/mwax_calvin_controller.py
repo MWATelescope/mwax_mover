@@ -39,6 +39,7 @@ from mwax_mover.constants import (
     CONFIG_KEY_LOG_LEVEL,
     EXIT_FAILURE,
     HEALTH_THREAD_NAME,
+    IMAGES_DIR_SUFFIX,
     LOG_FORMAT,
     SECONDS_PER_HOUR,
     SECTION_CALVIN,
@@ -91,6 +92,27 @@ PLOT_UPLOAD_BACKLOG_DELAY_SECS = 5
 SLURM_REFRESH_INTERVAL = 10
 
 
+def parse_fit_dir_name(dir_name: str) -> tuple[int, bool] | None:
+    """Parse the name of a published directory in the plot upload path.
+
+    A fit's solutions and plots are published as ``<fit_id>``. Its imaging outputs are
+    published separately as ``<fit_id>_images`` (see calvin.solution_files.upload_image_files).
+
+    Args:
+        dir_name: The name (not the full path) of the directory.
+
+    Returns:
+        ``(fit_id, is_images_dir)``, or None if the name is neither of the above.
+    """
+    is_images_dir = dir_name.endswith(IMAGES_DIR_SUFFIX)
+    fit_id_str = dir_name[: -len(IMAGES_DIR_SUFFIX)] if is_images_dir else dir_name
+
+    try:
+        return int(fit_id_str), is_images_dir
+    except ValueError:
+        return None
+
+
 def fit_dir_sort_key(fit_dir: Path) -> tuple[int, int, str]:
     """Build a sort key ordering fit directories newest (largest fitid) first.
 
@@ -100,7 +122,10 @@ def fit_dir_sort_key(fit_dir: Path) -> tuple[int, int, str]:
     means the ordering does not silently depend on every fitid happening to have
     the same number of digits.
 
-    Any directory whose name is not an integer is not a fit directory. Those
+    A fit's imaging directory (``<fitid>_images``) sorts directly after its
+    ``<fitid>`` directory.
+
+    Any directory whose name is not one of these is not a fit directory. Those
     sort last, alphabetically, so an unexpected entry can never displace real
     fits from the head of the batch.
 
@@ -110,12 +135,15 @@ def fit_dir_sort_key(fit_dir: Path) -> tuple[int, int, str]:
 
     Returns:
         A tuple suitable for ``list.sort(key=...)``: ``(0, -fitid, "")`` for
-        numerically named directories and ``(1, 0, name)`` for anything else.
+        numerically named directories, ``(0, -fitid, "_images")`` for imaging
+        directories and ``(1, 0, name)`` for anything else.
     """
-    try:
-        return (0, -int(fit_dir.name), "")
-    except ValueError:
+    parsed = parse_fit_dir_name(fit_dir.name)
+    if parsed is None:
         return (1, 0, fit_dir.name)
+
+    fit_id, is_images_dir = parsed
+    return (0, -fit_id, IMAGES_DIR_SUFFIX if is_images_dir else "")
 
 
 class CalibrationRequest:
@@ -409,6 +437,22 @@ class MWAXCalvinController(MWAXDaemon):
 
         logger.debug("Plot upload thread completed successfully.")
 
+    @staticmethod
+    def get_s3_subpath(dir_name: str) -> str:
+        """Get the S3 path (within the bucket) a published directory is uploaded to.
+
+        ``<fit_id>`` and ``<fit_id>_images`` both go to ``<fit_id>``, so the objects match the
+        URLs written into index.json. Any other name is used as it is.
+
+        Args:
+            dir_name: The name (not the full path) of the published directory.
+
+        Returns:
+            The S3 path within the bucket.
+        """
+        parsed = parse_fit_dir_name(dir_name)
+        return str(parsed[0]) if parsed is not None else dir_name
+
     def upload_published_fit_dirs(
         self,
         plot_upload_path: str,
@@ -416,9 +460,11 @@ class MWAXCalvinController(MWAXDaemon):
     ) -> bool:
         """Upload a batch of the newest published fit directories, then remove them.
 
-        Each fit directory's contents are moved into ``<bucket>/<fit_dir_name>``
+        Each fit directory's contents are moved into ``<bucket>/<fit_id>``
         so the resulting object keys match the URLs written into that fit's
-        index.json by ``populate_index_json_entry``.
+        index.json by ``populate_index_json_entry``. A fit's imaging directory
+        (``<fit_id>_images``) goes to the same place, but only once ``<fit_id>``
+        itself is no longer waiting: until then it is skipped.
 
         Directories are uploaded newest fitid first, and at most
         ``self.cfg_plots_upload_max_fits_per_pass`` of them per call. Both matter when
@@ -477,6 +523,14 @@ class MWAXCalvinController(MWAXDaemon):
                 logger.warning(f"Unexpected file (not a directory) in {plot_upload_path}: {fit_dir}. Skipping.")
                 continue
 
+            # A fit's images must not be uploaded while its solutions and plots are
+            # still waiting. They go to the same S3 path, and the images' index.json
+            # (which lists both) must not be replaced by the older one.
+            parsed = parse_fit_dir_name(fit_dir.name)
+            if parsed is not None and parsed[1] and (base / str(parsed[0])).exists():
+                logger.debug(f"Not uploading {fit_dir} yet: {parsed[0]} is still waiting to be uploaded.")
+                continue
+
             candidates.append(fit_dir)
 
         # Newest fitid first, then take only this pass's batch.
@@ -517,7 +571,7 @@ class MWAXCalvinController(MWAXDaemon):
                     str(fit_dir),
                     self.cfg_plots_s3_profile,
                     self.cfg_plots_s3_bucket,
-                    dest_subpath=fit_dir.name,
+                    dest_subpath=self.get_s3_subpath(fit_dir.name),
                 )
             except Exception as e:  # noqa: BLE001 - keep the first error but carry on; the next dir may still succeed (see comment below)
                 # Keep the first error so the caller can still see a real

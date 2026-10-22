@@ -7,18 +7,39 @@ files themselves. populate_index_json_entry() builds one file's entry
 get_file_description() supplies its human-readable description field.
 """
 
+import copy
 import datetime
+import fnmatch
 import json
 import logging
 import mimetypes
 import os
 from pathlib import Path
 
-from mwax_mover.constants import EXT_FITS, INDEX_JSON_FILENAME, SOLUTIONS_FITS_SUFFIX, SOLUTIONS_ORIGINAL_FITS_SUFFIX
+from mwax_mover.constants import (
+    EXT_FITS,
+    INDEX_JSON_FILENAME,
+    SOLUTIONS_APPLY_README_SUFFIX,
+    SOLUTIONS_FITS_SUFFIX,
+    SOLUTIONS_ORIGINAL_FITS_SUFFIX,
+    WSCLEAN_FITS_GLOB,
+    WSCLEAN_README_SUFFIX,
+)
 from mwax_mover.filesystem.files import get_png_dimensions
 from mwax_mover.filesystem.naming import extract_channels_from_filename
 
 logger = logging.getLogger(__name__)
+
+# Description of each known WSClean FITS output, by the end of its filename.
+# Any other WSClean FITS output (e.g. from extra options) gets a generic description.
+WSCLEAN_OUTPUT_DESCRIPTIONS = {
+    "-image.fits": "WSClean restored image",
+    "-dirty.fits": "WSClean dirty image",
+    "-psf.fits": "WSClean point spread function (PSF) image",
+    "-residual.fits": "WSClean residual image",
+    "-model.fits": "WSClean model image",
+}
+WSCLEAN_OTHER_OUTPUT_DESCRIPTION = "WSClean output image"
 
 
 def get_file_description(filename: str) -> str:
@@ -48,7 +69,14 @@ def get_file_description(filename: str) -> str:
         channel_suffix = " for all coarse channels"
 
     desc = ""
-    if "birli_readme.txt" in filename:
+    if filename.endswith(WSCLEAN_README_SUFFIX):
+        desc = "Full log output of the WSClean run"
+    elif filename.endswith(SOLUTIONS_APPLY_README_SUFFIX):
+        desc = "Full log output of the Hyperdrive solutions-apply run"
+    elif fnmatch.fnmatch(os.path.basename(filename), WSCLEAN_FITS_GLOB):
+        suffix = next((end for end in WSCLEAN_OUTPUT_DESCRIPTIONS if filename.endswith(end)), None)
+        desc = WSCLEAN_OUTPUT_DESCRIPTIONS[suffix] if suffix else WSCLEAN_OTHER_OUTPUT_DESCRIPTION
+    elif "birli_readme.txt" in filename:
         desc = "Full log output of the Birli run"
     elif "hyperdrive_readme.txt" in filename:
         desc = "Full log output of the Hyperdrive run"
@@ -153,8 +181,9 @@ def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_
 
     Only ``.png``, ``.tsv``, ``.txt`` and ``.fits`` files are supported; all
     other extensions return ``None``. Of the ``.fits`` files, only those ending
-    ``solutions.fits`` or ``solutions.original.fits`` are accepted -- this
-    deliberately excludes the visibility and metafits FITS files.
+    ``solutions.fits`` or ``solutions.original.fits``, and the WSClean outputs
+    (matching WSCLEAN_FITS_GLOB), are accepted -- this deliberately excludes
+    the visibility and metafits FITS files.
 
     Args:
         filename: A str or Path representing the file to describe.
@@ -184,7 +213,9 @@ def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_
 
     # Now check for other files which slip through
     if ext == EXT_FITS and not (
-        str(path).endswith(SOLUTIONS_FITS_SUFFIX) or str(path).endswith(SOLUTIONS_ORIGINAL_FITS_SUFFIX)
+        str(path).endswith(SOLUTIONS_FITS_SUFFIX)
+        or str(path).endswith(SOLUTIONS_ORIGINAL_FITS_SUFFIX)
+        or fnmatch.fnmatch(path.name, WSCLEAN_FITS_GLOB)
     ):
         # Ignore the visibility FITS files and metafits files
         return None
@@ -208,3 +239,36 @@ def populate_index_json_entry(filename: str | Path, fit_id: int, plot_front_end_
         "description": get_file_description(str(path)),
         **({"image_width": width, "image_height": height} if is_png else {}),
     }
+
+
+def extend_plot_index(index: dict, files: list[str], fit_id: int, plot_front_end_url: str) -> dict:
+    """Add more files to a fit's index, e.g. the WSClean outputs published after the plots.
+
+    An entry for a file that is already in the index is replaced by the new one.
+    Files that populate_index_json_entry() does not accept are skipped.
+
+    Args:
+        index: The index dict returned by generate_plot_index_file(). It is not changed.
+        files: Full paths of the files to add. They must exist.
+        fit_id: The fit ID, used to build each entry's URL.
+        plot_front_end_url: Base URL of the calibration plot front end.
+
+    Returns:
+        A new index dict with the entries added (sorted by filename after the existing ones)
+        and a new ``generated_at``.
+    """
+    new_index = copy.deepcopy(index)
+
+    new_entries = []
+    for file in sorted(files, key=os.path.basename):
+        entry = populate_index_json_entry(file, fit_id, plot_front_end_url)
+        if entry is None:
+            logger.warning(f"extend_plot_index: {file} is not an indexable file. Skipping.")
+            continue
+        new_entries.append(entry)
+
+    replaced_names = {entry["filename"] for entry in new_entries}
+    new_index["files"] = [f for f in new_index["files"] if f["filename"] not in replaced_names] + new_entries
+    new_index["generated_at"] = datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    return new_index

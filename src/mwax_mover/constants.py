@@ -196,6 +196,18 @@ SOLUTIONS_APPLY_README_SUFFIX = "_solutions_apply_readme.txt"
 # <obs_id>_wsclean-image.fits etc.
 WSCLEAN_NAME_SUFFIX = "_wsclean"
 
+# All WSClean FITS outputs, as named by WSCLEAN_NAME_SUFFIX
+# (<obs_id>_wsclean-image.fits, <obs_id>_wsclean-MFS-image.fits, ...).
+WSCLEAN_FITS_GLOB = "*" + WSCLEAN_NAME_SUFFIX + "-*.fits"
+
+# Readme written by calvin.wsclean.run_wsclean (prefixed with the obs ID).
+WSCLEAN_README_SUFFIX = "_wsclean_readme.txt"
+
+# The WSClean image outputs have their own published directory,
+# <plot_upload_path>/<fit_id>_images. The controller uploads it to the same
+# S3 path as <fit_id>, once <fit_id> itself has been uploaded.
+IMAGES_DIR_SUFFIX = "_images"
+
 # Birli's measurement set output goes in the (RAM-backed) temp working path
 # only if the working space needed is below this many GB; otherwise it goes in
 # the job output path.

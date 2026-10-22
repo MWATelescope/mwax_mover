@@ -34,11 +34,13 @@ from mwax_mover.calvin.birli import estimate_birli_output_bytes, estimate_workin
 from mwax_mover.calvin.hyperdrive import run_hyperdrive
 from mwax_mover.calvin.hyperdrive_apply import run_solutions_apply
 from mwax_mover.calvin.pipeline import CalvinJobType, process_solutions
-from mwax_mover.calvin.plots.index import generate_plot_index_file
+from mwax_mover.calvin.plots.index import extend_plot_index, generate_plot_index_file
 from mwax_mover.calvin.wsclean import WSCleanArgs, run_wsclean
 from mwax_mover.calvin.solution_files import (
     export_calibration_solutions,
     reap_orphaned_staging_dirs,
+    find_image_files,
+    upload_image_files,
     upload_plot_files,
 )
 from mwax_mover.constants import (
@@ -46,6 +48,7 @@ from mwax_mover.constants import (
     CONFIG_KEY_LOG_LEVEL,
     CALIBRATED_MS_SUFFIX,
     EXIT_FAILURE,
+    IMAGES_DIR_SUFFIX,
     EXT_MS,
     HEALTH_THREAD_NAME,
     INDEX_JSON_FILENAME,
@@ -160,6 +163,9 @@ class MWAXCalvinProcessor(MWAXDaemon):
         # True once the calibration solution is in the database. After that
         # nothing (e.g. imaging running out of walltime) may fail the job.
         self.job_succeeded: bool = False
+        # The index.json of the first publish (solutions and plots). Only set if that
+        # publish worked. The imaging publish extends it.
+        self.published_index: dict | None = None
         self.metafits_context: MetafitsContext
 
         # downloading
@@ -473,7 +479,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
                     # Try and generate an index file
                     # NOTE: generate_plot_index_file returns a (success, index)
                     # tuple. Unpack it- a bare `if` on the tuple is always True.
-                    index_success, _index = generate_plot_index_file(
+                    index_success, index = generate_plot_index_file(
                         fit_id,
                         self.cfg_proc_plot_front_end_url,
                         self.cfg_proc_job_output_path,
@@ -483,7 +489,9 @@ class MWAXCalvinProcessor(MWAXDaemon):
                         plot_upload_path = os.path.join(self.cfg_proc_plot_upload_path, str(fit_id))
 
                         # Go and upload all the files (including the index)
-                        if not upload_plot_files(self.cfg_proc_job_output_path, plot_upload_path):
+                        if upload_plot_files(self.cfg_proc_job_output_path, plot_upload_path):
+                            self.published_index = index
+                        else:
                             logger.warning(
                                 f"{self.obs_id}: could not publish plots to {plot_upload_path}."
                                 " Calibration itself succeeded; continuing."
@@ -564,8 +572,8 @@ class MWAXCalvinProcessor(MWAXDaemon):
 
             # The solutions and plots are published, so now do the optional imaging.
             # A failure here is logged only; the job stays successful.
-            if self.cfg_wsclean_enabled:
-                self.run_imaging()
+            if self.cfg_wsclean_enabled and fit_id and self.run_imaging():
+                self.publish_images(fit_id)
 
             # Now remove the measurement sets too. Birli wrote them to
             # working_path (not job_input_path). Each one is a directory.
@@ -1068,12 +1076,47 @@ class MWAXCalvinProcessor(MWAXDaemon):
             except OSError:
                 logger.warning(f"{self.obs_id}: could not remove measurement set {ms_dir_to_delete}. Ignoring.")
 
-    def run_imaging(self) -> None:
+    def publish_images(self, fit_id: int) -> None:
+        """Publish the imaging outputs to <plot_upload_path>/<fit_id>_images.
+
+        This is the second publish for the fit. It only runs if the first one (solutions and plots)
+        worked, because the extended index.json it uploads describes the files of both. Any failure is
+        only logged and the job stays successful.
+
+        Args:
+            fit_id: The fit ID of the calibration solution.
+        """
+        try:
+            if self.published_index is None:
+                logger.warning(
+                    f"{self.obs_id}: the solutions and plots were not published, so the images are not published."
+                )
+                return
+
+            self.current_task_name = "Publishing images"
+            extended_index = extend_plot_index(
+                self.published_index,
+                find_image_files(self.cfg_proc_job_output_path),
+                fit_id,
+                self.cfg_proc_plot_front_end_url,
+            )
+            images_path = os.path.join(self.cfg_proc_plot_upload_path, f"{fit_id}{IMAGES_DIR_SUFFIX}")
+            if not upload_image_files(self.cfg_proc_job_output_path, images_path, extended_index):
+                logger.warning(
+                    f"{self.obs_id}: could not publish images to {images_path}. Calibration itself succeeded."
+                )
+        except Exception:  # noqa: BLE001 - imaging is optional; it must not fail a job that already succeeded
+            logger.exception(f"{self.obs_id}: unhandled exception publishing images. Calibration itself succeeded.")
+
+    def run_imaging(self) -> bool:
         """Apply the solutions to each band, then image the calibrated bands with WSClean.
 
         Runs after the solutions and plots are published, so any failure is only
         logged and the job stays successful. If solutions-apply fails for any
         band, WSClean does not run (a partial set of bands is not imaged).
+
+        Returns:
+            True if WSClean ran successfully, False otherwise.
         """
         try:
             # The Birli measurement sets, not any calibrated ones
@@ -1084,7 +1127,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
             )
             if not ms_files:
                 logger.warning(f"{self.obs_id}: no measurement sets found to image. Skipping imaging.")
-                return
+                return False
 
             self.current_task_name = "Applying solutions"
             apply_success, cal_ms_files = run_solutions_apply(
@@ -1101,7 +1144,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 logger.warning(
                     f"{self.obs_id}: solutions-apply failed. Skipping imaging. Calibration itself succeeded."
                 )
-                return
+                return False
 
             self.current_task_name = "WSClean"
             wsclean_args = WSCleanArgs(
@@ -1117,8 +1160,12 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 wsclean_args,
             ):
                 logger.warning(f"{self.obs_id}: WSClean failed. Calibration itself succeeded.")
+                return False
         except Exception:  # noqa: BLE001 - imaging is optional; it must not fail a job that already succeeded
             logger.exception(f"{self.obs_id}: unhandled exception while imaging. Calibration itself succeeded.")
+            return False
+
+        return True
 
     def stop(self, exit_code: int = 0):
         """Shutdown the processor and close all connections.

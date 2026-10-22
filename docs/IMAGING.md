@@ -1,7 +1,7 @@
 # mwax_mover calvin imaging plan
 
-Status: **in progress.** Phases 1 to 3 are implemented (see their notes
-below). They still need the calvin host checks. Phases 4-6 are planned.
+Status: **in progress.** Phases 1 to 4 are implemented (see their notes
+below). They still need the calvin host checks. Phases 5-6 are planned.
 
 Add a WSClean imaging step to `mwax_calvin_processor`. To do this, Birli
 and hyperdrive change from UVFITS to CASA measurement sets (MS), and
@@ -305,6 +305,8 @@ Status: **implemented**.
 
 ## Phase 4: stage-2 publish (processor and controller)
 
+Status: **implemented**.
+
 - `calvin/plots/index.py`:
   - `populate_index_json_entry()`: accept `.fits` files that contain
     `WSCLEAN_NAME_SUFFIX` and end with one of the
@@ -332,6 +334,34 @@ Status: **implemented**.
 - Tests: index entries for each WSClean output, `extend_plot_index()`,
   upload copies (not moves) the images, sort key, dest_subpath mapping,
   skip while `<fit_id>` exists.
+
+- Implementation notes:
+  - Added constants `WSCLEAN_FITS_GLOB`, `WSCLEAN_README_SUFFIX` and
+    `IMAGES_DIR_SUFFIX`. `WSCLEAN_OUTPUT_SUFFIXES` was not added.
+  - Decision: the index accepts every FITS file that matches
+    `WSCLEAN_FITS_GLOB`, not only the five known suffixes. D3 uploads all
+    WSClean FITS outputs, so every uploaded file is in the index. The five
+    known outputs have their own description. Others (for example
+    `-beam.fits`) get "WSClean output image".
+  - `find_image_files()` in `solution_files.py` lists what the second
+    publish takes: the WSClean FITS files, the WSClean readme and the
+    solutions-apply readmes. The processor uses it for the index, and
+    `upload_image_files()` uses it for the files, so the two always match.
+  - `upload_image_files()` writes `index.json` last and publishes nothing
+    if there is no WSClean FITS file (for example after a failed run).
+  - Processor: `published_index` holds the first publish's index. It is
+    set only if both index generation and `upload_plot_files()` worked.
+    `publish_images(fit_id)` does nothing if it is None, because the
+    extended index describes the files of both publishes.
+    `run_imaging()` now returns True only if WSClean succeeded, and the
+    flow calls `publish_images()` only then.
+  - Controller: `parse_fit_dir_name()` and `get_s3_subpath()` were added.
+    A `<fit_id>_images` dir is left out of the batch (and not counted as
+    backlog) while `<fit_id>` exists in the same path. If `<fit_id>` can
+    never be uploaded, its images wait too. That is intended (D13).
+  - New tests only. Existing tests are unchanged.
+  - Not done here: the controller does not check that the S3 index.json is
+    older than the one in `<fit_id>_images`. D13 only orders the uploads.
 
 ## Phase 5: wall time (controller)
 

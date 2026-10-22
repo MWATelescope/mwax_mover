@@ -14,6 +14,7 @@ import os
 import time
 from dataclasses import dataclass
 
+from mwax_mover.constants import WSCLEAN_README_SUFFIX
 from mwax_mover.core.command import check_popen_finished, start_command, write_readme_file
 
 logger = logging.getLogger(__name__)
@@ -91,7 +92,9 @@ def run_wsclean(
         stderr = f"Unhandled exception {wsclean_run_exception}"
 
     elapsed = time.monotonic() - start_time
-    write_readme_file(os.path.join(job_output_path, f"{obs_id}_wsclean_readme.txt"), cmdline, exit_code, stdout, stderr)
+    write_readme_file(
+        os.path.join(job_output_path, f"{obs_id}{WSCLEAN_README_SUFFIX}"), cmdline, exit_code, stdout, stderr
+    )
 
     if exit_code == 0:
         logger.info(f"{obs_id}: wsclean run successful in {elapsed:.3f} seconds")
