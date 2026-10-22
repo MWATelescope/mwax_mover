@@ -10,17 +10,28 @@ already published, so run_wsclean() only returns False and the caller logs it.
 """
 
 import logging
+import math
 import os
 import time
 from configparser import ConfigParser
 from dataclasses import dataclass
 
+import numpy as np
+
+from mwalib import MetafitsContext
+
 from mwax_mover.constants import (
+    MWA_COARSE_CHANNEL_WIDTH_HZ,
     SECTION_WSCLEAN,
+    WSCLEAN_COMPACT_BASE_SCALE,
+    WSCLEAN_COMPACT_IMAGE_SIZE,
+    WSCLEAN_EXTENDED_BASE_SCALE,
+    WSCLEAN_EXTENDED_IMAGE_SIZE,
+    WSCLEAN_EXTENDED_MIN_TILES,
     WSCLEAN_GRIDDER,
-    WSCLEAN_IDG_MODE,
-    WSCLEAN_LINK_POLARIZATIONS,
+    WSCLEAN_POLARIZATIONS,
     WSCLEAN_README_SUFFIX,
+    WSCLEAN_SCALE_DECIMALS,
 )
 from mwax_mover.core.command import check_popen_finished, start_command, write_readme_file
 from mwax_mover.core.config import read_config, read_config_bool
@@ -34,8 +45,9 @@ class WSCleanArgs:
     """The WSClean options used by calvin.
 
     An option that is None (or False, for a flag) is not put on the command line.
-    wsclean_args_from_config() sets all the options calvin uses, from the [wsclean]
-    config section. The processor then fills in name, temp_dir and abs_mem_gib for the job.
+    wsclean_args_from_config() sets the options calvin takes from the [wsclean] config
+    section. The processor then fills in the name, temp_dir and abs_mem_gib for the job, and the
+    size and scale, which are worked out for each observation (see array_image_settings()).
 
     Attributes:
         name: Prefix for all WSClean output files. Must be an absolute path, because WSClean
@@ -44,16 +56,18 @@ class WSCleanArgs:
         no_update_model_required: If True, WSClean does not write the model data column.
         abs_mem_gib: Memory limit in GiB (-abs-mem).
         size: Image width and height in pixels (-size).
-        scale: Pixel scale with its unit, e.g. "0.75amin" (-scale).
+        scale: Pixel scale, in degrees unless it has a unit, e.g. "0.0045113" (-scale).
         briggs_robust: Robustness of Briggs weighting (-weight briggs <robust>).
         niter: Maximum number of clean iterations (-niter).
+        nmiter: Maximum number of major iterations (-nmiter).
         mgain: Major iteration gain (-mgain).
+        multiscale_gain: Multiscale clean gain (-multiscale-gain).
         auto_threshold: Clean to this many sigma (-auto-threshold).
         auto_mask: Mask at this many sigma (-auto-mask).
+        minuv_l: Ignore baselines shorter than this many wavelengths (-minuv-l).
         channels_out: Number of output channels (-channels-out).
         gridder: Gridder (-gridder).
-        idg_mode: IDG mode (-idg-mode).
-        link_polarizations: Polarizations to clean on, the rest are cleaned from them (-link-polarizations).
+        polarizations: Polarizations to image (-pol).
         multiscale: Use multiscale cleaning (-multiscale).
         join_channels: Clean the output channels together (-join-channels).
         log_time: Put the date and time on each line of output (-log-time).
@@ -68,13 +82,15 @@ class WSCleanArgs:
     scale: str | None = None
     briggs_robust: float | None = None
     niter: int | None = None
+    nmiter: int | None = None
     mgain: float | None = None
+    multiscale_gain: float | None = None
     auto_threshold: float | None = None
     auto_mask: float | None = None
+    minuv_l: float | None = None
     channels_out: int | None = None
     gridder: str | None = None
-    idg_mode: str | None = None
-    link_polarizations: str | None = None
+    polarizations: str | None = None
     multiscale: bool = False
     join_channels: bool = False
     log_time: bool = False
@@ -113,20 +129,24 @@ class WSCleanArgs:
             args += ["-weight", "briggs", f"{self.briggs_robust:g}"]
         if self.niter is not None:
             args += ["-niter", str(self.niter)]
+        if self.nmiter is not None:
+            args += ["-nmiter", str(self.nmiter)]
         if self.mgain is not None:
             args += ["-mgain", f"{self.mgain:g}"]
+        if self.multiscale_gain is not None:
+            args += ["-multiscale-gain", f"{self.multiscale_gain:g}"]
         if self.auto_threshold is not None:
             args += ["-auto-threshold", f"{self.auto_threshold:g}"]
         if self.auto_mask is not None:
             args += ["-auto-mask", f"{self.auto_mask:g}"]
+        if self.minuv_l is not None:
+            args += ["-minuv-l", f"{self.minuv_l:g}"]
         if self.channels_out is not None:
             args += ["-channels-out", str(self.channels_out)]
         if self.gridder is not None:
             args += ["-gridder", self.gridder]
-        if self.idg_mode is not None:
-            args += ["-idg-mode", self.idg_mode]
-        if self.link_polarizations is not None:
-            args += ["-link-polarizations", self.link_polarizations]
+        if self.polarizations is not None:
+            args += ["-pol", self.polarizations]
 
         flags = [
             (self.multiscale, "-multiscale"),
@@ -143,12 +163,13 @@ class WSCleanArgs:
 def wsclean_args_from_config(config: ConfigParser) -> WSCleanArgs:
     """Read the WSClean options from the [wsclean] config section.
 
-    Every option calvin sets is a required key. The gridder (IDG, hybrid mode) and
-    -link-polarizations i are always used, so they are not in the config. -pol is not set, so
-    WSClean makes a Stokes I image. WSClean uses all CPU cores unless told otherwise, and
-    calvin does not tell it.
+    Every option read here is a required key. The gridder (w-gridder) and the polarization
+    (-pol i, Stokes I) are always used, so they are not in the config. The image size and pixel
+    scale are not in the config either: they are worked out for each observation (see
+    array_image_settings()). WSClean uses all CPU cores unless told otherwise, and calvin does
+    not tell it.
 
-    The returned args have no name, temp_dir or memory limit: those are set per job.
+    The returned args have no name, temp_dir, memory limit, size or scale: those are set per job.
 
     Args:
         config: The loaded calvin_processor config.
@@ -160,28 +181,20 @@ def wsclean_args_from_config(config: ConfigParser) -> WSCleanArgs:
         configparser.NoOptionError: If a key is missing.
         ValueError: If a value is not valid, or the options cannot be used together.
     """
-    size_values = read_config(config, SECTION_WSCLEAN, "size").replace(",", " ").split()
-    try:
-        size = (int(size_values[0]), int(size_values[1])) if len(size_values) == 2 else None
-    except ValueError:
-        size = None
-    if size is None:
-        raise ValueError(f"[wsclean] size must be a width and a height (two integers), got '{' '.join(size_values)}'.")
-
     args = WSCleanArgs(
         name="",
         temp_dir="",
-        size=size,
-        scale=read_config(config, SECTION_WSCLEAN, "scale"),
         briggs_robust=float(read_config(config, SECTION_WSCLEAN, "briggs_robust")),
         niter=int(read_config(config, SECTION_WSCLEAN, "niter")),
+        nmiter=int(read_config(config, SECTION_WSCLEAN, "nmiter")),
         mgain=float(read_config(config, SECTION_WSCLEAN, "mgain")),
+        multiscale_gain=float(read_config(config, SECTION_WSCLEAN, "multiscale_gain")),
         auto_threshold=float(read_config(config, SECTION_WSCLEAN, "auto_threshold")),
         auto_mask=float(read_config(config, SECTION_WSCLEAN, "auto_mask")),
+        minuv_l=float(read_config(config, SECTION_WSCLEAN, "minuv_l")),
         channels_out=int(read_config(config, SECTION_WSCLEAN, "channels_out")),
         gridder=WSCLEAN_GRIDDER,
-        idg_mode=WSCLEAN_IDG_MODE,
-        link_polarizations=WSCLEAN_LINK_POLARIZATIONS,
+        polarizations=WSCLEAN_POLARIZATIONS,
         multiscale=read_config_bool(config, SECTION_WSCLEAN, "multiscale"),
         join_channels=read_config_bool(config, SECTION_WSCLEAN, "join_channels"),
         log_time=read_config_bool(config, SECTION_WSCLEAN, "log_time"),
@@ -190,6 +203,165 @@ def wsclean_args_from_config(config: ConfigParser) -> WSCleanArgs:
     args.validate()
 
     return args
+
+
+def read_compact_array_baseline_max_length(config: ConfigParser) -> float:
+    """Read [wsclean] compact_array_baseline_max_length: the longest baseline of a compact array, in metres.
+
+    Args:
+        config: The loaded calvin_processor config.
+
+    Returns:
+        The length in metres.
+
+    Raises:
+        configparser.NoOptionError: If the key is missing.
+        ValueError: If the value is not a number above zero.
+    """
+    key = "compact_array_baseline_max_length"
+    value = read_config(config, SECTION_WSCLEAN, key)
+    try:
+        length_m = float(value)
+    except ValueError:
+        length_m = math.nan
+    if not length_m > 0:  # also false for NaN
+        raise ValueError(f"[{SECTION_WSCLEAN}] {key} must be a number of metres above zero, got '{value}'.")
+
+    return length_m
+
+
+@dataclass
+class ArrayImageSettings:
+    """The WSClean image size and pixel scale for one observation, and how they were worked out.
+
+    Attributes:
+        configuration: "compact" or "extended".
+        size: Image width and height in pixels.
+        scale: The pixel scale in degrees, as the string given to WSClean.
+        centre_channel: The centre coarse channel number (0-255).
+        num_tiles: The number of tiles.
+        max_baseline_m: The longest baseline in metres, from all the tile positions.
+    """
+
+    configuration: str
+    size: tuple[int, int]
+    scale: str
+    centre_channel: int
+    num_tiles: int
+    max_baseline_m: float
+
+
+def centre_coarse_channel(centre_freq_hz: float) -> int:
+    """Work out the centre coarse channel number (0-255) from the centre frequency.
+
+    For an observation with an even number of coarse channels the centre is between two channels
+    (a .5 value), and this rounds half up, as the metafits CENTCHAN does. Python's round() rounds half
+    to even, which would give 120 for 120.5, where CENTCHAN has 121. A calculation in floating point is
+    not safe either: 163.2 / 1.28 is 127.49999999999999, not 127.5. So this uses whole numbers: the centre
+    frequency in Hz is a whole number, and so is the channel width.
+
+    Args:
+        centre_freq_hz: The centre frequency in Hz (mwalib MetafitsContext.centre_freq_hz).
+
+    Returns:
+        The channel number.
+    """
+    width_hz = MWA_COARSE_CHANNEL_WIDTH_HZ
+    return (2 * round(centre_freq_hz) + width_hz) // (2 * width_hz)
+
+
+def max_baseline_length_m(positions_m: np.ndarray) -> float:
+    """Find the longest baseline between a set of positions.
+
+    Args:
+        positions_m: An array of shape (n, 3): the east, north and height of each tile in metres.
+
+    Returns:
+        The longest distance between any two positions, in metres. Zero if there are fewer than two.
+    """
+    positions = np.asarray(positions_m, dtype=float)
+    if len(positions) < 2:  # noqa: PLR2004 - a baseline needs two tiles
+        return 0.0
+
+    differences = positions[:, np.newaxis, :] - positions[np.newaxis, :, :]
+    return float(np.sqrt((differences**2).sum(axis=-1)).max())
+
+
+def array_image_settings(
+    num_tiles: int,
+    max_baseline_m: float,
+    centre_freq_hz: float,
+    compact_array_baseline_max_length: float,
+) -> ArrayImageSettings:
+    """Choose the WSClean image size and pixel scale for an observation.
+
+    - With WSCLEAN_EXTENDED_MIN_TILES or more tiles the array is "extended".
+    - Otherwise it is "compact" if the longest baseline is no more than compact_array_baseline_max_length,
+      and "extended" if it is longer.
+    - Compact: size WSCLEAN_COMPACT_IMAGE_SIZE and scale WSCLEAN_COMPACT_BASE_SCALE / centre channel.
+      Extended: WSCLEAN_EXTENDED_IMAGE_SIZE and WSCLEAN_EXTENDED_BASE_SCALE / centre channel.
+    - The scale is in degrees, with WSCLEAN_SCALE_DECIMALS decimal places.
+
+    Args:
+        num_tiles: The number of tiles.
+        max_baseline_m: The longest baseline in metres.
+        centre_freq_hz: The centre frequency in Hz.
+        compact_array_baseline_max_length: The longest baseline of a compact array in metres.
+
+    Returns:
+        The settings.
+
+    Raises:
+        ValueError: If the centre frequency gives a channel number below 1.
+    """
+    centre_channel = centre_coarse_channel(centre_freq_hz)
+    if centre_channel < 1:
+        raise ValueError(f"The centre frequency {centre_freq_hz} Hz gives centre channel {centre_channel}.")
+
+    if num_tiles >= WSCLEAN_EXTENDED_MIN_TILES or max_baseline_m > compact_array_baseline_max_length:
+        configuration = "extended"
+        base_scale = WSCLEAN_EXTENDED_BASE_SCALE
+        image_size = WSCLEAN_EXTENDED_IMAGE_SIZE
+    else:
+        configuration = "compact"
+        base_scale = WSCLEAN_COMPACT_BASE_SCALE
+        image_size = WSCLEAN_COMPACT_IMAGE_SIZE
+
+    return ArrayImageSettings(
+        configuration=configuration,
+        size=(image_size, image_size),
+        scale=f"{base_scale / centre_channel:.{WSCLEAN_SCALE_DECIMALS}f}",
+        centre_channel=centre_channel,
+        num_tiles=num_tiles,
+        max_baseline_m=max_baseline_m,
+    )
+
+
+def array_image_settings_from_metafits(
+    metafits_context: MetafitsContext, compact_array_baseline_max_length: float
+) -> ArrayImageSettings:
+    """Choose the WSClean image size and pixel scale for an observation from its metafits.
+
+    Args:
+        metafits_context: The observation's metafits (mwalib). All the tiles are used, flagged or not.
+        compact_array_baseline_max_length: The longest baseline of a compact array in metres.
+
+    Returns:
+        The settings (see array_image_settings()).
+    """
+    positions = np.array([(a.east_m, a.north_m, a.height_m) for a in metafits_context.antennas], dtype=float)
+    settings = array_image_settings(
+        metafits_context.num_ants,
+        max_baseline_length_m(positions),
+        metafits_context.centre_freq_hz,
+        compact_array_baseline_max_length,
+    )
+    logger.info(
+        f"{settings.num_tiles} tiles, longest baseline {settings.max_baseline_m:.0f} m, centre channel"
+        f" {settings.centre_channel}: {settings.configuration} array, WSClean -size {settings.size[0]}"
+        f" {settings.size[1]} -scale {settings.scale}"
+    )
+    return settings
 
 
 def calculate_abs_mem_gib(max_mem_gib: int, ram_backed_gb: int) -> int:

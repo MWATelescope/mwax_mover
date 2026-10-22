@@ -213,12 +213,29 @@ WSCLEAN_NAME_SUFFIX = "_wsclean"
 WSCLEAN_FITS_GLOB = "*" + WSCLEAN_NAME_SUFFIX + "-*.fits"
 
 # WSClean options that calvin always uses (see calvin.wsclean.WSCleanArgs).
-# The gridder is IDG, in hybrid mode (CPU and GPU). IDG grids all four instrumental
-# polarizations together, and the WSClean IDG documentation says to clean Stokes I
-# with -link-polarizations i. -pol is not set, so WSClean makes the default Stokes I image.
-WSCLEAN_GRIDDER = "idg"
-WSCLEAN_IDG_MODE = "hybrid"
-WSCLEAN_LINK_POLARIZATIONS = "i"
+# The gridder is the w-gridder, and the image is Stokes I.
+WSCLEAN_GRIDDER = "wgridder"
+WSCLEAN_POLARIZATIONS = "i"
+
+# The image size and pixel scale are worked out for each observation from the array
+# configuration and the centre frequency (see calvin.wsclean.array_image_settings()).
+# An observation with at least this many tiles is always "extended".
+WSCLEAN_EXTENDED_MIN_TILES = 184
+
+# Otherwise it is "compact" if its longest baseline is no more than the configured
+# [wsclean] compact_array_baseline_max_length, and "extended" if it is longer.
+# The pixel scale in degrees is the base scale divided by the centre coarse channel number.
+WSCLEAN_COMPACT_BASE_SCALE = 1.2
+WSCLEAN_COMPACT_IMAGE_SIZE = 4000
+WSCLEAN_EXTENDED_BASE_SCALE = 0.6
+WSCLEAN_EXTENDED_IMAGE_SIZE = 8000
+
+# Number of decimal places in the -scale value given to WSClean (in degrees).
+WSCLEAN_SCALE_DECIMALS = 7
+
+# Width in Hz of an MWA coarse channel. The coarse channel (receiver channel) number is the
+# centre frequency divided by this.
+MWA_COARSE_CHANNEL_WIDTH_HZ = 1_280_000
 
 # WSClean is not run with a memory limit (-abs-mem) below this many GiB. The limit is
 # the configured maximum minus the RAM that the measurement sets use in the RAM-backed

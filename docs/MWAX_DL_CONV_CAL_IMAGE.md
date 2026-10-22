@@ -160,7 +160,7 @@ sections can stay in the file.
 | `[birli]` | `binary_path`, `timeout`, `max_mem_gib`, `freq_res_khz`, `int_time_res_sec`, `edge_width_khz` |
 | `[hyperdrive]` | `binary_path`, `timeout`, `apply_timeout`, `num_sources`, `source_list_filename`, `source_list_type`, `extra_args` |
 | `[processing]` | `phase_fit_niter`, `phase_outlier_nstd`, `gains_cut_off_max` (optional), `gain_outlier_poly_degree`, `gain_outlier_mad_residual_threshold`, `gain_outlier_modify_gains`, `gain_outlier_plot_n_tiles_per_page`, `tile_bad_channel_fraction`, `keep_completed_visibility_files` |
-| `[wsclean]` | `binary_path`, `timeout`, `max_mem_gib` and all the option keys |
+| `[wsclean]` | `binary_path`, `timeout`, `max_mem_gib`, `compact_array_baseline_max_length` and the option keys (not `size` and `scale`: those are worked out for each observation, see `docs/IMAGING.md` Phase 9) |
 | `[downloading]` | `download_retries`, `download_retry_wait`, `mwaasvo_download_obs_timeout`, `https_proxy` and `no_proxy` (optional) |
 
 Not read: `[mwax mover]`, `[mwa database]`, `[giant squid]`, `[plots upload]`, and

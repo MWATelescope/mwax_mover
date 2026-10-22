@@ -12,7 +12,7 @@ import os
 from configparser import ConfigParser
 from dataclasses import dataclass
 
-from mwax_mover.calvin.wsclean import WSCleanArgs, wsclean_args_from_config
+from mwax_mover.calvin.wsclean import WSCleanArgs, read_compact_array_baseline_max_length, wsclean_args_from_config
 from mwax_mover.constants import (
     SECTION_BIRLI,
     SECTION_DOWNLOADING,
@@ -64,6 +64,7 @@ class LocalSettings:
     wsclean_binary_path: str
     wsclean_timeout: int
     wsclean_max_mem_gib: int
+    wsclean_compact_array_baseline_max_length: float
     wsclean_args: WSCleanArgs
 
     download_retries: int
@@ -172,6 +173,7 @@ def read_local_config(config_filename: str) -> LocalSettings:
 
     try:
         wsclean_args = wsclean_args_from_config(config)
+        compact_array_baseline_max_length = read_compact_array_baseline_max_length(config)
     except configparser.NoSectionError as error:
         raise LocalConfigError(f"The config has no [{SECTION_WSCLEAN}] section.") from error
     except configparser.NoOptionError as error:
@@ -209,6 +211,7 @@ def read_local_config(config_filename: str) -> LocalSettings:
         wsclean_binary_path=_read(config, SECTION_WSCLEAN, "binary_path"),
         wsclean_timeout=_read_as(config, SECTION_WSCLEAN, "timeout", int),
         wsclean_max_mem_gib=_read_as(config, SECTION_WSCLEAN, "max_mem_gib", int),
+        wsclean_compact_array_baseline_max_length=compact_array_baseline_max_length,
         wsclean_args=wsclean_args,
         download_retries=_read_as(config, SECTION_DOWNLOADING, "download_retries", int),
         download_retry_wait=_read_as(config, SECTION_DOWNLOADING, "download_retry_wait", int),

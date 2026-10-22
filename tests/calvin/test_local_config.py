@@ -63,8 +63,13 @@ def test_reads_a_real_processor_config(tmp_path):
     assert settings.keep_completed_visibility_files is False
     assert settings.wsclean_timeout == 14400
     assert settings.wsclean_max_mem_gib == 830
-    assert settings.wsclean_args.size == (3072, 3072)
+    assert settings.wsclean_compact_array_baseline_max_length == 3500.0
+    # The size and scale are worked out for each observation, so they are not in the config
+    assert settings.wsclean_args.size is None
+    assert settings.wsclean_args.scale is None
     assert settings.wsclean_args.channels_out == 4
+    assert settings.wsclean_args.niter == 1000000
+    assert settings.wsclean_args.minuv_l == 100.0
     assert settings.download_retries == 3
     assert settings.download_retry_wait == 240
     assert settings.download_timeout == 3600
@@ -91,7 +96,7 @@ def test_reads_the_wsclean_options_even_if_imaging_is_not_enabled_in_the_config(
     text = _cfg_text()
     assert "[wsclean]\nenabled=0" in text
 
-    assert read_local_config(_write(tmp_path, text)).wsclean_args.scale == "0.75amin"
+    assert read_local_config(_write(tmp_path, text)).wsclean_args.mgain == 0.85
 
 
 def test_proxy_settings_are_optional(tmp_path):
@@ -127,7 +132,8 @@ def test_gains_cut_off_max_is_optional(tmp_path):
         ("processing", "tile_bad_channel_fraction"),
         ("wsclean", "timeout"),
         ("wsclean", "max_mem_gib"),
-        ("wsclean", "scale"),
+        ("wsclean", "nmiter"),
+        ("wsclean", "compact_array_baseline_max_length"),
         ("downloading", "download_retries"),
     ],
 )
@@ -159,7 +165,16 @@ def test_a_missing_section_is_named_in_the_error(tmp_path):
             r"\[processing\] tile_bad_channel_fraction must be a float",
         ),
         ("gain_outlier_modify_gains=0", "gain_outlier_modify_gains=maybe", r"\[processing\] gain_outlier_modify_gains"),
-        ("size=3072 3072", "size=big", r"\[wsclean\].*size"),
+        (
+            "compact_array_baseline_max_length=3500",
+            "compact_array_baseline_max_length=far",
+            r"\[wsclean\].*compact_array",
+        ),
+        (
+            "compact_array_baseline_max_length=3500",
+            "compact_array_baseline_max_length=0",
+            r"\[wsclean\].*compact_array",
+        ),
         ("channels_out=4", "channels_out=1", r"\[wsclean\].*join_channels"),
     ],
 )

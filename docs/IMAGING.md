@@ -1,6 +1,6 @@
 # mwax_mover calvin imaging plan
 
-Status: **implemented, phases 1 to 7.** The calvin host checks (see the
+Status: **implemented, phases 1 to 9.** The calvin host checks (see the
 notes of each phase) are still to do before `[wsclean] enabled=1` is used.
 
 Add a WSClean imaging step to `mwax_calvin_processor`. To do this, Birli
@@ -405,7 +405,8 @@ Status: **implemented**.
   `to_cmdline_args()`.
 - Check that `-channels-out > 1` names (`-MFS-image.fits`,
   `-0000-image.fits`) still match the Phase 4 filters.
-- Implementation notes:
+- Implementation notes: **the option values, the gridder, the polarization and the image size and
+    scale in this list were changed in Phase 9. Read Phase 9 for the current ones.**
   - Greg chose the options and values. Config keys in `[wsclean]` (all
     required when `enabled=1`; they are not read when `enabled=0`):
     `max_mem_gib=830`, `size=3072 3072`, `scale=0.75amin`,
@@ -490,6 +491,45 @@ Status: **implemented.**
   `mwax_mover.calvin.imaging` (20 patch targets; approved by Greg).
 - `mwax_dl_conv_cal_image` runs the whole pipeline on one MWA ASVO download,
   with the same imaging code. See `docs/MWAX_DL_CONV_CAL_IMAGE.md`.
+
+---
+
+## Phase 9: revised WSClean defaults, with the image size and scale per observation
+
+Status: **implemented.** The defaults are from a colleague's WSClean script.
+
+- **Gridder and polarization:** `-gridder wgridder` and `-pol i`. The IDG options
+  (`-idg-mode`, `-link-polarizations`) are gone. (The script has `-use-wgridder`. That is the
+  old name. The WSClean 3.4 and later docs use `-gridder wgridder`, and the `-gridder` option is
+  already used here, so `-gridder wgridder` is used.) The output file names do not change
+  (Stokes I has no polarization tag), so the index and the preview PNG still work.
+- **Config keys in `[wsclean]`** (all required when `enabled=1`): `max_mem_gib=830`,
+  `compact_array_baseline_max_length=3500` (metres), `briggs_robust=0`, `niter=1000000`,
+  `nmiter=2`, `mgain=0.85`, `multiscale_gain=0.15`, `auto_threshold=5`, `auto_mask=7`,
+  `minuv_l=100`, `channels_out=4`, and the flags `multiscale`, `join_channels`, `log_time`,
+  `verbose` (all 1). `size` and `scale` are **not** config keys any more. A config that still has them
+  works: they are ignored.
+- **Image size and pixel scale, for each observation** (`calvin.wsclean.array_image_settings()`):
+  - The centre coarse channel is the centre frequency divided by 1.28 MHz, rounded half up. This is the
+    metafits `CENTCHAN`, and it is checked against `CENTCHAN` in every test metafits that mwalib can
+    open. It is done with whole numbers: in floating point, 163.2 / 1.28 is 127.49999999999999 and
+    rounds to the wrong channel, and Python's `round()` rounds half to even.
+  - With 184 or more tiles the array is "extended". Otherwise it is "compact" if the longest baseline
+    (from all the tile positions, flagged or not, in 3D) is no more than
+    `compact_array_baseline_max_length`, and "extended" if it is longer.
+  - Compact: `-size 4000 4000`, scale = 1.2 / centre channel. Extended: `-size 8000 8000`,
+    scale = 0.6 / centre channel. The scale is in degrees with 7 decimal places (the script cuts the
+    string to 8 characters, which gives 7 decimals, but truncates where this rounds).
+  - The limits and the sizes are constants in `constants.py` (`WSCLEAN_EXTENDED_MIN_TILES`,
+    `WSCLEAN_COMPACT_BASE_SCALE`, ...). Only the baseline limit is config.
+- **Processor:** `start()` works the settings out as soon as the metafits is read, and keeps them in
+  `wsclean_image_settings`. If that fails, the calibration goes on and imaging is skipped with a warning.
+  `run_imaging()` puts the size and scale in the WSClean options. **The tool**
+  (`mwax_dl_conv_cal_image`) does the same in its `imaging` step, and shows the result in the summary.
+- **Not changed:** `[wsclean] timeout` (4 h) and the Slurm wall times (6 h and 12 h). `-niter 1000000` with
+  `-multiscale` on an 8000 x 8000 image may need longer. Measure it first.
+- **Check on a calvin host:** that the installed WSClean accepts `-gridder wgridder`, `-minuv-l`,
+  `-nmiter` and `-multiscale-gain`, and the run time and memory of an extended-array observation.
 
 ---
 

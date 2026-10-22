@@ -9,6 +9,7 @@ the calibrator visibility files for archiving or discard.
 """
 
 import argparse
+import dataclasses
 import datetime
 import glob
 import logging
@@ -36,8 +37,11 @@ from mwax_mover.calvin.imaging import ImagingSettings, run_imaging_steps
 from mwax_mover.calvin.pipeline import CalvinJobType, process_solutions
 from mwax_mover.calvin.plots.index import extend_plot_index, generate_plot_index_file
 from mwax_mover.calvin.wsclean import (
+    ArrayImageSettings,
     WSCleanArgs,
+    array_image_settings_from_metafits,
     calculate_abs_mem_gib,
+    read_compact_array_baseline_max_length,
     wsclean_args_from_config,
 )
 from mwax_mover.calvin.solution_files import (
@@ -223,8 +227,11 @@ class MWAXCalvinProcessor(MWAXDaemon):
         self.cfg_wsclean_binary_path: str = ""
         self.cfg_wsclean_timeout: int = 0
         self.cfg_wsclean_max_mem_gib: int = 0
+        self.cfg_wsclean_compact_array_baseline_max_length: float = 0.0
         # The options from the [wsclean] config. The job's name, temp_dir and memory limit are added when it runs.
         self.cfg_wsclean_args: WSCleanArgs = WSCleanArgs(name="", temp_dir="")
+        # The WSClean image size and pixel scale for this observation. None until start() works it out.
+        self.wsclean_image_settings: ArrayImageSettings | None = None
         # The WSClean memory limit (-abs-mem) for this job. None until start() works it out.
         self.wsclean_abs_mem_gib: int | None = None
         self.cfg_hyperdrive_binary_path: str = ""
@@ -317,6 +324,16 @@ class MWAXCalvinProcessor(MWAXDaemon):
             # Create metafits context
             logger.info(f"Reading metafits file {self.metafits_filename} with mwalib...")
             self.metafits_context = MetafitsContext(self.metafits_filename, None)
+
+            # The WSClean image size and pixel scale depend on the array configuration and the frequency.
+            # If this fails, imaging is skipped later: the calibration itself does not need it.
+            if self.cfg_wsclean_enabled:
+                try:
+                    self.wsclean_image_settings = array_image_settings_from_metafits(
+                        self.metafits_context, self.cfg_wsclean_compact_array_baseline_max_length
+                    )
+                except Exception:  # noqa: BLE001 - imaging is optional; the calibration must not fail because of it
+                    logger.exception(f"{self.obs_id}: could not work out the WSClean image size and scale.")
 
             # Get list of expected files from web service- wait if obs is still in progress!
             self.current_task_name = "Get file list"
@@ -1133,12 +1150,21 @@ class MWAXCalvinProcessor(MWAXDaemon):
         Returns:
             True if WSClean ran successfully, False otherwise.
         """
+        wsclean_args = self.cfg_wsclean_args
+        if self.wsclean_image_settings is not None:
+            wsclean_args = dataclasses.replace(
+                wsclean_args, size=self.wsclean_image_settings.size, scale=self.wsclean_image_settings.scale
+            )
+        elif self.cfg_wsclean_enabled:
+            logger.warning(f"{self.obs_id}: no WSClean image size and scale. Skipping imaging.")
+            return False
+
         settings = ImagingSettings(
             hyperdrive_binary_path=self.cfg_hyperdrive_binary_path,
             apply_timeout=self.cfg_hyperdrive_apply_timeout,
             wsclean_binary_path=self.cfg_wsclean_binary_path,
             wsclean_timeout=self.cfg_wsclean_timeout,
-            wsclean_args=self.cfg_wsclean_args,
+            wsclean_args=wsclean_args,
             wsclean_abs_mem_gib=self.wsclean_abs_mem_gib,
             remove_input_ms=not self.cfg_proc_keep_completed_visibility_files,
         )
@@ -1518,6 +1544,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
 
                 try:
                     self.cfg_wsclean_args = wsclean_args_from_config(config)
+                    self.cfg_wsclean_compact_array_baseline_max_length = read_compact_array_baseline_max_length(config)
                 except ValueError as wsclean_error:
                     logger.error(f"Invalid [wsclean] config: {wsclean_error} Quitting.")
                     sys.exit(EXIT_FAILURE)

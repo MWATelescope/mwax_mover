@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import tests_common
 
+from mwax_mover.calvin.wsclean import ArrayImageSettings
 from mwax_mover.cli import mwax_dl_conv_cal_image as tool
 from mwax_mover.mwa_asvo.signed_url import DownloadError
 
@@ -93,6 +94,9 @@ def patched_pipeline(base_dir: Path, work_dir: Path | None = None, kind: str = "
         solutions=MagicMock(return_value=SimpleNamespace(soln_tile_ids=[1, 2, 3])),
         imaging=MagicMock(side_effect=fake_imaging),
         ram_backed=MagicMock(return_value=False),
+        image_settings=MagicMock(
+            return_value=ArrayImageSettings("extended", (8000, 8000), "0.0045113", 133, 128, 5302.9)
+        ),
     )
     for name, value in overrides.items():
         setattr(mocks, name, value)
@@ -108,6 +112,7 @@ def patched_pipeline(base_dir: Path, work_dir: Path | None = None, kind: str = "
         "solutions": "process_solutions_files",
         "imaging": "run_imaging_steps",
         "ram_backed": "is_ram_backed",
+        "image_settings": "array_image_settings_from_metafits",
     }
     plenty_of_room = SimpleNamespace(total=10**15, used=0, free=10**15)
     with ExitStack() as stack:
@@ -559,3 +564,46 @@ def test_format_summary_lists_every_step():
     assert "Birli failed" in summary
     assert "Result: FAILED" in summary
     assert "Output: /d/output" in summary
+
+
+# ---------------------------------------------------------------------------
+# the WSClean image size and scale are worked out for each observation
+# ---------------------------------------------------------------------------
+
+
+def test_imaging_gets_the_image_size_and_scale_worked_out_for_the_observation(cfg_filename, tmp_path):
+    base = tmp_path / "job"
+    compact = ArrayImageSettings("compact", (4000, 4000), "0.0090226", 133, 128, 2873.5)
+
+    with patched_pipeline(base, image_settings=MagicMock(return_value=compact)) as mocks:
+        assert _run(cfg_filename, base) == tool.EXIT_OK
+
+    # The metafits and the cutoff from the config go in ...
+    context, cutoff = mocks.image_settings.call_args.args
+    assert context is mocks.context.return_value
+    assert cutoff == 3500.0
+    # ... and the size and scale come out in the WSClean options. The other options are from the config.
+    wsclean_args = mocks.imaging.call_args.args[4].wsclean_args
+    assert wsclean_args.size == (4000, 4000)
+    assert wsclean_args.scale == "0.0090226"
+    assert wsclean_args.niter == 1000000
+    assert wsclean_args.gridder == "wgridder"
+
+
+def test_the_image_settings_are_in_the_summary(cfg_filename, tmp_path, capsys):
+    base = tmp_path / "job"
+
+    with patched_pipeline(base):
+        _run(cfg_filename, base)
+
+    assert "extended array: -size 8000 8000 -scale 0.0045113" in capsys.readouterr().out
+
+
+def test_a_failure_to_work_out_the_image_settings_fails_imaging_before_anything_runs(cfg_filename, tmp_path, capsys):
+    base = tmp_path / "job"
+
+    with patched_pipeline(base, image_settings=MagicMock(side_effect=ValueError("centre channel 0"))) as mocks:
+        assert _run(cfg_filename, base) == tool.EXIT_STEP_FAILED
+
+    assert "centre channel 0" in capsys.readouterr().out
+    mocks.imaging.assert_not_called()

@@ -418,19 +418,23 @@ def test_mwax_calvin_processor_reads_the_wsclean_options_if_enabled():
     mcal = _read_processor_config(_rendered_config_with({"[wsclean]\nenabled=0": "[wsclean]\nenabled=1"}))
 
     assert mcal.cfg_wsclean_max_mem_gib == 830
-    assert mcal.cfg_wsclean_args.size == (3072, 3072)
-    assert mcal.cfg_wsclean_args.scale == "0.75amin"
+    assert mcal.cfg_wsclean_compact_array_baseline_max_length == 3500.0
+    # The size and scale are worked out for each observation, so they are not in the config
+    assert mcal.cfg_wsclean_args.size is None
+    assert mcal.cfg_wsclean_args.scale is None
     assert mcal.cfg_wsclean_args.channels_out == 4
     assert mcal.cfg_wsclean_args.join_channels is True
 
 
 def test_mwax_calvin_processor_does_not_need_the_wsclean_options_if_disabled():
-    config_filename = _rendered_config_with({"max_mem_gib=830\nsize=3072 3072\nscale=0.75amin\n": ""})
+    config_filename = _rendered_config_with(
+        {"compact_array_baseline_max_length=3500\nbriggs_robust=0\nniter=1000000\n": ""}
+    )
 
     mcal = _read_processor_config(config_filename)
 
     assert mcal.cfg_wsclean_enabled is False
-    assert mcal.cfg_wsclean_args.size is None
+    assert mcal.cfg_wsclean_args.niter is None
 
 
 def test_mwax_calvin_processor_quits_on_wsclean_options_that_do_not_fit_together():

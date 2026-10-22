@@ -10,6 +10,7 @@ the MWAX servers or Slurm. See docs/MWAX_DL_CONV_CAL_IMAGE.md for the design.
 """
 
 import argparse
+import dataclasses
 import glob
 import logging
 import os
@@ -28,7 +29,7 @@ from mwax_mover.calvin.hyperdrive import run_hyperdrive
 from mwax_mover.calvin.imaging import ImagingSettings, run_imaging_steps
 from mwax_mover.calvin.local_config import LocalConfigError, LocalSettings, check_files_exist, read_local_config
 from mwax_mover.calvin.pipeline import process_solutions_files
-from mwax_mover.calvin.wsclean import calculate_abs_mem_gib
+from mwax_mover.calvin.wsclean import array_image_settings_from_metafits, calculate_abs_mem_gib
 from mwax_mover.constants import (
     CALIBRATED_MS_SUFFIX,
     EXT_MS,
@@ -515,6 +516,17 @@ def _step_imaging(job: Job) -> tuple[str, str]:
         (status, detail).
     """
     settings = job.settings
+    assert job.metafits_context is not None
+
+    # The WSClean image size and pixel scale depend on the array configuration and the frequency
+    try:
+        image_settings = array_image_settings_from_metafits(
+            job.metafits_context, settings.wsclean_compact_array_baseline_max_length
+        )
+    except Exception as image_error:  # noqa: BLE001 - reported as a failed step
+        logger.exception("Could not work out the WSClean image size and scale")
+        return STATUS_FAILED, f"Could not work out the WSClean image size and scale: {image_error}"
+    wsclean_args = dataclasses.replace(settings.wsclean_args, size=image_settings.size, scale=image_settings.scale)
 
     # An _ms.tar download is the expensive input, so it is never deleted: it is needed to run again.
     remove_input_ms = job.info.kind is SignedUrlKind.vis and not settings.keep_completed_visibility_files
@@ -523,7 +535,7 @@ def _step_imaging(job: Job) -> tuple[str, str]:
         apply_timeout=settings.hyperdrive_apply_timeout,
         wsclean_binary_path=settings.wsclean_binary_path,
         wsclean_timeout=settings.wsclean_timeout,
-        wsclean_args=settings.wsclean_args,
+        wsclean_args=wsclean_args,
         wsclean_abs_mem_gib=job.wsclean_abs_mem_gib,
         remove_input_ms=remove_input_ms,
     )
@@ -545,7 +557,11 @@ def _step_imaging(job: Job) -> tuple[str, str]:
         pngs = glob.glob(f"{image_prefix}-*.png")
         png = pngs[0] if pngs else ""
 
-    return STATUS_OK, f"preview: {png}" if png else "no preview PNG was made"
+    image_detail = (
+        f"{image_settings.configuration} array: -size {image_settings.size[0]} {image_settings.size[1]}"
+        f" -scale {image_settings.scale}"
+    )
+    return STATUS_OK, f"{image_detail}; preview: {png}" if png else f"{image_detail}; no preview PNG was made"
 
 
 def _step_cleanup(job: Job) -> tuple[str, str]:
