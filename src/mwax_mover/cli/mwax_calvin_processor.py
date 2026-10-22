@@ -9,6 +9,7 @@ the calibrator visibility files for archiving or discard.
 """
 
 import argparse
+import dataclasses
 import datetime
 import glob
 import logging
@@ -35,7 +36,12 @@ from mwax_mover.calvin.hyperdrive import run_hyperdrive
 from mwax_mover.calvin.hyperdrive_apply import run_solutions_apply
 from mwax_mover.calvin.pipeline import CalvinJobType, process_solutions
 from mwax_mover.calvin.plots.index import extend_plot_index, generate_plot_index_file
-from mwax_mover.calvin.wsclean import WSCleanArgs, run_wsclean
+from mwax_mover.calvin.wsclean import (
+    WSCleanArgs,
+    calculate_abs_mem_gib,
+    run_wsclean,
+    wsclean_args_from_config,
+)
 from mwax_mover.calvin.solution_files import (
     export_calibration_solutions,
     reap_orphaned_staging_dirs,
@@ -63,6 +69,7 @@ from mwax_mover.constants import (
     SECTION_PROCESSING,
     SOLUTIONS_FITS_GLOB,
     WORKING_PATH_MAX_GB,
+    WSCLEAN_MIN_ABS_MEM_GIB,
     WSCLEAN_NAME_SUFFIX,
 )
 from mwax_mover.core.config import read_config, read_config_bool, read_optional_config
@@ -220,6 +227,11 @@ class MWAXCalvinProcessor(MWAXDaemon):
         self.cfg_wsclean_enabled: bool = False
         self.cfg_wsclean_binary_path: str = ""
         self.cfg_wsclean_timeout: int = 0
+        self.cfg_wsclean_max_mem_gib: int = 0
+        # The options from the [wsclean] config. The job's name, temp_dir and memory limit are added when it runs.
+        self.cfg_wsclean_args: WSCleanArgs = WSCleanArgs(name="", temp_dir="")
+        # The WSClean memory limit (-abs-mem) for this job. None until start() works it out.
+        self.wsclean_abs_mem_gib: int | None = None
         self.cfg_hyperdrive_binary_path: str = ""
         self.hyperdrive_extra_args: str = ""
 
@@ -393,10 +405,19 @@ class MWAXCalvinProcessor(MWAXDaemon):
                     f"Using temporary work dir {self.cfg_proc_temp_working_path} for Birli output. Reduced "
                     f"allowed Birli memory to: {self.cfg_birli_max_mem_gib} GiB"
                 )
+
+                # The temp working path is RAM-backed, so WSClean gets the same reduction
+                if self.cfg_wsclean_enabled:
+                    self.wsclean_abs_mem_gib = calculate_abs_mem_gib(self.cfg_wsclean_max_mem_gib, working_space_gb)
+                    logger.info(f"Reduced allowed WSClean memory to: {self.wsclean_abs_mem_gib} GiB")
             else:
                 # Use output_dir
                 self.working_path = self.cfg_proc_job_output_path
                 logger.info(f"Using work dir {self.working_path} for Birli output.")
+
+                # The measurement sets are on disk, so WSClean can have all of its memory
+                if self.cfg_wsclean_enabled:
+                    self.wsclean_abs_mem_gib = self.cfg_wsclean_max_mem_gib
 
             # Set measurement set name. For a picket fence observation Birli adds
             # a _chN or _chN-M suffix, creating one measurement set per band.
@@ -1129,6 +1150,13 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 logger.warning(f"{self.obs_id}: no measurement sets found to image. Skipping imaging.")
                 return False
 
+            if self.wsclean_abs_mem_gib is not None and self.wsclean_abs_mem_gib < WSCLEAN_MIN_ABS_MEM_GIB:
+                logger.warning(
+                    f"{self.obs_id}: only {self.wsclean_abs_mem_gib} GiB is left for WSClean after the"
+                    " measurement sets in the temp working path. Skipping imaging. Calibration itself succeeded."
+                )
+                return False
+
             self.current_task_name = "Applying solutions"
             apply_success, cal_ms_files = run_solutions_apply(
                 ms_files,
@@ -1147,9 +1175,11 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 return False
 
             self.current_task_name = "WSClean"
-            wsclean_args = WSCleanArgs(
+            wsclean_args = dataclasses.replace(
+                self.cfg_wsclean_args,
                 name=os.path.join(self.cfg_proc_job_output_path, f"{self.obs_id}{WSCLEAN_NAME_SUFFIX}"),
                 temp_dir=self.working_path,
+                abs_mem_gib=self.wsclean_abs_mem_gib,
             )
             if not run_wsclean(
                 cal_ms_files,
@@ -1523,6 +1553,16 @@ class MWAXCalvinProcessor(MWAXDaemon):
                     "timeout",
                 )
             )
+
+            # The imaging options are only needed (and only checked) if imaging is on
+            if self.cfg_wsclean_enabled:
+                self.cfg_wsclean_max_mem_gib = int(read_config(config, SECTION_WSCLEAN, "max_mem_gib"))
+
+                try:
+                    self.cfg_wsclean_args = wsclean_args_from_config(config)
+                except ValueError as wsclean_error:
+                    logger.error(f"Invalid [wsclean] config: {wsclean_error} Quitting.")
+                    sys.exit(EXIT_FAILURE)
 
             #
             # processing config

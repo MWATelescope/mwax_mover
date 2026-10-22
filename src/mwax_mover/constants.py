@@ -212,6 +212,17 @@ WSCLEAN_NAME_SUFFIX = "_wsclean"
 # (<obs_id>_wsclean-image.fits, <obs_id>_wsclean-MFS-image.fits, ...).
 WSCLEAN_FITS_GLOB = "*" + WSCLEAN_NAME_SUFFIX + "-*.fits"
 
+# WSClean options that calvin always uses (see calvin.wsclean.WSCleanArgs).
+# The gridder is IDG, in hybrid mode (CPU and GPU). Both polarisations are imaged.
+WSCLEAN_GRIDDER = "idg"
+WSCLEAN_IDG_MODE = "hybrid"
+WSCLEAN_POLARIZATIONS = "xx,yy"
+
+# WSClean is not run with a memory limit (-abs-mem) below this many GiB. The limit is
+# the configured maximum minus the RAM that the measurement sets use in the RAM-backed
+# temp working path, so a very large observation can leave nothing for WSClean.
+WSCLEAN_MIN_ABS_MEM_GIB = 1
+
 # Readme written by calvin.wsclean.run_wsclean (prefixed with the obs ID).
 WSCLEAN_README_SUFFIX = "_wsclean_readme.txt"
 

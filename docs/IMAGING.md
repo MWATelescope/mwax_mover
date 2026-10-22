@@ -1,7 +1,7 @@
 # mwax_mover calvin imaging plan
 
-Status: **in progress.** Phases 1 to 5 are implemented (see their notes
-below). They still need the calvin host checks. Phase 6 is planned.
+Status: **implemented, phases 1 to 6.** The calvin host checks (see the
+notes of each phase) are still to do before `[wsclean] enabled=1` is used.
 
 Add a WSClean imaging step to `mwax_calvin_processor`. To do this, Birli
 and hyperdrive change from UVFITS to CASA measurement sets (MS), and
@@ -398,11 +398,52 @@ Status: **implemented**.
 
 ## Phase 6: WSClean parameters
 
+Status: **implemented**.
+
 - Greg selects the parameters. `-abs-mem` is required (D10). Add each one
   to `WSCleanArgs`, to the `[wsclean]` config, and to
   `to_cmdline_args()`.
 - Check that `-channels-out > 1` names (`-MFS-image.fits`,
   `-0000-image.fits`) still match the Phase 4 filters.
+- Implementation notes:
+  - Greg chose the options and values. Config keys in `[wsclean]` (all
+    required when `enabled=1`; they are not read when `enabled=0`):
+    `max_mem_gib=830`, `size=3072 3072`, `scale=0.75amin`,
+    `briggs_robust=-1.0`, `niter=100000`, `mgain=0.95`, `auto_threshold=1`,
+    `auto_mask=5`, `channels_out=4`, and the flags `multiscale`,
+    `join_channels`, `join_polarizations`, `log_time`, `verbose` (all 1).
+  - Fixed in code: `-gridder idg`, `-idg-mode hybrid`, `-pol xx,yy` (constants
+    `WSCLEAN_GRIDDER`, `WSCLEAN_IDG_MODE`, `WSCLEAN_POLARIZATIONS`) and
+    `-no-update-model-required`. `-j` is not passed, so WSClean uses all
+    CPU cores.
+  - `WSCleanArgs` leaves out any option that is None or False. So the
+    Phase 3 tests, which only set `name` and `temp_dir`, are unchanged.
+    `wsclean_args_from_config()` fills the options. The processor keeps them
+    in `cfg_wsclean_args` and adds `name`, `temp_dir` and `abs_mem_gib` for
+    each job with `dataclasses.replace()`.
+  - `WSCleanArgs.validate()` runs when the config is read. The processor
+    quits if `join_channels` is on and `channels_out` is below 2, or if a
+    value is not valid.
+  - `-abs-mem` (D10): `[wsclean] max_mem_gib` minus the RAM-backed
+    working space (the same value as the Birli reduction, which is 2 x the
+    Birli MS estimate when imaging is on). If the working path is on disk
+    (500 GB rule), nothing is subtracted. If less than
+    `WSCLEAN_MIN_ABS_MEM_GIB` (1) is left, `run_imaging()` skips imaging
+    before solutions-apply and the job stays successful.
+    `start()` sets `wsclean_abs_mem_gib`. If it is None (only in unit tests),
+    `-abs-mem` is not passed.
+  - File names: with `-channels-out 4` and `-pol xx,yy`, WSClean writes names
+    such as `<obs>_wsclean-MFS-XX-image.fits` and
+    `<obs>_wsclean-0003-YY-dirty.fits`. They match `WSCLEAN_FITS_GLOB` and
+    the index descriptions. This is tested.
+  - Not covered by a unit test: the code in `start()` that calls
+    `calculate_abs_mem_gib()`. The function itself is tested.
+  - Check on a calvin host (Greg): `wsclean -help` for the installed version
+    lists `-abs-mem`, `-gridder`, `-idg-mode`, `-temp-dir`, `-auto-mask`,
+    `-join-polarizations`, `-log-time` and `-verbose`. Then run one
+    observation with `enabled=1` and measure: WSClean run time (for the
+    deferred separate-job decision, D14), peak RAM, and the wall times from
+    Phase 5.
 
 ---
 

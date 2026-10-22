@@ -8,6 +8,7 @@ import pytest
 import tests_common
 from tests_fakedb import FakeMWAXDBHandler
 
+from mwax_mover.calvin.wsclean import WSCleanArgs
 from mwax_mover.cli.mwax_calvin_processor import CalvinJobType, MWAXCalvinProcessor
 from mwax_mover.constants import EXIT_FAILURE
 
@@ -395,3 +396,82 @@ def test_run_imaging_returns_whether_wsclean_worked(tmp_path):
 
     with patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", return_value=(False, [])):
         assert mcal.run_imaging() is False
+
+
+def _rendered_config_with(replacements: dict[str, str]) -> str:
+    """Render the processor test config, then replace text in it."""
+    tests_common.setup_test_directories("mwax_calvin_processor")
+    config_filename = tests_common.render_test_config("mwax_calvin_processor")
+    with open(config_filename, encoding="UTF-8") as f:
+        text = f.read()
+    for old, new in replacements.items():
+        assert old in text
+        text = text.replace(old, new, 1)
+    with open(config_filename, "w", encoding="UTF-8") as f:
+        f.write(text)
+    return config_filename
+
+
+def test_mwax_calvin_processor_reads_the_wsclean_options_if_enabled():
+    mcal = _read_processor_config(_rendered_config_with({"[wsclean]\nenabled=0": "[wsclean]\nenabled=1"}))
+
+    assert mcal.cfg_wsclean_max_mem_gib == 830
+    assert mcal.cfg_wsclean_args.size == (3072, 3072)
+    assert mcal.cfg_wsclean_args.scale == "0.75amin"
+    assert mcal.cfg_wsclean_args.channels_out == 4
+    assert mcal.cfg_wsclean_args.join_channels is True
+
+
+def test_mwax_calvin_processor_does_not_need_the_wsclean_options_if_disabled():
+    config_filename = _rendered_config_with({"max_mem_gib=830\nsize=3072 3072\nscale=0.75amin\n": ""})
+
+    mcal = _read_processor_config(config_filename)
+
+    assert mcal.cfg_wsclean_enabled is False
+    assert mcal.cfg_wsclean_args.size is None
+
+
+def test_mwax_calvin_processor_quits_on_wsclean_options_that_do_not_fit_together():
+    config_filename = _rendered_config_with(
+        {"[wsclean]\nenabled=0": "[wsclean]\nenabled=1", "channels_out=4": "channels_out=1"}
+    )
+
+    with pytest.raises(SystemExit):
+        _read_processor_config(config_filename)
+
+
+def test_run_imaging_gives_wsclean_the_configured_options_and_the_memory_limit(tmp_path):
+    mcal = _processor_with_ms_dirs(tmp_path, ["1234567890_ch75.ms"])
+    mcal.cfg_wsclean_args = WSCleanArgs(name="", temp_dir="", size=(3072, 3072), scale="0.75amin", multiscale=True)
+    mcal.wsclean_abs_mem_gib = 737
+    cal_ms = [str(tmp_path / "1234567890_ch75_cal.ms")]
+
+    with (
+        patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", return_value=(True, cal_ms)),
+        patch("mwax_mover.cli.mwax_calvin_processor.run_wsclean", return_value=True) as mock_wsclean,
+    ):
+        assert mcal.run_imaging() is True
+
+    args = mock_wsclean.call_args.args[5]
+    assert args.name == str(tmp_path / "out" / "1234567890_wsclean")
+    assert args.temp_dir == str(tmp_path)
+    assert args.abs_mem_gib == 737
+    assert args.size == (3072, 3072)
+    assert args.multiscale is True
+    # The options from the config are not changed by a job
+    assert mcal.cfg_wsclean_args.name == ""
+    assert mcal.cfg_wsclean_args.abs_mem_gib is None
+
+
+def test_run_imaging_is_skipped_if_the_measurement_sets_leave_no_memory_for_wsclean(tmp_path):
+    mcal = _processor_with_ms_dirs(tmp_path, ["1234567890_ch75.ms"])
+    mcal.wsclean_abs_mem_gib = 0
+
+    with (
+        patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply") as mock_apply,
+        patch("mwax_mover.cli.mwax_calvin_processor.run_wsclean") as mock_wsclean,
+    ):
+        assert mcal.run_imaging() is False
+
+    mock_apply.assert_not_called()
+    mock_wsclean.assert_not_called()
