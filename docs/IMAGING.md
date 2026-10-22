@@ -1,7 +1,7 @@
 # mwax_mover calvin imaging plan
 
-Status: **in progress.** Phases 1 to 4 are implemented (see their notes
-below). They still need the calvin host checks. Phases 5-6 are planned.
+Status: **in progress.** Phases 1 to 5 are implemented (see their notes
+below). They still need the calvin host checks. Phase 6 is planned.
 
 Add a WSClean imaging step to `mwax_calvin_processor`. To do this, Birli
 and hyperdrive change from UVFITS to CASA measurement sets (MS), and
@@ -365,6 +365,8 @@ Status: **implemented**.
 
 ## Phase 5: wall time (controller)
 
+Status: **implemented**.
+
 - D8: replace the hard-coded `"04:00:00"` / `"10:00:00"` in
   `create_sbatch_script()` with config keys `realtime_wall_time_secs` /
   `mwa_asvo_wall_time_secs`. Defaults as constants: realtime 6 h, MWA
@@ -373,6 +375,26 @@ Status: **implemented**.
 - Change the comment in `solution_files.py` that says that a job is at
   most 10 hours.
 - Tests: `create_sbatch_script()` wall time from config and defaults.
+
+- Implementation notes:
+  - The keys are optional, in the `[calvin]` section of the controller
+    cfg. If a key is missing, the default constant is used (same pattern as
+    `plot_upload_max_fits_per_pass`). No key is required, so deployed cfg
+    files still work. The jobs then get 6 h (realtime) and 12 h (MWA ASVO)
+    instead of the old 4 h and 10 h. `cfg/calvin_controller*.cfg` list both
+    keys with the default values.
+  - A wall time of 360 s or less is refused at start-up. Slurm sends
+    SIGUSR1 360 s before the wall time (`SLURM_USR1_WARNING_SECS`, now also
+    used in the script), so a shorter wall time cannot work.
+  - `create_sbatch_script(..., wall_time_secs=None)`: None gives the
+    default for the job type. `format_wall_time()` makes the `HH:MM:SS`
+    (hours can be more than 24).
+  - The wall time is for the whole job. It must cover download (MWA ASVO),
+    Birli, hyperdrive, imaging and the publishes. There is no check against
+    the `[wsclean] timeout`, which is the only bound on WSClean (D8).
+  - The comment in `reap_orphaned_staging_dirs()` is updated. The 24 h
+    default still holds, because a staging dir only exists during a publish.
+  - New tests only. Existing tests are unchanged.
 
 ## Phase 6: WSClean parameters
 

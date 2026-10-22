@@ -183,6 +183,18 @@ F64_BYTES = 8
 # consumed by hyperdrive and WSClean.
 EXT_MS = ".ms"
 
+# Slurm walltime of a Calvin job, used when the controller config does not set
+# [calvin] realtime_wall_time_secs / mwa_asvo_wall_time_secs. MWA ASVO jobs
+# also download the data (up to 8 hours), so they get longer. Both include time
+# for imaging.
+DEFAULT_REALTIME_WALL_TIME_SECS = 6 * SECONDS_PER_HOUR
+DEFAULT_MWA_ASVO_WALL_TIME_SECS = 12 * SECONDS_PER_HOUR
+
+# Slurm sends SIGUSR1 to a Calvin job this many seconds before its walltime
+# (sbatch --signal=USR1@N), so the job can stop cleanly. A walltime must be
+# longer than this.
+SLURM_USR1_WARNING_SECS = 360
+
 # Suffix of a calibrated measurement set written by hyperdrive solutions-apply
 # (e.g. 1234567890_ch75-76.ms -> 1234567890_ch75-76_cal.ms). It still ends in
 # EXT_MS, so "*.ms" globs match it too.

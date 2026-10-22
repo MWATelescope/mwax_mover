@@ -218,8 +218,9 @@ def reap_orphaned_staging_dirs(base_path: str, max_age_hours: int = 24) -> list[
     Intended to be called once at processor startup. Only directories older
     than *max_age_hours* are removed, so a staging directory belonging to a
     concurrently-running job is never touched. The Slurm walltime for a Calvin
-    job is at most 10 hours (see create_sbatch_script), so the 24 hour default
-    is comfortably beyond the lifetime of any legitimate in-flight job.
+    job is configurable (12 hours by default, see create_sbatch_script), and a
+    staging directory only exists while a publish is running, so the 24 hour
+    default is comfortably beyond the lifetime of any legitimate in-flight one.
 
     Args:
         base_path: The plot upload base directory to scan, e.g.

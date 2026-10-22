@@ -37,6 +37,8 @@ from mwax_mover.calvin.slurm import count_slurm_asvo_jobs, create_sbatch_script,
 from mwax_mover.constants import (
     CONFIG_KEY_GIANT_SQUID_BINARY_PATH,
     CONFIG_KEY_LOG_LEVEL,
+    DEFAULT_MWA_ASVO_WALL_TIME_SECS,
+    DEFAULT_REALTIME_WALL_TIME_SECS,
     EXIT_FAILURE,
     HEALTH_THREAD_NAME,
     IMAGES_DIR_SUFFIX,
@@ -46,6 +48,7 @@ from mwax_mover.constants import (
     SECTION_GIANT_SQUID,
     SECTION_MWAX_MOVER,
     SECTION_PLOTS_UPLOAD,
+    SLURM_USR1_WARNING_SECS,
 )
 from mwax_mover.core.config import read_config, read_config_list, read_optional_config
 from mwax_mover.core.env import get_hostname
@@ -146,6 +149,31 @@ def fit_dir_sort_key(fit_dir: Path) -> tuple[int, int, str]:
     return (0, -fit_id, IMAGES_DIR_SUFFIX if is_images_dir else "")
 
 
+def read_wall_time_secs(config: ConfigParser, key: str, default_secs: int) -> int:
+    """Read an optional Slurm walltime (in seconds) from the [calvin] section.
+
+    Args:
+        config: The loaded controller config.
+        key: The key in the [calvin] section.
+        default_secs: The value to use if the key is not in the config.
+
+    Returns:
+        The walltime in seconds.
+
+    Raises:
+        ValueError: If the value is not an integer longer than SLURM_USR1_WARNING_SECS. Slurm
+            signals the job that many seconds before its walltime, so a shorter walltime cannot work.
+    """
+    if not config.has_option(SECTION_CALVIN, key):
+        return default_secs
+
+    wall_time_secs = int(read_config(config, SECTION_CALVIN, key))
+    if wall_time_secs <= SLURM_USR1_WARNING_SECS:
+        raise ValueError(f"{key} must be more than {SLURM_USR1_WARNING_SECS} seconds, got {wall_time_secs}.")
+
+    return wall_time_secs
+
+
 class CalibrationRequest:
     """One row of work read from the calibration_request table."""
 
@@ -224,6 +252,10 @@ class MWAXCalvinController(MWAXDaemon):
         self.cfg_gs_binary_path: str = ""
         self.cfg_gs_list_timeout_seconds: int = 0
         self.cfg_gs_submitvis_timeout_seconds: int = 0
+
+        # Slurm walltime of the jobs we submit
+        self.cfg_realtime_wall_time_secs: int = DEFAULT_REALTIME_WALL_TIME_SECS
+        self.cfg_mwa_asvo_wall_time_secs: int = DEFAULT_MWA_ASVO_WALL_TIME_SECS
 
         # S3 upload settings
         self.cfg_plots_s3_profile: str = ""
@@ -754,6 +786,7 @@ class MWAXCalvinController(MWAXDaemon):
             [realtime_request.request_id],
             False,
             "",
+            self.cfg_realtime_wall_time_secs,
         )
 
         success: bool = False
@@ -856,6 +889,7 @@ class MWAXCalvinController(MWAXDaemon):
                                 job.request_ids,
                                 job.bulk_request,
                                 f'--mwa-asvo-download-url="{job.download_url}" --asvo-job-id={job.job_id}',
+                                self.cfg_mwa_asvo_wall_time_secs,
                             )
 
                             # submit sbatch script
@@ -1166,6 +1200,18 @@ class MWAXCalvinController(MWAXDaemon):
         self.oldest_cal_obs_id = int(config.get(SECTION_CALVIN, "oldest_calibrator_obs_id"))
 
         self.max_in_progress_asvo_jobs = int(config.get(SECTION_CALVIN, "max_in_progress_asvo_jobs"))
+
+        # Slurm walltime of the jobs we submit
+        try:
+            self.cfg_realtime_wall_time_secs = read_wall_time_secs(
+                config, "realtime_wall_time_secs", DEFAULT_REALTIME_WALL_TIME_SECS
+            )
+            self.cfg_mwa_asvo_wall_time_secs = read_wall_time_secs(
+                config, "mwa_asvo_wall_time_secs", DEFAULT_MWA_ASVO_WALL_TIME_SECS
+            )
+        except ValueError as wall_time_error:
+            logger.error(f"{wall_time_error} Quitting.")
+            sys.exit(EXIT_FAILURE)
 
         #
         # giant-squid config
