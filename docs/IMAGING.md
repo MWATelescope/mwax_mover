@@ -1,7 +1,7 @@
 # mwax_mover calvin imaging plan
 
-Status: **in progress.** Phase 1 is implemented (see its notes below). It
-still needs the calvin host checks. Phases 2-6 are planned.
+Status: **in progress.** Phases 1 and 2 are implemented (see their notes
+below). Both still need the calvin host checks. Phases 3-6 are planned.
 
 Add a WSClean imaging step to `mwax_calvin_processor`. To do this, Birli
 and hyperdrive change from UVFITS to CASA measurement sets (MS), and
@@ -184,6 +184,9 @@ to do (see the end of this phase).
 
 ## Phase 2: calibrated MS
 
+Status: **implemented**. The new function is not called yet. Phase 3 wires it
+into the processor.
+
 - New `calvin/hyperdrive_apply.py` (keeps `hyperdrive.py` for
   di-calibrate): `run_solutions_apply(ms_files, metafits_filename,
   job_output_path, working_path, obs_id, binary_path, timeout)`.
@@ -214,6 +217,25 @@ to do (see the end of this phase).
   `/tmp` is tmpfs (D10). Only apply the factor when `[wsclean] enabled`.
 - Tests: band matching (stem pairing, missing solution), command
   building, the size rule with and without WSClean enabled.
+- Implementation notes:
+  - Decision: the `[wsclean] enabled` flag is read in this phase (config,
+    all four cfg files, `cfg_wsclean_enabled`), because the size rule needs
+    it. Phase 3 adds the other `[wsclean]` keys. `enabled` and
+    `[hyperdrive] apply_timeout` are required keys, so deployed cfg files
+    must be updated.
+  - Constants: `CALIBRATED_MS_SUFFIX`, `SOLUTIONS_APPLY_README_SUFFIX`,
+    `SECTION_WSCLEAN`, `WORKING_PATH_MAX_GB` (500) and
+    `WORKING_SPACE_FACTOR_IMAGING` (2).
+  - `run_solutions_apply(..., remove_input_ms)` stops at the first failed
+    band (a partial band set is not imaged). It removes the partial
+    `_cal.ms` of the failed band. It writes the readme for success and
+    failure. `remove_input_ms` removes each Birli MS right after its own
+    apply succeeds (D9). The caller sets it from
+    `not keep_completed_visibility_files`.
+  - Size rule: `estimate_working_space_gb()` in `calvin/birli.py`. The
+    processor uses it for both the 500 GB test and the Birli memory
+    reduction.
+  - New tests only. Existing tests are unchanged.
 
 ## Phase 3: WSClean step and stage-1 move
 

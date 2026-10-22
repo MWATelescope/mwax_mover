@@ -141,3 +141,42 @@ def test_mwax_calvin_processor_no_gains_cutoff():
     )
     assert mcal.cfg_proc_phase_fit_niter == 3
     assert mcal.gains_cut_off_max is None
+
+
+def _read_processor_config(config_filename: str) -> MWAXCalvinProcessor:
+    """Initialise a processor from a rendered test config file."""
+    mcal = MWAXCalvinProcessor()
+    mcal.hostname = "calvin99"
+    mcal.initialise(
+        config_filename,
+        1234567890,
+        1234,
+        None,
+        CalvinJobType.realtime,
+        "https//test.test",
+        [123],
+        FakeMWAXDBHandler(),
+    )
+    return mcal
+
+
+def test_mwax_calvin_processor_reads_apply_timeout_and_wsclean_disabled():
+    tests_common.setup_test_directories("mwax_calvin_processor")
+    mcal = _read_processor_config(tests_common.render_test_config("mwax_calvin_processor"))
+
+    assert mcal.cfg_hyperdrive_apply_timeout == 7200
+    assert mcal.cfg_wsclean_enabled is False
+
+
+def test_mwax_calvin_processor_reads_wsclean_enabled():
+    tests_common.setup_test_directories("mwax_calvin_processor")
+    config_filename = tests_common.render_test_config("mwax_calvin_processor")
+    with open(config_filename, encoding="UTF-8") as f:
+        text = f.read()
+    assert "[wsclean]\nenabled=0" in text
+    with open(config_filename, "w", encoding="UTF-8") as f:
+        f.write(text.replace("[wsclean]\nenabled=0", "[wsclean]\nenabled=1"))
+
+    mcal = _read_processor_config(config_filename)
+
+    assert mcal.cfg_wsclean_enabled is True

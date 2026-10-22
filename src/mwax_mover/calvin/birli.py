@@ -17,7 +17,7 @@ import numpy as np
 from mwalib import MetafitsContext
 
 from mwax_mover.calibration.models import Metafits
-from mwax_mover.constants import SOLUTIONS_FITS_SUFFIX
+from mwax_mover.constants import SOLUTIONS_FITS_SUFFIX, WORKING_SPACE_FACTOR_IMAGING
 from mwax_mover.core.command import check_popen_finished, start_command, write_readme_file
 
 logger = logging.getLogger(__name__)
@@ -213,3 +213,22 @@ def estimate_birli_output_bytes(
     #       f" * {baselines}bl * {pols}pol * {bytes_per_r_and_i} bytes")
 
     return timesteps * coarse_channels * fine_channels * baselines * pols * bytes_per_r_and_i
+
+
+def estimate_working_space_gb(estimated_vis_gb: int, imaging_enabled: bool) -> int:
+    """Estimate the working space the job needs, in GB.
+
+    Without imaging the working path holds the Birli measurement set only. With
+    imaging it also holds the calibrated measurement set and WSClean's
+    reordered copy, so the estimate is scaled by WORKING_SPACE_FACTOR_IMAGING.
+
+    Args:
+        estimated_vis_gb: Estimated size of the Birli measurement set(s) in GB.
+        imaging_enabled: True if the WSClean imaging step is enabled.
+
+    Returns:
+        The estimated working space in GB.
+    """
+    if imaging_enabled:
+        return estimated_vis_gb * WORKING_SPACE_FACTOR_IMAGING
+    return estimated_vis_gb

@@ -30,7 +30,7 @@ from mwax_mover import (
     version,
 )
 from mwax_mover.archive.archiver import copy_file_rsync
-from mwax_mover.calvin.birli import estimate_birli_output_bytes, run_birli
+from mwax_mover.calvin.birli import estimate_birli_output_bytes, estimate_working_space_gb, run_birli
 from mwax_mover.calvin.hyperdrive import run_hyperdrive
 from mwax_mover.calvin.pipeline import CalvinJobType, process_solutions
 from mwax_mover.calvin.plots.index import generate_plot_index_file
@@ -52,9 +52,11 @@ from mwax_mover.constants import (
     SECTION_DOWNLOADING,
     SECTION_GIANT_SQUID,
     SECTION_HYPERDRIVE,
+    SECTION_WSCLEAN,
     SECTION_MWAX_MOVER,
     SECTION_PROCESSING,
     SOLUTIONS_FITS_GLOB,
+    WORKING_PATH_MAX_GB,
 )
 from mwax_mover.core.config import read_config, read_config_bool, read_optional_config
 from mwax_mover.core.env import get_hostname
@@ -201,6 +203,8 @@ class MWAXCalvinProcessor(MWAXDaemon):
 
         # hyperdrive
         self.cfg_hyperdrive_timeout: int = 0
+        self.cfg_hyperdrive_apply_timeout: int = 0
+        self.cfg_wsclean_enabled: bool = False
         self.cfg_hyperdrive_binary_path: str = ""
         self.hyperdrive_extra_args: str = ""
 
@@ -354,7 +358,13 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 f"({int(gigabyte_to_gibibyte(self.estimated_vis_GB))} GiB)"
             )
 
-            if self.estimated_vis_GB < 500:
+            working_space_gb = estimate_working_space_gb(self.estimated_vis_GB, self.cfg_wsclean_enabled)
+            if self.cfg_wsclean_enabled:
+                logger.info(
+                    f"Imaging is enabled, so the working space needed is estimated to be: {working_space_gb} GB"
+                )
+
+            if working_space_gb < WORKING_PATH_MAX_GB:
                 # Use temp_working_dir
                 self.working_path = os.path.join(
                     self.cfg_proc_temp_working_path, f"{self.slurm_job_id!s}_{self.obs_id!s}"
@@ -363,7 +373,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 os.makedirs(name=self.working_path, exist_ok=True)
 
                 # Override the birli allowed memory
-                self.cfg_birli_max_mem_gib -= int(gigabyte_to_gibibyte(self.estimated_vis_GB))
+                self.cfg_birli_max_mem_gib -= int(gigabyte_to_gibibyte(working_space_gb))
                 logger.info(
                     f"Using temporary work dir {self.cfg_proc_temp_working_path} for Birli output. Reduced "
                     f"allowed Birli memory to: {self.cfg_birli_max_mem_gib} GiB"
@@ -1316,6 +1326,15 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 )
             )
 
+            # hyperdrive solutions-apply timeout
+            self.cfg_hyperdrive_apply_timeout = int(
+                read_config(
+                    config,
+                    SECTION_HYPERDRIVE,
+                    "apply_timeout",
+                )
+            )
+
             # Get the hyperdrive binary
             self.cfg_hyperdrive_binary_path = read_config(
                 config,
@@ -1336,6 +1355,15 @@ class MWAXCalvinProcessor(MWAXDaemon):
                     SECTION_HYPERDRIVE,
                     "extra_args",
                 )
+            )
+
+            #
+            # wsclean config
+            #
+            self.cfg_wsclean_enabled = read_config_bool(
+                config,
+                SECTION_WSCLEAN,
+                "enabled",
             )
 
             #

@@ -63,6 +63,7 @@ SECTION_BEAMFORMER = "beamformer"
 SECTION_CALVIN = "calvin"
 SECTION_BIRLI = "birli"
 SECTION_HYPERDRIVE = "hyperdrive"
+SECTION_WSCLEAN = "wsclean"
 SECTION_GIANT_SQUID = "giant squid"
 SECTION_PLOTS_UPLOAD = "plots upload"
 SECTION_DOWNLOADING = "downloading"
@@ -181,6 +182,24 @@ F64_BYTES = 8
 # file. Produced by Birli (one per contiguous coarse channel band) and
 # consumed by hyperdrive and WSClean.
 EXT_MS = ".ms"
+
+# Suffix of a calibrated measurement set written by hyperdrive solutions-apply
+# (e.g. 1234567890_ch75-76.ms -> 1234567890_ch75-76_cal.ms). It still ends in
+# EXT_MS, so "*.ms" globs match it too.
+CALIBRATED_MS_SUFFIX = "_cal" + EXT_MS
+
+# Readme written per band by solutions-apply (prefixed with the band stem).
+SOLUTIONS_APPLY_README_SUFFIX = "_solutions_apply_readme.txt"
+
+# Birli's measurement set output goes in the (RAM-backed) temp working path
+# only if the working space needed is below this many GB; otherwise it goes in
+# the job output path.
+WORKING_PATH_MAX_GB = 500
+
+# When imaging is enabled the working path must hold the calibrated MS and
+# WSClean's own reordered copy of it, so it needs this many times the
+# estimated Birli measurement set size.
+WORKING_SPACE_FACTOR_IMAGING = 2
 
 # Fraction of live-probed available memory reserved as headroom when
 # sizing concurrent hyperdrive runs -- leaves room for the parent process
