@@ -1,10 +1,14 @@
 import logging
 import os
+import signal
+from unittest.mock import patch
 
+import pytest
 import tests_common
 from tests_fakedb import FakeMWAXDBHandler
 
 from mwax_mover.cli.mwax_calvin_processor import CalvinJobType, MWAXCalvinProcessor
+from mwax_mover.constants import EXIT_FAILURE
 
 logger = logging.getLogger(__name__)
 
@@ -180,3 +184,148 @@ def test_mwax_calvin_processor_reads_wsclean_enabled():
     mcal = _read_processor_config(config_filename)
 
     assert mcal.cfg_wsclean_enabled is True
+
+
+def test_mwax_calvin_processor_reads_wsclean_binary_and_timeout():
+    tests_common.setup_test_directories("mwax_calvin_processor")
+    mcal = _read_processor_config(tests_common.render_test_config("mwax_calvin_processor"))
+
+    assert mcal.cfg_wsclean_binary_path == os.path.join(
+        tests_common.get_test_bin_dir("mwax_calvin_processor"), "wsclean"
+    )
+    assert mcal.cfg_wsclean_timeout == 14400
+
+
+def test_mwax_calvin_processor_wsclean_enabled_needs_the_binary_to_exist():
+    tests_common.setup_test_directories("mwax_calvin_processor")
+    config_filename = tests_common.render_test_config("mwax_calvin_processor")
+    with open(config_filename, encoding="UTF-8") as f:
+        text = f.read()
+    with open(config_filename, "w", encoding="UTF-8") as f:
+        f.write(text.replace("[wsclean]\nenabled=0", "[wsclean]\nenabled=1"))
+
+    bin_dir = tests_common.get_test_bin_dir("mwax_calvin_processor")
+    wsclean_path = os.path.join(bin_dir, "wsclean")
+    if os.path.exists(wsclean_path):
+        os.remove(wsclean_path)
+
+    with pytest.raises(SystemExit):
+        _read_processor_config(config_filename)
+
+
+def _processor_with_ms_dirs(tmp_path, names):
+    """A processor whose working path holds placeholder measurement set directories."""
+    mcal = MWAXCalvinProcessor()
+    mcal.obs_id = 1234567890
+    mcal.working_path = str(tmp_path)
+    mcal.cfg_proc_job_output_path = str(tmp_path / "out")
+    mcal.cfg_proc_keep_completed_visibility_files = False
+    for name in names:
+        ms_dir = tmp_path / name
+        ms_dir.mkdir()
+        (ms_dir / "table.dat").write_text("placeholder")
+    return mcal
+
+
+def test_remove_measurement_sets_removes_birli_and_calibrated_sets(tmp_path):
+    mcal = _processor_with_ms_dirs(tmp_path, ["1234567890_ch75.ms", "1234567890_ch75_cal.ms"])
+
+    mcal.remove_measurement_sets()
+
+    assert list(tmp_path.glob("*.ms")) == []
+
+
+def test_remove_measurement_sets_keeps_them_if_asked(tmp_path):
+    mcal = _processor_with_ms_dirs(tmp_path, ["1234567890_ch75.ms"])
+    mcal.cfg_proc_keep_completed_visibility_files = True
+
+    mcal.remove_measurement_sets()
+
+    assert (tmp_path / "1234567890_ch75.ms").exists()
+
+
+def test_run_imaging_applies_solutions_then_runs_wsclean_on_the_calibrated_sets(tmp_path):
+    mcal = _processor_with_ms_dirs(tmp_path, ["1234567890_ch75.ms", "1234567890_ch159.ms", "1234567890_ch159_cal.ms"])
+    mcal.cfg_wsclean_binary_path = "/bin/wsclean"
+    mcal.cfg_wsclean_timeout = 99
+    mcal.cfg_hyperdrive_apply_timeout = 77
+    mcal.cfg_hyperdrive_binary_path = "/bin/hyperdrive"
+    mcal.metafits_filename = "meta.fits"
+    cal_ms = [str(tmp_path / "1234567890_ch159_cal.ms"), str(tmp_path / "1234567890_ch75_cal.ms")]
+
+    with (
+        patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", return_value=(True, cal_ms)) as mock_apply,
+        patch("mwax_mover.cli.mwax_calvin_processor.run_wsclean", return_value=True) as mock_wsclean,
+    ):
+        mcal.run_imaging()
+
+    apply_args = mock_apply.call_args.args
+    # Only the Birli sets go in, sorted
+    assert apply_args[0] == [str(tmp_path / "1234567890_ch159.ms"), str(tmp_path / "1234567890_ch75.ms")]
+    assert apply_args[1:] == (
+        "meta.fits",
+        str(tmp_path / "out"),
+        str(tmp_path),
+        1234567890,
+        "/bin/hyperdrive",
+        77,
+        True,
+    )
+    wsclean_args = mock_wsclean.call_args.args
+    assert wsclean_args[0] == cal_ms
+    assert wsclean_args[3:5] == ("/bin/wsclean", 99)
+    assert wsclean_args[5].name == str(tmp_path / "out" / "1234567890_wsclean")
+    assert wsclean_args[5].temp_dir == str(tmp_path)
+
+
+def test_run_imaging_does_not_run_wsclean_if_solutions_apply_fails(tmp_path):
+    mcal = _processor_with_ms_dirs(tmp_path, ["1234567890_ch75.ms"])
+
+    with (
+        patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", return_value=(False, [])),
+        patch("mwax_mover.cli.mwax_calvin_processor.run_wsclean") as mock_wsclean,
+    ):
+        mcal.run_imaging()
+
+    mock_wsclean.assert_not_called()
+
+
+def test_run_imaging_swallows_unexpected_exceptions(tmp_path):
+    mcal = _processor_with_ms_dirs(tmp_path, ["1234567890_ch75.ms"])
+
+    with patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", side_effect=RuntimeError("boom")):
+        mcal.run_imaging()  # must not raise
+
+
+def test_signal_handler_before_success_fails_the_job(tmp_path):
+    mcal = _processor_with_ms_dirs(tmp_path, [])
+    mcal.data_downloaded = True
+
+    with (
+        patch.object(mcal, "fail_job_processing") as mock_fail,
+        patch.object(mcal, "stop", side_effect=SystemExit(1)) as mock_stop,
+        pytest.raises(SystemExit),
+    ):
+        mcal.signal_handler(signal.SIGTERM, None)
+
+    mock_fail.assert_called_once()
+    mock_stop.assert_called_once_with(exit_code=EXIT_FAILURE)
+
+
+def test_signal_handler_after_success_keeps_the_job_successful_and_removes_ms(tmp_path):
+    mcal = _processor_with_ms_dirs(tmp_path, ["1234567890_ch75.ms", "1234567890_ch75_cal.ms"])
+    mcal.data_downloaded = True
+    mcal.job_succeeded = True
+
+    with (
+        patch.object(mcal, "fail_job_processing") as mock_fail,
+        patch.object(mcal, "fail_job_downloading") as mock_fail_dl,
+        patch.object(mcal, "stop", side_effect=SystemExit(0)) as mock_stop,
+        pytest.raises(SystemExit),
+    ):
+        mcal.signal_handler(signal.SIGUSR1, None)
+
+    mock_fail.assert_not_called()
+    mock_fail_dl.assert_not_called()
+    mock_stop.assert_called_once_with(exit_code=0)
+    assert list(tmp_path.glob("*.ms")) == []

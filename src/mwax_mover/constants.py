@@ -191,6 +191,11 @@ CALIBRATED_MS_SUFFIX = "_cal" + EXT_MS
 # Readme written per band by solutions-apply (prefixed with the band stem).
 SOLUTIONS_APPLY_README_SUFFIX = "_solutions_apply_readme.txt"
 
+# Suffix added to the observation ID to make the WSClean output prefix
+# (-name <job_output_path>/<obs_id>_wsclean), so outputs are
+# <obs_id>_wsclean-image.fits etc.
+WSCLEAN_NAME_SUFFIX = "_wsclean"
+
 # Birli's measurement set output goes in the (RAM-backed) temp working path
 # only if the working space needed is below this many GB; otherwise it goes in
 # the job output path.

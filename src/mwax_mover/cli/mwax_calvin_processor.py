@@ -32,8 +32,10 @@ from mwax_mover import (
 from mwax_mover.archive.archiver import copy_file_rsync
 from mwax_mover.calvin.birli import estimate_birli_output_bytes, estimate_working_space_gb, run_birli
 from mwax_mover.calvin.hyperdrive import run_hyperdrive
+from mwax_mover.calvin.hyperdrive_apply import run_solutions_apply
 from mwax_mover.calvin.pipeline import CalvinJobType, process_solutions
 from mwax_mover.calvin.plots.index import generate_plot_index_file
+from mwax_mover.calvin.wsclean import WSCleanArgs, run_wsclean
 from mwax_mover.calvin.solution_files import (
     export_calibration_solutions,
     reap_orphaned_staging_dirs,
@@ -42,6 +44,7 @@ from mwax_mover.calvin.solution_files import (
 from mwax_mover.constants import (
     CONFIG_KEY_GIANT_SQUID_BINARY_PATH,
     CONFIG_KEY_LOG_LEVEL,
+    CALIBRATED_MS_SUFFIX,
     EXIT_FAILURE,
     EXT_MS,
     HEALTH_THREAD_NAME,
@@ -57,6 +60,7 @@ from mwax_mover.constants import (
     SECTION_PROCESSING,
     SOLUTIONS_FITS_GLOB,
     WORKING_PATH_MAX_GB,
+    WSCLEAN_NAME_SUFFIX,
 )
 from mwax_mover.core.config import read_config, read_config_bool, read_optional_config
 from mwax_mover.core.env import get_hostname
@@ -153,6 +157,9 @@ class MWAXCalvinProcessor(MWAXDaemon):
         self.ws_filenames: list[str] = []
         self.mwax_download_filenames: list[str] = []  # Only applicable for realtime
         self.data_downloaded: bool = False
+        # True once the calibration solution is in the database. After that
+        # nothing (e.g. imaging running out of walltime) may fail the job.
+        self.job_succeeded: bool = False
         self.metafits_context: MetafitsContext
 
         # downloading
@@ -205,6 +212,8 @@ class MWAXCalvinProcessor(MWAXDaemon):
         self.cfg_hyperdrive_timeout: int = 0
         self.cfg_hyperdrive_apply_timeout: int = 0
         self.cfg_wsclean_enabled: bool = False
+        self.cfg_wsclean_binary_path: str = ""
+        self.cfg_wsclean_timeout: int = 0
         self.cfg_hyperdrive_binary_path: str = ""
         self.hyperdrive_extra_args: str = ""
 
@@ -454,6 +463,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
 
                 if fit_id:
                     self.succeed_job_processing(fit_id)
+                    self.job_succeeded = True
 
                     # Ensure all mwax boxes know they can remove their files for this obs
                     if self.job_type == CalvinJobType.realtime:
@@ -552,13 +562,14 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 for file_to_delete in visibility_files:
                     remove_file(file_to_delete, False)
 
-                # Now remove the measurement sets too. Birli wrote them to
-                # working_path (not job_input_path). Each one is a directory.
-                for ms_dir_to_delete in glob.glob(os.path.join(self.working_path, f"*{EXT_MS}")):
-                    try:
-                        shutil.rmtree(ms_dir_to_delete)
-                    except OSError:
-                        logger.warning(f"{self.obs_id}: could not remove measurement set {ms_dir_to_delete}. Ignoring.")
+            # The solutions and plots are published, so now do the optional imaging.
+            # A failure here is logged only; the job stays successful.
+            if self.cfg_wsclean_enabled:
+                self.run_imaging()
+
+            # Now remove the measurement sets too. Birli wrote them to
+            # working_path (not job_input_path). Each one is a directory.
+            self.remove_measurement_sets()
 
             # Final log message
             self.current_task_name = "Complete"
@@ -567,6 +578,11 @@ class MWAXCalvinProcessor(MWAXDaemon):
         except Exception as e:  # noqa: BLE001 - top-level SLURM job boundary; must not crash uncaught
             # Something really bad went wrong!
             error_message = f"Unhandled Exception: {e!s}"
+            if self.job_succeeded:
+                # The solution is already in the database, so this must not fail the job.
+                logger.exception(f"{self.obs_id}: {error_message} after the job succeeded. Ignoring.")
+                self.remove_measurement_sets()
+                self.stop(exit_code=0)
             if self.data_downloaded:
                 self.fail_job_processing(error_message)
             else:
@@ -1037,6 +1053,73 @@ class MWAXCalvinProcessor(MWAXDaemon):
         else:
             return False, "Hyperdrive run failed. See logs", calibration_command
 
+    def remove_measurement_sets(self) -> None:
+        """Remove all measurement sets (Birli's and calibrated) from the working path.
+
+        Each measurement set is a directory. This is best effort: a failure is logged and ignored.
+        Nothing is removed if keep_completed_visibility_files is set.
+        """
+        if self.cfg_proc_keep_completed_visibility_files:
+            return
+
+        for ms_dir_to_delete in glob.glob(os.path.join(self.working_path, f"*{EXT_MS}")):
+            try:
+                shutil.rmtree(ms_dir_to_delete)
+            except OSError:
+                logger.warning(f"{self.obs_id}: could not remove measurement set {ms_dir_to_delete}. Ignoring.")
+
+    def run_imaging(self) -> None:
+        """Apply the solutions to each band, then image the calibrated bands with WSClean.
+
+        Runs after the solutions and plots are published, so any failure is only
+        logged and the job stays successful. If solutions-apply fails for any
+        band, WSClean does not run (a partial set of bands is not imaged).
+        """
+        try:
+            # The Birli measurement sets, not any calibrated ones
+            ms_files = sorted(
+                ms
+                for ms in glob.glob(os.path.join(self.working_path, f"*{EXT_MS}"))
+                if not ms.endswith(CALIBRATED_MS_SUFFIX)
+            )
+            if not ms_files:
+                logger.warning(f"{self.obs_id}: no measurement sets found to image. Skipping imaging.")
+                return
+
+            self.current_task_name = "Applying solutions"
+            apply_success, cal_ms_files = run_solutions_apply(
+                ms_files,
+                self.metafits_filename,
+                self.cfg_proc_job_output_path,
+                self.working_path,
+                self.obs_id,
+                self.cfg_hyperdrive_binary_path,
+                self.cfg_hyperdrive_apply_timeout,
+                not self.cfg_proc_keep_completed_visibility_files,
+            )
+            if not apply_success:
+                logger.warning(
+                    f"{self.obs_id}: solutions-apply failed. Skipping imaging. Calibration itself succeeded."
+                )
+                return
+
+            self.current_task_name = "WSClean"
+            wsclean_args = WSCleanArgs(
+                name=os.path.join(self.cfg_proc_job_output_path, f"{self.obs_id}{WSCLEAN_NAME_SUFFIX}"),
+                temp_dir=self.working_path,
+            )
+            if not run_wsclean(
+                cal_ms_files,
+                self.cfg_proc_job_output_path,
+                self.obs_id,
+                self.cfg_wsclean_binary_path,
+                self.cfg_wsclean_timeout,
+                wsclean_args,
+            ):
+                logger.warning(f"{self.obs_id}: WSClean failed. Calibration itself succeeded.")
+        except Exception:  # noqa: BLE001 - imaging is optional; it must not fail a job that already succeeded
+            logger.exception(f"{self.obs_id}: unhandled exception while imaging. Calibration itself succeeded.")
+
     def stop(self, exit_code: int = 0):
         """Shutdown the processor and close all connections.
 
@@ -1086,7 +1169,6 @@ class MWAXCalvinProcessor(MWAXDaemon):
             _signum: The signal number received.
             _frame: Stack frame (unused).
         """
-        # Update the database that this job has been cancelled
         if _signum == signal.SIGUSR1:
             signal_message = "Slurm hit walltime"
         elif _signum == signal.SIGINT:
@@ -1096,6 +1178,16 @@ class MWAXCalvinProcessor(MWAXDaemon):
         else:
             signal_message = f"Received unknown signal {_signum}"
 
+        if self.job_succeeded:
+            # The solution is already in the database (this is imaging running
+            # out of time or being cancelled), so do not touch the database.
+            logger.warning(
+                f"{self.obs_id}: {signal_message} after the job succeeded. Stopping without updating the db."
+            )
+            self.remove_measurement_sets()
+            self.stop(exit_code=0)
+
+        # Update the database that this job has been cancelled
         logger.warning("Updating job to cancelled...")
         if self.data_downloaded:
             self.fail_job_processing(f"Cancelled: {signal_message}")
@@ -1364,6 +1456,25 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 config,
                 SECTION_WSCLEAN,
                 "enabled",
+            )
+
+            self.cfg_wsclean_binary_path = read_config(
+                config,
+                SECTION_WSCLEAN,
+                "binary_path",
+            )
+
+            # The binary is only needed if imaging is on
+            if self.cfg_wsclean_enabled and not os.path.exists(self.cfg_wsclean_binary_path):
+                logger.error(f"wsclean binary_path location {self.cfg_wsclean_binary_path} does not exist. Quitting.")
+                sys.exit(EXIT_FAILURE)
+
+            self.cfg_wsclean_timeout = int(
+                read_config(
+                    config,
+                    SECTION_WSCLEAN,
+                    "timeout",
+                )
             )
 
             #

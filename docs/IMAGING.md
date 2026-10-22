@@ -1,7 +1,7 @@
 # mwax_mover calvin imaging plan
 
-Status: **in progress.** Phases 1 and 2 are implemented (see their notes
-below). Both still need the calvin host checks. Phases 3-6 are planned.
+Status: **in progress.** Phases 1 to 3 are implemented (see their notes
+below). They still need the calvin host checks. Phases 4-6 are planned.
 
 Add a WSClean imaging step to `mwax_calvin_processor`. To do this, Birli
 and hyperdrive change from UVFITS to CASA measurement sets (MS), and
@@ -239,6 +239,8 @@ into the processor.
 
 ## Phase 3: WSClean step and stage-1 move
 
+Status: **implemented**.
+
 - `constants.py`: `SECTION_WSCLEAN = "wsclean"`,
   `WSCLEAN_NAME_SUFFIX = "_wsclean"`,
   `WSCLEAN_FITS_GLOB = "*_wsclean-*.fits"`, and
@@ -273,6 +275,33 @@ into the processor.
     `run_wsclean()`. Log a warning on failure.
 - Tests: `WSCleanArgs.to_cmdline_args()`, run_wsclean failure (no move,
   readme written), `signal_handler` before and after success.
+
+- Implementation notes:
+  - The stage-1 publish (index.json + `upload_plot_files()`) was already
+    before the cleanup, so it did not move. The index dict is not kept
+    yet. Phase 4 keeps it when it needs it.
+  - Only `WSCLEAN_NAME_SUFFIX` is added in this phase. `WSCLEAN_FITS_GLOB`
+    and `WSCLEAN_OUTPUT_SUFFIXES` are added in Phase 4, where they are
+    first used.
+  - `[wsclean]` has `enabled`, `binary_path` and `timeout`. All three are
+    required keys, so deployed cfg files must be updated. The binary must
+    exist only if `enabled=1`.
+  - Flow: remove raw visibility files (unless keep) -> `run_imaging()` (if
+    enabled) -> `remove_measurement_sets()`. `run_imaging()` runs
+    solutions-apply, then WSClean on the calibrated sets. Any failure or
+    exception is logged only.
+  - `remove_measurement_sets()` does nothing if
+    `keep_completed_visibility_files` is set. This also applies on the
+    signal path (D15) and the unhandled-exception path.
+  - The top-level `except` also checks `job_succeeded`. After success it
+    logs, removes the MS dirs and exits 0. It does not fail the job.
+  - `-abs-mem` is not set yet (Phase 6). Until then WSClean can use all
+    RAM. Do not enable imaging on a calvin host before Phase 6.
+  - `tests/tests_common.py`: added a `wsclean` stub to
+    `STUB_BIN_FILENAMES`. The Phase 2 test that sets `enabled=1` needs it.
+    No existing test was edited.
+  - Check on a calvin host (Greg): `wsclean -help` lists `-temp-dir`,
+    `-name` and `-no-update-model-required` for the installed version.
 
 ## Phase 4: stage-2 publish (processor and controller)
 
