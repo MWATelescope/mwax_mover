@@ -258,8 +258,8 @@ def test_run_imaging_applies_solutions_then_runs_wsclean_on_the_calibrated_sets(
     cal_ms = [str(tmp_path / "1234567890_ch159_cal.ms"), str(tmp_path / "1234567890_ch75_cal.ms")]
 
     with (
-        patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", return_value=(True, cal_ms)) as mock_apply,
-        patch("mwax_mover.cli.mwax_calvin_processor.run_wsclean", return_value=True) as mock_wsclean,
+        patch("mwax_mover.calvin.imaging.run_solutions_apply", return_value=(True, cal_ms)) as mock_apply,
+        patch("mwax_mover.calvin.imaging.run_wsclean", return_value=True) as mock_wsclean,
     ):
         mcal.run_imaging()
 
@@ -286,8 +286,8 @@ def test_run_imaging_does_not_run_wsclean_if_solutions_apply_fails(tmp_path):
     mcal = _processor_with_ms_dirs(tmp_path, ["1234567890_ch75.ms"])
 
     with (
-        patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", return_value=(False, [])),
-        patch("mwax_mover.cli.mwax_calvin_processor.run_wsclean") as mock_wsclean,
+        patch("mwax_mover.calvin.imaging.run_solutions_apply", return_value=(False, [])),
+        patch("mwax_mover.calvin.imaging.run_wsclean") as mock_wsclean,
     ):
         mcal.run_imaging()
 
@@ -297,7 +297,7 @@ def test_run_imaging_does_not_run_wsclean_if_solutions_apply_fails(tmp_path):
 def test_run_imaging_swallows_unexpected_exceptions(tmp_path):
     mcal = _processor_with_ms_dirs(tmp_path, ["1234567890_ch75.ms"])
 
-    with patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", side_effect=RuntimeError("boom")):
+    with patch("mwax_mover.calvin.imaging.run_solutions_apply", side_effect=RuntimeError("boom")):
         mcal.run_imaging()  # must not raise
 
 
@@ -390,13 +390,13 @@ def test_run_imaging_returns_whether_wsclean_worked(tmp_path):
     mcal = _processor_with_ms_dirs(tmp_path, ["1234567890_ch75.ms"])
     cal_ms = [str(tmp_path / "1234567890_ch75_cal.ms")]
 
-    with patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", return_value=(True, cal_ms)):
-        with patch("mwax_mover.cli.mwax_calvin_processor.run_wsclean", return_value=True):
+    with patch("mwax_mover.calvin.imaging.run_solutions_apply", return_value=(True, cal_ms)):
+        with patch("mwax_mover.calvin.imaging.run_wsclean", return_value=True):
             assert mcal.run_imaging() is True
-        with patch("mwax_mover.cli.mwax_calvin_processor.run_wsclean", return_value=False):
+        with patch("mwax_mover.calvin.imaging.run_wsclean", return_value=False):
             assert mcal.run_imaging() is False
 
-    with patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", return_value=(False, [])):
+    with patch("mwax_mover.calvin.imaging.run_solutions_apply", return_value=(False, [])):
         assert mcal.run_imaging() is False
 
 
@@ -449,8 +449,8 @@ def test_run_imaging_gives_wsclean_the_configured_options_and_the_memory_limit(t
     cal_ms = [str(tmp_path / "1234567890_ch75_cal.ms")]
 
     with (
-        patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", return_value=(True, cal_ms)),
-        patch("mwax_mover.cli.mwax_calvin_processor.run_wsclean", return_value=True) as mock_wsclean,
+        patch("mwax_mover.calvin.imaging.run_solutions_apply", return_value=(True, cal_ms)),
+        patch("mwax_mover.calvin.imaging.run_wsclean", return_value=True) as mock_wsclean,
     ):
         assert mcal.run_imaging() is True
 
@@ -470,8 +470,8 @@ def test_run_imaging_is_skipped_if_the_measurement_sets_leave_no_memory_for_wscl
     mcal.wsclean_abs_mem_gib = 0
 
     with (
-        patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply") as mock_apply,
-        patch("mwax_mover.cli.mwax_calvin_processor.run_wsclean") as mock_wsclean,
+        patch("mwax_mover.calvin.imaging.run_solutions_apply") as mock_apply,
+        patch("mwax_mover.calvin.imaging.run_wsclean") as mock_wsclean,
     ):
         assert mcal.run_imaging() is False
 
@@ -494,8 +494,8 @@ def test_run_imaging_makes_the_preview_png_after_wsclean_works(tmp_path):
     cal_ms = [str(tmp_path / "1234567890_ch75_cal.ms")]
 
     with (
-        patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", return_value=(True, cal_ms)),
-        patch("mwax_mover.cli.mwax_calvin_processor.run_wsclean", return_value=True),
+        patch("mwax_mover.calvin.imaging.run_solutions_apply", return_value=(True, cal_ms)),
+        patch("mwax_mover.calvin.imaging.run_wsclean", return_value=True),
     ):
         assert mcal.run_imaging() is True
 
@@ -507,8 +507,8 @@ def test_run_imaging_still_works_if_the_preview_png_cannot_be_made(tmp_path):
     cal_ms = [str(tmp_path / "1234567890_ch75_cal.ms")]
 
     with (
-        patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", return_value=(True, cal_ms)),
-        patch("mwax_mover.cli.mwax_calvin_processor.run_wsclean", return_value=True),
+        patch("mwax_mover.calvin.imaging.run_solutions_apply", return_value=(True, cal_ms)),
+        patch("mwax_mover.calvin.imaging.run_wsclean", return_value=True),
     ):
         # There is no image in the output dir, so there is nothing to draw
         assert mcal.run_imaging() is True
@@ -519,9 +519,9 @@ def test_run_imaging_does_not_make_a_preview_png_if_wsclean_fails(tmp_path):
     cal_ms = [str(tmp_path / "1234567890_ch75_cal.ms")]
 
     with (
-        patch("mwax_mover.cli.mwax_calvin_processor.run_solutions_apply", return_value=(True, cal_ms)),
-        patch("mwax_mover.cli.mwax_calvin_processor.run_wsclean", return_value=False),
-        patch("mwax_mover.cli.mwax_calvin_processor.make_wsclean_preview") as mock_preview,
+        patch("mwax_mover.calvin.imaging.run_solutions_apply", return_value=(True, cal_ms)),
+        patch("mwax_mover.calvin.imaging.run_wsclean", return_value=False),
+        patch("mwax_mover.calvin.imaging.make_wsclean_preview") as mock_preview,
     ):
         assert mcal.run_imaging() is False
 

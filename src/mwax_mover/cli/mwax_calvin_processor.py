@@ -9,7 +9,6 @@ the calibrator visibility files for archiving or discard.
 """
 
 import argparse
-import dataclasses
 import datetime
 import glob
 import logging
@@ -33,14 +32,12 @@ from mwax_mover import (
 from mwax_mover.archive.archiver import copy_file_rsync
 from mwax_mover.calvin.birli import estimate_birli_output_bytes, estimate_working_space_gb, run_birli
 from mwax_mover.calvin.hyperdrive import run_hyperdrive
-from mwax_mover.calvin.hyperdrive_apply import run_solutions_apply
+from mwax_mover.calvin.imaging import ImagingSettings, run_imaging_steps
 from mwax_mover.calvin.pipeline import CalvinJobType, process_solutions
 from mwax_mover.calvin.plots.index import extend_plot_index, generate_plot_index_file
-from mwax_mover.calvin.plots.wsclean_preview import make_wsclean_preview
 from mwax_mover.calvin.wsclean import (
     WSCleanArgs,
     calculate_abs_mem_gib,
-    run_wsclean,
     wsclean_args_from_config,
 )
 from mwax_mover.calvin.solution_files import (
@@ -53,7 +50,6 @@ from mwax_mover.calvin.solution_files import (
 from mwax_mover.constants import (
     CONFIG_KEY_GIANT_SQUID_BINARY_PATH,
     CONFIG_KEY_LOG_LEVEL,
-    CALIBRATED_MS_SUFFIX,
     EXIT_FAILURE,
     IMAGES_DIR_SUFFIX,
     EXT_MS,
@@ -70,8 +66,6 @@ from mwax_mover.constants import (
     SECTION_PROCESSING,
     SOLUTIONS_FITS_GLOB,
     WORKING_PATH_MAX_GB,
-    WSCLEAN_MIN_ABS_MEM_GIB,
-    WSCLEAN_NAME_SUFFIX,
 )
 from mwax_mover.core.config import read_config, read_config_bool, read_optional_config
 from mwax_mover.core.env import get_hostname
@@ -1134,73 +1128,32 @@ class MWAXCalvinProcessor(MWAXDaemon):
         """Apply the solutions to each band, then image the calibrated bands with WSClean.
 
         Runs after the solutions and plots are published, so any failure is only
-        logged and the job stays successful. If solutions-apply fails for any
-        band, WSClean does not run (a partial set of bands is not imaged).
+        logged and the job stays successful. This calls calvin.imaging.run_imaging_steps().
 
         Returns:
             True if WSClean ran successfully, False otherwise.
         """
-        try:
-            # The Birli measurement sets, not any calibrated ones
-            ms_files = sorted(
-                ms
-                for ms in glob.glob(os.path.join(self.working_path, f"*{EXT_MS}"))
-                if not ms.endswith(CALIBRATED_MS_SUFFIX)
-            )
-            if not ms_files:
-                logger.warning(f"{self.obs_id}: no measurement sets found to image. Skipping imaging.")
-                return False
+        settings = ImagingSettings(
+            hyperdrive_binary_path=self.cfg_hyperdrive_binary_path,
+            apply_timeout=self.cfg_hyperdrive_apply_timeout,
+            wsclean_binary_path=self.cfg_wsclean_binary_path,
+            wsclean_timeout=self.cfg_wsclean_timeout,
+            wsclean_args=self.cfg_wsclean_args,
+            wsclean_abs_mem_gib=self.wsclean_abs_mem_gib,
+            remove_input_ms=not self.cfg_proc_keep_completed_visibility_files,
+        )
 
-            if self.wsclean_abs_mem_gib is not None and self.wsclean_abs_mem_gib < WSCLEAN_MIN_ABS_MEM_GIB:
-                logger.warning(
-                    f"{self.obs_id}: only {self.wsclean_abs_mem_gib} GiB is left for WSClean after the"
-                    " measurement sets in the temp working path. Skipping imaging. Calibration itself succeeded."
-                )
-                return False
+        def set_task_name(name: str) -> None:
+            self.current_task_name = name
 
-            self.current_task_name = "Applying solutions"
-            apply_success, cal_ms_files = run_solutions_apply(
-                ms_files,
-                self.metafits_filename,
-                self.cfg_proc_job_output_path,
-                self.working_path,
-                self.obs_id,
-                self.cfg_hyperdrive_binary_path,
-                self.cfg_hyperdrive_apply_timeout,
-                not self.cfg_proc_keep_completed_visibility_files,
-            )
-            if not apply_success:
-                logger.warning(
-                    f"{self.obs_id}: solutions-apply failed. Skipping imaging. Calibration itself succeeded."
-                )
-                return False
-
-            self.current_task_name = "WSClean"
-            wsclean_args = dataclasses.replace(
-                self.cfg_wsclean_args,
-                name=os.path.join(self.cfg_proc_job_output_path, f"{self.obs_id}{WSCLEAN_NAME_SUFFIX}"),
-                temp_dir=self.working_path,
-                abs_mem_gib=self.wsclean_abs_mem_gib,
-            )
-            if not run_wsclean(
-                cal_ms_files,
-                self.cfg_proc_job_output_path,
-                self.obs_id,
-                self.cfg_wsclean_binary_path,
-                self.cfg_wsclean_timeout,
-                wsclean_args,
-            ):
-                logger.warning(f"{self.obs_id}: WSClean failed. Calibration itself succeeded.")
-                return False
-
-            # A PNG of the main image, published with the FITS files. If it fails the images are still published.
-            self.current_task_name = "Preview PNG"
-            make_wsclean_preview(self.cfg_proc_job_output_path, self.obs_id)
-        except Exception:  # noqa: BLE001 - imaging is optional; it must not fail a job that already succeeded
-            logger.exception(f"{self.obs_id}: unhandled exception while imaging. Calibration itself succeeded.")
-            return False
-
-        return True
+        return run_imaging_steps(
+            self.obs_id,
+            self.metafits_filename,
+            self.cfg_proc_job_output_path,
+            self.working_path,
+            settings,
+            set_task_name,
+        )
 
     def stop(self, exit_code: int = 0):
         """Shutdown the processor and close all connections.
