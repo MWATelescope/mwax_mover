@@ -478,6 +478,21 @@ Status: **implemented**.
 
 ---
 
+## Phase 8: shared imaging step and the local tool
+
+Status: **implemented.**
+
+- `calvin/imaging.py` has `run_imaging_steps()` (find the MS, the `-abs-mem`
+  check, solutions-apply, WSClean, the preview PNG) and `ImagingSettings`.
+  `MWAXCalvinProcessor.run_imaging()` builds the settings and calls it. The
+  processor tests that patched `run_solutions_apply`, `run_wsclean` and
+  `make_wsclean_preview` in the processor module now patch them in
+  `mwax_mover.calvin.imaging` (20 patch targets; approved by Greg).
+- `mwax_dl_conv_cal_image` runs the whole pipeline on one MWA ASVO download,
+  with the same imaging code. See `docs/MWAX_DL_CONV_CAL_IMAGE.md`.
+
+---
+
 ## Deferred
 
 - **Separate SLURM job for WSClean (D14).** Look at this again after the

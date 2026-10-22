@@ -56,6 +56,7 @@ changelog = "https://github.com/MWATelescope/mwax_mover/CHANGELOG.md"
 [project.scripts]
 mwax_calvin_processor = "mwax_mover.cli.mwax_calvin_processor:main"
 mwax_calvin_controller = "mwax_mover.cli.mwax_calvin_controller:main"
+mwax_dl_conv_cal_image = "mwax_mover.cli.mwax_dl_conv_cal_image:main"
 mwax_subfile_distributor = "mwax_mover.cli.mwax_subfile_distributor:main"
 mwacache_archiver = "mwax_mover.cli.mwacache_archive_processor:main"
 fits_inspect = "mwax_mover.cli.fits_inspect:main"
