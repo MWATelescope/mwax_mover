@@ -156,10 +156,6 @@ class WSCleanArgs:
         ]
         args += [flag for enabled, flag in flags if enabled]
 
-        args += ["-parallel-gridding", "4"]
-        args += ["-parallel-reordering", "32"]
-        args += ["-parallel-deconvolution", "1024"]
-
         return args
 
 
