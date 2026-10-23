@@ -11,7 +11,7 @@ import os
 
 import numpy as np
 from astropy.io import fits
-from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval
+from astropy.visualization import AsinhStretch, ImageNormalize, MinMaxInterval
 from astropy.wcs import WCS
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
@@ -20,10 +20,10 @@ from mwax_mover.constants import WSCLEAN_IMAGE_SUFFIX, WSCLEAN_MFS_IMAGE_SUFFIX,
 
 logger = logging.getLogger(__name__)
 
-# How the image is drawn. The colour scale runs from the lowest value to this percentile of the
-# image, so a few very bright sources do not turn the rest of the image black. The asinh stretch
-# (softening parameter below) keeps the faint structure visible.
-PREVIEW_PERCENTILE = 99.5
+# How the image is drawn. The colour scale runs from the lowest to the highest value of the image, so
+# the colour bar shows the real peak. (A percentile limit would clip the brightest sources and make the
+# faint noise and sidelobes look much stronger than they are.) The asinh stretch (softening parameter
+# below) lifts the fainter structure.
 PREVIEW_ASINH_A = 0.1
 PREVIEW_COLORMAP = "viridis"
 PREVIEW_FIGURE_SIZE_INCHES = (8.0, 8.0)
@@ -81,7 +81,7 @@ def make_preview_png(fits_filename: str, png_filename: str, title: str) -> bool:
 
         norm = ImageNormalize(
             data,
-            interval=PercentileInterval(PREVIEW_PERCENTILE),
+            interval=MinMaxInterval(),
             stretch=AsinhStretch(PREVIEW_ASINH_A),
         )
 

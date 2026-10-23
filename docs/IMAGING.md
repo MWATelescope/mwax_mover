@@ -472,7 +472,8 @@ Status: **implemented**.
 - It uses matplotlib (`Figure` and the Agg canvas, no pyplot) and astropy,
   which are already dependencies. The plot has sky axes (from the FITS
   WCS), a colour bar in the FITS `BUNIT`, an asinh stretch, and a colour
-  scale from the lowest value to the 99.5th percentile. The look is set by
+  scale from the lowest to the highest value of the image (so the colour bar
+  shows the true peak, as DS9 does with min max). The look is set by
   constants at the top of the module.
 - A failure to make the PNG is logged only. The images are still published.
   No PNG is made if WSClean failed.

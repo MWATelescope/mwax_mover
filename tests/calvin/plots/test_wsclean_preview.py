@@ -1,7 +1,11 @@
 """Tests for calvin.plots.wsclean_preview: the PNG preview of the main WSClean image."""
 
+from unittest.mock import patch
+
 import numpy as np
+import pytest
 from astropy.io import fits
+from astropy.visualization import ImageNormalize
 
 from mwax_mover.calvin.plots.wsclean_preview import find_main_image, make_preview_png, make_wsclean_preview
 from mwax_mover.filesystem.files import get_png_dimensions
@@ -135,3 +139,40 @@ def test_make_wsclean_preview_writes_the_png_next_to_the_fits(tmp_path):
 def test_make_wsclean_preview_returns_none_without_an_image_and_does_not_raise(tmp_path):
     assert make_wsclean_preview(str(tmp_path), OBS) is None
     assert make_wsclean_preview(str(tmp_path / "does_not_exist"), OBS) is None
+
+
+def test_the_colour_scale_runs_from_the_lowest_to_the_highest_value(tmp_path):
+    fits_file = tmp_path / "image.fits"
+    _write_wsclean_fits(fits_file)  # noise of about 0.01, and one source of 50
+    data = np.squeeze(fits.getdata(fits_file))
+    norms: list[ImageNormalize] = []
+
+    def capture_norm(*args, **kwargs) -> ImageNormalize:
+        norms.append(ImageNormalize(*args, **kwargs))
+        return norms[-1]
+
+    with patch("mwax_mover.calvin.plots.wsclean_preview.ImageNormalize", side_effect=capture_norm):
+        assert make_preview_png(str(fits_file), str(tmp_path / "image.png"), "title") is True
+
+    # The bright source must not be clipped away: the colour bar shows the real peak
+    assert norms[0].vmin == pytest.approx(float(data.min()))
+    assert norms[0].vmax == pytest.approx(50.0)
+
+
+def test_the_colour_scale_ignores_nan_pixels(tmp_path):
+    fits_file = tmp_path / "image.fits"
+    data = np.full((SIZE, SIZE), 0.5, dtype=np.float32)
+    data[0, 0] = -2.0
+    data[1, 1] = 7.0
+    data[2, 2] = np.nan
+    _write_wsclean_fits(fits_file, data=data)
+    norms: list[ImageNormalize] = []
+
+    def capture_norm(*args, **kwargs) -> ImageNormalize:
+        norms.append(ImageNormalize(*args, **kwargs))
+        return norms[-1]
+
+    with patch("mwax_mover.calvin.plots.wsclean_preview.ImageNormalize", side_effect=capture_norm):
+        assert make_preview_png(str(fits_file), str(tmp_path / "image.png"), "title") is True
+
+    assert (norms[0].vmin, norms[0].vmax) == (-2.0, 7.0)
