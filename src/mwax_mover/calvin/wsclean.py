@@ -67,6 +67,9 @@ class WSCleanArgs:
         channels_out: Number of output channels (-channels-out).
         gridder: Gridder (-gridder).
         polarizations: Polarizations to image (-pol).
+        parallel_gridding: Number of parallel gridders (-parallel-gridding).
+        parallel_reordering: Number of threads for reordering the measurement sets (-parallel-reordering).
+        parallel_deconvolution: The value of -parallel-deconvolution (deconvolve in parallel).
         multiscale: Use multiscale cleaning (-multiscale).
         join_channels: Clean the output channels together (-join-channels).
         log_time: Put the date and time on each line of output (-log-time).
@@ -90,6 +93,9 @@ class WSCleanArgs:
     channels_out: int | None = None
     gridder: str | None = None
     polarizations: str | None = None
+    parallel_gridding: int | None = None
+    parallel_reordering: int | None = None
+    parallel_deconvolution: int | None = None
     multiscale: bool = False
     join_channels: bool = False
     log_time: bool = False
@@ -109,6 +115,14 @@ class WSCleanArgs:
 
         if self.join_channels and (self.channels_out is None or self.channels_out < 2):
             raise ValueError("join_channels needs channels_out to be 2 or more.")
+
+        for option, value in (
+            ("parallel_gridding", self.parallel_gridding),
+            ("parallel_reordering", self.parallel_reordering),
+            ("parallel_deconvolution", self.parallel_deconvolution),
+        ):
+            if value is not None and value < 1:
+                raise ValueError(f"{option} must be at least 1, got {value}.")
 
     def to_cmdline_args(self) -> list[str]:
         """Build the WSClean command line options (without the binary or the measurement sets).
@@ -146,6 +160,12 @@ class WSCleanArgs:
             args += ["-gridder", self.gridder]
         if self.polarizations is not None:
             args += ["-pol", self.polarizations]
+        if self.parallel_gridding is not None:
+            args += ["-parallel-gridding", str(self.parallel_gridding)]
+        if self.parallel_reordering is not None:
+            args += ["-parallel-reordering", str(self.parallel_reordering)]
+        if self.parallel_deconvolution is not None:
+            args += ["-parallel-deconvolution", str(self.parallel_deconvolution)]
 
         flags = [
             (self.multiscale, "-multiscale"),
@@ -159,10 +179,39 @@ class WSCleanArgs:
         return args
 
 
+def _read_optional_positive_int(config: ConfigParser, key: str) -> int | None:
+    """Read an optional whole number from the [wsclean] config section.
+
+    Args:
+        config: The loaded calvin_processor config.
+        key: The key name in [wsclean].
+
+    Returns:
+        The number, or None if the key is not in the config.
+
+    Raises:
+        ValueError: If the value is not a whole number of at least 1. The message names the key.
+    """
+    if not config.has_option(SECTION_WSCLEAN, key):
+        return None
+
+    value = read_config(config, SECTION_WSCLEAN, key)
+    try:
+        number = int(value)
+    except ValueError:
+        number = 0  # not a number: the same error as a number below 1
+
+    if number < 1:
+        raise ValueError(f"[{SECTION_WSCLEAN}] {key} must be a whole number of at least 1, got '{value}'.")
+    return number
+
+
 def wsclean_args_from_config(config: ConfigParser) -> WSCleanArgs:
     """Read the WSClean options from the [wsclean] config section.
 
-    Every option read here is a required key. The gridder (w-gridder) and the polarization
+    Every option read here is a required key, except parallel_gridding, parallel_reordering and
+    parallel_deconvolution. Those are optional: an option that is not in the config is not given to
+    WSClean. The gridder (w-gridder) and the polarization
     (-pol i, Stokes I) are always used, so they are not in the config. The image size and pixel
     scale are not in the config either: they are worked out for each observation (see
     array_image_settings()). WSClean uses all CPU cores unless told otherwise, and calvin does
@@ -194,6 +243,9 @@ def wsclean_args_from_config(config: ConfigParser) -> WSCleanArgs:
         channels_out=int(read_config(config, SECTION_WSCLEAN, "channels_out")),
         gridder=WSCLEAN_GRIDDER,
         polarizations=WSCLEAN_POLARIZATIONS,
+        parallel_gridding=_read_optional_positive_int(config, "parallel_gridding"),
+        parallel_reordering=_read_optional_positive_int(config, "parallel_reordering"),
+        parallel_deconvolution=_read_optional_positive_int(config, "parallel_deconvolution"),
         multiscale=read_config_bool(config, SECTION_WSCLEAN, "multiscale"),
         join_channels=read_config_bool(config, SECTION_WSCLEAN, "join_channels"),
         log_time=read_config_bool(config, SECTION_WSCLEAN, "log_time"),

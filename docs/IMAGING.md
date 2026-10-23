@@ -510,6 +510,11 @@ Status: **implemented.** The defaults are from a colleague's WSClean script.
   `minuv_l=100`, `channels_out=4`, and the flags `multiscale`, `join_channels`, `log_time`,
   `verbose` (all 1). `size` and `scale` are **not** config keys any more. A config that still has them
   works: they are ignored.
+- **Optional config keys in `[wsclean]`, for speed:** `parallel_gridding=4`, `parallel_reordering=32` and
+  `parallel_deconvolution=1024`. They become `-parallel-gridding`, `-parallel-reordering` and
+  `-parallel-deconvolution` on the WSClean command line. Each is a whole number of at least 1. A key that is
+  not in the config is not given to WSClean (so an older config still works). The values are in
+  `cfg/calvin_processor.cfg` and `cfg/calvin_processor_test.cfg`.
 - **Image size and pixel scale, for each observation** (`calvin.wsclean.array_image_settings()`):
   - The centre coarse channel is the centre frequency divided by 1.28 MHz, rounded half up. This is the
     metafits `CENTCHAN`, and it is checked against `CENTCHAN` in every test metafits that mwalib can

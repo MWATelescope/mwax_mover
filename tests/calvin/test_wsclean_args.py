@@ -1,6 +1,7 @@
 """Tests for the WSClean options: the command line, the config and the memory limit."""
 
 from configparser import ConfigParser
+from pathlib import Path
 
 import pytest
 
@@ -223,3 +224,76 @@ def test_calculate_abs_mem_gib_with_files_on_disk_keeps_all_the_memory():
 
 def test_calculate_abs_mem_gib_can_be_negative_if_the_files_are_too_big():
     assert calculate_abs_mem_gib(830, 1000) < 0
+
+
+# ---------------------------------------------------------------------------
+# the optional parallel options
+# ---------------------------------------------------------------------------
+
+PARALLEL_KEYS = {"parallel_gridding": "4", "parallel_reordering": "32", "parallel_deconvolution": "1024"}
+REPO_CFG_DIR = Path(__file__).resolve().parents[2] / "cfg"
+
+
+def test_the_parallel_options_are_put_on_the_command_line_when_set():
+    args = WSCleanArgs(
+        name="/out/x", temp_dir="/work", parallel_gridding=4, parallel_reordering=32, parallel_deconvolution=1024
+    )
+
+    command_line = args.to_cmdline_args()
+
+    assert command_line[command_line.index("-parallel-gridding") + 1] == "4"
+    assert command_line[command_line.index("-parallel-reordering") + 1] == "32"
+    assert command_line[command_line.index("-parallel-deconvolution") + 1] == "1024"
+
+
+def test_the_parallel_options_are_left_out_when_they_are_not_set():
+    command_line = WSCleanArgs(name="/out/x", temp_dir="/work").to_cmdline_args()
+
+    for option in ("-parallel-gridding", "-parallel-reordering", "-parallel-deconvolution"):
+        assert option not in command_line
+
+
+def test_the_parallel_options_are_read_from_the_config_when_present():
+    args = wsclean_args_from_config(_config(**PARALLEL_KEYS))
+
+    assert (args.parallel_gridding, args.parallel_reordering, args.parallel_deconvolution) == (4, 32, 1024)
+    assert "-parallel-gridding" in args.to_cmdline_args()
+
+
+def test_a_config_without_the_parallel_keys_still_works_and_leaves_them_out():
+    args = wsclean_args_from_config(_config())
+
+    assert (args.parallel_gridding, args.parallel_reordering, args.parallel_deconvolution) == (None, None, None)
+    assert not [a for a in args.to_cmdline_args() if a.startswith("-parallel")]
+
+
+def test_each_parallel_key_can_be_given_on_its_own():
+    args = wsclean_args_from_config(_config(parallel_reordering="8"))
+
+    assert (args.parallel_gridding, args.parallel_reordering, args.parallel_deconvolution) == (None, 8, None)
+
+
+@pytest.mark.parametrize("key", list(PARALLEL_KEYS))
+@pytest.mark.parametrize("value", ["0", "-1", "abc", "2.5", ""])
+def test_a_bad_parallel_value_is_named_in_the_error(key, value):
+    with pytest.raises(ValueError, match=rf"\[wsclean\] {key} must be a whole number of at least 1"):
+        wsclean_args_from_config(_config(**{key: value}))
+
+
+@pytest.mark.parametrize("key", list(PARALLEL_KEYS))
+def test_validate_rejects_a_parallel_option_below_one(key):
+    args = WSCleanArgs(name="/out/x", temp_dir="/work")
+    setattr(args, key, 0)
+
+    with pytest.raises(ValueError, match=key):
+        args.validate()
+
+
+@pytest.mark.parametrize("cfg_name", ["calvin_processor.cfg", "calvin_processor_test.cfg"])
+def test_the_cfg_files_in_the_repo_set_the_parallel_options(cfg_name):
+    config = ConfigParser()
+    assert config.read(REPO_CFG_DIR / cfg_name) == [str(REPO_CFG_DIR / cfg_name)]
+
+    args = wsclean_args_from_config(config)
+
+    assert (args.parallel_gridding, args.parallel_reordering, args.parallel_deconvolution) == (4, 32, 1024)
