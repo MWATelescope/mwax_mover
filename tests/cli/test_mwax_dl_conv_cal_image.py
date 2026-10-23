@@ -1,6 +1,7 @@
 """Tests for mwax_dl_conv_cal_image: arguments, the order of the steps, failures, and what it must not touch."""
 
 import ast
+import logging
 import os
 from collections.abc import Generator
 from contextlib import ExitStack, contextmanager
@@ -716,3 +717,62 @@ def test_reuse_calibrated_cannot_be_used_with_stop_after(cfg_filename, tmp_path)
         )  # fmt: skip
 
     assert exit_info.value.code == tool.EXIT_USAGE
+
+
+# ---------------------------------------------------------------------------
+# the summary is shown once on the console, and is in the log file
+# ---------------------------------------------------------------------------
+
+
+def test_the_summary_is_logged_for_the_log_file_only_and_printed_once(cfg_filename, tmp_path, capsys, caplog):
+    base = tmp_path / "job"
+
+    with patched_pipeline(base), caplog.at_level("INFO", logger=tool.logger.name):
+        assert _run(cfg_filename, base) == tool.EXIT_OK
+
+    assert capsys.readouterr().out.count("Result: SUCCESS") == 1
+    summary_records = [r for r in caplog.records if "Result: SUCCESS" in r.getMessage()]
+    assert len(summary_records) == 1
+    assert getattr(summary_records[0], tool.LOG_FILE_ONLY_ATTRIBUTE) is True
+    # The ordinary log lines are not marked
+    step_records = [r for r in caplog.records if r.getMessage().startswith("=== Step:")]
+    assert step_records
+    assert not any(getattr(r, tool.LOG_FILE_ONLY_ATTRIBUTE, False) for r in step_records)
+
+
+def test_the_console_does_not_show_the_summary_record_but_the_log_file_has_it(tmp_path, capsys):
+    log_file = tmp_path / "test.log"
+    test_logger = logging.getLogger("test_summary_once")
+    test_logger.propagate = False
+    test_logger.setLevel(logging.INFO)
+    handlers = tool.make_log_handlers(str(log_file))
+    for handler in handlers:
+        test_logger.addHandler(handler)
+
+    try:
+        test_logger.info("a normal line")
+        test_logger.info("the summary", extra={tool.LOG_FILE_ONLY_ATTRIBUTE: True})
+    finally:
+        for handler in handlers:
+            test_logger.removeHandler(handler)
+            handler.close()
+
+    console = capsys.readouterr().err
+    assert "a normal line" in console
+    assert "the summary" not in console
+    log_text = log_file.read_text()
+    assert "a normal line" in log_text
+    assert log_text.count("the summary") == 1
+
+
+def test_the_filter_only_drops_records_that_are_marked_for_the_log_file():
+    drop = tool.DropFileOnlyRecords()
+    plain = logging.LogRecord("x", logging.INFO, "f", 1, "m", None, None)
+    marked = logging.LogRecord("x", logging.INFO, "f", 1, "m", None, None)
+    setattr(marked, tool.LOG_FILE_ONLY_ATTRIBUTE, True)
+    unmarked = logging.LogRecord("x", logging.INFO, "f", 1, "m", None, None)
+    setattr(unmarked, tool.LOG_FILE_ONLY_ATTRIBUTE, False)
+
+    assert drop.filter(plain) is True
+    assert drop.filter(marked) is False
+    assert drop.filter(unmarked) is True

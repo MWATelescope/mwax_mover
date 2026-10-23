@@ -83,6 +83,10 @@ WORK_DIR_NAME = "work"
 OUTPUT_DIR_NAME = "output"
 LOG_FILENAME = "mwax_dl_conv_cal_image.log"
 
+# A log record with this extra attribute set to True goes to the log file only, not to the console. The
+# summary is printed on the console by run(), so it must not be logged there as well.
+LOG_FILE_ONLY_ATTRIBUTE = "file_only"
+
 STATUS_OK = "ok"
 STATUS_FAILED = "failed"
 STATUS_SKIPPED = "skipped"
@@ -91,6 +95,21 @@ STATUS_SKIPPED = "skipped"
 # <obs_id>_chN.ms / <obs_id>_chN-M.ms for a picket fence observation. The rest of the pipeline finds
 # the solutions by that name.
 MS_NAME_PATTERN = r"^{obs_id}(_ch\d{{1,3}}(-\d{{1,3}})?)?\.ms$"
+
+
+class DropFileOnlyRecords(logging.Filter):
+    """A log filter for the console handler: it drops the records that are for the log file only."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Say if a record is shown.
+
+        Args:
+            record: The log record.
+
+        Returns:
+            False if the record has LOG_FILE_ONLY_ATTRIBUTE set to True, otherwise True.
+        """
+        return not getattr(record, LOG_FILE_ONLY_ATTRIBUTE, False)
 
 
 @dataclass
@@ -819,10 +838,25 @@ def run(argv: list[str] | None = None) -> int:
         success = False
 
     summary = format_summary(job, success)
-    logger.info(summary)
+    # The console gets the summary from print(). The log file gets it from here.
+    logger.info(summary, extra={LOG_FILE_ONLY_ATTRIBUTE: True})
     print(summary)
 
     return EXIT_OK if success else EXIT_STEP_FAILED
+
+
+def make_log_handlers(log_filename: str) -> list[logging.Handler]:
+    """Make the log handlers: the console, and the log file.
+
+    Args:
+        log_filename: The log file.
+
+    Returns:
+        The console handler (which does not show the records that are for the log file only) and the file handler.
+    """
+    console_handler = logging.StreamHandler()
+    console_handler.addFilter(DropFileOnlyRecords())
+    return [console_handler, logging.FileHandler(log_filename)]
 
 
 def main() -> None:
@@ -835,7 +869,7 @@ def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
         format=LOG_FORMAT,
-        handlers=[logging.StreamHandler(), logging.FileHandler(os.path.join(base_dir, LOG_FILENAME))],
+        handlers=make_log_handlers(os.path.join(base_dir, LOG_FILENAME)),
     )
     sys.exit(run())
 
