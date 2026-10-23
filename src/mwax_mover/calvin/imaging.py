@@ -35,6 +35,9 @@ class ImagingSettings:
             skipped if it is below WSCLEAN_MIN_ABS_MEM_GIB.
         remove_input_ms: If True, each band's uncalibrated measurement set is removed after
             solutions-apply worked for it, to free working space.
+        reuse_calibrated: If True, solutions-apply is not run. WSClean images the calibrated
+            measurement sets (*_cal.ms) that are already in the working path, for running WSClean
+            again with other settings.
     """
 
     hyperdrive_binary_path: str
@@ -44,6 +47,7 @@ class ImagingSettings:
     wsclean_args: WSCleanArgs
     wsclean_abs_mem_gib: int | None
     remove_input_ms: bool
+    reuse_calibrated: bool = False
 
 
 def run_imaging_steps(
@@ -60,12 +64,16 @@ def run_imaging_steps(
     not imaged). If the PNG preview fails, that is logged and the result is still True.
     Nothing is raised: any failure is logged and False is returned.
 
+    If settings.reuse_calibrated is True, solutions-apply is not run: the calibrated measurement
+    sets already in working_path are imaged.
+
     Args:
         obs_id: Observation ID.
         metafits_filename: Path to the metafits file.
         job_output_path: Directory with the solutions. Readmes, WSClean outputs and the PNG are written here.
         working_path: Directory with the Birli measurement sets. Calibrated ones and WSClean's
-            temporary files are written here.
+            temporary files are written here. With settings.reuse_calibrated it must have the
+            calibrated ones.
         settings: The imaging settings.
         on_task: Called with the name of each step as it starts (for a status display). Optional.
 
@@ -78,10 +86,16 @@ def run_imaging_steps(
             on_task(name)
 
     try:
-        # The Birli measurement sets, not any calibrated ones
-        ms_files = sorted(
-            ms for ms in glob.glob(os.path.join(working_path, f"*{EXT_MS}")) if not ms.endswith(CALIBRATED_MS_SUFFIX)
-        )
+        if settings.reuse_calibrated:
+            # Only the calibrated measurement sets, made by an earlier run
+            ms_files = sorted(glob.glob(os.path.join(working_path, f"*{CALIBRATED_MS_SUFFIX}")))
+        else:
+            # The Birli measurement sets, not any calibrated ones
+            ms_files = sorted(
+                ms
+                for ms in glob.glob(os.path.join(working_path, f"*{EXT_MS}"))
+                if not ms.endswith(CALIBRATED_MS_SUFFIX)
+            )
         if not ms_files:
             logger.warning(f"{obs_id}: no measurement sets found to image. Skipping imaging.")
             return False
@@ -94,20 +108,24 @@ def run_imaging_steps(
             )
             return False
 
-        task("Applying solutions")
-        apply_success, cal_ms_files = run_solutions_apply(
-            ms_files,
-            metafits_filename,
-            job_output_path,
-            working_path,
-            obs_id,
-            settings.hyperdrive_binary_path,
-            settings.apply_timeout,
-            settings.remove_input_ms,
-        )
-        if not apply_success:
-            logger.warning(f"{obs_id}: solutions-apply failed. Skipping imaging.")
-            return False
+        if settings.reuse_calibrated:
+            logger.info(f"{obs_id}: reusing {len(ms_files)} calibrated measurement set(s). Not applying solutions.")
+            cal_ms_files = ms_files
+        else:
+            task("Applying solutions")
+            apply_success, cal_ms_files = run_solutions_apply(
+                ms_files,
+                metafits_filename,
+                job_output_path,
+                working_path,
+                obs_id,
+                settings.hyperdrive_binary_path,
+                settings.apply_timeout,
+                settings.remove_input_ms,
+            )
+            if not apply_success:
+                logger.warning(f"{obs_id}: solutions-apply failed. Skipping imaging.")
+                return False
 
         task("WSClean")
         wsclean_args = dataclasses.replace(

@@ -607,3 +607,112 @@ def test_a_failure_to_work_out_the_image_settings_fails_imaging_before_anything_
 
     assert "centre channel 0" in capsys.readouterr().out
     mocks.imaging.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# --keep-calibrated and --reuse-calibrated
+# ---------------------------------------------------------------------------
+
+
+def test_keep_calibrated_keeps_the_calibrated_sets_and_removes_the_others(cfg_filename, tmp_path, capsys):
+    base = tmp_path / "job"
+
+    with patched_pipeline(base):
+        assert _run(cfg_filename, base, VIS_URL, "--keep-calibrated") == tool.EXIT_OK
+
+    assert (base / "work" / f"{OBS}_cal.ms").is_dir()
+    assert not (base / "work" / f"{OBS}.ms").exists()
+    assert "kept 1 calibrated measurement set(s)" in capsys.readouterr().out
+
+
+def test_keep_calibrated_is_off_by_default(cfg_filename, tmp_path):
+    base = tmp_path / "job"
+
+    with patched_pipeline(base):
+        assert _run(cfg_filename, base) == tool.EXIT_OK
+
+    assert not (base / "work" / f"{OBS}_cal.ms").exists()
+
+
+def test_reuse_calibrated_runs_only_the_metafits_and_imaging_steps(cfg_filename, tmp_path, capsys):
+    base = tmp_path / "job"
+    with patched_pipeline(base):
+        assert _run(cfg_filename, base, VIS_URL, "--keep-calibrated") == tool.EXIT_OK
+    capsys.readouterr()
+
+    rerun_imaging = MagicMock(return_value=True)
+    with patched_pipeline(base, imaging=rerun_imaging) as mocks:
+        assert _run(cfg_filename, base, VIS_URL, "--reuse-calibrated") == tool.EXIT_OK
+
+    for skipped in (mocks.download, mocks.extract, mocks.birli, mocks.hyperdrive, mocks.solutions, mocks.estimate):
+        skipped.assert_not_called()
+    assert _step_status(capsys) == {
+        "download": "skipped",
+        "metafits": "ok",
+        "disk space": "ok",
+        "birli": "skipped",
+        "hyperdrive": "skipped",
+        "solutions": "skipped",
+        "imaging": "ok",
+        "cleanup": "ok",
+    }
+    assert rerun_imaging.call_args.args[4].reuse_calibrated is True
+    assert rerun_imaging.call_args.args[3] == str(base / "work")
+    # A reuse run keeps the calibrated sets, so it can be run again
+    assert (base / "work" / f"{OBS}_cal.ms").is_dir()
+
+
+def test_a_full_run_does_not_tell_the_imaging_step_to_reuse(cfg_filename, tmp_path):
+    base = tmp_path / "job"
+
+    with patched_pipeline(base) as mocks:
+        assert _run(cfg_filename, base) == tool.EXIT_OK
+
+    assert mocks.imaging.call_args.args[4].reuse_calibrated is False
+
+
+def test_reuse_calibrated_without_calibrated_sets_fails_before_anything_runs(cfg_filename, tmp_path, capsys):
+    base = tmp_path / "job"
+
+    with patched_pipeline(base) as mocks:
+        assert _run(cfg_filename, base, VIS_URL, "--reuse-calibrated") == tool.EXIT_STEP_FAILED
+
+    out = capsys.readouterr().out
+    assert "--keep-calibrated" in out
+    for step in (mocks.download, mocks.metafits, mocks.birli, mocks.hyperdrive, mocks.solutions, mocks.imaging):
+        step.assert_not_called()
+
+
+def test_reuse_calibrated_does_not_need_birli_to_exist(cfg_filename, tmp_path):
+    base = tmp_path / "job"
+    (base / "work" / f"{OBS}_cal.ms").mkdir(parents=True)
+    os.remove(os.path.join(tests_common.get_test_bin_dir("mwax_calvin_processor"), "birli"))
+
+    with patched_pipeline(base, imaging=MagicMock(return_value=True)):
+        assert _run(cfg_filename, base, VIS_URL, "--reuse-calibrated") == tool.EXIT_OK
+
+
+def test_a_failed_wsclean_in_a_reuse_run_keeps_the_calibrated_sets(cfg_filename, tmp_path, capsys):
+    base = tmp_path / "job"
+    (base / "work" / f"{OBS}_cal.ms").mkdir(parents=True)
+
+    with patched_pipeline(base, imaging=MagicMock(return_value=False)):
+        assert _run(cfg_filename, base, VIS_URL, "--reuse-calibrated") == tool.EXIT_STEP_FAILED
+
+    assert (base / "work" / f"{OBS}_cal.ms").is_dir()
+    assert "cleanup" not in _step_status(capsys)
+
+
+def test_reuse_calibrated_cannot_be_used_with_stop_after(cfg_filename, tmp_path):
+    with pytest.raises(SystemExit) as exit_info:
+        tool.parse_args(
+            [
+                "--cfg", cfg_filename,
+                "--url", VIS_URL,
+                "--dir", str(tmp_path),
+                "--reuse-calibrated",
+                "--stop-after", "imaging",
+            ]
+        )  # fmt: skip
+
+    assert exit_info.value.code == tool.EXIT_USAGE

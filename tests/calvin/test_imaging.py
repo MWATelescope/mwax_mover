@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import numpy as np
@@ -14,7 +15,7 @@ OBS = 1234567890
 
 
 def _settings(**overrides) -> ImagingSettings:
-    values = {
+    values: dict[str, Any] = {
         "hyperdrive_binary_path": "/bin/hyperdrive",
         "apply_timeout": 77,
         "wsclean_binary_path": "/bin/wsclean",
@@ -173,3 +174,52 @@ def test_makes_the_real_preview_png_after_wsclean_works(tmp_path):
         assert _run(work, out, _settings()) is True
 
     assert os.path.exists(out / f"{OBS}_wsclean-MFS-image.png")
+
+
+def test_reuse_calibrated_images_the_calibrated_sets_and_does_not_apply_solutions(tmp_path):
+    work, out = _dirs(tmp_path, [f"{OBS}_ch75.ms", f"{OBS}_ch75_cal.ms", f"{OBS}_ch159_cal.ms"])
+    tasks: list[str] = []
+
+    with (
+        patch("mwax_mover.calvin.imaging.run_solutions_apply") as mock_apply,
+        patch("mwax_mover.calvin.imaging.run_wsclean", return_value=True) as mock_wsclean,
+        patch("mwax_mover.calvin.imaging.make_wsclean_preview") as mock_preview,
+    ):
+        assert _run(work, out, _settings(reuse_calibrated=True), tasks.append) is True
+
+    mock_apply.assert_not_called()
+    # Only the calibrated sets go to WSClean, sorted
+    assert mock_wsclean.call_args.args[0] == [str(work / f"{OBS}_ch159_cal.ms"), str(work / f"{OBS}_ch75_cal.ms")]
+    assert mock_wsclean.call_args.args[5].abs_mem_gib == 737
+    mock_preview.assert_called_once_with(str(out), OBS)
+    assert tasks == ["WSClean", "Preview PNG"]
+
+
+def test_reuse_calibrated_does_not_remove_anything(tmp_path):
+    work, out = _dirs(tmp_path, [f"{OBS}_ch75.ms", f"{OBS}_ch75_cal.ms"])
+
+    with (
+        patch("mwax_mover.calvin.imaging.run_wsclean", return_value=True),
+        patch("mwax_mover.calvin.imaging.make_wsclean_preview"),
+    ):
+        assert _run(work, out, _settings(reuse_calibrated=True, remove_input_ms=True)) is True
+
+    assert (work / f"{OBS}_ch75.ms").is_dir()
+    assert (work / f"{OBS}_ch75_cal.ms").is_dir()
+
+
+def test_reuse_calibrated_fails_without_calibrated_sets(tmp_path):
+    work, out = _dirs(tmp_path, [f"{OBS}_ch75.ms"])  # only a Birli set
+
+    with (
+        patch("mwax_mover.calvin.imaging.run_solutions_apply") as mock_apply,
+        patch("mwax_mover.calvin.imaging.run_wsclean") as mock_wsclean,
+    ):
+        assert _run(work, out, _settings(reuse_calibrated=True)) is False
+
+    mock_apply.assert_not_called()
+    mock_wsclean.assert_not_called()
+
+
+def test_reuse_calibrated_is_off_by_default():
+    assert _settings().reuse_calibrated is False

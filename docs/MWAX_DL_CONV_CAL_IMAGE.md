@@ -45,6 +45,7 @@ for consistency. The `_vis.tar` also holds a metafits, but it is not used.
 ```
 mwax_dl_conv_cal_image --cfg CFG --url SIGNED_URL --dir DIR
                        [--work-dir WORK] [--skip-download] [--stop-after STEP]
+                       [--keep-calibrated] [--reuse-calibrated]
 ```
 
 | Argument | Meaning |
@@ -55,6 +56,8 @@ mwax_dl_conv_cal_image --cfg CFG --url SIGNED_URL --dir DIR
 | `--work-dir` | Where the measurement sets go. The default is `DIR/work`. Use a disk directory (for example `/data/x`) or a RAM-backed directory (for example `/tmp/x`). |
 | `--skip-download` | Use the data that is already in `DIR/input`. For running again with other options. |
 | `--stop-after STEP` | Stop after `download`, `metafits`, `birli`, `hyperdrive`, `solutions` or `imaging`. |
+| `--keep-calibrated` | Do not remove the calibrated measurement sets (`_cal.ms`) at the end of the run. |
+| `--reuse-calibrated` | Run only WSClean and the PNG on the calibrated measurement sets that an earlier run kept. See "Running WSClean again". Cannot be used with `--stop-after`. |
 
 The file name in the URL decides what happens:
 
@@ -109,13 +112,36 @@ DIR/
 | `hyperdrive` | di-calibrate each measurement set. | `run_hyperdrive()` |
 | `solutions` | Flag, plot, write the stats and the modified solutions. No database. | `process_solutions_files()` |
 | `imaging` | solutions-apply, WSClean and the PNG. | `run_imaging_steps()` |
-| cleanup | Remove the measurement sets that are not needed. Only after a full run. | |
+| cleanup | Remove the measurement sets that are not needed. Only after a full run. The calibrated sets stay with `--keep-calibrated` or `--reuse-calibrated`. | |
 
 The run stops at the first failed step, and everything stays on disk. A failed
 PNG is a warning, not a failure. If `solutions` finds no unflagged tiles, that
 is a failure here (there is nothing to apply).
 
 The tool prints a summary (step, status, seconds, detail), and writes it to the log.
+
+### Running WSClean again
+
+To try other WSClean settings without downloading, running Birli, calibrating
+or applying the solutions again:
+
+1. Run once with `--keep-calibrated`. The calibrated sets stay in the work directory.
+2. Change the `[wsclean]` settings in the cfg.
+3. Run again with the same `--cfg`, `--url`, `--dir` and `--work-dir`, and with `--reuse-calibrated`.
+
+With `--reuse-calibrated`:
+
+- The `download`, `birli`, `hyperdrive` and `solutions` steps are shown as `skipped`. A `reuse`
+  step first checks that there is at least one `_cal.ms` in the work directory. If not, the run
+  fails at once and says so.
+- `metafits` runs (it uses the file in `input/`), and so does the disk space check, with the
+  size of the calibrated sets. The check allows only for WSClean's reordered copy, because the
+  calibrated sets are already there. `imaging` does **not** run solutions-apply.
+- The image size and scale are worked out again from the metafits, so a change to
+  `compact_array_baseline_max_length` also applies.
+- The calibrated sets are kept at the end, so the run can be repeated. WSClean
+  writes its images to the same names in `output/`, so each run replaces the images of the one before.
+- `--url` is still needed (it gives the observation ID). Birli does not have to exist.
 
 ### Download
 
@@ -142,8 +168,8 @@ The tool prints a summary (step, status, seconds, detail), and writes it to the 
   that lists the names. (This is checked on the names Birli makes. We have not seen
   the names that MWA ASVO uses.)
 - The measurement sets are the expensive input, so they are **never deleted**.
-  Only the calibrated copy (`_cal.ms`) is removed at the end. A second run with
-  `--skip-download` uses the measurement sets that are already in `work/`.
+  Only the calibrated copy (`_cal.ms`) is removed at the end (unless `--keep-calibrated`).
+  A second run with `--skip-download` uses the measurement sets that are already in `work/`.
 - The Birli resolution and edge settings in the cfg are not applied: the
   measurement sets are as the MWA ASVO job made them.
 - Birli does not have to exist for an `_ms.tar` run.

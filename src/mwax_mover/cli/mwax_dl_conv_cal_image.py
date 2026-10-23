@@ -7,6 +7,10 @@ directory.
 
 This is a test tool. It does not use the database, the upload (S3, plot upload path, index.json),
 the MWAX servers or Slurm. See docs/MWAX_DL_CONV_CAL_IMAGE.md for the design.
+
+--keep-calibrated keeps the calibrated measurement sets (*_cal.ms) at the end of the run.
+--reuse-calibrated runs only WSClean (and the PNG) on the calibrated measurement sets that an earlier
+run kept, so that WSClean can be run again with other settings.
 """
 
 import argparse
@@ -69,6 +73,10 @@ STOP_AFTER_CHOICES = (STEP_DOWNLOAD, STEP_METAFITS, STEP_BIRLI, STEP_HYPERDRIVE,
 # Steps that are not in STOP_AFTER_CHOICES because it makes no sense to stop after them.
 STEP_DISK_SPACE = "disk space"
 STEP_CLEANUP = "cleanup"
+STEP_REUSE = "reuse"
+
+# The steps that --reuse-calibrated does not run, because the calibrated measurement sets are already made.
+REUSE_SKIPPED_STEPS = (STEP_DOWNLOAD, STEP_BIRLI, STEP_HYPERDRIVE, STEP_SOLUTIONS)
 
 INPUT_DIR_NAME = "input"
 WORK_DIR_NAME = "work"
@@ -127,6 +135,8 @@ class Job:
         dirs: The directories.
         url: The signed URL.
         skip_download: True to use the data already in the input directory.
+        reuse_calibrated: True to run only WSClean on the calibrated measurement sets in the work directory.
+        keep_calibrated: True to keep the calibrated measurement sets at the end of the run.
         metafits_filename: The metafits file, once it exists.
         metafits_context: The metafits, read by mwalib.
         work_is_ram_backed: True if the work directory uses RAM.
@@ -139,6 +149,8 @@ class Job:
     dirs: Dirs
     url: str
     skip_download: bool = False
+    reuse_calibrated: bool = False
+    keep_calibrated: bool = False
     metafits_filename: str = ""
     metafits_context: MetafitsContext | None = None
     work_is_ram_backed: bool = False
@@ -192,7 +204,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Stop after this step.",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--keep-calibrated",
+        action="store_true",
+        help="Keep the calibrated measurement sets (*_cal.ms) in the work directory at the end of the run.",
+    )
+    parser.add_argument(
+        "--reuse-calibrated",
+        action="store_true",
+        help=(
+            "Do not download, run Birli, hyperdrive or the solutions steps. Run only WSClean and the PNG on the"
+            " calibrated measurement sets that an earlier run kept in the work directory (use the same --dir and"
+            " --work-dir, and --keep-calibrated on the first run). The other WSClean settings come from --cfg."
+            " The calibrated measurement sets are kept at the end of this run too."
+        ),
+    )
+    args = parser.parse_args(argv)
+    if args.reuse_calibrated and args.stop_after:
+        parser.error(
+            "--stop-after cannot be used with --reuse-calibrated (it only runs the metafits and imaging steps)."
+        )
+    return args
 
 
 def _directory_size_bytes(path: str) -> int:
@@ -232,6 +264,20 @@ def _find_measurement_sets(directory: str, include_calibrated: bool = False) -> 
                 if include_calibrated or not name.endswith(CALIBRATED_MS_SUFFIX):
                     found.append(os.path.join(root, name))
     return sorted(found)
+
+
+def _find_calibrated_measurement_sets(directory: str) -> list[str]:
+    """Find the calibrated measurement sets (directories ending _cal.ms) under a directory.
+
+    Args:
+        directory: Where to look.
+
+    Returns:
+        The full paths, sorted.
+    """
+    return [
+        ms for ms in _find_measurement_sets(directory, include_calibrated=True) if ms.endswith(CALIBRATED_MS_SUFFIX)
+    ]
 
 
 def collect_measurement_sets(job: Job) -> list[str]:
@@ -276,6 +322,37 @@ def collect_measurement_sets(job: Job) -> list[str]:
 
     logger.info(f"Moved {len(moved)} measurement set(s) to {job.dirs.work}")
     return sorted(moved)
+
+
+def _step_reuse(job: Job) -> tuple[str, str]:
+    """Check that the calibrated measurement sets of an earlier run are in the work directory.
+
+    Args:
+        job: The job.
+
+    Returns:
+        (status, detail).
+    """
+    calibrated = _find_calibrated_measurement_sets(job.dirs.work)
+    if not calibrated:
+        return (
+            STATUS_FAILED,
+            f"--reuse-calibrated needs calibrated measurement sets (*{CALIBRATED_MS_SUFFIX}) in {job.dirs.work}, but"
+            " there are none. Run once with --keep-calibrated first, with the same --dir and --work-dir.",
+        )
+    return STATUS_OK, f"{len(calibrated)} calibrated measurement set(s) in {job.dirs.work}"
+
+
+def _step_not_needed(job: Job) -> tuple[str, str]:
+    """Skip a step that --reuse-calibrated does not need.
+
+    Args:
+        job: The job.
+
+    Returns:
+        (status, detail).
+    """
+    return STATUS_SKIPPED, "reusing the calibrated measurement sets"
 
 
 def _step_download(job: Job) -> tuple[str, str]:
@@ -363,7 +440,9 @@ def _step_disk_space(job: Job) -> tuple[str, str]:
     settings = job.settings
     assert job.metafits_context is not None
 
-    if job.info.kind is SignedUrlKind.vis:
+    if job.reuse_calibrated:
+        estimated_bytes = sum(_directory_size_bytes(ms) for ms in _find_calibrated_measurement_sets(job.dirs.work))
+    elif job.info.kind is SignedUrlKind.vis:
         estimated_bytes = estimate_birli_output_bytes(
             job.metafits_context, settings.birli_freq_res_khz, settings.birli_int_time_res_sec
         )
@@ -373,6 +452,9 @@ def _step_disk_space(job: Job) -> tuple[str, str]:
     estimated_gb = max(int(estimated_bytes / BYTES_PER_GIGABYTE), 1)
     needed_gb = estimate_working_space_gb(estimated_gb, True)
     free_gb = shutil.disk_usage(job.dirs.work).free / BYTES_PER_GIGABYTE
+    # The calibrated sets are already in the work directory (so already use its space and RAM). Only WSClean's
+    # reordered copy needs more room.
+    room_needed_gb = needed_gb - estimated_gb if job.reuse_calibrated else needed_gb
 
     job.work_is_ram_backed = is_ram_backed(job.dirs.work)
     job.birli_max_mem_gib = settings.birli_max_mem_gib
@@ -386,8 +468,8 @@ def _step_disk_space(job: Job) -> tuple[str, str]:
             f" and WSClean memory is now {job.wsclean_abs_mem_gib} GiB."
         )
 
-    detail = f"need about {needed_gb} GB in {job.dirs.work}, {free_gb:.0f} GB free"
-    if needed_gb > free_gb:
+    detail = f"need about {room_needed_gb} GB in {job.dirs.work}, {free_gb:.0f} GB free"
+    if room_needed_gb > free_gb:
         return STATUS_FAILED, f"Not enough room: {detail}"
 
     return STATUS_OK, detail
@@ -538,6 +620,7 @@ def _step_imaging(job: Job) -> tuple[str, str]:
         wsclean_args=wsclean_args,
         wsclean_abs_mem_gib=job.wsclean_abs_mem_gib,
         remove_input_ms=remove_input_ms,
+        reuse_calibrated=job.reuse_calibrated,
     )
 
     ok = run_imaging_steps(
@@ -567,8 +650,8 @@ def _step_imaging(job: Job) -> tuple[str, str]:
 def _step_cleanup(job: Job) -> tuple[str, str]:
     """Remove the measurement sets that are not needed any more.
 
-    The calibrated sets always go. The Birli sets go too, but an ``_ms.tar`` download is kept. Nothing is
-    removed if ``keep_completed_visibility_files`` is set.
+    The calibrated sets go, unless ``--keep-calibrated`` (or ``--reuse-calibrated``) was given. The Birli sets
+    go too, but an ``_ms.tar`` download is kept. Nothing is removed if ``keep_completed_visibility_files`` is set.
 
     Args:
         job: The job.
@@ -580,15 +663,22 @@ def _step_cleanup(job: Job) -> tuple[str, str]:
         return STATUS_SKIPPED, "keep_completed_visibility_files is set"
 
     removed = 0
+    kept = 0
     for ms in _find_measurement_sets(job.dirs.work, include_calibrated=True):
-        if ms.endswith(CALIBRATED_MS_SUFFIX) or job.info.kind is SignedUrlKind.vis:
+        is_calibrated = ms.endswith(CALIBRATED_MS_SUFFIX)
+        if is_calibrated and job.keep_calibrated:
+            kept += 1
+        elif is_calibrated or job.info.kind is SignedUrlKind.vis:
             try:
                 shutil.rmtree(ms)
                 removed += 1
             except OSError:
                 logger.warning(f"Could not remove {ms}. Ignoring.")
 
-    return STATUS_OK, f"removed {removed} measurement set(s)"
+    detail = f"removed {removed} measurement set(s)"
+    if kept:
+        detail += f", kept {kept} calibrated measurement set(s) in {job.dirs.work}"
+    return STATUS_OK, detail
 
 
 def _run_step(job: Job, name: str, step: Callable[[Job], tuple[str, str]]) -> bool:
@@ -636,6 +726,12 @@ def run_job(job: Job, stop_after: str | None) -> bool:
         (STEP_SOLUTIONS, _step_solutions, True),
         (STEP_IMAGING, _step_imaging, True),
     ]
+    if job.reuse_calibrated:
+        # The calibrated sets are checked first, so a missing one fails before anything else runs
+        steps = [(STEP_REUSE, _step_reuse, False)] + [
+            (name, _step_not_needed if name in REUSE_SKIPPED_STEPS else step, can_stop_after)
+            for name, step, can_stop_after in steps
+        ]
 
     for name, step, can_stop_after in steps:
         if not _run_step(job, name, step):
@@ -691,7 +787,7 @@ def run(argv: list[str] | None = None) -> int:
         print(f"Error: {error}", file=sys.stderr)
         return EXIT_USAGE
 
-    problems = check_files_exist(settings, need_birli=info.kind is SignedUrlKind.vis)
+    problems = check_files_exist(settings, need_birli=info.kind is SignedUrlKind.vis and not args.reuse_calibrated)
     if problems:
         print("Error:\n" + "\n".join(problems), file=sys.stderr)
         return EXIT_USAGE
@@ -705,7 +801,15 @@ def run(argv: list[str] | None = None) -> int:
     for directory in (dirs.input, dirs.work, dirs.output):
         os.makedirs(directory, exist_ok=True)
 
-    job = Job(settings=settings, info=info, dirs=dirs, url=args.url, skip_download=args.skip_download)
+    job = Job(
+        settings=settings,
+        info=info,
+        dirs=dirs,
+        url=args.url,
+        skip_download=args.skip_download,
+        reuse_calibrated=args.reuse_calibrated,
+        keep_calibrated=args.keep_calibrated or args.reuse_calibrated,
+    )
 
     try:
         success = run_job(job, args.stop_after)
