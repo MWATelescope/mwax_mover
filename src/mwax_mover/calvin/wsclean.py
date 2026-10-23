@@ -17,7 +17,6 @@ from configparser import ConfigParser
 from dataclasses import dataclass
 
 import numpy as np
-
 from mwalib import MetafitsContext
 
 from mwax_mover.constants import (
@@ -156,6 +155,10 @@ class WSCleanArgs:
             (self.no_update_model_required, "-no-update-model-required"),
         ]
         args += [flag for enabled, flag in flags if enabled]
+
+        args += ["-parallel-gridding", "4"]
+        args += ["-parallel-reordering", "32"]
+        args += ["-parallel-deconvolution", "1024"]
 
         return args
 
