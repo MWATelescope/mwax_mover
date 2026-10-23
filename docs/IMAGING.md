@@ -505,7 +505,8 @@ Status: **implemented.** The defaults are from a colleague's WSClean script.
   already used here, so `-gridder wgridder` is used.) The output file names do not change
   (Stokes I has no polarization tag), so the index and the preview PNG still work.
 - **Config keys in `[wsclean]`** (all required when `enabled=1`): `max_mem_gib=830`,
-  `compact_array_baseline_max_length=3500` (metres), `briggs_robust=0`, `niter=1000000`,
+  `compact_array_baseline_max_length=3500` (metres), `compact_image_size=1024` and
+  `extended_image_size=2048` (pixels), `briggs_robust=0`, `niter=1000000`,
   `nmiter=2`, `mgain=0.85`, `multiscale_gain=0.15`, `auto_threshold=5`, `auto_mask=7`,
   `minuv_l=100`, `channels_out=4`, and the flags `multiscale`, `join_channels`, `log_time`,
   `verbose` (all 1). `size` and `scale` are **not** config keys any more. A config that still has them
@@ -523,11 +524,13 @@ Status: **implemented.** The defaults are from a colleague's WSClean script.
   - With 184 or more tiles the array is "extended". Otherwise it is "compact" if the longest baseline
     (from all the tile positions, flagged or not, in 3D) is no more than
     `compact_array_baseline_max_length`, and "extended" if it is longer.
-  - Compact: `-size 4000 4000`, scale = 1.2 / centre channel. Extended: `-size 8000 8000`,
-    scale = 0.6 / centre channel. The scale is in degrees with 7 decimal places (the script cuts the
+  - Compact: `-size N N` with N from `compact_image_size`, scale = 1.2 / centre channel. Extended:
+    `-size N N` with N from `extended_image_size`, scale = 0.6 / centre channel. The scale is in degrees with 7 decimal places (the script cuts the
     string to 8 characters, which gives 7 decimals, but truncates where this rounds).
-  - The limits and the sizes are constants in `constants.py` (`WSCLEAN_EXTENDED_MIN_TILES`,
-    `WSCLEAN_COMPACT_BASE_SCALE`, ...). Only the baseline limit is config.
+  - The tile limit and the base scales are constants in `constants.py` (`WSCLEAN_EXTENDED_MIN_TILES`,
+    `WSCLEAN_COMPACT_BASE_SCALE`, ...). The baseline limit and the two image sizes are config. All three
+    are required keys (when imaging is on). `WSCLEAN_COMPACT_IMAGE_SIZE` and `WSCLEAN_EXTENDED_IMAGE_SIZE` in
+    `constants.py` are only the defaults of `array_image_settings()` for a caller that has no config.
 - **Processor:** `start()` works the settings out as soon as the metafits is read, and keeps them in
   `wsclean_image_settings`. If that fails, the calibration goes on and imaging is skipped with a warning.
   `run_imaging()` puts the size and scale in the WSClean options. **The tool**

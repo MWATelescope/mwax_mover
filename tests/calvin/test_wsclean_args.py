@@ -1,6 +1,6 @@
 """Tests for the WSClean options: the command line, the config and the memory limit."""
 
-from configparser import ConfigParser
+from configparser import ConfigParser, NoOptionError
 from pathlib import Path
 
 import pytest
@@ -9,6 +9,8 @@ from mwax_mover.calvin.wsclean import (
     WSCleanArgs,
     calculate_abs_mem_gib,
     read_compact_array_baseline_max_length,
+    read_compact_image_size,
+    read_extended_image_size,
     wsclean_args_from_config,
 )
 
@@ -297,3 +299,43 @@ def test_the_cfg_files_in_the_repo_set_the_parallel_options(cfg_name):
     args = wsclean_args_from_config(config)
 
     assert (args.parallel_gridding, args.parallel_reordering, args.parallel_deconvolution) == (4, 32, 1024)
+
+
+# ---------------------------------------------------------------------------
+# the image sizes (required keys)
+# ---------------------------------------------------------------------------
+
+
+def test_the_image_sizes_are_read_from_the_config():
+    config = _config(compact_image_size="1024", extended_image_size="2048")
+
+    assert read_compact_image_size(config) == 1024
+    assert read_extended_image_size(config) == 2048
+
+
+@pytest.mark.parametrize(
+    ("reader", "key"),
+    [(read_compact_image_size, "compact_image_size"), (read_extended_image_size, "extended_image_size")],
+)
+def test_an_image_size_is_a_required_key(reader, key):
+    with pytest.raises(NoOptionError, match=key):
+        reader(_config())
+
+
+@pytest.mark.parametrize(
+    ("reader", "key"),
+    [(read_compact_image_size, "compact_image_size"), (read_extended_image_size, "extended_image_size")],
+)
+@pytest.mark.parametrize("value", ["0", "-1", "big", "1024.5", ""])
+def test_a_bad_image_size_is_named_in_the_error(reader, key, value):
+    with pytest.raises(ValueError, match=rf"\[wsclean\] {key} must be a whole number of at least 1"):
+        reader(_config(**{key: value}))
+
+
+@pytest.mark.parametrize("cfg_name", ["calvin_processor.cfg", "calvin_processor_test.cfg"])
+def test_the_cfg_files_in_the_repo_set_the_image_sizes(cfg_name):
+    config = ConfigParser()
+    assert config.read(REPO_CFG_DIR / cfg_name) == [str(REPO_CFG_DIR / cfg_name)]
+
+    assert read_compact_image_size(config) == 1024
+    assert read_extended_image_size(config) == 2048

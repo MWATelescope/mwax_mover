@@ -622,7 +622,10 @@ def _step_imaging(job: Job) -> tuple[str, str]:
     # The WSClean image size and pixel scale depend on the array configuration and the frequency
     try:
         image_settings = array_image_settings_from_metafits(
-            job.metafits_context, settings.wsclean_compact_array_baseline_max_length
+            job.metafits_context,
+            settings.wsclean_compact_array_baseline_max_length,
+            compact_image_size=settings.wsclean_compact_image_size,
+            extended_image_size=settings.wsclean_extended_image_size,
         )
     except Exception as image_error:  # noqa: BLE001 - reported as a failed step
         logger.exception("Could not work out the WSClean image size and scale")

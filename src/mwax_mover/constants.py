@@ -225,10 +225,13 @@ WSCLEAN_EXTENDED_MIN_TILES = 184
 # Otherwise it is "compact" if its longest baseline is no more than the configured
 # [wsclean] compact_array_baseline_max_length, and "extended" if it is longer.
 # The pixel scale in degrees is the base scale divided by the centre coarse channel number.
+# The image sizes in pixels are the required [wsclean] config keys compact_image_size and
+# extended_image_size. The values here are the defaults for a caller that does not give them
+# (array_image_settings()), and are the values in the cfg files.
 WSCLEAN_COMPACT_BASE_SCALE = 1.2
-WSCLEAN_COMPACT_IMAGE_SIZE = 2048
+WSCLEAN_COMPACT_IMAGE_SIZE = 1024
 WSCLEAN_EXTENDED_BASE_SCALE = 0.6
-WSCLEAN_EXTENDED_IMAGE_SIZE = 4096
+WSCLEAN_EXTENDED_IMAGE_SIZE = 2048
 
 # Number of decimal places in the -scale value given to WSClean (in degrees).
 WSCLEAN_SCALE_DECIMALS = 7

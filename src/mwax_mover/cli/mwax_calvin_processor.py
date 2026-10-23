@@ -42,6 +42,8 @@ from mwax_mover.calvin.wsclean import (
     array_image_settings_from_metafits,
     calculate_abs_mem_gib,
     read_compact_array_baseline_max_length,
+    read_compact_image_size,
+    read_extended_image_size,
     wsclean_args_from_config,
 )
 from mwax_mover.calvin.solution_files import (
@@ -70,6 +72,8 @@ from mwax_mover.constants import (
     SECTION_PROCESSING,
     SOLUTIONS_FITS_GLOB,
     WORKING_PATH_MAX_GB,
+    WSCLEAN_COMPACT_IMAGE_SIZE,
+    WSCLEAN_EXTENDED_IMAGE_SIZE,
 )
 from mwax_mover.core.config import read_config, read_config_bool, read_optional_config
 from mwax_mover.core.env import get_hostname
@@ -228,6 +232,8 @@ class MWAXCalvinProcessor(MWAXDaemon):
         self.cfg_wsclean_timeout: int = 0
         self.cfg_wsclean_max_mem_gib: int = 0
         self.cfg_wsclean_compact_array_baseline_max_length: float = 0.0
+        self.cfg_wsclean_compact_image_size: int = WSCLEAN_COMPACT_IMAGE_SIZE
+        self.cfg_wsclean_extended_image_size: int = WSCLEAN_EXTENDED_IMAGE_SIZE
         # The options from the [wsclean] config. The job's name, temp_dir and memory limit are added when it runs.
         self.cfg_wsclean_args: WSCleanArgs = WSCleanArgs(name="", temp_dir="")
         # The WSClean image size and pixel scale for this observation. None until start() works it out.
@@ -330,7 +336,10 @@ class MWAXCalvinProcessor(MWAXDaemon):
             if self.cfg_wsclean_enabled:
                 try:
                     self.wsclean_image_settings = array_image_settings_from_metafits(
-                        self.metafits_context, self.cfg_wsclean_compact_array_baseline_max_length
+                        self.metafits_context,
+                        self.cfg_wsclean_compact_array_baseline_max_length,
+                        compact_image_size=self.cfg_wsclean_compact_image_size,
+                        extended_image_size=self.cfg_wsclean_extended_image_size,
                     )
                 except Exception:  # noqa: BLE001 - imaging is optional; the calibration must not fail because of it
                     logger.exception(f"{self.obs_id}: could not work out the WSClean image size and scale.")
@@ -1545,6 +1554,8 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 try:
                     self.cfg_wsclean_args = wsclean_args_from_config(config)
                     self.cfg_wsclean_compact_array_baseline_max_length = read_compact_array_baseline_max_length(config)
+                    self.cfg_wsclean_compact_image_size = read_compact_image_size(config)
+                    self.cfg_wsclean_extended_image_size = read_extended_image_size(config)
                 except ValueError as wsclean_error:
                     logger.error(f"Invalid [wsclean] config: {wsclean_error} Quitting.")
                     sys.exit(EXIT_FAILURE)

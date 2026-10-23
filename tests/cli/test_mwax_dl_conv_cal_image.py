@@ -776,3 +776,12 @@ def test_the_filter_only_drops_records_that_are_marked_for_the_log_file():
     assert drop.filter(plain) is True
     assert drop.filter(marked) is False
     assert drop.filter(unmarked) is True
+
+
+def test_the_image_sizes_from_the_config_go_to_the_image_settings(cfg_filename, tmp_path):
+    base = tmp_path / "job"
+
+    with patched_pipeline(base) as mocks:
+        assert _run(cfg_filename, base) == tool.EXIT_OK
+
+    assert mocks.image_settings.call_args.kwargs == {"compact_image_size": 1024, "extended_image_size": 2048}

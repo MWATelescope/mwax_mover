@@ -110,3 +110,40 @@ def test_the_compact_array_baseline_max_length_is_not_needed_if_imaging_is_disab
 
     assert mcal.cfg_wsclean_enabled is False
     assert os.path.exists(config_filename)
+
+
+def test_the_image_sizes_are_read_if_imaging_is_enabled():
+    config_filename = _config_with(
+        {
+            "[wsclean]\nenabled=0": "[wsclean]\nenabled=1",
+            "compact_image_size=1024": "compact_image_size=1500",
+            "extended_image_size=2048": "extended_image_size=3000",
+        }
+    )
+
+    mcal = _initialise(config_filename)
+
+    assert (mcal.cfg_wsclean_compact_image_size, mcal.cfg_wsclean_extended_image_size) == (1500, 3000)
+
+
+@pytest.mark.parametrize("key", ["compact_image_size", "extended_image_size"])
+@pytest.mark.parametrize("value", ["0", "-5", "big"])
+def test_the_processor_quits_on_a_bad_image_size_if_imaging_is_enabled(key, value):
+    config_filename = _config_with(
+        {
+            "[wsclean]\nenabled=0": "[wsclean]\nenabled=1",
+            f"{key}={'1024' if 'compact' in key else '2048'}": f"{key}={value}",
+        }
+    )
+
+    with pytest.raises(SystemExit):
+        _initialise(config_filename)
+
+
+@pytest.mark.parametrize("key", ["compact_image_size", "extended_image_size"])
+def test_an_image_size_is_not_needed_if_imaging_is_disabled(key):
+    config_filename = _config_with({f"{key}=1024" if "compact" in key else f"{key}=2048": f"{key}=big"})
+
+    mcal = _initialise(config_filename)
+
+    assert mcal.cfg_wsclean_enabled is False

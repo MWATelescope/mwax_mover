@@ -14,8 +14,11 @@ from mwax_mover.calvin.wsclean import (
     centre_coarse_channel,
     max_baseline_length_m,
 )
+from mwax_mover.constants import WSCLEAN_COMPACT_IMAGE_SIZE, WSCLEAN_EXTENDED_IMAGE_SIZE
 
 COMPACT_MAX = 3500.0
+# The sizes that the tests below that name 4000 and 8000 pixels use, whatever the defaults are
+SIZES_4000_8000 = {"compact_image_size": 4000, "extended_image_size": 8000}
 
 
 def _test_metafits(obs_id: int) -> str:
@@ -83,7 +86,7 @@ def test_max_baseline_length_is_zero_for_fewer_than_two_tiles(positions):
 
 
 def test_a_compact_array_has_a_4000_pixel_image_and_a_base_scale_of_1_2():
-    settings = array_image_settings(128, 2873.5, 1.28e6 * 133, COMPACT_MAX)
+    settings = array_image_settings(128, 2873.5, 1.28e6 * 133, COMPACT_MAX, **SIZES_4000_8000)
 
     assert settings.configuration == "compact"
     assert settings.size == (4000, 4000)
@@ -92,7 +95,7 @@ def test_a_compact_array_has_a_4000_pixel_image_and_a_base_scale_of_1_2():
 
 
 def test_an_extended_array_has_an_8000_pixel_image_and_a_base_scale_of_0_6():
-    settings = array_image_settings(128, 5302.9, 1.28e6 * 133, COMPACT_MAX)
+    settings = array_image_settings(128, 5302.9, 1.28e6 * 133, COMPACT_MAX, **SIZES_4000_8000)
 
     assert settings.configuration == "extended"
     assert settings.size == (8000, 8000)
@@ -142,7 +145,9 @@ def test_settings_from_a_real_metafits(obs_id, configuration, size, scale):
     if not os.path.exists(metafits):
         pytest.skip(f"{metafits} is not there")
 
-    settings = array_image_settings_from_metafits(mwalib.MetafitsContext(metafits, None), COMPACT_MAX)
+    settings = array_image_settings_from_metafits(
+        mwalib.MetafitsContext(metafits, None), COMPACT_MAX, **SIZES_4000_8000
+    )
 
     assert settings.configuration == configuration
     assert settings.size == (size, size)
@@ -159,3 +164,49 @@ def test_a_smaller_limit_makes_a_compact_observation_extended():
 
     assert array_image_settings_from_metafits(context, 3500.0).configuration == "compact"
     assert array_image_settings_from_metafits(context, 2500.0).configuration == "extended"
+
+
+# ---------------------------------------------------------------------------
+# the image sizes can be given (they are config keys)
+# ---------------------------------------------------------------------------
+
+
+def test_the_given_image_sizes_are_used_for_a_compact_and_an_extended_array():
+    sizes = {"compact_image_size": 1500, "extended_image_size": 3000}
+
+    compact = array_image_settings(128, 2873.5, 1.28e6 * 133, COMPACT_MAX, **sizes)
+    extended = array_image_settings(128, 5302.9, 1.28e6 * 133, COMPACT_MAX, **sizes)
+
+    assert (compact.configuration, compact.size) == ("compact", (1500, 1500))
+    assert (extended.configuration, extended.size) == ("extended", (3000, 3000))
+
+
+def test_the_image_sizes_do_not_change_the_scale():
+    default = array_image_settings(128, 2873.5, 1.28e6 * 133, COMPACT_MAX)
+    resized = array_image_settings(128, 2873.5, 1.28e6 * 133, COMPACT_MAX, compact_image_size=77)
+
+    assert resized.scale == default.scale
+
+
+def test_the_image_sizes_default_to_the_constants():
+    compact = array_image_settings(128, 2873.5, 1.28e6 * 133, COMPACT_MAX)
+    extended = array_image_settings(128, 5302.9, 1.28e6 * 133, COMPACT_MAX)
+
+    assert compact.size == (WSCLEAN_COMPACT_IMAGE_SIZE, WSCLEAN_COMPACT_IMAGE_SIZE)
+    assert extended.size == (WSCLEAN_EXTENDED_IMAGE_SIZE, WSCLEAN_EXTENDED_IMAGE_SIZE)
+
+
+@pytest.mark.parametrize(
+    ("obs_id", "configuration", "size"), [(1094488624, "compact", 1111), (1244973688, "extended", 2222)]
+)
+def test_the_given_image_sizes_are_used_with_a_real_metafits(obs_id, configuration, size):
+    metafits = _test_metafits(obs_id)
+    if not os.path.exists(metafits):
+        pytest.skip(f"{metafits} is not there")
+
+    settings = array_image_settings_from_metafits(
+        mwalib.MetafitsContext(metafits, None), COMPACT_MAX, compact_image_size=1111, extended_image_size=2222
+    )
+
+    assert settings.configuration == configuration
+    assert settings.size == (size, size)

@@ -209,3 +209,27 @@ def test_check_files_exist(tmp_path):
 
     # Birli is not needed if the download already has measurement sets
     assert [p for p in check_files_exist(settings, need_birli=False) if "birli" in p] == []
+
+
+def test_reads_the_image_sizes(tmp_path):
+    settings = read_local_config(_write(tmp_path, _cfg_text()))
+
+    assert settings.wsclean_compact_image_size == 1024
+    assert settings.wsclean_extended_image_size == 2048
+
+
+@pytest.mark.parametrize("key", ["compact_image_size", "extended_image_size"])
+def test_a_missing_image_size_is_named_in_the_error(tmp_path, key):
+    text = _without_key(_cfg_text(), "wsclean", key)
+
+    with pytest.raises(LocalConfigError, match=re.escape("[wsclean]") + ".*" + key):
+        read_local_config(_write(tmp_path, text))
+
+
+@pytest.mark.parametrize("key", ["compact_image_size", "extended_image_size"])
+@pytest.mark.parametrize("value", ["0", "-5", "big"])
+def test_a_bad_image_size_is_named_in_the_error_from_the_config_file(tmp_path, key, value):
+    text = re.sub(rf"(?m)^{key}=.*$", f"{key}={value}", _cfg_text())
+
+    with pytest.raises(LocalConfigError, match=re.escape("[wsclean]") + ".*" + key):
+        read_local_config(_write(tmp_path, text))

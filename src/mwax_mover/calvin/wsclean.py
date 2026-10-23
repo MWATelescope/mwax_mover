@@ -179,8 +179,33 @@ class WSCleanArgs:
         return args
 
 
+def _read_required_positive_int(config: ConfigParser, key: str) -> int:
+    """Read a required whole number of at least 1 from the [wsclean] config section.
+
+    Args:
+        config: The loaded calvin_processor config.
+        key: The key name in [wsclean].
+
+    Returns:
+        The number.
+
+    Raises:
+        configparser.NoOptionError: If the key is missing.
+        ValueError: If the value is not a whole number of at least 1. The message names the key.
+    """
+    value = read_config(config, SECTION_WSCLEAN, key)
+    try:
+        number = int(value)
+    except ValueError:
+        number = 0  # not a number: the same error as a number below 1
+
+    if number < 1:
+        raise ValueError(f"[{SECTION_WSCLEAN}] {key} must be a whole number of at least 1, got '{value}'.")
+    return number
+
+
 def _read_optional_positive_int(config: ConfigParser, key: str) -> int | None:
-    """Read an optional whole number from the [wsclean] config section.
+    """Read an optional whole number of at least 1 from the [wsclean] config section.
 
     Args:
         config: The loaded calvin_processor config.
@@ -195,15 +220,7 @@ def _read_optional_positive_int(config: ConfigParser, key: str) -> int | None:
     if not config.has_option(SECTION_WSCLEAN, key):
         return None
 
-    value = read_config(config, SECTION_WSCLEAN, key)
-    try:
-        number = int(value)
-    except ValueError:
-        number = 0  # not a number: the same error as a number below 1
-
-    if number < 1:
-        raise ValueError(f"[{SECTION_WSCLEAN}] {key} must be a whole number of at least 1, got '{value}'.")
-    return number
+    return _read_required_positive_int(config, key)
 
 
 def wsclean_args_from_config(config: ConfigParser) -> WSCleanArgs:
@@ -281,6 +298,38 @@ def read_compact_array_baseline_max_length(config: ConfigParser) -> float:
     return length_m
 
 
+def read_compact_image_size(config: ConfigParser) -> int:
+    """Read [wsclean] compact_image_size: the WSClean image width and height in pixels for a compact array.
+
+    Args:
+        config: The loaded calvin_processor config.
+
+    Returns:
+        The size in pixels.
+
+    Raises:
+        configparser.NoOptionError: If the key is missing.
+        ValueError: If the value is not a whole number of at least 1.
+    """
+    return _read_required_positive_int(config, "compact_image_size")
+
+
+def read_extended_image_size(config: ConfigParser) -> int:
+    """Read [wsclean] extended_image_size: the WSClean image width and height in pixels for an extended array.
+
+    Args:
+        config: The loaded calvin_processor config.
+
+    Returns:
+        The size in pixels.
+
+    Raises:
+        configparser.NoOptionError: If the key is missing.
+        ValueError: If the value is not a whole number of at least 1.
+    """
+    return _read_required_positive_int(config, "extended_image_size")
+
+
 @dataclass
 class ArrayImageSettings:
     """The WSClean image size and pixel scale for one observation, and how they were worked out.
@@ -343,14 +392,16 @@ def array_image_settings(
     max_baseline_m: float,
     centre_freq_hz: float,
     compact_array_baseline_max_length: float,
+    compact_image_size: int = WSCLEAN_COMPACT_IMAGE_SIZE,
+    extended_image_size: int = WSCLEAN_EXTENDED_IMAGE_SIZE,
 ) -> ArrayImageSettings:
     """Choose the WSClean image size and pixel scale for an observation.
 
     - With WSCLEAN_EXTENDED_MIN_TILES or more tiles the array is "extended".
     - Otherwise it is "compact" if the longest baseline is no more than compact_array_baseline_max_length,
       and "extended" if it is longer.
-    - Compact: size WSCLEAN_COMPACT_IMAGE_SIZE and scale WSCLEAN_COMPACT_BASE_SCALE / centre channel.
-      Extended: WSCLEAN_EXTENDED_IMAGE_SIZE and WSCLEAN_EXTENDED_BASE_SCALE / centre channel.
+    - Compact: size compact_image_size and scale WSCLEAN_COMPACT_BASE_SCALE / centre channel.
+      Extended: extended_image_size and WSCLEAN_EXTENDED_BASE_SCALE / centre channel.
     - The scale is in degrees, with WSCLEAN_SCALE_DECIMALS decimal places.
 
     Args:
@@ -358,6 +409,10 @@ def array_image_settings(
         max_baseline_m: The longest baseline in metres.
         centre_freq_hz: The centre frequency in Hz.
         compact_array_baseline_max_length: The longest baseline of a compact array in metres.
+        compact_image_size: The image width and height in pixels for a compact array. The processor and
+            mwax_dl_conv_cal_image give the [wsclean] compact_image_size config value. The default is for a
+            caller with no config.
+        extended_image_size: The same for an extended array ([wsclean] extended_image_size).
 
     Returns:
         The settings.
@@ -372,11 +427,11 @@ def array_image_settings(
     if num_tiles >= WSCLEAN_EXTENDED_MIN_TILES or max_baseline_m > compact_array_baseline_max_length:
         configuration = "extended"
         base_scale = WSCLEAN_EXTENDED_BASE_SCALE
-        image_size = WSCLEAN_EXTENDED_IMAGE_SIZE
+        image_size = extended_image_size
     else:
         configuration = "compact"
         base_scale = WSCLEAN_COMPACT_BASE_SCALE
-        image_size = WSCLEAN_COMPACT_IMAGE_SIZE
+        image_size = compact_image_size
 
     return ArrayImageSettings(
         configuration=configuration,
@@ -389,13 +444,18 @@ def array_image_settings(
 
 
 def array_image_settings_from_metafits(
-    metafits_context: MetafitsContext, compact_array_baseline_max_length: float
+    metafits_context: MetafitsContext,
+    compact_array_baseline_max_length: float,
+    compact_image_size: int = WSCLEAN_COMPACT_IMAGE_SIZE,
+    extended_image_size: int = WSCLEAN_EXTENDED_IMAGE_SIZE,
 ) -> ArrayImageSettings:
     """Choose the WSClean image size and pixel scale for an observation from its metafits.
 
     Args:
         metafits_context: The observation's metafits (mwalib). All the tiles are used, flagged or not.
         compact_array_baseline_max_length: The longest baseline of a compact array in metres.
+        compact_image_size: The image width and height in pixels for a compact array.
+        extended_image_size: The image width and height in pixels for an extended array.
 
     Returns:
         The settings (see array_image_settings()).
@@ -406,6 +466,8 @@ def array_image_settings_from_metafits(
         max_baseline_length_m(positions),
         metafits_context.centre_freq_hz,
         compact_array_baseline_max_length,
+        compact_image_size,
+        extended_image_size,
     )
     logger.info(
         f"{settings.num_tiles} tiles, longest baseline {settings.max_baseline_m:.0f} m, centre channel"
