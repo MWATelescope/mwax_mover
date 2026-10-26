@@ -2,7 +2,7 @@
 
 # 2.1.2 26-Oct-2026
 
-* Calvin: Don't try and process obs prior to 01-Jun-2013 0:00:00 UTC+8 (GPS: 1056643216).
+* Calvin: Don't try and process obs prior to 01-Jul-2013 0:00:00 UTC+8 (GPS: 1056643216).
 
 # 2.1.1 26-Oct-2026
 

@@ -380,6 +380,8 @@ def get_unattempted_calibration_requests(
         (
             -- realtime case
             c.realtime IS TRUE
+            -- Skip requests failed before they got a slurm job (e.g. obs_id too old)
+            AND c.download_error_datetime IS NULL
         )
     )
     -- Always ensure bulk requests are sorted last for non-realtime

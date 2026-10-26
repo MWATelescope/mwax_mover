@@ -43,6 +43,8 @@ from mwax_mover.constants import (
     HEALTH_THREAD_NAME,
     IMAGES_DIR_SUFFIX,
     LOG_FORMAT,
+    MIN_OBS_ID,
+    MIN_OBS_ID_MESSAGE,
     SECONDS_PER_HOUR,
     SECTION_CALVIN,
     SECTION_GIANT_SQUID,
@@ -57,6 +59,7 @@ from mwax_mover.db.calibration import (
     get_unattempted_calibration_requests,
     get_unattempted_unrequested_cal_obsids,
     insert_calibration_request_row,
+    update_calibration_request_download_complete_status,
     update_calibration_request_mwa_asvo_job_status,
     update_calibration_request_slurm_status,
 )
@@ -1014,6 +1017,11 @@ class MWAXCalvinController(MWAXDaemon):
                     # Get the obs_id
                     new_request.obs_id = result[1]
 
+                    # Fail (and skip) any request for an obs which is too old to calibrate
+                    if new_request.obs_id < MIN_OBS_ID:
+                        self.fail_request_obs_id_too_old(new_request)
+                        continue
+
                     # Get the type
                     request_type_is_realtime: bool = result[2]
                     if request_type_is_realtime:
@@ -1025,6 +1033,34 @@ class MWAXCalvinController(MWAXDaemon):
                         return_list_asvo.append(new_request)
 
         return return_list_realtime, return_list_asvo
+
+    def fail_request_obs_id_too_old(self, cal_request: CalibrationRequest) -> None:
+        """Fail a calibration request for an observation older than MIN_OBS_ID.
+
+        The request is marked as failed in the database with MIN_OBS_ID_MESSAGE, so it is
+        not returned by get_unattempted_calibration_requests() again. If the database
+        update fails, the error is counted and the request is retried in the next loop.
+
+        Args:
+            cal_request: The request to fail.
+        """
+        logger.warning(
+            f"RequestID: {cal_request.request_id} ObsID: {cal_request.obs_id} is before the minimum obs_id"
+            f" {MIN_OBS_ID}. Failing the request."
+        )
+
+        try:
+            update_calibration_request_download_complete_status(
+                self.db_handler,
+                None,
+                [cal_request.request_id],
+                None,
+                datetime.now().astimezone(),
+                MIN_OBS_ID_MESSAGE,
+            )
+        except Exception:
+            logger.exception(f"Unable to fail RequestID: {cal_request.request_id}. It will be retried.")
+            self.database_errors += 1
 
     def mwa_asvo_add_new_asvo_job(self, request_id: int, obs_id: int, bulk_request: bool) -> bool:
         """Add and track a new MWA ASVO job, submitting if not already submitted.
