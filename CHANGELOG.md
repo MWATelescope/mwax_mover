@@ -1,5 +1,9 @@
 # Changelog
 
+# 2.1.1 26-Oct-2026
+
+* Calvin: No longer upload the per channel fits images. Only the MFS (Multi-Freqency Synthesis) / combined images.
+
 # 2.1.0 26-Oct-2026
 
 * Calvin: Added imaging to calvin_processor.
