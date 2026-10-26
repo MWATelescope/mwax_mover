@@ -442,6 +442,12 @@ Status: **implemented**.
     such as `<obs>_wsclean-MFS-image.fits` and
     `<obs>_wsclean-0003-dirty.fits`. They match `WSCLEAN_FITS_GLOB` and
     the index descriptions. This is tested.
+  - Per-channel files: only the `<obs>_wsclean-MFS-*.fits` files are kept and
+    published. After a successful WSClean run, `run_imaging_steps()` calls
+    `remove_wsclean_channel_images()`. It deletes `<obs>_wsclean-000N-*.fits`
+    (`WSCLEAN_CHANNEL_FITS_GLOB`) from the job output folder, but only if at least
+    one `<obs>_wsclean-MFS-*.fits` file exists (`WSCLEAN_MFS_FITS_GLOB`). With
+    `channels_out=1` there are no MFS files, so nothing is removed.
   - Not covered by a unit test: the code in `start()` that calls
     `calculate_abs_mem_gib()`. The function itself is tested.
   - Check on a calvin host (Greg): `wsclean -help` for the installed version

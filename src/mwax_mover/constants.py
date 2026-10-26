@@ -214,6 +214,13 @@ WSCLEAN_NAME_SUFFIX = "_wsclean"
 # (<obs_id>_wsclean-image.fits, <obs_id>_wsclean-MFS-image.fits, ...).
 WSCLEAN_FITS_GLOB = "*" + WSCLEAN_NAME_SUFFIX + "-*.fits"
 
+# With -channels-out 2 or more, WSClean writes one set of FITS files per output channel
+# (<obs_id>_wsclean-0000-image.fits ... -0003-) as well as the multi-frequency synthesis (MFS) set
+# (<obs_id>_wsclean-MFS-image.fits ...). Only the MFS files are kept and published, so the per-channel
+# files are removed after WSClean runs. These two globs are appended to the "<obs_id>_wsclean" prefix.
+WSCLEAN_CHANNEL_FITS_GLOB = "-[0-9][0-9][0-9][0-9]-*.fits"
+WSCLEAN_MFS_FITS_GLOB = "-MFS-*.fits"
+
 # WSClean options that calvin always uses (see calvin.wsclean.WSCleanArgs).
 # The gridder is the w-gridder, and the image is Stokes I.
 WSCLEAN_GRIDDER = "wgridder"

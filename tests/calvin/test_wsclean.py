@@ -3,7 +3,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from mwax_mover.calvin.wsclean import WSCleanArgs, run_wsclean
+from mwax_mover.calvin.wsclean import WSCleanArgs, remove_wsclean_channel_images, run_wsclean
 
 OBS_ID = 1234567890
 
@@ -69,3 +69,54 @@ def test_run_wsclean_unhandled_exception_is_a_failure(tmp_path):
 
     assert success is False
     assert "boom" in (tmp_path / f"{OBS_ID}_wsclean_readme.txt").read_text()
+
+
+def _touch(directory: Path, names: list[str]) -> None:
+    for name in names:
+        (directory / name).write_text("x")
+
+
+def test_remove_wsclean_channel_images_keeps_only_the_mfs_files(tmp_path):
+    mfs = [f"{OBS_ID}_wsclean-MFS-{kind}.fits" for kind in ("image", "dirty", "model", "residual", "psf")]
+    channels = [f"{OBS_ID}_wsclean-000{n}-{kind}.fits" for n in range(4) for kind in ("image", "dirty", "psf")]
+    others = [f"{OBS_ID}_wsclean-MFS-image.png", f"{OBS_ID}_wsclean_readme.txt", f"{OBS_ID}_ch75.ms.fits"]
+    _touch(tmp_path, mfs + channels + others)
+
+    assert remove_wsclean_channel_images(str(tmp_path), OBS_ID) == len(channels)
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted(mfs + others)
+
+
+def test_remove_wsclean_channel_images_removes_nothing_without_mfs_files(tmp_path):
+    names = [f"{OBS_ID}_wsclean-0000-image.fits", f"{OBS_ID}_wsclean-0001-image.fits"]
+    _touch(tmp_path, names)
+
+    assert remove_wsclean_channel_images(str(tmp_path), OBS_ID) == 0
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == names
+
+
+def test_remove_wsclean_channel_images_keeps_single_channel_output(tmp_path):
+    names = [f"{OBS_ID}_wsclean-dirty.fits", f"{OBS_ID}_wsclean-image.fits"]
+    _touch(tmp_path, names)
+
+    assert remove_wsclean_channel_images(str(tmp_path), OBS_ID) == 0
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == names
+
+
+def test_remove_wsclean_channel_images_only_touches_this_obs(tmp_path):
+    _touch(tmp_path, [f"{OBS_ID}_wsclean-MFS-image.fits", f"{OBS_ID}_wsclean-0000-image.fits"])
+    other = ["999_wsclean-MFS-image.fits", "999_wsclean-0000-image.fits"]
+    _touch(tmp_path, other)
+
+    assert remove_wsclean_channel_images(str(tmp_path), OBS_ID) == 1
+
+    assert (tmp_path / other[1]).exists()
+
+
+def test_remove_wsclean_channel_images_does_not_raise_if_a_file_cannot_be_removed(tmp_path):
+    _touch(tmp_path, [f"{OBS_ID}_wsclean-MFS-image.fits", f"{OBS_ID}_wsclean-0000-image.fits"])
+
+    with patch("mwax_mover.calvin.wsclean.os.remove", side_effect=PermissionError("nope")):
+        assert remove_wsclean_channel_images(str(tmp_path), OBS_ID) == 0

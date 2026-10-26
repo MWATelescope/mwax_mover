@@ -9,6 +9,7 @@ A failed WSClean run does not fail the calibration job: the solutions are
 already published, so run_wsclean() only returns False and the caller logs it.
 """
 
+import glob
 import logging
 import math
 import os
@@ -22,12 +23,15 @@ from mwalib import MetafitsContext
 from mwax_mover.constants import (
     MWA_COARSE_CHANNEL_WIDTH_HZ,
     SECTION_WSCLEAN,
+    WSCLEAN_CHANNEL_FITS_GLOB,
     WSCLEAN_COMPACT_BASE_SCALE,
     WSCLEAN_COMPACT_IMAGE_SIZE,
     WSCLEAN_EXTENDED_BASE_SCALE,
     WSCLEAN_EXTENDED_IMAGE_SIZE,
     WSCLEAN_EXTENDED_MIN_TILES,
     WSCLEAN_GRIDDER,
+    WSCLEAN_MFS_FITS_GLOB,
+    WSCLEAN_NAME_SUFFIX,
     WSCLEAN_POLARIZATIONS,
     WSCLEAN_README_SUFFIX,
     WSCLEAN_SCALE_DECIMALS,
@@ -548,3 +552,38 @@ def run_wsclean(
 
     logger.error(f"{obs_id}: wsclean run FAILED: Exit code of {exit_code} in {elapsed:.3f} seconds: {stderr}")
     return False
+
+
+def remove_wsclean_channel_images(job_output_path: str, obs_id: int) -> int:
+    """Remove the per-channel WSClean FITS files, keeping the MFS ones.
+
+    With ``-channels-out`` of 2 or more, WSClean writes ``<obs_id>_wsclean-0000-*.fits``
+    (and so on for each output channel) as well as ``<obs_id>_wsclean-MFS-*.fits``. Only the
+    MFS files are wanted, so the per-channel files are deleted here, before anything is
+    published. Nothing is removed unless at least one MFS file exists, so a run that made no
+    MFS output (for example ``-channels-out 1``, which writes ``<obs_id>_wsclean-image.fits``)
+    keeps all of its files. Failures are logged, not raised: imaging must not fail the job.
+
+    Args:
+        job_output_path: The job's output directory.
+        obs_id: Observation ID.
+
+    Returns:
+        The number of files removed.
+    """
+    prefix = os.path.join(glob.escape(job_output_path), f"{obs_id}{WSCLEAN_NAME_SUFFIX}")
+
+    if not glob.glob(prefix + WSCLEAN_MFS_FITS_GLOB):
+        logger.info(f"{obs_id}: no WSClean MFS FITS files found, so not removing any per-channel FITS files.")
+        return 0
+
+    removed = 0
+    for filename in sorted(glob.glob(prefix + WSCLEAN_CHANNEL_FITS_GLOB)):
+        try:
+            os.remove(filename)
+            removed += 1
+        except OSError as e:
+            logger.warning(f"{obs_id}: could not remove per-channel WSClean file {filename}: {e!s}")
+
+    logger.info(f"{obs_id}: removed {removed} per-channel WSClean FITS file(s).")
+    return removed

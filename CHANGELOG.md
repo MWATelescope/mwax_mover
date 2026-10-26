@@ -7,6 +7,7 @@
 * Calvin: Fix: When no unflagged tiles, mwax files will still be released (plus error is less verbose)
 * Calvin: Fix: The URL for the AWS metadata web service is now https
 * Calvin: Fix: Increased the timeout period and retries when calling the WS that gets metadata for a new obs- especially important when MRO WS is down, as there can be a delay in the streaming replication to the AWS WS, which causes premature failures
+* Calvin: Imaging now keeps and uploads only the `<obs_id>_wsclean-MFS-*.fits` images. The per-channel `<obs_id>_wsclean-000N-*.fits` files are removed after WSClean runs (only if MFS files exist).
 
 # 2.0.8 22-Sep-2026
 

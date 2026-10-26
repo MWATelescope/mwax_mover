@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from mwax_mover.calvin.hyperdrive_apply import run_solutions_apply
 from mwax_mover.calvin.plots.wsclean_preview import make_wsclean_preview
-from mwax_mover.calvin.wsclean import WSCleanArgs, run_wsclean
+from mwax_mover.calvin.wsclean import WSCleanArgs, remove_wsclean_channel_images, run_wsclean
 from mwax_mover.constants import CALIBRATED_MS_SUFFIX, EXT_MS, WSCLEAN_MIN_ABS_MEM_GIB, WSCLEAN_NAME_SUFFIX
 
 logger = logging.getLogger(__name__)
@@ -148,6 +148,9 @@ def run_imaging_steps(
         # A PNG of the main image, published with the FITS files. If it fails the images are still published.
         task("Preview PNG")
         make_wsclean_preview(job_output_path, obs_id)
+
+        # Only the MFS FITS files are kept and published, not the per-channel ones.
+        remove_wsclean_channel_images(job_output_path, obs_id)
     except Exception:  # noqa: BLE001 - imaging is optional; one failure here must not stop the caller
         logger.exception(f"{obs_id}: unhandled exception while imaging.")
         return False

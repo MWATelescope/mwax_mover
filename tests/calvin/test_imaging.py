@@ -176,6 +176,39 @@ def test_makes_the_real_preview_png_after_wsclean_works(tmp_path):
     assert os.path.exists(out / f"{OBS}_wsclean-MFS-image.png")
 
 
+def test_per_channel_images_are_removed_and_mfs_images_are_kept(tmp_path):
+    work, out = _dirs(tmp_path, [f"{OBS}_ch75.ms"])
+    fits.PrimaryHDU(np.zeros((1, 1, 8, 8), dtype=np.float32)).writeto(out / f"{OBS}_wsclean-MFS-image.fits")
+    for name in (f"{OBS}_wsclean-MFS-dirty.fits", f"{OBS}_wsclean-0000-image.fits", f"{OBS}_wsclean-0003-dirty.fits"):
+        (out / name).write_text("x")
+
+    with (
+        patch("mwax_mover.calvin.imaging.run_solutions_apply", return_value=(True, ["x_cal.ms"])),
+        patch("mwax_mover.calvin.imaging.run_wsclean", return_value=True),
+    ):
+        assert _run(work, out, _settings()) is True
+
+    assert (out / f"{OBS}_wsclean-MFS-image.fits").exists()
+    assert (out / f"{OBS}_wsclean-MFS-dirty.fits").exists()
+    assert (out / f"{OBS}_wsclean-MFS-image.png").exists()
+    assert not (out / f"{OBS}_wsclean-0000-image.fits").exists()
+    assert not (out / f"{OBS}_wsclean-0003-dirty.fits").exists()
+
+
+def test_per_channel_images_are_kept_if_wsclean_fails(tmp_path):
+    work, out = _dirs(tmp_path, [f"{OBS}_ch75.ms"])
+    (out / f"{OBS}_wsclean-MFS-image.fits").write_text("x")
+    (out / f"{OBS}_wsclean-0000-image.fits").write_text("x")
+
+    with (
+        patch("mwax_mover.calvin.imaging.run_solutions_apply", return_value=(True, ["x_cal.ms"])),
+        patch("mwax_mover.calvin.imaging.run_wsclean", return_value=False),
+    ):
+        assert _run(work, out, _settings()) is False
+
+    assert (out / f"{OBS}_wsclean-0000-image.fits").exists()
+
+
 def test_reuse_calibrated_images_the_calibrated_sets_and_does_not_apply_solutions(tmp_path):
     work, out = _dirs(tmp_path, [f"{OBS}_ch75.ms", f"{OBS}_ch75_cal.ms", f"{OBS}_ch159_cal.ms"])
     tasks: list[str] = []
