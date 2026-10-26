@@ -36,8 +36,10 @@ from mwax_mover.calvin.hyperfits_solution import HyperfitsSolution
 from mwax_mover.calvin.hyperfits_solution_group import (
     ChannelFlagReason,
     HyperfitsSolutionGroup,
+    NoUnflaggedTilesError,
     TileFlagReason,
 )
+from mwax_mover.constants import NO_UNFLAGGED_TILES_REMAINING_MSG
 
 # A real fixture whose filename parse_solution_channels() can parse -- same
 # file used by TestSharedHduHelpersAgreeAcrossCallers in test014.
@@ -1048,6 +1050,38 @@ def test_run_flagging_pipeline_reselects_refant_when_invalidated():
     # The AFTER phase fits are not empty (the replacement refant works):
     assert group.phase_fits is not None
     assert len(group.phase_fits) > 0
+
+
+def test_reselect_refant_raises_no_unflagged_tiles_error():
+    """_reselect_refant raises NoUnflaggedTilesError (a ValueError) with the plain message when every tile is flagged."""
+    n_tiles = 4
+    group = _make_fake_group(n_tiles=n_tiles, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.tile_flag_reasons = np.full(n_tiles, TileFlagReason.MOSTLY_BAD_CHANNELS, dtype=object)
+
+    with pytest.raises(NoUnflaggedTilesError) as excinfo:
+        group._reselect_refant()
+
+    assert isinstance(excinfo.value, ValueError)
+    assert str(excinfo.value) == NO_UNFLAGGED_TILES_REMAINING_MSG
+
+
+def test_run_flagging_pipeline_raises_when_every_tile_flagged():
+    """If flagging NaNs every tile, run_flagging_pipeline raises NoUnflaggedTilesError."""
+    n_tiles = 4
+    group = _make_fake_group(n_tiles=n_tiles, n_chanblocks=_FIT_N_CHANBLOCKS, flagged_ids=[])
+    group.tile_flag_reasons = np.full(n_tiles, TileFlagReason.NONE, dtype=object)
+    group.channel_flag_reasons = [np.full((n_tiles, _FIT_N_CHANBLOCKS), ChannelFlagReason.NONE, dtype=object)]
+
+    # Every tile diverged, so flag_gain_max_cutoff NaNs them all.
+    group.jones[0][:, :, 0, 0] = 1e10 + 0j
+    group.jones[0][:, :, 1, 1] = 1e10 + 0j
+
+    with _patched_uniform_weights(_FIT_N_CHANBLOCKS), pytest.raises(NoUnflaggedTilesError):
+        group.run_flagging_pipeline(
+            refant_name="Tile001",
+            phase_fit_niter=1,
+            gain_max_cutoff=100.0,
+        )
 
 
 def test_run_flagging_pipeline_gain_max_cutoff_none_preserves_prior_behaviour():

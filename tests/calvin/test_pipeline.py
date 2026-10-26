@@ -24,7 +24,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from tests_common import obs_data_dir, setup_test_directories
 
+from mwax_mover.calvin.hyperfits_solution_group import NoUnflaggedTilesError
 from mwax_mover.calvin.pipeline import process_solutions
+from mwax_mover.constants import NO_UNFLAGGED_TILES_REMAINING_MSG
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +233,48 @@ def test_process_solutions_all_tiles_flagged(tmp_path):
     assert "No unflagged tiles" in error_msg
     assert fit_id is None
     # Pool should never have been used
+    mock_db.pool.connection.assert_not_called()
+
+
+def test_process_solutions_no_unflagged_tiles_after_flagging(real_data_paths, tmp_path):
+    """Flagging leaves no tiles -> graceful (True, short message, None), not an unhandled error.
+
+    The caller needs success=True with no fit_id so it releases the MWAX files before
+    failing the job. The message must be the plain reason, with no traceback text, and
+    no readme_error.txt must be written.
+    """
+    input_path, _ = real_data_paths
+    shutil.copy(SOLUTIONS_PATH, str(tmp_path))
+
+    mock_db = MagicMock()
+
+    with patch(
+        "mwax_mover.calvin.pipeline.HyperfitsSolutionGroup.run_flagging_pipeline",
+        side_effect=NoUnflaggedTilesError(NO_UNFLAGGED_TILES_REMAINING_MSG),
+    ):
+        success, error_msg, fit_id = process_solutions(
+            db_handler_object=mock_db,
+            obs_id=OBS_ID,
+            input_data_path=input_path,
+            output_data_path=str(tmp_path),
+            phase_fit_niter=1,
+            source_list="test_srclist",
+            num_sources=100,
+            calibration_command="",
+            gain_max_cutoff=None,
+            gain_outlier_poly_degree=2,
+            gain_outlier_mad_residual_threshold=10,
+            gain_outlier_modify_gains=False,
+            gain_outlier_plot_n_tiles_per_page=16,
+            tile_bad_channel_fraction=0.5,
+            hyperdrive_binary_path="/nonexistent/hyperdrive",
+        )
+
+    assert success is True
+    assert error_msg == NO_UNFLAGGED_TILES_REMAINING_MSG
+    assert "Traceback" not in error_msg
+    assert fit_id is None
+    assert not os.path.exists(os.path.join(str(tmp_path), "readme_error.txt"))
     mock_db.pool.connection.assert_not_called()
 
 

@@ -30,6 +30,7 @@ from mwalib import MetafitsContext
 
 from mwax_mover.calvin.birli import estimate_birli_output_bytes, estimate_working_space_gb, run_birli
 from mwax_mover.calvin.hyperdrive import run_hyperdrive
+from mwax_mover.calvin.hyperfits_solution_group import NoUnflaggedTilesError
 from mwax_mover.calvin.imaging import ImagingSettings, run_imaging_steps
 from mwax_mover.calvin.local_config import LocalConfigError, LocalSettings, check_files_exist, read_local_config
 from mwax_mover.calvin.pipeline import process_solutions_files
@@ -593,6 +594,10 @@ def _step_solutions(job: Job) -> tuple[str, str]:
             settings.hyperdrive_binary_path,
             settings.phase_outlier_nstd,
         )
+    except NoUnflaggedTilesError as e:
+        # Expected end state for a bad observation, not a bug: no traceback, no readme.
+        logger.warning(f"{job.info.obs_id}: {e}")
+        return STATUS_FAILED, str(e)
     except Exception:  # noqa: BLE001 - the step runner must get a result, with the error in a readme
         error_text = f"Error in process_solutions_files():\n{traceback.format_exc()}"
         logger.exception(error_text)

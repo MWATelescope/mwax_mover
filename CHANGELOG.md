@@ -3,6 +3,7 @@
 # 2.1.0 20-Oct-2026
 
 * Added imaging to calvin_processor.
+* Calvin: when the flagging pipeline leaves no unflagged tiles (so no replacement reference tile can be selected), this is now a normal failed-calibration end state, not an unhandled error. `process_solutions` and `mwax_dl_conv_cal_image` no longer log a traceback or write `readme_error.txt`. The MWAX files are released (realtime), and the job fails with the simple message "No unflagged tiles remaining after the flagging pipeline -- cannot re-select a reference tile.". Added `NoUnflaggedTilesError`.
 
 # 2.0.8 22-Sep-2026
 

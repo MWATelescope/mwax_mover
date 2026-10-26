@@ -28,7 +28,7 @@ from mwax_mover.calibration.fitting import pad_gain_fit_info
 from mwax_mover.calibration.models import GainFitInfo, Metafits, PhaseFitInfo
 from mwax_mover.calvin.hyperdrive import write_hyperdrive_stats
 from mwax_mover.calvin.hyperfits_solution import HyperfitsSolution
-from mwax_mover.calvin.hyperfits_solution_group import HyperfitsSolutionGroup
+from mwax_mover.calvin.hyperfits_solution_group import HyperfitsSolutionGroup, NoUnflaggedTilesError
 from mwax_mover.calvin.plots import hyperdrive
 from mwax_mover.calvin.plots.gains import plot_outlier_gains
 from mwax_mover.calvin.plots.phases import write_debug_phase_fit_plots
@@ -396,7 +396,9 @@ def process_solutions(
 
     Returns:
         A tuple containing:
-        - success (bool): True if processing completed successfully.
+        - success (bool): True if no unexpected error occurred. This is also True when
+          there are no unflagged tiles (before or after flagging), in which case fit_id
+          is None and error_message says why.
         - error_message (str): Error message if unsuccessful, empty string otherwise.
         - fit_id (int|None): The calibration fit ID if successful, None otherwise.
     """
@@ -546,6 +548,14 @@ def process_solutions(
                     raise CalibrationInsertError(f"failed to insert calibration solution for tile {tile_id}")
 
         return True, "", int(fit_id)
+
+    except NoUnflaggedTilesError as e:
+        # Expected end state for a bad observation, not a bug. Like the early
+        # "no unflagged tiles" exit above, return success=True with no fit_id so
+        # the caller releases the MWAX files and then fails the job with this
+        # (short) message. No traceback, and no readme_error.txt.
+        logger.warning(f"{obs_id}: {e}")
+        return True, str(e), None
 
     except Exception:
         error_text = f"Error in process_solutions():\n{traceback.format_exc()}"

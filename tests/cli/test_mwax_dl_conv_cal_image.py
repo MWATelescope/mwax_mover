@@ -12,8 +12,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 import tests_common
 
+from mwax_mover.calvin.hyperfits_solution_group import NoUnflaggedTilesError
 from mwax_mover.calvin.wsclean import ArrayImageSettings
 from mwax_mover.cli import mwax_dl_conv_cal_image as tool
+from mwax_mover.constants import NO_UNFLAGGED_TILES_REMAINING_MSG
 from mwax_mover.mwa_asvo.signed_url import DownloadError
 
 OBS = 1234567890
@@ -407,6 +409,21 @@ def test_no_unflagged_tiles_is_a_failure(cfg_filename, tmp_path, capsys):
         assert _run(cfg_filename, base) == tool.EXIT_STEP_FAILED
 
     assert "No unflagged tiles" in capsys.readouterr().out
+    mocks.imaging.assert_not_called()
+
+
+def test_no_unflagged_tiles_after_flagging_is_a_failure_without_a_readme(cfg_filename, tmp_path, capsys):
+    base = tmp_path / "job"
+
+    with patched_pipeline(
+        base, solutions=MagicMock(side_effect=NoUnflaggedTilesError(NO_UNFLAGGED_TILES_REMAINING_MSG))
+    ) as mocks:
+        assert _run(cfg_filename, base) == tool.EXIT_STEP_FAILED
+
+    out = capsys.readouterr().out
+    assert NO_UNFLAGGED_TILES_REMAINING_MSG in out
+    assert "Traceback" not in out
+    assert not list(base.rglob("readme_error.txt"))
     mocks.imaging.assert_not_called()
 
 
