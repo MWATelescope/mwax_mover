@@ -1,9 +1,12 @@
 # Changelog
 
-# 2.1.0 20-Oct-2026
+# 2.1.0 26-Oct-2026
 
-* Added imaging to calvin_processor.
-* Calvin: when the flagging pipeline leaves no unflagged tiles (so no replacement reference tile can be selected), this is now a normal failed-calibration end state, not an unhandled error. `process_solutions` and `mwax_dl_conv_cal_image` no longer log a traceback or write `readme_error.txt`. The MWAX files are released (realtime), and the job fails with the simple message "No unflagged tiles remaining after the flagging pipeline -- cannot re-select a reference tile.". Added `NoUnflaggedTilesError`.
+* Calvin: Added imaging to calvin_processor.
+* Calvin: When the flagging pipeline leaves no unflagged tiles (so no replacement reference tile can be selected), this is now a normal failed-calibration end state, not an unhandled error. `process_solutions` and `mwax_dl_conv_cal_image` no longer log a traceback or write `readme_error.txt`. The MWAX files are released (realtime), and the job fails with the simple message "No unflagged tiles remaining after the flagging pipeline -- cannot re-select a reference tile.". Added `NoUnflaggedTilesError`.
+* Calvin: Fix: When no unflagged tiles, mwax files will still be released (plus error is less verbose)
+* Calvin: Fix: The URL for the AWS metadata web service is now https
+* Calvin: Fix: Increased the timeout period and retries when calling the WS that gets metadata for a new obs- especially important when MRO WS is down, as there can be a delay in the streaming replication to the AWS WS, which causes premature failures
 
 # 2.0.8 22-Sep-2026
 

@@ -21,7 +21,17 @@ from enum import Enum, IntEnum
 
 import requests
 
-from mwax_mover.constants import EXT_FIL, EXT_FITS, EXT_HDR, EXT_MS, EXT_SUB, EXT_VDIF, MWA_WEBSERVICE_HOSTS
+from mwax_mover.constants import (
+    EXT_FIL,
+    EXT_FITS,
+    EXT_HDR,
+    EXT_MS,
+    EXT_SUB,
+    EXT_VDIF,
+    MWA_WEBSERVICE_HOSTS,
+    WS_DATA_FILES_RETRIES,
+    WS_DATA_FILES_RETRY_WAIT_SECS,
+)
 from mwax_mover.fits.metafits import download_metafits_file, get_calibrator_info
 from mwax_mover.net.webservice import call_webservice
 
@@ -596,7 +606,9 @@ def get_data_files_with_hostname_for_obsid_from_webservice(
     data = {"obs_id": obs_id, "terse": False, "all_files": True}
 
     # On failure of all urls and retries it will raise an exception
-    result = call_webservice(obs_id, urls, data)
+    result = call_webservice(
+        obs_id, urls, data, max_retries=WS_DATA_FILES_RETRIES, retry_wait_seconds=WS_DATA_FILES_RETRY_WAIT_SECS
+    )
 
     files = json.loads(result.text)
     file_list = [

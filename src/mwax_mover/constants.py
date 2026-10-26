@@ -78,7 +78,9 @@ SECTION_MWA_DATABASE = "mwa database"
 # The two MWA webservice hosts, tried in order (MRO-local first, then
 # public) by every caller that queries the metadata webservice. Identical
 # in every deployment, so these are constants rather than config.
-MWA_WEBSERVICE_HOSTS = ("http://mro.mwa128t.org", "http://ws.mwatelescope.org")
+MWA_WEBSERVICE_HOSTS = ("http://mro.mwa128t.org", "https://ws.mwatelescope.org")
+WS_DATA_FILES_RETRIES = 20
+WS_DATA_FILES_RETRY_WAIT_SECS = 60
 
 SECONDS_PER_MINUTE = 60
 SECONDS_PER_HOUR = 3600
