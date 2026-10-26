@@ -44,6 +44,12 @@ calibration-quality-aware reference tile; and MWA_NUM_COARSE_CHANS, the
 standard MWA coarse-channel count.
 """
 
+# Only try and calibrate obs after 01-Jul-2013 0:00:00 AWST (1056643216)
+MIN_OBS_ID = 1056643216
+MIN_OBS_ID_MESSAGE = (
+    "Unable to process, as this observation occurs prior to MWA 128T commissioning (01-Jul-2013 0:00:00 AWST)"
+)
+
 # The full filename with path
 FILE_REPLACEMENT_TOKEN = "__FILE__"
 
