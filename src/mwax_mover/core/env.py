@@ -4,7 +4,8 @@ get_hostname() returns the machine's short (non-FQDN) hostname;
 running_under_pytest() detects whether the current process is a test run;
 _available_memory_bytes() is a best-effort estimate of memory available to
 this process (checking cgroup limits before node-wide free memory), used
-by calvin.plots.gains to budget concurrent page-rendering workers.
+by calvin.plots.gains to budget concurrent page-rendering workers;
+is_ram_backed() says whether a directory is on a RAM-backed file system (e.g. tmpfs).
 """
 
 import logging
@@ -13,6 +14,12 @@ import socket
 import sys
 
 logger = logging.getLogger(__name__)
+
+# File system types that keep their data in RAM, so files in them use memory.
+RAM_BACKED_FILESYSTEM_TYPES = frozenset({"tmpfs", "ramfs"})
+
+# Where Linux lists the mounted file systems.
+PROC_MOUNTS_PATH = "/proc/mounts"
 
 
 def get_hostname() -> str:
@@ -111,3 +118,48 @@ def available_memory_bytes() -> int | None:
     # The tightest constraint wins: being inside a small cgroup on a big node is
     # exactly the case that has to be respected.
     return min(candidates)
+
+
+def is_ram_backed(path: str, mounts_path: str = PROC_MOUNTS_PATH) -> bool:
+    """Say whether a directory is on a RAM-backed file system (tmpfs or ramfs).
+
+    Files in such a directory use RAM, which then cannot be used by programs such as Birli
+    and WSClean. This reads the Linux mount table. The mount with the longest mount point
+    that contains the directory decides.
+
+    Args:
+        path: The directory (or file). It does not have to exist: the closest existing parent is used.
+        mounts_path: The mount table. Only a test needs to change this.
+
+    Returns:
+        True if the directory is on tmpfs or ramfs. False if it is not, or if the mount table cannot
+        be read (for example not on Linux), because a wrong "yes" would take memory away for nothing.
+    """
+    # Follow symbolic links in the part of the path that exists, and keep the rest as it is.
+    existing = os.path.abspath(path)
+    missing_tail: list[str] = []
+    while not os.path.exists(existing) and os.path.dirname(existing) != existing:
+        missing_tail.insert(0, os.path.basename(existing))
+        existing = os.path.dirname(existing)
+    real_path = os.path.join(os.path.realpath(existing), *missing_tail)
+
+    try:
+        with open(mounts_path, encoding="utf-8") as mounts_file:
+            mount_lines = mounts_file.readlines()
+    except OSError:
+        return False
+
+    best_mount_point = ""
+    best_fs_type = ""
+    for line in mount_lines:
+        fields = line.split()
+        if len(fields) < 3:  # noqa: PLR2004 - a mount table line is "device mount_point fs_type options ..."
+            continue
+        mount_point = fields[1].replace("\\040", " ")
+        if (real_path == mount_point or real_path.startswith(mount_point.rstrip("/") + "/")) and len(
+            mount_point
+        ) >= len(best_mount_point):
+            best_mount_point = mount_point
+            best_fs_type = fields[2]
+
+    return best_fs_type in RAM_BACKED_FILESYSTEM_TYPES

@@ -9,6 +9,7 @@ the calibrator visibility files for archiving or discard.
 """
 
 import argparse
+import dataclasses
 import datetime
 import glob
 import logging
@@ -30,20 +31,34 @@ from mwax_mover import (
     version,
 )
 from mwax_mover.archive.archiver import copy_file_rsync
-from mwax_mover.calvin.birli import estimate_birli_output_bytes, run_birli
+from mwax_mover.calvin.birli import estimate_birli_output_bytes, estimate_working_space_gb, run_birli
 from mwax_mover.calvin.hyperdrive import run_hyperdrive
+from mwax_mover.calvin.imaging import ImagingSettings, run_imaging_steps
 from mwax_mover.calvin.pipeline import CalvinJobType, process_solutions
-from mwax_mover.calvin.plots.index import generate_plot_index_file
+from mwax_mover.calvin.plots.index import extend_plot_index, generate_plot_index_file
+from mwax_mover.calvin.wsclean import (
+    ArrayImageSettings,
+    WSCleanArgs,
+    array_image_settings_from_metafits,
+    calculate_abs_mem_gib,
+    read_compact_array_baseline_max_length,
+    read_compact_image_size,
+    read_extended_image_size,
+    wsclean_args_from_config,
+)
 from mwax_mover.calvin.solution_files import (
     export_calibration_solutions,
     reap_orphaned_staging_dirs,
+    find_image_files,
+    upload_image_files,
     upload_plot_files,
 )
 from mwax_mover.constants import (
     CONFIG_KEY_GIANT_SQUID_BINARY_PATH,
     CONFIG_KEY_LOG_LEVEL,
     EXIT_FAILURE,
-    EXT_UVFITS,
+    IMAGES_DIR_SUFFIX,
+    EXT_MS,
     HEALTH_THREAD_NAME,
     INDEX_JSON_FILENAME,
     LOG_FORMAT,
@@ -52,9 +67,13 @@ from mwax_mover.constants import (
     SECTION_DOWNLOADING,
     SECTION_GIANT_SQUID,
     SECTION_HYPERDRIVE,
+    SECTION_WSCLEAN,
     SECTION_MWAX_MOVER,
     SECTION_PROCESSING,
     SOLUTIONS_FITS_GLOB,
+    WORKING_PATH_MAX_GB,
+    WSCLEAN_COMPACT_IMAGE_SIZE,
+    WSCLEAN_EXTENDED_IMAGE_SIZE,
 )
 from mwax_mover.core.config import read_config, read_config_bool, read_optional_config
 from mwax_mover.core.env import get_hostname
@@ -147,10 +166,16 @@ class MWAXCalvinProcessor(MWAXDaemon):
         self.request_id_list: list[int] = []
         self.metafits_name: str = ""
         self.metafits_filename: str = ""
-        self.uvfits_filename: str = ""
+        self.ms_filename: str = ""
         self.ws_filenames: list[str] = []
         self.mwax_download_filenames: list[str] = []  # Only applicable for realtime
         self.data_downloaded: bool = False
+        # True once the calibration solution is in the database. After that
+        # nothing (e.g. imaging running out of walltime) may fail the job.
+        self.job_succeeded: bool = False
+        # The index.json of the first publish (solutions and plots). Only set if that
+        # publish worked. The imaging publish extends it.
+        self.published_index: dict | None = None
         self.metafits_context: MetafitsContext
 
         # downloading
@@ -197,10 +222,24 @@ class MWAXCalvinProcessor(MWAXDaemon):
         self.cfg_birli_max_mem_gib: int = 0
         self.cfg_birli_freq_res_khz: int = 0
         self.cfg_birli_int_time_res_sec: float = 0.0
-        self.estimated_uvfits_GB: int = 0
+        self.estimated_vis_GB: int = 0
 
         # hyperdrive
         self.cfg_hyperdrive_timeout: int = 0
+        self.cfg_hyperdrive_apply_timeout: int = 0
+        self.cfg_wsclean_enabled: bool = False
+        self.cfg_wsclean_binary_path: str = ""
+        self.cfg_wsclean_timeout: int = 0
+        self.cfg_wsclean_max_mem_gib: int = 0
+        self.cfg_wsclean_compact_array_baseline_max_length: float = 0.0
+        self.cfg_wsclean_compact_image_size: int = WSCLEAN_COMPACT_IMAGE_SIZE
+        self.cfg_wsclean_extended_image_size: int = WSCLEAN_EXTENDED_IMAGE_SIZE
+        # The options from the [wsclean] config. The job's name, temp_dir and memory limit are added when it runs.
+        self.cfg_wsclean_args: WSCleanArgs = WSCleanArgs(name="", temp_dir="")
+        # The WSClean image size and pixel scale for this observation. None until start() works it out.
+        self.wsclean_image_settings: ArrayImageSettings | None = None
+        # The WSClean memory limit (-abs-mem) for this job. None until start() works it out.
+        self.wsclean_abs_mem_gib: int | None = None
         self.cfg_hyperdrive_binary_path: str = ""
         self.hyperdrive_extra_args: str = ""
 
@@ -292,6 +331,19 @@ class MWAXCalvinProcessor(MWAXDaemon):
             logger.info(f"Reading metafits file {self.metafits_filename} with mwalib...")
             self.metafits_context = MetafitsContext(self.metafits_filename, None)
 
+            # The WSClean image size and pixel scale depend on the array configuration and the frequency.
+            # If this fails, imaging is skipped later: the calibration itself does not need it.
+            if self.cfg_wsclean_enabled:
+                try:
+                    self.wsclean_image_settings = array_image_settings_from_metafits(
+                        self.metafits_context,
+                        self.cfg_wsclean_compact_array_baseline_max_length,
+                        compact_image_size=self.cfg_wsclean_compact_image_size,
+                        extended_image_size=self.cfg_wsclean_extended_image_size,
+                    )
+                except Exception:  # noqa: BLE001 - imaging is optional; the calibration must not fail because of it
+                    logger.exception(f"{self.obs_id}: could not work out the WSClean image size and scale.")
+
             # Get list of expected files from web service- wait if obs is still in progress!
             self.current_task_name = "Get file list"
             logger.info("Getting observation file list from web service...")
@@ -336,9 +388,9 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 )
                 self.stop(exit_code=EXIT_FAILURE)
 
-            # Working path for Birli / uvfits output is determined by calculating the size of the output visibilites:
+            # Working path for Birli / measurement set output is determined by calculating the size of the output visibilites:
             logger.info("Calculating observation output size...")
-            self.estimated_uvfits_GB = int(
+            self.estimated_vis_GB = int(
                 estimate_birli_output_bytes(
                     self.metafits_context,
                     self.cfg_birli_freq_res_khz,
@@ -347,14 +399,20 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 / (1000**3)
             )
             # Round up
-            self.estimated_uvfits_GB = max(self.estimated_uvfits_GB, 1)
+            self.estimated_vis_GB = max(self.estimated_vis_GB, 1)
 
             logger.info(
-                f"Observation UVFITS output is estimated to be : {self.estimated_uvfits_GB} GB "
-                f"({int(gigabyte_to_gibibyte(self.estimated_uvfits_GB))} GiB)"
+                f"Observation measurement set output is estimated to be : {self.estimated_vis_GB} GB "
+                f"({int(gigabyte_to_gibibyte(self.estimated_vis_GB))} GiB)"
             )
 
-            if self.estimated_uvfits_GB < 500:
+            working_space_gb = estimate_working_space_gb(self.estimated_vis_GB, self.cfg_wsclean_enabled)
+            if self.cfg_wsclean_enabled:
+                logger.info(
+                    f"Imaging is enabled, so the working space needed is estimated to be: {working_space_gb} GB"
+                )
+
+            if working_space_gb < WORKING_PATH_MAX_GB:
                 # Use temp_working_dir
                 self.working_path = os.path.join(
                     self.cfg_proc_temp_working_path, f"{self.slurm_job_id!s}_{self.obs_id!s}"
@@ -363,19 +421,29 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 os.makedirs(name=self.working_path, exist_ok=True)
 
                 # Override the birli allowed memory
-                self.cfg_birli_max_mem_gib -= int(gigabyte_to_gibibyte(self.estimated_uvfits_GB))
+                self.cfg_birli_max_mem_gib -= int(gigabyte_to_gibibyte(working_space_gb))
                 logger.info(
                     f"Using temporary work dir {self.cfg_proc_temp_working_path} for Birli output. Reduced "
                     f"allowed Birli memory to: {self.cfg_birli_max_mem_gib} GiB"
                 )
+
+                # The temp working path is RAM-backed, so WSClean gets the same reduction
+                if self.cfg_wsclean_enabled:
+                    self.wsclean_abs_mem_gib = calculate_abs_mem_gib(self.cfg_wsclean_max_mem_gib, working_space_gb)
+                    logger.info(f"Reduced allowed WSClean memory to: {self.wsclean_abs_mem_gib} GiB")
             else:
                 # Use output_dir
                 self.working_path = self.cfg_proc_job_output_path
                 logger.info(f"Using work dir {self.working_path} for Birli output.")
 
-            # Set uvfits filename
-            self.uvfits_filename = os.path.join(self.working_path, f"{self.obs_id}{EXT_UVFITS}")
-            logger.info(f"Job Output UVFITS file(s) will be created as: {self.uvfits_filename}")
+                # The measurement sets are on disk, so WSClean can have all of its memory
+                if self.cfg_wsclean_enabled:
+                    self.wsclean_abs_mem_gib = self.cfg_wsclean_max_mem_gib
+
+            # Set measurement set name. For a picket fence observation Birli adds
+            # a _chN or _chN-M suffix, creating one measurement set per band.
+            self.ms_filename = os.path.join(self.working_path, f"{self.obs_id}{EXT_MS}")
+            logger.info(f"Job Output measurement set(s) will be created as: {self.ms_filename}")
 
             # All files we could get are now in the processing_path
             logger.info("Ensuring all data is ready for processing...")
@@ -443,6 +511,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
 
                 if fit_id:
                     self.succeed_job_processing(fit_id)
+                    self.job_succeeded = True
 
                     # Ensure all mwax boxes know they can remove their files for this obs
                     if self.job_type == CalvinJobType.realtime:
@@ -452,7 +521,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
                     # Try and generate an index file
                     # NOTE: generate_plot_index_file returns a (success, index)
                     # tuple. Unpack it- a bare `if` on the tuple is always True.
-                    index_success, _index = generate_plot_index_file(
+                    index_success, index = generate_plot_index_file(
                         fit_id,
                         self.cfg_proc_plot_front_end_url,
                         self.cfg_proc_job_output_path,
@@ -462,7 +531,9 @@ class MWAXCalvinProcessor(MWAXDaemon):
                         plot_upload_path = os.path.join(self.cfg_proc_plot_upload_path, str(fit_id))
 
                         # Go and upload all the files (including the index)
-                        if not upload_plot_files(self.cfg_proc_job_output_path, plot_upload_path):
+                        if upload_plot_files(self.cfg_proc_job_output_path, plot_upload_path):
+                            self.published_index = index
+                        else:
                             logger.warning(
                                 f"{self.obs_id}: could not publish plots to {plot_upload_path}."
                                 " Calibration itself succeeded; continuing."
@@ -541,10 +612,14 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 for file_to_delete in visibility_files:
                     remove_file(file_to_delete, False)
 
-                # Now remove uvfits too
-                uvfits_files = glob.glob(os.path.join(self.cfg_proc_job_input_path, f"*{EXT_UVFITS}"))
-                for file_to_delete in uvfits_files:
-                    remove_file(file_to_delete, False)
+            # The solutions and plots are published, so now do the optional imaging.
+            # A failure here is logged only; the job stays successful.
+            if self.cfg_wsclean_enabled and fit_id and self.run_imaging():
+                self.publish_images(fit_id)
+
+            # Now remove the measurement sets too. Birli wrote them to
+            # working_path (not job_input_path). Each one is a directory.
+            self.remove_measurement_sets()
 
             # Final log message
             self.current_task_name = "Complete"
@@ -553,6 +628,11 @@ class MWAXCalvinProcessor(MWAXDaemon):
         except Exception as e:  # noqa: BLE001 - top-level SLURM job boundary; must not crash uncaught
             # Something really bad went wrong!
             error_message = f"Unhandled Exception: {e!s}"
+            if self.job_succeeded:
+                # The solution is already in the database, so this must not fail the job.
+                logger.exception(f"{self.obs_id}: {error_message} after the job succeeded. Ignoring.")
+                self.remove_measurement_sets()
+                self.stop(exit_code=0)
             if self.data_downloaded:
                 self.fail_job_processing(error_message)
             else:
@@ -946,10 +1026,10 @@ class MWAXCalvinProcessor(MWAXDaemon):
             return False, f"Exception in check_obs_is_ready_to_process: {e!s}"
 
     def run_birli(self) -> tuple[bool, str]:
-        """Execute Birli preprocessing to produce UVFITS file(s).
+        """Execute Birli preprocessing to produce CASA measurement set(s).
 
         Runs Birli with appropriate parameters to preprocess visibility data
-        and create UVFITS output files.
+        and create measurement set output (one per contiguous coarse channel band).
 
         Returns:
             A tuple of (success, error_message). If successful, error_message is empty.
@@ -964,7 +1044,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
         birli_success = run_birli(
             self.cfg_proc_job_input_path,
             self.metafits_filename,
-            self.uvfits_filename,
+            self.ms_filename,
             self.cfg_proc_job_output_path,
             self.obs_id,
             oversampled,
@@ -984,7 +1064,7 @@ class MWAXCalvinProcessor(MWAXDaemon):
     def run_hyperdrive(self, metafits_context: mwalib.MetafitsContext) -> tuple[bool, str, str]:
         """Execute Hyperdrive calibration to produce calibration solutions.
 
-        Runs Hyperdrive calibration on preprocessed UVFITS files, generates
+        Runs Hyperdrive calibration on preprocessed measurement sets, generates
         statistics and plots, and exports solutions to configured directories.
 
         Args:
@@ -995,16 +1075,16 @@ class MWAXCalvinProcessor(MWAXDaemon):
         """
         hyperdrive_success = False
 
-        # If all good run hyperdrive- once per uvfits file created
-        # N (where N>1) uvfits are generated if Birli sees the obs is picket fence
+        # If all good run hyperdrive- once per measurement set created
+        # N (where N>1) measurement sets are generated if Birli sees the obs is picket fence
         # Therefore we need to run hyperdrive N times too
         #
-        # get a list of the uvfits files
-        uvfits_files = glob.glob(os.path.join(self.working_path, f"*{EXT_UVFITS}"))
+        # get a list of the measurement sets (directories)
+        ms_files = sorted(glob.glob(os.path.join(self.working_path, f"*{EXT_MS}")))
 
         # Run hyperdrive (might be multiple times if picket fence)
         hyperdrive_success, calibration_command = run_hyperdrive(
-            uvfits_files,
+            ms_files,
             self.metafits_filename,
             metafits_context,
             self.cfg_proc_job_output_path,
@@ -1022,6 +1102,93 @@ class MWAXCalvinProcessor(MWAXDaemon):
             return True, "", calibration_command
         else:
             return False, "Hyperdrive run failed. See logs", calibration_command
+
+    def remove_measurement_sets(self) -> None:
+        """Remove all measurement sets (Birli's and calibrated) from the working path.
+
+        Each measurement set is a directory. This is best effort: a failure is logged and ignored.
+        Nothing is removed if keep_completed_visibility_files is set.
+        """
+        if self.cfg_proc_keep_completed_visibility_files:
+            return
+
+        for ms_dir_to_delete in glob.glob(os.path.join(self.working_path, f"*{EXT_MS}")):
+            try:
+                shutil.rmtree(ms_dir_to_delete)
+            except OSError:
+                logger.warning(f"{self.obs_id}: could not remove measurement set {ms_dir_to_delete}. Ignoring.")
+
+    def publish_images(self, fit_id: int) -> None:
+        """Publish the imaging outputs to <plot_upload_path>/<fit_id>_images.
+
+        This is the second publish for the fit. It only runs if the first one (solutions and plots)
+        worked, because the extended index.json it uploads describes the files of both. Any failure is
+        only logged and the job stays successful.
+
+        Args:
+            fit_id: The fit ID of the calibration solution.
+        """
+        try:
+            if self.published_index is None:
+                logger.warning(
+                    f"{self.obs_id}: the solutions and plots were not published, so the images are not published."
+                )
+                return
+
+            self.current_task_name = "Publishing images"
+            extended_index = extend_plot_index(
+                self.published_index,
+                find_image_files(self.cfg_proc_job_output_path),
+                fit_id,
+                self.cfg_proc_plot_front_end_url,
+            )
+            images_path = os.path.join(self.cfg_proc_plot_upload_path, f"{fit_id}{IMAGES_DIR_SUFFIX}")
+            if not upload_image_files(self.cfg_proc_job_output_path, images_path, extended_index):
+                logger.warning(
+                    f"{self.obs_id}: could not publish images to {images_path}. Calibration itself succeeded."
+                )
+        except Exception:  # noqa: BLE001 - imaging is optional; it must not fail a job that already succeeded
+            logger.exception(f"{self.obs_id}: unhandled exception publishing images. Calibration itself succeeded.")
+
+    def run_imaging(self) -> bool:
+        """Apply the solutions to each band, then image the calibrated bands with WSClean.
+
+        Runs after the solutions and plots are published, so any failure is only
+        logged and the job stays successful. This calls calvin.imaging.run_imaging_steps().
+
+        Returns:
+            True if WSClean ran successfully, False otherwise.
+        """
+        wsclean_args = self.cfg_wsclean_args
+        if self.wsclean_image_settings is not None:
+            wsclean_args = dataclasses.replace(
+                wsclean_args, size=self.wsclean_image_settings.size, scale=self.wsclean_image_settings.scale
+            )
+        elif self.cfg_wsclean_enabled:
+            logger.warning(f"{self.obs_id}: no WSClean image size and scale. Skipping imaging.")
+            return False
+
+        settings = ImagingSettings(
+            hyperdrive_binary_path=self.cfg_hyperdrive_binary_path,
+            apply_timeout=self.cfg_hyperdrive_apply_timeout,
+            wsclean_binary_path=self.cfg_wsclean_binary_path,
+            wsclean_timeout=self.cfg_wsclean_timeout,
+            wsclean_args=wsclean_args,
+            wsclean_abs_mem_gib=self.wsclean_abs_mem_gib,
+            remove_input_ms=not self.cfg_proc_keep_completed_visibility_files,
+        )
+
+        def set_task_name(name: str) -> None:
+            self.current_task_name = name
+
+        return run_imaging_steps(
+            self.obs_id,
+            self.metafits_filename,
+            self.cfg_proc_job_output_path,
+            self.working_path,
+            settings,
+            set_task_name,
+        )
 
     def stop(self, exit_code: int = 0):
         """Shutdown the processor and close all connections.
@@ -1072,7 +1239,6 @@ class MWAXCalvinProcessor(MWAXDaemon):
             _signum: The signal number received.
             _frame: Stack frame (unused).
         """
-        # Update the database that this job has been cancelled
         if _signum == signal.SIGUSR1:
             signal_message = "Slurm hit walltime"
         elif _signum == signal.SIGINT:
@@ -1082,6 +1248,16 @@ class MWAXCalvinProcessor(MWAXDaemon):
         else:
             signal_message = f"Received unknown signal {_signum}"
 
+        if self.job_succeeded:
+            # The solution is already in the database (this is imaging running
+            # out of time or being cancelled), so do not touch the database.
+            logger.warning(
+                f"{self.obs_id}: {signal_message} after the job succeeded. Stopping without updating the db."
+            )
+            self.remove_measurement_sets()
+            self.stop(exit_code=0)
+
+        # Update the database that this job has been cancelled
         logger.warning("Updating job to cancelled...")
         if self.data_downloaded:
             self.fail_job_processing(f"Cancelled: {signal_message}")
@@ -1312,6 +1488,15 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 )
             )
 
+            # hyperdrive solutions-apply timeout
+            self.cfg_hyperdrive_apply_timeout = int(
+                read_config(
+                    config,
+                    SECTION_HYPERDRIVE,
+                    "apply_timeout",
+                )
+            )
+
             # Get the hyperdrive binary
             self.cfg_hyperdrive_binary_path = read_config(
                 config,
@@ -1333,6 +1518,47 @@ class MWAXCalvinProcessor(MWAXDaemon):
                     "extra_args",
                 )
             )
+
+            #
+            # wsclean config
+            #
+            self.cfg_wsclean_enabled = read_config_bool(
+                config,
+                SECTION_WSCLEAN,
+                "enabled",
+            )
+
+            self.cfg_wsclean_binary_path = read_config(
+                config,
+                SECTION_WSCLEAN,
+                "binary_path",
+            )
+
+            # The binary is only needed if imaging is on
+            if self.cfg_wsclean_enabled and not os.path.exists(self.cfg_wsclean_binary_path):
+                logger.error(f"wsclean binary_path location {self.cfg_wsclean_binary_path} does not exist. Quitting.")
+                sys.exit(EXIT_FAILURE)
+
+            self.cfg_wsclean_timeout = int(
+                read_config(
+                    config,
+                    SECTION_WSCLEAN,
+                    "timeout",
+                )
+            )
+
+            # The imaging options are only needed (and only checked) if imaging is on
+            if self.cfg_wsclean_enabled:
+                self.cfg_wsclean_max_mem_gib = int(read_config(config, SECTION_WSCLEAN, "max_mem_gib"))
+
+                try:
+                    self.cfg_wsclean_args = wsclean_args_from_config(config)
+                    self.cfg_wsclean_compact_array_baseline_max_length = read_compact_array_baseline_max_length(config)
+                    self.cfg_wsclean_compact_image_size = read_compact_image_size(config)
+                    self.cfg_wsclean_extended_image_size = read_extended_image_size(config)
+                except ValueError as wsclean_error:
+                    logger.error(f"Invalid [wsclean] config: {wsclean_error} Quitting.")
+                    sys.exit(EXIT_FAILURE)
 
             #
             # processing config

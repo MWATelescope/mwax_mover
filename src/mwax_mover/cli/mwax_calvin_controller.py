@@ -37,14 +37,20 @@ from mwax_mover.calvin.slurm import count_slurm_asvo_jobs, create_sbatch_script,
 from mwax_mover.constants import (
     CONFIG_KEY_GIANT_SQUID_BINARY_PATH,
     CONFIG_KEY_LOG_LEVEL,
+    DEFAULT_MWA_ASVO_WALL_TIME_SECS,
+    DEFAULT_REALTIME_WALL_TIME_SECS,
     EXIT_FAILURE,
     HEALTH_THREAD_NAME,
+    IMAGES_DIR_SUFFIX,
     LOG_FORMAT,
+    MIN_OBS_ID,
+    MIN_OBS_ID_MESSAGE,
     SECONDS_PER_HOUR,
     SECTION_CALVIN,
     SECTION_GIANT_SQUID,
     SECTION_MWAX_MOVER,
     SECTION_PLOTS_UPLOAD,
+    SLURM_USR1_WARNING_SECS,
 )
 from mwax_mover.core.config import read_config, read_config_list, read_optional_config
 from mwax_mover.core.env import get_hostname
@@ -53,6 +59,7 @@ from mwax_mover.db.calibration import (
     get_unattempted_calibration_requests,
     get_unattempted_unrequested_cal_obsids,
     insert_calibration_request_row,
+    update_calibration_request_download_complete_status,
     update_calibration_request_mwa_asvo_job_status,
     update_calibration_request_slurm_status,
 )
@@ -91,6 +98,27 @@ PLOT_UPLOAD_BACKLOG_DELAY_SECS = 5
 SLURM_REFRESH_INTERVAL = 10
 
 
+def parse_fit_dir_name(dir_name: str) -> tuple[int, bool] | None:
+    """Parse the name of a published directory in the plot upload path.
+
+    A fit's solutions and plots are published as ``<fit_id>``. Its imaging outputs are
+    published separately as ``<fit_id>_images`` (see calvin.solution_files.upload_image_files).
+
+    Args:
+        dir_name: The name (not the full path) of the directory.
+
+    Returns:
+        ``(fit_id, is_images_dir)``, or None if the name is neither of the above.
+    """
+    is_images_dir = dir_name.endswith(IMAGES_DIR_SUFFIX)
+    fit_id_str = dir_name[: -len(IMAGES_DIR_SUFFIX)] if is_images_dir else dir_name
+
+    try:
+        return int(fit_id_str), is_images_dir
+    except ValueError:
+        return None
+
+
 def fit_dir_sort_key(fit_dir: Path) -> tuple[int, int, str]:
     """Build a sort key ordering fit directories newest (largest fitid) first.
 
@@ -100,7 +128,10 @@ def fit_dir_sort_key(fit_dir: Path) -> tuple[int, int, str]:
     means the ordering does not silently depend on every fitid happening to have
     the same number of digits.
 
-    Any directory whose name is not an integer is not a fit directory. Those
+    A fit's imaging directory (``<fitid>_images``) sorts directly after its
+    ``<fitid>`` directory.
+
+    Any directory whose name is not one of these is not a fit directory. Those
     sort last, alphabetically, so an unexpected entry can never displace real
     fits from the head of the batch.
 
@@ -110,12 +141,40 @@ def fit_dir_sort_key(fit_dir: Path) -> tuple[int, int, str]:
 
     Returns:
         A tuple suitable for ``list.sort(key=...)``: ``(0, -fitid, "")`` for
-        numerically named directories and ``(1, 0, name)`` for anything else.
+        numerically named directories, ``(0, -fitid, "_images")`` for imaging
+        directories and ``(1, 0, name)`` for anything else.
     """
-    try:
-        return (0, -int(fit_dir.name), "")
-    except ValueError:
+    parsed = parse_fit_dir_name(fit_dir.name)
+    if parsed is None:
         return (1, 0, fit_dir.name)
+
+    fit_id, is_images_dir = parsed
+    return (0, -fit_id, IMAGES_DIR_SUFFIX if is_images_dir else "")
+
+
+def read_wall_time_secs(config: ConfigParser, key: str, default_secs: int) -> int:
+    """Read an optional Slurm walltime (in seconds) from the [calvin] section.
+
+    Args:
+        config: The loaded controller config.
+        key: The key in the [calvin] section.
+        default_secs: The value to use if the key is not in the config.
+
+    Returns:
+        The walltime in seconds.
+
+    Raises:
+        ValueError: If the value is not an integer longer than SLURM_USR1_WARNING_SECS. Slurm
+            signals the job that many seconds before its walltime, so a shorter walltime cannot work.
+    """
+    if not config.has_option(SECTION_CALVIN, key):
+        return default_secs
+
+    wall_time_secs = int(read_config(config, SECTION_CALVIN, key))
+    if wall_time_secs <= SLURM_USR1_WARNING_SECS:
+        raise ValueError(f"{key} must be more than {SLURM_USR1_WARNING_SECS} seconds, got {wall_time_secs}.")
+
+    return wall_time_secs
 
 
 class CalibrationRequest:
@@ -196,6 +255,10 @@ class MWAXCalvinController(MWAXDaemon):
         self.cfg_gs_binary_path: str = ""
         self.cfg_gs_list_timeout_seconds: int = 0
         self.cfg_gs_submitvis_timeout_seconds: int = 0
+
+        # Slurm walltime of the jobs we submit
+        self.cfg_realtime_wall_time_secs: int = DEFAULT_REALTIME_WALL_TIME_SECS
+        self.cfg_mwa_asvo_wall_time_secs: int = DEFAULT_MWA_ASVO_WALL_TIME_SECS
 
         # S3 upload settings
         self.cfg_plots_s3_profile: str = ""
@@ -409,6 +472,22 @@ class MWAXCalvinController(MWAXDaemon):
 
         logger.debug("Plot upload thread completed successfully.")
 
+    @staticmethod
+    def get_s3_subpath(dir_name: str) -> str:
+        """Get the S3 path (within the bucket) a published directory is uploaded to.
+
+        ``<fit_id>`` and ``<fit_id>_images`` both go to ``<fit_id>``, so the objects match the
+        URLs written into index.json. Any other name is used as it is.
+
+        Args:
+            dir_name: The name (not the full path) of the published directory.
+
+        Returns:
+            The S3 path within the bucket.
+        """
+        parsed = parse_fit_dir_name(dir_name)
+        return str(parsed[0]) if parsed is not None else dir_name
+
     def upload_published_fit_dirs(
         self,
         plot_upload_path: str,
@@ -416,9 +495,11 @@ class MWAXCalvinController(MWAXDaemon):
     ) -> bool:
         """Upload a batch of the newest published fit directories, then remove them.
 
-        Each fit directory's contents are moved into ``<bucket>/<fit_dir_name>``
+        Each fit directory's contents are moved into ``<bucket>/<fit_id>``
         so the resulting object keys match the URLs written into that fit's
-        index.json by ``populate_index_json_entry``.
+        index.json by ``populate_index_json_entry``. A fit's imaging directory
+        (``<fit_id>_images``) goes to the same place, but only once ``<fit_id>``
+        itself is no longer waiting: until then it is skipped.
 
         Directories are uploaded newest fitid first, and at most
         ``self.cfg_plots_upload_max_fits_per_pass`` of them per call. Both matter when
@@ -477,6 +558,14 @@ class MWAXCalvinController(MWAXDaemon):
                 logger.warning(f"Unexpected file (not a directory) in {plot_upload_path}: {fit_dir}. Skipping.")
                 continue
 
+            # A fit's images must not be uploaded while its solutions and plots are
+            # still waiting. They go to the same S3 path, and the images' index.json
+            # (which lists both) must not be replaced by the older one.
+            parsed = parse_fit_dir_name(fit_dir.name)
+            if parsed is not None and parsed[1] and (base / str(parsed[0])).exists():
+                logger.debug(f"Not uploading {fit_dir} yet: {parsed[0]} is still waiting to be uploaded.")
+                continue
+
             candidates.append(fit_dir)
 
         # Newest fitid first, then take only this pass's batch.
@@ -517,7 +606,7 @@ class MWAXCalvinController(MWAXDaemon):
                     str(fit_dir),
                     self.cfg_plots_s3_profile,
                     self.cfg_plots_s3_bucket,
-                    dest_subpath=fit_dir.name,
+                    dest_subpath=self.get_s3_subpath(fit_dir.name),
                 )
             except Exception as e:  # noqa: BLE001 - keep the first error but carry on; the next dir may still succeed (see comment below)
                 # Keep the first error so the caller can still see a real
@@ -700,6 +789,7 @@ class MWAXCalvinController(MWAXDaemon):
             [realtime_request.request_id],
             False,
             "",
+            self.cfg_realtime_wall_time_secs,
         )
 
         success: bool = False
@@ -802,6 +892,7 @@ class MWAXCalvinController(MWAXDaemon):
                                 job.request_ids,
                                 job.bulk_request,
                                 f'--mwa-asvo-download-url="{job.download_url}" --asvo-job-id={job.job_id}',
+                                self.cfg_mwa_asvo_wall_time_secs,
                             )
 
                             # submit sbatch script
@@ -926,6 +1017,11 @@ class MWAXCalvinController(MWAXDaemon):
                     # Get the obs_id
                     new_request.obs_id = result[1]
 
+                    # Fail (and skip) any request for an obs which is too old to calibrate
+                    if new_request.obs_id < MIN_OBS_ID:
+                        self.fail_request_obs_id_too_old(new_request)
+                        continue
+
                     # Get the type
                     request_type_is_realtime: bool = result[2]
                     if request_type_is_realtime:
@@ -937,6 +1033,34 @@ class MWAXCalvinController(MWAXDaemon):
                         return_list_asvo.append(new_request)
 
         return return_list_realtime, return_list_asvo
+
+    def fail_request_obs_id_too_old(self, cal_request: CalibrationRequest) -> None:
+        """Fail a calibration request for an observation older than MIN_OBS_ID.
+
+        The request is marked as failed in the database with MIN_OBS_ID_MESSAGE, so it is
+        not returned by get_unattempted_calibration_requests() again. If the database
+        update fails, the error is counted and the request is retried in the next loop.
+
+        Args:
+            cal_request: The request to fail.
+        """
+        logger.warning(
+            f"RequestID: {cal_request.request_id} ObsID: {cal_request.obs_id} is before the minimum obs_id"
+            f" {MIN_OBS_ID}. Failing the request."
+        )
+
+        try:
+            update_calibration_request_download_complete_status(
+                self.db_handler,
+                None,
+                [cal_request.request_id],
+                None,
+                datetime.now().astimezone(),
+                MIN_OBS_ID_MESSAGE,
+            )
+        except Exception:
+            logger.exception(f"Unable to fail RequestID: {cal_request.request_id}. It will be retried.")
+            self.database_errors += 1
 
     def mwa_asvo_add_new_asvo_job(self, request_id: int, obs_id: int, bulk_request: bool) -> bool:
         """Add and track a new MWA ASVO job, submitting if not already submitted.
@@ -1112,6 +1236,18 @@ class MWAXCalvinController(MWAXDaemon):
         self.oldest_cal_obs_id = int(config.get(SECTION_CALVIN, "oldest_calibrator_obs_id"))
 
         self.max_in_progress_asvo_jobs = int(config.get(SECTION_CALVIN, "max_in_progress_asvo_jobs"))
+
+        # Slurm walltime of the jobs we submit
+        try:
+            self.cfg_realtime_wall_time_secs = read_wall_time_secs(
+                config, "realtime_wall_time_secs", DEFAULT_REALTIME_WALL_TIME_SECS
+            )
+            self.cfg_mwa_asvo_wall_time_secs = read_wall_time_secs(
+                config, "mwa_asvo_wall_time_secs", DEFAULT_MWA_ASVO_WALL_TIME_SECS
+            )
+        except ValueError as wall_time_error:
+            logger.error(f"{wall_time_error} Quitting.")
+            sys.exit(EXIT_FAILURE)
 
         #
         # giant-squid config

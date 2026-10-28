@@ -18,7 +18,7 @@ Network: MWA_WEBSERVICE_HOSTS, the two MWA webservice hosts tried in
 order by every caller that queries the metadata webservice.
 
 File naming: the MWA data file extensions (EXT_FITS, EXT_SUB, EXT_VDIF,
-EXT_FIL, EXT_HDR, EXT_UVFITS); the hyperdrive solution-file naming
+EXT_FIL, EXT_HDR, EXT_MS); the hyperdrive solution-file naming
 convention (SOLUTIONS_FITS_SUFFIX and friends); INDEX_JSON_FILENAME, the
 calibration-fit index manifest filename; COMMAND_DADA_DISKDB, the
 external binary name used to load a subfile into a PSRDADA ring buffer.
@@ -44,6 +44,12 @@ calibration-quality-aware reference tile; and MWA_NUM_COARSE_CHANS, the
 standard MWA coarse-channel count.
 """
 
+# Only try and calibrate obs after 01-Jul-2013 0:00:00 AWST (1056643216)
+MIN_OBS_ID = 1056643216
+MIN_OBS_ID_MESSAGE = (
+    "Unable to process, as this observation occurs prior to MWA 128T commissioning (01-Jul-2013 0:00:00 AWST)"
+)
+
 # The full filename with path
 FILE_REPLACEMENT_TOKEN = "__FILE__"
 
@@ -63,6 +69,7 @@ SECTION_BEAMFORMER = "beamformer"
 SECTION_CALVIN = "calvin"
 SECTION_BIRLI = "birli"
 SECTION_HYPERDRIVE = "hyperdrive"
+SECTION_WSCLEAN = "wsclean"
 SECTION_GIANT_SQUID = "giant squid"
 SECTION_PLOTS_UPLOAD = "plots upload"
 SECTION_DOWNLOADING = "downloading"
@@ -77,7 +84,9 @@ SECTION_MWA_DATABASE = "mwa database"
 # The two MWA webservice hosts, tried in order (MRO-local first, then
 # public) by every caller that queries the metadata webservice. Identical
 # in every deployment, so these are constants rather than config.
-MWA_WEBSERVICE_HOSTS = ("http://mro.mwa128t.org", "http://ws.mwatelescope.org")
+MWA_WEBSERVICE_HOSTS = ("http://mro.mwa128t.org", "https://ws.mwatelescope.org")
+WS_DATA_FILES_RETRIES = 20
+WS_DATA_FILES_RETRY_WAIT_SECS = 60
 
 SECONDS_PER_MINUTE = 60
 SECONDS_PER_HOUR = 3600
@@ -177,8 +186,104 @@ JONES_F64_BYTES = 64
 F32_BYTES = 4
 F64_BYTES = 8
 
-# UVFITS output extension, produced by Birli and consumed by hyperdrive.
-EXT_UVFITS = ".uvfits"
+# CASA measurement set extension. A measurement set is a directory, not a
+# file. Produced by Birli (one per contiguous coarse channel band) and
+# consumed by hyperdrive and WSClean.
+EXT_MS = ".ms"
+
+# Slurm walltime of a Calvin job, used when the controller config does not set
+# [calvin] realtime_wall_time_secs / mwa_asvo_wall_time_secs. MWA ASVO jobs
+# also download the data (up to 8 hours), so they get longer. Both include time
+# for imaging.
+DEFAULT_REALTIME_WALL_TIME_SECS = 6 * SECONDS_PER_HOUR
+DEFAULT_MWA_ASVO_WALL_TIME_SECS = 12 * SECONDS_PER_HOUR
+
+# Slurm sends SIGUSR1 to a Calvin job this many seconds before its walltime
+# (sbatch --signal=USR1@N), so the job can stop cleanly. A walltime must be
+# longer than this.
+SLURM_USR1_WARNING_SECS = 360
+
+# Suffix of a calibrated measurement set written by hyperdrive solutions-apply
+# (e.g. 1234567890_ch75-76.ms -> 1234567890_ch75-76_cal.ms). It still ends in
+# EXT_MS, so "*.ms" globs match it too.
+CALIBRATED_MS_SUFFIX = "_cal" + EXT_MS
+
+# Readme written per band by solutions-apply (prefixed with the band stem).
+SOLUTIONS_APPLY_README_SUFFIX = "_solutions_apply_readme.txt"
+
+# Suffix added to the observation ID to make the WSClean output prefix
+# (-name <job_output_path>/<obs_id>_wsclean), so outputs are
+# <obs_id>_wsclean-image.fits etc.
+WSCLEAN_NAME_SUFFIX = "_wsclean"
+
+# All WSClean FITS outputs, as named by WSCLEAN_NAME_SUFFIX
+# (<obs_id>_wsclean-image.fits, <obs_id>_wsclean-MFS-image.fits, ...).
+WSCLEAN_FITS_GLOB = "*" + WSCLEAN_NAME_SUFFIX + "-*.fits"
+
+# With -channels-out 2 or more, WSClean writes one set of FITS files per output channel
+# (<obs_id>_wsclean-0000-image.fits ... -0003-) as well as the multi-frequency synthesis (MFS) set
+# (<obs_id>_wsclean-MFS-image.fits ...). Only the MFS files are kept and published, so the per-channel
+# files are removed after WSClean runs. These two globs are appended to the "<obs_id>_wsclean" prefix.
+WSCLEAN_CHANNEL_FITS_GLOB = "-[0-9][0-9][0-9][0-9]-*.fits"
+WSCLEAN_MFS_FITS_GLOB = "-MFS-*.fits"
+
+# WSClean options that calvin always uses (see calvin.wsclean.WSCleanArgs).
+# The gridder is the w-gridder, and the image is Stokes I.
+WSCLEAN_GRIDDER = "wgridder"
+WSCLEAN_POLARIZATIONS = "i"
+
+# The image size and pixel scale are worked out for each observation from the array
+# configuration and the centre frequency (see calvin.wsclean.array_image_settings()).
+# An observation with at least this many tiles is always "extended".
+WSCLEAN_EXTENDED_MIN_TILES = 184
+
+# Otherwise it is "compact" if its longest baseline is no more than the configured
+# [wsclean] compact_array_baseline_max_length, and "extended" if it is longer.
+# The pixel scale in degrees is the base scale divided by the centre coarse channel number.
+# The image sizes in pixels are the required [wsclean] config keys compact_image_size and
+# extended_image_size. The values here are the defaults for a caller that does not give them
+# (array_image_settings()), and are the values in the cfg files.
+WSCLEAN_COMPACT_BASE_SCALE = 1.2
+WSCLEAN_COMPACT_IMAGE_SIZE = 1024
+WSCLEAN_EXTENDED_BASE_SCALE = 0.6
+WSCLEAN_EXTENDED_IMAGE_SIZE = 2048
+
+# Number of decimal places in the -scale value given to WSClean (in degrees).
+WSCLEAN_SCALE_DECIMALS = 7
+
+# Width in Hz of an MWA coarse channel. The coarse channel (receiver channel) number is the
+# centre frequency divided by this.
+MWA_COARSE_CHANNEL_WIDTH_HZ = 1_280_000
+
+# WSClean is not run with a memory limit (-abs-mem) below this many GiB. The limit is
+# the configured maximum minus the RAM that the measurement sets use in the RAM-backed
+# temp working path, so a very large observation can leave nothing for WSClean.
+WSCLEAN_MIN_ABS_MEM_GIB = 1
+
+# The WSClean image that the preview PNG is made from: the multi-frequency synthesis
+# (MFS) image if WSClean made several output channels, otherwise the single image.
+# Both are Stokes I (calvin does not set -pol). The PNG has the same name as the FITS file.
+WSCLEAN_MFS_IMAGE_SUFFIX = "-MFS-image.fits"
+WSCLEAN_IMAGE_SUFFIX = "-image.fits"
+WSCLEAN_PNG_GLOB = "*" + WSCLEAN_NAME_SUFFIX + "-*.png"
+
+# Readme written by calvin.wsclean.run_wsclean (prefixed with the obs ID).
+WSCLEAN_README_SUFFIX = "_wsclean_readme.txt"
+
+# The WSClean image outputs have their own published directory,
+# <plot_upload_path>/<fit_id>_images. The controller uploads it to the same
+# S3 path as <fit_id>, once <fit_id> itself has been uploaded.
+IMAGES_DIR_SUFFIX = "_images"
+
+# Birli's measurement set output goes in the (RAM-backed) temp working path
+# only if the working space needed is below this many GB; otherwise it goes in
+# the job output path.
+WORKING_PATH_MAX_GB = 500
+
+# When imaging is enabled the working path must hold the calibrated MS and
+# WSClean's own reordered copy of it, so it needs this many times the
+# estimated Birli measurement set size.
+WORKING_SPACE_FACTOR_IMAGING = 2
 
 # Fraction of live-probed available memory reserved as headroom when
 # sizing concurrent hyperdrive runs -- leaves room for the parent process
@@ -250,3 +355,8 @@ REFTILE_DIPOLE_GAINS_EXPECTED = 32  # Total dipole gains per tile (16 X + 16 Y)
 REFTILE_DIPOLE_GOOD_MIN = 32  # Min good dipoles (== 1.0) to pass the dipole gate
 REFTILE_NAN_CHANNEL_FRACTION_MAX = 0.30  # Max NaN channel fraction to pass the channel gate
 REFTILE_REPORT_TILES_TO_DISPLAY = 999  # Max number of tiles to display in the ref_tile selection report in stats.txt
+# Reason given when the flagging pipeline flags every tile, so no replacement reference tile can be selected.
+# This is stored in the database as the calibration request's error message.
+NO_UNFLAGGED_TILES_REMAINING_MSG = (
+    "No unflagged tiles remaining after the flagging pipeline -- cannot re-select a reference tile."
+)

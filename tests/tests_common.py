@@ -85,6 +85,7 @@ STUB_BIN_FILENAMES = (
     "giant-squid",
     "birli",
     "hyperdrive",
+    "wsclean",
     "srclist.txt",
 )
 

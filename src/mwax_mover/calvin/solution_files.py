@@ -6,14 +6,17 @@ channel-range). export_calibration_solutions() copies solution FITS files
 to the configured export directory. upload_plot_files() assembles a fit's
 plots/stats in a sibling ``.staging-*`` dir (get_staging_path) and publishes
 them with a single atomic rename, so a concurrently-reading controller never
-observes a partially-written fit directory; reap_orphaned_staging_dirs()
+observes a partially-written fit directory; upload_image_files() does the same
+for the WSClean outputs (find_image_files() lists them); reap_orphaned_staging_dirs()
 cleans up a staging dir orphaned by a crash.
 
 index.json generation lives in calvin.plots.index and convergence-summary
 reading in calvin.hyperdrive, not here -- see docs/RESTRUCTURE.md Phase 4.
 """
 
+import fnmatch
 import glob
+import json
 import logging
 import os
 import re
@@ -21,7 +24,16 @@ import shutil
 import time
 from pathlib import Path
 
-from mwax_mover.constants import SECONDS_PER_HOUR, SOLUTIONS_FITS_GLOB, SOLUTIONS_ORIGINAL_FITS_GLOB
+from mwax_mover.constants import (
+    INDEX_JSON_FILENAME,
+    SECONDS_PER_HOUR,
+    SOLUTIONS_APPLY_README_SUFFIX,
+    SOLUTIONS_FITS_GLOB,
+    SOLUTIONS_ORIGINAL_FITS_GLOB,
+    WSCLEAN_FITS_GLOB,
+    WSCLEAN_PNG_GLOB,
+    WSCLEAN_README_SUFFIX,
+)
 from mwax_mover.filesystem.files import delete_files_older_than
 
 logger = logging.getLogger(__name__)
@@ -207,8 +219,9 @@ def reap_orphaned_staging_dirs(base_path: str, max_age_hours: int = 24) -> list[
     Intended to be called once at processor startup. Only directories older
     than *max_age_hours* are removed, so a staging directory belonging to a
     concurrently-running job is never touched. The Slurm walltime for a Calvin
-    job is at most 10 hours (see create_sbatch_script), so the 24 hour default
-    is comfortably beyond the lifetime of any legitimate in-flight job.
+    job is configurable (12 hours by default, see create_sbatch_script), and a
+    staging directory only exists while a publish is running, so the 24 hour
+    default is comfortably beyond the lifetime of any legitimate in-flight one.
 
     Args:
         base_path: The plot upload base directory to scan, e.g.
@@ -348,5 +361,99 @@ def upload_plot_files(job_output_path: str, upload_path: str) -> bool:
         # remove it on a later processor startup if it is genuinely abandoned.
         logger.warning(
             f"Failed to publish {upload_path} (staging dir {staging_path} left in place). Error: {ee!s}. Ignoring"
+        )
+        return False
+
+
+def find_image_files(job_output_path: str) -> list[str]:
+    """List the imaging outputs in a job's output directory.
+
+    These are the WSClean FITS outputs, the preview PNG of the main image, the
+    WSClean readme and the solutions-apply readmes.
+
+    Args:
+        job_output_path: The job's output directory.
+
+    Returns:
+        The full paths of the files, sorted by name.
+    """
+    patterns = [
+        WSCLEAN_FITS_GLOB,
+        WSCLEAN_PNG_GLOB,
+        f"*{WSCLEAN_README_SUFFIX}",
+        f"*{SOLUTIONS_APPLY_README_SUFFIX}",
+    ]
+    files: list[str] = []
+    for pattern in patterns:
+        files.extend(glob.glob(os.path.join(job_output_path, pattern)))
+    return sorted(files)
+
+
+def upload_image_files(job_output_path: str, upload_path: str, index: dict) -> bool:
+    """Assemble this fit's imaging outputs in a staging dir, then publish atomically.
+
+    This is the second publish for a fit. The first (upload_plot_files) publishes
+    ``<plot_upload_path>/<fit_id>``. This one publishes
+    ``<plot_upload_path>/<fit_id>_images``, which the controller uploads to the
+    same S3 path as ``<fit_id>``, but only once ``<fit_id>`` has gone. The staging
+    and atomic rename are the same as in upload_plot_files(), so the controller
+    never sees a partly written directory.
+
+    The WSClean FITS files are copied, so the originals stay in the job folder.
+    The preview PNG and the readmes are moved. ``index.json`` is written into the directory, and it
+    replaces the first publish's index.json when uploaded.
+
+    Failures are logged and reported via the return value rather than raised:
+    imaging must not fail an otherwise successful calibration.
+
+    Args:
+        job_output_path: The job's output directory, with the imaging outputs.
+        upload_path: Final destination directory, ``<plot_upload_path>/<fit_id>_images``.
+        index: The extended index (see calvin.plots.index.extend_plot_index) to write as index.json.
+
+    Returns:
+        True if the directory was published successfully, False otherwise.
+    """
+    staging_path = get_staging_path(upload_path)
+
+    try:
+        if os.path.exists(upload_path):
+            logger.error(
+                f"upload_image_files: {upload_path} already exists. Aborting without"
+                f" uploading anything. The files remain in {job_output_path}. This needs manual investigation."
+            )
+            return False
+
+        image_files = find_image_files(job_output_path)
+        if not any(fnmatch.fnmatch(os.path.basename(f), WSCLEAN_FITS_GLOB) for f in image_files):
+            logger.warning(f"upload_image_files: no WSClean FITS files found in {job_output_path}. Nothing to publish.")
+            return False
+
+        if os.path.exists(staging_path):
+            logger.warning(f"upload_image_files: removing stale staging dir {staging_path} before starting.")
+            shutil.rmtree(staging_path)
+
+        os.makedirs(staging_path)
+
+        for file_no, image_file in enumerate(image_files, start=1):
+            dest_filename = os.path.join(staging_path, os.path.basename(image_file))
+            if fnmatch.fnmatch(os.path.basename(image_file), WSCLEAN_FITS_GLOB):
+                logger.debug(f"Copying {image_file} to {dest_filename} [{file_no}/{len(image_files)}]")
+                shutil.copy(image_file, dest_filename)
+            else:
+                logger.debug(f"Moving {image_file} to {dest_filename} [{file_no}/{len(image_files)}]")
+                shutil.move(image_file, dest_filename)
+
+        # The index must describe exactly what is in this directory, so write it last.
+        with open(os.path.join(staging_path, INDEX_JSON_FILENAME), "w", encoding="utf-8") as f:
+            json.dump(index, f, indent=2)
+
+        os.replace(staging_path, upload_path)
+        logger.info(f"upload_image_files: published {upload_path} for upload.")
+        return True
+
+    except Exception as e:  # noqa: BLE001 - imaging must not fail a job that succeeded; staging dir left for inspection
+        logger.warning(
+            f"Failed to publish {upload_path} (staging dir {staging_path} left in place). Error: {e!s}. Ignoring"
         )
         return False

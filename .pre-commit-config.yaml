@@ -58,7 +58,7 @@ repos:
       - id: ruff-format
 
   - repo: https://github.com/astral-sh/ty-pre-commit
-    rev: v0.0.82
+    rev: v0.0.90
     hooks:
       # Type checking. Configuration lives in [tool.ty] in pyproject.toml.
       # ty checks the full project on every commit (not just staged files),

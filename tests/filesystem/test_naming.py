@@ -22,6 +22,7 @@ from mwax_mover.filesystem.naming import (
     ArchivePriority,
     MWADataFileType,
     ValidationData,
+    extract_channels_from_ms_filename,
     get_bucket_name_for_location,
     get_bucket_name_from_filename,
     get_bucket_name_from_obs_id,
@@ -441,3 +442,38 @@ def test_get_data_files_for_obsid_from_webservice_200():
         "1157306584_20160907180249_gpubox23_00.fits",
         "1157306584_20160907180249_gpubox24_00.fits",
     ]
+
+
+# ===========================================================================
+# extract_channels_from_ms_filename
+# ===========================================================================
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("1445856416_ch96.ms", {"start": 96}),
+        ("1424383568_ch110-121.ms", {"start": 110, "end": 121}),
+        ("1424383568_ch5-6.ms", {"start": 5, "end": 6}),
+        # A leading directory and a trailing slash (glob/listing styles) are fine
+        ("/data/calvin/jobs/1424383568_ch75-76.ms", {"start": 75, "end": 76}),
+        ("/data/calvin/jobs/1424383568_ch75-76.ms/", {"start": 75, "end": 76}),
+    ],
+)
+def test_extract_channels_from_ms_filename_finds_suffix(filename, expected):
+    assert extract_channels_from_ms_filename(filename) == expected
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "1424383568.ms",  # not a picket fence observation: no suffix
+        "1424383568_ch75-76_cal.ms",  # calibrated copy; the suffix is not directly before .ms
+        "1424383568_ch75-76.uvfits",  # wrong extension
+        "1424383568_ch75-76_solutions.fits",
+        "1424383568_ch75-76.ms.bak",
+        "",
+    ],
+)
+def test_extract_channels_from_ms_filename_returns_none_without_suffix(filename):
+    assert extract_channels_from_ms_filename(filename) is None

@@ -50,6 +50,7 @@ from mwax_mover.calvin.hyperfits_solution import HyperfitsSolution
 from mwax_mover.calvin.refant_report import ScoredTile, format_refant_selection_report
 from mwax_mover.constants import (
     HYPERDRIVE_CONVERGENCE_PRECISION_MAX,
+    NO_UNFLAGGED_TILES_REMAINING_MSG,
     REFTILE_DIPOLE_GAINS_EXPECTED,
     REFTILE_DIPOLE_GOOD_MIN,
     REFTILE_GAIN_QUALITY_MIN,
@@ -59,6 +60,16 @@ from mwax_mover.constants import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class NoUnflaggedTilesError(ValueError):
+    """Raised when the flagging pipeline leaves no unflagged tiles.
+
+    This is an expected end state for a bad observation, not a bug. Callers
+    should treat it as a normal failed calibration rather than an unexpected
+    error. It subclasses ValueError so existing ``except ValueError`` handlers
+    still catch it.
+    """
 
 
 class TileFlagReason(IntFlag):
@@ -713,8 +724,8 @@ class HyperfitsSolutionGroup:
             A pandas Series representing the replacement tile row.
 
         Raises:
-            ValueError: If no tiles survive both structural and Calvin
-                flags.
+            NoUnflaggedTilesError: If no tiles survive both structural and
+                Calvin flags.
         """
         structural_ok = ~self.combined_tile_flags
         calvin_ok = (
@@ -724,9 +735,7 @@ class HyperfitsSolutionGroup:
         )
         unflagged = structural_ok & calvin_ok
         if not unflagged.any():
-            raise ValueError(
-                "No unflagged tiles remaining after the flagging pipeline -- cannot re-select a reference tile."
-            )
+            raise NoUnflaggedTilesError(NO_UNFLAGGED_TILES_REMAINING_MSG)
         candidate_ids = self.metafits_tiles_df[COL_ID].to_numpy()
         best_idx = np.where(unflagged)[0][np.argmin(candidate_ids[unflagged])]
         return self.metafits_tiles_df.iloc[best_idx]
@@ -1564,6 +1573,10 @@ class HyperfitsSolutionGroup:
             (flag_gain_max_cutoff / flag_mostly_bad_tiles) invalidated
             the original choice, in which case a replacement is selected
             via _reselect_refant and a warning is logged.
+
+        Raises:
+            NoUnflaggedTilesError: If the original refant was invalidated and
+                the flagging pipeline left no tile to replace it with.
         """
         self._ensure_loaded()
         self.apply_tile_flags()

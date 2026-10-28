@@ -12,11 +12,32 @@ import os
 import sys
 
 from mwax_mover.calvin.pipeline import CalvinJobType
-from mwax_mover.constants import EXIT_FAILURE
+from mwax_mover.constants import (
+    DEFAULT_MWA_ASVO_WALL_TIME_SECS,
+    DEFAULT_REALTIME_WALL_TIME_SECS,
+    EXIT_FAILURE,
+    SECONDS_PER_HOUR,
+    SECONDS_PER_MINUTE,
+    SLURM_USR1_WARNING_SECS,
+)
 from mwax_mover.core.command import run_command
 from mwax_mover.core.units import is_int
 
 logger = logging.getLogger(__name__)
+
+
+def format_wall_time(wall_time_secs: int) -> str:
+    """Format a number of seconds as the HH:MM:SS that sbatch --time accepts.
+
+    Args:
+        wall_time_secs: The walltime in seconds.
+
+    Returns:
+        The walltime as HH:MM:SS. Hours can be more than 24 (e.g. 36:00:00).
+    """
+    hours, remainder = divmod(wall_time_secs, SECONDS_PER_HOUR)
+    minutes, seconds = divmod(remainder, SECONDS_PER_MINUTE)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
 def create_sbatch_script(
@@ -27,6 +48,7 @@ def create_sbatch_script(
     request_ids: list[int],
     bulk_request: bool,
     processor_args: str,
+    wall_time_secs: int | None = None,
 ) -> str:
     """Create a Slurm batch script for Calvin processing.
 
@@ -39,6 +61,8 @@ def create_sbatch_script(
             calibration_request.id database column).
         bulk_request: Is this a bulk request? If so lower priority.
         processor_args: Extra command-line arguments for the processor.
+        wall_time_secs: Slurm walltime of the job in seconds. If None, the default for the job type
+            is used (DEFAULT_REALTIME_WALL_TIME_SECS or DEFAULT_MWA_ASVO_WALL_TIME_SECS).
 
     Returns:
         The generated batch script as a string.
@@ -51,7 +75,7 @@ def create_sbatch_script(
         job_name = f"real{obs_id}"
         partition = "priority,gpu"
         nice = "0"  # highest priority
-        wall_time = "04:00:00"
+        default_wall_time_secs = DEFAULT_REALTIME_WALL_TIME_SECS
     else:
         job_name = f"asvo{obs_id}"
         partition = "gpu"
@@ -59,7 +83,9 @@ def create_sbatch_script(
             nice = "10000"  # lowest priority
         else:
             nice = "1000"  # lower priority than realtime jobs
-        wall_time = "10:00:00"  # allow extra time for downloading from ASVO (8 hours + 2 for processing)
+        default_wall_time_secs = DEFAULT_MWA_ASVO_WALL_TIME_SECS  # includes time for downloading from ASVO
+
+    wall_time = format_wall_time(default_wall_time_secs if wall_time_secs is None else wall_time_secs)
 
     job_script = f"""#!/bin/bash
 #SBATCH --partition={partition}
@@ -72,7 +98,7 @@ def create_sbatch_script(
 #SBATCH --time={wall_time}
 #SBATCH --account=mwa
 #SBATCH --job-name={job_name}
-#SBATCH --signal=USR1@360
+#SBATCH --signal=USR1@{SLURM_USR1_WARNING_SECS}
 #SBATCH --output={log_path}/%J.out
 #SBATCH --error={log_path}/%J.out
 #SBATCH --open-mode=append

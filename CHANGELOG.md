@@ -1,5 +1,22 @@
 # Changelog
 
+# 2.1.2 26-Oct-2026
+
+* Calvin: Don't try and process obs prior to 01-Jul-2013 0:00:00 UTC+8 (GPS: 1056643216).
+
+# 2.1.1 26-Oct-2026
+
+* Calvin: No longer upload the per channel fits images. Only the MFS (Multi-Freqency Synthesis) / combined images.
+
+# 2.1.0 26-Oct-2026
+
+* Calvin: Added imaging to calvin_processor.
+* Calvin: When the flagging pipeline leaves no unflagged tiles (so no replacement reference tile can be selected), this is now a normal failed-calibration end state, not an unhandled error. `process_solutions` and `mwax_dl_conv_cal_image` no longer log a traceback or write `readme_error.txt`. The MWAX files are released (realtime), and the job fails with the simple message "No unflagged tiles remaining after the flagging pipeline -- cannot re-select a reference tile.". Added `NoUnflaggedTilesError`.
+* Calvin: Fix: When no unflagged tiles, mwax files will still be released (plus error is less verbose)
+* Calvin: Fix: The URL for the AWS metadata web service is now https
+* Calvin: Fix: Increased the timeout period and retries when calling the WS that gets metadata for a new obs- especially important when MRO WS is down, as there can be a delay in the streaming replication to the AWS WS, which causes premature failures
+* Calvin: Imaging now keeps and uploads only the `<obs_id>_wsclean-MFS-*.fits` images. The per-channel `<obs_id>_wsclean-000N-*.fits` files are removed after WSClean runs (only if MFS files exist).
+
 # 2.0.8 22-Sep-2026
 
 * Replaced time.sleep() with a custom function in core/timing.py that allows interruption and also decreases sleep time when running under pytest.
