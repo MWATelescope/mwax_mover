@@ -57,6 +57,11 @@ PREVIEW_MAD_TO_SIGMA = 1.4826
 PREVIEW_COLORMAP = "RdBu_r"
 PREVIEW_FIGURE_SIZE_INCHES = (14.0, 7.0)
 PREVIEW_DPI = 100
+# A panel title has the label on the first line and the numbers on the second. A long label (for example
+# a file name, when the image has no polarisation in its name) is cut to this many characters so that
+# the titles of neighbouring panels do not overlap.
+PREVIEW_PANEL_TITLE_FONT_SIZE = 10
+PREVIEW_MAX_LABEL_CHARS = 40
 
 
 @dataclass(frozen=True)
@@ -181,6 +186,24 @@ def make_norm(sigma: float, stretch: PreviewStretch) -> FuncNorm:
     return FuncNorm((forward, inverse), vmin=vmin, vmax=vmax)
 
 
+def panel_title(label: str, peak: float, sigma: float) -> str:
+    """Make the title of one panel: the label, then the peak, the noise and the dynamic range.
+
+    Args:
+        label: The name of the image (e.g. "XX"). It is cut, with an ellipsis, if it is longer than
+            PREVIEW_MAX_LABEL_CHARS.
+        peak: The highest pixel value.
+        sigma: The noise (see robust_sigma()).
+
+    Returns:
+        The title: two lines.
+    """
+    if len(label) > PREVIEW_MAX_LABEL_CHARS:
+        label = label[: PREVIEW_MAX_LABEL_CHARS - 1] + "…"
+
+    return f"{label}\npeak {peak:.3g}, sigma {sigma:.3g}, peak/sigma {peak / sigma:.0f}"
+
+
 def _read_image(label: str, fits_filename: str) -> _PreviewImage | None:
     """Read a WSClean image.
 
@@ -256,9 +279,7 @@ def make_preview_png(
 
             peak = float(np.nanmax(image.data))
             image_sigma = robust_sigma(image.data)
-            ax.set_title(
-                f"{image.label}: peak {peak:.3g}, sigma {image_sigma:.3g}, peak/sigma {peak / image_sigma:.0f}"
-            )
+            ax.set_title(panel_title(image.label, peak, image_sigma), fontsize=PREVIEW_PANEL_TITLE_FONT_SIZE)
             if has_sky:
                 ax.grid(color="gray", alpha=0.3)
                 ax.set_xlabel("Right ascension")

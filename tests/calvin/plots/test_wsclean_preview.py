@@ -10,6 +10,7 @@ from mwax_mover.calvin.plots.wsclean_preview import (
     make_norm,
     make_preview_png,
     make_wsclean_preview,
+    panel_title,
     preview_png_filename,
     robust_sigma,
 )
@@ -274,3 +275,15 @@ def test_make_wsclean_preview_makes_a_png_from_one_polarisation_if_the_other_is_
 def test_make_wsclean_preview_returns_none_without_an_image_and_does_not_raise(tmp_path):
     assert make_wsclean_preview(str(tmp_path), OBS) is None
     assert make_wsclean_preview(str(tmp_path / "does_not_exist"), OBS) is None
+
+
+def test_a_panel_title_has_the_label_on_one_line_and_the_numbers_on_the_next():
+    assert panel_title("XX", 60.62, 0.157) == "XX\npeak 60.6, sigma 0.157, peak/sigma 386"
+
+
+def test_a_long_label_is_cut_so_that_neighbouring_titles_do_not_overlap():
+    title = panel_title("1477739776_wsclean-MFS-XX-image-and-more-text-after.fits", 1.0, 0.5)
+    label = title.splitlines()[0]
+
+    assert len(label) == 40
+    assert label.endswith("…")
