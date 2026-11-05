@@ -36,6 +36,13 @@ from mwax_mover.calvin.hyperdrive import run_hyperdrive
 from mwax_mover.calvin.imaging import ImagingSettings, run_imaging_steps
 from mwax_mover.calvin.pipeline import CalvinJobType, process_solutions
 from mwax_mover.calvin.plots.index import extend_plot_index, generate_plot_index_file
+from mwax_mover.calvin.sky_model import (
+    SkyModel,
+    SkyModelError,
+    select_sky_model_for_metafits,
+    sky_model_file_problems,
+    sky_models_from_config,
+)
 from mwax_mover.calvin.wsclean import (
     ArrayImageSettings,
     WSCleanArgs,
@@ -193,6 +200,10 @@ class MWAXCalvinProcessor(MWAXDaemon):
             ""  # where does Birli write to? /data/calvin/jobs/SLURM_JOB_ID_OBSID or /tmp if the obs is small enough
         )
         self.cfg_proc_job_output_path: str = ""  # e.g. /data/calvin/jobs/SLURM_JOB_ID_OBSID
+        # All the sky models in the config. The next three are those of the sky model chosen for the current
+        # observation (set in start() once the metafits is read; cfg_hyperdrive_num_sources starts as the
+        # [hyperdrive] num_sources default).
+        self.cfg_hyperdrive_sky_models: list[SkyModel] = []
         self.cfg_hyperdrive_source_list_filename: str = ""
         self.cfg_hyperdrive_source_list_type: str = ""
         self.cfg_hyperdrive_num_sources: int = 0
@@ -330,6 +341,16 @@ class MWAXCalvinProcessor(MWAXDaemon):
             # Create metafits context
             logger.info(f"Reading metafits file {self.metafits_filename} with mwalib...")
             self.metafits_context = MetafitsContext(self.metafits_filename, None)
+
+            # Choose the sky model from the centre channel. Do it now, before the download, so that a job that
+            # has no sky model fails straight away.
+            try:
+                self.select_sky_model()
+            except SkyModelError as sky_model_error:
+                error_message = f"Could not choose a sky model: {sky_model_error}"
+                logger.error(error_message)
+                self.fail_job_downloading(error_message)
+                self.stop(exit_code=EXIT_FAILURE)
 
             # The WSClean image size and pixel scale depend on the array configuration and the frequency.
             # If this fails, imaging is skipped later: the calibration itself does not need it.
@@ -702,6 +723,24 @@ class MWAXCalvinProcessor(MWAXDaemon):
             if len(hostnames) > 0:
                 # We still have some hosts remaining, wait before trying again
                 sleep(RETRY_WAIT_SECONDS)
+
+    def select_sky_model(self) -> SkyModel:
+        """Choose the hyperdrive sky model for this observation, from its centre channel.
+
+        Sets cfg_hyperdrive_source_list_filename, cfg_hyperdrive_source_list_type and
+        cfg_hyperdrive_num_sources to those of the chosen model.
+
+        Returns:
+            The chosen sky model.
+
+        Raises:
+            SkyModelError: If no sky model is for the observation's centre channel.
+        """
+        sky_model = select_sky_model_for_metafits(self.cfg_hyperdrive_sky_models, self.metafits_context)
+        self.cfg_hyperdrive_source_list_filename = sky_model.filename
+        self.cfg_hyperdrive_source_list_type = sky_model.source_list_type
+        self.cfg_hyperdrive_num_sources = sky_model.num_sources
+        return sky_model
 
     def fail_job_downloading(self, error_message: str):
         """Mark a job as failed during the download phase.
@@ -1460,24 +1499,18 @@ class MWAXCalvinProcessor(MWAXDaemon):
                 )
             )
 
-            self.cfg_hyperdrive_source_list_filename = read_config(
-                config,
-                SECTION_HYPERDRIVE,
-                "source_list_filename",
-            )
-
-            if not os.path.exists(self.cfg_hyperdrive_source_list_filename):
-                logger.error(
-                    f"source_list_filename location  {self.cfg_hyperdrive_source_list_filename} does not"
-                    " exist. Quitting."
-                )
+            # The sky models: one [skymodel:<name>] section each, chosen for each observation by its centre
+            # channel (see calvin.sky_model). The model for the current observation is chosen in start().
+            try:
+                self.cfg_hyperdrive_sky_models = sky_models_from_config(config)
+            except SkyModelError as sky_model_error:
+                logger.error(f"Sky model config is not valid: {sky_model_error} Quitting.")
                 sys.exit(EXIT_FAILURE)
 
-            self.cfg_hyperdrive_source_list_type = read_config(
-                config,
-                SECTION_HYPERDRIVE,
-                "source_list_type",
-            )
+            sky_model_problems = sky_model_file_problems(self.cfg_hyperdrive_sky_models)
+            if sky_model_problems:
+                logger.error("\n".join(sky_model_problems) + " Quitting.")
+                sys.exit(EXIT_FAILURE)
 
             # hyperdrive timeout
             self.cfg_hyperdrive_timeout = int(

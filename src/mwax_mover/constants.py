@@ -70,6 +70,19 @@ SECTION_CALVIN = "calvin"
 SECTION_BIRLI = "birli"
 SECTION_HYPERDRIVE = "hyperdrive"
 SECTION_WSCLEAN = "wsclean"
+
+# The hyperdrive sky models are in sections named [skymodel:<name>] (see calvin.sky_model). Each has these keys.
+# The range is of the observation's centre coarse channel (both ends included, and each is optional).
+SECTION_SKY_MODEL_PREFIX = "skymodel:"
+SKY_MODEL_KEY_MIN_CHANNEL = "min_centre_channel"
+SKY_MODEL_KEY_MAX_CHANNEL = "max_centre_channel"
+SKY_MODEL_KEY_FILENAME = "source_list_filename"
+SKY_MODEL_KEY_TYPE = "source_list_type"
+SKY_MODEL_KEY_NUM_SOURCES = "num_sources"
+
+# The values hyperdrive accepts for --source-list-type (from mwa_hyperdrive src/srclist/mod.rs:
+# SourceListType, including its aliases). The aliases "skymodel" and "bbs" are the DP3 type.
+SKY_MODEL_TYPES = ("hyperdrive", "fits", "rts", "woden", "ao", "dp3", "skymodel", "bbs")
 SECTION_GIANT_SQUID = "giant squid"
 SECTION_PLOTS_UPLOAD = "plots upload"
 SECTION_DOWNLOADING = "downloading"

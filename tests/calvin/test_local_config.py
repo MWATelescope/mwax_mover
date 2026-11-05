@@ -8,7 +8,15 @@ import tests_common
 
 from mwax_mover.calvin.local_config import LocalConfigError, LocalSettings, check_files_exist, read_local_config
 
-SECTIONS_THE_TOOL_NEEDS = ["birli", "hyperdrive", "wsclean", "processing", "downloading"]
+SECTIONS_THE_TOOL_NEEDS = [
+    "birli",
+    "hyperdrive",
+    "skymodel:low",
+    "skymodel:high",
+    "wsclean",
+    "processing",
+    "downloading",
+]
 
 
 def _cfg_text() -> str:
@@ -55,7 +63,13 @@ def test_reads_a_real_processor_config(tmp_path):
     assert settings.hyperdrive_timeout == 7200
     assert settings.hyperdrive_apply_timeout == 7200
     assert settings.hyperdrive_num_sources == 99
-    assert settings.hyperdrive_source_list_type == "rts"
+    assert [m.name for m in settings.sky_models] == ["low", "high"]
+    assert settings.sky_models[0].source_list_type == "rts"
+    assert settings.sky_models[0].num_sources == 99  # the [hyperdrive] default
+    assert (settings.sky_models[0].min_channel, settings.sky_models[0].max_channel) == (None, 168)
+    assert settings.sky_models[1].source_list_type == "fits"
+    assert settings.sky_models[1].num_sources == 50  # its own
+    assert (settings.sky_models[1].min_channel, settings.sky_models[1].max_channel) == (169, None)
     assert "--uvw-min 50m" in settings.hyperdrive_extra_args
     assert settings.phase_fit_niter == 3
     assert settings.gains_cut_off_max == 100.0
@@ -127,7 +141,8 @@ def test_gains_cut_off_max_is_optional(tmp_path):
         ("birli", "binary_path"),
         ("birli", "freq_res_khz"),
         ("hyperdrive", "apply_timeout"),
-        ("hyperdrive", "source_list_filename"),
+        ("skymodel:low", "source_list_filename"),
+        ("skymodel:high", "source_list_type"),
         ("processing", "phase_fit_niter"),
         ("processing", "tile_bad_channel_fraction"),
         ("wsclean", "timeout"),
@@ -195,7 +210,7 @@ def test_a_missing_file_is_an_error(tmp_path):
 def test_check_files_exist(tmp_path):
     settings = read_local_config(_write(tmp_path, _cfg_text()))
     bin_dir = tests_common.get_test_bin_dir("mwax_calvin_processor")
-    for name in ("birli", "hyperdrive", "wsclean", "srclist.txt"):
+    for name in ("birli", "hyperdrive", "wsclean", "srclist.txt", "srclist_high.fits"):
         assert os.path.exists(os.path.join(bin_dir, name))
 
     assert check_files_exist(settings, need_birli=True) == []
@@ -206,6 +221,10 @@ def test_check_files_exist(tmp_path):
     assert len(problems) == 2
     assert any("[birli] binary_path" in p for p in problems)
     assert any("[wsclean] binary_path" in p for p in problems)
+
+    # Every sky model file is checked, not only the one that an observation would use
+    os.remove(os.path.join(bin_dir, "srclist_high.fits"))
+    assert any("[skymodel:high] source_list_filename" in p for p in check_files_exist(settings, need_birli=True))
 
     # Birli is not needed if the download already has measurement sets
     assert [p for p in check_files_exist(settings, need_birli=False) if "birli" in p] == []
@@ -232,4 +251,32 @@ def test_a_bad_image_size_is_named_in_the_error_from_the_config_file(tmp_path, k
     text = re.sub(rf"(?m)^{key}=.*$", f"{key}={value}", _cfg_text())
 
     with pytest.raises(LocalConfigError, match=re.escape("[wsclean]") + ".*" + key):
+        read_local_config(_write(tmp_path, text))
+
+
+def test_the_old_source_list_keys_in_hyperdrive_are_an_error(tmp_path):
+    text = _cfg_text().replace("num_sources=99\n", "num_sources=99\nsource_list_filename=/x/old.txt\n", 1)
+
+    with pytest.raises(LocalConfigError, match=r"\[hyperdrive\] source_list_filename is not used any more"):
+        read_local_config(_write(tmp_path, text))
+
+
+def test_a_config_with_no_sky_model_is_an_error(tmp_path):
+    text = _only_sections(_cfg_text(), ["birli", "hyperdrive", "wsclean", "processing", "downloading"])
+
+    with pytest.raises(LocalConfigError, match="no .skymodel:<name>. section"):
+        read_local_config(_write(tmp_path, text))
+
+
+def test_a_gap_between_the_sky_model_ranges_is_an_error(tmp_path):
+    text = _cfg_text().replace("min_centre_channel=169", "min_centre_channel=171", 1)
+
+    with pytest.raises(LocalConfigError, match="no sky model for channels 169 to 170"):
+        read_local_config(_write(tmp_path, text))
+
+
+def test_overlapping_sky_model_ranges_are_an_error(tmp_path):
+    text = _cfg_text().replace("min_centre_channel=169", "min_centre_channel=168", 1)
+
+    with pytest.raises(LocalConfigError, match="overlap"):
         read_local_config(_write(tmp_path, text))

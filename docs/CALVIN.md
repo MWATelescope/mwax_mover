@@ -42,6 +42,33 @@ Calvin calibration solution processing starts with the calibrator observation ta
   - Writes out one UVFITS file per contiguous coarse channel band
 - For each UVFITS file (one for non-picket fence observations, >1 otherwise), `hyperdrive` (see: [hyperdrive github](https://github.com/MWATelescope/mwa_hyperdrive)) is run to generate calibration solution fits files.
 
+### Sky models
+
+`hyperdrive` needs a sky model (source list). Calvin chooses it for each observation from the observation's **centre coarse channel** (the centre frequency in the metafits divided by 1.28 MHz, rounded half up: the same channel that is used for the WSClean pixel scale). The sky models are in the `calvin_processor.cfg`, one `[skymodel:<name>]` section each:
+
+```
+[hyperdrive]
+num_sources=1000                # default for every model
+
+[skymodel:low]
+max_centre_channel=168          # channel 168 and below
+source_list_filename=/software/srclists/GGSM_updated.fits
+source_list_type=fits
+
+[skymodel:high]
+min_centre_channel=169          # channel 169 and above
+source_list_filename=/software/srclists/<file>.fits
+source_list_type=fits
+num_sources=2000                # optional: this model's own number of sources
+```
+
+- `source_list_type` is required. It is the `hyperdrive --source-list-type` (`hyperdrive`, `fits`, `rts`, `woden`, `ao` or `dp3`; `skymodel` and `bbs` also mean `dp3`).
+- The channel range includes both ends. Each end is optional: no `min_centre_channel` means "from the lowest channel" and no `max_centre_channel` means "up to the highest channel".
+- The ranges must cover every channel exactly once. An overlap, a gap, a lowest range with a minimum, or a highest range with a maximum is an error. A single section with neither covers all channels.
+- The processor checks all of this, and that every file exists, when it starts. It quits if anything is wrong. `[hyperdrive] source_list_filename` and `source_list_type` are no longer used: a config that still has them is an error.
+- The chosen model is logged. Its file name goes in the `source_list` column of `calibration_fits` and its number of sources in `num_sources`. The model is chosen before the data is downloaded, so an observation that has no model fails straight away.
+- `mwax_dl_conv_cal_image` uses the same sections and the same choice.
+
 For each observation, Calvin reads:
 
 - One or more `hyperdrive` calibration solutions FITS files (one per contiguous frequency band).
@@ -263,7 +290,7 @@ The phase and gain fits in the database can then be used by MWA ASVO (or researc
 ### The `calibration_fits` table
 
 One row per Calvin run (per observation), keyed by `fitid` (a Unix-timestamp-derived integer, generated when the row is inserted). Holds provenance and the parameters used by Calvin for this run, but none of the per-tile numbers themselves:
-- source_list: Skymodel used by `hyperdrive`
+- source_list: File name of the skymodel used by `hyperdrive` (the one chosen for this observation's centre channel, see [Sky models](#sky-models))
 - num_sources: Number of sources from the skymodel for `hyperdrive` to use 
 - calibration_command: Dump of the command line args used in this `hyperdrive` run
 - (phase) fit_niter: Number of times the phase fit should be iterated

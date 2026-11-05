@@ -19,6 +19,8 @@ from mwax_mover.constants import NO_UNFLAGGED_TILES_REMAINING_MSG
 from mwax_mover.mwa_asvo.signed_url import DownloadError
 
 OBS = 1234567890
+# The centre coarse channel of the mocked metafits. The test config has its low sky model up to channel 168.
+CENTRE_CHANNEL = 133
 VIS_URL = f"https://projects.pawsey.org.au/mwa-asvo/{OBS}_1021186_vis.tar?Signature=abc&Expires=1"
 MS_URL = f"https://projects.pawsey.org.au/mwa-asvo/{OBS}_1021186_ms.tar?Signature=abc&Expires=1"
 MODULE = "mwax_mover.cli.mwax_dl_conv_cal_image"
@@ -90,7 +92,7 @@ def patched_pipeline(base_dir: Path, work_dir: Path | None = None, kind: str = "
         download=MagicMock(side_effect=fake_download),
         extract=MagicMock(side_effect=fake_extract),
         metafits=MagicMock(side_effect=fake_metafits),
-        context=MagicMock(return_value=SimpleNamespace(oversampled=False)),
+        context=MagicMock(return_value=SimpleNamespace(oversampled=False, centre_freq_hz=1_280_000 * CENTRE_CHANNEL)),
         estimate=MagicMock(return_value=10 * 10**9),
         birli=MagicMock(side_effect=fake_birli),
         hyperdrive=MagicMock(return_value=(True, "hyperdrive command")),
@@ -802,3 +804,39 @@ def test_the_image_sizes_from_the_config_go_to_the_image_settings(cfg_filename, 
         assert _run(cfg_filename, base) == tool.EXIT_OK
 
     assert mocks.image_settings.call_args.kwargs == {"compact_image_size": 1024, "extended_image_size": 2048}
+
+
+def _context_at(channel: int) -> MagicMock:
+    return MagicMock(return_value=SimpleNamespace(oversampled=False, centre_freq_hz=1_280_000 * channel))
+
+
+def test_hyperdrive_gets_the_low_sky_model_for_a_low_centre_channel(cfg_filename, tmp_path):
+    base = tmp_path / "job"
+    bin_dir = tests_common.get_test_bin_dir("mwax_calvin_processor")
+
+    with patched_pipeline(base, context=_context_at(168)) as mocks:
+        assert _run(cfg_filename, base) == tool.EXIT_OK
+
+    # source list file, type and number of sources
+    assert mocks.hyperdrive.call_args.args[6:9] == (os.path.join(bin_dir, "srclist.txt"), "rts", 99)
+
+
+def test_hyperdrive_gets_the_high_sky_model_for_a_high_centre_channel(cfg_filename, tmp_path):
+    base = tmp_path / "job"
+    bin_dir = tests_common.get_test_bin_dir("mwax_calvin_processor")
+
+    with patched_pipeline(base, context=_context_at(169)) as mocks:
+        assert _run(cfg_filename, base) == tool.EXIT_OK
+
+    assert mocks.hyperdrive.call_args.args[6:9] == (os.path.join(bin_dir, "srclist_high.fits"), "fits", 50)
+
+
+def test_a_missing_sky_model_file_stops_the_tool_before_it_starts(cfg_filename, tmp_path, capsys):
+    base = tmp_path / "job"
+    os.remove(os.path.join(tests_common.get_test_bin_dir("mwax_calvin_processor"), "srclist_high.fits"))
+
+    with patched_pipeline(base) as mocks:
+        assert _run(cfg_filename, base) == tool.EXIT_USAGE
+
+    assert "[skymodel:high] source_list_filename" in capsys.readouterr().err
+    mocks.download.assert_not_called()

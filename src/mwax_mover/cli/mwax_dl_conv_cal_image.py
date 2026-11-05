@@ -34,6 +34,7 @@ from mwax_mover.calvin.hyperfits_solution_group import NoUnflaggedTilesError
 from mwax_mover.calvin.imaging import ImagingSettings, run_imaging_steps
 from mwax_mover.calvin.local_config import LocalConfigError, LocalSettings, check_files_exist, read_local_config
 from mwax_mover.calvin.pipeline import process_solutions_files
+from mwax_mover.calvin.sky_model import SkyModelError, select_sky_model_for_metafits
 from mwax_mover.calvin.wsclean import array_image_settings_from_metafits, calculate_abs_mem_gib
 from mwax_mover.constants import (
     CALIBRATED_MS_SUFFIX,
@@ -550,6 +551,11 @@ def _step_hyperdrive(job: Job) -> tuple[str, str]:
     assert job.metafits_context is not None
     settings = job.settings
 
+    try:
+        sky_model = select_sky_model_for_metafits(settings.sky_models, job.metafits_context)
+    except SkyModelError as e:
+        return STATUS_FAILED, f"Could not choose a sky model: {e}"
+
     ok, _calibration_command = run_hyperdrive(
         _find_measurement_sets(job.dirs.work),
         job.metafits_filename,
@@ -557,9 +563,9 @@ def _step_hyperdrive(job: Job) -> tuple[str, str]:
         job.dirs.output,
         job.info.obs_id,
         settings.hyperdrive_binary_path,
-        settings.hyperdrive_source_list_filename,
-        settings.hyperdrive_source_list_type,
-        settings.hyperdrive_num_sources,
+        sky_model.filename,
+        sky_model.source_list_type,
+        sky_model.num_sources,
         settings.hyperdrive_timeout,
         settings.hyperdrive_extra_args,
         settings.birli_edge_width_khz * 1000,

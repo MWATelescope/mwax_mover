@@ -87,6 +87,7 @@ STUB_BIN_FILENAMES = (
     "hyperdrive",
     "wsclean",
     "srclist.txt",
+    "srclist_high.fits",
 )
 
 
