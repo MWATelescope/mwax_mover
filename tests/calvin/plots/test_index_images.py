@@ -48,7 +48,7 @@ def test_populate_index_json_entry_names_the_polarisation_of_wsclean_outputs(tmp
 
 
 def test_the_preview_png_description_says_it_has_xx_and_yy():
-    description = get_file_description("1234567890_wsclean-MFS-XX-YY-image.png")
+    description = get_file_description("1234567890_wsclean-MFS-image.png")
 
     assert description.startswith("PNG preview of the main WSClean images (XX and YY side by side")
 

@@ -131,7 +131,7 @@ def test_remove_wsclean_dropped_outputs_removes_dirty_psf_and_model_and_keeps_im
     kept = [f"{OBS_ID}_wsclean-MFS-{pol}-{kind}.fits" for pol in ("XX", "YY") for kind in ("image", "residual")]
     dropped = [f"{OBS_ID}_wsclean-MFS-{pol}-{kind}.fits" for pol in ("XX", "YY") for kind in ("dirty", "psf", "model")]
     dropped.append(f"{OBS_ID}_wsclean-0000-XX-dirty.fits")
-    others = [f"{OBS_ID}_wsclean_readme.txt", f"{OBS_ID}_wsclean-MFS-XX-YY-image.png", f"{OBS_ID}_ch75.ms.fits"]
+    others = [f"{OBS_ID}_wsclean_readme.txt", f"{OBS_ID}_wsclean-MFS-image.png", f"{OBS_ID}_ch75.ms.fits"]
     _touch(tmp_path, kept + dropped + others)
 
     assert remove_wsclean_dropped_outputs(str(tmp_path), OBS_ID) == len(dropped)

@@ -322,7 +322,7 @@ def preview_png_filename(job_output_path: str, obs_id: int, mfs: bool) -> str:
         mfs: True if the images are the MFS images.
 
     Returns:
-        The full path: ``<obs_id>_wsclean-MFS-XX-YY-image.png``, or without ``-MFS`` if not ``mfs``.
+        The full path: ``<obs_id>_wsclean-MFS-image.png``, or without ``-MFS`` if not ``mfs``.
     """
     name_part = WSCLEAN_MFS_NAME_PART if mfs else ""
     return os.path.join(job_output_path, f"{obs_id}{WSCLEAN_NAME_SUFFIX}{name_part}{WSCLEAN_PREVIEW_PNG_SUFFIX}")

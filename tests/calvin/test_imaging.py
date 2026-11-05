@@ -158,7 +158,7 @@ def test_a_failed_preview_does_not_fail_the_imaging(tmp_path):
     ):
         assert _run(work, out, _settings()) is True
 
-    assert not (out / f"{OBS}_wsclean-MFS-XX-YY-image.png").exists()
+    assert not (out / f"{OBS}_wsclean-MFS-image.png").exists()
 
 
 def _write_pol_images(out: Path, *names: str) -> None:
@@ -179,7 +179,7 @@ def test_makes_the_real_preview_png_after_wsclean_works(tmp_path):
     ):
         assert _run(work, out, _settings()) is True
 
-    assert os.path.exists(out / f"{OBS}_wsclean-MFS-XX-YY-image.png")
+    assert os.path.exists(out / f"{OBS}_wsclean-MFS-image.png")
 
 
 def test_per_channel_images_are_removed_and_mfs_images_are_kept(tmp_path):
@@ -201,7 +201,7 @@ def test_per_channel_images_are_removed_and_mfs_images_are_kept(tmp_path):
     assert (out / f"{OBS}_wsclean-MFS-XX-image.fits").exists()
     assert (out / f"{OBS}_wsclean-MFS-YY-image.fits").exists()
     assert (out / f"{OBS}_wsclean-MFS-XX-residual.fits").exists()
-    assert (out / f"{OBS}_wsclean-MFS-XX-YY-image.png").exists()
+    assert (out / f"{OBS}_wsclean-MFS-image.png").exists()
     assert not (out / f"{OBS}_wsclean-0000-XX-image.fits").exists()
     assert not (out / f"{OBS}_wsclean-0003-YY-residual.fits").exists()
 

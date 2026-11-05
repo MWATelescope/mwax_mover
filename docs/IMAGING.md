@@ -562,9 +562,9 @@ Status: **implemented** (branch `imaging_update`, version 2.1.3).
   `remove_wsclean_channel_images()` removes the per-channel files (as before), and the new
   `remove_wsclean_dropped_outputs()` removes the dirty, PSF and model files
   (`WSCLEAN_DROPPED_OUTPUT_SUFFIXES`). A failed WSClean run removes nothing.
-- **Preview PNG:** one PNG, `<obs>_wsclean-MFS-XX-YY-image.png` (without `-MFS` if WSClean made one output
+- **Preview PNG:** one PNG, `<obs>_wsclean-MFS-image.png` (without `-MFS` if WSClean made one output
   channel), with XX on the left and YY on the right and one colour scale. It replaces the Stokes I PNG of
-  Phase 7. The colour scale shows the calibration quality, not the peak:
+  Phase 7 and **has the same file name**, so that the production system still finds it. The colour scale shows the calibration quality, not the peak:
   - The noise (sigma) is the median absolute deviation times 1.4826, from the pixels of both images
     together. Sources and artifacts have little effect on it.
   - The scale goes from -5 sigma to +50 sigma (`PREVIEW_NEGATIVE_LIMIT_SIGMA`, `PREVIEW_LIMIT_SIGMA`).

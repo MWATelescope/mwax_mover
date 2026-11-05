@@ -274,11 +274,12 @@ WSCLEAN_MIN_ABS_MEM_GIB = 1
 # WSCLEAN_POLARIZATION_NAMES, the multi-frequency synthesis (MFS) image if WSClean made several output
 # channels, otherwise the single image. The names are
 # <obs_id>_wsclean-MFS-<POL>-image.fits and <obs_id>_wsclean-<POL>-image.fits. The preview is one PNG
-# with the polarisations side by side, and it is named by WSCLEAN_PREVIEW_PNG_SUFFIX (after "-MFS" if
-# the images are the MFS ones).
+# with the polarisations side by side. Its name is the same as it was when the image was Stokes I, so that
+# the production system (which looks for <obs_id>_wsclean-MFS-image.png) still finds it:
+# <obs_id>_wsclean-MFS-image.png, or <obs_id>_wsclean-image.png if the images are not the MFS ones.
 WSCLEAN_MFS_NAME_PART = "-MFS"
 WSCLEAN_IMAGE_FILE_SUFFIX = "-image.fits"
-WSCLEAN_PREVIEW_PNG_SUFFIX = "-XX-YY-image.png"
+WSCLEAN_PREVIEW_PNG_SUFFIX = "-image.png"
 WSCLEAN_PNG_GLOB = "*" + WSCLEAN_NAME_SUFFIX + "-*.png"
 
 # WSClean outputs that are removed after the run. Only the restored images and the residual images

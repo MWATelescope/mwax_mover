@@ -245,8 +245,8 @@ def test_make_preview_png_with_no_images_makes_no_png(tmp_path):
 
 
 def test_preview_png_filename_with_and_without_mfs():
-    assert preview_png_filename("/out", OBS, True) == f"/out/{OBS}_wsclean-MFS-XX-YY-image.png"
-    assert preview_png_filename("/out", OBS, False) == f"/out/{OBS}_wsclean-XX-YY-image.png"
+    assert preview_png_filename("/out", OBS, True) == f"/out/{OBS}_wsclean-MFS-image.png"
+    assert preview_png_filename("/out", OBS, False) == f"/out/{OBS}_wsclean-image.png"
 
 
 def test_make_wsclean_preview_writes_one_png_for_the_mfs_images(tmp_path):
@@ -255,21 +255,21 @@ def test_make_wsclean_preview_writes_one_png_for_the_mfs_images(tmp_path):
 
     png = make_wsclean_preview(str(tmp_path), OBS)
 
-    assert png == str(tmp_path / f"{OBS}_wsclean-MFS-XX-YY-image.png")
-    assert (tmp_path / f"{OBS}_wsclean-MFS-XX-YY-image.png").exists()
+    assert png == str(tmp_path / f"{OBS}_wsclean-MFS-image.png")
+    assert (tmp_path / f"{OBS}_wsclean-MFS-image.png").exists()
 
 
 def test_make_wsclean_preview_names_the_png_without_mfs_for_single_channel_images(tmp_path):
     for pol in ("XX", "YY"):
         _write_wsclean_fits(tmp_path / f"{OBS}_wsclean-{pol}-image.fits")
 
-    assert make_wsclean_preview(str(tmp_path), OBS) == str(tmp_path / f"{OBS}_wsclean-XX-YY-image.png")
+    assert make_wsclean_preview(str(tmp_path), OBS) == str(tmp_path / f"{OBS}_wsclean-image.png")
 
 
 def test_make_wsclean_preview_makes_a_png_from_one_polarisation_if_the_other_is_missing(tmp_path):
     _write_wsclean_fits(tmp_path / f"{OBS}_wsclean-MFS-XX-image.fits")
 
-    assert make_wsclean_preview(str(tmp_path), OBS) == str(tmp_path / f"{OBS}_wsclean-MFS-XX-YY-image.png")
+    assert make_wsclean_preview(str(tmp_path), OBS) == str(tmp_path / f"{OBS}_wsclean-MFS-image.png")
 
 
 def test_make_wsclean_preview_returns_none_without_an_image_and_does_not_raise(tmp_path):

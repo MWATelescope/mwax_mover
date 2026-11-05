@@ -506,7 +506,7 @@ def test_run_imaging_makes_the_preview_png_after_wsclean_works(tmp_path):
     ):
         assert mcal.run_imaging() is True
 
-    assert os.path.exists(os.path.join(mcal.cfg_proc_job_output_path, "1234567890_wsclean-MFS-XX-YY-image.png"))
+    assert os.path.exists(os.path.join(mcal.cfg_proc_job_output_path, "1234567890_wsclean-MFS-image.png"))
 
 
 def test_run_imaging_still_works_if_the_preview_png_cannot_be_made(tmp_path):
