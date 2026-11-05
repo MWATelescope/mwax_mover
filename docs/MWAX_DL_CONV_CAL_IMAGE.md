@@ -6,8 +6,8 @@ A command line tool that downloads, converts, calibrates and images one MWA
 ASVO observation on one machine, for testing. It takes an MWA ASVO signed URL
 and a directory. It downloads and extracts the data, runs Birli (unless the
 download already has CASA measurement sets), hyperdrive di-calibrate, the
-solution processing, hyperdrive solutions-apply and WSClean, and makes a PNG
-preview of the image. The name is the steps: **d**own**l**oad, **conv**ert,
+solution processing, hyperdrive solutions-apply and WSClean (XX and YY), and makes a
+PNG preview of the images (XX and YY side by side). The name is the steps: **d**own**l**oad, **conv**ert,
 **cal**ibrate, **image**.
 
 ---
@@ -111,8 +111,10 @@ DIR/
 | `birli` | Make the measurement sets. Skipped for `_ms.tar`. | `run_birli()` |
 | `hyperdrive` | di-calibrate each measurement set. | `run_hyperdrive()` |
 | `solutions` | Flag, plot, write the stats and the modified solutions. No database. | `process_solutions_files()` |
-| `imaging` | solutions-apply, WSClean and the PNG. | `run_imaging_steps()` |
+| `imaging` | solutions-apply, WSClean (XX and YY) and the PNG. | `run_imaging_steps()` |
 | cleanup | Remove the measurement sets that are not needed. Only after a full run. The calibrated sets stay with `--keep-calibrated` or `--reuse-calibrated`. | |
+
+To try other colour scales on the images of a finished run, use `mwax_wsclean_preview` (see `docs/IMAGING.md` Phase 10).
 
 The run stops at the first failed step, and everything stays on disk. A failed
 PNG is a warning, not a failure. If `solutions` finds no unflagged tiles, that

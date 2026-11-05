@@ -1,7 +1,8 @@
 """The imaging steps of a calibration job, shared by mwax_calvin_processor and mwax_dl_conv_cal_image.
 
 run_imaging_steps() applies the calibration solutions to each band's measurement set (hyperdrive
-solutions-apply), images the calibrated bands with WSClean, and makes a PNG preview of the main image.
+solutions-apply), images the calibrated bands with WSClean (XX and YY), and makes a PNG preview of the main
+images.
 It uses explicit settings (ImagingSettings), not the state of a class, so that both callers run the
 same code.
 """
@@ -15,7 +16,12 @@ from dataclasses import dataclass
 
 from mwax_mover.calvin.hyperdrive_apply import run_solutions_apply
 from mwax_mover.calvin.plots.wsclean_preview import make_wsclean_preview
-from mwax_mover.calvin.wsclean import WSCleanArgs, remove_wsclean_channel_images, run_wsclean
+from mwax_mover.calvin.wsclean import (
+    WSCleanArgs,
+    remove_wsclean_channel_images,
+    remove_wsclean_dropped_outputs,
+    run_wsclean,
+)
 from mwax_mover.constants import CALIBRATED_MS_SUFFIX, EXT_MS, WSCLEAN_MIN_ABS_MEM_GIB, WSCLEAN_NAME_SUFFIX
 
 logger = logging.getLogger(__name__)
@@ -145,12 +151,15 @@ def run_imaging_steps(
             logger.warning(f"{obs_id}: WSClean failed.")
             return False
 
-        # A PNG of the main image, published with the FITS files. If it fails the images are still published.
+        # A PNG of the main XX and YY images, published with the FITS files. If it fails the images are
+        # still published.
         task("Preview PNG")
         make_wsclean_preview(job_output_path, obs_id)
 
-        # Only the MFS FITS files are kept and published, not the per-channel ones.
+        # Only the MFS FITS files are kept and published, not the per-channel ones. Of those, only the
+        # restored and residual images are kept, not the dirty, PSF and model images.
         remove_wsclean_channel_images(job_output_path, obs_id)
+        remove_wsclean_dropped_outputs(job_output_path, obs_id)
     except Exception:  # noqa: BLE001 - imaging is optional; one failure here must not stop the caller
         logger.exception(f"{obs_id}: unhandled exception while imaging.")
         return False

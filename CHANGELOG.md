@@ -2,7 +2,10 @@
 
 # 2.1.3 5-Nov-2026
 
-* TODO: Calvin: generate png images for XX and YY
+* Calvin: WSClean now makes XX and YY images (`-pol xx,yy`, cleaned independently) instead of Stokes I. Only the restored and residual images are kept (the dirty, PSF and model images are removed).
+* Calvin: WSClean images are zoomed in 2x (the base pixel scales are halved, the image sizes are the same).
+* Calvin: the PNG preview is now one PNG with XX and YY side by side, with one colour scale based on the noise, so that calibration errors are easier to see. It has the peak, noise and dynamic range of each image.
+* New command `mwax_wsclean_preview` to remake the PNG from WSClean FITS files, with the colour scale as options.
 
 # 2.1.2 26-Oct-2026
 

@@ -3,7 +3,12 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from mwax_mover.calvin.wsclean import WSCleanArgs, remove_wsclean_channel_images, run_wsclean
+from mwax_mover.calvin.wsclean import (
+    WSCleanArgs,
+    remove_wsclean_channel_images,
+    remove_wsclean_dropped_outputs,
+    run_wsclean,
+)
 
 OBS_ID = 1234567890
 
@@ -120,3 +125,31 @@ def test_remove_wsclean_channel_images_does_not_raise_if_a_file_cannot_be_remove
 
     with patch("mwax_mover.calvin.wsclean.os.remove", side_effect=PermissionError("nope")):
         assert remove_wsclean_channel_images(str(tmp_path), OBS_ID) == 0
+
+
+def test_remove_wsclean_dropped_outputs_removes_dirty_psf_and_model_and_keeps_image_and_residual(tmp_path):
+    kept = [f"{OBS_ID}_wsclean-MFS-{pol}-{kind}.fits" for pol in ("XX", "YY") for kind in ("image", "residual")]
+    dropped = [f"{OBS_ID}_wsclean-MFS-{pol}-{kind}.fits" for pol in ("XX", "YY") for kind in ("dirty", "psf", "model")]
+    dropped.append(f"{OBS_ID}_wsclean-0000-XX-dirty.fits")
+    others = [f"{OBS_ID}_wsclean_readme.txt", f"{OBS_ID}_wsclean-MFS-XX-YY-image.png", f"{OBS_ID}_ch75.ms.fits"]
+    _touch(tmp_path, kept + dropped + others)
+
+    assert remove_wsclean_dropped_outputs(str(tmp_path), OBS_ID) == len(dropped)
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted(kept + others)
+
+
+def test_remove_wsclean_dropped_outputs_only_touches_this_obs(tmp_path):
+    other = "999_wsclean-MFS-XX-dirty.fits"
+    _touch(tmp_path, [f"{OBS_ID}_wsclean-MFS-XX-dirty.fits", other])
+
+    assert remove_wsclean_dropped_outputs(str(tmp_path), OBS_ID) == 1
+
+    assert (tmp_path / other).exists()
+
+
+def test_remove_wsclean_dropped_outputs_does_not_raise_if_a_file_cannot_be_removed(tmp_path):
+    _touch(tmp_path, [f"{OBS_ID}_wsclean-MFS-XX-dirty.fits"])
+
+    with patch("mwax_mover.calvin.wsclean.os.remove", side_effect=PermissionError("nope")):
+        assert remove_wsclean_dropped_outputs(str(tmp_path), OBS_ID) == 0

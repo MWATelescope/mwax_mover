@@ -494,7 +494,10 @@ def _write_small_wsclean_fits(path: str) -> None:
 def test_run_imaging_makes_the_preview_png_after_wsclean_works(tmp_path):
     mcal = _processor_with_ms_dirs(tmp_path, ["1234567890_ch75.ms"])
     os.makedirs(mcal.cfg_proc_job_output_path)
-    _write_small_wsclean_fits(os.path.join(mcal.cfg_proc_job_output_path, "1234567890_wsclean-MFS-image.fits"))
+    for pol in ("XX", "YY"):
+        _write_small_wsclean_fits(
+            os.path.join(mcal.cfg_proc_job_output_path, f"1234567890_wsclean-MFS-{pol}-image.fits")
+        )
     cal_ms = [str(tmp_path / "1234567890_ch75_cal.ms")]
 
     with (
@@ -503,7 +506,7 @@ def test_run_imaging_makes_the_preview_png_after_wsclean_works(tmp_path):
     ):
         assert mcal.run_imaging() is True
 
-    assert os.path.exists(os.path.join(mcal.cfg_proc_job_output_path, "1234567890_wsclean-MFS-image.png"))
+    assert os.path.exists(os.path.join(mcal.cfg_proc_job_output_path, "1234567890_wsclean-MFS-XX-YY-image.png"))
 
 
 def test_run_imaging_still_works_if_the_preview_png_cannot_be_made(tmp_path):

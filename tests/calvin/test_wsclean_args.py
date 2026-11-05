@@ -83,7 +83,7 @@ def test_to_cmdline_args_with_all_the_calvin_options():
         "-gridder",
         "wgridder",
         "-pol",
-        "i",
+        "xx,yy",
         "-multiscale",
         "-join-channels",
         "-log-time",
@@ -116,11 +116,11 @@ def test_to_cmdline_args_does_not_set_the_thread_count():
     assert "-j" not in wsclean_args_from_config(_config()).to_cmdline_args()
 
 
-def test_to_cmdline_args_uses_the_wgridder_and_stokes_i_and_no_idg_options():
+def test_to_cmdline_args_uses_the_wgridder_and_xx_yy_and_no_idg_options():
     command_line = wsclean_args_from_config(_config()).to_cmdline_args()
 
     assert command_line[command_line.index("-gridder") + 1] == "wgridder"
-    assert command_line[command_line.index("-pol") + 1] == "i"
+    assert command_line[command_line.index("-pol") + 1] == "xx,yy"
     for not_used in ("-idg-mode", "-use-idg", "-link-polarizations", "-join-polarizations"):
         assert not_used not in command_line
 
@@ -140,7 +140,7 @@ def test_wsclean_args_from_config_reads_the_values_and_fixes_gridder_and_pol():
     assert args.multiscale is False
     assert args.verbose is False
     assert args.gridder == "wgridder"
-    assert args.polarizations == "i"
+    assert args.polarizations == "xx,yy"
     assert args.name == ""
     assert args.abs_mem_gib is None
     assert args.size is None

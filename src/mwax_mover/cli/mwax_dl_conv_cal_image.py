@@ -39,8 +39,9 @@ from mwax_mover.constants import (
     CALIBRATED_MS_SUFFIX,
     EXT_MS,
     LOG_FORMAT,
-    WSCLEAN_MFS_IMAGE_SUFFIX,
+    WSCLEAN_MFS_NAME_PART,
     WSCLEAN_NAME_SUFFIX,
+    WSCLEAN_PREVIEW_PNG_SUFFIX,
 )
 from mwax_mover.core.command import write_readme_file
 from mwax_mover.core.env import is_ram_backed
@@ -662,7 +663,7 @@ def _step_imaging(job: Job) -> tuple[str, str]:
         return STATUS_FAILED, "Imaging failed. See the log and the readmes in the output directory."
 
     image_prefix = os.path.join(job.dirs.output, f"{job.info.obs_id}{WSCLEAN_NAME_SUFFIX}")
-    png = f"{image_prefix}{WSCLEAN_MFS_IMAGE_SUFFIX.removesuffix('.fits')}.png"
+    png = f"{image_prefix}{WSCLEAN_MFS_NAME_PART}{WSCLEAN_PREVIEW_PNG_SUFFIX}"
     if not os.path.exists(png):
         pngs = glob.glob(f"{image_prefix}-*.png")
         png = pngs[0] if pngs else ""

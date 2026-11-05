@@ -26,6 +26,7 @@ from mwax_mover.constants import (
     WSCLEAN_CHANNEL_FITS_GLOB,
     WSCLEAN_COMPACT_BASE_SCALE,
     WSCLEAN_COMPACT_IMAGE_SIZE,
+    WSCLEAN_DROPPED_OUTPUT_SUFFIXES,
     WSCLEAN_EXTENDED_BASE_SCALE,
     WSCLEAN_EXTENDED_IMAGE_SIZE,
     WSCLEAN_EXTENDED_MIN_TILES,
@@ -232,8 +233,8 @@ def wsclean_args_from_config(config: ConfigParser) -> WSCleanArgs:
 
     Every option read here is a required key, except parallel_gridding, parallel_reordering and
     parallel_deconvolution. Those are optional: an option that is not in the config is not given to
-    WSClean. The gridder (w-gridder) and the polarization
-    (-pol i, Stokes I) are always used, so they are not in the config. The image size and pixel
+    WSClean. The gridder (w-gridder) and the polarizations
+    (-pol xx,yy, cleaned independently) are always used, so they are not in the config. The image size and pixel
     scale are not in the config either: they are worked out for each observation (see
     array_image_settings()). WSClean uses all CPU cores unless told otherwise, and calvin does
     not tell it.
@@ -586,4 +587,34 @@ def remove_wsclean_channel_images(job_output_path: str, obs_id: int) -> int:
             logger.warning(f"{obs_id}: could not remove per-channel WSClean file {filename}: {e!s}")
 
     logger.info(f"{obs_id}: removed {removed} per-channel WSClean FITS file(s).")
+    return removed
+
+
+def remove_wsclean_dropped_outputs(job_output_path: str, obs_id: int) -> int:
+    """Remove the WSClean outputs that are not published: the dirty, PSF and model images.
+
+    Only the restored images and the residual images are kept, for XX and YY. This removes the files that
+    end in one of WSCLEAN_DROPPED_OUTPUT_SUFFIXES (for the MFS images and for each output channel).
+    Failures are logged, not raised: imaging must not fail the job.
+
+    Args:
+        job_output_path: The job's output directory.
+        obs_id: The observation ID.
+
+    Returns:
+        The number of files removed.
+    """
+    prefix = os.path.join(glob.escape(job_output_path), f"{obs_id}{WSCLEAN_NAME_SUFFIX}")
+
+    removed = 0
+    for filename in sorted(glob.glob(prefix + "-*.fits")):
+        if not filename.endswith(WSCLEAN_DROPPED_OUTPUT_SUFFIXES):
+            continue
+        try:
+            os.remove(filename)
+            removed += 1
+        except OSError as e:
+            logger.warning(f"{obs_id}: could not remove WSClean file {filename}: {e!s}")
+
+    logger.info(f"{obs_id}: removed {removed} WSClean dirty, PSF and model FITS file(s).")
     return removed

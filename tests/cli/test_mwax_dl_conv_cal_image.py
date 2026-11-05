@@ -83,7 +83,7 @@ def patched_pipeline(base_dir: Path, work_dir: Path | None = None, kind: str = "
 
     def fake_imaging(obs_id, metafits, out, work_path, settings, on_task=None):
         (Path(work_path) / f"{OBS}_cal.ms").mkdir()
-        (Path(out) / f"{OBS}_wsclean-MFS-image.png").write_text("png")
+        (Path(out) / f"{OBS}_wsclean-MFS-XX-YY-image.png").write_text("png")
         return True
 
     mocks = Mocks(
@@ -218,7 +218,7 @@ def test_a_vis_tar_run_does_every_step_in_order_and_cleans_up(cfg_filename, tmp_
     # The tar is deleted after extraction, the measurement sets at the end, the outputs stay
     assert not (base / "input" / f"{OBS}_1021186_vis.tar").exists()
     assert list((base / "work").glob("*.ms")) == []
-    assert (base / "output" / f"{OBS}_wsclean-MFS-image.png").exists()
+    assert (base / "output" / f"{OBS}_wsclean-MFS-XX-YY-image.png").exists()
     assert (base / "input" / f"{OBS}_metafits.fits").exists()
     assert (base / tool.LOG_FILENAME).parent.exists()
 

@@ -36,6 +36,23 @@ def test_populate_index_json_entry_accepts_wsclean_outputs(tmp_path, suffix, des
     assert entry["description"].startswith(description)
 
 
+@pytest.mark.parametrize("pol", ["XX", "YY"])
+@pytest.mark.parametrize(("kind", "description"), [("image", "restored image"), ("residual", "residual image")])
+def test_populate_index_json_entry_names_the_polarisation_of_wsclean_outputs(tmp_path, pol, kind, description):
+    for name_part in ("-MFS", ""):
+        filename = f"1234567890_wsclean{name_part}-{pol}-{kind}.fits"
+        entry = populate_index_json_entry(_touch(tmp_path, filename), FIT_ID, URL)
+
+        assert entry is not None
+        assert entry["description"].startswith(f"WSClean {description} for polarisation {pol}")
+
+
+def test_the_preview_png_description_says_it_has_xx_and_yy():
+    description = get_file_description("1234567890_wsclean-MFS-XX-YY-image.png")
+
+    assert description.startswith("PNG preview of the main WSClean images (XX and YY side by side")
+
+
 def test_populate_index_json_entry_still_ignores_other_fits(tmp_path):
     assert populate_index_json_entry(_touch(tmp_path, "1234567890_metafits.fits"), FIT_ID, URL) is None
     assert (
