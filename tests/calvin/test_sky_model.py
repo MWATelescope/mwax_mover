@@ -2,6 +2,7 @@
 
 import os
 from configparser import ConfigParser
+from pathlib import Path
 
 import mwalib
 import pytest
@@ -305,3 +306,25 @@ def test_no_problems_if_all_the_files_exist(tmp_path):
     path.write_text("x")
 
     assert sky_model_file_problems([SkyModel("all", str(path), "fits", 10)]) == []
+
+
+# ---------------------------------------------------------------------------
+# the config files in the repo
+# ---------------------------------------------------------------------------
+
+REPO_CFG_DIR = Path(__file__).resolve().parents[2] / "cfg"
+
+
+@pytest.mark.parametrize("cfg_name", ["calvin_processor.cfg", "calvin_processor_test.cfg"])
+def test_the_cfg_files_in_the_repo_have_a_low_and_a_high_sky_model(cfg_name):
+    config = ConfigParser()
+    assert config.read(REPO_CFG_DIR / cfg_name) == [str(REPO_CFG_DIR / cfg_name)]
+
+    low, high = sky_models_from_config(config)
+
+    assert (os.path.basename(low.filename), low.source_list_type) == ("GGSM_updated.fits", "fits")
+    assert (low.min_channel, low.max_channel) == (None, 168)
+    assert (os.path.basename(high.filename), high.source_list_type) == ("Total-300MHz-skymodel.fits", "fits")
+    assert (high.min_channel, high.max_channel) == (169, None)
+    assert os.path.dirname(low.filename) == os.path.dirname(high.filename)
+    assert low.num_sources == high.num_sources == 1000

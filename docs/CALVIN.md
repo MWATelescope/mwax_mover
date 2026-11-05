@@ -57,7 +57,7 @@ source_list_type=fits
 
 [skymodel:high]
 min_centre_channel=169          # channel 169 and above
-source_list_filename=/software/srclists/<file>.fits
+source_list_filename=/software/srclists/Total-300MHz-skymodel.fits
 source_list_type=fits
 num_sources=2000                # optional: this model's own number of sources
 ```
