@@ -24,6 +24,7 @@ from mwax_mover.constants import (
     SOLUTIONS_ORIGINAL_FITS_SUFFIX,
     WSCLEAN_FITS_GLOB,
     WSCLEAN_PNG_GLOB,
+    WSCLEAN_POLARIZATION_NAMES,
     WSCLEAN_README_SUFFIX,
 )
 from mwax_mover.filesystem.files import get_png_dimensions
@@ -75,10 +76,13 @@ def get_file_description(filename: str) -> str:
     elif filename.endswith(SOLUTIONS_APPLY_README_SUFFIX):
         desc = "Full log output of the Hyperdrive solutions-apply run"
     elif fnmatch.fnmatch(os.path.basename(filename), WSCLEAN_PNG_GLOB):
-        desc = "PNG preview of the main WSClean image"
+        desc = "PNG preview of the main WSClean images (XX and YY side by side, with one colour scale)"
     elif fnmatch.fnmatch(os.path.basename(filename), WSCLEAN_FITS_GLOB):
         suffix = next((end for end in WSCLEAN_OUTPUT_DESCRIPTIONS if filename.endswith(end)), None)
         desc = WSCLEAN_OUTPUT_DESCRIPTIONS[suffix] if suffix else WSCLEAN_OTHER_OUTPUT_DESCRIPTION
+        pol = next((name for name in WSCLEAN_POLARIZATION_NAMES if f"-{name}-" in os.path.basename(filename)), None)
+        if pol:
+            desc = f"{desc} for polarisation {pol}"
     elif "birli_readme.txt" in filename:
         desc = "Full log output of the Birli run"
     elif "hyperdrive_readme.txt" in filename:

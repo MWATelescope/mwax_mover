@@ -70,6 +70,19 @@ SECTION_CALVIN = "calvin"
 SECTION_BIRLI = "birli"
 SECTION_HYPERDRIVE = "hyperdrive"
 SECTION_WSCLEAN = "wsclean"
+
+# The hyperdrive sky models are in sections named [skymodel:<name>] (see calvin.sky_model). Each has these keys.
+# The range is of the observation's centre coarse channel (both ends included, and each is optional).
+SECTION_SKY_MODEL_PREFIX = "skymodel:"
+SKY_MODEL_KEY_MIN_CHANNEL = "min_centre_channel"
+SKY_MODEL_KEY_MAX_CHANNEL = "max_centre_channel"
+SKY_MODEL_KEY_FILENAME = "source_list_filename"
+SKY_MODEL_KEY_TYPE = "source_list_type"
+SKY_MODEL_KEY_NUM_SOURCES = "num_sources"
+
+# The values hyperdrive accepts for --source-list-type (from mwa_hyperdrive src/srclist/mod.rs:
+# SourceListType, including its aliases). The aliases "skymodel" and "bbs" are the DP3 type.
+SKY_MODEL_TYPES = ("hyperdrive", "fits", "rts", "woden", "ao", "dp3", "skymodel", "bbs")
 SECTION_GIANT_SQUID = "giant squid"
 SECTION_PLOTS_UPLOAD = "plots upload"
 SECTION_DOWNLOADING = "downloading"
@@ -228,9 +241,15 @@ WSCLEAN_CHANNEL_FITS_GLOB = "-[0-9][0-9][0-9][0-9]-*.fits"
 WSCLEAN_MFS_FITS_GLOB = "-MFS-*.fits"
 
 # WSClean options that calvin always uses (see calvin.wsclean.WSCleanArgs).
-# The gridder is the w-gridder, and the image is Stokes I.
+# The gridder is the w-gridder, and the images are the instrumental polarisations XX and YY
+# (not Stokes I). WSClean puts the polarisation in each output name, e.g.
+# <obs_id>_wsclean-MFS-XX-image.fits.
 WSCLEAN_GRIDDER = "wgridder"
-WSCLEAN_POLARIZATIONS = "i"
+WSCLEAN_POLARIZATIONS = "xx,yy"
+
+# The polarisations of the WSClean images, as they appear (upper case) in the output file names.
+# The order is the order of the panels in the preview PNG.
+WSCLEAN_POLARIZATION_NAMES = ("XX", "YY")
 
 # The image size and pixel scale are worked out for each observation from the array
 # configuration and the centre frequency (see calvin.wsclean.array_image_settings()).
@@ -239,17 +258,24 @@ WSCLEAN_EXTENDED_MIN_TILES = 184
 
 # Otherwise it is "compact" if its longest baseline is no more than the configured
 # [wsclean] compact_array_baseline_max_length, and "extended" if it is longer.
-# The pixel scale in degrees is the base scale divided by the centre coarse channel number.
+# The pixel scale is the base scale (in degrees) divided by the centre coarse channel number.
 # The image sizes in pixels are the required [wsclean] config keys compact_image_size and
 # extended_image_size. The values here are the defaults for a caller that does not give them
 # (array_image_settings()), and are the values in the cfg files.
-WSCLEAN_COMPACT_BASE_SCALE = 1.2
+#
+# The base scales (in degrees) are one third of the first values (1.2 and 0.6): the images are
+# zoomed in by 3x. The image sizes in pixels are unchanged, so the field of view is one third as
+# wide as at first (about 2.8 degrees at centre channel 145 with the default sizes).
+WSCLEAN_COMPACT_BASE_SCALE = 0.4
 WSCLEAN_COMPACT_IMAGE_SIZE = 1024
-WSCLEAN_EXTENDED_BASE_SCALE = 0.6
+WSCLEAN_EXTENDED_BASE_SCALE = 0.2
 WSCLEAN_EXTENDED_IMAGE_SIZE = 2048
 
-# Number of decimal places in the -scale value given to WSClean (in degrees).
-WSCLEAN_SCALE_DECIMALS = 7
+# The -scale value given to WSClean is in arcseconds, with a unit (e.g. "10.827asec"), and has this
+# number of decimal places.
+WSCLEAN_SCALE_UNIT = "asec"
+WSCLEAN_SCALE_DECIMALS = 3
+ARCSEC_PER_DEGREE = 3600
 
 # Width in Hz of an MWA coarse channel. The coarse channel (receiver channel) number is the
 # centre frequency divided by this.
@@ -260,12 +286,22 @@ MWA_COARSE_CHANNEL_WIDTH_HZ = 1_280_000
 # temp working path, so a very large observation can leave nothing for WSClean.
 WSCLEAN_MIN_ABS_MEM_GIB = 1
 
-# The WSClean image that the preview PNG is made from: the multi-frequency synthesis
-# (MFS) image if WSClean made several output channels, otherwise the single image.
-# Both are Stokes I (calvin does not set -pol). The PNG has the same name as the FITS file.
-WSCLEAN_MFS_IMAGE_SUFFIX = "-MFS-image.fits"
-WSCLEAN_IMAGE_SUFFIX = "-image.fits"
+# The WSClean images that the preview PNG is made from: for each polarisation in
+# WSCLEAN_POLARIZATION_NAMES, the multi-frequency synthesis (MFS) image if WSClean made several output
+# channels, otherwise the single image. The names are
+# <obs_id>_wsclean-MFS-<POL>-image.fits and <obs_id>_wsclean-<POL>-image.fits. The preview is one PNG
+# with the polarisations side by side. Its name is the same as it was when the image was Stokes I, so that
+# the production system (which looks for <obs_id>_wsclean-MFS-image.png) still finds it:
+# <obs_id>_wsclean-MFS-image.png, or <obs_id>_wsclean-image.png if the images are not the MFS ones.
+WSCLEAN_MFS_NAME_PART = "-MFS"
+WSCLEAN_IMAGE_FILE_SUFFIX = "-image.fits"
+WSCLEAN_PREVIEW_PNG_SUFFIX = "-image.png"
 WSCLEAN_PNG_GLOB = "*" + WSCLEAN_NAME_SUFFIX + "-*.png"
+
+# WSClean outputs that are removed after the run. Only the restored images and the residual images
+# are kept and published, for both polarisations. (The per-channel files are removed too: see
+# WSCLEAN_CHANNEL_FITS_GLOB.)
+WSCLEAN_DROPPED_OUTPUT_SUFFIXES = ("-dirty.fits", "-psf.fits", "-model.fits")
 
 # Readme written by calvin.wsclean.run_wsclean (prefixed with the obs ID).
 WSCLEAN_README_SUFFIX = "_wsclean_readme.txt"

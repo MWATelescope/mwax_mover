@@ -531,8 +531,7 @@ Status: **implemented.** The defaults are from a colleague's WSClean script.
     (from all the tile positions, flagged or not, in 3D) is no more than
     `compact_array_baseline_max_length`, and "extended" if it is longer.
   - Compact: `-size N N` with N from `compact_image_size`, scale = 1.2 / centre channel. Extended:
-    `-size N N` with N from `extended_image_size`, scale = 0.6 / centre channel. The scale is in degrees with 7 decimal places (the script cuts the
-    string to 8 characters, which gives 7 decimals, but truncates where this rounds).
+    `-size N N` with N from `extended_image_size`, scale = 0.6 / centre channel (the first values, in degrees; see Phase 10 for the current ones). Phase 10 gives the scale in arcseconds with a unit.
   - The tile limit and the base scales are constants in `constants.py` (`WSCLEAN_EXTENDED_MIN_TILES`,
     `WSCLEAN_COMPACT_BASE_SCALE`, ...). The baseline limit and the two image sizes are config. All three
     are required keys (when imaging is on). `WSCLEAN_COMPACT_IMAGE_SIZE` and `WSCLEAN_EXTENDED_IMAGE_SIZE` in
@@ -545,6 +544,48 @@ Status: **implemented.** The defaults are from a colleague's WSClean script.
   `-multiscale` on an 8000 x 8000 image may need longer. Measure it first.
 - **Check on a calvin host:** that the installed WSClean accepts `-gridder wgridder`, `-minuv-l`,
   `-nmiter` and `-multiscale-gain`, and the run time and memory of an extended-array observation.
+
+## Phase 10: XX and YY images, zoomed in, and a PNG that shows the calibration quality
+
+Status: **implemented** (branch `imaging_update`, version 2.1.3).
+
+- **Polarizations:** `-pol xx,yy` (`WSCLEAN_POLARIZATIONS`), not Stokes I. XX and YY are cleaned
+  independently: no `-join-polarizations` and no `-link-polarizations`. WSClean puts the polarization in
+  the output names: `<obs>_wsclean-MFS-XX-image.fits` and `<obs>_wsclean-MFS-YY-image.fits` (and
+  `-0000-XX-image.fits` for each output channel). Run time is about double. `[wsclean] timeout` and the
+  Slurm wall times are **not changed**: measure first.
+- **Zoom 3x:** `WSCLEAN_COMPACT_BASE_SCALE` is 0.4 (was 1.2) and `WSCLEAN_EXTENDED_BASE_SCALE` is 0.2 (was
+  0.6), in degrees. The image sizes in pixels are the same, so the field of view is one third as wide as at
+  first (about 2.8 degrees at centre channel 145 with the default sizes). The image is centred on the
+  measurement set phase centre. (The first change in this phase was 2x; it was then changed to 3x.)
+- **Scale unit:** the `-scale` value has a unit: arcseconds, `base scale * ARCSEC_PER_DEGREE / centre channel`
+  with `WSCLEAN_SCALE_DECIMALS` (3) decimal places and `WSCLEAN_SCALE_UNIT` (`asec`), e.g. `10.827asec` for a
+  compact array at centre channel 133. It is rounded (the earlier degree value had 7 decimal places).
+- **Files kept:** only the restored image and the residual image, for XX and YY. After the PNG is made,
+  `remove_wsclean_channel_images()` removes the per-channel files (as before), and the new
+  `remove_wsclean_dropped_outputs()` removes the dirty, PSF and model files
+  (`WSCLEAN_DROPPED_OUTPUT_SUFFIXES`). A failed WSClean run removes nothing.
+- **Preview PNG:** one PNG, `<obs>_wsclean-MFS-image.png` (without `-MFS` if WSClean made one output
+  channel), with XX on the left and YY on the right and one colour scale. It replaces the Stokes I PNG of
+  Phase 7 and **has the same file name**, so that the production system still finds it. The colour scale shows the calibration quality, not the peak:
+  - The noise (sigma) is the median absolute deviation times 1.4826, from the pixels of both images
+    together. Sources and artifacts have little effect on it.
+  - The scale goes from -5 sigma to +50 sigma (`PREVIEW_NEGATIVE_LIMIT_SIGMA`, `PREVIEW_LIMIT_SIGMA`).
+    Zero is the middle of a diverging colour map (`RdBu_r`). Within 1 sigma of zero the scale is linear
+    (`PREVIEW_LINEAR_SIGMA`), and beyond that it is asinh. Values outside the range get the end colours
+    (the colour bar has arrows).
+  - The title of each panel has the peak, sigma and peak / sigma (a dynamic range). The colour bar no
+    longer shows the true peak: the peak is in the title.
+  - Ghost sources, rings and stripes around bright sources, and a high noise floor are the signs of poor
+    calibration. Negative rings are easy to see because zero is white.
+  - All these values are first guesses. Try others without running WSClean again:
+    `mwax_wsclean_preview -o out.png XX.fits YY.fits --limit-sigma 20 --linear-sigma 2`.
+    Then change the `PREVIEW_*` constants in `calvin/plots/wsclean_preview.py`.
+- **Index:** the descriptions of the FITS files say `for polarisation XX` or `YY`. The PNG description says it
+  has XX and YY side by side.
+- **Not verified (no WSClean in the development environment):** the output file names above, and that the
+  installed WSClean accepts `-pol xx,yy` with `-join-channels`, `-multiscale` and `-gridder wgridder`.
+  Check on a calvin host with one real observation.
 
 ---
 
@@ -564,4 +605,8 @@ Status: **implemented.** The defaults are from a colleague's WSClean script.
 
 - Replaced (approved, D2): 3 `_uvfits_num_coarse_chans` tests in
   `tests/calvin/test_hyperdrive.py`.
+- Phase 10 (approved): the `-pol` and scale assertions in `tests/calvin/test_wsclean_args.py` and
+  `tests/calvin/test_wsclean_image_settings.py`, the Stokes I file names in `tests/calvin/test_imaging.py`,
+  `tests/calvin/plots/test_wsclean_preview.py`, `tests/cli/test_mwax_calvin_processor.py` and
+  `tests/cli/test_mwax_dl_conv_cal_image.py`.
 - All other changes add new tests only.

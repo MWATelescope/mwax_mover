@@ -3,7 +3,7 @@
 read_local_config() reads only the keys the tool uses (see docs/MWAX_DL_CONV_CAL_IMAGE.md). The database,
 upload, giant-squid and MWAX sections of the file are not read, so a file that still has them is fine. It
 does not read the job paths either: the tool works in the directories it is given. check_files_exist()
-checks the programs and the source list that the settings point to.
+checks the programs and the sky model files that the settings point to.
 """
 
 import configparser
@@ -12,6 +12,7 @@ import os
 from configparser import ConfigParser
 from dataclasses import dataclass
 
+from mwax_mover.calvin.sky_model import SkyModel, SkyModelError, sky_model_file_problems, sky_models_from_config
 from mwax_mover.calvin.wsclean import (
     WSCleanArgs,
     read_compact_array_baseline_max_length,
@@ -53,8 +54,7 @@ class LocalSettings:
     hyperdrive_timeout: int
     hyperdrive_apply_timeout: int
     hyperdrive_num_sources: int
-    hyperdrive_source_list_filename: str
-    hyperdrive_source_list_type: str
+    sky_models: list[SkyModel]
     hyperdrive_extra_args: str
 
     phase_fit_niter: int
@@ -191,6 +191,15 @@ def read_local_config(config_filename: str) -> LocalSettings:
     except ValueError as error:
         raise LocalConfigError(f"[{SECTION_WSCLEAN}]: {error}") from error
 
+    try:
+        sky_models = sky_models_from_config(config)
+    except SkyModelError as error:
+        raise LocalConfigError(str(error)) from error
+    except configparser.NoSectionError as error:
+        raise LocalConfigError(f"The config has no [{error.section}] section.") from error
+    except configparser.NoOptionError as error:
+        raise LocalConfigError(f"The config has no [{error.section}] {error.option}.") from error
+
     return LocalSettings(
         birli_binary_path=_read(config, SECTION_BIRLI, "binary_path"),
         birli_timeout=_read_as(config, SECTION_BIRLI, "timeout", int),
@@ -202,8 +211,7 @@ def read_local_config(config_filename: str) -> LocalSettings:
         hyperdrive_timeout=_read_as(config, SECTION_HYPERDRIVE, "timeout", int),
         hyperdrive_apply_timeout=_read_as(config, SECTION_HYPERDRIVE, "apply_timeout", int),
         hyperdrive_num_sources=_read_as(config, SECTION_HYPERDRIVE, "num_sources", int),
-        hyperdrive_source_list_filename=_read(config, SECTION_HYPERDRIVE, "source_list_filename"),
-        hyperdrive_source_list_type=_read(config, SECTION_HYPERDRIVE, "source_list_type"),
+        sky_models=sky_models,
         hyperdrive_extra_args=_read(config, SECTION_HYPERDRIVE, "extra_args"),
         phase_fit_niter=_read_as(config, SECTION_PROCESSING, "phase_fit_niter", int),
         phase_outlier_nstd=_read_as(config, SECTION_PROCESSING, "phase_outlier_nstd", float),
@@ -234,7 +242,7 @@ def read_local_config(config_filename: str) -> LocalSettings:
 
 
 def check_files_exist(settings: LocalSettings, need_birli: bool) -> list[str]:
-    """Check that the programs and the source list in the settings exist.
+    """Check that the programs and the sky model files in the settings exist.
 
     Args:
         settings: The settings.
@@ -245,10 +253,10 @@ def check_files_exist(settings: LocalSettings, need_birli: bool) -> list[str]:
     """
     to_check = [
         ("[hyperdrive] binary_path", settings.hyperdrive_binary_path),
-        ("[hyperdrive] source_list_filename", settings.hyperdrive_source_list_filename),
         ("[wsclean] binary_path", settings.wsclean_binary_path),
     ]
     if need_birli:
         to_check.insert(0, ("[birli] binary_path", settings.birli_binary_path))
 
-    return [f"{key} {path} does not exist." for key, path in to_check if not os.path.exists(path)]
+    problems = [f"{key} {path} does not exist." for key, path in to_check if not os.path.exists(path)]
+    return problems + sky_model_file_problems(settings.sky_models)

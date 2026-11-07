@@ -6,8 +6,8 @@ A command line tool that downloads, converts, calibrates and images one MWA
 ASVO observation on one machine, for testing. It takes an MWA ASVO signed URL
 and a directory. It downloads and extracts the data, runs Birli (unless the
 download already has CASA measurement sets), hyperdrive di-calibrate, the
-solution processing, hyperdrive solutions-apply and WSClean, and makes a PNG
-preview of the image. The name is the steps: **d**own**l**oad, **conv**ert,
+solution processing, hyperdrive solutions-apply and WSClean (XX and YY), and makes a
+PNG preview of the images (XX and YY side by side). The name is the steps: **d**own**l**oad, **conv**ert,
 **cal**ibrate, **image**.
 
 ---
@@ -111,8 +111,10 @@ DIR/
 | `birli` | Make the measurement sets. Skipped for `_ms.tar`. | `run_birli()` |
 | `hyperdrive` | di-calibrate each measurement set. | `run_hyperdrive()` |
 | `solutions` | Flag, plot, write the stats and the modified solutions. No database. | `process_solutions_files()` |
-| `imaging` | solutions-apply, WSClean and the PNG. | `run_imaging_steps()` |
+| `imaging` | solutions-apply, WSClean (XX and YY) and the PNG. | `run_imaging_steps()` |
 | cleanup | Remove the measurement sets that are not needed. Only after a full run. The calibrated sets stay with `--keep-calibrated` or `--reuse-calibrated`. | |
+
+To try other colour scales on the images of a finished run, use `mwax_wsclean_preview` (see `docs/IMAGING.md` Phase 10).
 
 The run stops at the first failed step, and everything stays on disk. A failed
 PNG is a warning, not a failure. If `solutions` finds no unflagged tiles, that
@@ -184,7 +186,8 @@ sections can stay in the file.
 | Section | Keys used |
 | --- | --- |
 | `[birli]` | `binary_path`, `timeout`, `max_mem_gib`, `freq_res_khz`, `int_time_res_sec`, `edge_width_khz` |
-| `[hyperdrive]` | `binary_path`, `timeout`, `apply_timeout`, `num_sources`, `source_list_filename`, `source_list_type`, `extra_args` |
+| `[hyperdrive]` | `binary_path`, `timeout`, `apply_timeout`, `num_sources`, `extra_args` |
+| `[skymodel:<name>]` | `min_centre_channel`, `max_centre_channel`, `source_list_filename`, `source_list_type`, `num_sources` (optional). The sky model is chosen from the observation's centre channel, as in the processor: see `docs/CALVIN.md` "Sky models". |
 | `[processing]` | `phase_fit_niter`, `phase_outlier_nstd`, `gains_cut_off_max` (optional), `gain_outlier_poly_degree`, `gain_outlier_mad_residual_threshold`, `gain_outlier_modify_gains`, `gain_outlier_plot_n_tiles_per_page`, `tile_bad_channel_fraction`, `keep_completed_visibility_files` |
 | `[wsclean]` | `binary_path`, `timeout`, `max_mem_gib`, `compact_array_baseline_max_length`, `compact_image_size`, `extended_image_size` and the option keys (not `size` and `scale`: those are worked out for each observation, see `docs/IMAGING.md` Phase 9) |
 | `[downloading]` | `download_retries`, `download_retry_wait`, `mwaasvo_download_obs_timeout`, `https_proxy` and `no_proxy` (optional) |

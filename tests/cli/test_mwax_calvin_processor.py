@@ -3,13 +3,17 @@ import json
 import logging
 import os
 import signal
+from types import SimpleNamespace
+from typing import cast
 from unittest.mock import patch
 
 import numpy as np
 import pytest
 import tests_common
+from mwalib import MetafitsContext
 from tests_fakedb import FakeMWAXDBHandler
 
+from mwax_mover.calvin.sky_model import SkyModel, SkyModelError
 from mwax_mover.calvin.wsclean import WSCleanArgs
 from mwax_mover.cli.mwax_calvin_processor import CalvinJobType, MWAXCalvinProcessor
 from mwax_mover.constants import EXIT_FAILURE
@@ -67,8 +71,9 @@ def test_mwax_calvin_processor():
 
     assert mcal.cfg_proc_job_input_path == os.path.join(base_dir, "data/calvin/in_jobs")
     assert mcal.cfg_proc_job_output_path == os.path.join(base_dir, "data/calvin/out_jobs")
-    assert mcal.cfg_hyperdrive_source_list_filename == os.path.join(bin_dir, "srclist.txt")
-    assert mcal.cfg_hyperdrive_source_list_type == "rts"
+    assert [m.name for m in mcal.cfg_hyperdrive_sky_models] == ["low", "high"]
+    assert mcal.cfg_hyperdrive_sky_models[0].filename == os.path.join(bin_dir, "srclist.txt")
+    assert mcal.cfg_hyperdrive_sky_models[0].source_list_type == "rts"
     assert mcal.cfg_hyperdrive_binary_path == os.path.join(bin_dir, "hyperdrive")
     assert mcal.cfg_hyperdrive_timeout == 7200
     assert mcal.cfg_birli_binary_path == os.path.join(bin_dir, "birli")
@@ -135,8 +140,9 @@ def test_mwax_calvin_processor_no_gains_cutoff():
 
     assert mcal.cfg_proc_job_input_path == os.path.join(base_dir, "data/calvin/in_jobs")
     assert mcal.cfg_proc_job_output_path == os.path.join(base_dir, "data/calvin/out_jobs")
-    assert mcal.cfg_hyperdrive_source_list_filename == os.path.join(bin_dir, "srclist.txt")
-    assert mcal.cfg_hyperdrive_source_list_type == "rts"
+    assert [m.name for m in mcal.cfg_hyperdrive_sky_models] == ["low", "high"]
+    assert mcal.cfg_hyperdrive_sky_models[0].filename == os.path.join(bin_dir, "srclist.txt")
+    assert mcal.cfg_hyperdrive_sky_models[0].source_list_type == "rts"
     assert mcal.cfg_hyperdrive_binary_path == os.path.join(bin_dir, "hyperdrive")
     assert mcal.cfg_hyperdrive_timeout == 7200
     assert mcal.cfg_birli_binary_path == os.path.join(bin_dir, "birli")
@@ -494,7 +500,10 @@ def _write_small_wsclean_fits(path: str) -> None:
 def test_run_imaging_makes_the_preview_png_after_wsclean_works(tmp_path):
     mcal = _processor_with_ms_dirs(tmp_path, ["1234567890_ch75.ms"])
     os.makedirs(mcal.cfg_proc_job_output_path)
-    _write_small_wsclean_fits(os.path.join(mcal.cfg_proc_job_output_path, "1234567890_wsclean-MFS-image.fits"))
+    for pol in ("XX", "YY"):
+        _write_small_wsclean_fits(
+            os.path.join(mcal.cfg_proc_job_output_path, f"1234567890_wsclean-MFS-{pol}-image.fits")
+        )
     cal_ms = [str(tmp_path / "1234567890_ch75_cal.ms")]
 
     with (
@@ -549,3 +558,94 @@ def test_publish_images_includes_the_preview_png(tmp_path):
     with open(images_dir / "index.json", encoding="UTF-8") as f:
         index = json.load(f)
     assert "1234567890_wsclean-MFS-image.png" in [e["filename"] for e in index["files"]]
+
+
+def _processor_with_sky_models(centre_channel):
+    """A processor with the test config's sky models, and a metafits at the given centre channel."""
+    mcal = MWAXCalvinProcessor()
+    mcal.cfg_hyperdrive_num_sources = 99
+    mcal.cfg_hyperdrive_sky_models = [
+        SkyModel("low", "/srclists/low.txt", "rts", 99, None, 168),
+        SkyModel("high", "/srclists/high.fits", "fits", 50, 169, None),
+    ]
+    mcal.metafits_context = cast("MetafitsContext", SimpleNamespace(centre_freq_hz=1_280_000 * centre_channel))
+    return mcal
+
+
+def test_select_sky_model_uses_the_low_model_up_to_channel_168():
+    mcal = _processor_with_sky_models(168)
+
+    assert mcal.select_sky_model().name == "low"
+    assert mcal.cfg_hyperdrive_source_list_filename == "/srclists/low.txt"
+    assert mcal.cfg_hyperdrive_source_list_type == "rts"
+    assert mcal.cfg_hyperdrive_num_sources == 99
+
+
+def test_select_sky_model_uses_the_high_model_from_channel_169():
+    mcal = _processor_with_sky_models(169)
+
+    assert mcal.select_sky_model().name == "high"
+    assert mcal.cfg_hyperdrive_source_list_filename == "/srclists/high.fits"
+    assert mcal.cfg_hyperdrive_source_list_type == "fits"
+    assert mcal.cfg_hyperdrive_num_sources == 50
+
+
+def test_select_sky_model_raises_if_there_is_no_model_for_the_channel():
+    mcal = _processor_with_sky_models(169)
+    mcal.cfg_hyperdrive_sky_models = mcal.cfg_hyperdrive_sky_models[:1]  # only the low model
+
+    with pytest.raises(SkyModelError):
+        mcal.select_sky_model()
+
+
+def _initialise_with_config_text(tmp_path, text):
+    """Run initialise() on the test config after changing its text."""
+    tests_common.setup_test_directories("mwax_calvin_processor")
+    config_filename = tmp_path / "calvin_processor.cfg"
+    config_filename.write_text(text, encoding="UTF-8")
+    mcal = MWAXCalvinProcessor()
+    mcal.hostname = "calvin99"
+    mcal.initialise(
+        str(config_filename),
+        1234567890,
+        1234,
+        None,
+        CalvinJobType.realtime,
+        "https//test.test",
+        [123],
+        FakeMWAXDBHandler(),
+    )
+
+
+def _test_config_text() -> str:
+    tests_common.setup_test_directories("mwax_calvin_processor")
+    with open(tests_common.render_test_config("mwax_calvin_processor"), encoding="UTF-8") as f:
+        return f.read()
+
+
+def test_a_gap_between_the_sky_model_ranges_stops_the_processor_at_start_up(tmp_path):
+    text = _test_config_text().replace("min_centre_channel=169", "min_centre_channel=171", 1)
+
+    with pytest.raises(SystemExit) as exit_info:
+        _initialise_with_config_text(tmp_path, text)
+
+    assert exit_info.value.code == EXIT_FAILURE
+
+
+def test_the_old_source_list_keys_stop_the_processor_at_start_up(tmp_path):
+    text = _test_config_text().replace("num_sources=99\n", "num_sources=99\nsource_list_filename=/x/old.txt\n", 1)
+
+    with pytest.raises(SystemExit) as exit_info:
+        _initialise_with_config_text(tmp_path, text)
+
+    assert exit_info.value.code == EXIT_FAILURE
+
+
+def test_a_missing_sky_model_file_stops_the_processor_at_start_up(tmp_path):
+    text = _test_config_text()
+    os.remove(os.path.join(tests_common.get_test_bin_dir("mwax_calvin_processor"), "srclist_high.fits"))
+
+    with pytest.raises(SystemExit) as exit_info:
+        _initialise_with_config_text(tmp_path, text)
+
+    assert exit_info.value.code == EXIT_FAILURE
