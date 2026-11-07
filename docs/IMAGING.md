@@ -531,8 +531,7 @@ Status: **implemented.** The defaults are from a colleague's WSClean script.
     (from all the tile positions, flagged or not, in 3D) is no more than
     `compact_array_baseline_max_length`, and "extended" if it is longer.
   - Compact: `-size N N` with N from `compact_image_size`, scale = 1.2 / centre channel. Extended:
-    `-size N N` with N from `extended_image_size`, scale = 0.6 / centre channel. The scale is in degrees with 7 decimal places (the script cuts the
-    string to 8 characters, which gives 7 decimals, but truncates where this rounds).
+    `-size N N` with N from `extended_image_size`, scale = 0.6 / centre channel (the first values, in degrees; see Phase 10 for the current ones). Phase 10 gives the scale in arcseconds with a unit.
   - The tile limit and the base scales are constants in `constants.py` (`WSCLEAN_EXTENDED_MIN_TILES`,
     `WSCLEAN_COMPACT_BASE_SCALE`, ...). The baseline limit and the two image sizes are config. All three
     are required keys (when imaging is on). `WSCLEAN_COMPACT_IMAGE_SIZE` and `WSCLEAN_EXTENDED_IMAGE_SIZE` in
@@ -555,9 +554,13 @@ Status: **implemented** (branch `imaging_update`, version 2.1.3).
   the output names: `<obs>_wsclean-MFS-XX-image.fits` and `<obs>_wsclean-MFS-YY-image.fits` (and
   `-0000-XX-image.fits` for each output channel). Run time is about double. `[wsclean] timeout` and the
   Slurm wall times are **not changed**: measure first.
-- **Zoom 2x:** `WSCLEAN_COMPACT_BASE_SCALE` is 0.6 (was 1.2) and `WSCLEAN_EXTENDED_BASE_SCALE` is 0.3 (was
-  0.6). The image sizes in pixels are the same, so the field of view is half as wide (about 4.2 degrees at
-  centre channel 145). The image is centred on the measurement set phase centre.
+- **Zoom 3x:** `WSCLEAN_COMPACT_BASE_SCALE` is 0.4 (was 1.2) and `WSCLEAN_EXTENDED_BASE_SCALE` is 0.2 (was
+  0.6), in degrees. The image sizes in pixels are the same, so the field of view is one third as wide as at
+  first (about 2.8 degrees at centre channel 145 with the default sizes). The image is centred on the
+  measurement set phase centre. (The first change in this phase was 2x; it was then changed to 3x.)
+- **Scale unit:** the `-scale` value has a unit: arcseconds, `base scale * ARCSEC_PER_DEGREE / centre channel`
+  with `WSCLEAN_SCALE_DECIMALS` (3) decimal places and `WSCLEAN_SCALE_UNIT` (`asec`), e.g. `10.827asec` for a
+  compact array at centre channel 133. It is rounded (the earlier degree value had 7 decimal places).
 - **Files kept:** only the restored image and the residual image, for XX and YY. After the PNG is made,
   `remove_wsclean_channel_images()` removes the per-channel files (as before), and the new
   `remove_wsclean_dropped_outputs()` removes the dirty, PSF and model files

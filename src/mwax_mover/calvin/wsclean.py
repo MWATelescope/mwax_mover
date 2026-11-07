@@ -21,6 +21,7 @@ import numpy as np
 from mwalib import MetafitsContext
 
 from mwax_mover.constants import (
+    ARCSEC_PER_DEGREE,
     MWA_COARSE_CHANNEL_WIDTH_HZ,
     SECTION_WSCLEAN,
     WSCLEAN_CHANNEL_FITS_GLOB,
@@ -36,6 +37,7 @@ from mwax_mover.constants import (
     WSCLEAN_POLARIZATIONS,
     WSCLEAN_README_SUFFIX,
     WSCLEAN_SCALE_DECIMALS,
+    WSCLEAN_SCALE_UNIT,
 )
 from mwax_mover.core.command import check_popen_finished, start_command, write_readme_file
 from mwax_mover.core.config import read_config, read_config_bool
@@ -60,7 +62,7 @@ class WSCleanArgs:
         no_update_model_required: If True, WSClean does not write the model data column.
         abs_mem_gib: Memory limit in GiB (-abs-mem).
         size: Image width and height in pixels (-size).
-        scale: Pixel scale, in degrees unless it has a unit, e.g. "0.0045113" (-scale).
+        scale: Pixel scale, in degrees unless it has a unit, e.g. "10.827asec" (-scale).
         briggs_robust: Robustness of Briggs weighting (-weight briggs <robust>).
         niter: Maximum number of clean iterations (-niter).
         nmiter: Maximum number of major iterations (-nmiter).
@@ -407,7 +409,8 @@ def array_image_settings(
       and "extended" if it is longer.
     - Compact: size compact_image_size and scale WSCLEAN_COMPACT_BASE_SCALE / centre channel.
       Extended: extended_image_size and WSCLEAN_EXTENDED_BASE_SCALE / centre channel.
-    - The scale is in degrees, with WSCLEAN_SCALE_DECIMALS decimal places.
+    - The scale is in arcseconds with the unit WSCLEAN_SCALE_UNIT and WSCLEAN_SCALE_DECIMALS decimal places,
+      e.g. "10.827asec".
 
     Args:
         num_tiles: The number of tiles.
@@ -441,7 +444,7 @@ def array_image_settings(
     return ArrayImageSettings(
         configuration=configuration,
         size=(image_size, image_size),
-        scale=f"{base_scale / centre_channel:.{WSCLEAN_SCALE_DECIMALS}f}",
+        scale=f"{base_scale * ARCSEC_PER_DEGREE / centre_channel:.{WSCLEAN_SCALE_DECIMALS}f}{WSCLEAN_SCALE_UNIT}",
         centre_channel=centre_channel,
         num_tiles=num_tiles,
         max_baseline_m=max_baseline_m,

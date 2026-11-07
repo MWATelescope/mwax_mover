@@ -258,21 +258,24 @@ WSCLEAN_EXTENDED_MIN_TILES = 184
 
 # Otherwise it is "compact" if its longest baseline is no more than the configured
 # [wsclean] compact_array_baseline_max_length, and "extended" if it is longer.
-# The pixel scale in degrees is the base scale divided by the centre coarse channel number.
+# The pixel scale is the base scale (in degrees) divided by the centre coarse channel number.
 # The image sizes in pixels are the required [wsclean] config keys compact_image_size and
 # extended_image_size. The values here are the defaults for a caller that does not give them
 # (array_image_settings()), and are the values in the cfg files.
 #
-# The base scales are half of the earlier values (1.2 and 0.6): the images are zoomed in by 2x.
-# The image sizes in pixels are unchanged, so the field of view is half as wide (about 4.2 degrees
-# at centre channel 145).
-WSCLEAN_COMPACT_BASE_SCALE = 0.6
+# The base scales (in degrees) are one third of the first values (1.2 and 0.6): the images are
+# zoomed in by 3x. The image sizes in pixels are unchanged, so the field of view is one third as
+# wide as at first (about 2.8 degrees at centre channel 145 with the default sizes).
+WSCLEAN_COMPACT_BASE_SCALE = 0.4
 WSCLEAN_COMPACT_IMAGE_SIZE = 1024
-WSCLEAN_EXTENDED_BASE_SCALE = 0.3
+WSCLEAN_EXTENDED_BASE_SCALE = 0.2
 WSCLEAN_EXTENDED_IMAGE_SIZE = 2048
 
-# Number of decimal places in the -scale value given to WSClean (in degrees).
-WSCLEAN_SCALE_DECIMALS = 7
+# The -scale value given to WSClean is in arcseconds, with a unit (e.g. "10.827asec"), and has this
+# number of decimal places.
+WSCLEAN_SCALE_UNIT = "asec"
+WSCLEAN_SCALE_DECIMALS = 3
+ARCSEC_PER_DEGREE = 3600
 
 # Width in Hz of an MWA coarse channel. The coarse channel (receiver channel) number is the
 # centre frequency divided by this.

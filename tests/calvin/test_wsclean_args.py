@@ -47,7 +47,7 @@ def test_to_cmdline_args_with_all_the_calvin_options():
     args.temp_dir = "/work"
     args.abs_mem_gib = 600
     args.size = (8000, 8000)
-    args.scale = "0.0045113"
+    args.scale = "10.827asec"
 
     assert args.to_cmdline_args() == [
         "-name",
@@ -60,7 +60,7 @@ def test_to_cmdline_args_with_all_the_calvin_options():
         "8000",
         "8000",
         "-scale",
-        "0.0045113",
+        "10.827asec",
         "-weight",
         "briggs",
         "0",
