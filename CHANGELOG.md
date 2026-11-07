@@ -1,9 +1,13 @@
 # Changelog
 
+# 2.1.4 7-Nov-2026
+
+* Calvin: WSClean images are zoomed in 3x (the base pixel scales are one third of the first values, the image sizes are the same). The `-scale` value is now given in arcseconds with a unit, e.g. `10.827asec`, not in degrees.
+
+
 # 2.1.3 5-Nov-2026
 
 * Calvin: WSClean now makes XX and YY images (`-pol xx,yy`, cleaned independently) instead of Stokes I. Only the restored and residual images are kept (the dirty, PSF and model images are removed).
-* Calvin: WSClean images are zoomed in 3x (the base pixel scales are one third of the first values, the image sizes are the same). The `-scale` value is now given in arcseconds with a unit, e.g. `10.827asec`, not in degrees.
 * Calvin: the PNG preview is now one PNG with XX and YY side by side, with one colour scale based on the noise, so that calibration errors are easier to see. The file name is unchanged (`<obs_id>_wsclean-MFS-image.png`). It has the peak, noise and dynamic range of each image.
 * Calvin: the hyperdrive sky model is now chosen from the observation's centre coarse channel. The config has one `[skymodel:<name>]` section per model with its file, its type (`fits`, `rts`, ...), an optional `num_sources` and a range of centre channels. The ranges must cover every channel with no gap or overlap (checked at start-up, as is every file). **Config change:** `[hyperdrive] source_list_filename` and `source_list_type` are replaced by these sections and are an error if still present. See `docs/CALVIN.md` "Sky models".
 * New command `mwax_wsclean_preview` to remake the PNG from WSClean FITS files, with the colour scale as options.
