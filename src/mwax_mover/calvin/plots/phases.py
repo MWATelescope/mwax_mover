@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from astropy import units as u
-from astropy.constants import c  # ty: ignore[unresolved-import]
+from astropy.constants import c  # ty: ignore[import-not-found]
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from numpy.typing import NDArray

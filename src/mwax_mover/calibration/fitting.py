@@ -12,7 +12,7 @@ import warnings
 
 import numpy as np
 from astropy import units as u
-from astropy.constants import c  # ty: ignore[unresolved-import]
+from astropy.constants import c  # ty: ignore[import-not-found]
 from numpy.typing import NDArray
 from scipy.optimize import minimize
 
