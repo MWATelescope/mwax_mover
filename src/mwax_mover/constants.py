@@ -263,12 +263,12 @@ WSCLEAN_EXTENDED_MIN_TILES = 184
 # extended_image_size. The values here are the defaults for a caller that does not give them
 # (array_image_settings()), and are the values in the cfg files.
 #
-# The base scales (in degrees) are one third of the first values (1.2 and 0.6): the images are
-# zoomed in by 3x. The image sizes in pixels are unchanged, so the field of view is one third as
-# wide as at first (about 2.8 degrees at centre channel 145 with the default sizes).
-WSCLEAN_COMPACT_BASE_SCALE = 0.4
+# The base scales (in degrees) are one half of the first values (1.2 and 0.6): the images are
+# zoomed in by 2x. The image sizes in pixels are unchanged, so the field of view is one half as
+# wide as at first (about 4.2 degrees at centre channel 145 with the default sizes).
+WSCLEAN_COMPACT_BASE_SCALE = 0.6
 WSCLEAN_COMPACT_IMAGE_SIZE = 1024
-WSCLEAN_EXTENDED_BASE_SCALE = 0.2
+WSCLEAN_EXTENDED_BASE_SCALE = 0.3
 WSCLEAN_EXTENDED_IMAGE_SIZE = 2048
 
 # The -scale value given to WSClean is in arcseconds, with a unit (e.g. "10.827asec"), and has this

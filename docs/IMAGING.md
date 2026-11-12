@@ -554,10 +554,10 @@ Status: **implemented** (branch `imaging_update`, version 2.1.3).
   the output names: `<obs>_wsclean-MFS-XX-image.fits` and `<obs>_wsclean-MFS-YY-image.fits` (and
   `-0000-XX-image.fits` for each output channel). Run time is about double. `[wsclean] timeout` and the
   Slurm wall times are **not changed**: measure first.
-- **Zoom 3x:** `WSCLEAN_COMPACT_BASE_SCALE` is 0.4 (was 1.2) and `WSCLEAN_EXTENDED_BASE_SCALE` is 0.2 (was
-  0.6), in degrees. The image sizes in pixels are the same, so the field of view is one third as wide as at
-  first (about 2.8 degrees at centre channel 145 with the default sizes). The image is centred on the
-  measurement set phase centre. (The first change in this phase was 2x; it was then changed to 3x.)
+- **Zoom 2x:** `WSCLEAN_COMPACT_BASE_SCALE` is 0.6 (was 1.2) and `WSCLEAN_EXTENDED_BASE_SCALE` is 0.3 (was
+  0.6), in degrees. The image sizes in pixels are the same, so the field of view is one half as wide as at
+  first (about 4.2 degrees at centre channel 145 with the default sizes). The image is centred on the
+  measurement set phase centre. (2.1.3: 2x. 2.1.4: 3x. 2.1.5: back to 2x.)
 - **Scale unit:** the `-scale` value has a unit: arcseconds, `base scale * ARCSEC_PER_DEGREE / centre channel`
   with `WSCLEAN_SCALE_DECIMALS` (3) decimal places and `WSCLEAN_SCALE_UNIT` (`asec`), e.g. `10.827asec` for a
   compact array at centre channel 133. It is rounded (the earlier degree value had 7 decimal places).

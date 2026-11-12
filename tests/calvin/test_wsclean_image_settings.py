@@ -85,21 +85,21 @@ def test_max_baseline_length_is_zero_for_fewer_than_two_tiles(positions):
 # ---------------------------------------------------------------------------
 
 
-def test_a_compact_array_has_a_4000_pixel_image_and_a_base_scale_of_0_4():
+def test_a_compact_array_has_a_4000_pixel_image_and_a_base_scale_of_0_6():
     settings = array_image_settings(128, 2873.5, 1.28e6 * 133, COMPACT_MAX, **SIZES_4000_8000)
 
     assert settings.configuration == "compact"
     assert settings.size == (4000, 4000)
     assert settings.centre_channel == 133
-    assert settings.scale == "10.827asec"  # 0.4 deg / 133
+    assert settings.scale == "16.241asec"  # 0.6 deg / 133
 
 
-def test_an_extended_array_has_an_8000_pixel_image_and_a_base_scale_of_0_2():
+def test_an_extended_array_has_an_8000_pixel_image_and_a_base_scale_of_0_3():
     settings = array_image_settings(128, 5302.9, 1.28e6 * 133, COMPACT_MAX, **SIZES_4000_8000)
 
     assert settings.configuration == "extended"
     assert settings.size == (8000, 8000)
-    assert settings.scale == "5.414asec"  # 0.2 deg / 133
+    assert settings.scale == "8.120asec"  # 0.3 deg / 133
 
 
 def test_a_baseline_exactly_at_the_limit_is_compact():
@@ -118,7 +118,7 @@ def test_184_tiles_or_more_is_always_extended_whatever_the_baseline(num_tiles, c
 
 
 def test_the_scale_is_in_arcseconds_with_three_decimal_places():
-    assert array_image_settings(256, 5000.0, 1.28e6 * 200, COMPACT_MAX).scale == "3.600asec"
+    assert array_image_settings(256, 5000.0, 1.28e6 * 200, COMPACT_MAX).scale == "5.400asec"
 
 
 def test_a_centre_frequency_that_gives_channel_zero_is_an_error():
@@ -134,10 +134,10 @@ def test_a_centre_frequency_that_gives_channel_zero_is_an_error():
 @pytest.mark.parametrize(
     ("obs_id", "configuration", "size", "scale"),
     [
-        (1220738720, "compact", 4000, "11.901asec"),  # 741 m, channel 121
-        (1094488624, "compact", 4000, "10.070asec"),  # 2874 m, channel 143
-        (1122979144, "compact", 4000, "8.521asec"),  # 2874 m, channel 169
-        (1244973688, "extended", 8000, "6.207asec"),  # 5303 m, channel 116, only 128 tiles
+        (1220738720, "compact", 4000, "17.851asec"),  # 741 m, channel 121
+        (1094488624, "compact", 4000, "15.105asec"),  # 2874 m, channel 143
+        (1122979144, "compact", 4000, "12.781asec"),  # 2874 m, channel 169
+        (1244973688, "extended", 8000, "9.310asec"),  # 5303 m, channel 116, only 128 tiles
     ],
 )
 def test_settings_from_a_real_metafits(obs_id, configuration, size, scale):
