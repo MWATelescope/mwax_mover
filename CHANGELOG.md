@@ -1,5 +1,9 @@
 # Changelog
 
+# 2.1.5 13-Nov-2026
+
+* Calvin: WSClean images are zoomed in only 2x.
+
 # 2.1.4 7-Nov-2026
 
 * Calvin: WSClean images are zoomed in 3x (the base pixel scales are one third of the first values, the image sizes are the same). The `-scale` value is now given in arcseconds with a unit, e.g. `10.827asec`, not in degrees.
