@@ -10,7 +10,6 @@ import logging
 import os
 import re
 import shutil
-import subprocess
 
 import astropy.units as u
 from astropy.coordinates import Angle
@@ -64,7 +63,6 @@ class VDIFHeader:
         self.NPOL: int = 2
         self.NBIT: int = 8
         self.NDIM: int = 2
-        self.BF_PATH: str = "/home/mwa/mwax_cbf/build/beamformer/mwax_beamformer"
 
         self.mwax_beamformer_version: str = "Unknown"
         self.datafile: str = ""
@@ -78,27 +76,6 @@ class VDIFHeader:
         self.bw: float = 0.0
         self.tsamp_us: float = 0.0  # sampling interval in microseconds
 
-    def get_bf_version(self) -> str:
-        """Get the MWAX beamformer version string.
-
-        Returns:
-            The version string of the MWAX beamformer software.
-        """
-        try:
-            # Attempt to get the version from the beamformer binary
-            result = subprocess.run(
-                [self.BF_PATH, "-V"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=True,
-            )
-            self.mwax_beamformer_version = result.stdout.strip()
-        except Exception as e:
-            logger.warning(f"Could not get MWAX beamformer version from {self.BF_PATH}: {e}")
-            self.mwax_beamformer_version = "Unknown"
-        return self.mwax_beamformer_version
-
     def populate(self, metafits_filename: str, rec_chan: int, beam_no: int):
         """Populate VDIF header fields from a metafits file.
 
@@ -111,9 +88,6 @@ class VDIFHeader:
             rec_chan: Receiver channel number.
             beam_no: Beam number index.
         """
-        # Get the beamfoermer version
-        self.mwax_beamformer_version = self.get_bf_version()
-
         mc = MetafitsContext(metafits_filename)
         self.mjd_start = mc.sched_start_mjd
         self.mjd_epoch = mc.sched_start_mjd
@@ -256,7 +230,9 @@ def get_stitched_filename(filename: str) -> str:
     return os.path.join(file_path, f"{obsid}_ch{chan:03d}_beam{beam:02d}.vdif")
 
 
-def stitch_vdif_files_and_write_hdr(metafits_filename: str, files: list[str], output_dir: str) -> tuple[str, str]:
+def stitch_vdif_files_and_write_hdr(
+    metafits_filename: str, files: list[str], output_dir: str, mwax_beamformer_version: str
+) -> tuple[str, str]:
     """Concatenate VDIF files and generate a header file with beam metadata.
 
     Combines per-subobservation VDIF files produced by the MWAX beamformer
@@ -267,6 +243,7 @@ def stitch_vdif_files_and_write_hdr(metafits_filename: str, files: list[str], ou
         metafits_filename: Path to the metafits file for metadata.
         files: List of VDIF file paths to stitch together.
         output_dir: Directory where output VDIF and header files will be written.
+        mwax_beamformer_version: Version string of the MWAX beamformer software.
 
     Returns:
         A tuple of (output_vdif_filename: str, output_hdr_filename: str).
@@ -309,6 +286,7 @@ def stitch_vdif_files_and_write_hdr(metafits_filename: str, files: list[str], ou
 
     # Write the header file
     hdr = VDIFHeader()
+    hdr.mwax_beamformer_version = mwax_beamformer_version
     hdr.populate(metafits_filename, rec_chan, beam_no)
     hdr.write(output_hdr_filename)
 

@@ -17,7 +17,9 @@ def test_stitch_zero_files():
     # raises a bare Exception here, so the message is the only thing that
     # distinguishes this failure from an unrelated one.
     with pytest.raises(Exception, match="No VDIF files to stitch"):
-        _, _ = stitch_vdif_files_and_write_hdr(metafits_filename, filenames, output_dir)
+        _, _ = stitch_vdif_files_and_write_hdr(
+            metafits_filename, filenames, output_dir, mwax_beamformer_version="1.0.0"
+        )
 
 
 def test_stitch_one_file():
@@ -34,7 +36,7 @@ def test_stitch_one_file():
     output_hdr_filename = ""
 
     output_vdif_filename, output_hdr_filename = stitch_vdif_files_and_write_hdr(
-        metafits_filename, filenames, output_dir
+        metafits_filename, filenames, output_dir, mwax_beamformer_version="1.0.0"
     )
 
     assert output_vdif_filename == os.path.join(output_dir, "1454343736_ch109_beam00.vdif")
@@ -59,7 +61,7 @@ def test_stitch_many_files2():
     output_hdr_filename = ""
 
     output_vdif_filename, output_hdr_filename = stitch_vdif_files_and_write_hdr(
-        metafits_filename, filenames, output_dir
+        metafits_filename, filenames, output_dir, mwax_beamformer_version="1.0.0"
     )
 
     assert output_vdif_filename == os.path.join(output_dir, f"{obs_id}_ch109_beam01.vdif")
@@ -96,7 +98,7 @@ def test_stitch_with_target_name_sra_sdec():
     output_hdr_filename = ""
 
     output_vdif_filename, output_hdr_filename = stitch_vdif_files_and_write_hdr(
-        metafits_filename, filenames, output_dir
+        metafits_filename, filenames, output_dir, mwax_beamformer_version="1.0.0"
     )
 
     assert os.path.exists(output_hdr_filename)

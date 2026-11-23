@@ -10,6 +10,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from mwax_mover.beamformer.vdif import stitch_vdif_files_and_write_hdr
+from mwax_mover.version import get_mwax_beamformer_version
 
 logger = logging.getLogger(__name__)
 
@@ -102,9 +103,12 @@ def main(argv: list[str] | None = None) -> int:
     # For debug, log the list of lists
     logger.info(groups)
 
+    # Get beamformer version
+    mwax_beamformer_version = get_mwax_beamformer_version()
+
     # Do the stitching
     for file_list in groups.values():
-        stitch_vdif_files_and_write_hdr(str(args.metafits_file), file_list, args.output_dir)
+        stitch_vdif_files_and_write_hdr(str(args.metafits_file), file_list, args.output_dir, mwax_beamformer_version)
 
     return 0
 
