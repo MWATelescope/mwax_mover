@@ -606,7 +606,7 @@ wheels = [
 
 [[package]]
 name = "mwax-mover"
-version = "2.1.5"
+version = "2.1.6"
 source = { editable = "." }
 dependencies = [
     { name = "astropy" },

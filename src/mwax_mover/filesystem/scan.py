@@ -53,7 +53,6 @@ def scan_directory(watch_dir: str, pattern: str, recursive: bool, exclude_patter
 def scan_for_existing_files_and_add_to_queue(
     watch_dir: str,
     pattern: str,
-    recursive: bool,
     queue_target: queue.Queue,
     exclude_pattern=None,
 ):
@@ -66,12 +65,11 @@ def scan_for_existing_files_and_add_to_queue(
         watch_dir: Root directory to scan.
         pattern: Glob suffix pattern to match (e.g. ``'.fits'``). Prepended
             with ``'*'`` internally.
-        recursive: If True, scan all subdirectories recursively.
         queue_target: The ``queue.Queue`` instance to add matched filenames to.
         exclude_pattern: Optional glob suffix pattern. Files matching this
             pattern are excluded from the results. Defaults to None (no exclusion).
     """
-    files = scan_directory(watch_dir, pattern, recursive, exclude_pattern)
+    files = scan_directory(watch_dir, pattern, recursive=False, exclude_pattern=exclude_pattern)
     files = sorted(files)
     logger.info(f"{watch_dir}: Found {len(files)} files")
 

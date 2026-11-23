@@ -47,8 +47,7 @@ class Watcher:
             FileNotFoundError: If the specified path does not exist.
         """
         self.name = name
-        self.inotify_tree: inotify.adapters.Inotify | inotify.adapters.InotifyTree
-        self.recursive = recursive
+        self.inotify_tree: inotify.adapters.Inotify
         self.mode = mode
         self.path = path
         self.watching = False
@@ -77,13 +76,9 @@ class Watcher:
         # supress all but most critical inotify logs
         logging.getLogger("inotify.adapters").setLevel(logging.CRITICAL)
 
-        if self.recursive:
-            logger.info(f"Watcher starting on {self.path}/*{self.pattern} and all subdirectories...")
-            self.inotify_tree = inotify.adapters.InotifyTree(self.path, mask=self.mask)
-        else:
-            logger.info(f"Watcher starting on {self.path}/*{self.pattern}...")
-            self.inotify_tree = inotify.adapters.Inotify()
-            self.inotify_tree.add_watch(self.path, mask=self.mask)
+        logger.info(f"Watcher starting on {self.path}/*{self.pattern}...")
+        self.inotify_tree = inotify.adapters.Inotify()
+        self.inotify_tree.add_watch(self.path, mask=self.mask)
 
         if self.exclude_pattern:
             logger.info(f"Watcher on {self.path}/*{self.pattern} is excluding *{self.exclude_pattern}")
@@ -97,10 +92,7 @@ class Watcher:
 
         self.watching = False
 
-        if self.recursive:
-            pass
-        else:
-            self.inotify_tree.remove_watch(self.path)  # ty: ignore[unresolved-attribute]
+        self.inotify_tree.remove_watch(self.path)
 
         # Destroy the inotify adpater
         try:
@@ -125,7 +117,6 @@ class Watcher:
             scan_for_existing_files_and_add_to_queue(
                 self.path,
                 self.pattern,
-                self.recursive,
                 self.dest_queue,
                 self.exclude_pattern,
             )

@@ -1,5 +1,10 @@
 # Changelog
 
+# 2.2.0 23-Nov-2026
+
+* mwax: VDIF headers need to write RA and DEC in sexagesimal coordinates. Also change RA to RAJ and DEC to DECJ.
+* watcher: Recursive watching feature removed, as nothing uses it.
+
 # 2.1.5 13-Nov-2026
 
 * Calvin: WSClean images are zoomed in only 2x.
