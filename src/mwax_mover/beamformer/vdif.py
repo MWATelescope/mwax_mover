@@ -18,6 +18,7 @@ from mwalib import MetafitsContext
 import mwax_mover.version
 from mwax_mover.constants import EXT_HDR, EXT_VDIF
 from mwax_mover.fits.subfile import CorrelatorMode
+from mwax_mover.version import UNKNOWN_BEAMFORMER_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class VDIFHeader:
         self.NBIT: int = 8
         self.NDIM: int = 2
 
-        self.mwax_beamformer_version: str = "Unknown"
+        self.mwax_beamformer_version: str = UNKNOWN_BEAMFORMER_VERSION
         self.datafile: str = ""
         self.mjd_start: float = 0.0
         self.mjd_epoch: float = 0.0

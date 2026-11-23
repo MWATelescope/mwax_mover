@@ -1,9 +1,11 @@
 # Changelog
 
-# 2.2.0 23-Nov-2026
+# 2.2.0 24-Nov-2026
 
 * mwax: VDIF header fixes (issue #55): `RA` and `DEC` are now `RAJ` and `DECJ`, written in sexagesimal (`hh:mm:ss.ss` and `dd:mm:ss.ss`). `TSAMP` is now in microseconds (e.g. `0.7812500`), not seconds. Also updated the MWAX VDIF headers to include the beamformer version.
 * watcher: Recursive watching feature removed, as nothing uses it.
+* mwax: **Config change:** add `beamformer_binary_path` (full path of the `mwax_beamformer` binary) to the `[beamformer]` section of the `mwax_subfile_distributor` config. It is required. If the file does not exist, `mwax_subfile_distributor` logs an error and quits at start-up, so a typo cannot silently give a beamformer version of `Unknown`.
+* vdif_cat: New option `-b`/`--beamformer-binary-path`. Without it, the beamformer version in the VDIF header is `Unknown`. With a path that does not exist, `vdif_cat` exits with an error.
 
 # 2.1.5 13-Nov-2026
 

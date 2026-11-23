@@ -10,7 +10,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from mwax_mover.beamformer.vdif import stitch_vdif_files_and_write_hdr
-from mwax_mover.version import get_mwax_beamformer_version
+from mwax_mover.version import UNKNOWN_BEAMFORMER_VERSION, get_mwax_beamformer_version
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     Returns:
         Parsed argument namespace with attributes:
-            nput_dir (Path), output_dir (Path).
+            metafits_file (Path), input_dir (Path), output_dir (Path),
+            beamformer_binary_path (Path or None).
     """
     parser = argparse.ArgumentParser(description=("Combine multiple 8 second VDIF files into a single VDIF and header"))
 
@@ -49,6 +50,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="OUTPUT_DIR",
         default=Path("."),
         help="Path to output directory to write the concatenated VDIF file and header. Defaults to current dir.",
+    )
+    parser.add_argument(
+        "-b",
+        "--beamformer-binary-path",
+        type=Path,
+        metavar="BEAMFORMER_BINARY_PATH",
+        default=None,
+        help=(
+            "Path to the MWAX beamformer binary, used to get the beamformer version for the VDIF header."
+            f' If not given, the version is "{UNKNOWN_BEAMFORMER_VERSION}".'
+        ),
     )
     return parser.parse_args(argv)
 
@@ -104,7 +116,13 @@ def main(argv: list[str] | None = None) -> int:
     logger.info(groups)
 
     # Get beamformer version
-    mwax_beamformer_version = get_mwax_beamformer_version()
+    if args.beamformer_binary_path is None:
+        mwax_beamformer_version = UNKNOWN_BEAMFORMER_VERSION
+    else:
+        if not args.beamformer_binary_path.exists():
+            logger.error("Beamformer binary not found: %s", args.beamformer_binary_path)
+            return 1
+        mwax_beamformer_version = get_mwax_beamformer_version(str(args.beamformer_binary_path))
 
     # Do the stitching
     for file_list in groups.values():

@@ -82,6 +82,7 @@ def obs_metafits_path(obs_id: int | str) -> str:
 # initialise(); nothing is ever executed or read, so empty files suffice.
 STUB_BIN_FILENAMES = (
     "mwax_stats",
+    "mwax_beamformer",
     "giant-squid",
     "birli",
     "hyperdrive",

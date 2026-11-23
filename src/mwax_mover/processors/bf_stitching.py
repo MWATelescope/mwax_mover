@@ -44,6 +44,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
         high_priority_vcs_projects: list[str],
         archiving_enabled: bool,
         keep_original_files_after_stitching: bool,
+        beamformer_binary_path: str,
     ):
         """Initialise the beamformer stitching processor.
 
@@ -56,6 +57,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
             high_priority_vcs_projects: VCS project IDs with elevated priority.
             archiving_enabled: Whether archiving is enabled for this host.
             keep_original_files_after_stitching: Whether to keep original subobs files after stitching.
+            beamformer_binary_path: Full path of the MWAX beamformer binary (used to get its version).
         """
         super().__init__(
             "BfStitchingProcessor",
@@ -76,7 +78,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
         self.high_priority_vcs_projects = high_priority_vcs_projects
         self.archiving_enabled = archiving_enabled
         self.keep_original_files_after_stitching = keep_original_files_after_stitching
-        self.mwax_beamformer_version = get_mwax_beamformer_version()
+        self.mwax_beamformer_version = get_mwax_beamformer_version(beamformer_binary_path)
 
     def handler(self, item: str) -> bool:
         """Stitch VDIF and filterbank subobservation files into complete observation files.

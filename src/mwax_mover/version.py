@@ -5,11 +5,14 @@ Version handling for mwax_mover
 import subprocess
 from importlib.metadata import version as _get_version
 
-BF_PATH: str = "/home/mwa/mwax_cbf/build/beamformer/mwax_beamformer"
+UNKNOWN_BEAMFORMER_VERSION: str = "Unknown"
 
 
-def get_mwax_beamformer_version() -> str:
+def get_mwax_beamformer_version(beamformer_binary_path: str) -> str:
     """Get the MWAX beamformer version string.
+
+    Args:
+        beamformer_binary_path: Full path of the MWAX beamformer binary.
 
     Returns:
         The version string of the MWAX beamformer software.
@@ -17,7 +20,7 @@ def get_mwax_beamformer_version() -> str:
     try:
         # Attempt to get the version from the beamformer binary
         result = subprocess.run(
-            [BF_PATH, "-V"],
+            [beamformer_binary_path, "-V"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -25,7 +28,7 @@ def get_mwax_beamformer_version() -> str:
         )
         mwax_beamformer_version = result.stdout.strip()
     except Exception:
-        mwax_beamformer_version = "Unknown"
+        mwax_beamformer_version = UNKNOWN_BEAMFORMER_VERSION
     return mwax_beamformer_version
 
 
