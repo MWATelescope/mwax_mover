@@ -110,16 +110,20 @@ def test_stitch_with_target_name_sra_sdec():
         for line in lines:
             if line.startswith("SOURCE"):
                 source_line = line
-            if line.startswith("RA"):
+            if line.startswith("RAJ"):
                 ra_line = line
-            if line.startswith("DEC"):
+            if line.startswith("DECJ"):
                 dec_line = line
+            if line.startswith("TSAMP"):
+                tsamp_line = line
 
     assert source_line != ""
     assert ra_line != ""
     assert dec_line != ""
+    assert tsamp_line != ""
 
     # Now we check the contents
     assert source_line == "SOURCE       PSR J1453-6413 # name of the astronomical source\n", f"{source_line}"
-    assert ra_line == "RA           223.38606     # Right Ascension of the source\n", f"{ra_line}"
-    assert dec_line == "DEC          -64.22112    # Declination of the source\n", f"{dec_line}"
+    assert ra_line == "RAJ          14:53:32.65     # Right Ascension of the source (hh:mm:ss.ss)\n", f"{ra_line}"
+    assert dec_line == "DECJ         -64:13:16.03    # Declination of the source (dd:mm:ss.ss)\n", f"{dec_line}"
+    assert tsamp_line == "TSAMP        0.7812500 # sampling interval in microseconds\n", f"{tsamp_line}"

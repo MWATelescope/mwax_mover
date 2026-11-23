@@ -11,6 +11,8 @@ import os
 import re
 import shutil
 
+import astropy.units as u
+from astropy.coordinates import Angle
 from mwalib import MetafitsContext
 
 import mwax_mover.version
@@ -30,6 +32,18 @@ class NoVdifFilesError(Exception):
 # unified with it: the two file formats' chunk sizes are independent
 # choices that happen to differ (1 MiB here vs. 8 MiB there).
 _READ_CHUNK_SIZE = 1024 * 1024
+
+# The TSAMP header value is in microseconds. mwalib gives the sample rate in Hz.
+_MICROSECONDS_PER_SECOND = 1_000_000.0
+
+# Number of decimal places written for TSAMP (microseconds), e.g. 0.7812500
+_TSAMP_DECIMAL_PLACES = 7
+
+# Number of decimal places of the seconds field in RAJ (hms) and DECJ (dms), e.g. 05:27:56.85
+_SEXAGESIMAL_SECONDS_PRECISION = 2
+
+# Sample rate (Hz) used when the metafits has no voltage beam to give it. Default TSAMP is 1 / this value.
+_DEFAULT_SAMPLE_RATE_HZ = 1_280_000
 
 
 class VDIFHeader:
@@ -57,11 +71,11 @@ class VDIFHeader:
         self.mjd_epoch: float = 0.0
         self.sec_offset: float = 0.0
         self.source: str = ""
-        self.ra: str = ""
-        self.dec: str = ""
+        self.ra_deg: float = 0.0
+        self.dec_deg: float = 0.0
         self.freq: float = 0.0
         self.bw: float = 0.0
-        self.tsamp: float = 0.0
+        self.tsamp_us: float = 0.0  # sampling interval in microseconds
 
     def populate(self, metafits_filename: str, rec_chan: int, beam_no: int):
         """Populate VDIF header fields from a metafits file.
@@ -81,22 +95,26 @@ class VDIFHeader:
         self.sec_offset = 0
 
         self.source = mc.obs_name  # might get overridden by metafits so this is the default
-        self.ra = str(0)  # might get overridden by metafits so this is the default
-        self.dec = str(0)  # might get overridden by metafits so this is the default
-        self.tsamp = 1.0 / 1280000  # might get overridden by metafits so this is the default
+        self.ra_deg = 0.0  # might get overridden by metafits so this is the default
+        self.dec_deg = 0.0  # might get overridden by metafits so this is the default
+        # might get overridden by metafits so this is the default
+        self.tsamp_us = _MICROSECONDS_PER_SECOND / _DEFAULT_SAMPLE_RATE_HZ
 
         if mc.metafits_voltage_beams:
             voltage_beam = mc.metafits_voltage_beams[beam_no]
-            self.ra = str(voltage_beam.ra_deg)
-            self.dec = str(voltage_beam.dec_deg)
-            self.tsamp = 1.0 / voltage_beam.frequency_resolution_hz
+            # mwalib types these as optional. Keep the default if the metafits has none.
+            if voltage_beam.ra_deg is not None:
+                self.ra_deg = voltage_beam.ra_deg
+            if voltage_beam.dec_deg is not None:
+                self.dec_deg = voltage_beam.dec_deg
+            self.tsamp_us = _MICROSECONDS_PER_SECOND / voltage_beam.frequency_resolution_hz
             if voltage_beam.target_name:
                 self.source = voltage_beam.target_name
 
             if voltage_beam.start_ra_deg:
-                self.ra = str(voltage_beam.start_ra_deg)
+                self.ra_deg = voltage_beam.start_ra_deg
             if voltage_beam.start_dec_deg:
-                self.dec = str(voltage_beam.start_dec_deg)
+                self.dec_deg = voltage_beam.start_dec_deg
 
         # Find the coarse channel
         for chan in mc.metafits_coarse_chans:
@@ -104,6 +122,20 @@ class VDIFHeader:
                 self.bw = chan.chan_width_hz / 1000000.0  # convert Hz to MHz
                 self.freq = chan.chan_centre_hz / 1000000.0  # convert Hz to MHz
                 break
+
+    @property
+    def raj(self) -> str:
+        """Right Ascension (J2000) as sexagesimal hours, e.g. ``05:27:56.85``."""
+        return Angle(self.ra_deg, u.deg).to_string(
+            unit=u.hour, sep=":", precision=_SEXAGESIMAL_SECONDS_PRECISION, pad=True
+        )
+
+    @property
+    def decj(self) -> str:
+        """Declination (J2000) as sexagesimal degrees, e.g. ``-58:12:10.01``."""
+        return Angle(self.dec_deg, u.deg).to_string(
+            unit=u.deg, sep=":", precision=_SEXAGESIMAL_SECONDS_PRECISION, pad=True
+        )
 
     def write(self, vdif_hdr_filename: str):
         """Write VDIF header fields to an ASCII header file.
@@ -132,12 +164,12 @@ class VDIFHeader:
             f"SEC_OFFSET   {self.sec_offset} # seconds offset from the start of the observation",
             "",
             f"SOURCE       {self.source} # name of the astronomical source",
-            f"RA           {self.ra}     # Right Ascension of the source",
-            f"DEC          {self.dec}    # Declination of the source",
+            f"RAJ          {self.raj}     # Right Ascension of the source (hh:mm:ss.ss)",
+            f"DECJ         {self.decj}    # Declination of the source (dd:mm:ss.ss)",
             "",
             f"FREQ         {self.freq}  # centre frequency on sky in MHz",
             f"BW           {self.bw}    # bandwidth in MHz (-ve lower sb)",
-            f"TSAMP        {self.tsamp} # sampling interval in microseconds",
+            f"TSAMP        {self.tsamp_us:.{_TSAMP_DECIMAL_PLACES}f} # sampling interval in microseconds",
             "",
             f"NBIT         {self.NBIT} # number of bits per sample",
             f"NDIM         {self.NDIM} # dimension of samples (2=complex, 1=real)",
