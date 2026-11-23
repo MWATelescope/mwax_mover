@@ -12,7 +12,7 @@ sharing this file in the original.
 import numpy as np
 import pytest
 from astropy import units as u
-from astropy.constants import c as speed_of_light  # ty: ignore[import-not-found]
+from astropy.constants import c as speed_of_light  # ty: ignore[missing-module-member]
 
 from mwax_mover.calibration.fitting import (
     ensure_system_byte_order,

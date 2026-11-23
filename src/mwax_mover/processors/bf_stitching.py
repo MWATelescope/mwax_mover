@@ -17,6 +17,7 @@ from mwax_mover.constants import EXT_FIL, EXT_VDIF, METAFITS_KEY_EXPOSURE, MODE_
 from mwax_mover.filesystem.files import remove_file
 from mwax_mover.fits.metafits import get_metafits_value
 from mwax_mover.queues.watch_queue_worker import MWAXPriorityWatchQueueWorker
+from mwax_mover.version import get_mwax_beamformer_version
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
         high_priority_vcs_projects: list[str],
         archiving_enabled: bool,
         keep_original_files_after_stitching: bool,
+        beamformer_binary_path: str,
     ):
         """Initialise the beamformer stitching processor.
 
@@ -55,6 +57,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
             high_priority_vcs_projects: VCS project IDs with elevated priority.
             archiving_enabled: Whether archiving is enabled for this host.
             keep_original_files_after_stitching: Whether to keep original subobs files after stitching.
+            beamformer_binary_path: Full path of the MWAX beamformer binary (used to get its version).
         """
         super().__init__(
             "BfStitchingProcessor",
@@ -75,6 +78,7 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
         self.high_priority_vcs_projects = high_priority_vcs_projects
         self.archiving_enabled = archiving_enabled
         self.keep_original_files_after_stitching = keep_original_files_after_stitching
+        self.mwax_beamformer_version = get_mwax_beamformer_version(beamformer_binary_path)
 
     def handler(self, item: str) -> bool:
         """Stitch VDIF and filterbank subobservation files into complete observation files.
@@ -173,7 +177,9 @@ class BfStitchingProcessor(MWAXPriorityWatchQueueWorker):
                                 os.path.join(self.bf_dont_archive_path, os.path.basename(f)),
                             )
 
-                    vdif.stitch_vdif_files_and_write_hdr(metafits_filename, files, self.bf_stitching_path)
+                    vdif.stitch_vdif_files_and_write_hdr(
+                        metafits_filename, files, self.bf_stitching_path, self.mwax_beamformer_version
+                    )
 
                     # If it worked, remove the files
                     for f in files:

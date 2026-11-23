@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from astropy import units as u
-from astropy.constants import c as speed_of_light  # ty: ignore[import-not-found]
+from astropy.constants import c as speed_of_light  # ty: ignore[missing-module-member]
 from astropy.io import fits
 from tests_common import data_path, obs_metafits_path
 

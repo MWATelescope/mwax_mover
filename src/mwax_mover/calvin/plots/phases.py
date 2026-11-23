@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from astropy import units as u
-from astropy.constants import c  # ty: ignore[import-not-found]
+from astropy.constants import c  # ty: ignore[missing-module-member]
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from numpy.typing import NDArray
@@ -37,12 +37,12 @@ from numpy.typing import NDArray
 from mwax_mover.calibration.df_columns import (
     COL_CHI2DOF,
     COL_FLAG,
-    COL_RX_TYPE,
     COL_LENGTH,
     COL_OUTLIER,
     COL_POL,
     COL_QUALITY,
     COL_RX,
+    COL_RX_TYPE,
     COL_SIGMA_RESID,
     COL_SLOT,
     COL_SOLN_IDX,

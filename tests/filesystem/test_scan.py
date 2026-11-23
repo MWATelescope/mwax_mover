@@ -17,12 +17,11 @@ def test_scan_for_existing_files_and_add_to_queue():
     queue_target = queue.Queue()
     watch_dir = obs_data_dir(1244973688)
     pattern = ".fits"
-    recursive = False
 
     #
     # Run test
     #
-    scan_for_existing_files_and_add_to_queue(watch_dir, pattern, recursive, queue_target)
+    scan_for_existing_files_and_add_to_queue(watch_dir, pattern, queue_target)
 
     assert queue_target.qsize() == 2
     assert queue_target.get() == os.path.join(
@@ -36,12 +35,11 @@ def test_scan_directory():
     """Tests we can get a list of files in a dir"""
     watch_dir = obs_data_dir(1244973688)
     pattern = ".fits"
-    recursive = False
 
     #
     # Run test
     #
-    list_of_files = scan_directory(watch_dir, pattern, recursive, exclude_pattern=None)
+    list_of_files = scan_directory(watch_dir, pattern, recursive=False, exclude_pattern=None)
 
     assert len(list_of_files) == 2
     assert (
