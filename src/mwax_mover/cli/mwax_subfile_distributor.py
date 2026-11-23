@@ -512,15 +512,15 @@ class MWAXSubfileDistributor(MWAXDaemon):
             self.config, SECTION_BEAMFORMER, "bf_keep_original_files_after_stitching"
         )
 
-        self.cfg_beamformer_binary_path = read_config(
+        self.cfg_bf_binary_path = read_config(
             self.config,
             SECTION_BEAMFORMER,
-            "beamformer_binary_path",
+            "bf_binary_path",
         )
 
         # A typo here would otherwise only show up as a beamformer version of "Unknown"
-        if not os.path.exists(self.cfg_beamformer_binary_path):
-            logger.error(f"beamformer_binary_path {self.cfg_beamformer_binary_path} does not exist. Quitting.")
+        if not os.path.exists(self.cfg_bf_binary_path):
+            logger.error(f"bf_binary_path {self.cfg_bf_binary_path} does not exist. Quitting.")
             sys.exit(EXIT_FAILURE)
 
         # Read master archiving enabled option
@@ -659,7 +659,7 @@ class MWAXSubfileDistributor(MWAXDaemon):
             self.cfg_corr_high_priority_vcs_projectids,
             self.cfg_corr_archive_destination_enabled,
             self.cfg_bf_keep_original_files_after_stitching,
-            self.cfg_beamformer_binary_path,
+            self.cfg_bf_binary_path,
         )
         self.workers.append(self.bf_stitching_processor)
 
