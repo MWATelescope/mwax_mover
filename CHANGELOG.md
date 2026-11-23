@@ -2,7 +2,7 @@
 
 # 2.2.0 23-Nov-2026
 
-* mwax: VDIF header fixes (issue #55): `RA` and `DEC` are now `RAJ` and `DECJ`, written in sexagesimal (`hh:mm:ss.ss` and `dd:mm:ss.ss`). `TSAMP` is now in microseconds (e.g. `0.7812500`), not seconds.
+* mwax: VDIF header fixes (issue #55): `RA` and `DEC` are now `RAJ` and `DECJ`, written in sexagesimal (`hh:mm:ss.ss` and `dd:mm:ss.ss`). `TSAMP` is now in microseconds (e.g. `0.7812500`), not seconds. Also updated the MWAX VDIF headers.
 * watcher: Recursive watching feature removed, as nothing uses it.
 
 # 2.1.5 13-Nov-2026

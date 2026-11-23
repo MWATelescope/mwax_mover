@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 
 import astropy.units as u
 from astropy.coordinates import Angle
@@ -55,17 +56,17 @@ class VDIFHeader:
         Sets up all VDIF header fields with default values for telescope,
         mode, instrument, and data format specifications.
         """
-        self.VDIF_HDR_VERSION: str = "0.2"
-        self.MWA_CAPTURE_VERSION: str = mwax_mover.version.get_mwax_mover_version_string()
-        self.MWA_SAMPLE_VERSION: str = "0.1"
+        self.VDIF_HDR_VERSION: str = "1.0"
+        self.MWAX_MOVER_VERSION: str = mwax_mover.version.get_mwax_mover_version_string()
         self.TELESCOPE: str = "MWA"
         self.MODE: str = CorrelatorMode.MWAX_BEAMFORMER.value
         self.INSTRUMENT: str = "VDIF"
         self.NPOL: int = 2
         self.NBIT: int = 8
         self.NDIM: int = 2
+        self.BF_PATH: str = "/home/mwa/mwax_cbf/build/beamformer/mwax_beamformer"
 
-        self.mwax_beamfomer_version: str = "1.0"
+        self.mwax_beamformer_version: str = "Unknown"
         self.datafile: str = ""
         self.mjd_start: float = 0.0
         self.mjd_epoch: float = 0.0
@@ -76,6 +77,27 @@ class VDIFHeader:
         self.freq: float = 0.0
         self.bw: float = 0.0
         self.tsamp_us: float = 0.0  # sampling interval in microseconds
+
+    def get_bf_version(self) -> str:
+        """Get the MWAX beamformer version string.
+
+        Returns:
+            The version string of the MWAX beamformer software.
+        """
+        try:
+            # Attempt to get the version from the beamformer binary
+            result = subprocess.run(
+                [self.BF_PATH, "-V"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=True,
+            )
+            self.mwax_beamformer_version = result.stdout.strip()
+        except Exception as e:
+            logger.warning(f"Could not get MWAX beamformer version from {self.BF_PATH}: {e}")
+            self.mwax_beamformer_version = "Unknown"
+        return self.mwax_beamformer_version
 
     def populate(self, metafits_filename: str, rec_chan: int, beam_no: int):
         """Populate VDIF header fields from a metafits file.
@@ -89,6 +111,9 @@ class VDIFHeader:
             rec_chan: Receiver channel number.
             beam_no: Beam number index.
         """
+        # Get the beamfoermer version
+        self.mwax_beamformer_version = self.get_bf_version()
+
         mc = MetafitsContext(metafits_filename)
         self.mjd_start = mc.sched_start_mjd
         self.mjd_epoch = mc.sched_start_mjd
@@ -150,9 +175,8 @@ class VDIFHeader:
 
         lines = [
             f"HDR_VERSION {self.VDIF_HDR_VERSION}                   # Version of this ASCII header",
-            f"MWA_CAPTURE_VERSION {self.MWA_CAPTURE_VERSION}        # Version of the Data Acquisition Software",
-            f"MWA_SAMPLE_VERSION {self.MWA_SAMPLE_VERSION}          # Version of the FFD FPGA Software",
-            f"MWAX_BEAMFORMER_VERSION {self.mwax_beamfomer_version} # Version of the MWAX Beamformer Software",
+            f"MWAX_MOVER_VERSION {self.MWAX_MOVER_VERSION}        # Version of the MWAX udp2sub Software",
+            f"MWAX_BEAMFORMER_VERSION {self.mwax_beamformer_version} # Version of the MWAX Beamformer Software",
             "",
             f"TELESCOPE    {self.TELESCOPE}  # telescope name",
             f"MODE         {self.MODE}       # observing mode",
